@@ -45,3 +45,17 @@ To install dependencies:
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
 - Branch from `main`. Current working branch: `fix/architecture`.
+
+## NVIDIA Agent Skills
+
+Vendored skills from the [NVIDIA skills catalog](https://github.com/NVIDIA/skills) live under `.cursor/skills/nvidia/`. Read and follow them when the relevant task comes up:
+
+| Skill | Path | Use when |
+|---|---|---|
+| RAG Blueprint | `.cursor/skills/nvidia/RAG-Blueprint/rag-blueprint/SKILL.md` | Deploying, configuring, troubleshooting, or tearing down the RAG pipeline (ingestion, retrieval, guardrails, query rewriting, observability). Docker Compose or Helm. |
+| NeMo Evaluator — BYOB | `.cursor/skills/nvidia/NeMo-Evaluator/byob/SKILL.md` | Adding a bring-your-own benchmark for evaluating chat/RAG quality. |
+| NeMo Evaluator Launcher — launching-evals | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/launching-evals/SKILL.md` | Kicking off LLM evaluation runs via the launcher. |
+| NeMo Evaluator Launcher — accessing-mlflow | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/accessing-mlflow/SKILL.md` | Reading/compare eval results stored in MLflow. |
+| NeMo Evaluator Launcher — nel-assistant | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/nel-assistant/SKILL.md` | End-to-end assistant for the NeMo Evaluator Launcher workflow. |
+
+These are static copies. To refresh, re-pull from `github.com/NVIDIA/skills` (NeMo-Evaluator*) and `github.com/NVIDIA-AI-Blueprints/rag` (RAG Blueprint, from `skill-source/.agents/skills/rag-blueprint`).
