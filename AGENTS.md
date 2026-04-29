@@ -52,10 +52,11 @@ Vendored skills from the [NVIDIA skills catalog](https://github.com/NVIDIA/skill
 
 | Skill | Path | Use when |
 |---|---|---|
-| RAG Blueprint | `.cursor/skills/nvidia/RAG-Blueprint/rag-blueprint/SKILL.md` | Deploying, configuring, troubleshooting, or tearing down the RAG pipeline (ingestion, retrieval, guardrails, query rewriting, observability). Docker Compose or Helm. |
 | NeMo Evaluator — BYOB | `.cursor/skills/nvidia/NeMo-Evaluator/byob/SKILL.md` | Adding a bring-your-own benchmark for evaluating chat/RAG quality. |
 | NeMo Evaluator Launcher — launching-evals | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/launching-evals/SKILL.md` | Kicking off LLM evaluation runs via the launcher. |
 | NeMo Evaluator Launcher — accessing-mlflow | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/accessing-mlflow/SKILL.md` | Reading/compare eval results stored in MLflow. |
 | NeMo Evaluator Launcher — nel-assistant | `.cursor/skills/nvidia/NeMo-Evaluator-Launcher/nel-assistant/SKILL.md` | End-to-end assistant for the NeMo Evaluator Launcher workflow. |
 
-These are static copies. To refresh, re-pull from `github.com/NVIDIA/skills` (NeMo-Evaluator*) and `github.com/NVIDIA-AI-Blueprints/rag` (RAG Blueprint, from `skill-source/.agents/skills/rag-blueprint`).
+These are static copies. To refresh, re-pull from `github.com/NVIDIA/skills` (`skills/NeMo-Evaluator`, `skills/NeMo-Evaluator-Launcher`).
+
+> The NVIDIA RAG Blueprint skill was intentionally **not** vendored: it targets a separate containerized product (`rag-server`, `ingestor-server`, `milvus`, NIM containers) and would mis-activate on GSF's own chat/deploy flows. GSF consumes `nemo-retriever` as a Python library, not as a deployed blueprint service.
