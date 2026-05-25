@@ -26,11 +26,8 @@ export const MessageList = ({ messages, isLoading, steps }: MessageListProps) =>
 	if (messages.length === 0 && !isLoading) {
 		return (
 			<div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-				<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 dark:bg-emerald-900/30">
-					<Icon
-						name={IconName.ChatBubble}
-						className="h-7 w-7 text-emerald-600 dark:text-emerald-400"
-					/>
+				<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#76b900]/15">
+					<Icon name={IconName.ChatBubble} className="h-7 w-7 text-[#76b900]" />
 				</div>
 				<h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
 					Ask a question

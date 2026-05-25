@@ -73,7 +73,7 @@ export type DataTreeProps = {
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 cursor-pointer items-center gap-1 rounded-lg text-left text-sm no-underline transition-colors ${
 		selected
-			? 'bg-emerald-100/95 font-medium text-emerald-950 shadow-sm ring-1 ring-emerald-200/80 dark:bg-emerald-950/45 dark:text-emerald-50 dark:ring-emerald-800/50'
+			? 'bg-[#76b900]/15 font-medium text-zinc-900 shadow-sm ring-1 ring-[#76b900]/30 dark:text-zinc-100'
 			: 'text-zinc-800 hover:bg-zinc-100/90 dark:text-zinc-200 dark:hover:bg-zinc-800/70'
 	}`;
 }

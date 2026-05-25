@@ -96,7 +96,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 			<div
 				className={`max-w-[80%] rounded-2xl px-4 py-3 ${
 					isUser
-						? 'bg-emerald-600 text-white dark:bg-emerald-500'
+						? 'bg-[#76b900] text-white'
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>
@@ -115,7 +115,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 							<span className="text-xs font-medium text-zinc-400">SQL</span>
 							<CopyButton text={message.sql} />
 						</div>
-						<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-emerald-400">
+						<pre className="overflow-x-auto p-3 text-xs leading-relaxed text-[#76b900]">
 							<code>{message.sql}</code>
 						</pre>
 					</div>

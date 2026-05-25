@@ -291,8 +291,6 @@ export function buildTreeFocusPageFormat(
 							value: column.data_type.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
-						{ label: 'Schema', value: column.schema_name },
-						{ label: 'Database', value: column.db_name },
 						{ label: 'Position', value: String(column.ordinal_position) },
 					],
 				},
@@ -302,7 +300,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						subtitle: `Column · ${column.schema_name} · ${column.table_name} · ${column.db_name}`,
+						subtitle: `Column · ${column.table_name}`,
 						entityId: column.id,
 						parentId: table.id,
 					},

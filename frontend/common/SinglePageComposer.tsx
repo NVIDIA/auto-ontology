@@ -61,7 +61,7 @@ const EditableTextCard = ({
 	};
 
 	return (
-		<div className="rounded-lg border-2 border-emerald-500 bg-white/90 p-5 shadow-sm ring-1 ring-emerald-500/20 dark:border-emerald-400 dark:bg-zinc-950/50 dark:ring-emerald-400/20">
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
 			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
 				{section.title}
 			</h2>
@@ -70,7 +70,7 @@ const EditableTextCard = ({
 				value={value}
 				onChange={handleChange}
 				rows={4}
-				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
 		</div>
 	);
@@ -322,7 +322,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										setLocalIsEditing(false);
 										onSave?.(edits);
 									}}
-									className="rounded-lg bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-700 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+									className="rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 								>
 									Save
 								</button>
@@ -358,7 +358,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						{sections.length === 0 ? (
 							<div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
 								<div
-									className="flex h-12 w-12 items-center justify-center rounded-lg bg-emerald-100/90 text-xl dark:bg-emerald-950/60"
+									className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
 									aria-hidden
 								>
 									◇

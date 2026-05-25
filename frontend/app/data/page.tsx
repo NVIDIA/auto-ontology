@@ -11,7 +11,7 @@ export default function DataPage() {
 			fallback={
 				<div className="flex h-screen items-center justify-center">
 					<div
-						className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-700 dark:border-t-emerald-400"
+						className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
 						role="status"
 						aria-label="Loading"
 					/>

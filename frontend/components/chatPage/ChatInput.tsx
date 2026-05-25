@@ -59,7 +59,7 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 					placeholder="Ask a question…"
 					onInput={resetHeight}
 					onKeyDown={handleKeyDown}
-					className="flex-1 resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400"
+					className="flex-1 resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
 				/>
 
 				{isLoading ? (
@@ -74,7 +74,7 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 				) : (
 					<button
 						type="submit"
-						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-600 text-white transition-colors hover:bg-emerald-700 disabled:opacity-40 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#76b900] text-white transition-colors hover:bg-[#5e9400] disabled:opacity-40"
 						aria-label="Send message"
 					>
 						<Icon name={IconName.Send} className="h-4 w-4" />

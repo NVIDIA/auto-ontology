@@ -33,7 +33,7 @@ const renderSegment = (segment: ContentSegment, key: number) => {
 					href={segment.url}
 					target="_blank"
 					rel="noopener noreferrer"
-					className="text-emerald-600 underline hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+					className="text-[#76b900] underline hover:text-[#6aa500]"
 				>
 					{segment.text}
 				</a>
@@ -46,7 +46,7 @@ const renderSegment = (segment: ContentSegment, key: number) => {
 					href={segment.url}
 					target="_blank"
 					rel="noopener noreferrer"
-					className="font-semibold text-emerald-600 underline hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300"
+					className="font-semibold text-[#76b900] underline hover:text-[#6aa500]"
 				>
 					{segment.text}
 				</a>
@@ -56,7 +56,7 @@ const renderSegment = (segment: ContentSegment, key: number) => {
 			return (
 				<pre
 					key={key}
-					className="my-2 overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs leading-relaxed text-emerald-400 dark:bg-zinc-950"
+					className="my-2 overflow-x-auto rounded-lg bg-zinc-900 p-3 text-xs leading-relaxed text-[#76b900] dark:bg-zinc-950"
 				>
 					<code>{segment.text}</code>
 				</pre>

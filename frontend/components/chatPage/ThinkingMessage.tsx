@@ -13,7 +13,7 @@ type ThinkingMessageProps = {
 
 const Dot = ({ delay }: { delay: string }) => (
 	<span
-		className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 dark:bg-emerald-400"
+		className="inline-block h-1.5 w-1.5 rounded-full bg-[#76b900]"
 		style={{
 			animation: 'thinking-bounce 1.2s linear infinite',
 			animationDelay: delay,
@@ -36,11 +36,8 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 
 			<div className="w-full max-w-[80%] rounded-2xl bg-zinc-100 px-4 py-3 dark:bg-zinc-800">
 				<div className="mb-2 flex items-center gap-2">
-					<div className="flex h-6 w-6 items-center justify-center rounded-md bg-emerald-100 dark:bg-emerald-900/30">
-						<Icon
-							name={IconName.NvidiaLogo}
-							className="h-4 w-4 text-emerald-600 dark:text-emerald-400"
-						/>
+					<div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#76b900]/15">
+						<Icon name={IconName.NvidiaLogo} className="h-4 w-4 text-[#76b900]" />
 					</div>
 					<span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
 						GSF Agent
@@ -56,7 +53,7 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 							>
 								<Icon
 									name={IconName.Check}
-									className="h-3 w-3 shrink-0 text-emerald-500"
+									className="h-3 w-3 shrink-0 text-[#76b900]"
 								/>
 								<span>{step.label}</span>
 							</li>
