@@ -408,11 +408,10 @@ def create_custom_analysis(
     connector = get_connector()
 
     _embed_custom_analyses(
-            database_name=connector.database_name,
-            embed_params=EMBED_PARAMS,
-            vdb=get_vdb(),
-        )
-
+        database_name=connector.database_name,
+        embed_params=EMBED_PARAMS,
+        vdb=get_vdb(),
+    )
 
     return row
 
@@ -487,6 +486,5 @@ def update_custom_analysis(
         existing_id=analysis_id,
         override_existing_props={"name": name, "description": description},
     )
-
 
     return _persist_analysis_with_sql(analysis_node, sql, query_obj)
