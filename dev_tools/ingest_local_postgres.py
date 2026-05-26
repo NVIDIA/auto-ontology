@@ -30,7 +30,7 @@ from nemo_retriever.params import EmbedParams, TabularExtractParams
 from gsf.vdb import get_vdb
 from gsf.connectors.postgres import PostgresDatabase
 
-from gsf.server.enrich_graph import add_custom_analyses, apply_metadata
+from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
 
 logger = logging.getLogger("scripts.ingest_local_postgres")
 

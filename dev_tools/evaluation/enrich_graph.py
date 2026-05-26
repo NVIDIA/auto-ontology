@@ -190,6 +190,8 @@ def add_custom_analyses(
         get_schemas_by_ids,
     )
 
+    from gsf.server.custom_analyses.dal import _embed_custom_analyses
+
     analyses_path = DEFAULT_DIR / f"{database_name}_custom_analyses.json"
 
     if not analyses_path.exists():
@@ -269,120 +271,3 @@ def add_custom_analyses(
         return
 
     _embed_custom_analyses(database_name, embed_params, vdb)
-
-
-def _embed_custom_analyses(
-    database_name: str,
-    embed_params: "EmbedParams",
-    vdb: "VDB",
-) -> None:
-    """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*.
-
-    Filters to analyses whose SQL references at least one table belonging to
-    *database_name* via the path
-    ``CustomAnalysis -[:HAS_SQL]-> Sql -[:SQL]-> Table <-[:CONTAINS]- Schema <-[:CONTAINS]- Database``,
-    shapes the result into the same 5-column DataFrame the main pipeline
-    produces, then uses the same embedder
-    (:func:`nemo_retriever.text_embed.runtime.embed_text_main_text_embed`) and
-    writes the embedded rows through *vdb* in append mode, so existing
-    ``Table``/``Column`` rows are preserved.
-    """
-    import pandas as pd
-
-    from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-    from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-    from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
-    from nemo_retriever.vdb import IngestVdbOperator
-
-    query = f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(s:{Labels.SCHEMA})
-              <-[:{Edges.CONTAINS}]-(d:{Labels.DB}{{name: $database_name}})
-        WITH DISTINCT ca, sql,
-             CASE
-                 WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
-                 THEN ca.description
-                 ELSE ''
-             END AS desc,
-             CASE
-                 WHEN sql.sql_full_query IS NOT NULL
-                 THEN ', sql: ' + sql.sql_full_query
-                 ELSE ''
-             END AS sql_text
-        RETURN collect({{
-            text: 'custom_analysis: ' + ca.name +
-                  CASE WHEN desc <> '' THEN ', description: ' + desc ELSE '' END +
-                  sql_text,
-            name: ca.name,
-            label: labels(ca)[0],
-            id: ca.id
-        }}) AS docs
-    """
-    result = get_neo4j_conn().query_read(
-        query, parameters={"database_name": database_name}
-    )
-    docs = result[0].get("docs") if result else None
-    if not docs:
-        logger.info(
-            "No CustomAnalysis rows found for %r; skipping VDB upsert.", database_name
-        )
-        return
-
-    rows = []
-    for item in docs:
-        node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
-        tabular_fields = {
-            "id": node_id,
-            "label": item.get("label", ""),
-            "name": item.get("name", ""),
-            "source_path": path,
-            "database_name": database_name,
-        }
-        rows.append(
-            {
-                "text": (item.get("text") or "").strip(),
-                "_embed_modality": "text",
-                "path": path,
-                "page_number": -1,
-                "metadata": {
-                    **tabular_fields,
-                    "content_metadata": dict(tabular_fields),
-                },
-            }
-        )
-    df = pd.DataFrame(rows)
-
-    before = time.time()
-    embedded = embed_text_main_text_embed(
-        df,
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
-    )
-
-    # nemo_retriever's embed runtime swallows HTTP failures (e.g. 502 Bad
-    # Gateway from integrate.api.nvidia.com) and returns rows without an
-    # `embedding` column. Detect that here so we don't silently report success
-    # while PostgresVDB.write_to_index skips every row.
-    with_embeddings = [
-        row
-        for row in embedded.to_dict(orient="records")
-        if (row.get("metadata") or {}).get("embedding")
-    ]
-    if not with_embeddings:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} CustomAnalysis rows "
-            f"with embeddings; check upstream embed errors (often a transient "
-            f"{embed_params.embed_invoke_url} 5xx)."
-        )
-
-    IngestVdbOperator(vdb=vdb)(with_embeddings)
-    logger.info(
-        "Embedded and appended %d/%d CustomAnalysis row(s) via %s in %.2fs.",
-        len(with_embeddings),
-        len(embedded),
-        type(vdb).__name__,
-        time.time() - before,
-    )
