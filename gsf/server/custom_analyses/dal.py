@@ -387,7 +387,34 @@ def create_custom_analysis(
         match_props={"name": name},
     )
 
-    return _persist_analysis_with_sql(analysis_node, sql, query_obj)
+    row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
+
+    # Mirror the dev-tools ingest path on the VDB side: enrich_graph's
+    # ``_embed_custom_analyses`` already does "fetch every CustomAnalysis
+    # for this database from Neo4j → embed → append to pgvector", which
+    # is exactly the contract chat retrieval expects. Reusing it (instead
+    # of re-implementing per-analysis embed here) keeps the API write
+    # path byte-compatible with re-running enrich_graph after a fresh
+    # ingest. Caveat: it appends without dedup, so every new create
+    # currently re-embeds the full set of analyses for the database —
+    # acceptable for now since the analyses table is small and update
+    # doesn't re-embed at all (deferred to a follow-up). Lazy-imported
+    # so the server still boots if dev_tools/ isn't on the path.
+    from dev_tools.evaluation.enrich_graph import _embed_custom_analyses
+
+    from gsf.ingestion_service.ingest import EMBED_PARAMS
+    from gsf.vdb import get_vdb
+
+    connector = get_connector()
+
+    _embed_custom_analyses(
+            database_name=connector.database_name,
+            embed_params=EMBED_PARAMS,
+            vdb=get_vdb(),
+        )
+
+
+    return row
 
 
 def update_custom_analysis(
@@ -460,5 +487,6 @@ def update_custom_analysis(
         existing_id=analysis_id,
         override_existing_props={"name": name, "description": description},
     )
+
 
     return _persist_analysis_with_sql(analysis_node, sql, query_obj)

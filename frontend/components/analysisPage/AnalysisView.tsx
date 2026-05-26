@@ -127,17 +127,14 @@ export const AnalysisView = () => {
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon
-					name={IconName.ChartBar}
-					className="h-5 w-5 text-emerald-600 dark:text-emerald-400"
-				/>
+				<Icon name={IconName.ChartBar} className="h-5 w-5 text-[#76b900]" />
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Custom analyses
 				</h1>
 				<button
 					type="button"
 					onClick={openCreateModal}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
 				>
 					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
@@ -150,7 +147,7 @@ export const AnalysisView = () => {
 				{loading && (
 					<div className="flex h-full items-center justify-center">
 						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-emerald-600 dark:border-zinc-700 dark:border-t-emerald-400"
+							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
 							role="status"
 							aria-label="Loading custom analyses"
 						/>
@@ -192,7 +189,7 @@ export const AnalysisView = () => {
 										onClick={() => openEditModal(a)}
 										aria-label={`Edit ${a.name}`}
 										title="Edit"
-										className="shrink-0 cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-emerald-600 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-emerald-400"
+										className="shrink-0 cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
 									>
 										<Icon name={IconName.Pencil} className="h-4 w-4" />
 									</button>
@@ -234,7 +231,7 @@ export const AnalysisView = () => {
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Custom Analysis Name"
-						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 					/>
 				</div>
 				<div>
@@ -246,7 +243,7 @@ export const AnalysisView = () => {
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={3}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-emerald-400 dark:focus:ring-emerald-400/30"
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 					/>
 				</div>
 				<SqlEditor value={sql} onChange={setSql} />

@@ -10,8 +10,7 @@ import { Modal } from './Modal';
 type Accent = 'emerald' | 'teal';
 
 const ACCENT_CLASSES: Record<Accent, string> = {
-	emerald:
-		'bg-emerald-600 text-white hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-500',
+	emerald: 'bg-[#76b900] text-white hover:bg-[#5e9400]',
 	teal: 'bg-teal-600 text-white hover:bg-teal-700 dark:bg-teal-600 dark:hover:bg-teal-500',
 };
 
