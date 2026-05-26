@@ -389,7 +389,7 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    from dev_tools.evaluation.enrich_graph import _embed_custom_analyses
+    from gsf.server.enrich_graph import _embed_custom_analyses
 
     from gsf.ingestion_service.ingest import EMBED_PARAMS
     from gsf.vdb import get_vdb
