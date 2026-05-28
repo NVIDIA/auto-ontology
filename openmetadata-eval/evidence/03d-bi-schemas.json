@@ -1,0 +1,1495 @@
+/home/airflow/.local/lib/python3.10/site-packages/google/api_core/_python_version_support.py:266: FutureWarning: You are using a Python version (3.10.19) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+/home/airflow/.local/lib/python3.10/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "SchemaDiffResult" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+==== PowerBI -> PowerBIConnection ====
+{
+  "$defs": {
+    "AWSCredentials": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": false,
+          "description": "Enable AWS IAM authentication. When enabled, uses the default credential provider chain (environment variables, instance profile, etc.). Defaults to false for backward compatibility.",
+          "title": "Enable IAM Auth"
+        },
+        "awsAccessKeyId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS Access key ID.",
+          "title": "AWS Access Key ID"
+        },
+        "awsSecretAccessKey": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS Secret Access Key.",
+          "title": "AWS Secret Access Key"
+        },
+        "awsRegion": {
+          "description": "AWS Region",
+          "title": "AWS Region",
+          "type": "string"
+        },
+        "awsSessionToken": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "AWS Session Token.",
+          "title": "AWS Session Token"
+        },
+        "endPointURL": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "EndPoint URL for the AWS",
+          "title": "Endpoint URL"
+        },
+        "profileName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The name of a profile to use with the boto session.",
+          "title": "Profile Name"
+        },
+        "assumeRoleArn": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The Amazon Resource Name (ARN) of the role to assume. Required Field in case of Assume Role",
+          "title": "Role Arn for Assume Role"
+        },
+        "assumeRoleSessionName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "OpenMetadataSession",
+          "description": "An identifier for the assumed role session. Use the role session name to uniquely identify a session when the same role is assumed by different principals or for different reasons. Required Field in case of Assume Role",
+          "title": "Role Session Name for Assume Role"
+        },
+        "assumeRoleSourceIdentity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The Amazon Resource Name (ARN) of the role to assume. Optional Field in case of Assume Role",
+          "title": "Source Identity for Assume Role"
+        }
+      },
+      "required": [
+        "awsRegion"
+      ],
+      "title": "AWSCredentials",
+      "type": "object"
+    },
+    "AzureConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "pbitFileConfigType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/metadata__generated__schema__entity__services__connections__dashboard__powerbi__azureConfig__PbitFileConfigType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "azure",
+          "description": "pbit File Configuration type"
+        },
+        "securityConfig": {
+          "$ref": "#/$defs/AzureCredentials",
+          "title": "Azure Config Source"
+        },
+        "prefixConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BucketDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix Config"
+        },
+        "pbitFilesExtractDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "/tmp/pbitFiles",
+          "description": "Path of the folder where the .pbit files will be unzipped and datamodel schema will be extracted",
+          "title": "pbit Files Extraction Directory"
+        }
+      },
+      "required": [
+        "securityConfig"
+      ],
+      "title": "AzureConfig",
+      "type": "object"
+    },
+    "AzureCredentials": {
+      "additionalProperties": false,
+      "properties": {
+        "clientId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Your Service Principal App ID (Client ID)",
+          "title": "Client ID"
+        },
+        "clientSecret": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Your Service Principal Password (Client Secret)",
+          "title": "Client Secret"
+        },
+        "tenantId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Tenant ID of your Azure Subscription",
+          "title": "Tenant ID"
+        },
+        "accountName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Account Name of your storage account",
+          "title": "Storage Account Name"
+        },
+        "vaultName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Key Vault Name",
+          "title": "Key Vault Name"
+        },
+        "scopes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scopes to get access token, for e.g. api://6dfX33ab-XXXX-49df-XXXX-3459eX817d3e/.default",
+          "title": "Scopes"
+        }
+      },
+      "title": "AzureCredentials",
+      "type": "object"
+    },
+    "BucketDetails": {
+      "additionalProperties": false,
+      "properties": {
+        "bucketName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Name of the bucket where the .pbit files are stored",
+          "title": "Bucket Name"
+        },
+        "objectPrefix": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path of the folder where the .pbit files are stored",
+          "title": "Object Prefix"
+        }
+      },
+      "title": "BucketDetails",
+      "type": "object"
+    },
+    "FilterPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "includes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of strings/regex patterns to match and include only database entities that match.",
+          "title": "Includes"
+        },
+        "excludes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of strings/regex patterns to match and exclude only database entities that match.",
+          "title": "Excludes"
+        }
+      },
+      "title": "FilterPattern",
+      "type": "object"
+    },
+    "GCPCredentials": {
+      "additionalProperties": false,
+      "properties": {
+        "gcpConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GcpCredentialsValues"
+            },
+            {
+              "$ref": "#/$defs/GcpCredentialsPath"
+            },
+            {
+              "$ref": "#/$defs/GcpExternalAccount"
+            },
+            {
+              "$ref": "#/$defs/GcpADC"
+            }
+          ],
+          "description": "We support two ways of authenticating to GCP i.e via GCP Credentials Values or GCP Credentials Path",
+          "title": "GCP Credentials Configuration"
+        },
+        "gcpImpersonateServiceAccount": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GCPImpersonateServiceAccountValues"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "we enable the authenticated service account to impersonate another service account",
+          "title": "GCP Impersonate Service Account Configuration"
+        }
+      },
+      "required": [
+        "gcpConfig"
+      ],
+      "title": "GCPCredentials",
+      "type": "object"
+    },
+    "GCPImpersonateServiceAccountValues": {
+      "properties": {
+        "impersonateServiceAccount": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The impersonated service account email",
+          "title": "Target Service Account Email"
+        },
+        "lifetime": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": 3600,
+          "description": "Number of seconds the delegated credential should be valid",
+          "title": "Lifetime"
+        }
+      },
+      "title": "GCPImpersonateServiceAccountValues",
+      "type": "object"
+    },
+    "GCSConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "pbitFileConfigType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/metadata__generated__schema__entity__services__connections__dashboard__powerbi__gcsConfig__PbitFileConfigType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "gcs",
+          "description": "pbit File Configuration type"
+        },
+        "securityConfig": {
+          "$ref": "#/$defs/GCPCredentials",
+          "title": "GCS Security Config"
+        },
+        "prefixConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BucketDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix Config"
+        },
+        "pbitFilesExtractDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "/tmp/pbitFiles",
+          "description": "Path of the folder where the .pbit files will be unzipped and datamodel schema will be extracted",
+          "title": "pbit Files Extraction Directory"
+        }
+      },
+      "required": [
+        "securityConfig"
+      ],
+      "title": "GCSConfig",
+      "type": "object"
+    },
+    "GcpADC": {
+      "properties": {
+        "type": {
+          "const": "gcp_adc",
+          "default": "gcp_adc",
+          "description": "Google Cloud Platform ADC ( Application Default Credentials )",
+          "title": "Credentials Type",
+          "type": "string"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleProjectId"
+            },
+            {
+              "$ref": "#/$defs/MultipleProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GCP Project ID to parse metadata from",
+          "title": "GCP Project ID"
+        }
+      },
+      "title": "GcpADC",
+      "type": "object"
+    },
+    "GcpCredentialsPath": {
+      "properties": {
+        "type": {
+          "const": "gcp_credential_path",
+          "default": "gcp_credential_path",
+          "description": "Google Cloud Platform account type.",
+          "title": "Credentials Type",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path of the file containing the GCP credentials info",
+          "title": "Path"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleProjectId"
+            },
+            {
+              "$ref": "#/$defs/MultipleProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "GCP Project ID to parse metadata from",
+          "title": "GCP Project ID"
+        }
+      },
+      "title": "GcpCredentialsPath",
+      "type": "object"
+    },
+    "GcpCredentialsValues": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "service_account",
+          "default": "service_account",
+          "description": "Google Cloud Platform account type.",
+          "title": "Credentials Type",
+          "type": "string"
+        },
+        "projectId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SingleProjectId"
+            },
+            {
+              "$ref": "#/$defs/MultipleProjectId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project ID",
+          "title": "Project ID"
+        },
+        "privateKeyId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Cloud private key id.",
+          "title": "Private Key ID"
+        },
+        "privateKey": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Cloud private key.",
+          "title": "Private Key"
+        },
+        "clientEmail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Cloud email.",
+          "title": "Client Email"
+        },
+        "clientId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Cloud Client ID.",
+          "title": "Client ID"
+        },
+        "authUri": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "https://accounts.google.com/o/oauth2/auth",
+          "description": "Google Cloud auth uri.",
+          "title": "Authentication URI"
+        },
+        "tokenUri": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "https://oauth2.googleapis.com/token",
+          "description": "Google Cloud token uri.",
+          "title": "Token URI"
+        },
+        "authProviderX509CertUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "https://www.googleapis.com/oauth2/v1/certs",
+          "description": "Google Cloud auth provider certificate.",
+          "title": "Authentication Provider x509 Certificate URL"
+        },
+        "clientX509CertUrl": {
+          "anyOf": [
+            {
+              "format": "uri",
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Cloud client certificate uri.",
+          "title": "Client x509 Certificate URL"
+        }
+      },
+      "title": "GcpCredentialsValues",
+      "type": "object"
+    },
+    "GcpExternalAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "external_account",
+          "default": "external_account",
+          "description": "Google Cloud Platform account type.",
+          "title": "Credentials Type",
+          "type": "string"
+        },
+        "externalType": {
+          "const": "external_account",
+          "default": "external_account",
+          "description": "Google Cloud Platform account type.",
+          "title": "GCP Account Type",
+          "type": "string"
+        },
+        "audience": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Security Token Service audience which contains the resource name for the workload identity pool and the provider identifier in that pool.",
+          "title": "Audience"
+        },
+        "subjectTokenType": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Security Token Service subject token type based on the OAuth 2.0 token exchange spec.",
+          "title": "Subject Token Type"
+        },
+        "tokenURL": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google Security Token Service token exchange endpoint.",
+          "title": "Token URL"
+        },
+        "credentialSource": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "This object defines the mechanism used to retrieve the external credential from the local environment so that it can be exchanged for a GCP access token via the STS endpoint",
+          "title": "Credential Source"
+        }
+      },
+      "title": "GcpExternalAccount",
+      "type": "object"
+    },
+    "LocalConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "pbitFileConfigType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/metadata__generated__schema__entity__services__connections__dashboard__powerBIConnection__PbitFileConfigType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "local",
+          "description": "pbit File Configuration type"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Directory path for the pbit files",
+          "title": "Path"
+        },
+        "pbitFilesExtractDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "/tmp/pbitFiles",
+          "description": "Path of the folder where the .pbit files will be unzipped and datamodel schema will be extracted",
+          "title": "pbit Files Extraction Directory"
+        }
+      },
+      "title": "LocalConfig",
+      "type": "object"
+    },
+    "MultipleProjectId": {
+      "items": {
+        "type": "string"
+      },
+      "title": "MultipleProjectId",
+      "type": "array"
+    },
+    "PowerBiType": {
+      "enum": [
+        "PowerBI"
+      ],
+      "title": "PowerBiType",
+      "type": "string"
+    },
+    "S3Config": {
+      "additionalProperties": false,
+      "properties": {
+        "pbitFileConfigType": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/metadata__generated__schema__entity__services__connections__dashboard__powerbi__s3Config__PbitFileConfigType"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "s3",
+          "description": "pbit File Configuration type"
+        },
+        "securityConfig": {
+          "$ref": "#/$defs/AWSCredentials",
+          "title": "S3 Security Config"
+        },
+        "prefixConfig": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BucketDetails"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prefix Config"
+        },
+        "pbitFilesExtractDir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "/tmp/pbitFiles",
+          "description": "Path of the folder where the .pbit files will be unzipped and datamodel schema will be extracted",
+          "title": "pbit Files Extraction Directory"
+        }
+      },
+      "required": [
+        "securityConfig"
+      ],
+      "title": "S3Config",
+      "type": "object"
+    },
+    "SingleProjectId": {
+      "title": "SingleProjectId",
+      "type": "string"
+    },
+    "SupportsMetadataExtraction": {
+      "description": "Supports Metadata Extraction.",
+      "title": "SupportsMetadataExtraction",
+      "type": "boolean"
+    },
+    "metadata__generated__schema__entity__services__connections__dashboard__powerBIConnection__PbitFileConfigType": {
+      "enum": [
+        "local"
+      ],
+      "title": "PbitFileConfigType",
+      "type": "string"
+    },
+    "metadata__generated__schema__entity__services__connections__dashboard__powerbi__azureConfig__PbitFileConfigType": {
+      "enum": [
+        "azure"
+      ],
+      "title": "PbitFileConfigType",
+      "type": "string"
+    },
+    "metadata__generated__schema__entity__services__connections__dashboard__powerbi__gcsConfig__PbitFileConfigType": {
+      "enum": [
+        "gcs"
+      ],
+      "title": "PbitFileConfigType",
+      "type": "string"
+    },
+    "metadata__generated__schema__entity__services__connections__dashboard__powerbi__s3Config__PbitFileConfigType": {
+      "enum": [
+        "s3"
+      ],
+      "title": "PbitFileConfigType",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PowerBiType"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "PowerBI",
+      "description": "Service Type",
+      "title": "Service Type"
+    },
+    "clientId": {
+      "description": "client_id for PowerBI.",
+      "title": "Client ID",
+      "type": "string"
+    },
+    "clientSecret": {
+      "description": "clientSecret for PowerBI.",
+      "format": "password",
+      "title": "Client Secret",
+      "type": "string",
+      "writeOnly": true
+    },
+    "tenantId": {
+      "description": "Tenant ID for PowerBI.",
+      "title": "Tenant ID",
+      "type": "string"
+    },
+    "apiURL": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "https://api.powerbi.com",
+      "description": "API URL to call powerbi rest apis to extract metadata. Default to `https://api.powerbi.com`. You can provide youw own in case of different environment",
+      "title": "PowerBI REST API url"
+    },
+    "authorityURI": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "https://login.microsoftonline.com/",
+      "description": "Authority URI for the PowerBI service.",
+      "title": "Authority URI"
+    },
+    "hostPort": {
+      "anyOf": [
+        {
+          "format": "uri",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "https://app.powerbi.com",
+      "description": "Dashboard URL for PowerBI service.",
+      "title": "Host and Port"
+    },
+    "scope": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": [
+        "https://analysis.windows.net/powerbi/api/.default"
+      ],
+      "description": "PowerBI secrets.",
+      "title": "Scope"
+    },
+    "pagination_entity_per_page": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": 100,
+      "description": "Entity Limit set here will be used to paginate the PowerBi APIs",
+      "title": "Pagination Entity Per Page"
+    },
+    "useAdminApis": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": true,
+      "description": "Fetch the PowerBI metadata using admin APIs",
+      "title": "Use PowerBI Admin APIs"
+    },
+    "displayTableNameFromSource": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": false,
+      "description": "Display Table Name from source instead of renamed table name for datamodel tables",
+      "title": "Display Table Name from source"
+    },
+    "pbitFilesSource": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/LocalConfig"
+        },
+        {
+          "$ref": "#/$defs/AzureConfig"
+        },
+        {
+          "$ref": "#/$defs/GCSConfig"
+        },
+        {
+          "$ref": "#/$defs/S3Config"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Source to get the .pbit files to extract lineage information",
+      "title": "PowerBI .pbit Files Source"
+    },
+    "dashboardFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex to exclude or include dashboards that matches the pattern.",
+      "title": "Default Dashboard Filter Pattern"
+    },
+    "chartFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex exclude or include charts that matches the pattern.",
+      "title": "Default Chart Filter Pattern"
+    },
+    "dataModelFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex exclude or include data models that matches the pattern.",
+      "title": "Default Data Model Filter Pattern"
+    },
+    "projectFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex to exclude or include projects that matches the pattern.",
+      "title": "Default Project Filter Pattern"
+    },
+    "supportsMetadataExtraction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SupportsMetadataExtraction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supports Metadata Extraction"
+    }
+  },
+  "required": [
+    "clientId",
+    "clientSecret",
+    "tenantId"
+  ],
+  "title": "PowerBIConnection",
+  "type": "object"
+}
+
+==== Tableau -> TableauConnection ====
+{
+  "$defs": {
+    "AccessTokenAuth": {
+      "additionalProperties": false,
+      "properties": {
+        "personalAccessTokenName": {
+          "description": "Personal Access Token Name.",
+          "title": "Personal Access Token",
+          "type": "string"
+        },
+        "personalAccessTokenSecret": {
+          "description": "Personal Access Token Secret.",
+          "format": "password",
+          "title": "Personal Access Token Secret",
+          "type": "string",
+          "writeOnly": true
+        }
+      },
+      "required": [
+        "personalAccessTokenName",
+        "personalAccessTokenSecret"
+      ],
+      "title": "AccessTokenAuth",
+      "type": "object"
+    },
+    "BasicAuth": {
+      "additionalProperties": false,
+      "properties": {
+        "username": {
+          "description": "Username to access the service.",
+          "title": "Username",
+          "type": "string"
+        },
+        "password": {
+          "description": "Password to access the service.",
+          "format": "password",
+          "title": "Password",
+          "type": "string",
+          "writeOnly": true
+        }
+      },
+      "required": [
+        "username",
+        "password"
+      ],
+      "title": "BasicAuth",
+      "type": "object"
+    },
+    "FilterPattern": {
+      "additionalProperties": false,
+      "properties": {
+        "includes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of strings/regex patterns to match and include only database entities that match.",
+          "title": "Includes"
+        },
+        "excludes": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "List of strings/regex patterns to match and exclude only database entities that match.",
+          "title": "Excludes"
+        }
+      },
+      "title": "FilterPattern",
+      "type": "object"
+    },
+    "SslConfig": {
+      "$ref": "#/$defs/ValidateSslClientConfig",
+      "description": "Client SSL configuration",
+      "title": "SslConfig"
+    },
+    "SupportsMetadataExtraction": {
+      "description": "Supports Metadata Extraction.",
+      "title": "SupportsMetadataExtraction",
+      "type": "boolean"
+    },
+    "TableauType": {
+      "enum": [
+        "Tableau"
+      ],
+      "title": "TableauType",
+      "type": "string"
+    },
+    "ValidateSslClientConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "caCertificate": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The CA certificate used for SSL validation.",
+          "title": "CA Certificate"
+        },
+        "sslCertificate": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The SSL certificate used for client authentication.",
+          "title": "SSL Certificate"
+        },
+        "sslKey": {
+          "anyOf": [
+            {
+              "format": "password",
+              "type": "string",
+              "writeOnly": true
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The private key associated with the SSL certificate.",
+          "title": "SSL Key"
+        }
+      },
+      "title": "ValidateSslClientConfig",
+      "type": "object"
+    },
+    "VerifySSL": {
+      "enum": [
+        "no-ssl",
+        "ignore",
+        "validate"
+      ],
+      "title": "VerifySSL",
+      "type": "string"
+    }
+  },
+  "additionalProperties": false,
+  "properties": {
+    "type": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/TableauType"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "Tableau",
+      "description": "Service Type",
+      "title": "Service Type"
+    },
+    "hostPort": {
+      "description": "Tableau Server url.",
+      "format": "uri",
+      "minLength": 1,
+      "title": "Host and Port",
+      "type": "string"
+    },
+    "authType": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/BasicAuth"
+        },
+        {
+          "$ref": "#/$defs/AccessTokenAuth"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Types of methods used to authenticate to the tableau instance",
+      "title": "Authentication type for Tableau"
+    },
+    "siteName": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Tableau Site Name.",
+      "title": "Site Name"
+    },
+    "paginationLimit": {
+      "anyOf": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": 10,
+      "description": "Pagination limit used while querying the tableau metadata API for getting data sources",
+      "title": "Pagination Limit"
+    },
+    "apiVersion": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Tableau API version. If not provided, the version will be used from the tableau server.",
+      "title": "API Version"
+    },
+    "proxyURL": {
+      "anyOf": [
+        {
+          "format": "uri",
+          "minLength": 1,
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Proxy URL for the tableau server. If not provided, the hostPort will be used. This is used to generate the dashboard & Chart URL.",
+      "title": "Proxy URL"
+    },
+    "verifySSL": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/VerifySSL"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": "no-ssl"
+    },
+    "sslConfig": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SslConfig"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "dashboardFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex to exclude or include dashboards that matches the pattern.",
+      "title": "Default Dashboard Filter Pattern"
+    },
+    "chartFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex exclude or include charts that matches the pattern.",
+      "title": "Default Chart Filter Pattern"
+    },
+    "dataModelFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex exclude or include data models that matches the pattern.",
+      "title": "Default Data Model Filter Pattern"
+    },
+    "projectFilterPattern": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FilterPattern"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Regex to exclude or include projects that matches the pattern.",
+      "title": "Default Project Filter Pattern"
+    },
+    "supportsMetadataExtraction": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SupportsMetadataExtraction"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Supports Metadata Extraction"
+    }
+  },
+  "required": [
+    "hostPort"
+  ],
+  "title": "TableauConnection",
+  "type": "object"
+}
+

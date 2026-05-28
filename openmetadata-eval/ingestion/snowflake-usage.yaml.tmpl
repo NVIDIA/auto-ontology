@@ -1,0 +1,36 @@
+source:
+  type: snowflake-usage
+  serviceName: snowflake_eval
+  serviceConnection:
+    config:
+      type: Snowflake
+      username: ${SNOWFLAKE_USER}
+      password: ${SNOWFLAKE_PASSWORD}
+      account: ${SNOWFLAKE_ACCOUNT}
+      warehouse: ${SNOWFLAKE_WAREHOUSE}
+      database: ${SNOWFLAKE_DATABASE}
+      role: ${SNOWFLAKE_ROLE}
+  sourceConfig:
+    config:
+      type: DatabaseUsage
+      queryLogDuration: 7
+      stageFileLocation: /tmp/snowflake_usage_stage
+      resultLimit: 1000
+processor:
+  type: query-parser
+  config: {}
+stage:
+  type: table-usage
+  config:
+    filename: /tmp/snowflake_usage
+bulkSink:
+  type: metadata-usage
+  config:
+    filename: /tmp/snowflake_usage
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: http://openmetadata-server:8585/api
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: ${OM_TOKEN}

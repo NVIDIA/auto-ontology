@@ -1,0 +1,19 @@
+=== PII classification tags ===
+{
+  "name": "None",
+  "description": "Non PII",
+  "autoClassificationEnabled": false
+}
+{
+  "name": "NonSensitive",
+  "description": "PII which is easily accessible from public sources and can include zip code, race, gender, and date of birth.",
+  "autoClassificationEnabled": true
+}
+{
+  "name": "Sensitive",
+  "description": "PII which if lost, compromised, or disclosed without authorization, could result in substantial harm, embarrassment, inconvenience, or unfairness to an individual.",
+  "autoClassificationEnabled": true
+}
+
+=== TPCH_SF1.CUSTOMER sample data (3 rows) ===
+null

@@ -1,0 +1,52 @@
+[
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.CUSTOMER",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.CUSTOMER",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.CUSTOMER",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.LINEITEM",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.LINEITEM",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.LINEITEM",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.NATION",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  },
+  {
+    "fqn": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION",
+    "weekly_queries": 0,
+    "weekly_pct": 0.0
+  }
+]

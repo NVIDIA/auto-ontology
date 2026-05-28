@@ -1,0 +1,9 @@
+
+  [1/8] rows=5  elapsed=0.62s  qid=01c4acbf-0206-fa7d-0005-062e0006f0fa
+  [2/8] rows=25  elapsed=0.51s  qid=01c4acbf-0206-f140-0005-062e000700de
+  [3/8] rows=5  elapsed=0.72s  qid=01c4acbf-0206-f85b-0005-062e000671b6
+  [4/8] rows=4  elapsed=0.85s  qid=01c4acbf-0206-fa7d-0005-062e0006f0fe
+  [5/8] rows=25  elapsed=0.70s  qid=01c4acbf-0206-f140-0005-062e000700e2
+  [6/8] rows=25  elapsed=0.74s  qid=01c4acbf-0206-f85b-0005-062e000671ba
+  [7/8] rows=1  elapsed=0.33s  qid=01c4acbf-0206-f85b-0005-062e000671be
+  [8/8] rows=1  elapsed=0.18s  qid=01c4acbf-0206-fa7d-0005-062e0006f102

@@ -1,0 +1,7 @@
+
+schema OM_EVAL: [('Schema OM_EVAL successfully created.',)]
+drop  : [('Drop statement executed successfully (PEOPLE already dropped).',)]
+create: [('Table PEOPLE successfully created.',)]
+insert: rowcount=8
+verify: 8 rows in OM_EVAL.PEOPLE
+preview: [('Alice Johnson', 'alice.johnson@gmail.com', '212-555-0143', '123-45-6789', datetime.date(1980, 4, 12), '742 Evergreen Terrace, Springfield, IL 62704'), ('Bob Williams', 'bobw@yahoo.com', '415-555-9821', '987-65-4321', datetime.date(1975, 9, 30), '1600 Amphitheatre Pkwy, Mountain View, CA 94043')]

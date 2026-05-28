@@ -1,0 +1,33 @@
+source:
+  type: snowflake
+  serviceName: snowflake_eval
+  serviceConnection:
+    config:
+      type: Snowflake
+      username: ${SNOWFLAKE_USER}
+      password: ${SNOWFLAKE_PASSWORD}
+      account: ${SNOWFLAKE_ACCOUNT}
+      warehouse: ${SNOWFLAKE_WAREHOUSE}
+      database: WIDEWORLDIMPORTERS
+      role: ${SNOWFLAKE_ROLE}
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      markDeletedTables: false
+      markDeletedSchemas: false
+      markDeletedDatabases: false
+      includeTables: true
+      includeViews: false
+      schemaFilterPattern:
+        includes:
+          - ^OM_EVAL$
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: http://openmetadata-server:8585/api
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: ${OM_TOKEN}

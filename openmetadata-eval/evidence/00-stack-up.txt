@@ -1,0 +1,11 @@
+=== /api/v1/system/version ===
+{"version":"1.12.9","revision":"6a37d2d963c5e42fdc5197cd123132f4c944ac7c","timestamp":1779943306770}
+
+=== UI ping (HEAD /) ===
+HTTP 200  size=4721  time=0.022698s
+
+=== docker compose ps ===
+NAME                     STATE     STATUS
+openmetadata_ingestion   running   Up About a minute
+openmetadata_mysql       running   Up 2 minutes (healthy)
+openmetadata_server      running   Up About a minute (healthy)

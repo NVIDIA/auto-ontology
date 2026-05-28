@@ -1,0 +1,13 @@
+=== Resource: /api/v1/queries (collection root) ===
+{
+  "data": [],
+  "paging": {
+    "total": 0
+  }
+}
+
+=== Confirm no 'execute' endpoint exists ===
+  POST http://localhost:8585/api/v1/queries/execute -> HTTP 404
+  POST http://localhost:8585/api/v1/queries/run -> HTTP 404
+  POST http://localhost:8585/api/v1/sql/execute -> HTTP 404
+  POST http://localhost:8585/api/v1/query/run -> HTTP 404

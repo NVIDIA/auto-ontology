@@ -1,0 +1,37 @@
+source:
+  type: snowflake
+  serviceName: snowflake_eval
+  serviceConnection:
+    config:
+      type: Snowflake
+      username: ${SNOWFLAKE_USER}
+      password: ${SNOWFLAKE_PASSWORD}
+      account: ${SNOWFLAKE_ACCOUNT}
+      warehouse: ${SNOWFLAKE_WAREHOUSE}
+      database: WIDEWORLDIMPORTERS
+      role: ${SNOWFLAKE_ROLE}
+  sourceConfig:
+    config:
+      type: AutoClassification
+      storeSampleData: true
+      enableAutoClassification: true
+      confidence: 60
+      schemaFilterPattern:
+        includes:
+          - ^OM_EVAL$
+      tableFilterPattern:
+        includes:
+          - ^PEOPLE$
+processor:
+  type: orm-profiler
+  config: {}
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: http://openmetadata-server:8585/api
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: ${OM_TOKEN}

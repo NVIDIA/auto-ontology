@@ -1,0 +1,43 @@
+source:
+  type: snowflake
+  serviceName: snowflake_eval
+  serviceConnection:
+    config:
+      type: Snowflake
+      username: ${SNOWFLAKE_USER}
+      password: ${SNOWFLAKE_PASSWORD}
+      account: ${SNOWFLAKE_ACCOUNT}
+      warehouse: ${SNOWFLAKE_WAREHOUSE}
+      database: ${SNOWFLAKE_DATABASE}
+      role: ${SNOWFLAKE_ROLE}
+      includeTransientTables: false
+      includeStreams: false
+      clientSessionKeepAlive: false
+  sourceConfig:
+    config:
+      type: DatabaseMetadata
+      markDeletedTables: true
+      markDeletedStoredProcedures: true
+      markDeletedSchemas: true
+      markDeletedDatabases: true
+      includeTables: true
+      includeViews: true
+      includeTags: true
+      includeOwners: false
+      useFqnForFiltering: false
+      schemaFilterPattern:
+        includes:
+          - TPCH_SF1
+      tableFilterPattern:
+        excludes:
+          - ^information_schema$
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: http://openmetadata-server:8585/api
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: ${OM_TOKEN}
