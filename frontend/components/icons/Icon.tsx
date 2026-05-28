@@ -17,6 +17,7 @@ import NvidiaLogoSvg from './svg/nvidia-logo.svg';
 import DatabaseSvg from './svg/database.svg';
 import SettingsSvg from './svg/settings.svg';
 import ChartBarSvg from './svg/chart-bar.svg';
+import SparklesSvg from './svg/sparkles.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -32,6 +33,7 @@ export enum IconName {
 	Database = 'database',
 	Settings = 'settings',
 	ChartBar = 'chart-bar',
+	Sparkles = 'sparkles',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -48,6 +50,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Database]: DatabaseSvg,
 	[IconName.Settings]: SettingsSvg,
 	[IconName.ChartBar]: ChartBarSvg,
+	[IconName.Sparkles]: SparklesSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {
