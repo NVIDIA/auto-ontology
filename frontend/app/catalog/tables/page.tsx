@@ -10,6 +10,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { om } from '@/api/openmetadata';
 import type { OmTable } from '@/types/openmetadata';
 import { TagPill } from '@/components/catalog/TagPill';
+import {
+	CategoryTabs,
+	CertificationBadge,
+	OwnerChip,
+	UsageMeter,
+	readinessOf,
+	usageLevelOf,
+} from '@/components/catalog/ui';
 
 type Filter = 'all' | 'pii' | 'undocumented' | 'tagged';
 
@@ -26,6 +34,13 @@ const piiColumnCount = (t: OmTable): number =>
 		0,
 	);
 
+const matchesFilter = (t: OmTable, filter: Filter): boolean => {
+	if (filter === 'pii') return piiColumnCount(t) > 0;
+	if (filter === 'undocumented') return !t.description;
+	if (filter === 'tagged') return (t.tags ?? []).length > 0;
+	return true;
+};
+
 export default function TablesListPage() {
 	const params = useSearchParams();
 	const initialFilter = filterOf(new URLSearchParams(params.toString()));
@@ -40,7 +55,10 @@ export default function TablesListPage() {
 		let cancelled = false;
 		void (async () => {
 			try {
-				const r = await om.tables.list({ fields: 'columns,tags,description', limit: 200 });
+				const r = await om.tables.list({
+					fields: 'columns,tags,description,owners,usageSummary',
+					limit: 200,
+				});
 				if (!cancelled) setTables(r.data);
 			} catch (e) {
 				if (!cancelled) setErr(e instanceof Error ? e.message : String(e));
@@ -51,31 +69,55 @@ export default function TablesListPage() {
 		};
 	}, []);
 
+	const counts = useMemo(() => {
+		const base = { all: 0, pii: 0, tagged: 0, undocumented: 0 };
+		if (!tables) return base;
+		for (const t of tables) {
+			base.all += 1;
+			if (piiColumnCount(t) > 0) base.pii += 1;
+			if ((t.tags ?? []).length > 0) base.tagged += 1;
+			if (!t.description) base.undocumented += 1;
+		}
+		return base;
+	}, [tables]);
+
 	const filtered = useMemo(() => {
 		if (!tables) return null;
 		const needle = q.trim().toLowerCase();
 		return tables.filter((t) => {
-			if (needle && !t.fullyQualifiedName.toLowerCase().includes(needle)) return false;
-			if (filter === 'pii' && piiColumnCount(t) === 0) return false;
-			if (filter === 'undocumented' && t.description) return false;
-			if (filter === 'tagged' && !((t.tags ?? []).length > 0)) return false;
-			return true;
+			if (
+				needle &&
+				!t.fullyQualifiedName.toLowerCase().includes(needle) &&
+				!(t.tags ?? []).some((tag) => tag.tagFQN.toLowerCase().includes(needle))
+			)
+				return false;
+			return matchesFilter(t, filter);
 		});
 	}, [tables, q, filter]);
 
 	return (
 		<div className="mx-auto w-full max-w-7xl px-6 py-8">
-			<header className="mb-6 flex items-end justify-between gap-4">
-				<div>
-					<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-						Data Dictionary
-					</h1>
-					<p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
-						{tables == null
-							? 'Loading tables…'
-							: `${filtered?.length ?? 0} of ${tables.length} tables`}
-					</p>
-				</div>
+			<header className="mb-5">
+				<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+					Data Dictionary
+				</h1>
+				<p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+					Every table OpenMetadata harvested, with ownership, certification status, usage
+					and tags.
+				</p>
+			</header>
+
+			<div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+				<CategoryTabs
+					tabs={[
+						{ id: 'all', label: 'All tables', count: counts.all },
+						{ id: 'pii', label: 'PII', count: counts.pii },
+						{ id: 'tagged', label: 'Tagged', count: counts.tagged },
+						{ id: 'undocumented', label: 'Undocumented', count: counts.undocumented },
+					]}
+					active={filter}
+					onSelect={setFilter}
+				/>
 				<div className="flex w-72 items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 shadow-sm dark:border-zinc-700 dark:bg-zinc-900">
 					<svg viewBox="0 0 20 20" fill="currentColor" className="h-4 w-4 text-zinc-400">
 						<path
@@ -87,34 +129,10 @@ export default function TablesListPage() {
 					<input
 						value={q}
 						onChange={(e) => setQ(e.target.value)}
-						placeholder="Search table FQN…"
+						placeholder="Search tables or tags…"
 						className="w-full bg-transparent text-sm outline-none placeholder:text-zinc-400 dark:text-zinc-100"
 					/>
 				</div>
-			</header>
-
-			<div className="mb-4 flex flex-wrap gap-2">
-				{(
-					[
-						['all', 'All'],
-						['pii', 'PII'],
-						['tagged', 'Has tags'],
-						['undocumented', 'Undocumented'],
-					] as const
-				).map(([id, label]) => (
-					<button
-						key={id}
-						type="button"
-						onClick={() => setFilter(id)}
-						className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
-							filter === id
-								? 'border-[#76b900] bg-[#76b900]/10 text-[#76b900]'
-								: 'border-zinc-300 text-zinc-600 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800'
-						}`}
-					>
-						{label}
-					</button>
-				))}
 			</div>
 
 			{err ? (
@@ -133,16 +151,21 @@ export default function TablesListPage() {
 						<thead className="border-b border-zinc-200 bg-zinc-50 text-left text-xs font-medium uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950/40 dark:text-zinc-400">
 							<tr>
 								<th className="px-4 py-2.5">Table</th>
-								<th className="px-4 py-2.5">Schema</th>
+								<th className="px-4 py-2.5">Owner</th>
+								<th className="px-4 py-2.5">Status</th>
+								<th className="px-4 py-2.5">Usage</th>
 								<th className="px-4 py-2.5 text-right">Cols</th>
 								<th className="px-4 py-2.5 text-right">PII</th>
 								<th className="px-4 py-2.5">Tags</th>
-								<th className="px-4 py-2.5">Description</th>
 							</tr>
 						</thead>
 						<tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
 							{(filtered ?? []).map((t) => {
 								const piiN = piiColumnCount(t);
+								const ownerName =
+									t.owners && t.owners.length > 0
+										? (t.owners[0].displayName ?? t.owners[0].name)
+										: null;
 								return (
 									<tr
 										key={t.id}
@@ -151,18 +174,24 @@ export default function TablesListPage() {
 										<td className="px-4 py-3">
 											<Link
 												href={`/catalog/tables/${encodeURIComponent(t.fullyQualifiedName)}`}
-												className="font-medium text-zinc-900 group-hover:text-[#76b900] dark:text-zinc-100"
+												className="block"
 											>
-												{t.name}
-											</Link>
-											{t.displayName && t.displayName !== t.name ? (
-												<span className="ml-2 text-xs text-zinc-500">
-													{t.displayName}
+												<span className="font-medium text-zinc-900 group-hover:text-[#76b900] dark:text-zinc-100">
+													{t.name}
 												</span>
-											) : null}
+												<span className="block font-mono text-[11px] text-zinc-500 dark:text-zinc-400">
+													{t.database.name} · {t.databaseSchema.name}
+												</span>
+											</Link>
 										</td>
-										<td className="px-4 py-3 font-mono text-xs text-zinc-600 dark:text-zinc-400">
-											{t.database.name} · {t.databaseSchema.name}
+										<td className="px-4 py-3">
+											<OwnerChip name={ownerName} />
+										</td>
+										<td className="px-4 py-3">
+											<CertificationBadge status={readinessOf(t)} dense />
+										</td>
+										<td className="px-4 py-3">
+											<UsageMeter level={usageLevelOf(t.usageSummary)} />
 										</td>
 										<td className="px-4 py-3 text-right tabular-nums text-zinc-700 dark:text-zinc-300">
 											{t.columns?.length ?? 0}
@@ -188,17 +217,13 @@ export default function TablesListPage() {
 															dense
 														/>
 													))}
+													{(t.tags ?? []).length > 3 ? (
+														<span className="text-[11px] text-zinc-400">
+															+{(t.tags ?? []).length - 3}
+														</span>
+													) : null}
 												</div>
 											)}
-										</td>
-										<td className="px-4 py-3 text-xs text-zinc-600 dark:text-zinc-400">
-											<span className="line-clamp-2 max-w-md">
-												{t.description ?? (
-													<em className="text-zinc-400">
-														— not documented —
-													</em>
-												)}
-											</span>
 										</td>
 									</tr>
 								);

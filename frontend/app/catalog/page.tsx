@@ -9,13 +9,25 @@ import { useEffect, useState } from 'react';
 import { om } from '@/api/openmetadata';
 import type { OmQuery, OmTable } from '@/types/openmetadata';
 import { TagPill } from '@/components/catalog/TagPill';
+import {
+	CertificationBadge,
+	CoverageBar,
+	Panel,
+	readinessOf,
+	type Readiness,
+} from '@/components/catalog/ui';
 
 type Stats = {
 	tables: number;
 	columns: number;
+	documentedTables: number;
+	documentedColumns: number;
+	ownedTables: number;
+	taggedTables: number;
 	piiColumns: number;
 	piiTables: number;
 	queries: number;
+	readiness: Record<Readiness, number>;
 };
 
 const fqnSchemaPath = (t: OmTable): string => `${t.database.name} · ${t.databaseSchema.name}`;
@@ -31,29 +43,57 @@ export default function CatalogOverviewPage() {
 		void (async () => {
 			try {
 				const [tablesRes, queriesRes] = await Promise.all([
-					om.tables.list({ fields: 'columns,tags', limit: 200 }),
+					om.tables.list({
+						fields: 'columns,tags,description,owners',
+						limit: 200,
+					}),
 					om.queries.list({ limit: 50 }),
 				]);
 				if (cancelled) return;
 
 				let columns = 0;
+				let documentedColumns = 0;
+				let documentedTables = 0;
+				let ownedTables = 0;
+				let taggedTables = 0;
 				let piiColumns = 0;
 				const piiByTable: OmTable[] = [];
+				const readiness: Record<Readiness, number> = {
+					certified: 0,
+					partial: 0,
+					pending: 0,
+				};
+
 				for (const t of tablesRes.data) {
-					columns += t.columns?.length ?? 0;
-					const tablePii = (t.columns ?? []).filter((c) =>
+					const cols = t.columns ?? [];
+					columns += cols.length;
+					documentedColumns += cols.filter(
+						(c) => c.description && c.description.trim().length > 0,
+					).length;
+					if (t.description && t.description.trim().length > 0) documentedTables += 1;
+					if (t.owners && t.owners.length > 0) ownedTables += 1;
+					if ((t.tags ?? []).length > 0) taggedTables += 1;
+
+					const tablePii = cols.filter((c) =>
 						(c.tags ?? []).some((tag) => tag.tagFQN.startsWith('PII.')),
 					);
 					piiColumns += tablePii.length;
 					if (tablePii.length > 0) piiByTable.push(t);
+
+					readiness[readinessOf(t)] += 1;
 				}
 
 				setStats({
 					tables: tablesRes.data.length,
 					columns,
+					documentedTables,
+					documentedColumns,
+					ownedTables,
+					taggedTables,
 					piiColumns,
 					piiTables: piiByTable.length,
 					queries: queriesRes.data.length,
+					readiness,
 				});
 				setPiiTables(piiByTable.slice(0, 8));
 				setRecentQueries(queriesRes.data.slice(0, 5));
@@ -66,6 +106,17 @@ export default function CatalogOverviewPage() {
 		};
 	}, []);
 
+	const readinessTotal = stats
+		? stats.readiness.certified + stats.readiness.partial + stats.readiness.pending
+		: 0;
+	const readinessScore =
+		stats && readinessTotal > 0
+			? Math.round(
+					((stats.readiness.certified + stats.readiness.partial * 0.5) / readinessTotal) *
+						100,
+				)
+			: 0;
+
 	return (
 		<div className="mx-auto w-full max-w-7xl px-6 py-8">
 			<header className="mb-8">
@@ -73,11 +124,12 @@ export default function CatalogOverviewPage() {
 					Generative Semantic Fabric · Catalog
 				</p>
 				<h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-					Your data, organised and AI-ready.
+					AI-Readiness overview
 				</h1>
 				<p className="mt-2 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-					Tables, columns, descriptions, tags, PII, lineage, and query history — all
-					harvested from your warehouses by OpenMetadata and surfaced here in one place.
+					How documented, owned and classified your data is — the foundation for
+					trustworthy LLM and agent answers. Harvested from your warehouses by
+					OpenMetadata.
 				</p>
 			</header>
 
@@ -87,7 +139,59 @@ export default function CatalogOverviewPage() {
 				</div>
 			) : null}
 
-			<section className="grid grid-cols-2 gap-3 md:grid-cols-5">
+			{/* readiness score + coverage */}
+			<section className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
+				<Panel title="AI-Readiness score">
+					<div className="flex items-center gap-5 px-5 py-6">
+						<ReadinessRing score={readinessScore} />
+						<div>
+							<p className="text-sm text-zinc-600 dark:text-zinc-400">
+								Across {stats?.tables ?? '—'} tables
+							</p>
+							<ul className="mt-2 space-y-1 text-xs">
+								<ReadinessLegend
+									status="certified"
+									n={stats?.readiness.certified}
+								/>
+								<ReadinessLegend status="partial" n={stats?.readiness.partial} />
+								<ReadinessLegend status="pending" n={stats?.readiness.pending} />
+							</ul>
+						</div>
+					</div>
+				</Panel>
+
+				<Panel title="Coverage">
+					<div className="space-y-4 px-5 py-5">
+						<CoverageBar
+							label="Tables documented"
+							value={stats?.documentedTables ?? 0}
+							total={stats?.tables ?? 0}
+							tone="green"
+						/>
+						<CoverageBar
+							label="Columns documented"
+							value={stats?.documentedColumns ?? 0}
+							total={stats?.columns ?? 0}
+							tone="sky"
+						/>
+						<CoverageBar
+							label="Tables with an owner"
+							value={stats?.ownedTables ?? 0}
+							total={stats?.tables ?? 0}
+							tone="violet"
+						/>
+						<CoverageBar
+							label="Tables classified (tagged)"
+							value={stats?.taggedTables ?? 0}
+							total={stats?.tables ?? 0}
+							tone="amber"
+						/>
+					</div>
+				</Panel>
+			</section>
+
+			{/* quick stats */}
+			<section className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5">
 				<StatCard label="Tables" value={stats?.tables} href="/catalog/tables" />
 				<StatCard label="Columns" value={stats?.columns} />
 				<StatCard
@@ -100,19 +204,18 @@ export default function CatalogOverviewPage() {
 				<StatCard label="Tracked queries" value={stats?.queries} href="/catalog/queries" />
 			</section>
 
-			<section className="mt-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
-				<div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-					<div className="mb-3 flex items-center justify-between">
-						<h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-							Tables with PII
-						</h2>
+			<section className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+				<Panel
+					title="Tables with PII"
+					action={
 						<Link
 							href="/catalog/tables?pii=1"
-							className="text-xs text-[#76b900] hover:underline"
+							className="text-xs font-normal normal-case tracking-normal text-[#76b900] hover:underline"
 						>
 							View all →
 						</Link>
-					</div>
+					}
+				>
 					{piiTables.length === 0 ? (
 						<EmptyState label="No tables with PII tags yet. Run the Auto Classification workflow." />
 					) : (
@@ -122,10 +225,10 @@ export default function CatalogOverviewPage() {
 									(c.tags ?? []).some((tg) => tg.tagFQN.startsWith('PII.')),
 								);
 								return (
-									<li key={t.id} className="py-2.5">
+									<li key={t.id}>
 										<Link
 											href={`/catalog/tables/${encodeURIComponent(t.fullyQualifiedName)}`}
-											className="group block"
+											className="group block px-4 py-2.5 hover:bg-[#76b900]/5"
 										>
 											<div className="flex items-center justify-between">
 												<div className="min-w-0">
@@ -161,29 +264,25 @@ export default function CatalogOverviewPage() {
 							})}
 						</ul>
 					)}
-				</div>
+				</Panel>
 
-				<div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-					<div className="mb-3 flex items-center justify-between">
-						<h2 className="text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-							Recent queries
-						</h2>
+				<Panel
+					title="Recent queries"
+					action={
 						<Link
 							href="/catalog/queries"
-							className="text-xs text-[#76b900] hover:underline"
+							className="text-xs font-normal normal-case tracking-normal text-[#76b900] hover:underline"
 						>
 							View all →
 						</Link>
-					</div>
+					}
+				>
 					{recentQueries.length === 0 ? (
 						<EmptyState label="No queries ingested yet. Run the usage workflow." />
 					) : (
-						<ul className="space-y-2">
+						<ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
 							{recentQueries.map((q) => (
-								<li
-									key={q.id}
-									className="rounded-lg border border-zinc-100 bg-zinc-50/60 p-3 dark:border-zinc-800 dark:bg-zinc-950/40"
-								>
+								<li key={q.id} className="px-4 py-3">
 									<pre className="line-clamp-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed text-zinc-700 dark:text-zinc-300">
 										{q.query}
 									</pre>
@@ -204,10 +303,10 @@ export default function CatalogOverviewPage() {
 							))}
 						</ul>
 					)}
-				</div>
+				</Panel>
 			</section>
 
-			<section className="mt-10">
+			<section className="mt-8">
 				<h2 className="mb-3 text-sm font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					What you can do here
 				</h2>
@@ -249,6 +348,50 @@ export default function CatalogOverviewPage() {
 	);
 }
 
+const ReadinessRing = ({ score }: { score: number }) => {
+	const r = 34;
+	const c = 2 * Math.PI * r;
+	const offset = c - (score / 100) * c;
+	return (
+		<div className="relative h-24 w-24 shrink-0">
+			<svg viewBox="0 0 80 80" className="h-24 w-24 -rotate-90">
+				<circle
+					cx="40"
+					cy="40"
+					r={r}
+					fill="none"
+					strokeWidth="8"
+					className="stroke-zinc-100 dark:stroke-zinc-800"
+				/>
+				<circle
+					cx="40"
+					cy="40"
+					r={r}
+					fill="none"
+					strokeWidth="8"
+					strokeLinecap="round"
+					strokeDasharray={c}
+					strokeDashoffset={offset}
+					className="stroke-[#76b900] transition-[stroke-dashoffset] duration-700"
+				/>
+			</svg>
+			<div className="absolute inset-0 flex flex-col items-center justify-center">
+				<span className="text-xl font-semibold tabular-nums text-zinc-900 dark:text-zinc-50">
+					{score}%
+				</span>
+				<span className="text-[9px] uppercase tracking-wider text-zinc-400">ready</span>
+			</div>
+		</div>
+	);
+};
+
+const ReadinessLegend = ({ status, n }: { status: Readiness; n: number | undefined }) => (
+	<li className="flex items-center gap-2">
+		<CertificationBadge status={status} dense />
+		<span className="tabular-nums text-zinc-500 dark:text-zinc-400">{n ?? '—'}</span>
+	</li>
+);
+
 const StatCard = ({
 	label,
 	value,
@@ -284,7 +427,7 @@ const StatCard = ({
 };
 
 const EmptyState = ({ label }: { label: string }) => (
-	<p className="rounded-lg border border-dashed border-zinc-200 p-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
+	<p className="m-4 rounded-lg border border-dashed border-zinc-200 p-6 text-center text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-500">
 		{label}
 	</p>
 );

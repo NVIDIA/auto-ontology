@@ -107,6 +107,23 @@ export type OmQuery = {
 	processedLineage?: boolean;
 };
 
+export type OmLineageEdge = {
+	fromEntity: string;
+	toEntity: string;
+	docId?: string;
+	lineageDetails?: {
+		sqlQuery?: string | null;
+		columnsLineage?: Array<{ fromColumns?: string[]; toColumn?: string }>;
+	} | null;
+};
+
+export type OmLineageResponse = {
+	entity: OmEntityRef;
+	nodes: OmEntityRef[];
+	upstreamEdges: OmLineageEdge[];
+	downstreamEdges: OmLineageEdge[];
+};
+
 export type OmListResponse<T> = {
 	data: T[];
 	paging?: {

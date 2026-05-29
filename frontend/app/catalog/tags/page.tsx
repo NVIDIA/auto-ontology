@@ -8,6 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { om } from '@/api/openmetadata';
 import type { OmClassification, OmTagDef } from '@/types/openmetadata';
 import { TagPill } from '@/components/catalog/TagPill';
+import { Panel } from '@/components/catalog/ui';
 
 type ClassWithTags = OmClassification & { tags: OmTagDef[] };
 
@@ -56,12 +57,22 @@ export default function TagsPage() {
 		[data, selected],
 	);
 
+	const totalTags = useMemo(
+		() => (data ?? []).reduce((acc, c) => acc + c.tags.length, 0),
+		[data],
+	);
+
 	return (
 		<div className="mx-auto w-full max-w-7xl px-6 py-8">
 			<header className="mb-6 flex flex-wrap items-end justify-between gap-4">
 				<div>
 					<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
 						Tags
+						{data != null ? (
+							<span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 align-middle text-sm font-medium tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+								{totalTags}
+							</span>
+						) : null}
 					</h1>
 					<p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
 						Classifications group related tags. Use them to label tables and columns
@@ -86,11 +97,11 @@ export default function TagsPage() {
 			) : null}
 
 			<div className="grid grid-cols-1 gap-6 lg:grid-cols-[260px_1fr]">
-				<aside className="rounded-xl border border-zinc-200 bg-white p-2 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+				<Panel title="Classifications" className="self-start">
 					{data == null ? (
 						<SkeletonList />
 					) : (
-						<ul>
+						<ul className="p-2">
 							{data.map((c) => (
 								<li key={c.name}>
 									<button
@@ -118,34 +129,37 @@ export default function TagsPage() {
 							))}
 						</ul>
 					)}
-				</aside>
+				</Panel>
 
-				<main className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-					{current == null ? (
-						<p className="text-sm text-zinc-500">Select a classification…</p>
-					) : (
-						<>
-							<div className="mb-4 flex items-start justify-between gap-4 border-b border-zinc-100 pb-4 dark:border-zinc-800">
-								<div>
-									<h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-										{current.name}
-									</h2>
-									{current.description ? (
-										<p className="mt-1 max-w-3xl text-sm text-zinc-600 dark:text-zinc-400">
-											{current.description}
-										</p>
-									) : null}
-								</div>
-								{current.provider !== 'system' ? (
-									<button
-										type="button"
-										onClick={() => setCreatingFor(current.name)}
-										className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-									>
-										+ Add tag
-									</button>
-								) : null}
-							</div>
+				{current == null ? (
+					<Panel>
+						<p className="px-6 py-6 text-sm text-zinc-500">Select a classification…</p>
+					</Panel>
+				) : (
+					<Panel
+						title={current.name}
+						action={
+							current.provider === 'system' ? (
+								<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:bg-zinc-800">
+									system
+								</span>
+							) : (
+								<button
+									type="button"
+									onClick={() => setCreatingFor(current.name)}
+									className="rounded-lg border border-zinc-300 px-3 py-1 text-xs font-medium normal-case tracking-normal text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+								>
+									+ Add tag
+								</button>
+							)
+						}
+					>
+						<div className="p-5">
+							{current.description ? (
+								<p className="mb-4 max-w-3xl border-b border-zinc-100 pb-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
+									{current.description}
+								</p>
+							) : null}
 
 							{current.tags.length === 0 ? (
 								<p className="rounded-lg border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
@@ -187,9 +201,9 @@ export default function TagsPage() {
 									))}
 								</ul>
 							)}
-						</>
-					)}
-				</main>
+						</div>
+					</Panel>
+				)}
 			</div>
 
 			{creatingFor != null ? (

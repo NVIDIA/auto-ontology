@@ -12,6 +12,7 @@ type Tab = { href: string; label: string; matchPrefix?: string };
 const tabs: Tab[] = [
 	{ href: '/catalog', label: 'Overview', matchPrefix: '/catalog' },
 	{ href: '/catalog/tables', label: 'Data Dictionary' },
+	{ href: '/catalog/lineage', label: 'Exploration' },
 	{ href: '/catalog/tags', label: 'Tags' },
 	{ href: '/catalog/queries', label: 'Query Tab' },
 ];

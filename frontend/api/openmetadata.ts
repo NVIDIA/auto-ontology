@@ -14,6 +14,7 @@
 
 import type {
 	OmClassification,
+	OmLineageResponse,
 	OmListResponse,
 	OmQuery,
 	OmTable,
@@ -124,6 +125,21 @@ export const om = {
 		) =>
 			json<OmListResponse<OmQuery>>(
 				`${BASE}/queries${qs({ fields: 'query,users,queryDate,queryUsedIn', ...params })}`,
+			),
+	},
+
+	lineage: {
+		/**
+		 * Directed table→table lineage from OpenMetadata. Returns the focused
+		 * entity plus upstream/downstream nodes and edges. Edges reference node
+		 * IDs via fromEntity/toEntity.
+		 */
+		forTable: (fqn: string, upstreamDepth = 2, downstreamDepth = 2) =>
+			json<OmLineageResponse>(
+				`${BASE}/lineage/table/name/${encodeURIComponent(fqn)}${qs({
+					upstreamDepth,
+					downstreamDepth,
+				})}`,
 			),
 	},
 };
