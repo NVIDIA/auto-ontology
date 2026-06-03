@@ -39,7 +39,7 @@ export type NodeUpdateResponse = {
 export type ColumnsEnvelope = {
 	table_name: string;
 	schema_name: string;
-	db_name: string;
+	database_name: string;
 	columns_count: number;
 	columns: Pick<
 		Column,

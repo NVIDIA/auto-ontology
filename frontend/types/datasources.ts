@@ -6,7 +6,7 @@ export type Column = {
 	id: string;
 	column_name: string;
 	data_type: string;
-	db_name: string;
+	database_name: string;
 	schema_name: string;
 	table_name: string;
 	ordinal_position: number;
@@ -17,7 +17,7 @@ export type Column = {
 export type Table = {
 	id: string;
 	name: string;
-	db_name: string;
+	database_name: string;
 	schema_name: string;
 	columns_count: number;
 	columns: Column[];

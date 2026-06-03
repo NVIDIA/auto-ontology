@@ -24,16 +24,25 @@ logging.basicConfig(
 load_server_env()
 
 from gsf.server.chat.router import router as chat_router  # noqa: E402
+from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.datasources.router import router as datasources_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    yield
-    if neo4j_connection._conn is not None:
-        neo4j_connection._conn.close()
-        neo4j_connection._conn = None
+    # Kick off the chat worker pool's initial warm spawn at boot. The pool
+    # itself is lazy on first use, but eagerly initialising here means the
+    # very first chat request doesn't pay a cold start.
+    get_pool()
+    try:
+        yield
+    finally:
+        # Tear down warm subprocesses before exiting so we don't leak them.
+        shutdown_pool()
+        if neo4j_connection._conn is not None:
+            neo4j_connection._conn.close()
+            neo4j_connection._conn = None
 
 
 def main() -> None:

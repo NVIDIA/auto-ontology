@@ -71,13 +71,11 @@ def main() -> None:
         )
     else:
         connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-        if len(connection_strings) == 1:
-            try:
-                asyncio.run(_run_forever(connection_strings))
-            except KeyboardInterrupt:
-                logger.info("ingestion_service: shutting down")
-        else:
-            logger.warning("Multiple connection is not supported yet.")
+        try:
+            asyncio.run(_run_forever(connection_strings))
+        except KeyboardInterrupt:
+            logger.info("ingestion_service: shutting down")
+            raise SystemExit(0)
 
 
 if __name__ == "__main__":

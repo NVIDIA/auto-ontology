@@ -87,7 +87,7 @@ export const datasources = {
 				const envelope = res.data as unknown as ColumnsEnvelope;
 				const columns: Column[] = (envelope.columns ?? []).map((c) => ({
 					...c,
-					db_name: envelope.db_name,
+					database_name: envelope.database_name,
 					schema_name: envelope.schema_name,
 					table_name: envelope.table_name,
 				}));

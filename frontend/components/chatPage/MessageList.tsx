@@ -14,14 +14,32 @@ type MessageListProps = {
 	messages: ChatMessage[];
 	isLoading: boolean;
 	steps: GraphStep[];
+	messageListLoading?: boolean;
 };
 
-export const MessageList = ({ messages, isLoading, steps }: MessageListProps) => {
+export const MessageList = ({
+	messages,
+	isLoading,
+	steps,
+	messageListLoading = false,
+}: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
 	}, [messages.length, isLoading, steps.length]);
+
+	if (messageListLoading) {
+		return (
+			<div className="flex flex-1 items-center justify-center">
+				<div
+					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
+					role="status"
+					aria-label="Loading messages"
+				/>
+			</div>
+		);
+	}
 
 	if (messages.length === 0 && !isLoading) {
 		return (

@@ -39,7 +39,7 @@ from nemo_retriever.tabular_data.retrieval.data_access.graph_schemas import (
     get_schemas_by_ids,
 )
 
-from gsf.server.chat.helpers import get_connector
+from gsf.connectors import get_connectors
 
 if TYPE_CHECKING:
     from nemo_retriever.params import EmbedParams
@@ -146,25 +146,22 @@ def list_custom_analyses() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def _get_dialect_and_schemas() -> tuple[str, dict]:
-    """Resolve the ``(dialect, schemas)`` pair needed by ``parse_query_single``.
+def _get_dialects() -> list[str]:
+    """Return the SQL dialects from the active connectors (all dialects supported by sqlglot)."""
+    connectors = get_connectors()
+    if not len(connectors):
+        return ["generic", "ansi", "postgres"]
+    return [connector.dialect for connector in connectors]
 
-    ``dialect`` is read from the active connector (currently always the
-    one configured by ``CONNECTION_STRINGS``); ``schemas`` is the catalog
-    snapshot the SQL parser uses to resolve table/column references.
-    """
-    connector = get_connector()
-    if connector is None:
-        raise CustomAnalysisSqlError(
-            "no source-DB connector configured; set CONNECTION_STRINGS",
-        )
+
+def _get_schemas() -> dict:
+    """Return the full catalog snapshot for ``parse_query_single``."""
     schemas_ids = get_all_schemas_ids()
-    schemas = get_schemas_by_ids(schemas_ids)
-    return connector.dialect, schemas
+    return get_schemas_by_ids(schemas_ids)
 
 
-def _parse_sql_or_raise(sql: str) -> Any:
-    """Validate ``sql`` against the current catalog, returning a query object.
+def _validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
+    """Validate ``sql`` against *schemas*, returning a query object.
 
     Pure validation step: no graph writes happen here. Callers MUST run
     this before any mutating call (``_detach_existing_sql_edges``,
@@ -197,28 +194,26 @@ def _parse_sql_or_raise(sql: str) -> Any:
     than "not valid SQL". Once the parser surfaces that distinction
     we can map it to a clearer message here without changing the API.
     """
-    dialect, schemas = _get_dialect_and_schemas()
-
     try:
-        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
     except Exception as exc:
         # `parse_query_single` -> sqlglot can raise a variety of
         # exception types for syntax / dialect issues; NeMo-Retriever's
         # own validation agent uses the same broad `except Exception`.
         raise CustomAnalysisSqlError(
-            f"SQL parse error (dialect={dialect!r}): {exc}",
+            f"SQL parse error: {exc}",
         ) from exc
 
     if query_obj is None:
         raise CustomAnalysisSqlError(
-            "SQL doesn't reference any table known to the catalog "
-            f"(dialect={dialect!r}); ingest the schema first or check the query",
+            "SQL doesn't reference any table known to the catalog; "
+            "ingest the schema first or check the query",
         )
 
     return query_obj
 
 
-def _find_analysis_with_name(
+def _find_analysis_by_name(
     name: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
@@ -229,7 +224,7 @@ def _find_analysis_with_name(
     unchanged name doesn't collide with itself; :func:`create_custom_analysis`
     passes ``None`` since a new record can't legitimately collide with
     itself. ``LIMIT 1`` because we only need to surface one conflicting
-    owner to the UI.
+    analysis to the UI.
 
     Lives here rather than as part of NeMo-Retriever because that
     library only exposes by-id lookups (``get_item_by_id``); there is
@@ -249,7 +244,7 @@ def _find_analysis_with_name(
     return {"id": rows[0]["id"], "name": rows[0]["name"]}
 
 
-def _find_analysis_owning_sql(
+def _find_analysis_by_sql(
     sql: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
@@ -261,7 +256,7 @@ def _find_analysis_owning_sql(
     ``CustomAnalysis``. ``exclude_id`` skips one specific analysis from
     the check — used so an update keeping the same SQL on the same
     record doesn't collide with itself. ``LIMIT 1`` because we only
-    need to surface one conflicting owner to the UI.
+    need to surface one conflicting analysis to the UI.
     """
     rows = get_neo4j_conn().query_read(
         f"""
@@ -317,7 +312,7 @@ def _persist_analysis_with_sql(
     reproduce its match_props → append HAS_SQL edge → ``add_query``
     sequence verbatim.
 
-    ``query_obj`` must already be the result of :func:`_parse_sql_or_raise`
+    ``query_obj`` must already be the result of :func:`_validate_sql`
     — that split lets callers validate the SQL before doing any graph
     writes (so a parse failure on update doesn't strand the analysis
     without a ``HAS_SQL`` edge).
@@ -372,22 +367,21 @@ def create_custom_analysis(
     Returns ``{id, name, description, sql}`` — the same shape used by
     :func:`list_custom_analyses`.
     """
-    name_owner = _find_analysis_with_name(name, exclude_id=None)
-    if name_owner is not None:
+    name_conflict = _find_analysis_by_name(name, exclude_id=None)
+    if name_conflict is not None:
         raise CustomAnalysisNameConflict(
             f"another CustomAnalysis already uses name {name!r} "
-            f"(id={name_owner['id']!r})",
+            f"(id={name_conflict['id']!r})",
         )
 
-    sql_owner = _find_analysis_owning_sql(sql, exclude_id=None)
-    if sql_owner is not None:
+    sql_conflict = _find_analysis_by_sql(sql, exclude_id=None)
+    if sql_conflict is not None:
         raise CustomAnalysisSqlConflict(
-            f"this SQL is already used by CustomAnalysis {sql_owner['name']!r} "
-            f"(id={sql_owner['id']!r})",
+            f"this SQL is already used by CustomAnalysis {sql_conflict['name']!r} "
+            f"(id={sql_conflict['id']!r})",
         )
 
-    query_obj = _parse_sql_or_raise(sql)
-
+    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
     analysis_node = Neo4jNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
@@ -450,25 +444,25 @@ def update_custom_analysis(
     if not existing:
         return None
 
-    name_owner = _find_analysis_with_name(name, exclude_id=analysis_id)
-    if name_owner is not None:
+    name_conflict = _find_analysis_by_name(name, exclude_id=analysis_id)
+    if name_conflict is not None:
         raise CustomAnalysisNameConflict(
             f"another CustomAnalysis already uses name {name!r} "
-            f"(id={name_owner['id']!r})",
+            f"(id={name_conflict['id']!r})",
         )
 
-    sql_owner = _find_analysis_owning_sql(sql, exclude_id=analysis_id)
-    if sql_owner is not None:
+    sql_conflict = _find_analysis_by_sql(sql, exclude_id=analysis_id)
+    if sql_conflict is not None:
         raise CustomAnalysisSqlConflict(
-            f"this SQL is already used by CustomAnalysis {sql_owner['name']!r} "
-            f"(id={sql_owner['id']!r})",
+            f"this SQL is already used by CustomAnalysis {sql_conflict['name']!r} "
+            f"(id={sql_conflict['id']!r})",
         )
 
     # Validate the new SQL BEFORE touching the graph: a parse failure
     # here used to land after `_detach_existing_sql_edges`, orphaning
     # the analysis from any `Sql` node and leaving the read endpoint
     # to return `sql: null` for an otherwise valid-looking record.
-    query_obj = _parse_sql_or_raise(sql)
+    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
 
     _detach_existing_sql_edges(analysis_id)
 
@@ -513,7 +507,7 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
     schema, not the analysis). Sharing of an ``Sql`` node across
     analyses is already prevented at write time by
     :class:`CustomAnalysisSqlConflict` (see
-    :func:`_find_analysis_owning_sql`), so this never strands another
+    :func:`_find_analysis_by_sql`), so this never strands another
     analysis.
 
     Graph delete happens before the VDB delete so a Neo4j failure

@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useCallback, useRef, type KeyboardEvent, type FormEvent } from 'react';
+import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
 import { Icon, IconName } from '@/components/icons';
 
 type ChatInputProps = {
@@ -15,6 +15,11 @@ type ChatInputProps = {
 
 export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// Track whether the textarea currently has any non-whitespace text so the
+	// Send button can be disabled/greyed-out when there's nothing to send.
+	// We intentionally keep the textarea uncontrolled (perf + caret behaviour)
+	// and only mirror the empty/non-empty flag into React state.
+	const [hasText, setHasText] = useState(false);
 
 	const resetHeight = () => {
 		const el = textareaRef.current;
@@ -22,6 +27,11 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 		el.style.height = 'auto';
 		el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
 	};
+
+	const handleInput = useCallback((e: FormEvent<HTMLTextAreaElement>) => {
+		resetHeight();
+		setHasText(e.currentTarget.value.trim().length > 0);
+	}, []);
 
 	const handleSubmit = useCallback(
 		(e?: FormEvent) => {
@@ -33,6 +43,7 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 			onSend(text);
 			el.value = '';
 			el.style.height = 'auto';
+			setHasText(false);
 		},
 		[onSend, isLoading],
 	);
@@ -57,7 +68,7 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 					ref={textareaRef}
 					rows={1}
 					placeholder="Ask a question…"
-					onInput={resetHeight}
+					onInput={handleInput}
 					onKeyDown={handleKeyDown}
 					className="flex-1 resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
 				/>
@@ -74,7 +85,8 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 				) : (
 					<button
 						type="submit"
-						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#76b900] text-white transition-colors hover:bg-[#5e9400] disabled:opacity-40"
+						disabled={!hasText}
+						className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#76b900] text-white transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:bg-zinc-300 disabled:text-zinc-500 disabled:hover:bg-zinc-300 dark:disabled:bg-zinc-700 dark:disabled:text-zinc-400 dark:disabled:hover:bg-zinc-700"
 						aria-label="Send message"
 					>
 						<Icon name={IconName.Send} className="h-4 w-4" />

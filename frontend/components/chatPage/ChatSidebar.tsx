@@ -20,6 +20,7 @@ type ChatSidebarProps = {
 	onDelete: (id: string) => void;
 	isOpen: boolean;
 	onToggle: () => void;
+	sidebarLoading?: boolean;
 };
 
 function ConversationItem({
@@ -150,6 +151,7 @@ export const ChatSidebar = ({
 	onDelete,
 	isOpen,
 	onToggle,
+	sidebarLoading = false,
 }: ChatSidebarProps) => {
 	return (
 		<>
@@ -199,7 +201,15 @@ export const ChatSidebar = ({
 				</div>
 
 				<nav className="flex-1 overflow-y-auto px-2 pb-2">
-					{conversations.length === 0 ? (
+					{sidebarLoading ? (
+						<div className="flex h-full items-center justify-center py-6">
+							<div
+								className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
+								role="status"
+								aria-label="Loading conversations"
+							/>
+						</div>
+					) : conversations.length === 0 ? (
 						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
 							No conversations yet
 						</p>

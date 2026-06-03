@@ -80,7 +80,13 @@ def run_ingest() -> None:
     database_name = connector.database_name
 
     extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-    extract_graph.execute(None)
+    extract_results = extract_graph.execute(None)
+    schema_data = extract_results[0] if extract_results else None
+    if not (isinstance(schema_data, tuple) and len(schema_data) == 2):
+        raise RuntimeError(
+            "TabularSchemaExtractOp did not return (tables_df, columns_df); "
+            f"got {type(schema_data).__name__}."
+        )
 
     apply_metadata(database_name)
 
@@ -89,7 +95,7 @@ def run_ingest() -> None:
         >> TabularFetchEmbeddingsOp(database_name=database_name)
         >> _BatchEmbedActor(params=EMBED_PARAMS)
     )
-    results = embed_graph.execute(None)
+    results = embed_graph.execute(schema_data)
     result_df = results[0] if results else None
 
     # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows

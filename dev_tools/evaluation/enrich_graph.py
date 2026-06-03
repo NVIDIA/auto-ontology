@@ -122,24 +122,24 @@ def apply_metadata(database_name: str) -> None:
         conn.query_write(
             query=(
                 "UNWIND $rows AS row "
-                "MATCH (d:Database {name: $db_name})-[:CONTAINS]->"
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
                 "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name}) "
                 "SET t.description = coalesce(row.description, t.description)"
             ),
-            parameters={"rows": table_rows, "db_name": database_name},
+            parameters={"rows": table_rows, "database_name": database_name},
         )
 
     if column_rows:
         conn.query_write(
             query=(
                 "UNWIND $rows AS row "
-                "MATCH (d:Database {name: $db_name})-[:CONTAINS]->"
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
                 "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name})"
                 "-[:CONTAINS]->(c:Column {name: row.column_name}) "
                 "SET c.description = coalesce(row.description, c.description), "
                 "    c.sample_values = coalesce(row.sample_values, c.sample_values)"
             ),
-            parameters={"rows": column_rows, "db_name": database_name},
+            parameters={"rows": column_rows, "database_name": database_name},
         )
 
     logger.info(
@@ -221,7 +221,7 @@ def add_custom_analyses(
             logger.warning("Skipping custom analysis %r — no SQL provided.", name)
             continue
 
-        query_obj = parse_query_single(sql=sql, dialect=dialect, schemas=schemas)
+        query_obj = parse_query_single(sql=sql, dialects=[dialect], schemas=schemas)
         if query_obj is None:
             logger.warning(
                 "Could not resolve any tables for custom analysis %r — skipping.",

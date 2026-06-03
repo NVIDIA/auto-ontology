@@ -12,6 +12,8 @@ import { isComposerSection, type ComposerSection } from '@/types/composer-sectio
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { datasources } from '@/api/datasources';
+import type { NodePatch } from '@/api/types';
+import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
 
@@ -293,9 +295,36 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			)?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
 		const [localIsEditing, setLocalIsEditing] = useState(false);
+		const [saving, setSaving] = useState(false);
+		const [saveError, setSaveError] = useState<string | null>(null);
 		const isEditingActive = isEditing || localIsEditing;
 
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
+
+		const handleSave = async () => {
+			const edits = pendingEditsRef.current;
+			if (saving) return;
+
+			if (!entityId || Object.keys(edits).length === 0) {
+				setLocalIsEditing(false);
+				setSaveError(null);
+				onSave?.(edits);
+				return;
+			}
+
+			setSaving(true);
+			setSaveError(null);
+			const res = await datasources.updateNode(entityId, edits as NodePatch);
+			setSaving(false);
+
+			if (res.error === true) {
+				setSaveError(res.message ?? 'Failed to save changes');
+				return;
+			}
+
+			setLocalIsEditing(false);
+			onSave?.(edits);
+		};
 
 		const pdfHeader = pdfProps?.headerProps;
 		const breadcrumbs = breadcrumbsFromPdf(pdfHeader);
@@ -375,6 +404,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								type="button"
 								onClick={() => {
 									pendingEditsRef.current = {};
+									setSaveError(null);
 									setLocalIsEditing(true);
 								}}
 								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
@@ -387,29 +417,33 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							<div className="flex items-center gap-2">
 								<button
 									type="button"
+									disabled={saving}
 									onClick={() => {
+										if (saving) return;
 										setLocalIsEditing(false);
+										setSaveError(null);
 										onCancel?.();
 									}}
-									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
 								>
 									Cancel
 								</button>
 								<button
 									type="button"
-									onClick={async () => {
-										const edits = pendingEditsRef.current;
-										if (entityId && Object.keys(edits).length > 0) {
-											// NodePatch only accepts the known fields; pass through
-											// known string/array shapes.
-											await datasources.updateNode(entityId, edits as never);
-										}
-										setLocalIsEditing(false);
-										onSave?.(edits);
+									disabled={saving}
+									onClick={() => {
+										void handleSave();
 									}}
-									className="rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+									className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
 								>
-									Save
+									{saving ? (
+										<>
+											<Spinner aria-label="Saving" className="h-3.5 w-3.5" />
+											Saving…
+										</>
+									) : (
+										'Save'
+									)}
 								</button>
 							</div>
 						)}
@@ -556,6 +590,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						</aside>
 					) : null}
 				</div>
+
+				<Toast
+					open={saveError != null}
+					message={saveError ?? ''}
+					variant="error"
+					onClose={() => setSaveError(null)}
+				/>
 			</div>
 		);
 	},

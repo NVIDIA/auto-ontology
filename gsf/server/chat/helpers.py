@@ -2,27 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat-route helpers: request models, connector registry, retriever factory."""
+"""Chat-route helpers: request models, node labels, retriever factory."""
 
 from __future__ import annotations
 
-import logging
 import os
 
 from pydantic import BaseModel, Field
 
 from nemo_retriever.retriever import Retriever
-from gsf.connectors.postgres import PostgresDatabase
+
 from gsf.vdb import get_vdb
-
-logger = logging.getLogger(__name__)
-
-
-class ChatRequest(BaseModel):
-    """Payload sent by the frontend to start a chat completion."""
-
-    question: str = Field(..., min_length=1)
-
 
 # Maps LangGraph node names from
 # nemo_retriever.tabular_data.retrieval.text_to_sql.text_to_sql_graph
@@ -54,29 +44,12 @@ _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"
 _NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 _retriever: Retriever | None = None
-_connector: PostgresDatabase | None = None
 
 
-def get_connector() -> PostgresDatabase:
-    """Return the source-DB connector for the chat agent.
+class ChatRequest(BaseModel):
+    """Payload sent by the frontend to start a chat completion."""
 
-    Reads ``CONNECTION_STRINGS`` from the environment (set in ``.env``); the
-    same URL is used by ``dev_tools/ingest_local_postgres.py`` so chat queries
-    target the database whose schema/embeddings were ingested.
-    """
-    global _connector
-    if _connector is None:
-        connection_strings = os.environ.get("CONNECTION_STRINGS", "").split(",")
-        if len(connection_strings) == 1:
-            _connector = PostgresDatabase(connection_strings[0])
-        elif len(connection_strings) == 0:
-            logger.warning(
-                "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
-            )
-        else:
-            logger.warning("Multiple connection is not supported yet.")
-
-    return _connector
+    question: str = Field(..., min_length=1)
 
 
 def get_retriever() -> Retriever:

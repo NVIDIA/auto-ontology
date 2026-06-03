@@ -31,8 +31,20 @@ export async function POST(req: Request): Promise<Response> {
 	});
 
 	if (!upstream.ok || !upstream.body) {
-		return new Response(`Upstream responded with ${upstream.status}`, {
+		// Forward the upstream body verbatim so structured errors (e.g. the
+		// 409 "Conversation in progress" payload from FastAPI) reach the
+		// client and can be surfaced to the user. Fall back to a generic
+		// message if the body could not be read.
+		const contentType = upstream.headers.get('content-type') ?? 'text/plain';
+		let errorBody: string;
+		try {
+			errorBody = await upstream.text();
+		} catch {
+			errorBody = `Upstream responded with ${upstream.status}`;
+		}
+		return new Response(errorBody || `Upstream responded with ${upstream.status}`, {
 			status: upstream.status || 502,
+			headers: { 'Content-Type': contentType },
 		});
 	}
 

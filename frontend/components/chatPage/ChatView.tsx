@@ -4,7 +4,8 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useChat } from '@/lib/useChat';
 import type { Conversation } from '@/types/chat';
 import {
@@ -13,14 +14,24 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
+import { Toast } from '@/components/Toast';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
 
 export const ChatView = () => {
-	const [activeConvId, setActiveConvId] = useState<string | null>(null);
+	const router = useRouter();
+	const pathname = usePathname();
+	const searchParams = useSearchParams();
+	const rawFocus = searchParams.get('focus');
+	const focusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
+
+	const [activeConvId, setActiveConvId] = useState<string | null>(focusId);
 	const [sidebarOpen, setSidebarOpen] = useState(false);
 	const [conversations, setConversations] = useState<Conversation[]>([]);
+	const [sidebarLoading, setSidebarLoading] = useState(true);
+	const [messageListLoading, setMessageListLoading] = useState<boolean>(focusId != null);
+	const loadedFocusRef = useRef<string | null>(null);
 
 	const {
 		messages,
@@ -31,7 +42,22 @@ export const ChatView = () => {
 		sendMessage,
 		stopGeneration,
 		clearMessages,
+		clearError,
 	} = useChat();
+
+	const updateFocusInUrl = useCallback(
+		(id: string | null) => {
+			const params = new URLSearchParams(searchParams.toString());
+			if (id) {
+				params.set('focus', id);
+			} else {
+				params.delete('focus');
+			}
+			const query = params.toString();
+			router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+		},
+		[router, pathname, searchParams],
+	);
 
 	const refreshConversations = useCallback(async () => {
 		try {
@@ -51,6 +77,7 @@ export const ChatView = () => {
 
 	useEffect(() => {
 		let active = true;
+		setSidebarLoading(true);
 		conversationsApi
 			.list()
 			.then((summaries: ConversationSummary[]) => {
@@ -64,36 +91,78 @@ export const ChatView = () => {
 					})),
 				);
 			})
-			.catch(() => {});
+			.catch(() => {})
+			.finally(() => {
+				if (active) setSidebarLoading(false);
+			});
 		return () => {
 			active = false;
 		};
 	}, []);
 
+	useEffect(() => {
+		if (!focusId) {
+			loadedFocusRef.current = null;
+			setMessageListLoading(false);
+			return;
+		}
+		if (loadedFocusRef.current === focusId) return;
+		loadedFocusRef.current = focusId;
+		let active = true;
+		setMessageListLoading(true);
+		conversationsApi
+			.get(focusId)
+			.then((detail: ConversationDetail) => {
+				if (!active) return;
+				const conv = toConversation(detail);
+				setActiveConvId(detail.id);
+				setMessages(conv.messages);
+			})
+			.catch(() => {
+				if (!active) return;
+				loadedFocusRef.current = null;
+				updateFocusInUrl(null);
+			})
+			.finally(() => {
+				if (active) setMessageListLoading(false);
+			});
+		return () => {
+			active = false;
+		};
+	}, [focusId, setMessages, updateFocusInUrl]);
+
 	const handleNewChat = useCallback(async () => {
 		clearMessages();
 		setActiveConvId(null);
 		setSidebarOpen(false);
+		loadedFocusRef.current = null;
+		updateFocusInUrl(null);
 		await refreshConversations();
-	}, [clearMessages, refreshConversations]);
+	}, [clearMessages, refreshConversations, updateFocusInUrl]);
 
 	const handleSelectConversation = useCallback(
 		async (id: string) => {
 			if (id === activeConvId) {
 				setSidebarOpen(false);
+				updateFocusInUrl(id);
 				return;
 			}
+			setMessageListLoading(true);
 			try {
 				const detail: ConversationDetail = await conversationsApi.get(id);
 				const conv = toConversation(detail);
+				loadedFocusRef.current = id;
 				setActiveConvId(id);
 				setMessages(conv.messages);
 				setSidebarOpen(false);
+				updateFocusInUrl(id);
 			} catch {
 				// ignore fetch errors
+			} finally {
+				setMessageListLoading(false);
 			}
 		},
-		[activeConvId, setMessages],
+		[activeConvId, setMessages, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(
@@ -115,13 +184,15 @@ export const ChatView = () => {
 				if (activeConvId === id) {
 					clearMessages();
 					setActiveConvId(null);
+					loadedFocusRef.current = null;
+					updateFocusInUrl(null);
 				}
 				await refreshConversations();
 			} catch {
 				// ignore
 			}
 		},
-		[activeConvId, clearMessages, refreshConversations],
+		[activeConvId, clearMessages, refreshConversations, updateFocusInUrl],
 	);
 
 	const handleSend = useCallback(
@@ -132,7 +203,9 @@ export const ChatView = () => {
 					const title = text.slice(0, 50) || 'New conversation';
 					const created = await conversationsApi.create(title);
 					convId = created.id;
+					loadedFocusRef.current = convId;
 					setActiveConvId(convId);
+					updateFocusInUrl(convId);
 					refreshConversations();
 				} catch {
 					return;
@@ -140,7 +213,7 @@ export const ChatView = () => {
 			}
 			sendMessage(text, convId);
 		},
-		[activeConvId, sendMessage, refreshConversations],
+		[activeConvId, sendMessage, refreshConversations, updateFocusInUrl],
 	);
 
 	return (
@@ -154,21 +227,26 @@ export const ChatView = () => {
 				onDelete={handleDelete}
 				isOpen={sidebarOpen}
 				onToggle={() => setSidebarOpen((o) => !o)}
+				sidebarLoading={sidebarLoading}
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList messages={messages} isLoading={isLoading} steps={steps} />
-
-				{error && (
-					<div className="mx-auto w-full max-w-3xl px-4 py-2">
-						<p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700 dark:bg-red-900/20 dark:text-red-400">
-							{error}
-						</p>
-					</div>
-				)}
+				<MessageList
+					messages={messages}
+					isLoading={isLoading}
+					steps={steps}
+					messageListLoading={messageListLoading}
+				/>
 
 				<ChatInput onSend={handleSend} onStop={stopGeneration} isLoading={isLoading} />
 			</main>
+
+			<Toast
+				open={error != null}
+				message={error ?? ''}
+				variant="error"
+				onClose={clearError}
+			/>
 		</div>
 	);
 };
