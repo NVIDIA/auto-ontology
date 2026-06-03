@@ -5,17 +5,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-	Badge,
-	Button,
-	FormField,
-	Modal,
-	ModalCloseButton,
-	Skeleton,
-	Text,
-	TextArea,
-	TextInput,
-} from '@kui/foundations-react';
 import { om } from '@/api/openmetadata';
 import type { OmClassification, OmTagDef } from '@/types/openmetadata';
 import { TagPill } from '@/components/catalog/TagPill';
@@ -77,30 +66,32 @@ export default function TagsPage() {
 		<div className="mx-auto w-full max-w-7xl px-6 py-8">
 			<header className="mb-6 flex flex-wrap items-end justify-between gap-4">
 				<div>
-					<div className="flex items-center gap-2">
-						<Text asChild kind="title/md">
-							<h1 className="text-[var(--text-color-primary)]">Tags</h1>
-						</Text>
+					<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+						Tags
 						{data != null ? (
-							<Badge color="gray" kind="outline">
+							<span className="ml-2 rounded-full bg-zinc-100 px-2 py-0.5 align-middle text-sm font-medium tabular-nums text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
 								{totalTags}
-							</Badge>
+							</span>
 						) : null}
-					</div>
-					<p className="mt-1 max-w-2xl text-sm text-[var(--text-color-base)]">
+					</h1>
+					<p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
 						Classifications group related tags. Use them to label tables and columns
 						with custom themes (e.g. <span className="font-medium">Sensitivity</span>)
 						or rely on the built-in <span className="font-medium">PII</span> system
 						classification populated by Auto-Classification.
 					</p>
 				</div>
-				<Button color="brand" onClick={() => setNewClassOpen(true)}>
-					New classification
-				</Button>
+				<button
+					type="button"
+					onClick={() => setNewClassOpen(true)}
+					className="rounded-lg bg-[#76b900] px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-[#5fa000]"
+				>
+					+ New classification
+				</button>
 			</header>
 
 			{err ? (
-				<div className="mb-4 rounded-[var(--radius-lg)] border border-[var(--border-color-feedback-danger)] bg-[var(--background-color-feedback-danger-subtle-hover)] p-4 text-sm text-[var(--text-color-feedback-danger-strong)]">
+				<div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
 					{err}
 				</div>
 			) : null}
@@ -110,27 +101,27 @@ export default function TagsPage() {
 					{data == null ? (
 						<SkeletonList />
 					) : (
-						<ul className="flex flex-col gap-1">
+						<ul className="p-2">
 							{data.map((c) => (
 								<li key={c.name}>
 									<button
 										type="button"
 										onClick={() => setSelected(c.name)}
-										className={`flex w-full items-center justify-between rounded-[var(--radius-md)] px-3 py-2 text-left text-sm transition-colors ${
+										className={`flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm transition-colors ${
 											c.name === selected
-												? 'bg-[var(--background-color-accent-green-subtle)] text-[var(--text-color-brand)]'
-												: 'text-[var(--text-color-secondary)] hover:bg-[var(--background-color-interaction-hover)]'
+												? 'bg-[#76b900]/10 text-[#76b900]'
+												: 'text-zinc-700 hover:bg-zinc-50 dark:text-zinc-300 dark:hover:bg-zinc-800'
 										}`}
 									>
 										<span className="flex items-center gap-2">
 											<span className="font-medium">{c.name}</span>
 											{c.provider === 'system' ? (
-												<Badge color="gray" kind="outline">
+												<span className="rounded bg-zinc-100 px-1 py-px text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:bg-zinc-800">
 													system
-												</Badge>
+												</span>
 											) : null}
 										</span>
-										<span className="text-xs tabular-nums text-[var(--text-color-subtle)]">
+										<span className="text-xs tabular-nums text-zinc-400">
 											{c.tags.length}
 										</span>
 									</button>
@@ -142,75 +133,75 @@ export default function TagsPage() {
 
 				{current == null ? (
 					<Panel>
-						<p className="text-sm text-[var(--text-color-subtle)]">
-							Select a classification…
-						</p>
+						<p className="px-6 py-6 text-sm text-zinc-500">Select a classification…</p>
 					</Panel>
 				) : (
 					<Panel
 						title={current.name}
 						action={
 							current.provider === 'system' ? (
-								<Badge color="gray" kind="outline">
+								<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider text-zinc-500 dark:bg-zinc-800">
 									system
-								</Badge>
+								</span>
 							) : (
-								<Button
-									kind="secondary"
-									size="small"
+								<button
+									type="button"
 									onClick={() => setCreatingFor(current.name)}
+									className="rounded-lg border border-zinc-300 px-3 py-1 text-xs font-medium normal-case tracking-normal text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
 								>
-									Add tag
-								</Button>
+									+ Add tag
+								</button>
 							)
 						}
 					>
-						{current.description ? (
-							<p className="mb-4 max-w-3xl border-b border-[var(--border-color-base)] pb-4 text-sm text-[var(--text-color-base)]">
-								{current.description}
-							</p>
-						) : null}
+						<div className="p-5">
+							{current.description ? (
+								<p className="mb-4 max-w-3xl border-b border-zinc-100 pb-4 text-sm text-zinc-600 dark:border-zinc-800 dark:text-zinc-400">
+									{current.description}
+								</p>
+							) : null}
 
-						{current.tags.length === 0 ? (
-							<p className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color-base)] p-8 text-center text-sm text-[var(--text-color-subtle)]">
-								No tags in this classification yet.
-							</p>
-						) : (
-							<ul className="space-y-2">
-								{current.tags.map((t) => (
-									<li
-										key={t.fullyQualifiedName}
-										className="flex items-start justify-between gap-4 rounded-[var(--radius-md)] border border-[var(--border-color-base)] p-3"
-									>
-										<div className="min-w-0">
-											<div className="flex items-center gap-2">
-												<TagPill
-													label={{
-														tagFQN: t.fullyQualifiedName,
-														source: 'Classification',
-														state: 'Confirmed',
-														labelType: 'Manual',
-													}}
-												/>
-												{t.mutuallyExclusive ? (
-													<Badge color="purple" kind="outline">
-														exclusive
-													</Badge>
+							{current.tags.length === 0 ? (
+								<p className="rounded-lg border border-dashed border-zinc-300 p-8 text-center text-sm text-zinc-500 dark:border-zinc-700">
+									No tags in this classification yet.
+								</p>
+							) : (
+								<ul className="space-y-2">
+									{current.tags.map((t) => (
+										<li
+											key={t.fullyQualifiedName}
+											className="flex items-start justify-between gap-4 rounded-lg border border-zinc-100 p-3 dark:border-zinc-800"
+										>
+											<div className="min-w-0">
+												<div className="flex items-center gap-2">
+													<TagPill
+														label={{
+															tagFQN: t.fullyQualifiedName,
+															source: 'Classification',
+															state: 'Confirmed',
+															labelType: 'Manual',
+														}}
+													/>
+													{t.mutuallyExclusive ? (
+														<span className="rounded bg-violet-100 px-1.5 py-0 text-[10px] font-medium text-violet-700 dark:bg-violet-950/40 dark:text-violet-300">
+															exclusive
+														</span>
+													) : null}
+												</div>
+												{t.description ? (
+													<p className="mt-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+														{t.description}
+													</p>
 												) : null}
 											</div>
-											{t.description ? (
-												<p className="mt-1.5 text-xs text-[var(--text-color-base)]">
-													{t.description}
-												</p>
-											) : null}
-										</div>
-										<code className="shrink-0 text-[10px] text-[var(--text-color-subtle)]">
-											{t.fullyQualifiedName}
-										</code>
-									</li>
-								))}
-							</ul>
-						)}
+											<code className="shrink-0 text-[10px] text-zinc-400">
+												{t.fullyQualifiedName}
+											</code>
+										</li>
+									))}
+								</ul>
+							)}
+						</div>
 					</Panel>
 				)}
 			</div>
@@ -240,13 +231,44 @@ export default function TagsPage() {
 }
 
 const SkeletonList = () => (
-	<ul className="flex flex-col gap-2">
+	<ul className="space-y-1.5 p-1">
 		{Array.from({ length: 6 }).map((_, i) => (
-			<li key={i}>
-				<Skeleton kind="line" />
-			</li>
+			<li key={i} className="h-8 animate-pulse rounded-lg bg-zinc-100 dark:bg-zinc-800" />
 		))}
 	</ul>
+);
+
+const Modal = ({
+	title,
+	onClose,
+	children,
+}: {
+	title: string;
+	onClose: () => void;
+	children: React.ReactNode;
+}) => (
+	<div
+		className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-900/40 backdrop-blur-sm"
+		role="dialog"
+		aria-modal
+	>
+		<div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900">
+			<div className="mb-4 flex items-center justify-between">
+				<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+					{title}
+				</h3>
+				<button
+					type="button"
+					onClick={onClose}
+					className="rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+					aria-label="Close"
+				>
+					✕
+				</button>
+			</div>
+			{children}
+		</div>
+	</div>
 );
 
 const NewClassificationModal = ({
@@ -261,62 +283,60 @@ const NewClassificationModal = ({
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const submit = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setBusy(true);
-		setErr(null);
-		try {
-			await om.classifications.create({ name, description });
-			onCreated(name);
-		} catch (ex) {
-			setErr(ex instanceof Error ? ex.message : String(ex));
-		} finally {
-			setBusy(false);
-		}
-	};
-
 	return (
-		<Modal
-			open
-			onOpenChange={(o) => {
-				if (!o) onClose();
-			}}
-			slotHeading="New classification"
-			renderContent={({ children }) => <form onSubmit={submit}>{children}</form>}
-			slotFooter={
-				<>
-					<ModalCloseButton kind="tertiary">Cancel</ModalCloseButton>
-					<Button type="submit" color="brand" disabled={busy}>
-						Create
-					</Button>
-				</>
-			}
-		>
-			<div className="space-y-3">
-				<FormField slotLabel="Name" required>
-					<TextInput
+		<Modal title="New classification" onClose={onClose}>
+			<form
+				onSubmit={async (e) => {
+					e.preventDefault();
+					setBusy(true);
+					setErr(null);
+					try {
+						await om.classifications.create({ name, description });
+						onCreated(name);
+					} catch (ex) {
+						setErr(ex instanceof Error ? ex.message : String(ex));
+					} finally {
+						setBusy(false);
+					}
+				}}
+				className="space-y-3"
+			>
+				<Field label="Name" required>
+					<input
 						value={name}
-						onValueChange={(v) => setName(v)}
-						attributes={{
-							Input: {
-								required: true,
-								pattern: '[A-Za-z0-9_\\-]+',
-								title: 'Letters, digits, underscore, hyphen',
-							},
-						}}
+						onChange={(e) => setName(e.target.value)}
+						required
+						pattern="[A-Za-z0-9_\-]+"
+						title="Letters, digits, underscore, hyphen"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
 					/>
-				</FormField>
-				<FormField slotLabel="Description">
-					<TextArea
+				</Field>
+				<Field label="Description">
+					<textarea
 						value={description}
-						onValueChange={(v) => setDescription(v)}
-						placeholder="What does this classification group?"
+						onChange={(e) => setDescription(e.target.value)}
+						rows={3}
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
 					/>
-				</FormField>
-				{err ? (
-					<p className="text-xs text-[var(--text-color-feedback-danger)]">{err}</p>
-				) : null}
-			</div>
+				</Field>
+				{err ? <p className="text-xs text-red-600">{err}</p> : null}
+				<div className="flex justify-end gap-2 pt-2">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={busy}
+						className="rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#5fa000] disabled:opacity-60"
+					>
+						Create
+					</button>
+				</div>
+			</form>
 		</Modal>
 	);
 };
@@ -335,56 +355,77 @@ const NewTagModal = ({
 	const [busy, setBusy] = useState(false);
 	const [err, setErr] = useState<string | null>(null);
 
-	const submit = async (e: React.FormEvent) => {
-		e.preventDefault();
-		setBusy(true);
-		setErr(null);
-		try {
-			await om.tags.create({ name, description, classification });
-			onCreated();
-		} catch (ex) {
-			setErr(ex instanceof Error ? ex.message : String(ex));
-		} finally {
-			setBusy(false);
-		}
-	};
-
 	return (
-		<Modal
-			open
-			onOpenChange={(o) => {
-				if (!o) onClose();
-			}}
-			slotHeading={`New tag in ${classification}`}
-			renderContent={({ children }) => <form onSubmit={submit}>{children}</form>}
-			slotFooter={
-				<>
-					<ModalCloseButton kind="tertiary">Cancel</ModalCloseButton>
-					<Button type="submit" color="brand" disabled={busy}>
-						Create
-					</Button>
-				</>
-			}
-		>
-			<div className="space-y-3">
-				<FormField slotLabel="Name" required>
-					<TextInput
+		<Modal title={`New tag in ${classification}`} onClose={onClose}>
+			<form
+				onSubmit={async (e) => {
+					e.preventDefault();
+					setBusy(true);
+					setErr(null);
+					try {
+						await om.tags.create({ name, description, classification });
+						onCreated();
+					} catch (ex) {
+						setErr(ex instanceof Error ? ex.message : String(ex));
+					} finally {
+						setBusy(false);
+					}
+				}}
+				className="space-y-3"
+			>
+				<Field label="Name" required>
+					<input
 						value={name}
-						onValueChange={(v) => setName(v)}
-						attributes={{ Input: { required: true, pattern: '[A-Za-z0-9_\\-]+' } }}
+						onChange={(e) => setName(e.target.value)}
+						required
+						pattern="[A-Za-z0-9_\-]+"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
 					/>
-				</FormField>
-				<FormField slotLabel="Description">
-					<TextArea
+				</Field>
+				<Field label="Description">
+					<textarea
 						value={description}
-						onValueChange={(v) => setDescription(v)}
-						placeholder="What does this tag mean?"
+						onChange={(e) => setDescription(e.target.value)}
+						rows={3}
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-950"
 					/>
-				</FormField>
-				{err ? (
-					<p className="text-xs text-[var(--text-color-feedback-danger)]">{err}</p>
-				) : null}
-			</div>
+				</Field>
+				{err ? <p className="text-xs text-red-600">{err}</p> : null}
+				<div className="flex justify-end gap-2 pt-2">
+					<button
+						type="button"
+						onClick={onClose}
+						className="rounded-lg px-3 py-1.5 text-sm text-zinc-600 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+					>
+						Cancel
+					</button>
+					<button
+						type="submit"
+						disabled={busy}
+						className="rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#5fa000] disabled:opacity-60"
+					>
+						Create
+					</button>
+				</div>
+			</form>
 		</Modal>
 	);
 };
+
+const Field = ({
+	label,
+	required,
+	children,
+}: {
+	label: string;
+	required?: boolean;
+	children: React.ReactNode;
+}) => (
+	<label className="block">
+		<span className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+			{label}
+			{required ? <span className="text-red-500"> *</span> : null}
+		</span>
+		{children}
+	</label>
+);

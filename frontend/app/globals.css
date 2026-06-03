@@ -1,22 +1,5 @@
-/*
- * Tailwind v4 + Kaizen UI Foundations (@kui/foundations-react).
- *
- * Layer order is declared up-front so Kaizen's component stylesheet (base.css,
- * which ships unlayered upstream) is pulled into the `kaizen` layer *below*
- * Tailwind `utilities`. That keeps app Tailwind utilities winning, so existing
- * non-catalog pages render exactly as before — Kaizen styling is additive.
- *
- * Dark-mode tokens in base.css live under `.nv-dark`; that class is applied by
- * the <ThemeProvider theme="system"> that wraps the catalog (see
- * app/catalog/layout.tsx). We intentionally do NOT import
- * @kui/foundations-tailwind-plugin globally because it redefines the `dark:`
- * variant to be `.nv-dark`-based, which would break OS-preference dark mode on
- * the rest of the app.
- */
-@layer theme, base, kaizen, components, utilities;
-
+/* Load Tailwind. @nvidia/foundations-react-core ships no standalone base.css. */
 @import 'tailwindcss';
-@import '@kui/foundations-react/base.css' layer(kaizen);
 
 @theme {
 	--color-foreground: #09090b;

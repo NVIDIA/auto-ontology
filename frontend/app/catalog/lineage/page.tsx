@@ -7,7 +7,6 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useState } from 'react';
-import { Badge, Select, Skeleton, Text } from '@kui/foundations-react';
 import { om } from '@/api/openmetadata';
 import type { OmLineageResponse, OmQuery, OmTable } from '@/types/openmetadata';
 import { LineageGraph, type GraphEdge, type GraphNode } from '@/components/catalog/LineageGraph';
@@ -248,62 +247,69 @@ const LineageExplorer = () => {
 		<div className="mx-auto w-full max-w-7xl px-6 py-8">
 			<header className="mb-5 flex flex-wrap items-end justify-between gap-4">
 				<div>
-					<Text asChild kind="title/md">
-						<h1 className="text-[var(--text-color-primary)]">Exploration</h1>
-					</Text>
-					<p className="mt-1 max-w-2xl text-sm text-[var(--text-color-base)]">
+					<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
+						Exploration
+					</h1>
+					<p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
 						How a table relates to the rest of your warehouse — directed lineage from
 						the catalog, table joins observed in real query history, and same-schema
 						neighbours, centred on the table you pick.
 					</p>
 				</div>
 				<label className="flex items-center gap-2 text-sm">
-					<span className="text-[var(--text-color-base)]">Focus</span>
-					<Select
-						className="w-72"
-						placeholder={allTables == null ? 'Loading…' : 'Select a table'}
+					<span className="text-zinc-500 dark:text-zinc-400">Focus</span>
+					<select
 						value={fqn ?? ''}
-						onValueChange={(v) =>
-							router.push(`/catalog/lineage?fqn=${encodeURIComponent(v)}`)
+						onChange={(e) =>
+							router.push(
+								`/catalog/lineage?fqn=${encodeURIComponent(e.target.value)}`,
+							)
 						}
-						items={(allTables ?? []).map((t) => ({
-							value: t.fullyQualifiedName,
-							children: `${t.database.name} · ${t.databaseSchema.name} · ${t.name}`,
-						}))}
-					/>
+						className="w-72 rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 shadow-sm outline-none focus:border-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+					>
+						{allTables == null ? (
+							<option>Loading…</option>
+						) : (
+							allTables.map((t) => (
+								<option key={t.id} value={t.fullyQualifiedName}>
+									{t.database.name} · {t.databaseSchema.name} · {t.name}
+								</option>
+							))
+						)}
+					</select>
 				</label>
 			</header>
 
 			{err ? (
-				<div className="rounded-[var(--radius-lg)] border border-[var(--border-color-feedback-danger)] bg-[var(--background-color-feedback-danger-subtle-hover)] p-4 text-sm text-[var(--text-color-feedback-danger-strong)]">
+				<div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
 					{err}
 				</div>
 			) : null}
 
-			<div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-[var(--text-color-base)]">
-				<LegendDot className="bg-[var(--color-brand)]" label="Focused table" />
+			<div className="mb-3 flex flex-wrap items-center gap-4 text-xs text-zinc-500 dark:text-zinc-400">
+				<LegendDot className="bg-[#76b900]" label="Focused table" />
 				<span className="flex items-center gap-1.5">
-					<span className="inline-block h-px w-5 border-t-2 border-[var(--color-brand)]" />
+					<span className="inline-block h-px w-5 border-t-2 border-[#76b900]/60" />
 					Related — query join{' '}
-					<Badge color="gray" kind="outline">
+					<span className="rounded-full bg-zinc-100 px-1.5 py-0.5 tabular-nums dark:bg-zinc-800">
 						{relatedCount}
-					</Badge>
+					</span>
 				</span>
 				<span className="flex items-center gap-1.5">
-					<span className="inline-block h-px w-5 border-t border-[var(--border-color-accent-gray)]" />
+					<span className="inline-block h-px w-5 border-t border-zinc-400" />
 					Lineage — catalog{' '}
-					<Badge color="gray" kind="outline">
+					<span className="rounded-full bg-zinc-100 px-1.5 py-0.5 tabular-nums dark:bg-zinc-800">
 						{omEdgeCount}
-					</Badge>
+					</span>
 				</span>
 				<span className="flex items-center gap-1.5">
-					<span className="inline-block h-px w-5 border-t border-dashed border-[var(--border-color-accent-gray)]" />
+					<span className="inline-block h-px w-5 border-t border-dashed border-zinc-400" />
 					Same schema
 				</span>
 			</div>
 
 			{loading && !graph ? (
-				<div className="h-[480px] animate-pulse rounded-[var(--radius-lg)] bg-[var(--background-color-component-skeleton)]" />
+				<div className="h-[480px] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
 			) : graph ? (
 				<>
 					<LineageGraph nodes={graph.nodes} edges={graph.edges} />
@@ -311,7 +317,7 @@ const LineageExplorer = () => {
 						<div className="mt-4 text-sm">
 							<Link
 								href={`/catalog/tables/${encodeURIComponent(table.fullyQualifiedName)}`}
-								className="text-[var(--text-color-brand)] hover:underline"
+								className="text-[#76b900] hover:underline"
 							>
 								Open {table.name} in the Data Dictionary →
 							</Link>
@@ -319,7 +325,7 @@ const LineageExplorer = () => {
 					) : null}
 				</>
 			) : (
-				<p className="rounded-[var(--radius-lg)] border border-dashed border-[var(--border-color-base)] p-12 text-center text-sm text-[var(--text-color-subtle)]">
+				<p className="rounded-lg border border-dashed border-zinc-300 p-12 text-center text-sm text-zinc-500 dark:border-zinc-700">
 					Pick a table to explore.
 				</p>
 			)}
@@ -338,9 +344,9 @@ export default function LineagePage() {
 	return (
 		<Suspense
 			fallback={
-				<div className="mx-auto w-full max-w-7xl space-y-6 px-6 py-8">
-					<Skeleton kind="line" />
-					<div className="h-[480px] animate-pulse rounded-[var(--radius-lg)] bg-[var(--background-color-component-skeleton)]" />
+				<div className="mx-auto w-full max-w-7xl px-6 py-8">
+					<div className="h-8 w-48 animate-pulse rounded bg-zinc-100 dark:bg-zinc-900" />
+					<div className="mt-6 h-[480px] animate-pulse rounded-xl bg-zinc-100 dark:bg-zinc-900" />
 				</div>
 			}
 		>
