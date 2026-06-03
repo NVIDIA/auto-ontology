@@ -6,7 +6,7 @@
 
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { om } from '@/api/openmetadata';
 import type { OmTable } from '@/types/openmetadata';
 import { TagPill } from '@/components/catalog/TagPill';
@@ -41,7 +41,7 @@ const matchesFilter = (t: OmTable, filter: Filter): boolean => {
 	return true;
 };
 
-export default function TablesListPage() {
+function TablesListContent() {
 	const params = useSearchParams();
 	const initialFilter = filterOf(new URLSearchParams(params.toString()));
 	const initialQuery = params.get('q') ?? '';
@@ -243,3 +243,11 @@ const TableSkeleton = () => (
 		))}
 	</div>
 );
+
+export default function TablesListPage() {
+	return (
+		<Suspense fallback={null}>
+			<TablesListContent />
+		</Suspense>
+	);
+}
