@@ -6,39 +6,31 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { HorizontalNav } from '@kui/foundations-react';
 
-type Tab = { href: string; label: string };
-
-const tabs: Tab[] = [
-	{ href: '/catalog/tables', label: 'Data Dictionary' },
-	{ href: '/catalog/lineage', label: 'Exploration' },
-	{ href: '/catalog/tags', label: 'Tags' },
-	{ href: '/catalog/queries', label: 'Query Tab' },
+const tabs = [
+	{ value: '/catalog/tables', href: '/catalog/tables', children: 'Data Dictionary' },
+	{ value: '/catalog/lineage', href: '/catalog/lineage', children: 'Exploration' },
+	{ value: '/catalog/tags', href: '/catalog/tags', children: 'Tags' },
+	{ value: '/catalog/queries', href: '/catalog/queries', children: 'Query Tab' },
 ];
 
 export const CatalogSubNav = () => {
 	const pathname = usePathname();
+	const active = tabs.find((t) => pathname.startsWith(t.value))?.value ?? tabs[0].value;
+
 	return (
-		<nav className="flex items-center gap-1 border-b border-zinc-200 bg-white px-6 dark:border-zinc-800 dark:bg-zinc-950">
-			{tabs.map((t) => {
-				const isActive = pathname.startsWith(t.href);
-				return (
-					<Link
-						key={t.href}
-						href={t.href}
-						className={`relative px-3 py-3 text-sm font-medium transition-colors ${
-							isActive
-								? 'text-[#76b900]'
-								: 'text-zinc-600 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-200'
-						}`}
-					>
-						{t.label}
-						{isActive ? (
-							<span className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-[#76b900]" />
-						) : null}
+		<div className="border-b border-[var(--border-color-base)] bg-[var(--background-color-surface-navigation)] px-4">
+			<HorizontalNav
+				value={active}
+				onValueChange={() => {}}
+				items={tabs}
+				renderLink={({ href, children, value }) => (
+					<Link key={value} href={href}>
+						{children}
 					</Link>
-				);
-			})}
-		</nav>
+				)}
+			/>
+		</div>
 	);
 };

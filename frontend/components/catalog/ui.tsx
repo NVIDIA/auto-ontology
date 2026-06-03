@@ -12,6 +12,7 @@
  */
 
 import type { ReactNode } from 'react';
+import { Avatar, Badge, Panel as KuiPanel, ProgressBar, Text } from '@kui/foundations-react';
 import type { OmTable, OmUsageSummary } from '@/types/openmetadata';
 
 /* ------------------------------------------------------------------ icons -- */
@@ -87,22 +88,32 @@ export const Panel = ({
 	action?: ReactNode;
 	children: ReactNode;
 	className?: string;
-}) => (
-	<section
-		className={`rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900 ${className}`}
-	>
-		{title ? (
-			<header className="flex items-center justify-between gap-3 border-b border-zinc-100 px-4 py-2.5 dark:border-zinc-800">
-				<h3 className="flex items-center gap-2 text-[13px] font-semibold text-zinc-700 dark:text-zinc-200">
-					{icon ? <span className="text-zinc-400 dark:text-zinc-500">{icon}</span> : null}
-					{title}
-				</h3>
+}) => {
+	// Map our title/icon/action API onto Kaizen's Panel slots. When a header
+	// action is present we render the heading row ourselves so the action can sit
+	// flush-right next to the title.
+	const heading = title ? (
+		action ? (
+			<span className="flex flex-1 items-center justify-between gap-3">
+				<span>{title}</span>
 				{action}
-			</header>
-		) : null}
-		{children}
-	</section>
-);
+			</span>
+		) : (
+			title
+		)
+	) : undefined;
+
+	return (
+		<KuiPanel
+			elevation="high"
+			slotHeading={heading}
+			slotIcon={title ? icon : undefined}
+			className={className}
+		>
+			{children}
+		</KuiPanel>
+	);
+};
 
 export const MetaField = ({
 	label,
@@ -144,22 +155,10 @@ export const readinessOf = (t: OmTable): Readiness => {
 	return 'pending';
 };
 
-const READINESS_META: Record<Readiness, { label: string; cls: string; dot: string }> = {
-	certified: {
-		label: 'Certified',
-		cls: 'bg-emerald-100 text-emerald-800 ring-emerald-300 dark:bg-emerald-950/50 dark:text-emerald-200 dark:ring-emerald-800',
-		dot: 'bg-emerald-500',
-	},
-	partial: {
-		label: 'Partial',
-		cls: 'bg-amber-100 text-amber-900 ring-amber-300 dark:bg-amber-950/50 dark:text-amber-200 dark:ring-amber-800',
-		dot: 'bg-amber-500',
-	},
-	pending: {
-		label: 'Pending',
-		cls: 'bg-zinc-100 text-zinc-600 ring-zinc-300 dark:bg-zinc-800 dark:text-zinc-400 dark:ring-zinc-700',
-		dot: 'bg-zinc-400',
-	},
+const READINESS_BADGE: Record<Readiness, { label: string; color: 'green' | 'yellow' | 'gray' }> = {
+	certified: { label: 'Certified', color: 'green' },
+	partial: { label: 'Partial', color: 'yellow' },
+	pending: { label: 'Pending', color: 'gray' },
 };
 
 export const CertificationBadge = ({
@@ -169,16 +168,11 @@ export const CertificationBadge = ({
 	status: Readiness;
 	dense?: boolean;
 }) => {
-	const m = READINESS_META[status];
+	const m = READINESS_BADGE[status];
 	return (
-		<span
-			className={`inline-flex items-center gap-1.5 rounded-full ring-1 ring-inset ${m.cls} ${
-				dense ? 'px-1.5 py-0 text-[10px]' : 'px-2 py-0.5 text-xs'
-			} font-medium`}
-		>
-			<span className={`h-1.5 w-1.5 rounded-full ${m.dot}`} aria-hidden />
+		<Badge color={m.color} kind={dense ? 'outline' : 'solid'}>
 			{m.label}
-		</span>
+		</Badge>
 	);
 };
 
@@ -228,38 +222,30 @@ export const CoverageBar = ({
 	label,
 	value,
 	total,
-	tone = 'green',
 }: {
 	label: string;
 	value: number;
 	total: number;
-	tone?: 'green' | 'amber' | 'sky' | 'violet';
 }) => {
 	const pct = total > 0 ? Math.round((value / total) * 100) : 0;
-	const fill =
-		tone === 'amber'
-			? 'bg-amber-500'
-			: tone === 'sky'
-				? 'bg-sky-500'
-				: tone === 'violet'
-					? 'bg-violet-500'
-					: 'bg-[#76b900]';
+	const labelId = `cov-${label.replace(/\s+/g, '-').toLowerCase()}`;
 	return (
 		<div>
 			<div className="mb-1.5 flex items-baseline justify-between">
-				<span className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+				<span
+					id={labelId}
+					className="text-xs font-medium text-[var(--text-color-secondary)]"
+				>
 					{label}
 				</span>
-				<span className="text-xs tabular-nums text-zinc-500 dark:text-zinc-400">
+				<span className="text-xs tabular-nums text-[var(--text-color-base)]">
 					{value.toLocaleString()} / {total.toLocaleString()}
-					<span className="ml-1.5 font-semibold text-zinc-700 dark:text-zinc-200">
+					<span className="ml-1.5 font-semibold text-[var(--text-color-strong)]">
 						{pct}%
 					</span>
 				</span>
 			</div>
-			<div className="h-2 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-				<div className={`h-full rounded-full ${fill}`} style={{ width: `${pct}%` }} />
-			</div>
+			<ProgressBar aria-labelledby={labelId} value={pct} size="small" />
 		</div>
 	);
 };
@@ -314,14 +300,6 @@ export const CategoryTabs = <T extends string>({
 
 /* ---------------------------------------------------------------- avatar -- */
 
-const AVATAR_TONES = [
-	'bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-300',
-	'bg-violet-100 text-violet-700 dark:bg-violet-950/50 dark:text-violet-300',
-	'bg-amber-100 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300',
-	'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300',
-	'bg-rose-100 text-rose-700 dark:bg-rose-950/50 dark:text-rose-300',
-];
-
 const initialsOf = (name: string): string =>
 	name
 		.split(/[\s._-]+/)
@@ -332,20 +310,14 @@ const initialsOf = (name: string): string =>
 
 export const OwnerChip = ({ name }: { name: string | null | undefined }) => {
 	if (!name) {
-		return <span className="text-xs text-zinc-400 dark:text-zinc-600">unassigned</span>;
+		return <span className="text-xs text-[var(--text-color-subtle)]">unassigned</span>;
 	}
-	let hash = 0;
-	for (let i = 0; i < name.length; i += 1)
-		hash = (hash + name.charCodeAt(i)) % AVATAR_TONES.length;
 	return (
 		<span className="inline-flex items-center gap-1.5">
-			<span
-				className={`flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-semibold ${AVATAR_TONES[hash]}`}
-				aria-hidden
-			>
-				{initialsOf(name)}
-			</span>
-			<span className="truncate text-sm text-zinc-700 dark:text-zinc-300">{name}</span>
+			<Avatar size="small" fallback={initialsOf(name)} alt="" />
+			<Text asChild kind="body/regular/sm">
+				<span className="truncate">{name}</span>
+			</Text>
 		</span>
 	);
 };

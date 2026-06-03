@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
+import { Spinner } from '@kui/foundations-react';
 import {
 	SinglePageComposer,
 	type ComposerEditValue,

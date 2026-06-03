@@ -5,7 +5,7 @@
 'use client';
 
 import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
+import { Spinner } from '@kui/foundations-react';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { isComposerSection, type ComposerSection } from '@/types/composer-section';
