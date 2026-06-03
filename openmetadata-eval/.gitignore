@@ -15,9 +15,9 @@ logs/
 # sed backups left if the in-place scrubber fails halfway through
 *.bak
 
-# Local volumes / runtime artifacts. docker-compose.yml maps the OM MySQL
-# data dir to ./docker-volume/db-data, which is many MB of binary tablespaces
-# that include the bot-JWT row and password-hash tables. NEVER commit.
+# Local volumes / runtime artifacts. docker-compose.yml maps the OM Postgres
+# data dir to ./docker-volume/db-data-postgres, which is many MB of binary
+# tablespaces that include the bot-JWT row and password-hash tables. NEVER commit.
 docker-volume/
 volumes/
 data/

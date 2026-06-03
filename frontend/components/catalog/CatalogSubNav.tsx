@@ -7,10 +7,9 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-type Tab = { href: string; label: string; matchPrefix?: string };
+type Tab = { href: string; label: string };
 
 const tabs: Tab[] = [
-	{ href: '/catalog', label: 'Overview', matchPrefix: '/catalog' },
 	{ href: '/catalog/tables', label: 'Data Dictionary' },
 	{ href: '/catalog/lineage', label: 'Exploration' },
 	{ href: '/catalog/tags', label: 'Tags' },
@@ -22,8 +21,7 @@ export const CatalogSubNav = () => {
 	return (
 		<nav className="flex items-center gap-1 border-b border-zinc-200 bg-white px-6 dark:border-zinc-800 dark:bg-zinc-950">
 			{tabs.map((t) => {
-				const isActive =
-					t.label === 'Overview' ? pathname === t.href : pathname.startsWith(t.href);
+				const isActive = pathname.startsWith(t.href);
 				return (
 					<Link
 						key={t.href}

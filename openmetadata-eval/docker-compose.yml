@@ -16,23 +16,24 @@ volumes:
   ingestion-volume-tmp:
   es-data:
 services:
-  mysql:
-    container_name: openmetadata_mysql
-    image: docker.getcollate.io/openmetadata/db:1.12.9
-    command: "--sort_buffer_size=10M"
+  postgresql:
+    container_name: openmetadata_postgresql
+    image: docker.getcollate.io/openmetadata/postgresql:1.12.9
+    command: "--work_mem=10MB"
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: password
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
     expose:
-      - 3306
+      - 5432
     ports:
-      - "3306:3306"
+      - "5432:5432"
     volumes:
-     - ./docker-volume/db-data:/var/lib/mysql
+     - ./docker-volume/db-data-postgres:/var/lib/postgresql/data
     networks:
       - app_net
     healthcheck:
-      test: mysql --user=root --password=$$MYSQL_ROOT_PASSWORD --silent --execute "use openmetadata_db"
+      test: psql -U postgres -tAc 'select 1' -d openmetadata_db
       interval: 15s
       timeout: 10s
       retries: 10
@@ -162,14 +163,14 @@ services:
       SERVER_HOST_API_URL: ${SERVER_HOST_API_URL:-http://openmetadata-server:8585/api}
       PIPELINE_SERVICE_CLIENT_VERIFY_SSL: ${PIPELINE_SERVICE_CLIENT_VERIFY_SSL:-"no-ssl"}
       PIPELINE_SERVICE_CLIENT_SSL_CERT_PATH: ${PIPELINE_SERVICE_CLIENT_SSL_CERT_PATH:-""}
-      # Database configuration for MySQL
-      DB_DRIVER_CLASS: ${DB_DRIVER_CLASS:-com.mysql.cj.jdbc.Driver}
-      DB_SCHEME: ${DB_SCHEME:-mysql}
+      # Database configuration for Postgres
+      DB_DRIVER_CLASS: ${DB_DRIVER_CLASS:-org.postgresql.Driver}
+      DB_SCHEME: ${DB_SCHEME:-postgresql}
       DB_PARAMS: ${DB_PARAMS:-allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC}
       DB_USER: ${DB_USER:-openmetadata_user}
       DB_USER_PASSWORD: ${DB_USER_PASSWORD:-openmetadata_password}
-      DB_HOST: ${DB_HOST:-mysql}
-      DB_PORT: ${DB_PORT:-3306}
+      DB_HOST: ${DB_HOST:-postgresql}
+      DB_PORT: ${DB_PORT:-5432}
       OM_DATABASE: ${OM_DATABASE:-openmetadata_db}
       # ElasticSearch Configurations
       ELASTICSEARCH_HOST: ${ELASTICSEARCH_HOST:- elasticsearch}
@@ -276,7 +277,7 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
-      mysql:
+      postgresql:
         condition: service_healthy
     networks:
       - app_net
@@ -383,14 +384,14 @@ services:
       SERVER_HOST_API_URL: ${SERVER_HOST_API_URL:-http://openmetadata-server:8585/api}
       PIPELINE_SERVICE_CLIENT_VERIFY_SSL: ${PIPELINE_SERVICE_CLIENT_VERIFY_SSL:-"no-ssl"}
       PIPELINE_SERVICE_CLIENT_SSL_CERT_PATH: ${PIPELINE_SERVICE_CLIENT_SSL_CERT_PATH:-""}
-      # Database configuration for MySQL
-      DB_DRIVER_CLASS: ${DB_DRIVER_CLASS:-com.mysql.cj.jdbc.Driver}
-      DB_SCHEME: ${DB_SCHEME:-mysql}
+      # Database configuration for Postgres
+      DB_DRIVER_CLASS: ${DB_DRIVER_CLASS:-org.postgresql.Driver}
+      DB_SCHEME: ${DB_SCHEME:-postgresql}
       DB_PARAMS: ${DB_PARAMS:-allowPublicKeyRetrieval=true&useSSL=false&serverTimezone=UTC}
       DB_USER: ${DB_USER:-openmetadata_user}
       DB_USER_PASSWORD: ${DB_USER_PASSWORD:-openmetadata_password}
-      DB_HOST: ${DB_HOST:-mysql}
-      DB_PORT: ${DB_PORT:-3306}
+      DB_HOST: ${DB_HOST:-postgresql}
+      DB_PORT: ${DB_PORT:-5432}
       OM_DATABASE: ${OM_DATABASE:-openmetadata_db}
       # ElasticSearch Configurations
       ELASTICSEARCH_HOST: ${ELASTICSEARCH_HOST:- elasticsearch}
@@ -493,7 +494,7 @@ services:
     depends_on:
       elasticsearch:
         condition: service_healthy
-      mysql:
+      postgresql:
         condition: service_healthy
       execute-migrate-all:
         condition: service_completed_successfully
@@ -508,7 +509,7 @@ services:
     depends_on:
       elasticsearch:
         condition: service_started
-      mysql:
+      postgresql:
         condition: service_healthy
       openmetadata-server:
         condition: service_started
@@ -516,10 +517,10 @@ services:
       AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session"
       AIRFLOW__CORE__EXECUTOR: LocalExecutor
       AIRFLOW__OPENMETADATA_AIRFLOW_APIS__DAG_GENERATED_CONFIGS: "/opt/airflow/dag_generated_configs"
-      DB_HOST: ${AIRFLOW_DB_HOST:-mysql}
-      DB_PORT: ${AIRFLOW_DB_PORT:-3306}
+      DB_HOST: ${AIRFLOW_DB_HOST:-postgresql}
+      DB_PORT: ${AIRFLOW_DB_PORT:-5432}
       AIRFLOW_DB: ${AIRFLOW_DB:-airflow_db}
-      DB_SCHEME: ${AIRFLOW_DB_SCHEME:-mysql+mysqldb}
+      DB_SCHEME: ${AIRFLOW_DB_SCHEME:-postgresql+psycopg2}
       DB_USER: ${AIRFLOW_DB_USER:-airflow_user}
       DB_PASSWORD: ${AIRFLOW_DB_PASSWORD:-airflow_pass}
       # extra connection-string properties for the database

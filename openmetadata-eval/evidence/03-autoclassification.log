@@ -1,0 +1,108 @@
+=== run-ingestion.sh kind=autoclass subcmd=classify at 2026-06-03T14:14:58Z ===
+--- rendered YAML (secrets scrubbed) ---
+source:
+  type: snowflake
+  serviceName: snowflake_eval
+  serviceConnection:
+    config:
+      type: Snowflake
+      username: <sf_user>
+      password: <redacted>
+      account: <sf_account>
+      warehouse: COMPUTE_WH
+      database: SNOWFLAKE_SAMPLE_DATA
+      role: ACCOUNTADMIN
+  sourceConfig:
+    config:
+      type: AutoClassification
+      storeSampleData: true
+      enableAutoClassification: true
+      confidence: 75
+      schemaFilterPattern:
+        includes:
+          - TPCH_SF1
+      tableFilterPattern:
+        includes:
+          - CUSTOMER
+          - SUPPLIER
+processor:
+  type: orm-profiler
+  config: {}
+sink:
+  type: metadata-rest
+  config: {}
+workflowConfig:
+  loggerLevel: INFO
+  openMetadataServerConfig:
+    hostPort: http://openmetadata-server:8585/api
+    authProvider: openmetadata
+    securityConfig:
+      jwtToken: <redacted>
+--- end YAML ---
+
+=== metadata classify output ===
+/home/airflow/.local/lib/python3.10/site-packages/google/api_core/_python_version_support.py:266: FutureWarning: You are using a Python version (3.10.19) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+/home/airflow/.local/lib/python3.10/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "SchemaDiffResult" shadows an attribute in parent "BaseModel"
+  warnings.warn(
+[2026-06-03 14:15:03] INFO     {metadata.OMetaAPI:server_mixin:97} - OpenMetadata client running with Server version [1.12.9] and Client version [1.12.9.0]
+[2026-06-03 14:15:03] INFO     {metadata.Metadata:test_connections:203} - Running CheckAccess...
+[2026-06-03 14:15:07] INFO     {metadata.Metadata:test_connections:203} - Running GetDatabases...
+[2026-06-03 14:15:08] INFO     {metadata.Metadata:test_connections:203} - Running GetSchemas...
+[2026-06-03 14:15:09] INFO     {metadata.Metadata:test_connections:203} - Running GetTables...
+[2026-06-03 14:15:10] INFO     {metadata.Metadata:test_connections:203} - Running GetViews...
+[2026-06-03 14:15:10] INFO     {metadata.Metadata:test_connections:203} - Running GetStreams...
+[2026-06-03 14:15:11] INFO     {metadata.Metadata:test_connections:203} - Running GetTags...
+[2026-06-03 14:15:11] INFO     {metadata.Metadata:test_connections:203} - Running GetQueries...
+[2026-06-03 14:15:13] INFO     {metadata.Metadata:test_connections:228} - Test connection results:
+[2026-06-03 14:15:13] INFO     {metadata.Metadata:test_connections:229} - lastUpdatedAt=None status=<StatusType.Running: 'Running'> steps=[TestConnectionStepResult(name='CheckAccess', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetDatabases', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetSchemas', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTables', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetViews', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetStreams', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTags', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetQueries', mandatory=False, passed=True, message=None, errorLog=None)]
+[2026-06-03 14:15:13] INFO     {metadata.Profiler:metadata:76} - Starting profiler for service snowflake_eval:snowflake
+[2026-06-03 14:15:16] WARNING  {metadata.PII:presidio_utils:138} - Downloading en_core_web_md language model for the spaCy
+
+[notice] A new release of pip is available: 26.1.1 -> 26.1.2
+[notice] To update, run: /usr/python/bin/python3.10 -m pip install --upgrade pip
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1mExecution Time Summary[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - 
++------------+--------------+--------------+------------+------------+------------+
+| Context    |   Total Time |   Call Count |   Avg Time |   Min Time |   Max Time |
++============+==============+==============+============+============+============+
+| GET        |    201.628ms |           35 |    5.761ms |    1.391ms |   19.834ms |
++------------+--------------+--------------+------------+------------+------------+
+| Sink       |    192.698ms |            8 |   24.087ms |    9.327ms |   73.744ms |
++------------+--------------+--------------+------------+------------+------------+
+| Sink.PUT   |    187.720ms |            8 |   23.465ms |    8.979ms |   72.285ms |
++------------+--------------+--------------+------------+------------+------------+
+| Source     |    291.324ms |            9 |   32.369ms |    0.052ms |  275.490ms |
++------------+--------------+--------------+------------+------------+------------+
+| Source.GET |    276.742ms |            4 |   69.185ms |   11.194ms |  226.594ms |
++------------+--------------+--------------+------------+------------+------------+[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Service Summary:[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Filtered: 25[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1mWorkflow Sampler Summary:[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1mWorkflow Auto Classification Processor Summary:[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Summary:[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow Success %: 100.0[0m
+[2026-06-03 14:15:50] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow finished in time: 37s 434.149ms[0m
+[38;5;2m✔ Download and installation successful[0m
+You can now load the package via spacy.load('en_core_web_md')
+=== exit_code=0 ===

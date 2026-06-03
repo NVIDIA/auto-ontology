@@ -1,4 +1,4 @@
-=== run-ingestion.sh kind=pii-metadata subcmd=ingest at 2026-05-28T19:01:45Z ===
+=== run-ingestion.sh kind=pii-metadata subcmd=ingest at 2026-06-03T14:05:14Z ===
 --- rendered YAML (secrets scrubbed) ---
 source:
   type: snowflake
@@ -40,62 +40,62 @@ workflowConfig:
   warnings.warn(message, FutureWarning)
 /home/airflow/.local/lib/python3.10/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "SchemaDiffResult" shadows an attribute in parent "BaseModel"
   warnings.warn(
-[2026-05-28 19:01:48] INFO     {metadata.OMetaAPI:server_mixin:97} - OpenMetadata client running with Server version [1.12.9] and Client version [1.12.9.0]
-[2026-05-28 19:01:48] INFO     {metadata.Metadata:test_connections:203} - Running CheckAccess...
-[2026-05-28 19:01:52] INFO     {metadata.Metadata:test_connections:203} - Running GetDatabases...
-[2026-05-28 19:01:53] INFO     {metadata.Metadata:test_connections:203} - Running GetSchemas...
-[2026-05-28 19:01:53] INFO     {metadata.Metadata:test_connections:203} - Running GetTables...
-[2026-05-28 19:01:54] INFO     {metadata.Metadata:test_connections:203} - Running GetViews...
-[2026-05-28 19:01:54] INFO     {metadata.Metadata:test_connections:203} - Running GetStreams...
-[2026-05-28 19:01:55] INFO     {metadata.Metadata:test_connections:203} - Running GetTags...
-[2026-05-28 19:01:55] INFO     {metadata.Metadata:test_connections:203} - Running GetQueries...
-[2026-05-28 19:02:00] INFO     {metadata.Metadata:test_connections:228} - Test connection results:
-[2026-05-28 19:02:00] INFO     {metadata.Metadata:test_connections:229} - lastUpdatedAt=None status=<StatusType.Running: 'Running'> steps=[TestConnectionStepResult(name='CheckAccess', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetDatabases', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetSchemas', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTables', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetViews', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetStreams', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTags', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetQueries', mandatory=False, passed=True, message=None, errorLog=None)]
-[2026-05-28 19:02:00] INFO     {metadata.Ingestion:common_db_source:156} - Ingesting from database: WIDEWORLDIMPORTERS
-[2026-05-28 19:02:11] INFO     {metadata.Ingestion:database_service:822} - Mark Deleted Stored Procedures Processing database [WIDEWORLDIMPORTERS]
-[2026-05-28 19:02:12] INFO     {metadata.Ingestion:metadata_rest:1077} - Flushing 3 remaining entities on close
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - [1mExecution Time Summary[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - 
+[2026-06-03 14:05:18] INFO     {metadata.OMetaAPI:server_mixin:97} - OpenMetadata client running with Server version [1.12.9] and Client version [1.12.9.0]
+[2026-06-03 14:05:18] INFO     {metadata.Metadata:test_connections:203} - Running CheckAccess...
+[2026-06-03 14:05:22] INFO     {metadata.Metadata:test_connections:203} - Running GetDatabases...
+[2026-06-03 14:05:22] INFO     {metadata.Metadata:test_connections:203} - Running GetSchemas...
+[2026-06-03 14:05:23] INFO     {metadata.Metadata:test_connections:203} - Running GetTables...
+[2026-06-03 14:05:24] INFO     {metadata.Metadata:test_connections:203} - Running GetViews...
+[2026-06-03 14:05:25] INFO     {metadata.Metadata:test_connections:203} - Running GetStreams...
+[2026-06-03 14:05:25] INFO     {metadata.Metadata:test_connections:203} - Running GetTags...
+[2026-06-03 14:05:25] INFO     {metadata.Metadata:test_connections:203} - Running GetQueries...
+[2026-06-03 14:05:28] INFO     {metadata.Metadata:test_connections:228} - Test connection results:
+[2026-06-03 14:05:28] INFO     {metadata.Metadata:test_connections:229} - lastUpdatedAt=None status=<StatusType.Running: 'Running'> steps=[TestConnectionStepResult(name='CheckAccess', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetDatabases', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetSchemas', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTables', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetViews', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetStreams', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTags', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetQueries', mandatory=False, passed=True, message=None, errorLog=None)]
+[2026-06-03 14:05:29] INFO     {metadata.Ingestion:common_db_source:156} - Ingesting from database: WIDEWORLDIMPORTERS
+[2026-06-03 14:05:40] INFO     {metadata.Ingestion:database_service:822} - Mark Deleted Stored Procedures Processing database [WIDEWORLDIMPORTERS]
+[2026-06-03 14:05:41] INFO     {metadata.Ingestion:metadata_rest:1077} - Flushing 3 remaining entities on close
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - [1mExecution Time Summary[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - 
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
 | Context                                        |    Total Time |   Call Count |     Avg Time |     Min Time |     Max Time |
 +================================================+===============+==============+==============+==============+==============+
-| GET                                            |       9.436ms |            3 |      3.145ms |      1.060ms |      5.818ms |
+| GET                                            |      21.546ms |            3 |      7.182ms |      1.323ms |     11.999ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| PUT                                            |      81.021ms |            3 |     27.007ms |     24.498ms |     31.021ms |
+| PUT                                            |     161.386ms |            3 |     53.795ms |     30.916ms |     81.953ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Sink                                           |       0.921ms |            3 |      0.307ms |      0.292ms |      0.316ms |
+| Sink                                           |       1.301ms |            3 |      0.434ms |      0.254ms |      0.562ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source                                         | 11s 604.565ms |            4 | 2s 901.141ms |    571.742ms | 4s 469.729ms |
+| Source                                         | 11s 362.142ms |            4 | 2s 840.535ms |    567.187ms | 4s 475.919ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.GET                                     |     109.618ms |            9 |     12.180ms |      6.596ms |     18.521ms |
+| Source.GET                                     |     133.822ms |            9 |     14.869ms |      6.447ms |     30.553ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_database                          |     376.976ms |            2 |    188.488ms |      0.042ms |    376.935ms |
+| Source.yield_database                          |     403.319ms |            2 |    201.659ms |      0.032ms |    403.287ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_database_schema                   |       0.333ms |            2 |      0.167ms |      0.038ms |      0.296ms |
+| Source.yield_database_schema                   |       0.699ms |            2 |      0.349ms |      0.045ms |      0.653ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_table                             |  3s 081.962ms |            2 | 1s 540.981ms |      0.091ms | 3s 081.871ms |
+| Source.yield_table                             |  3s 175.451ms |            2 | 1s 587.726ms |      0.058ms | 3s 175.394ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_table.get_columns_and_constraints |  2s 260.889ms |            1 | 2s 260.889ms | 2s 260.889ms | 2s 260.889ms |
+| Source.yield_table.get_columns_and_constraints |  2s 309.327ms |            1 | 2s 309.327ms | 2s 309.327ms | 2s 309.327ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_table.get_table_description       |     819.891ms |            1 |    819.891ms |    819.891ms |    819.891ms |
+| Source.yield_table.get_table_description       |     864.481ms |            1 |    864.481ms |    864.481ms |    864.481ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_table.register_record             |       0.064ms |            1 |      0.064ms |      0.064ms |      0.064ms |
+| Source.yield_table.register_record             |       0.039ms |            1 |      0.039ms |      0.039ms |      0.039ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+
-| Source.yield_table.update_table_constraints    |       0.019ms |            1 |      0.019ms |      0.019ms |      0.019ms |
+| Source.yield_table.update_table_constraints    |       0.041ms |            1 |      0.041ms |      0.041ms |      0.041ms |
 +------------------------------------------------+---------------+--------------+--------------+--------------+--------------+[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - [1mWorkflow Snowflake Summary:[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Processed records: 3[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Filtered: 9[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Summary:[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Processed records: 3[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow Success %: 100.0[0m
-[2026-05-28 19:02:12] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow finished in time: 12s 492.535ms[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - [1mWorkflow Snowflake Summary:[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Processed records: 3[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Filtered: 9[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Summary:[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Processed records: 3[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow Success %: 100.0[0m
+[2026-06-03 14:05:41] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow finished in time: 12s 525.807ms[0m
 === exit_code=0 ===

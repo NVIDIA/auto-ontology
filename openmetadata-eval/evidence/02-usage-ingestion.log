@@ -1,4 +1,4 @@
-=== run-ingestion.sh kind=usage subcmd=usage at 2026-05-28T19:02:53Z ===
+=== run-ingestion.sh kind=usage subcmd=usage at 2026-06-03T14:13:55Z ===
 --- rendered YAML (secrets scrubbed) ---
 source:
   type: snowflake-usage
@@ -43,537 +43,196 @@ workflowConfig:
   warnings.warn(message, FutureWarning)
 /home/airflow/.local/lib/python3.10/site-packages/pydantic/_internal/_fields.py:198: UserWarning: Field name "schema" in "SchemaDiffResult" shadows an attribute in parent "BaseModel"
   warnings.warn(
-[2026-05-28 19:02:56] INFO     {metadata.OMetaAPI:server_mixin:97} - OpenMetadata client running with Server version [1.12.9] and Client version [1.12.9.0]
-[2026-05-28 19:02:56] INFO     {metadata.Metadata:test_connections:203} - Running CheckAccess...
-[2026-05-28 19:02:58] INFO     {metadata.Metadata:test_connections:203} - Running GetDatabases...
-[2026-05-28 19:02:59] INFO     {metadata.Metadata:test_connections:203} - Running GetSchemas...
-[2026-05-28 19:02:59] INFO     {metadata.Metadata:test_connections:203} - Running GetTables...
-[2026-05-28 19:03:00] INFO     {metadata.Metadata:test_connections:203} - Running GetViews...
-[2026-05-28 19:03:00] INFO     {metadata.Metadata:test_connections:203} - Running GetStreams...
-[2026-05-28 19:03:01] INFO     {metadata.Metadata:test_connections:203} - Running GetTags...
-[2026-05-28 19:03:01] INFO     {metadata.Metadata:test_connections:203} - Running GetQueries...
-[2026-05-28 19:03:04] INFO     {metadata.Metadata:test_connections:228} - Test connection results:
-[2026-05-28 19:03:04] INFO     {metadata.Metadata:test_connections:229} - lastUpdatedAt=None status=<StatusType.Running: 'Running'> steps=[TestConnectionStepResult(name='CheckAccess', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetDatabases', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetSchemas', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTables', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetViews', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetStreams', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTags', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetQueries', mandatory=False, passed=True, message=None, errorLog=None)]
-[2026-05-28 19:03:04] INFO     {metadata.Utils:helpers:515} - Creating the directory to store staging data in /tmp/snowflake_usage
-[2026-05-28 19:03:04] INFO     {metadata.Ingestion:usage:94} - BulkSink type:metadata-usage,<class 'metadata.ingestion.bulksink.metadata_usage.MetadataUsageBulkSink'> configured
-[2026-05-28 19:03:04] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-21 - 2026-05-22
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'CREATE OR REPLACE DATABASE IDENTIFIER('snowflake_sample_data') FROM SHARE IDENTIFIER('sfc_samples.sa' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'GRANT ROLE IDENTIFIER('ORGADMIN') to user IDENTIFIER('FIRST_USER')' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'alter WAREHOUSE IDENTIFIER('"COMPUTE_WH"') resume' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:10] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'ALTER WAREHOUSE COMPUTE_WH RESUME IF SUSPENDED' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:11] INFO     {metadata.Ingestion:query_parser:140} - Total query count:1000 / 1000. Current success count: 1000. Current failed count: 0.
-[2026-05-28 19:03:13] INFO     {metadata.Ingestion:usage:127} - Fetching next page with offset 1000 (fetched 1000/1000) for 2026-05-21
-[2026-05-28 19:03:13] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-22 - 2026-05-23
-[2026-05-28 19:03:15] INFO     {metadata.Ingestion:query_parser:140} - Total query count:18 / 18. Current success count: 18. Current failed count: 0.
-[2026-05-28 19:03:15] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-23 - 2026-05-24
-[2026-05-28 19:03:18] INFO     {metadata.Ingestion:query_parser:140} - Total query count:18 / 18. Current success count: 18. Current failed count: 0.
-[2026-05-28 19:03:18] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-24 - 2026-05-25
-[2026-05-28 19:03:22] INFO     {metadata.Ingestion:query_parser:140} - Total query count:125 / 125. Current success count: 125. Current failed count: 0.
-[2026-05-28 19:03:22] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-25 - 2026-05-26
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:25] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:26] WARNING  {sqlglot:generator:851} - Conversion format is required for TO_NUMBER
-[2026-05-28 19:03:28] INFO     {metadata.Ingestion:query_parser:140} - Total query count:267 / 267. Current success count: 267. Current failed count: 0.
-[2026-05-28 19:03:29] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-26 - 2026-05-27
-[2026-05-28 19:03:32] INFO     {metadata.Ingestion:query_parser:140} - Total query count:1000 / 1000. Current success count: 1000. Current failed count: 0.
-[2026-05-28 19:03:32] INFO     {metadata.Ingestion:usage:127} - Fetching next page with offset 1000 (fetched 1000/1000) for 2026-05-26
-[2026-05-28 19:03:32] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-27 - 2026-05-28
-[2026-05-28 19:03:34] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:34] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
-[2026-05-28 19:03:34] INFO     {metadata.Ingestion:query_parser:140} - Total query count:68 / 68. Current success count: 68. Current failed count: 0.
-[2026-05-28 19:03:34] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-28 - 2026-05-29
-[2026-05-28 19:03:40] INFO     {metadata.Ingestion:query_parser:140} - Total query count:322 / 322. Current success count: 322. Current failed count: 0.
-[2026-05-28 19:03:40] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.special_deals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders_final
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.specialdeals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers_archive
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.stateprovinces
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.mv_stockitemtransactionssummary
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemtransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitems
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoicelines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.monthly_sales_aggregate
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.monthly_sales_aggregate
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemholdings
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.customer_order_summaries
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customercategories
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.mv_averageordervaluebycustomercategory
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_averageordervaluebycustomercategory
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.order_delayed
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.delayed_orders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.special_deals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.people
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemtransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.supplier_transaction_summary
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.supplier_transaction_summary
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.vehicletemperatures
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.vehicletemperatures
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.vehicletemperatures
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.public.cities
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.public.cities
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.website.suppliers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.countries
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.countries
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.top_selling_products
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.mv_topsellingproducts
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.top_selling_products
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.mv_topsellingproducts
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.customertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.mv_customerorderfrequency
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorderlines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.buyinggroups
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.coldroomtemperatures
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.coldroomtemperatures_archive
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoices
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures_archive
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices_pos_data
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.special_deals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliertransactions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.special_deals
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.tables
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.views
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.tag_references
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.query_history
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.tables
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.schemata
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.databases
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.columns
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.functions
-[2026-05-28 19:03:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.procedures
-[2026-05-28 19:03:42] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:42] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.om_eval.
-[2026-05-28 19:03:42] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.tables
-[2026-05-28 19:03:42] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.views
-[2026-05-28 19:03:42] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "C_NATIONKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION.N_NATIONKEY", "joinCount": 2}]}], "directTableJoins": []}
-[2026-05-28 19:03:43] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "L_ORDERKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS.O_ORDERKEY", "joinCount": 2}]}], "directTableJoins": []}
-[2026-05-28 19:03:43] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "S_SUPPKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.PARTSUPP.PS_SUPPKEY", "joinCount": 2}]}], "directTableJoins": []}
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.CUSTOMER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.CUSTOMER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.CUSTOMER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.SUPPLIER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.SUPPLIER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.SUPPLIER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.SUPPLIER
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.WIDEWORLDIMPORTERS.OM_EVAL.PEOPLE
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.PARTSUPP
-[2026-05-28 19:03:43] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemtransactions
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.stock_item_transaction_summary
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoicelines
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.monthly_sales_aggregate
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemholdings
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.website.customers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_averageordervaluebycustomercategory
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customercategories
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.delayed_orders
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.specialdeals
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders_final
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.people
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.top_selling_products
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.vehicletemperatures
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.vehicletemperatures
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.website.suppliers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_customerorderfrequency
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.customer_order_summaries
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorders
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorderlines
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.buyinggroups
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.coldroomtemperatures
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliertransactions
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.stateprovinces
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_stockitemtransactionssummary
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.stock_item_transaction_summary
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.orders
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitems
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.website.customers
-[2026-05-28 19:03:43] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_topsellingproducts
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemholdings
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemtransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.supplier_purchase_order_summaries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.specialdeals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.orders_final
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.mv_stockitemtransactionssummary
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.orderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders_final
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.countries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.mv_customerorderfrequency
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.special_deals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.customertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoices
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.wideworldimporters
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.website.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.buyinggroupid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.cityid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.colorid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.countryid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.customercategoryid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.customerid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.deliverymethodid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.invoiceid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.invoicelineid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.orderid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.orderlineid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.packagetypeid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.paymentmethodid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.personid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.purchaseorderid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.purchaseorderlineid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.specialdealid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.stateprovinceid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.stockgroupid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.stockitemid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.stockitemstockgroupid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.suppliercategoryid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.supplierid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.systemparameterid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.transactionid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sequences.transactiontypeid
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS._wwi_csv
-[2026-05-28 19:03:44] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.public.
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.public._wwi_csv
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS._wwi_stage
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.information_schema.tables
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.information_schema.schemata
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.result_scan
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.deliverymethods
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.deliverymethods_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.paymentmethods
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.paymentmethods_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.people
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.people_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.systemparameters
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.transactiontypes
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.transactiontypes_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliercategories_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.buyinggroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.buyinggroups_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customercategories_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoicelines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.colors
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.colors_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.packagetypes
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.packagetypes_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockgroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockgroups_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemholdings
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemstockgroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemtransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.vehicletemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.countries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.deliverymethods
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.paymentmethods
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.people
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.stateprovinces
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.systemparameters
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.transactiontypes
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.buyinggroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoicelines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoices
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.specialdeals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.colors
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.packagetypes
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockgroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemholdings
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitems
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemstockgroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemtransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.website.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.website.suppliers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.website.vehicletemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.vehicletemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.customer_order_summaries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.customer_retention
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.delayed_orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.monthly_inventory_turnover
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.monthly_sales_aggregate
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.stock_item_transaction_summary
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.supplier_purchase_order_summaries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.supplier_transaction_summary
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.top_selling_products
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.countries_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.deliverymethods_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.paymentmethods_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.people_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.stateprovinces_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.transactiontypes_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliercategories_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliers_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.buyinggroups_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customercategories_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.coldroomtemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.coldroomtemperatures_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.colors_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.packagetypes_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockgroups_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitems_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemtransactions
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.stock_item_transaction_summary
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.monthly_sales_aggregate
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders_final
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemholdings
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems_archive
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoicelines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customercategories
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_averageordervaluebycustomercategory
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoices
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.delayed_orders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.special_deals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.people
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.top_selling_products
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.vehicletemperatures
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.special_deals
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_customerorderfrequency
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.customer_order_summaries
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorders
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorderlines
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.buyinggroups
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitems
-[2026-05-28 19:03:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1mExecution Time Summary[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - 
+[2026-06-03 14:13:59] INFO     {metadata.OMetaAPI:server_mixin:97} - OpenMetadata client running with Server version [1.12.9] and Client version [1.12.9.0]
+[2026-06-03 14:13:59] INFO     {metadata.Metadata:test_connections:203} - Running CheckAccess...
+[2026-06-03 14:14:05] INFO     {metadata.Metadata:test_connections:203} - Running GetDatabases...
+[2026-06-03 14:14:05] INFO     {metadata.Metadata:test_connections:203} - Running GetSchemas...
+[2026-06-03 14:14:05] INFO     {metadata.Metadata:test_connections:203} - Running GetTables...
+[2026-06-03 14:14:07] INFO     {metadata.Metadata:test_connections:203} - Running GetViews...
+[2026-06-03 14:14:07] INFO     {metadata.Metadata:test_connections:203} - Running GetStreams...
+[2026-06-03 14:14:08] INFO     {metadata.Metadata:test_connections:203} - Running GetTags...
+[2026-06-03 14:14:08] INFO     {metadata.Metadata:test_connections:203} - Running GetQueries...
+[2026-06-03 14:14:12] INFO     {metadata.Metadata:test_connections:228} - Test connection results:
+[2026-06-03 14:14:12] INFO     {metadata.Metadata:test_connections:229} - lastUpdatedAt=None status=<StatusType.Running: 'Running'> steps=[TestConnectionStepResult(name='CheckAccess', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetDatabases', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetSchemas', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTables', mandatory=True, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetViews', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetStreams', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetTags', mandatory=False, passed=True, message=None, errorLog=None), TestConnectionStepResult(name='GetQueries', mandatory=False, passed=True, message=None, errorLog=None)]
+[2026-06-03 14:14:12] INFO     {metadata.Utils:helpers:515} - Creating the directory to store staging data in /tmp/snowflake_usage
+[2026-06-03 14:14:12] INFO     {metadata.Ingestion:usage:94} - BulkSink type:metadata-usage,<class 'metadata.ingestion.bulksink.metadata_usage.MetadataUsageBulkSink'> configured
+[2026-06-03 14:14:12] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-27 - 2026-05-28
+[2026-06-03 14:14:16] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
+[2026-06-03 14:14:16] WARNING  {sqlglot:parser:1957} - 'CALL SYSTEM$GET_RECENT_IN_APP_NOTIFICATIONS()' contains unsupported syntax. Falling back to parsing as a 'Command'.
+[2026-06-03 14:14:16] INFO     {metadata.Ingestion:query_parser:140} - Total query count:68 / 68. Current success count: 68. Current failed count: 0.
+[2026-06-03 14:14:16] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-28 - 2026-05-29
+[2026-06-03 14:14:22] INFO     {metadata.Ingestion:query_parser:140} - Total query count:406 / 406. Current success count: 406. Current failed count: 0.
+[2026-06-03 14:14:23] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-29 - 2026-05-30
+[2026-06-03 14:14:26] INFO     {metadata.Ingestion:query_parser:140} - Total query count:18 / 18. Current success count: 18. Current failed count: 0.
+[2026-06-03 14:14:26] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-30 - 2026-05-31
+[2026-06-03 14:14:28] INFO     {metadata.Ingestion:query_parser:140} - Total query count:27 / 27. Current success count: 27. Current failed count: 0.
+[2026-06-03 14:14:28] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-05-31 - 2026-06-01
+[2026-06-03 14:14:31] INFO     {metadata.Ingestion:query_parser:140} - Total query count:18 / 18. Current success count: 18. Current failed count: 0.
+[2026-06-03 14:14:31] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-06-01 - 2026-06-02
+[2026-06-03 14:14:33] INFO     {metadata.Ingestion:query_parser:140} - Total query count:18 / 18. Current success count: 18. Current failed count: 0.
+[2026-06-03 14:14:33] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-06-02 - 2026-06-03
+[2026-06-03 14:14:35] INFO     {metadata.Ingestion:query_parser:140} - Total query count:187 / 187. Current success count: 187. Current failed count: 0.
+[2026-06-03 14:14:35] INFO     {metadata.Ingestion:usage:63} - Scanning query logs for 2026-06-03 - 2026-06-04
+[2026-06-03 14:14:38] INFO     {metadata.Ingestion:query_parser:140} - Total query count:73 / 73. Current success count: 73. Current failed count: 0.
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.coldroomtemperatures_archive
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices_pos_data
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.special_deals
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliertransactions
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.special_deals
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.tables
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.views
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.tag_references
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.query_history
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.tables
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.schemata
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.databases
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.columns
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.functions
+[2026-06-03 14:14:38] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.procedures
+[2026-06-03 14:14:40] ERROR    {metadata.Utils:sql_lineage:262} - Error searching for table entities for service [snowflake_eval]: Table Name should be informed, but got table=``
+[2026-06-03 14:14:40] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.om_eval.
+[2026-06-03 14:14:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.tables
+[2026-06-03 14:14:41] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.views
+[2026-06-03 14:14:41] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "C_NATIONKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION.N_NATIONKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:41] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "C_NATIONKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION.N_NATIONKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:42] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "L_ORDERKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS.O_ORDERKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:42] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "L_ORDERKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS.O_ORDERKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:43] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "S_SUPPKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.PARTSUPP.PS_SUPPKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:43] INFO     {metadata.OMetaAPI:table_mixin:428} - table join request {"startDate": "2026-05-28", "columnJoins": [{"columnName": "S_SUPPKEY", "joinedWith": [{"fullyQualifiedName": "snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.PARTSUPP.PS_SUPPKEY", "joinCount": 3}]}], "directTableJoins": []}
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.CUSTOMER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.CUSTOMER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.CUSTOMER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.CUSTOMER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF10.SUPPLIER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.SUPPLIER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF100.SUPPLIER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1000.SUPPLIER
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.WIDEWORLDIMPORTERS.OM_EVAL.PEOPLE
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.ORDERS
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.LINEITEM
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.PARTSUPP
+[2026-06-03 14:14:44] INFO     {metadata.Ingestion:metadata_usage:154} - Successfully table usage published for snowflake_eval.SNOWFLAKE_SAMPLE_DATA.TPCH_SF1.NATION
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orderlines
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.specialdeals
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customers_archive
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.cities
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.stateprovinces
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customertransactions
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemtransactions
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.stock_item_transaction_summary
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.monthly_sales_aggregate
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.orders_final
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitemholdings
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.stockitems_archive
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoices
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.invoicelines
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orders
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.customercategories
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_averageordervaluebycustomercategory
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.application.cities
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.reports.delayed_orders
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.customers
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.invoices
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.special_deals
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.people
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.suppliers
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.top_selling_products
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.warehouse.vehicletemperatures
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.orderlines
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.sales.special_deals
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.application.countries
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.mv_customerorderfrequency
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.reports.customer_order_summaries
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorderlines
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.purchasing.purchaseorders
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.sales.buyinggroups
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.tables
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake_sample_data.information_schema.views
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.tag_references
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.query_history
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.tables
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.schemata
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.databases
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.information_schema.columns
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.functions
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table SNOWFLAKE_SAMPLE_DATA.snowflake.account_usage.procedures
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.tables
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.wideworldimporters.information_schema.views
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.warehouse.stockitemtransactions
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorderlines
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.purchaseorders
+[2026-06-03 14:14:44] WARNING  {metadata.Ingestion:metadata_usage:229} - Could not fetch table WIDEWORLDIMPORTERS.purchasing.suppliers
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1mExecution Time Summary[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - 
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
 | Context                                        |    Total Time |   Call Count |     Avg Time |   Min Time |     Max Time |
 +================================================+===============+==============+==============+============+==============+
-| EvaluateBestParser                             |  2s 101.456ms |         2818 |      0.746ms |    0.066ms |     72.889ms |
+| EvaluateBestParser                             |     868.263ms |          815 |      1.065ms |    0.070ms |     19.130ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| EvaluateBestParser.GetSqlFluffLineageRunner    |      90.981ms |            2 |     45.490ms |   23.910ms |     67.070ms |
+| EvaluateBestParser.GetSqlGlotLineageRunner     |     802.951ms |          815 |      0.985ms |    0.028ms |     18.971ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| EvaluateBestParser.GetSqlGlotLineageRunner     |  1s 818.581ms |         2818 |      0.645ms |    0.027ms |     26.860ms |
+| GET                                            |  1s 723.339ms |          698 |      2.469ms |    1.083ms |    267.817ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| EvaluateBestParser.GetSqlParseLineageRunner    |       4.682ms |            2 |      2.341ms |    1.086ms |      3.596ms |
+| MaskQuery                                      |  1s 538.813ms |         1392 |      1.105ms |    0.003ms |     29.558ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| GET                                            |  3s 983.036ms |         2602 |      1.531ms |    0.791ms |     24.397ms |
+| MaskQuery.GetSqlParseLineageRunner             |  1s 432.809ms |          657 |      2.181ms |    0.022ms |     29.042ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| MaskQuery                                      |  9s 545.915ms |         6636 |      1.439ms |    0.003ms |    103.841ms |
+| MaskQuery.MaskLiteralsSqlParse                 |      81.422ms |          657 |      0.124ms |    0.004ms |      3.334ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| MaskQuery.GetSqlParseLineageRunner             |  9s 115.126ms |         5932 |      1.537ms |    0.021ms |    103.634ms |
+| PATCH                                          |     952.880ms |           26 |     36.649ms |   21.984ms |    116.749ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| MaskQuery.MaskLiteralsSqlParse                 |     301.902ms |         5934 |      0.051ms |    0.005ms |      1.818ms |
+| POST                                           |     859.203ms |           72 |     11.933ms |    1.396ms |     77.207ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| PATCH                                          |     460.116ms |           13 |     35.394ms |   26.648ms |     71.161ms |
+| PUT                                            |  3s 102.488ms |          282 |     11.002ms |    3.071ms |     45.807ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| POST                                           |     486.509ms |           34 |     14.309ms |    1.931ms |     39.809ms |
+| SearchTableEntities                            |  1s 391.886ms |          115 |     12.103ms |    0.007ms |    324.864ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| PUT                                            |  1s 282.835ms |          105 |     12.217ms |    3.750ms |     41.996ms |
+| SearchTableEntities.GET                        |  1s 045.808ms |          183 |      5.715ms |    1.083ms |     74.129ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| SearchTableEntities                            |  1s 514.739ms |          367 |      4.127ms |    0.007ms |    130.405ms |
+| SearchTableEntities.GetDatabaseServiceType     |     287.510ms |          115 |      2.500ms |    0.001ms |    287.014ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| SearchTableEntities.GET                        |  1s 378.223ms |          538 |      2.562ms |    0.916ms |     25.992ms |
+| SearchTableEntities.GetDatabaseServiceType.GET |     278.033ms |            3 |     92.678ms |    7.695ms |    201.412ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| SearchTableEntities.GetDatabaseServiceType     |     102.202ms |          367 |      0.278ms |    0.001ms |    100.746ms |
-+------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| SearchTableEntities.GetDatabaseServiceType.GET |      98.726ms |            2 |     49.363ms |    4.223ms |     94.503ms |
-+------------------------------------------------+---------------+--------------+--------------+------------+--------------+
-| Source                                         | 26s 232.142ms |            9 | 2s 914.682ms |    0.019ms | 5s 609.685ms |
+| Source                                         | 22s 061.469ms |            9 | 2s 451.274ms |    0.030ms | 4s 365.743ms |
 +------------------------------------------------+---------------+--------------+--------------+------------+--------------+[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1mWorkflow Snowflake Summary:[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1mWorkflow Query Parser Summary:[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1mWorkflow Table Usage Summary:[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Processed records: 1596[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Summary:[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Processed records: 13[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow Success %: 100.0[0m
-[2026-05-28 19:03:52] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow finished in time: 56s 056.514ms[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1mWorkflow Snowflake Summary:[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1mWorkflow Query Parser Summary:[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Processed records: 8[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1mWorkflow Table Usage Summary:[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Processed records: 476[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1mWorkflow OpenMetadata Summary:[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Processed records: 13[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Updated records: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Warnings: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Errors: 0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - Success %: 100.0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow Success %: 100.0[0m
+[2026-06-03 14:14:46] INFO     {metadata.Utils:logger:205} - [1m[36;1mWorkflow finished in time: 46s 507.571ms[0m
 === exit_code=0 ===
