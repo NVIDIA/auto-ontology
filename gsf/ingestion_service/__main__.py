@@ -30,7 +30,30 @@ async def ingest(connection_strings: list[str]) -> None:
     logger.info("ingest: starting")
     for connection_string in connection_strings:
         run_ingest(connection_string)
+    _enrich_from_openmetadata()
     logger.info("ingest: finished")
+
+
+def _enrich_from_openmetadata() -> None:
+    """Overlay OpenMetadata descriptions onto the catalog graph (best-effort).
+
+    Skipped when ``OPENMETADATA_HOST`` is not configured. Any failure here is
+    logged but never aborts the ingestion pass — the SQL-sourced graph is the
+    source of truth; OpenMetadata only enriches it.
+    """
+    if not os.environ.get("OPENMETADATA_HOST"):
+        logger.info("ingest: OPENMETADATA_HOST not set; skipping OM enrichment")
+        return
+
+    try:
+        from gsf.connectors.openmetadata import OpenMetadataConnector
+        from gsf.server.datasources.dal import apply_descriptions
+
+        descriptions = OpenMetadataConnector.from_env().get_descriptions()
+        summary = apply_descriptions(descriptions)
+        logger.info("ingest: OpenMetadata enrichment %s", summary)
+    except Exception:
+        logger.exception("ingest: OpenMetadata enrichment failed (continuing)")
 
 
 async def _run_forever(connection_strings: list[str]) -> None:

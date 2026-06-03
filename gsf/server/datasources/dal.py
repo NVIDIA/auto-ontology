@@ -299,6 +299,138 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     IngestVdbOperator(vdb=vdb)(rows)
 
 
+def apply_descriptions(
+    descriptions: "pd.DataFrame | list[dict[str, Any]]",
+    *,
+    overwrite: bool = False,
+    refresh_embeddings: bool = True,
+) -> dict[str, int]:
+    """Write externally-sourced descriptions onto matching catalog nodes.
+
+    ``descriptions`` rows are matched to ``Table``/``Column`` nodes by
+    case-insensitive (``database``, ``schema``, ``table`` [, ``column``]) name
+    — the shape produced by
+    :meth:`gsf.connectors.openmetadata.OpenMetadataConnector.get_descriptions`.
+
+    By default only nodes with a missing/empty description are filled, so
+    existing (e.g. hand-edited) descriptions are preserved; pass
+    ``overwrite=True`` to replace them. When ``refresh_embeddings`` is set, the
+    pgvector rows for changed nodes are refreshed (best-effort — a failure
+    there, e.g. no embedding API key, does not roll back the writes).
+
+    Returns a summary with the number of incoming rows and nodes updated.
+    """
+    if isinstance(descriptions, pd.DataFrame):
+        rows = descriptions.to_dict(orient="records")
+    else:
+        rows = list(descriptions)
+
+    def _item(row: dict[str, Any]) -> dict[str, str] | None:
+        desc = (row.get("description") or "").strip()
+        database = row.get("database")
+        schema = row.get("schema")
+        table = row.get("table")
+        if not (desc and database and schema and table):
+            return None
+        return {
+            "database": str(database),
+            "schema": str(schema),
+            "table": str(table),
+            "column": str(row["column"]) if row.get("column") else "",
+            "description": desc,
+        }
+
+    table_items: list[dict[str, str]] = []
+    column_items: list[dict[str, str]] = []
+    for row in rows:
+        item = _item(row)
+        if item is None:
+            continue
+        if (row.get("level") == "column") or item["column"]:
+            if item["column"]:
+                column_items.append(item)
+        else:
+            table_items.append(item)
+
+    conn = get_neo4j_conn()
+    changed_table_ids: list[str] = []
+    changed_column_ids: list[str] = []
+
+    if table_items:
+        result = conn.query_write(
+            f"""
+            UNWIND $items AS it
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+                  (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+            WHERE toLower(db.name) = toLower(it.database)
+              AND toLower(s.name)  = toLower(it.schema)
+              AND toLower(t.name)  = toLower(it.table)
+              AND ($overwrite OR t.description IS NULL OR t.description = '')
+            SET t.description = it.description
+            RETURN t.id AS id
+            """,
+            {"items": table_items, "overwrite": overwrite},
+        )
+        changed_table_ids = [r["id"] for r in result]
+
+    if column_items:
+        result = conn.query_write(
+            f"""
+            UNWIND $items AS it
+            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+                  (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                  (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+            WHERE toLower(db.name) = toLower(it.database)
+              AND toLower(s.name)  = toLower(it.schema)
+              AND toLower(t.name)  = toLower(it.table)
+              AND toLower(c.name)  = toLower(it.column)
+              AND ($overwrite OR c.description IS NULL OR c.description = '')
+            SET c.description = it.description
+            RETURN c.id AS id
+            """,
+            {"items": column_items, "overwrite": overwrite},
+        )
+        changed_column_ids = [r["id"] for r in result]
+
+    summary = {
+        "table_descriptions": len(table_items),
+        "column_descriptions": len(column_items),
+        "tables_updated": len(changed_table_ids),
+        "columns_updated": len(changed_column_ids),
+    }
+
+    if refresh_embeddings and (changed_table_ids or changed_column_ids):
+        # Changed columns also feed their parent table's embedding text.
+        reembed_ids = set(changed_table_ids) | set(changed_column_ids)
+        reembed_ids |= set(_parent_table_ids(changed_column_ids))
+        try:
+            _refresh_vdb_embeddings(list(reembed_ids))
+        except Exception:
+            logger.warning(
+                "apply_descriptions: embedding refresh failed; descriptions "
+                "were still written to the graph.",
+                exc_info=True,
+            )
+
+    logger.info("apply_descriptions: %s", summary)
+    return summary
+
+
+def _parent_table_ids(column_ids: list[str]) -> list[str]:
+    """Return the ids of Table nodes that own any of ``column_ids``."""
+    if not column_ids:
+        return []
+    rows = get_neo4j_conn().query_read(
+        f"""
+        UNWIND $ids AS cid
+        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{id: cid}})
+        RETURN DISTINCT t.id AS id
+        """,
+        {"ids": column_ids},
+    )
+    return [r["id"] for r in rows]
+
+
 def _get_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
