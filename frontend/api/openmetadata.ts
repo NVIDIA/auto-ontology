@@ -124,8 +124,22 @@ export const om = {
 			} = {},
 		) =>
 			json<OmListResponse<OmQuery>>(
-				`${BASE}/queries${qs({ fields: 'query,users,queryDate,queryUsedIn', ...params })}`,
+				`${BASE}/queries${qs({
+					fields: 'query,users,queryDate,queryUsedIn,description,duration',
+					...params,
+				})}`,
 			),
+
+		patch: (id: string, ops: ReadonlyArray<Record<string, unknown>>) =>
+			fetch(`${BASE}/queries/${id}`, {
+				method: 'PATCH',
+				headers: { 'Content-Type': 'application/json-patch+json' },
+				body: JSON.stringify(ops),
+				cache: 'no-store',
+			}).then(async (r) => {
+				if (!r.ok) throw new Error(`PATCH /queries/${id} -> ${r.status} ${await r.text()}`);
+				return r.json() as Promise<OmQuery>;
+			}),
 	},
 
 	lineage: {

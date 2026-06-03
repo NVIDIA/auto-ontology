@@ -18,6 +18,7 @@ import DatabaseSvg from './svg/database.svg';
 import SettingsSvg from './svg/settings.svg';
 import ChartBarSvg from './svg/chart-bar.svg';
 import SparklesSvg from './svg/sparkles.svg';
+import CopySvg from './svg/copy.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -34,6 +35,7 @@ export enum IconName {
 	Settings = 'settings',
 	ChartBar = 'chart-bar',
 	Sparkles = 'sparkles',
+	Copy = 'copy',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -51,6 +53,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Settings]: SettingsSvg,
 	[IconName.ChartBar]: ChartBarSvg,
 	[IconName.Sparkles]: SparklesSvg,
+	[IconName.Copy]: CopySvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

@@ -97,8 +97,10 @@ export type OmQuery = {
 	id: string;
 	name?: string;
 	query: string;
+	description?: string | null;
 	queryType?: string | null;
 	queryDate?: number;
+	duration?: number | null;
 	users?: OmEntityRef[] | null;
 	queryUsedIn?: OmEntityRef[] | null;
 	vote?: number | null;

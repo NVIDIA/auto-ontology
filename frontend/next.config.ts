@@ -45,6 +45,10 @@ const nextConfig: NextConfig = {
 				destination: `${pythonApiUrl}/api/columns/:path*`,
 			},
 			{
+				source: '/api/queries/:path*',
+				destination: `${pythonApiUrl}/api/queries/:path*`,
+			},
+			{
 				source: '/api/nodes/:path*',
 				destination: `${pythonApiUrl}/api/nodes/:path*`,
 			},
