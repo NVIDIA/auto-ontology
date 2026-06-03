@@ -10,7 +10,6 @@ import { Suspense, useEffect, useMemo, useState } from 'react';
 import { om } from '@/api/openmetadata';
 import type { OmLineageResponse, OmQuery, OmTable } from '@/types/openmetadata';
 import { LineageGraph, type GraphEdge, type GraphNode } from '@/components/catalog/LineageGraph';
-import { Panel } from '@/components/catalog/ui';
 
 const MAX_SIBLINGS = 6;
 const MAX_RELATED = 8;
@@ -253,7 +252,7 @@ const LineageExplorer = () => {
 					</h1>
 					<p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
 						How a table relates to the rest of your warehouse — directed lineage from
-						OpenMetadata, table joins observed in real query history, and same-schema
+						the catalog, table joins observed in real query history, and same-schema
 						neighbours, centred on the table you pick.
 					</p>
 				</div>
@@ -298,7 +297,7 @@ const LineageExplorer = () => {
 				</span>
 				<span className="flex items-center gap-1.5">
 					<span className="inline-block h-px w-5 border-t border-zinc-400" />
-					Lineage — OpenMetadata{' '}
+					Lineage — catalog{' '}
 					<span className="rounded-full bg-zinc-100 px-1.5 py-0.5 tabular-nums dark:bg-zinc-800">
 						{omEdgeCount}
 					</span>
@@ -314,32 +313,6 @@ const LineageExplorer = () => {
 			) : graph ? (
 				<>
 					<LineageGraph nodes={graph.nodes} edges={graph.edges} />
-					{omEdgeCount === 0 ? (
-						<Panel className="mt-4">
-							<p className="px-4 py-3 text-xs text-zinc-500 dark:text-zinc-400">
-								{relatedCount > 0 ? (
-									<>
-										Showing{' '}
-										<span className="font-medium">
-											{relatedCount} relationship
-											{relatedCount === 1 ? '' : 's'} derived from query joins
-										</span>{' '}
-										plus same-schema neighbours. OpenMetadata has no ingested
-										table-to-table lineage for this entity yet — run the lineage
-										workflow with query parsing enabled and directed edges will
-										appear here automatically.
-									</>
-								) : (
-									<>
-										No query joins reference this table and OpenMetadata has no
-										ingested lineage for it yet, so only same-schema neighbours
-										are shown. Relationships will appear here as lineage is
-										ingested or as joins against this table are observed.
-									</>
-								)}
-							</p>
-						</Panel>
-					) : null}
 					{table ? (
 						<div className="mt-4 text-sm">
 							<Link

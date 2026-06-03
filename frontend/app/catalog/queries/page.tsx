@@ -67,8 +67,8 @@ export default function QueriesPage() {
 						Query Tab
 					</h1>
 					<p className="mt-1 max-w-2xl text-sm text-zinc-600 dark:text-zinc-400">
-						Every query OpenMetadata observed in your warehouse, with the tables it
-						touched and a plain-English summary.
+						Every query observed in your warehouse, with the tables it touched and a
+						plain-English summary.
 					</p>
 				</div>
 				<div className="flex items-center gap-2">
@@ -120,8 +120,7 @@ export default function QueriesPage() {
 				</div>
 			) : sorted.length === 0 ? (
 				<p className="rounded-lg border border-dashed border-zinc-300 p-12 text-center text-sm text-zinc-500 dark:border-zinc-700">
-					No queries tracked yet. Run the OpenMetadata usage ingestion against your
-					Snowflake service.
+					No queries tracked yet. Run usage ingestion against your warehouse.
 				</p>
 			) : (
 				<ul className="space-y-3">
