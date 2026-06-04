@@ -1,0 +1,48 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# One-way mirror: GitHub (canonical) -> GitLab (for Astra / internal CI).
+# Configure repository secrets before enabling:
+#   GITLAB_REPO_URL        - HTTPS clone URL without credentials, e.g.
+#                            https://gitlab-master.nvidia.com/my-group/GSF.git
+#   GITLAB_MIRROR_TOKEN    - GitLab deploy token or PAT with write_repository
+#   GITLAB_MIRROR_USERNAME - optional; defaults to oauth2 (use deploy-token username if needed)
+
+name: Mirror main to GitLab
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: mirror-to-gitlab
+  cancel-in-progress: true
+
+jobs:
+  mirror:
+    name: Push main to GitLab
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Push to GitLab
+        env:
+          GITLAB_REPO_URL: ${{ secrets.GITLAB_REPO_URL }}
+          GITLAB_MIRROR_TOKEN: ${{ secrets.GITLAB_MIRROR_TOKEN }}
+          GITLAB_MIRROR_USERNAME: ${{ secrets.GITLAB_MIRROR_USERNAME }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GITLAB_REPO_URL:-}" ] || [ -z "${GITLAB_MIRROR_TOKEN:-}" ]; then
+            echo "Configure GITLAB_REPO_URL and GITLAB_MIRROR_TOKEN in repository secrets."
+            exit 1
+          fi
+          user="${GITLAB_MIRROR_USERNAME:-oauth2}"
+          host_path="${GITLAB_REPO_URL#https://}"
+          host_path="${host_path#http://}"
+          git remote add gitlab "https://${user}:${GITLAB_MIRROR_TOKEN}@${host_path}"
+          git push gitlab "HEAD:refs/heads/main"
