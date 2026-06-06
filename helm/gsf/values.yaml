@@ -78,6 +78,13 @@ postgres:
 # pgAdmin
 # ------------------------------------------------------------------
 pgadmin:
+  # Disabled on Astra: pgAdmin is ClusterIP-only here (never exposed via the
+  # Route), so it is unreachable externally and serves no purpose on-cluster.
+  # The dpage/pgadmin4 image is also incompatible with OpenShift's restricted-v2
+  # SCC — it runs as a random non-root UID with all caps dropped, and the image
+  # entrypoint exits 126 (cannot execute) under that constraint. Flip to true
+  # for minikube/local where there is no SCC and pgAdmin is a handy DB GUI.
+  enabled: false
   image:
     repository: dpage/pgadmin4
     tag: latest

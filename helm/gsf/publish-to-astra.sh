@@ -5,7 +5,7 @@
 #
 # ── Canonical source of truth ────────────────────────────────────────────────
 # THIS chart (helm/gsf/ in the GitHub repo) is the single source of truth.
-# The GitLab `gsf-deploy` repo is a PUBLISHED COPY consumed by ArgoCD — never
+# The GitLab `gsf-app-deploy` repo is a PUBLISHED COPY consumed by ArgoCD — never
 # hand-edit its app templates. To ship a chart change:
 #
 #     1. edit helm/gsf/  (and commit it to GitHub)
@@ -21,14 +21,14 @@
 # Usage:
 #   ./publish-to-astra.sh [-e ENV] [-r DEPLOY_REPO_SSH_URL] [-k SSH_KEY] [-n]
 #     -e ENV    target environment dir under deployment/ (default: stg)
-#     -r URL    deploy repo SSH URL (default: the access-gpu-product-all gsf-deploy)
+#     -r URL    deploy repo SSH URL (default: the access-gpu-product-all gsf-app-deploy)
 #     -k KEY    SSH private key for gitlab-master (default: ~/.ssh/id_ed25519_nvidia)
 #     -n        dry-run: stage + diff only, do not commit/push
 #
 set -euo pipefail
 
 ENV="stg"
-DEPLOY_REPO="ssh://git@gitlab-master.nvidia.com:12051/ape-repo/astra-projects/access-gpu-product-all/gsf-deploy.git"
+DEPLOY_REPO="ssh://git@gitlab-master.nvidia.com:12051/ape-repo/astra-projects/access-gpu-product-all/gsf-app-deploy.git"
 SSH_KEY="${GSF_DEPLOY_SSH_KEY:-$HOME/.ssh/id_ed25519_nvidia}"
 DRY_RUN=0
 
