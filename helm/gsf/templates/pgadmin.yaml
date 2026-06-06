@@ -5,12 +5,14 @@ metadata:
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "pgadmin") | nindent 4 }}
 spec:
-  type: NodePort
+  type: {{ .Values.pgadmin.service.type | default "NodePort" }}
   ports:
     - name: http
       port: {{ .Values.pgadmin.service.port }}
-      targetPort: 80
+      targetPort: {{ .Values.pgadmin.listenPort | default 8080 }}
+      {{- if eq (.Values.pgadmin.service.type | default "NodePort") "NodePort" }}
       nodePort: {{ .Values.pgadmin.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 4 }}
 ---
@@ -22,6 +24,12 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "pgadmin") | nindent 4 }}
 spec:
   replicas: 1
+  # Recreate (not RollingUpdate): the namespace ResourceQuota is tight
+  # (limits.cpu=10 total), so a rolling surge that spins up the new pod before
+  # tearing down the old one would deadlock on quota. Recreate frees the old
+  # pod first.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 6 }}
@@ -30,13 +38,14 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 8 }}
     spec:
+      {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: pgadmin
           image: "{{ .Values.pgadmin.image.repository }}:{{ .Values.pgadmin.image.tag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.pgadmin.listenPort | default 8080 }}
           env:
             - name: PGADMIN_DEFAULT_EMAIL
               valueFrom:
@@ -50,5 +59,19 @@ spec:
                   key: PGADMIN_PASSWORD
             - name: PGADMIN_CONFIG_SERVER_MODE
               value: "True"
+            # Bind an unprivileged port: OpenShift's restricted SCC runs this
+            # pod as a random non-root UID without NET_BIND_SERVICE.
+            - name: PGADMIN_LISTEN_PORT
+              value: {{ .Values.pgadmin.listenPort | default 8080 | quote }}
+          # pgAdmin writes its config/session DB and storage under
+          # /var/lib/pgadmin. Under the restricted SCC the image's pre-owned
+          # (uid 5050) dir is not writable by the assigned UID, so back it with
+          # an emptyDir that OpenShift makes group-writable for the pod fsGroup.
+          volumeMounts:
+            - name: pgadmin-data
+              mountPath: /var/lib/pgadmin
           resources:
             {{- toYaml .Values.pgadmin.resources | nindent 12 }}
+      volumes:
+        - name: pgadmin-data
+          emptyDir: {}

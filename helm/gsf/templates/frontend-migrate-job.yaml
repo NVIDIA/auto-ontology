@@ -41,6 +41,7 @@ spec:
                 echo "waiting for postgres..."
                 sleep 2
               done
+          {{- include "gsf.initResources" . | nindent 10 }}
       containers:
         - name: prisma-migrate
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
@@ -54,3 +55,10 @@ spec:
             - node_modules/prisma/build/index.js
             - db
             - push
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi

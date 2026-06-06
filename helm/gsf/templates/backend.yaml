@@ -23,6 +23,10 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend") | nindent 4 }}
 spec:
   replicas: {{ .Values.backend.replicas }}
+  # Recreate under the tight namespace quota (limits.cpu=10) to avoid a
+  # rolling-update surge deadlocking on CPU quota.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 6 }}
@@ -31,6 +35,7 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "backend") | nindent 8 }}
     spec:
+      {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         {{- include "gsf.waitForDeps" . | nindent 8 }}
       containers:

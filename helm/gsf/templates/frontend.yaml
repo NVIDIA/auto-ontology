@@ -5,12 +5,14 @@ metadata:
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend") | nindent 4 }}
 spec:
-  type: NodePort
+  type: {{ .Values.frontend.service.type | default "NodePort" }}
   ports:
     - name: http
       port: {{ .Values.frontend.service.port }}
       targetPort: 3000
+      {{- if eq (.Values.frontend.service.type | default "NodePort") "NodePort" }}
       nodePort: {{ .Values.frontend.service.nodePort }}
+      {{- end }}
   selector:
     {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 4 }}
 ---
@@ -22,6 +24,10 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend") | nindent 4 }}
 spec:
   replicas: {{ .Values.frontend.replicas }}
+  # Recreate under the tight namespace quota (limits.cpu=10) to avoid a
+  # rolling-update surge deadlocking on CPU quota.
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 6 }}
@@ -30,6 +36,7 @@ spec:
       labels:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "frontend") | nindent 8 }}
     spec:
+      {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         {{- include "gsf.waitForDeps" . | nindent 8 }}
       containers:

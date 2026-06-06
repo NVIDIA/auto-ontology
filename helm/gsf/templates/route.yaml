@@ -1,0 +1,29 @@
+{{- if .Values.route.enabled }}
+{{/*
+OpenShift Route exposing the Next.js frontend externally. This is the native
+ingress on Astra's OpenShift clusters. With host empty, OpenShift assigns
+<name>-<namespace>.<apps-domain> automatically. Disabled for minikube, where
+the frontend is reached via its NodePort Service instead.
+*/}}
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: frontend
+  labels:
+    {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend") | nindent 4 }}
+spec:
+  {{- if .Values.route.host }}
+  host: {{ .Values.route.host | quote }}
+  {{- end }}
+  to:
+    kind: Service
+    name: frontend
+    weight: 100
+  port:
+    targetPort: http
+  {{- if .Values.route.tls.enabled }}
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect
+  {{- end }}
+{{- end }}

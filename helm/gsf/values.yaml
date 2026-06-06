@@ -4,10 +4,34 @@
 # IfNotPresent prevents the cluster from trying to pull from a remote registry.
 imagePullPolicy: IfNotPresent
 
+# Image pull secrets attached to every GSF workload pod. On Astra the JFrog
+# pull secret (astra-jfrog-docker-pullsecret) is provisioned in the namespace
+# by Fusion; referencing it lets pods pull the private it-astra-docker-local
+# images. Leave empty ([]) for minikube with locally-built images.
+imagePullSecrets:
+  - name: astra-jfrog-docker-pullsecret
+
+# OpenShift Route exposing the frontend externally. On Astra (OpenShift) a Route
+# is the native ingress; with host left empty OpenShift auto-assigns
+# <route>-<namespace>.<apps-domain>. Disable for minikube (use NodePort there).
+route:
+  enabled: true
+  host: ""
+  tls:
+    enabled: true
+
 # ------------------------------------------------------------------
 # Shared credentials — populate a single k8s Secret (<release>-secrets)
 # consumed by all GSF workloads.
+#
+# bundledSecret.enabled renders templates/secret.yaml from the plaintext
+# values below. On Astra this MUST stay false: Fusion injects an
+# ExternalSecret that materialises the same secret name (<release>-secrets)
+# from Vault, and two resources with the same name collide. Set true for
+# minikube/local where there is no Vault.
 # ------------------------------------------------------------------
+bundledSecret:
+  enabled: false
 # Postgres
 postgresUser: gsf
 postgresPassword: ""
@@ -38,10 +62,17 @@ postgres:
     port: 5432
   persistence:
     size: 5Gi
+  # Explicit limits are REQUIRED on Astra: the namespace LimitRange injects a
+  # default limits.cpu=10 onto any container lacking one, and the ResourceQuota
+  # caps total limits.cpu at 10 — so a single unbounded pod exhausts the quota
+  # and blocks every other workload. Keep the whole stack comfortably under 10.
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 # ------------------------------------------------------------------
 # pgAdmin
@@ -50,13 +81,24 @@ pgadmin:
   image:
     repository: dpage/pgadmin4
     tag: latest
+  # Port pgAdmin's gunicorn binds inside the container. Must be >=1024 on
+  # OpenShift: the restricted SCC runs the pod as a random non-root UID and
+  # drops NET_BIND_SERVICE, so binding the default privileged port 80 fails
+  # (container exits 126). 8080 is unprivileged and binds cleanly.
+  listenPort: 8080
   service:
+    # ClusterIP on Astra (NodePort is not externally reachable on OpenShift);
+    # pgAdmin stays internal-only. Override to NodePort for minikube.
+    type: ClusterIP
     port: 80
     nodePort: 30050
   resources:
     requests:
       cpu: 50m
       memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # ------------------------------------------------------------------
 # Neo4j
@@ -77,13 +119,16 @@ neo4j:
     requests:
       cpu: 200m
       memory: 1Gi
+    limits:
+      cpu: "1"
+      memory: 2Gi
 
 # ------------------------------------------------------------------
 # GSF FastAPI backend
 # ------------------------------------------------------------------
 backend:
   image:
-    repository: nvcr.io/nvstaging/gsf
+    repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
     tag: 0.0.1
   service:
     port: 3001
@@ -92,6 +137,9 @@ backend:
     requests:
       cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 # ------------------------------------------------------------------
 # Ingestion worker (no Service, no ingress; long-running pod)
@@ -99,22 +147,28 @@ backend:
 ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
-    repository: nvcr.io/nvstaging/gsf
+    repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
     tag: 0.0.1
   replicas: 1
   resources:
     requests:
       cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
 
 # ------------------------------------------------------------------
 # Next.js frontend
 # ------------------------------------------------------------------
 frontend:
   image:
-    repository: nvcr.io/nvstaging/gsf-frontend
+    repository: artifactory.nvidia.com/it-astra-docker-local/gsf/frontend
     tag: 0.0.1
   service:
+    # ClusterIP on Astra; external access is via the OpenShift Route above.
+    # Override to NodePort for minikube.
+    type: ClusterIP
     port: 3000
     nodePort: 30000
   replicas: 1
@@ -122,3 +176,6 @@ frontend:
     requests:
       cpu: 100m
       memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi

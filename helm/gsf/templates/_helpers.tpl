@@ -34,6 +34,14 @@ app.kubernetes.io/component: {{ .component }}
 {{ include "gsf.fullname" . }}-secrets
 {{- end -}}
 
+{{/* Image pull secrets shared by all GSF workload pods. */}}
+{{- define "gsf.imagePullSecrets" -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+{{- toYaml . | nindent 0 }}
+{{- end }}
+{{- end -}}
+
 {{/*
 Init containers that block until Postgres and Neo4j are reachable.
 A Service routes only to Ready endpoints, so `nc -z` succeeds only after
@@ -51,6 +59,7 @@ each datastore's readiness probe has passed.
         echo "waiting for postgres..."
         sleep 2
       done
+  {{- include "gsf.initResources" . | nindent 2 }}
 - name: wait-for-neo4j
   image: busybox:1.36
   imagePullPolicy: {{ .Values.imagePullPolicy }}
@@ -62,4 +71,21 @@ each datastore's readiness probe has passed.
         echo "waiting for neo4j..."
         sleep 2
       done
+  {{- include "gsf.initResources" . | nindent 2 }}
+{{- end -}}
+
+{{/*
+Tiny resource bounds for the busybox wait-* init containers. Without an
+explicit limit, Astra's namespace LimitRange injects a default limits.cpu=10,
+which (because pod quota counts max(initContainers, sum(containers))) makes
+every pod claim 10 CPU and blows the ResourceQuota after a single pod.
+*/}}
+{{- define "gsf.initResources" -}}
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
 {{- end -}}
