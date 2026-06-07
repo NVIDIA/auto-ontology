@@ -93,8 +93,6 @@ def _worker_loop(
                 "(e.g. postgresql://user:pass@host:5432/dbname) so the "
                 "text-to-SQL agent has a database to query."
             )
-        # The text-to-SQL agent operates on a single connector at a time.
-        connector = connectors[0]
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
         try:
@@ -124,7 +122,7 @@ def _worker_loop(
             agent_payload = {
                 "question": payload,
                 "retriever": retriever,
-                "connector": connector,
+                "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }
