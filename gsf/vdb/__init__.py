@@ -12,7 +12,7 @@ from gsf.vdb.postgres import PostgresVDB
 VDB_COLLECTION: str = "nv_ingest_tabular"
 
 
-def get_vdb(*, database_name: str = None) -> PostgresVDB:
+def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
     """Build a PostgresVDB pointed at the local pgvector-enabled Postgres.
 
     When database_name is provided, the VDB will use it to reset old embeddings for the given database.

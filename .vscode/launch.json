@@ -5,12 +5,12 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug Ingest",
+      "name": "Debug Local Ingest",
       "type": "debugpy",
       "request": "launch",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python",
-      "module": "dev_tools.ingest_local_postgres",
+      "module": "dev_tools.local_ingest",
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false

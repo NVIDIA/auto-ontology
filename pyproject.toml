@@ -12,6 +12,7 @@ dependencies = [
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.3",
     "python-dotenv>=1.2.2",
+    "snowflake-connector-python>=4.6.0",
     "uvicorn[standard]>=0.32.0",
 ]
 

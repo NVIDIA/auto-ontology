@@ -5,12 +5,12 @@
 """Seed the local docker-compose Postgres with the demo catalog.
 
 Creates the four demo databases if they don't exist, then applies each
-database's DDL from ``gsf/scripts/sql/<db>.sql``. Idempotent — safe to re-run.
+database's DDL from ``dev_tools/sql/<db>.sql``. Idempotent — safe to re-run.
 
 Usage::
 
     docker compose up -d postgres
-    PYTHONPATH=gsf uv run --no-sync python -m scripts.seed_local_postgres
+    uv run --no-sync python -m dev_tools.seed_local_postgres
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from pathlib import Path
 
 import psycopg
 
-logger = logging.getLogger("scripts.seed_local_postgres")
+logger = logging.getLogger("dev_tools.seed_local_postgres")
 
 DEFAULT_POSTGRES_HOST = "localhost"
 DEFAULT_POSTGRES_PORT = 5432

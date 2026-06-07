@@ -164,6 +164,15 @@ wheels = [
 ]
 
 [[package]]
+name = "asn1crypto"
+version = "1.5.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/de/cf/d547feed25b5244fcb9392e288ff9fdc3280b10260362fc45d37a798a6ee/asn1crypto-1.5.1.tar.gz", hash = "sha256:13ae38502be632115abf8a24cbe5f4da52e3b5231990aff31123c805306ccb9c", size = 121080, upload-time = "2022-03-15T14:46:52.889Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c9/7f/09065fd9e27da0eda08b4d6897f1c13535066174cc023af248fc2a8d5e5a/asn1crypto-1.5.1-py2.py3-none-any.whl", hash = "sha256:db4e40728b728508912cbb3d44f19ce188f218e9eba635821bb4b68564f8fd67", size = 105045, upload-time = "2022-03-15T14:46:51.055Z" },
+]
+
+[[package]]
 name = "asyncpg"
 version = "0.31.0"
 source = { registry = "https://pypi.org/simple" }
@@ -238,6 +247,20 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b0/1c6a16426d389813b48d95e26898aff79abbde42ad353958ad95cc8c9b21/beautifulsoup4-4.14.3.tar.gz", hash = "sha256:6292b1c5186d356bba669ef9f7f051757099565ad9ada5dd630bd9de5fa7fb86", size = 627737, upload-time = "2025-11-30T15:08:26.084Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/1a/39/47f9197bdd44df24d67ac8893641e16f386c984a0619ef2ee4c51fbbc019/beautifulsoup4-4.14.3-py3-none-any.whl", hash = "sha256:0918bfe44902e6ad8d57732ba310582e98da931428d231a5ecb9e7c703a735bb", size = 107721, upload-time = "2025-11-30T15:08:24.087Z" },
+]
+
+[[package]]
+name = "boto3"
+version = "1.43.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "botocore" },
+    { name = "jmespath" },
+    { name = "s3transfer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b7/65/47670987f2f9e181397872c7ee6415b7b95156d711b7eab6c55f66e575bc/boto3-1.43.0.tar.gz", hash = "sha256:80d44a943ef90aba7958ab31d30c155c198acc8a9581b5846b3878b2c8951086", size = 113143, upload-time = "2026-04-29T22:07:49.084Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b3/a0/3e6a0b1c1ea6bec76f71473727ef27abf3cd40e9709b3ebcbfbcfaae6f79/boto3-1.43.0-py3-none-any.whl", hash = "sha256:8ebe03754a4b73a5cb6ec2f14cca03ac33bd4760d0adea53da4724845130258b", size = 140497, upload-time = "2026-04-29T22:07:46.216Z" },
 ]
 
 [[package]]
@@ -884,6 +907,7 @@ dependencies = [
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
     { name = "python-dotenv" },
+    { name = "snowflake-connector-python" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -905,6 +929,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "snowflake-connector-python", specifier = ">=4.6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
 ]
 
@@ -1578,7 +1603,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.5.25.dev20260525081513"
+version = "2026.6.4.dev20260604105852"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#c951d4024ee5cd5a912a4dac5600af51818f7632" }
 dependencies = [
     { name = "backoff" },
@@ -2384,6 +2409,19 @@ crypto = [
 ]
 
 [[package]]
+name = "pyopenssl"
+version = "26.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cryptography" },
+    { name = "typing-extensions", marker = "python_full_version < '3.13'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1a/51/27a5ad5f939d08f690a326ef9582cda7140555180db71695f6fb747d6a36/pyopenssl-26.2.0.tar.gz", hash = "sha256:8c6fcecd1183a7fc897548dfe388b0cdb7f37e018200d8409cf33959dbe35387", size = 182195, upload-time = "2026-05-04T23:06:09.72Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/73/b8/a0e2790ae249d6f38c9f66de7a211621a7ab2650217bcd04e1262f578a56/pyopenssl-26.2.0-py3-none-any.whl", hash = "sha256:4f9d971bc5298b8bc1fab282803da04bf000c755d4ad9d99b52de2569ca19a70", size = 55823, upload-time = "2026-05-04T23:06:08.395Z" },
+]
+
+[[package]]
 name = "pypdfium2"
 version = "4.30.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2806,6 +2844,18 @@ wheels = [
 ]
 
 [[package]]
+name = "s3transfer"
+version = "0.17.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "botocore" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/b3/bcdc2f58fa92592db511beda154c2c08d28f21f6c4637f06a42a24b10c21/s3transfer-0.17.1.tar.gz", hash = "sha256:042dd5e3b1b512355e35a23f0223e426b7042e80b97830ea2680ddce327fc45e", size = 159439, upload-time = "2026-05-26T19:45:01.714Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/dd/904873250a6554fbae40cddbf9198e3cc37a2f1319d5e1a5ce82fe269c17/s3transfer-0.17.1-py3-none-any.whl", hash = "sha256:5b9827d1044159bbb01b86ef8902760ea39281927f5de31de75e1d657177bf4c", size = 88264, upload-time = "2026-05-26T19:45:00.452Z" },
+]
+
+[[package]]
 name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2846,6 +2896,52 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c5/65/3ada667d32675399001bf022ad3d9f3989b57101351ebc71d6fbe2384634/smart_open-7.6.1.tar.gz", hash = "sha256:4347996e7ba21db7cd1e059632e0b30395407e4f6c660d2ddffc8f2a9ae5f990", size = 54754, upload-time = "2026-05-09T06:23:37.06Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/14/78/0f68b93564b8c6b6987a0696c582ba2591a381ab2f733a501909e949f241/smart_open-7.6.1-py3-none-any.whl", hash = "sha256:b4de6aebef023aca91cc9fb372052e1343ba3f152de215bd22391a663e3ddd21", size = 64845, upload-time = "2026-05-09T06:23:35.386Z" },
+]
+
+[[package]]
+name = "snowflake-connector-python"
+version = "4.6.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "asn1crypto" },
+    { name = "boto3" },
+    { name = "botocore" },
+    { name = "certifi" },
+    { name = "charset-normalizer" },
+    { name = "cryptography" },
+    { name = "filelock" },
+    { name = "idna" },
+    { name = "packaging" },
+    { name = "platformdirs" },
+    { name = "pyjwt" },
+    { name = "pyopenssl" },
+    { name = "pytz" },
+    { name = "requests" },
+    { name = "sortedcontainers" },
+    { name = "tomlkit" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/49/4d/7e6a9088381386b4cfae4c5d1d23ea0c3618ca694bc2290118737af59f36/snowflake_connector_python-4.6.0.tar.gz", hash = "sha256:06e2dba02703da6fd60e07bb0574506f810a85e5831d3461247753ecce4b8335", size = 937999, upload-time = "2026-05-28T13:01:48.582Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ab/4e/a839eddf87df7fe91fd8086e6a43e10e6afddf7c6b718ef036643f032867/snowflake_connector_python-4.6.0-cp312-cp312-macosx_14_0_arm64.whl", hash = "sha256:a7701b702dbeb348769c5d1248231e18544c4ff1fb4118ad73d48e8f801cfb6e", size = 1167890, upload-time = "2026-05-28T13:01:56.567Z" },
+    { url = "https://files.pythonhosted.org/packages/7d/81/632b4ca9459cd801abfaa5396a60d9e60b9e2f051d015a577af0493782d3/snowflake_connector_python-4.6.0-cp312-cp312-macosx_14_0_x86_64.whl", hash = "sha256:00abbcfe958f60da18297191f3499b1e61802e64622521a2e8da1c059c14e1c0", size = 1181169, upload-time = "2026-05-28T13:01:58.16Z" },
+    { url = "https://files.pythonhosted.org/packages/c9/31/79871d7eea206c60a7891a8d4349fdd8933822101af87204231162a5c3e8/snowflake_connector_python-4.6.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:72aaee21a70e00fbe4dadcc60b9b1012b6411dddc90f94804d5efe5706fb9621", size = 2878875, upload-time = "2026-05-28T13:01:36.26Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/ff/ea43b9f87cf632bd9735f4da18d7982572fb67073fd55c67841091a20f1a/snowflake_connector_python-4.6.0-cp312-cp312-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:6d3f6120edeb0d6edd208831d006cc3e769ec51bc346727f22d7aeaecbf20f77", size = 2910491, upload-time = "2026-05-28T13:01:37.957Z" },
+    { url = "https://files.pythonhosted.org/packages/52/b1/80bc142ce5afee2e9b0520e4444bcdf1a02627c1066653705e4c36b475ab/snowflake_connector_python-4.6.0-cp312-cp312-win_amd64.whl", hash = "sha256:f15e2493a316ce79ab3d7fb16add10252bb2401723e5cfbc7a2ebc44d89a7b2b", size = 5388193, upload-time = "2026-05-28T13:02:10.267Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/7b/29af48b122f5df4e2c23a1733bd5ed28193f24734a7cf48e345e5c7c3012/snowflake_connector_python-4.6.0-cp313-cp313-macosx_14_0_arm64.whl", hash = "sha256:e0ca5a035b1afa690fb36a767ba59c8db85ef6295b88c2bbc2040449e99992ad", size = 1166660, upload-time = "2026-05-28T13:01:59.64Z" },
+    { url = "https://files.pythonhosted.org/packages/20/af/9c5f1551278a309bbda06662e842b34fc17a60916032e5402033482c0367/snowflake_connector_python-4.6.0-cp313-cp313-macosx_14_0_x86_64.whl", hash = "sha256:1894504c69a76ac4a205d01fbb3e18c6a6e974e6ad26dad263edd06343bea501", size = 1179744, upload-time = "2026-05-28T13:02:01.254Z" },
+    { url = "https://files.pythonhosted.org/packages/4e/ef/fdaf6150dacf80edd4dac948fd9a08930944d2ad2e978fe33aca598aa0a5/snowflake_connector_python-4.6.0-cp313-cp313-manylinux2014_aarch64.manylinux_2_17_aarch64.whl", hash = "sha256:ed40d1e9d867253596860b9d5240280489ff4692b7a3fa21e2d45d63b4b61d36", size = 2844736, upload-time = "2026-05-28T13:01:40.001Z" },
+    { url = "https://files.pythonhosted.org/packages/da/a1/25fdb592dfed3150b429f1bbb22b495c2590e5a5007153be9d1b798c72c9/snowflake_connector_python-4.6.0-cp313-cp313-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:1c8476781cfef961fc5f6f75a5238e668d3e0ca5ebf1d055661b2fcf2831c254", size = 2878174, upload-time = "2026-05-28T13:01:42.448Z" },
+    { url = "https://files.pythonhosted.org/packages/29/1f/081d2fb06fca926bb2e9af81533516af4f86ca13abe2b7cbb16ee4938339/snowflake_connector_python-4.6.0-cp313-cp313-win_amd64.whl", hash = "sha256:e8ccbf8b5e12177a86bd3ab8292cc5a99e9ac97d7645ef4a3ed0f767b4ec6594", size = 5388257, upload-time = "2026-05-28T13:02:13.073Z" },
+]
+
+[[package]]
+name = "sortedcontainers"
+version = "2.4.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e8/c4/ba2f8066cceb6f23394729afe52f3bf7adec04bf9ed2c820b39e19299111/sortedcontainers-2.4.0.tar.gz", hash = "sha256:25caa5a06cc30b6b83d11423433f65d1f9d76c4c6a0c90e3379eaa43b9bfdb88", size = 30594, upload-time = "2021-05-16T22:03:42.897Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/46/9cb0e58b2deb7f82b84065f37f3bffeb12413f947f9388e4cac22c4621ce/sortedcontainers-2.4.0-py2.py3-none-any.whl", hash = "sha256:a163dcaede0f1c021485e957a39245190e74249897e2ae4b2aa38595db237ee0", size = 29575, upload-time = "2021-05-16T22:03:41.177Z" },
 ]
 
 [[package]]
@@ -2949,6 +3045,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697ee8a44d3d69222b344920433d3b6666ccd9b374630c/tenacity-9.1.4.tar.gz", hash = "sha256:adb31d4c263f2bd041081ab33b498309a57c77f9acf2db65aadf0898179cf93a", size = 49413, upload-time = "2026-02-07T10:45:33.841Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
+]
+
+[[package]]
+name = "tomlkit"
+version = "0.15.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/51/db/03eaf4331631ef6b27d6e3c9b68c54dc6f0d63d87201fed600cc409307fd/tomlkit-0.15.0.tar.gz", hash = "sha256:7d1a9ecba3086638211b13814ea79c90dd54dd11993564376f3aa92271f5c7a3", size = 161875, upload-time = "2026-05-10T07:38:22.245Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/43/8bd850ee71a191bf072e31302c73a66be413fecdd98fdcd111ecbcce13ca/tomlkit-0.15.0-py3-none-any.whl", hash = "sha256:4dbc8f0fc024412b57ced8757ac7461305126a648ff8c2c807fcb8e133a78738", size = 41328, upload-time = "2026-05-10T07:38:23.517Z" },
 ]
 
 [[package]]

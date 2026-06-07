@@ -14,6 +14,7 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
+from gsf.connectors.snowflake import SnowflakeDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgresql": PostgresDatabase,
     "postgres": PostgresDatabase,
     "duckdb": DuckDBDatabase,
+    "snowflake": SnowflakeDatabase,
 }
 
 _connectors: dict[str, SQLDatabase] | None = None

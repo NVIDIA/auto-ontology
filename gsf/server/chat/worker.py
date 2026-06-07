@@ -78,7 +78,7 @@ def _worker_loop(
         )
 
         from gsf.connectors import get_connectors
-        from gsf.server.chat.helpers import get_retriever
+        from gsf.utils import get_retriever
         from gsf.server.chat.settings_dal import (
             fetch_acronyms,
             fetch_custom_prompts,

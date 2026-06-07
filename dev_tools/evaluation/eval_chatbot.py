@@ -41,14 +41,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.params import EmbedParams
-from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.retrieval.text_to_sql.main import get_agent_response
 from nemo_retriever.tabular_data.retrieval.text_to_sql.state import AgentPayload
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
-from gsf.connectors.postgres import PostgresDatabase
+from gsf.connectors import get_connectors
+from gsf.utils import get_retriever
 from gsf.server.env import load_server_env
-from gsf.vdb import get_vdb
 
 load_server_env()
 
@@ -66,55 +65,14 @@ if not _NVIDIA_API_KEY:
         "Get your key at https://build.nvidia.com"
     )
 
-# Match the chat server's wiring (gsf/server/chat/helpers.py): same embed
-# endpoint/model as ingest, same retriever, same pgvector store. Anything
-# else here and scoring stops being apples-to-apples with production.
-_EMBED_ENDPOINT = os.environ.get(
-    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-)
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2")
-
-EMBED_PARAMS = EmbedParams(
-    embed_invoke_url=_EMBED_ENDPOINT,
-    model_name=_EMBED_MODEL,
-    api_key=_NVIDIA_API_KEY,
-    embed_modality="text",
-)
+# Match the chat server's wiring (gsf/server/chat/helpers.py): same retriever
+# and pgvector store. Anything else here and scoring stops being apples-to-apples
+# with production.
 
 _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 
 
 _DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
-
-
-def _build_connector() -> PostgresDatabase:
-    """Build the source-DB connector against ``CONNECTION_STRINGS`` (single URL)."""
-    raw = os.environ.get("CONNECTION_STRINGS", "")
-    if not raw:
-        raise EnvironmentError(
-            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
-            "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
-        )
-    parts = [p for p in raw.split(",") if p.strip()]
-    if len(parts) != 1:
-        raise EnvironmentError(
-            f"CONNECTION_STRINGS must be exactly one URL for eval (got {len(parts)}); "
-            "multi-connector eval isn't supported yet."
-        )
-    return PostgresDatabase(parts[0])
-
-
-def _build_retriever() -> Retriever:
-    """Build the retriever against the local pgvector store."""
-    return Retriever(
-        top_k=15,
-        vdb_kwargs={"vdb": get_vdb()},
-        embed_kwargs={
-            "model_name": EMBED_PARAMS.model_name,
-            "embed_invoke_url": EMBED_PARAMS.embed_invoke_url,
-            "api_key": EMBED_PARAMS.api_key,
-        },
-    )
 
 
 # -----------------------------------------------------------------------------
@@ -162,7 +120,7 @@ def _canonical(value: Any) -> Any:
 
 
 def _execute_sql(
-    connector: PostgresDatabase, sql: str
+    connector: SQLDatabase, sql: str
 ) -> Tuple[Optional[pd.DataFrame], str]:
     if not sql or not sql.strip():
         return None, "empty SQL"
@@ -175,9 +133,7 @@ def _execute_sql(
         return None, f"{type(exc).__name__}: {exc}"
 
 
-def _score_sql(
-    connector: PostgresDatabase, expected: str, actual: str
-) -> Dict[str, Any]:
+def _score_sql(connector: SQLDatabase, expected: str, actual: str) -> Dict[str, Any]:
     text_sim = _sql_text_similarity(expected, actual)
     expected_df, expected_err = _execute_sql(connector, expected)
     actual_df, actual_err = _execute_sql(connector, actual)
@@ -229,7 +185,7 @@ def _parse_markdown_table(md: str) -> Optional[pd.DataFrame]:
             rows.append(cells)
     if not rows:
         return None
-    return pd.DataFrame(rows, columns=header)
+    return pd.DataFrame(rows, columns=pd.Index(header))
 
 
 def _db_result_to_df(value: str) -> Optional[pd.DataFrame]:
@@ -424,8 +380,8 @@ def evaluate(
         input_path,
     )
 
-    connector = _build_connector()
-    retriever = _build_retriever()
+    connectors = get_connectors()
+    retriever = get_retriever()
 
     resuming = start_index > 0 and output_path.exists()
     mode = "a" if resuming else "w"
@@ -468,7 +424,7 @@ def evaluate(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
-                    "connector": connector,
+                    "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
@@ -482,7 +438,7 @@ def evaluate(
                 row["returned_sql"] = returned_sql
                 row["returned_answer"] = returned_db_str
 
-                row.update(_score_sql(connector, expected_sql, returned_sql))
+                row.update(_score_sql(connectors[0], expected_sql, returned_sql))
                 row.update(_score_answer(expected_answer, returned_db_str))
             except Exception as exc:
                 logger.exception("Question %s failed", qid)
@@ -615,8 +571,8 @@ def evaluate_consistency(
         output_path,
     )
 
-    connector = _build_connector()
-    retriever = _build_retriever()
+    connectors = get_connectors()
+    retriever = get_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
@@ -634,7 +590,7 @@ def evaluate_consistency(
                 payload: AgentPayload = {
                     "question": question,
                     "retriever": retriever,
-                    "connector": connector,
+                    "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
                     "acronyms": [],
@@ -702,13 +658,13 @@ def evaluate_consistency(
 
 def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
-    connector = _build_connector()
-    retriever = _build_retriever()
+    connectors = get_connectors()
+    retriever = get_retriever()
 
     payload: AgentPayload = {
         "question": question,
         "retriever": retriever,
-        "connector": connector,
+        "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",
         "acronyms": [],
