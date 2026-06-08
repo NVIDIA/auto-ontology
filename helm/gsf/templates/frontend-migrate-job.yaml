@@ -29,6 +29,7 @@ spec:
         {{- include "gsf.componentSelectorLabels" (dict "root" . "component" "frontend-migrate") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
+      {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         - name: wait-for-postgres
           image: busybox:1.36
@@ -47,14 +48,35 @@ spec:
           image: "{{ .Values.frontend.image.repository }}:{{ .Values.frontend.image.tag }}"
           imagePullPolicy: {{ .Values.imagePullPolicy }}
           workingDir: /app/migrate
+          env:
+            # Prisma's query engine needs a writable cache dir; OpenShift runs
+            # the pod as an arbitrary UID without a home, so point HOME at /tmp.
+            - name: HOME
+              value: /tmp
           envFrom:
             - secretRef:
                 name: {{ include "gsf.secretName" . }}
           command:
-            - node
-            - node_modules/prisma/build/index.js
-            - db
-            - push
+            - sh
+            - -c
+            - |
+              # On a fresh database this creates the Prisma-managed tables.
+              # When Postgres is a SHARED database that also hosts agent/
+              # ingestion tables (e.g. CONNECTION_STRINGS points at this same
+              # DB), `db push` would refuse with a data-loss warning because it
+              # wants the DB to match the Prisma schema exactly. In that case
+              # the Prisma tables already exist, so treat the refusal as a
+              # no-op instead of failing the release. Any other error is fatal.
+              if node node_modules/prisma/build/index.js db push 2>/tmp/migrate-err; then
+                cat /tmp/migrate-err
+                echo "prisma db push: applied"
+              elif grep -q 'accept-data-loss' /tmp/migrate-err; then
+                cat /tmp/migrate-err
+                echo "prisma db push: skipped (shared DB already populated; Prisma tables assumed present)"
+              else
+                cat /tmp/migrate-err >&2
+                exit 1
+              fi
           resources:
             requests:
               cpu: 100m
