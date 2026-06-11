@@ -4,6 +4,7 @@
   (dict "name" "plugins" "size" .Values.neo4j.persistence.pluginsSize)
   (dict "name" "import" "size" .Values.neo4j.persistence.importSize)
 }}
+{{- $sc := $.Values.neo4j.persistence.storageClassName | default $.Values.storageClassName }}
 {{- range $pvc := $pvcs }}
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -13,6 +14,9 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" $.Chart "Release" $.Release "Values" $.Values "component" "neo4j") | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
+  {{- if $sc }}
+  storageClassName: {{ $sc }}
+  {{- end }}
   resources:
     requests:
       storage: {{ $pvc.size }}

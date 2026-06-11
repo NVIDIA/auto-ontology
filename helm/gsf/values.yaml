@@ -11,6 +11,13 @@ imagePullPolicy: IfNotPresent
 imagePullSecrets:
   - name: astra-jfrog-docker-pullsecret
 
+# Global StorageClass for all DB PersistentVolumeClaims (postgres + neo4j).
+# Leave empty ("") to use the cluster's default StorageClass. On clusters with
+# no default StorageClass (common on Astra/OpenShift), set this to a valid class
+# (e.g. ocs-storagecluster-ceph-rbd) or the PVCs stay Pending and the DB pods
+# never schedule. Per-component overrides live under <component>.persistence.
+storageClassName: ""
+
 # OpenShift Route exposing the frontend externally. On Astra (OpenShift) a Route
 # is the native ingress; with host left empty OpenShift auto-assigns
 # <route>-<namespace>.<apps-domain>. Disable for minikube (use NodePort there).
@@ -62,6 +69,9 @@ postgres:
     port: 5432
   persistence:
     size: 5Gi
+    # Override the global storageClassName for the postgres PVC. Empty ("")
+    # falls back to .Values.storageClassName, then the cluster default.
+    storageClassName: ""
   # Explicit limits are REQUIRED on Astra: the namespace LimitRange injects a
   # default limits.cpu=10 onto any container lacking one, and the ResourceQuota
   # caps total limits.cpu at 10 — so a single unbounded pod exhausts the quota
@@ -122,6 +132,9 @@ neo4j:
     logsSize: 1Gi
     pluginsSize: 1Gi
     importSize: 1Gi
+    # Override the global storageClassName for the neo4j PVCs. Empty ("")
+    # falls back to .Values.storageClassName, then the cluster default.
+    storageClassName: ""
   resources:
     requests:
       cpu: 200m
@@ -136,7 +149,7 @@ neo4j:
 backend:
   image:
     repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
-    tag: 0.0.1
+    tag: 0.0.2
   service:
     port: 3001
   replicas: 1
@@ -155,7 +168,7 @@ ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
     repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
-    tag: 0.0.1
+    tag: 0.0.2
   replicas: 1
   resources:
     requests:
