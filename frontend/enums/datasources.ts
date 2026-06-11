@@ -7,7 +7,15 @@ export enum DataModels {
 	SCHEMA = 'schema',
 	TABLE = 'table',
 	VIEW = 'view',
+	MATERIALIZED_VIEW = 'materialized view',
 	COLUMN = 'column',
+}
+
+/** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
+export enum TableType {
+	BASE_TABLE = 'base table',
+	VIEW = 'view',
+	MATERIALIZED_VIEW = 'materialized view',
 }
 
 /** Tree focus resolution before a catalog entity is matched. */

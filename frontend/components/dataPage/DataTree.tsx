@@ -9,7 +9,9 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
+import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
+import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import {
@@ -85,7 +87,8 @@ function Row({
 	hasChildren,
 	loading,
 	name,
-	meta,
+	icon,
+	title,
 	selected,
 	href,
 	onClick,
@@ -98,7 +101,8 @@ function Row({
 	hasChildren: boolean;
 	loading?: boolean;
 	name: string;
-	meta: string;
+	icon?: IconName;
+	title?: string;
 	selected: boolean;
 	href?: string;
 	onClick?: () => void;
@@ -110,9 +114,11 @@ function Row({
 	const pad = 12 + depth * 12;
 	const style = { paddingLeft: pad, paddingRight: 12 };
 
-	const metaEl = (
-		<span className="shrink-0 text-[10px] uppercase tracking-wide text-zinc-400">{meta}</span>
-	);
+	const nodeIconEl = icon ? (
+		<span className="inline-flex shrink-0" title={title} aria-hidden>
+			<Icon name={icon} className="h-4 w-4 text-zinc-500 dark:text-zinc-400" />
+		</span>
+	) : null;
 
 	const chevron = (
 		<span
@@ -144,8 +150,8 @@ function Row({
 	const inner = (
 		<>
 			{chevron}
+			{nodeIconEl}
 			{nameEl}
-			{metaEl}
 		</>
 	);
 
@@ -199,7 +205,8 @@ function ColumnBlock({
 				onToggle={() => setOpen((o) => !o)}
 				hasChildren={false}
 				name={column.column_name}
-				meta="col"
+				icon={catalogNodeInfo[DataModels.COLUMN].icon}
+				title={catalogNodeInfo[DataModels.COLUMN].title}
 				selected={selectedId === columnFocusPath}
 				href={catalogPathFromFocusId(columnFocusPath, pathBase)}
 			/>
@@ -263,7 +270,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				meta="table"
+				icon={catalogNodeInfo[catalogKindForTableType(table.table_type)].icon}
+				title={catalogNodeInfo[catalogKindForTableType(table.table_type)].title}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}
@@ -349,7 +357,8 @@ function SchemaBlock({
 				hasChildren={hasChildren}
 				loading={loadingTables}
 				name={schema.schema_name}
-				meta="schema"
+				icon={catalogNodeInfo[DataModels.SCHEMA].icon}
+				title={catalogNodeInfo[DataModels.SCHEMA].title}
 				selected={selectedId === schemaFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(schemaFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateSchemaBranch : undefined}
@@ -435,7 +444,8 @@ function DatabaseBlock({
 				hasChildren={hasChildren}
 				loading={loadingSchemas}
 				name={database.name}
-				meta={DataModels.DB}
+				icon={catalogNodeInfo[DataModels.DB].icon}
+				title={catalogNodeInfo[DataModels.DB].title}
 				selected={selectedId === database.id}
 				href={undefined}
 				onActivateBranch={activateDatabaseBranch}

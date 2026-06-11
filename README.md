@@ -13,7 +13,7 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvstaging/charts/gsf-0.0.1.tgz \
+   helm fetch https://helm.ngc.nvidia.com/nvstaging/gsf/charts/gsf-0.0.1.tgz \
      --username='$oauthtoken' \
      --password=<API-KEY>
    ```

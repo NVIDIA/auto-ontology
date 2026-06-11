@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SinglePageFormat } from '@/components/dataPage/SinglePageView';
+import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { ComposerSection } from '@/types/composer-section';
@@ -113,7 +114,7 @@ export function buildTreeFocusPageFormat(
 			header: {
 				header: {
 					title: 'Loading…',
-					subtitle: 'Catalog',
+					label: 'Catalog',
 				},
 			},
 		};
@@ -151,7 +152,7 @@ export function buildTreeFocusPageFormat(
 			header: {
 				header: {
 					title: 'All Data',
-					subtitle: 'Select a database, schema, table, or column in the tree.',
+					label: 'Select a database, schema, table, or column in the tree.',
 				},
 			},
 		};
@@ -185,7 +186,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: database.name,
-						subtitle: 'database',
+						label: catalogNodeInfo[DataModels.DB].title,
 						entityId: database.id,
 						parentId: workspaceDataId,
 					},
@@ -219,7 +220,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: schema.schema_name,
-						subtitle: `Schema · ${database.name}`,
+						label: `${catalogNodeInfo[DataModels.SCHEMA].title} · ${database.name}`,
 						entityId: schema.id,
 						parentId: database.id,
 					},
@@ -228,9 +229,11 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { database, schema, table } = resolvedFocus;
+			const tableTypeLabel = catalogNodeInfo[catalogKindForTableType(table.table_type)].title;
 			sections.push(
 				...baseCardsForEntity(table.description ?? '', [
-					{ label: 'Table', value: table.name },
+					{ label: 'Type', value: tableTypeLabel },
+					{ label: 'Name', value: table.name },
 					{ label: 'Schema', value: table.schema_name },
 					{ label: 'Database', value: table.database_name },
 					{ label: 'Columns', value: String(table.columns_count) },
@@ -256,7 +259,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						subtitle: `Table · ${schema.schema_name} · ${database.name}`,
+						label: `${tableTypeLabel} · ${schema.schema_name} · ${database.name}`,
 						entityId: table.id,
 						parentId: schema.id,
 					},
@@ -300,7 +303,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						subtitle: `Column · ${column.table_name}`,
+						label: `${catalogNodeInfo[DataModels.COLUMN].title} · ${column.table_name}`,
 						entityId: column.id,
 						parentId: table.id,
 					},
