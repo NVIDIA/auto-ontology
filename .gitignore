@@ -37,5 +37,6 @@ lancedb/*
 dev_tools/evaluation/*csv
 dev_tools/evaluation/*.json
 
-# Local OpenMetadata evaluation scratch (docker volume data, logs, secrets)
+# Local OpenMetadata evaluation environment (Docker volume + rendered configs
+# with secrets); local scratch state, never commit.
 openmetadata-eval/

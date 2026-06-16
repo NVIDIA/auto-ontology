@@ -1,5 +1,6 @@
 datasource db {
   provider = "postgresql"
+  schemas  = ["public"]
 }
 
 generator client {
@@ -15,6 +16,7 @@ model Conversation {
   messages  Message[]
 
   @@map("conversations")
+  @@schema("public")
 }
 
 model Message {
@@ -29,13 +31,15 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@map("messages")
+  @@schema("public")
 }
 
 model Prompt {
-  id        String   @id @default(uuid()) @db.Uuid
-  content   String   @default("")
+  id      String @id @default(uuid()) @db.Uuid
+  content String @default("")
 
   @@map("prompts")
+  @@schema("public")
 }
 
 model Acronym {
@@ -46,4 +50,19 @@ model Acronym {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("acronyms")
+  @@schema("public")
+}
+
+model ConversationAnalytics {
+  id                String    @id @default(uuid()) @db.Uuid
+  questionMessageId String    @unique @map("question_message_id") @db.Uuid
+  question          String    @default("")
+  questionTimestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
+  response          String?
+  responseMessageId String?   @map("response_message_id") @db.Uuid
+  responseTimestamp DateTime? @map("response_timestamp") @db.Timestamptz
+  sql               String?
+
+  @@map("conversation_analytics")
+  @@schema("public")
 }

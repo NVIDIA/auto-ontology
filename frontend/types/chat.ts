@@ -23,7 +23,15 @@ export type StepEvent = {
 
 export type ResultEvent = {
 	type: 'result';
-	answer: Record<string, unknown>;
+	answer: {
+		response: string;
+		sql_code?: string;
+		sql_response_from_db?:
+			| string[]
+			| {
+					[key: string]: string;
+			  }[];
+	};
 };
 
 export type ErrorEvent = {

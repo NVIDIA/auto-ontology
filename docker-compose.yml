@@ -15,6 +15,11 @@ services:
       POSTGRES_DB: ${POSTGRES_DATABASE}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DATABASE}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   pgadmin:
     image: dpage/pgadmin4:latest
@@ -85,6 +90,28 @@ services:
       neo4j:
         condition: service_healthy
 
+  # One-shot Job: sync the Postgres schema from prisma/schema.prisma via
+  # `prisma db push` (mirrors the Helm `frontend-migrate` hook). Runs without
+  # --accept-data-loss, so it refuses to drop tables outside the Prisma schema.
+  frontend-migrate:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf:3001}
+    image: gsf-frontend:latest
+    container_name: gsf-frontend-migrate
+    working_dir: /app/migrate
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+    command: ["node", "node_modules/prisma/build/index.js", "db", "push"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   gsf-frontend:
     build:
       context: ./frontend
@@ -102,7 +129,10 @@ services:
       PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf:3001}
       POSTGRES_HOST: postgres
     depends_on:
-      - gsf
+      gsf:
+        condition: service_started
+      frontend-migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:

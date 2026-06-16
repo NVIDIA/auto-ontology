@@ -10,6 +10,7 @@ from gsf.vdb.config import get_postgres_connection_string
 from gsf.vdb.postgres import PostgresVDB
 
 VDB_COLLECTION: str = "nv_ingest_tabular"
+VDB_SCHEMA: str = "vdb"
 
 
 def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
@@ -20,6 +21,7 @@ def get_vdb(*, database_name: str | None = None) -> PostgresVDB:
     kwargs: dict = {
         "connection_string": get_postgres_connection_string(),
         "collection_name": VDB_COLLECTION,
+        "schema_name": VDB_SCHEMA,
     }
     if database_name:
         kwargs["database_name"] = database_name

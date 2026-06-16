@@ -16,6 +16,7 @@ import logging
 from typing import Any, Iterable, Optional
 
 import psycopg
+from psycopg import sql
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
@@ -98,6 +99,7 @@ class PostgresVDB(VDB):
         self.collection_name: str = kwargs.get(
             "collection_name", kwargs.get("index_name", "nv_ingest_tabular")
         )
+        self.schema_name: str = kwargs.get("schema_name", "public")
         self.embeddings: Embeddings = kwargs.get("embeddings") or _UnusableEmbeddings()
 
         self._engine: Optional[PGEngine] = None
@@ -136,11 +138,29 @@ class PostgresVDB(VDB):
                     """
                     SELECT 1
                     FROM information_schema.tables
-                    WHERE table_schema = 'public' AND table_name = %s
+                    WHERE table_schema = %s AND table_name = %s
                     """,
-                    (self.collection_name,),
+                    (self.schema_name, self.collection_name),
                 )
                 return cur.fetchone() is not None
+
+    def _ensure_schema(self) -> None:
+        """Create the target schema if it doesn't exist.
+
+        ``init_vectorstore_table`` creates the table (and the pgvector
+        extension) but not its containing schema, so it must exist first.
+        """
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # `schema_name` is internal config (defaults to 'public');
+                # psycopg can't parameterise identifiers, so it's interpolated
+                # via the identifier-safe quote. Not user input.
+                cur.execute(
+                    sql.SQL("CREATE SCHEMA IF NOT EXISTS {}").format(
+                        sql.Identifier(self.schema_name)
+                    )
+                )
+            conn.commit()
 
     def _get_store(self) -> Optional[PGVectorStore]:
         """Return the vector store, creating the table on first write.
@@ -153,9 +173,11 @@ class PostgresVDB(VDB):
 
         engine = self._get_engine()
         if not self._table_exists():
+            self._ensure_schema()
             engine.init_vectorstore_table(
                 table_name=self.collection_name,
                 vector_size=self.vector_size,
+                schema_name=self.schema_name,
                 metadata_columns=[
                     Column(_DATABASE_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                     Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
@@ -166,6 +188,7 @@ class PostgresVDB(VDB):
             engine=engine,
             embedding_service=self.embeddings,
             table_name=self.collection_name,
+            schema_name=self.schema_name,
             metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
         )
         return self._store
@@ -289,14 +312,18 @@ class PostgresVDB(VDB):
 
         with psycopg.connect(self.connection_string) as conn:
             with conn.cursor() as cur:
-                # `collection_name` is internal config (defaults to
-                # 'nv_ingest_tabular'); psycopg can't parameterise table
-                # identifiers, so it's interpolated here. Not user input.
+                # `schema_name`/`collection_name` are internal config; psycopg
+                # can't parameterise identifiers, so they're composed via the
+                # identifier-safe API. Not user input.
                 cur.execute(
-                    f"""
-                    DELETE FROM {self.collection_name}
-                    WHERE langchain_metadata ->> 'id' = %s
-                    """,
+                    sql.SQL(
+                        """
+                        DELETE FROM {table}
+                        WHERE langchain_metadata ->> 'id' = %s
+                        """
+                    ).format(
+                        table=sql.Identifier(self.schema_name, self.collection_name)
+                    ),
                     (node_id,),
                 )
                 deleted = cur.rowcount

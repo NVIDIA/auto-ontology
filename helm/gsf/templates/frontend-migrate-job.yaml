@@ -6,10 +6,13 @@ release, so a pre-install hook would race the StatefulSet. Post-install
 runs after the StatefulSet exists but the Job's own init container waits
 for Postgres to be reachable, so first-install works.
 
-No `--accept-data-loss`: if the live DB has tables/columns outside the
-Prisma schema (e.g. `nv_ingest_tabular` written by ingestion), this
-intentionally refuses to drop them and the Job fails. Resolve drift by
-hand rather than silently dropping data.
+Prisma is scoped to the `public` schema only (schemas = ["public"] +
+multiSchema). Ingestion's vector table lives in the separate `vdb` schema
+(see gsf/vdb), so `db push` never sees it and cannot drop it.
+
+No `--accept-data-loss`: if the `public` schema still drifts from
+prisma/schema.prisma, this intentionally refuses to drop and the Job
+fails. Resolve drift by hand rather than silently dropping data.
 */}}
 apiVersion: batch/v1
 kind: Job

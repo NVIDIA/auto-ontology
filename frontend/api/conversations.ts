@@ -59,7 +59,7 @@ export const conversationsApi = {
 			sqlResponse?: string | null;
 		},
 	) =>
-		json<unknown>(`/api/conversations/${conversationId}/messages`, {
+		json<{ id: string }>(`/api/conversations/${conversationId}/messages`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify(msg),

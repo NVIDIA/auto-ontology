@@ -36,6 +36,118 @@
 }
 
 /*
+ * Pagination (@nvidia/foundations-react-core Pagination, kind="tabs").
+ * The package ships no base styles and renders its chevrons as an icon font
+ * that isn't loaded here, so the green design language — including the arrow
+ * glyphs — lives in this stylesheet.
+ */
+.nv-pagination-root {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	font-size: 0.875rem;
+	color: #52525b; /* zinc-600 */
+}
+
+.nv-pagination-navigation-group {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.nv-pagination-arrow-button,
+.nv-pagination-page-list .nv-tabs-trigger {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	height: 2rem;
+	width: 2rem;
+	padding: 0;
+	border: 0;
+	border-radius: 9999px;
+	background: transparent;
+	color: inherit;
+	font-size: 0.875rem;
+	font-weight: 500;
+	line-height: 1;
+	cursor: pointer;
+	transition:
+		background-color 0.15s ease,
+		color 0.15s ease;
+}
+
+.nv-pagination-arrow-button:hover:not(:disabled),
+.nv-pagination-page-list .nv-tabs-trigger:hover {
+	background-color: #f4f4f5; /* zinc-100 */
+}
+
+.nv-pagination-arrow-button:disabled {
+	cursor: not-allowed;
+	opacity: 0.3;
+}
+
+/* The arrow chevron is an empty icon-font <i>; paint it with a mask instead. */
+.nv-pagination-arrow-button .nv-icon {
+	display: inline-block;
+	height: 1rem;
+	width: 1rem;
+	background-color: currentColor;
+	-webkit-mask: center / contain no-repeat;
+	mask: center / contain no-repeat;
+	-webkit-mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Cpath%20d='M6.22%204.22a.75.75%200%20011.06%200l3.25%203.25a.75.75%200%20010%201.06l-3.25%203.25a.75.75%200%2001-1.06-1.06L8.94%208%206.22%205.28a.75.75%200%20010-1.06z'/%3E%3C/svg%3E");
+	mask-image: url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2016%2016'%3E%3Cpath%20d='M6.22%204.22a.75.75%200%20011.06%200l3.25%203.25a.75.75%200%20010%201.06l-3.25%203.25a.75.75%200%2001-1.06-1.06L8.94%208%206.22%205.28a.75.75%200%20010-1.06z'/%3E%3C/svg%3E");
+}
+
+.nv-pagination-arrow-button .nv-icon-chevron-left {
+	transform: rotate(180deg);
+}
+
+/* Tabs-based page numbers: keep them on a single unclipped row. */
+.nv-pagination-page-list,
+.nv-pagination-page-list .nv-tabs-scroll-container {
+	overflow: visible;
+}
+
+.nv-pagination-page-list .nv-tabs-list {
+	display: flex;
+	align-items: center;
+	gap: 0.25rem;
+}
+
+.nv-pagination-page-list .nv-tabs-content {
+	display: none;
+}
+
+/* Each trigger renders a hidden width-reservation copy of its label; without
+ * the design system's base CSS it shows as a duplicate digit (e.g. "11"). */
+.nv-pagination-page-list .nv-tabs-trigger [data-preserve-spacing] {
+	display: none;
+}
+
+.nv-pagination-page-list .nv-tabs-trigger[data-state='active'] {
+	background-color: rgba(118, 185, 0, 0.15);
+	color: #76b900; /* NVIDIA green */
+}
+
+.nv-pagination-item-range-text {
+	white-space: nowrap;
+}
+
+@media (prefers-color-scheme: dark) {
+	.nv-pagination-root {
+		color: #a1a1aa; /* zinc-400 */
+	}
+	.nv-pagination-arrow-button,
+	.nv-pagination-page-list .nv-tabs-trigger {
+		color: #d4d4d8; /* zinc-300 */
+	}
+	.nv-pagination-arrow-button:hover:not(:disabled),
+	.nv-pagination-page-list .nv-tabs-trigger:hover {
+		background-color: #27272a; /* zinc-800 */
+	}
+}
+
+/*
  * Explicit box-sizing so content never sits flush to the viewport.
  */
 body {

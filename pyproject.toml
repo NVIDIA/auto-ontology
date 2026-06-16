@@ -11,6 +11,7 @@ dependencies = [
     "pandas>=2.0,<3",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.3",
+    "pyheavydb>=8.0.1.post1",
     "python-dotenv>=1.2.2",
     "snowflake-connector-python>=4.6.0",
     "uvicorn[standard]>=0.32.0",

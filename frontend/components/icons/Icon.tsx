@@ -22,6 +22,7 @@ import ViewSvg from './svg/view.svg';
 import MaterializedViewSvg from './svg/materialized-view.svg';
 import SchemaSvg from './svg/schema.svg';
 import ColumnSvg from './svg/column.svg';
+import ChartLineSvg from './svg/chart-line.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -37,6 +38,7 @@ export enum IconName {
 	Database = 'database',
 	Settings = 'settings',
 	ChartBar = 'chart-bar',
+	ChartLine = 'chart-line',
 	Table = 'table',
 	View = 'view',
 	MaterializedView = 'materialized-view',
@@ -58,6 +60,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Database]: DatabaseSvg,
 	[IconName.Settings]: SettingsSvg,
 	[IconName.ChartBar]: ChartBarSvg,
+	[IconName.ChartLine]: ChartLineSvg,
 	[IconName.Table]: TableSvg,
 	[IconName.View]: ViewSvg,
 	[IconName.MaterializedView]: MaterializedViewSvg,

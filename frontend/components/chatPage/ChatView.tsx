@@ -14,7 +14,6 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
-import { Toast } from '@/components/Toast';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
@@ -33,17 +32,7 @@ export const ChatView = () => {
 	const [messageListLoading, setMessageListLoading] = useState<boolean>(focusId != null);
 	const loadedFocusRef = useRef<string | null>(null);
 
-	const {
-		messages,
-		setMessages,
-		steps,
-		isLoading,
-		error,
-		sendMessage,
-		stopGeneration,
-		clearMessages,
-		clearError,
-	} = useChat();
+	const { messages, setMessages, steps, isLoading, sendMessage, clearConversation } = useChat();
 
 	const updateFocusInUrl = useCallback(
 		(id: string | null) => {
@@ -132,13 +121,13 @@ export const ChatView = () => {
 	}, [focusId, setMessages, updateFocusInUrl]);
 
 	const handleNewChat = useCallback(async () => {
-		clearMessages();
+		clearConversation();
 		setActiveConvId(null);
 		setSidebarOpen(false);
 		loadedFocusRef.current = null;
 		updateFocusInUrl(null);
 		await refreshConversations();
-	}, [clearMessages, refreshConversations, updateFocusInUrl]);
+	}, [clearConversation, refreshConversations, updateFocusInUrl]);
 
 	const handleSelectConversation = useCallback(
 		async (id: string) => {
@@ -182,7 +171,7 @@ export const ChatView = () => {
 			try {
 				await conversationsApi.delete(id);
 				if (activeConvId === id) {
-					clearMessages();
+					clearConversation();
 					setActiveConvId(null);
 					loadedFocusRef.current = null;
 					updateFocusInUrl(null);
@@ -192,7 +181,7 @@ export const ChatView = () => {
 				// ignore
 			}
 		},
-		[activeConvId, clearMessages, refreshConversations, updateFocusInUrl],
+		[activeConvId, clearConversation, refreshConversations, updateFocusInUrl],
 	);
 
 	const handleSend = useCallback(
@@ -238,15 +227,8 @@ export const ChatView = () => {
 					messageListLoading={messageListLoading}
 				/>
 
-				<ChatInput onSend={handleSend} onStop={stopGeneration} isLoading={isLoading} />
+				<ChatInput onSend={handleSend} onStop={clearConversation} isLoading={isLoading} />
 			</main>
-
-			<Toast
-				open={error != null}
-				message={error ?? ''}
-				variant="error"
-				onClose={clearError}
-			/>
 		</div>
 	);
 };

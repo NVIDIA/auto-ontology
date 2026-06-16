@@ -939,6 +939,7 @@ dependencies = [
     { name = "pandas" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
+    { name = "pyheavydb" },
     { name = "python-dotenv" },
     { name = "snowflake-connector-python" },
     { name = "uvicorn", extra = ["standard"] },
@@ -961,6 +962,7 @@ requires-dist = [
     { name = "pandas", specifier = ">=2.0,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
+    { name = "pyheavydb", specifier = ">=8.0.1.post1" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "snowflake-connector-python", specifier = ">=4.6.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32.0" },
@@ -1636,7 +1638,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.6.9.dev20260609052549"
+version = "2026.6.11.dev20260611221238"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#1ec5e2e516d60a29dfa46832c7036ddf03dcebf7" }
 dependencies = [
     { name = "backoff" },
@@ -2443,6 +2445,19 @@ wheels = [
 ]
 
 [[package]]
+name = "pyheavydb"
+version = "8.0.1.post1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "packaging" },
+    { name = "requests" },
+    { name = "sqlalchemy" },
+    { name = "thrift" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e3/7f/cda3aa80e9941f0a6501d8e128f00f24f2131d4425e62523528f93bb97b5/pyheavydb-8.0.1.post1.tar.gz", hash = "sha256:91c95eeea631cf347c8d85027befe4706b038ee0c3bbfd04ab605e94748d86f7", size = 88908, upload-time = "2025-05-16T22:55:39.401Z" }
+
+[[package]]
 name = "pyjwt"
 version = "2.12.1"
 source = { registry = "https://pypi.org/simple" }
@@ -3103,6 +3118,12 @@ sdist = { url = "https://files.pythonhosted.org/packages/47/c6/ee486fd809e357697
 wheels = [
     { url = "https://files.pythonhosted.org/packages/d7/c1/eb8f9debc45d3b7918a32ab756658a0904732f75e555402972246b0b8e71/tenacity-9.1.4-py3-none-any.whl", hash = "sha256:6095a360c919085f28c6527de529e76a06ad89b23659fa881ae0649b867a9d55", size = 28926, upload-time = "2026-02-07T10:45:32.24Z" },
 ]
+
+[[package]]
+name = "thrift"
+version = "0.23.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d2/fd/6766a2a1a2532dbcb0fa8e31fd9a22de78b7338c7a07b5e5a6ef4e8913f1/thrift-0.23.0.tar.gz", hash = "sha256:5f43448a92c36ed6a450048355d10e231a1787e4c28965f08fabac0eb978914c", size = 66440, upload-time = "2026-05-14T08:35:49.196Z" }
 
 [[package]]
 name = "tomlkit"

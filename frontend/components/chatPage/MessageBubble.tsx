@@ -101,14 +101,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>
-				{isUser ? (
-					<p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
-				) : (
-					<FormattedContent
-						content={message.content}
-						className="text-sm leading-relaxed"
-					/>
-				)}
+				<FormattedContent content={message.content} className="text-sm leading-relaxed" />
 
 				{message.sql && <SqlBlock sql={message.sql} className="mt-3" />}
 

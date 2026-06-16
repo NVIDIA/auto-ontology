@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.connectors.duckdb import DuckDBDatabase
+from gsf.connectors.heavydb import HeavyDBDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
 
@@ -23,6 +24,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
+    "heavydb": HeavyDBDatabase,
 }
 
 _connectors: dict[str, SQLDatabase] | None = None

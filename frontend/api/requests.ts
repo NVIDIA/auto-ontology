@@ -3,8 +3,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import axios, { AxiosError, AxiosResponse } from 'axios';
-import type { Params } from '@/types/params';
 import { ApiError, ResponseWithError } from './types';
+
+// Query params accepted by `requests.get`. Numbers/booleans are serialised by
+// axios at request time, so callers can pass them without stringifying first.
+export type QueryParams = Record<string, string | number | boolean | string[] | undefined>;
 
 const isServer = typeof window === 'undefined';
 
@@ -30,8 +33,8 @@ const errorHandler = (err: AxiosError): ApiError => {
 	};
 };
 
-const normalizeQueryParams = (params: Params): Params => {
-	const newParams: Params = {};
+const normalizeQueryParams = (params: QueryParams): QueryParams => {
+	const newParams: QueryParams = {};
 	Object.entries(params).forEach(([paramKey, paramValue]) => {
 		if (Array.isArray(paramValue)) {
 			newParams[paramKey] = paramValue.toString();
@@ -43,7 +46,7 @@ const normalizeQueryParams = (params: Params): Params => {
 };
 
 export const requests = {
-	get: <OutputType>(url: string, params: Params = {}, abortController?: AbortController) => {
+	get: <OutputType>(url: string, params: QueryParams = {}, abortController?: AbortController) => {
 		return api
 			.get<OutputType>(url, {
 				params: normalizeQueryParams(params),
