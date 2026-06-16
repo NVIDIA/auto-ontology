@@ -36,7 +36,7 @@ PYTHON_API_URL ?= http://gsf:3001
 PLATFORMS      ?= linux/amd64,linux/arm64
 
 BACKEND_IMAGE  := gsf
-FRONTEND_IMAGE := gsf-frontend
+FRONTEND_IMAGE := frontend
 
 # --build-context for NeMo-Retriever: pass `NEMO=stub` to skip and use the
 # committed vendor/nemo_retriever_stub/ default baked into the Dockerfile.

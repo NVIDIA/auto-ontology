@@ -149,7 +149,7 @@ neo4j:
 backend:
   image:
     repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
-    tag: 0.0.2
+    tag: 0.0.5
   service:
     port: 3001
   replicas: 1
@@ -168,7 +168,7 @@ ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
     repository: artifactory.nvidia.com/it-astra-docker-local/gsf/gsf
-    tag: 0.0.2
+    tag: 0.0.5
   replicas: 1
   resources:
     requests:
@@ -184,7 +184,7 @@ ingestion:
 frontend:
   image:
     repository: artifactory.nvidia.com/it-astra-docker-local/gsf/frontend
-    tag: 0.0.1
+    tag: 0.0.5
   service:
     # ClusterIP on Astra; external access is via the OpenShift Route above.
     # Override to NodePort for minikube.
