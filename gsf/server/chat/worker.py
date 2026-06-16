@@ -73,9 +73,9 @@ def _worker_loop(
     )
 
     try:
-        # GSF-side adapter: accepts the plural ``connectors`` payload and
-        # derives the single ``connector`` the nemo_retriever agent requires.
-        from gsf.server.chat.agent import stream_agent_response
+        from nemo_retriever.tabular_data.retrieval.text_to_sql.main import (
+            stream_agent_response,
+        )
 
         from gsf.connectors import get_connectors
         from gsf.utils import get_retriever
@@ -87,12 +87,6 @@ def _worker_loop(
         # Eagerly build the heavyweights so they're hot before the first ask.
         retriever = get_retriever()
         connectors = get_connectors()
-        if not connectors:
-            raise RuntimeError(
-                "No database connectors available. Set CONNECTION_STRINGS "
-                "(e.g. postgresql://user:pass@host:5432/dbname) so the "
-                "text-to-SQL agent has a database to query."
-            )
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
         try:
