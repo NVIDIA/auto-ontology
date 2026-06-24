@@ -5,6 +5,6 @@
 """Shared utilities used across server, ingestion, and dev tools."""
 
 from gsf.utils.embedding import get_embed_params
-from gsf.utils.retriever import get_retriever
+from gsf.utils.retriever import get_tabular_retriever, get_taxonomies_retriever
 
-__all__ = ["get_embed_params", "get_retriever"]
+__all__ = ["get_embed_params", "get_tabular_retriever", "get_taxonomies_retriever"]
