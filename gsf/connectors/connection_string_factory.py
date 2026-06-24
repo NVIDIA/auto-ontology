@@ -37,7 +37,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
     conn_type = str(connection.get("type") or "").strip().lower()
 
     if conn_type in ("postgresql", "postgres"):
-        host = _require(connection, "host")
+        host = _require(connection, "host").rstrip("/")
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
@@ -58,7 +58,7 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         )
 
     if conn_type == "heavydb":
-        host = _require(connection, "host")
+        host = _require(connection, "host").rstrip("/")
         user = _require(connection, "user")
         password = _require(connection, "password")
         database = _require(connection, "database")
