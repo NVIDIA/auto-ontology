@@ -9,9 +9,9 @@ from __future__ import annotations
 import argparse
 import logging
 
-from gsf.server.env import load_server_env
+from gsf.env import load_env
 
-load_server_env()
+load_env()
 
 
 def main() -> None:

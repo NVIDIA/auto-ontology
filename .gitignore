@@ -33,9 +33,21 @@ lancedb/*
 .env.docker
 
 
-# Evaluation data files
-dev_tools/evaluation/*csv
-dev_tools/evaluation/*.json
+# WWI CSV data (local only)
+dev_tools/wwi/data/
+
+# IDE config (keep launch.json tracked)
+.vscode/*
+!.vscode/launch.json
+
+# Cursor debug logs
+.cursor/
+
+# Cache
+.cache/
+
+# Evaluation tooling (local dev-only)
+dev_tools/evaluation/
 
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.

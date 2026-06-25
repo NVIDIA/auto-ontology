@@ -81,9 +81,13 @@ def build_semantic_embedder(
     reset: bool,
 ) -> SemanticEmbedder | None:
     """Construct an embedder bound to the semantic VDB, or None when disabled."""
-    api_key = os.environ.get("NVIDIA_API_KEY", "")
+    api_key = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
+        "NVIDIA_API_KEY", ""
+    )
     if not api_key:
-        logger.warning("NVIDIA_API_KEY not set — semantic VDB embedding disabled")
+        logger.warning(
+            "EMBED_API_KEY / NVIDIA_API_KEY not set — semantic VDB embedding disabled"
+        )
         return None
 
     embed_params = EmbedParams(
