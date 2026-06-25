@@ -13,7 +13,7 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
-from gsf.retrieval.llm_invoke import get_llm_client
+from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 

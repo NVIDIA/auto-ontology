@@ -22,7 +22,7 @@ from langchain_core.messages import SystemMessage
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.retrieval.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,

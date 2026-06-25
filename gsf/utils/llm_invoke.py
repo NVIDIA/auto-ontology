@@ -8,33 +8,56 @@ import logging
 import os
 from typing import Type, TypeVar
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
 from pydantic import BaseModel, ValidationError
 
 logger = logging.getLogger(__name__)
 
-
 RETRY_MAX_ATTEMPTS = 3
 T = TypeVar("T", bound=BaseModel)
 
+_BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
+_MODEL_NAME = os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b")
+_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
-def get_llm_client() -> ChatNVIDIA:
+
+def get_llm_client(
+    *,
+    temperature: float = 0.0,
+    max_tokens: int = 4096,
+) -> BaseChatModel:
+    if not _API_KEY:
+        raise EnvironmentError("NVIDIA_API_KEY is not set")
+
+    if _MODEL_NAME.startswith("openai/"):
+        from langchain_openai import ChatOpenAI
+
+        return ChatOpenAI(
+            model=_MODEL_NAME,
+            api_key=_API_KEY,
+            base_url=_BASE_URL,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+
+    from langchain_nvidia_ai_endpoints import ChatNVIDIA
+
     return ChatNVIDIA(
-        base_url=os.environ.get("BASE_URL"),
-        api_key=os.environ.get("NVIDIA_API_KEY"),
-        model=os.environ.get("MODEL_NAME", "nvidia/nemotron-3-nano-30b-a3b"),
-        max_tokens=4096,
+        model=_MODEL_NAME,
+        api_key=_API_KEY,
+        base_url=_BASE_URL,
+        temperature=temperature,
+        max_tokens=max_tokens,
     )
 
 
 def safe_invoke_with_structured_output(
-    llm: ChatNVIDIA,
+    llm: BaseChatModel,
     messages: list[BaseMessage],
     schema: Type[T],
-    method: str = "function_calling",
 ) -> T:
-    """LLM structured call with retry"""
+    """LLM structured call with retry."""
     current_messages = messages.copy()
     schema_name = getattr(schema, "__name__", str(schema))
 
@@ -82,15 +105,14 @@ def safe_invoke_with_structured_output(
 
 
 def invoke_with_structured_output(
-    llm: ChatNVIDIA,
+    llm: BaseChatModel,
     messages: list[BaseMessage],
     schema: Type[T],
-    method: str = "function_calling",
 ) -> T | None:
-    """Safe wrapper for invoke_with_structured_output that returns None on failure"""
+    """Safe wrapper that returns None on failure."""
     try:
         schema_name = getattr(schema, "__name__", str(schema))
-        return safe_invoke_with_structured_output(llm, messages, schema, method)
+        return safe_invoke_with_structured_output(llm, messages, schema)
     except Exception as e:
         logger.error(
             f"invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "

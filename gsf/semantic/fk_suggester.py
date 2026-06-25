@@ -9,7 +9,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.semantic.deterministic import fk_source_columns
-from gsf.semantic.llm import invoke_structured
+from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSuggestion
 
 logger = logging.getLogger(__name__)
@@ -116,14 +116,12 @@ def suggest_potential_foreign_keys(
         f"Candidate columns:\n{candidate_lines}\n"
     )
 
-    try:
-        result = invoke_structured(
-            [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
-            FkAndPkResult,
-            temperature=0.0,
-        )
-    except Exception as e:
-        logger.warning("Error suggesting potential foreign keys: %s", e)
+    result = invoke_with_structured_output(
+        get_llm_client(temperature=0.0),
+        [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
+        FkAndPkResult,
+    )
+    if result is None:
         return PotentialFkResult()
 
     llm_pk_names = {n.strip() for n in result.pk_column_names if n.strip()}

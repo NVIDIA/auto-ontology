@@ -19,7 +19,7 @@ from gsf.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.prompts import create_entity_extraction_prompt
 
 logger = logging.getLogger(__name__)
