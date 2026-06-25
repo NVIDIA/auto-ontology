@@ -395,9 +395,9 @@ def create_custom_analysis(
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
     from gsf.utils import get_embed_params
-    from gsf.vdb import get_vdb
+    from gsf.vdb import get_semantic_vdb
 
-    vdb = get_vdb()
+    vdb = get_semantic_vdb()
     _embed_custom_analyses(
         embed_params=get_embed_params(),
         vdb=vdb,
@@ -484,9 +484,9 @@ def update_custom_analysis(
     # the stale row would leave two VDB entries for this analysis_id and
     # double-weight it at retrieval time.
     from gsf.utils import get_embed_params
-    from gsf.vdb import get_vdb
+    from gsf.vdb import get_semantic_vdb
 
-    vdb = get_vdb()
+    vdb = get_semantic_vdb()
     vdb.delete_by_id(analysis_id)
     _embed_custom_analyses(
         embed_params=get_embed_params(),
@@ -517,7 +517,7 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
     leaves both stores pointing at the same (still-present) record;
     if Neo4j succeeds and the VDB delete throws, the orphan VDB row
     will be cleaned up on the next ingest of *database_name* with ``reset=True``
-    (see :func:`gsf.vdb.get_data_vdb`).
+    (see :func:`gsf.vdb.get_semantic_vdb`).
     """
     existing = get_neo4j_conn().query_read(
         f"""
@@ -539,9 +539,9 @@ def delete_custom_analysis(analysis_id: str) -> dict[str, str] | None:
         {"analysis_id": analysis_id},
     )
 
-    from gsf.vdb import get_vdb
+    from gsf.vdb import get_semantic_vdb
 
-    get_vdb().delete_by_id(analysis_id)
+    get_semantic_vdb().delete_by_id(analysis_id)
 
     return {"id": analysis_id}
 

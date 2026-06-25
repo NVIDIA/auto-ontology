@@ -41,7 +41,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-from nemo_retriever.retriever import Retriever
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.retrieval.text_to_sql.main import get_agent_response
@@ -49,8 +48,7 @@ from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
 from gsf.env import load_env
 from gsf.connectors import get_connectors
-from gsf.utils.embedding import get_embed_kwargs
-from gsf.vdb import get_data_vdb, get_semantic_vdb
+from gsf.utils import get_data_objects_retriever, get_semantic_objects_retriever
 
 load_env()
 
@@ -76,35 +74,6 @@ _DEFAULT_INPUT = Path(__file__).parent / "chatbot_evaluation.json"
 
 
 _DEFAULT_OUTPUT = Path(__file__).parent / "chatbot_evaluation_scores.csv"
-
-
-def _build_connectors() -> list:
-    """Build source-DB connectors from ``CONNECTION_STRINGS``."""
-    connectors = get_connectors()
-    if not connectors:
-        raise EnvironmentError(
-            "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
-            "    CONNECTION_STRINGS=snowflake://user:pass@account?warehouse=WH&database=DB"
-        )
-    return connectors
-
-
-def _build_retriever() -> Retriever:
-    """Build the retriever against the local pgvector store."""
-    return Retriever(
-        top_k=15,
-        vdb_kwargs={"vdb": get_data_vdb()},
-        embed_kwargs=get_embed_kwargs(),
-    )
-
-
-def _build_ontology_retriever() -> Retriever:
-    """Build a retriever for the semantic-layer ontology collection."""
-    return Retriever(
-        top_k=15,
-        vdb_kwargs={"vdb": get_semantic_vdb()},
-        embed_kwargs=get_embed_kwargs(),
-    )
 
 
 # -----------------------------------------------------------------------------
@@ -418,11 +387,11 @@ def evaluate(
         len(questions),
         len(all_questions),
         input_path,
-    )
+    )   
 
-    connectors = _build_connectors()
-    retriever = _build_retriever()
-    ontology_retriever = _build_ontology_retriever()
+    connectors = get_connectors()
+    data_retriever = get_data_objects_retriever()
+    semantic_retriever = get_semantic_objects_retriever()
 
     resuming = start_index > 0 and output_path.exists()
     mode = "a" if resuming else "w"
@@ -464,8 +433,8 @@ def evaluate(
             try:
                 payload: TextToSQLPayload = {
                     "question": question,
-                    "data_retriever": retriever,
-                    "taxonomies_retriever": ontology_retriever,
+                    "data_retriever": data_retriever,
+                    "semantic_retriever": semantic_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -612,9 +581,9 @@ def evaluate_consistency(
         output_path,
     )
 
-    connectors = _build_connectors()
-    retriever = _build_retriever()
-    ontology_retriever = _build_ontology_retriever()
+    connectors = get_connectors()
+    data_retriever = get_data_objects_retriever()
+    semantic_retriever = get_semantic_objects_retriever()
 
     results: Dict[int, list] = {i: [] for i in range(len(questions))}
 
@@ -631,8 +600,8 @@ def evaluate_consistency(
             try:
                 payload: TextToSQLPayload = {
                     "question": question,
-                    "data_retriever": retriever,
-                    "taxonomies_retriever": ontology_retriever,
+                    "data_retriever": data_retriever,
+                    "semantic_retriever": semantic_retriever,
                     "connectors": connectors,
                     "path_state": {},
                     "custom_prompts": "",
@@ -701,14 +670,14 @@ def evaluate_consistency(
 
 def run_single_query(question: str) -> None:
     """Run a single question through the agent and print the result."""
-    connectors = _build_connectors()
-    retriever = _build_retriever()
-    ontology_retriever = _build_ontology_retriever()
+    connectors = get_connectors()
+    data_retriever = get_data_objects_retriever()
+    semantic_retriever = get_semantic_objects_retriever()
 
     payload: TextToSQLPayload = {
         "question": question,
-        "data_retriever": retriever,
-        "taxonomies_retriever": ontology_retriever,
+        "data_retriever": data_retriever,
+        "semantic_retriever": semantic_retriever,
         "connectors": connectors,
         "path_state": {},
         "custom_prompts": "",

@@ -43,10 +43,10 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
             "TextToSQLPayload is missing required 'data_retriever' (nemo_retriever.retriever.Retriever "
             "instance). Construct a Retriever once at startup and pass it in the payload."
         )
-    taxonomies_retriever = payload.get("taxonomies_retriever")
-    if taxonomies_retriever is None:
+    semantic_retriever = payload.get("semantic_retriever")
+    if semantic_retriever is None:
         raise ValueError(
-            "TextToSQLPayload is missing required 'taxonomies_retriever' (nemo_retriever.retriever.Retriever "
+            "TextToSQLPayload is missing required 'semantic_retriever' (nemo_retriever.retriever.Retriever "
             "instance). Construct a Retriever once at startup and pass it in the payload."
         )
 
@@ -71,7 +71,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "messages": messages,
         "path_state": initial_path_state,
         "data_retriever": data_retriever,
-        "taxonomies_retriever": taxonomies_retriever,
+        "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
     }

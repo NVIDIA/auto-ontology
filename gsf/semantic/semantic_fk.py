@@ -147,8 +147,10 @@ def _build_retriever(database_name: str) -> Retriever | None:
     """Build a Retriever backed by the semantic VDB, or None when the API key is absent."""
     if not _NVIDIA_API_KEY:
         return None
+
+    vdb = get_semantic_vdb(database_name=database_name)
     return Retriever(
-        vdb_kwargs={"vdb": get_semantic_vdb(database_name=database_name)},
+        vdb_kwargs={"vdb": vdb},
         embed_kwargs={
             "model_name": _EMBED_MODEL,
             "embed_invoke_url": _EMBED_ENDPOINT,

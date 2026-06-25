@@ -32,11 +32,11 @@ class AgentPayload(TypedDict):
 
 
 class TextToSQLPayload(TypedDict):
-    """Payload for the text-to-SQL agent flow (data + taxonomies retrievers)."""
+    """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
 
     question: str
     data_retriever: Retriever
-    taxonomies_retriever: NotRequired[Retriever]
+    semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
     connectors: NotRequired[list[SQLDatabase]]
     acronyms: NotRequired[list[dict[str, str]]]
@@ -53,7 +53,7 @@ class AgentState(TypedDict):
     connectors: list[SQLDatabase]
     path_state: dict
     data_retriever: Retriever
-    taxonomies_retriever: Retriever
+    semantic_retriever: Retriever
     domain_rules: list[dict[str, str]]
 
 
