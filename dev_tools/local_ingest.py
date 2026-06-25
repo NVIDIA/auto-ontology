@@ -18,7 +18,9 @@ import os
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
-from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import TabularSchemaExtractOp
+from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
+    TabularSchemaExtractOp,
+)
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )

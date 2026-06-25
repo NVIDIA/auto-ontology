@@ -387,7 +387,7 @@ def evaluate(
         len(questions),
         len(all_questions),
         input_path,
-    )   
+    )
 
     connectors = get_connectors()
     data_retriever = get_data_objects_retriever()
