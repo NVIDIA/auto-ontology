@@ -57,11 +57,14 @@ def run_ingest(connection_string: str) -> None:
             logger.info(
                 f"Tabular ingest result: {len(result_df)} rows written to pgvector",
             )
-        else:
-            logger.info("Tabular ingest result: no rows produced")
 
-        logger.info("Starting semantic compilation")
-        run_semantic_compilation(database_name)
+        logger.info("Starting semantic compilation for database %s", database_name)
+        tables_processed = run_semantic_compilation(database_name)
+        logger.info(
+            "Finished semantic compilation for database %s: %d tables processed",
+            database_name,
+            tables_processed,
+        )
 
     finally:
         TABULAR_PARAMS.connector.close()
@@ -115,8 +118,8 @@ def run_ingest_delete(database_name: str) -> None:
 
     delete_database_subgraph(database_name)
 
-    vdb = get_data_vdb()
-    deleted_data_objects = vdb.delete_by_database(database_name)
+    data_vdb = get_data_vdb()
+    deleted_data_objects = data_vdb.delete_by_database(database_name)
 
     semantic_vdb = get_semantic_vdb()
     deleted_semantic = semantic_vdb.delete_by_database(database_name)
