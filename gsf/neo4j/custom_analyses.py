@@ -303,6 +303,31 @@ def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, st
     return result
 
 
+def get_custom_analysis_by_id(analysis_id: str) -> str | None:
+    """Return the id of the CustomAnalysis, or None if it doesn't exist."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+        RETURN ca.id AS id
+        LIMIT 1
+        """,
+        {"analysis_id": analysis_id},
+    )
+    return rows[0]["id"] if rows else None
+
+
+def delete_custom_analysis_node(analysis_id: str) -> None:
+    """DETACH DELETE the CustomAnalysis and its linked Sql node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+              -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        DETACH DELETE ca, sql
+        """,
+        {"analysis_id": analysis_id},
+    )
+
+
 def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
     """Fetch Tables referenced by CustomAnalysis nodes via HAS_SQL -> Sql -> SQL -> Table."""
     if not analysis_ids:

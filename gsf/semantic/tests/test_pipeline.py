@@ -10,15 +10,15 @@ from gsf.semantic.pipeline import compile_semantic_layer
 @patch("gsf.semantic.pipeline.process_table")
 @patch("gsf.semantic.pipeline.fetch_table_context")
 @patch("gsf.semantic.pipeline.load_domain_summary", return_value=None)
-@patch("gsf.semantic.pipeline.neo4j_dal")
+@patch("gsf.semantic.pipeline.fetch_all_tables_without_term")
 def test_compile_processes_all_tables(
-    mock_dal: MagicMock,
+    mock_fetch_tables: MagicMock,
     _mock_summary: MagicMock,
     mock_fetch_ctx: MagicMock,
     mock_process: MagicMock,
 ) -> None:
     """Two tables → two process_table calls → count == 2."""
-    mock_dal.fetch_all_tables.return_value = [
+    mock_fetch_tables.return_value = [
         {"id": "t1", "name": "orders", "description": ""},
         {"id": "t2", "name": "customers", "description": ""},
     ]
@@ -36,15 +36,15 @@ def test_compile_processes_all_tables(
 @patch("gsf.semantic.pipeline.process_table")
 @patch("gsf.semantic.pipeline.fetch_table_context")
 @patch("gsf.semantic.pipeline.load_domain_summary", return_value=None)
-@patch("gsf.semantic.pipeline.neo4j_dal")
+@patch("gsf.semantic.pipeline.fetch_all_tables_without_term")
 def test_compile_skips_columnless_table(
-    mock_dal: MagicMock,
+    mock_fetch_tables: MagicMock,
     _mock_summary: MagicMock,
     mock_fetch_ctx: MagicMock,
     mock_process: MagicMock,
 ) -> None:
     """Table with no columns is skipped without calling process_table."""
-    mock_dal.fetch_all_tables.return_value = [
+    mock_fetch_tables.return_value = [
         {"id": "t1", "name": "empty_table", "description": ""}
     ]
     mock_fetch_ctx.return_value = {"columns": [], "fks": []}
@@ -58,15 +58,15 @@ def test_compile_skips_columnless_table(
 @patch("gsf.semantic.pipeline.process_table", side_effect=RuntimeError("boom"))
 @patch("gsf.semantic.pipeline.fetch_table_context")
 @patch("gsf.semantic.pipeline.load_domain_summary", return_value=None)
-@patch("gsf.semantic.pipeline.neo4j_dal")
+@patch("gsf.semantic.pipeline.fetch_all_tables_without_term")
 def test_compile_continues_after_error(
-    mock_dal: MagicMock,
+    mock_fetch_tables: MagicMock,
     _mock_summary: MagicMock,
     mock_fetch_ctx: MagicMock,
     _mock_process: MagicMock,
 ) -> None:
     """process_table raising an exception should not abort the loop."""
-    mock_dal.fetch_all_tables.return_value = [
+    mock_fetch_tables.return_value = [
         {"id": "t1", "name": "orders", "description": ""}
     ]
     mock_fetch_ctx.return_value = {"columns": [{"name": "x"}], "fks": []}

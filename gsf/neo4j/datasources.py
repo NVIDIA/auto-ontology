@@ -541,3 +541,39 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
         ORDER BY t.name
         """
     )
+
+
+def apply_metadata_batch(
+    database_name: str,
+    table_rows: list[dict],
+    column_rows: list[dict],
+) -> None:
+    """Batch-write description / sample_values onto Table and Column nodes.
+
+    *table_rows* — list of ``{table_name, description}``.
+    *column_rows* — list of ``{table_name, column_name, description, sample_values}``.
+    Skips silently when either list is empty.
+    """
+    conn = get_neo4j_conn()
+    if table_rows:
+        conn.query_write(
+            query=(
+                "UNWIND $rows AS row "
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
+                "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name}) "
+                "SET t.description = coalesce(row.description, t.description)"
+            ),
+            parameters={"rows": table_rows, "database_name": database_name},
+        )
+    if column_rows:
+        conn.query_write(
+            query=(
+                "UNWIND $rows AS row "
+                "MATCH (d:Database {name: $database_name})-[:CONTAINS]->"
+                "(:Schema)-[:CONTAINS]->(t:Table {name: row.table_name})"
+                "-[:CONTAINS]->(c:Column {name: row.column_name}) "
+                "SET c.description = coalesce(row.description, c.description), "
+                "    c.sample_values = coalesce(row.sample_values, c.sample_values)"
+            ),
+            parameters={"rows": column_rows, "database_name": database_name},
+        )

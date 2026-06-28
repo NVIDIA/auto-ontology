@@ -2,7 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data Access Layer — Neo4j driver, catalog graph, and datasource queries."""
+"""Data Access Layer — catalog datasource queries and VDB re-embedding.
+
+All direct Neo4j calls live in gsf/neo4j/datasources.py.
+This module only keeps the VDB orchestration: update_node_properties
+and its helpers that mix Neo4j reads with pgvector upserts.
+"""
 
 from __future__ import annotations
 
@@ -10,144 +15,31 @@ import logging
 from typing import Any
 
 import pandas as pd
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from gsf.neo4j.datasources import (
+    get_parent_table_id_for_column,
+    get_tables_and_columns_by_node_ids,
+    list_columns_for_table,
+    list_databases,
+    list_schemas_for_database,
+    list_tables_for_schema,
+    patch_catalog_node,
+)
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Graph queries (public API for routers / services)
-# ---------------------------------------------------------------------------
-
-
-def list_databases() -> list[dict[str, Any]]:
-    """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees."""
-    neo4j_conn = get_neo4j_conn()
-
-    rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-        RETURN db.id AS id, db.name AS name, db.description AS description,
-               count(s) AS schema_count
-        ORDER BY name
-        """,
-    )
-
-    return [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "description": r["description"],
-            "num_of_schemas": int(r["schema_count"]),
-            "schemas": [],
-        }
-        for r in rows
-    ]
-
-
-def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
-    """Return schemas_count and a list of schema summaries for a database.
-
-    Returns a dict with ``schemas_count`` and ``schemas`` — a list of
-    ``{id, schema_name, tables_count}`` dicts.
-
-    Returns ``None`` if no ``Database`` matches ``db_id``.
-    """
-    neo4j_conn = get_neo4j_conn()
-    rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
-              (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-        WITH s.id AS id, s.name AS schema_name, s.description AS description,
-             count(t) AS tables_count
-        ORDER BY schema_name
-        WITH collect({{id: id, schema_name: schema_name,
-                      description: description,
-                      tables_count: tables_count}}) AS schemas
-        RETURN size(schemas) AS schemas_count, schemas
-        """,
-        {"db_id": db_id},
-    )
-
-    record = rows[0]
-    return {
-        "schemas_count": record["schemas_count"],
-        "schemas": [dict(s) for s in record["schemas"]],
-    }
-
-
-def list_tables_for_schema(
-    schema_id: str,
-    *,
-    database_name: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return Table payloads with column counts for a given schema.
-
-    Each table dict contains ``database_name``, ``schema_name``, ``name``,
-    and ``columns_count``.
-    """
-    neo4j_conn = get_neo4j_conn()
-    rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        RETURN t.id AS id,
-               t.name AS name,
-               t.table_type AS table_type,
-               db.name AS database_name,
-               s.name AS schema_name, t.description AS description,
-               count(c) AS columns_count
-        ORDER BY name
-        """,
-        {
-            "schema_id": schema_id,
-            "database_name": database_name,
-        },
-    )
-
-    return rows
-
-
-def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
-    """Return a table dict with nested columns, or None if the table is missing.
-
-    Returns ``table_name``, ``schema_name``, ``database_name`` (all from the Table
-    node), ``columns_count``, and ``columns`` — a list of
-    ``{ordinal_position, column_name, data_type}`` dicts.
-    """
-    neo4j_conn = get_neo4j_conn()
-    rows = neo4j_conn.query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        WITH t, c, s, db ORDER BY c.ordinal_position
-        WITH t, s, db, collect({{
-                 id: c.id,
-                 ordinal_position: c.ordinal_position,
-                 column_name: c.name,
-                 data_type: c.data_type,
-                 description: c.description,
-                 sample_values: c.sample_values
-             }}) AS columns
-        RETURN t.name AS table_name,
-               t.table_type AS table_type,
-               s.name AS schema_name,
-               db.name AS database_name,
-               size(columns) AS columns_count,
-               columns
-        """,
-        {"table_id": table_id},
-    )
-
-    if not rows:
-        return None
-    return rows[0]
+__all__ = [
+    "list_databases",
+    "list_schemas_for_database",
+    "list_tables_for_schema",
+    "list_columns_for_table",
+    "get_parent_table_id_for_column",
+    "update_node_properties",
+]
 
 
 def update_node_properties(
@@ -158,32 +50,21 @@ def update_node_properties(
 
     Returns ``{id, ...updated_fields}``. When the patch touches fields that
     feed retrieval text (``Table``/``Column`` description or column
-    ``sample_values``), stale pgvector rows are deleted and re-appended
-    (same pattern as :func:`custom_analyses.dal.update_custom_analysis`).
+    ``sample_values``), stale pgvector rows are deleted and re-appended.
     """
     if not properties:
         return None
 
-    neo4j_conn = get_neo4j_conn()
-
-    rows = neo4j_conn.query_write(
-        f"""
-        MATCH (n:{Labels.DB}|{Labels.SCHEMA}|{Labels.TABLE}|{Labels.COLUMN}
-              {{id: $node_id}})
-        SET n += $props
-        RETURN n.id AS id, labels(n)[0] AS label, properties(n) AS props
-        """,
-        {"node_id": node_id, "props": properties},
-    )
-    if not rows:
+    patched = patch_catalog_node(node_id, properties)
+    if not patched:
         return None
 
-    node_props = dict(rows[0]["props"])
-    result = {"id": rows[0]["id"], **{k: node_props.get(k) for k in properties}}
+    node_props = patched["props"]
+    result = {"id": patched["id"], **{k: node_props.get(k) for k in properties}}
 
     reembed_ids = _get_node_ids_for_embedding_update(
         node_id=node_id,
-        label=rows[0]["label"],
+        label=patched["label"],
         properties=properties,
     )
     if reembed_ids:
@@ -232,18 +113,6 @@ def _get_node_ids_for_embedding_update(
     return []
 
 
-def get_parent_table_id_for_column(column_id: str) -> str | None:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{id: $column_id}})
-        RETURN t.id AS table_id
-        LIMIT 1
-        """,
-        {"column_id": column_id},
-    )
-    return rows[0]["table_id"] if rows else None
-
-
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from gsf.utils import get_embed_params
@@ -253,10 +122,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
 
     unique_ids = set(dict.fromkeys(node_ids))
 
-    # ── Step 1: build text representations from Neo4j ───────────────────────
-    tables_df, columns_df, database_name = _get_tables_and_columns_by_node_ids(
-        node_ids,
-    )
+    tables_df, columns_df, database_name = get_tables_and_columns_by_node_ids(node_ids)
     if tables_df.empty and columns_df.empty:
         logger.info(
             "No Table/Column rows found for node_ids=%r; skipping VDB upsert.",
@@ -280,8 +146,6 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     if not records:
         return
 
-    # ── Step 2: compute embeddings (may raise if service is unavailable) ─────
-
     embed_params = get_embed_params()
     embedded = embed_text_main_text_embed(
         pd.DataFrame(records),
@@ -300,63 +164,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
             f"Embedding step produced 0/{len(embedded)} tabular rows with embeddings."
         )
 
-    # ── Step 3: replace VDB rows only after embeddings are ready ────────────
     vdb = get_data_vdb()
     for nid in unique_ids:
         vdb.delete_by_id(nid)
     IngestVdbOperator(vdb=vdb)(rows)
-
-
-def _get_tables_and_columns_by_node_ids(
-    node_ids: list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame, str]:
-    """Load Table/Column rows from Neo4j as dataframes for :class:`TabularFetchEmbeddingsOp`.
-
-    When a table id is included, all of its columns are loaded so table
-    embedding text matches full ingest (not only the column row being edited).
-    """
-    conn = get_neo4j_conn()
-    columns_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-            WHERE t.id = id OR c.id = id
-            RETURN DISTINCT
-                   c.id AS id,
-                   t.name AS table_name,
-                   t.schema_name AS table_schema,
-                   c.name AS column_name,
-                   c.data_type AS data_type,
-                   c.description AS description,
-                   c.sample_values AS sample_values,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
-    )
-    tables_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: id}})
-            RETURN t.id AS id,
-                   t.name AS table_name,
-                   t.schema_name AS table_schema,
-                   t.table_type AS table_type,
-                   t.description AS description,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
-    )
-
-    database_name = ""
-    if not tables_df.empty:
-        database_name = str(tables_df.iloc[0].get("database_name") or "")
-    elif not columns_df.empty:
-        database_name = str(columns_df.iloc[0].get("database_name") or "")
-
-    return tables_df, columns_df, database_name

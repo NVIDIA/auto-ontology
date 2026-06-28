@@ -103,3 +103,8 @@ def delete_database_subgraph(database_name: str) -> None:
         """,
         {"database_name": database_name},
     )
+
+
+def verify_connectivity() -> None:
+    """Probe the Neo4j connection. Raises if the database is unreachable."""
+    get_neo4j_conn().verify_connectivity()
