@@ -117,9 +117,9 @@ def embed_all_semantic_nodes(
     """
     from collections import defaultdict
 
-    from gsf.semantic import neo4j_dal
+    from gsf.neo4j.terms import fetch_all_terms_and_attributes
 
-    terms, attrs = neo4j_dal.fetch_all_terms_and_attributes()
+    terms, attrs = fetch_all_terms_and_attributes()
     if not terms and not attrs:
         logger.info("embed_all_semantic_nodes: nothing to embed")
         return 0

@@ -24,7 +24,11 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
 
-from gsf.semantic import neo4j_dal
+from gsf.neo4j.attributes import (
+    find_column_attribute_by_column_id,
+    find_unlinked_fk_columns,
+    merge_semantic_fk,
+)
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
@@ -59,7 +63,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     Runs after the taxonomy while-loop in ``compile_semantic_layer``.
     Returns the total number of SEMANTIC_FK edges created.
     """
-    candidates = neo4j_dal.find_unlinked_fk_columns()
+    candidates = find_unlinked_fk_columns()
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
         return 0
@@ -74,9 +78,9 @@ def resolve_semantic_fks(database_name: str) -> int:
     for col in candidates:
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
-            attr_id = neo4j_dal.find_column_attribute_by_column_id(fk_target_col_id)
+            attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
-                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
+                merge_semantic_fk(col["id"], attr_id)
                 declared_written += 1
                 logger.debug(
                     "resolve_semantic_fks [declared]: %s.%s → attr %s",
@@ -116,7 +120,7 @@ def resolve_semantic_fks(database_name: str) -> int:
         try:
             attr_id = _resolve_via_vdb(col, retriever)
             if attr_id:
-                neo4j_dal.merge_semantic_fk(col["id"], attr_id)
+                merge_semantic_fk(col["id"], attr_id)
                 llm_written += 1
                 logger.debug(
                     "resolve_semantic_fks [llm]: %s.%s → attr %s",
