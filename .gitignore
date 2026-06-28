@@ -33,10 +33,6 @@ lancedb/*
 .env.docker
 
 
-# WWI local data and tooling
-dev_tools/wwi/
-dev_tools/load_wwi_postgres.py
-
 # IDE config
 .vscode/
 
