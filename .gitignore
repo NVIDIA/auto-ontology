@@ -33,8 +33,9 @@ lancedb/*
 .env.docker
 
 
-# IDE config
-.vscode/
+# IDE config (keep launch.json tracked)
+.vscode/*
+!.vscode/launch.json
 
 # Cursor debug logs
 .cursor/
