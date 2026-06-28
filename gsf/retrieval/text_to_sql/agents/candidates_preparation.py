@@ -28,7 +28,7 @@ from typing import Dict, Any
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from gsf.retrieval.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,

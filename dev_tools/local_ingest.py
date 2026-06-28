@@ -27,7 +27,7 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_vdb
+from gsf.vdb import get_data_vdb, get_semantic_vdb
 from gsf.connectors.registry import create_connector
 
 from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
@@ -66,9 +66,9 @@ def run_ingest(connection_string: str) -> None:
 
     # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
     # for `database_name`, so reuse the same instance for the custom-analysis
-    # append below — calling get_vdb(database_name=...) again would re-delete
+    # append below — calling get_data_vdb(database_name=...) again would re-delete
     # everything we just wrote.
-    vdb = get_vdb(database_name=database_name)
+    vdb = get_data_vdb(database_name=database_name)
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(vdb=vdb)
@@ -81,11 +81,13 @@ def run_ingest(connection_string: str) -> None:
     else:
         print("Tabular ingest result: no rows produced")
 
+    # Custom analyses live in the semantic-layer collection, so embed them
+    # through a dedicated semantic VDB rather than the tabular `vdb` above.
     add_custom_analyses(
         connector.database_name,
         connector.dialect,
         embed_params=embed_params,
-        vdb=vdb,
+        vdb=get_semantic_vdb(database_name=connector.database_name),
     )
 
 

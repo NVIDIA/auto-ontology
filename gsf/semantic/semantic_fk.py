@@ -25,7 +25,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
 
 from gsf.semantic import neo4j_dal
-from gsf.semantic.llm import invoke_structured
+from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -149,8 +149,10 @@ def _build_retriever(database_name: str) -> Retriever | None:
     """Build a Retriever backed by the semantic VDB, or None when the API key is absent."""
     if not _NVIDIA_API_KEY:
         return None
+
+    vdb = get_semantic_vdb(database_name=database_name)
     return Retriever(
-        vdb_kwargs={"vdb": get_semantic_vdb(database_name=database_name)},
+        vdb_kwargs={"vdb": vdb},
         embed_kwargs={
             "model_name": _EMBED_MODEL,
             "embed_invoke_url": _EMBED_ENDPOINT,
@@ -250,11 +252,13 @@ def _llm_pick_hit(
         "Return its exact neo4j_id value, or null if none are a confident match."
     )
 
-    result = invoke_structured(
+    result = invoke_with_structured_output(
+        get_llm_client(max_tokens=4096),
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
         FkHitSelection,
-        max_tokens=4096,
     )
+    if result is None:
+        return None
 
     selected = result.selected_id
     if not selected:

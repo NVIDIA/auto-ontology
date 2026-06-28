@@ -26,7 +26,7 @@ import logging
 from typing import Any, Dict
 from langchain_core.messages import AIMessage, SystemMessage
 
-from gsf.retrieval.llm_invoke import safe_invoke_with_structured_output
+from gsf.utils.llm_invoke import safe_invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.data_access.custom_analyses import (

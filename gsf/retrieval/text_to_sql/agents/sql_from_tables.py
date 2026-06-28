@@ -26,7 +26,7 @@ from typing import Any, Dict
 from langchain_core.messages import AIMessage, SystemMessage
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
-from gsf.retrieval.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing

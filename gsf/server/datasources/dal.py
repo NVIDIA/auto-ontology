@@ -247,7 +247,7 @@ def get_parent_table_id_for_column(column_id: str) -> str | None:
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from gsf.utils import get_embed_params
-    from gsf.vdb import get_vdb
+    from gsf.vdb import get_data_vdb
     from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
     from nemo_retriever.vdb import IngestVdbOperator
 
@@ -301,7 +301,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         )
 
     # ── Step 3: replace VDB rows only after embeddings are ready ────────────
-    vdb = get_vdb()
+    vdb = get_data_vdb()
     for nid in unique_ids:
         vdb.delete_by_id(nid)
     IngestVdbOperator(vdb=vdb)(rows)

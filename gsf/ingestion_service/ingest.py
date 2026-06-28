@@ -20,7 +20,7 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_vdb
+from gsf.vdb import get_data_vdb, get_semantic_vdb
 from gsf.connectors.registry import create_connector
 from gsf.server.connections.dal import delete_database_subgraph
 from gsf.semantic.compile import run_semantic_compilation
@@ -51,16 +51,20 @@ def run_ingest(connection_string: str) -> None:
         result_df = results[0] if results else None
 
         if result_df is not None and not result_df.empty:
-            ingest_op = IngestVdbOperator(vdb=get_vdb(database_name=database_name))
+            data_vdb = get_data_vdb(database_name=database_name, reset=True)
+            ingest_op = IngestVdbOperator(vdb=data_vdb)
             ingest_op(result_df.to_dict(orient="records"))
             logger.info(
                 f"Tabular ingest result: {len(result_df)} rows written to pgvector",
             )
-        else:
-            logger.info("Tabular ingest result: no rows produced")
 
-        logger.info("Starting semantic compilation")
-        run_semantic_compilation(database_name)
+        logger.info("Starting semantic compilation for database %s", database_name)
+        tables_processed = run_semantic_compilation(database_name)
+        logger.info(
+            "Finished semantic compilation for database %s: %d tables processed",
+            database_name,
+            tables_processed,
+        )
 
     finally:
         TABULAR_PARAMS.connector.close()
@@ -114,9 +118,12 @@ def run_ingest_delete(database_name: str) -> None:
 
     delete_database_subgraph(database_name)
 
-    vdb = get_vdb()
-    deleted_tabular = vdb.delete_by_database(database_name, preserve_semantic=False)
+    data_vdb = get_data_vdb()
+    deleted_data_objects = data_vdb.delete_by_database(database_name)
+
+    semantic_vdb = get_semantic_vdb()
+    deleted_semantic = semantic_vdb.delete_by_database(database_name)
     logger.info(
-        f"Tabular ingest delete: removed {len(deleted_tabular)} pgvector rows "
+        f"Tabular and semantic ingest delete: removed {len(deleted_data_objects) + len(deleted_semantic)} pgvector rows "
         f"for database {database_name}",
     )

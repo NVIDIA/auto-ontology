@@ -10,7 +10,7 @@ entity's raw hits, and stores typed results in path_state.
 
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
-- Search the data VDB (retriever) for CustomAnalysis candidates.
+- Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
 - Filter each entity's hits by intent using the LLM (full question, not entity).
 - Deduplicate across entities and store results in path_state.
 """
@@ -22,7 +22,7 @@ from langchain_core.messages import SystemMessage
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
-from gsf.retrieval.llm_invoke import invoke_with_structured_output
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     CandidateFilterModel,
@@ -64,7 +64,7 @@ def _search_column_attributes(ontology_retriever, entity: str, k: int) -> list[d
 
 
 def _search_custom_analyses(retriever, entity: str, k: int) -> list[dict]:
-    """Return up to *k* CustomAnalysis hits from the data VDB for *entity*."""
+    """Return up to *k* CustomAnalysis hits from the semantic VDB for *entity*."""
     try:
         return list(
             search_semantic_index(
@@ -254,13 +254,18 @@ class CandidateRetrievalAgent(BaseAgent):
         question = get_question_for_processing(state)
         entities: list[str] = path_state.get("entities") or []
         llm = state["llm"]
-        data_retriever = state["data_retriever"]
-        taxonomies_retriever = state.get("taxonomies_retriever")
+        semantic_retriever = state.get("semantic_retriever")
 
         all_col_attr_hits: list[dict] = []
 
         # CustomAnalysis: search once with the full question, not per entity.
-        all_custom_hits = _search_custom_analyses(data_retriever, question, 3)
+        # CustomAnalysis rows live in the semantic-layer collection, so query
+        # the semantic retriever rather than the data retriever.
+        all_custom_hits = (
+            _search_custom_analyses(semantic_retriever, question, 3)
+            if semantic_retriever is not None
+            else []
+        )
         all_custom_hits = _llm_filter_custom_analyses(llm, question, all_custom_hits)
 
         for entity in entities:
@@ -269,7 +274,7 @@ class CandidateRetrievalAgent(BaseAgent):
                 continue
 
             # 1. Search semantic VDB for ColumnAttributes per entity
-            col_attr_raw = _search_column_attributes(taxonomies_retriever, entity, 2)
+            col_attr_raw = _search_column_attributes(semantic_retriever, entity, 2)
 
             # 2. Collect all ColumnAttribute hits without LLM filtering
             all_col_attr_hits.extend(col_attr_raw)

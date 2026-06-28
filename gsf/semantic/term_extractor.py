@@ -9,7 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.semantic.deterministic import to_term_name
 from gsf.semantic.domain import DomainSummary
-from gsf.semantic.llm import invoke_structured
+from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 from pydantic import BaseModel, ConfigDict, Field
 
 from gsf.semantic.models import (
@@ -196,19 +196,17 @@ def _extract_synonyms(description: str) -> list[str]:
     """Dedicated LLM call to extract alternate names from a table description."""
     if not description:
         return []
-    try:
-        result = invoke_structured(
-            [
-                SystemMessage(content=_SYNONYM_SYSTEM),
-                HumanMessage(content=f"Description: {description}"),
-            ],
-            _SynonymExtractionModel,
-            temperature=0.0,
-            max_tokens=1024,
-        )
-        return [s.strip() for s in result.synonyms if s.strip()]
-    except Exception:
+    result = invoke_with_structured_output(
+        get_llm_client(temperature=0.0, max_tokens=1024),
+        [
+            SystemMessage(content=_SYNONYM_SYSTEM),
+            HumanMessage(content=f"Description: {description}"),
+        ],
+        _SynonymExtractionModel,
+    )
+    if result is None:
         return []
+    return [s.strip() for s in result.synonyms if s.strip()]
 
 
 def extract_term(
@@ -238,14 +236,12 @@ def extract_term(
         f"{spec_lines}\n"
         f"{domain_block}"
     )
-    try:
-        result = invoke_structured(
-            [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
-            RawTableTermsResult,
-            temperature=0.0,
-            max_tokens=4096,
-        )
-    except Exception:
+    result = invoke_with_structured_output(
+        get_llm_client(temperature=0.0, max_tokens=4096),
+        [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
+        RawTableTermsResult,
+    )
+    if result is None:
         return _fallback_result(table, specs)
 
     table_result = _sanitize_result(result, table=table, specs=specs)
