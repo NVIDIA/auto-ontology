@@ -33,12 +33,12 @@ lancedb/*
 .env.docker
 
 
-# WWI CSV data (local only)
-dev_tools/wwi/data/
+# WWI local data and tooling
+dev_tools/wwi/
+dev_tools/load_wwi_postgres.py
 
-# IDE config (keep launch.json tracked)
-.vscode/*
-!.vscode/launch.json
+# IDE config
+.vscode/
 
 # Cursor debug logs
 .cursor/

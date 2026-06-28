@@ -45,6 +45,7 @@ from gsf.retrieval.text_to_sql.state import (
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.retrieval.data_access.graph_schemas import fetch_tables_by_ids
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
@@ -245,7 +246,7 @@ class CandidatePreparationAgent(BaseAgent):
                     if ctx.get("table_id")
                 )
             )
-            ca_tables = self._fetch_tables_by_ids(ca_table_ids)
+            ca_tables = fetch_tables_by_ids(ca_table_ids)
             existing_ids = {t.get("id") for t in relevant_tables}
             for tbl in ca_tables:
                 if tbl.get("id") not in existing_ids:
@@ -636,47 +637,6 @@ class CandidatePreparationAgent(BaseAgent):
                     "description": row.get("description") or "",
                     "schema_name": row.get("schema_name") or "",
                     "label": Labels.TABLE,
-                    "columns": cols,
-                }
-            )
-        return tables
-
-    def _fetch_tables_by_ids(self, table_ids: list[str]) -> list[dict]:
-        """Fetch Table node properties from Neo4j for the given table IDs.
-
-        Returns a list of normalized table dicts ready for prompt consumption.
-        """
-        if not table_ids:
-            return []
-        query = """
-        UNWIND $table_ids AS tid
-        MATCH (tbl:Table {id: tid})
-        OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
-        OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
-        WITH tbl, sch, collect({name: col.name, data_type: col.data_type, description: col.description}) AS cols
-        RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-               sch.name AS schema_name, cols
-        """
-        try:
-            rows = get_neo4j_conn().query_read(query, {"table_ids": table_ids})
-        except Exception:
-            self.logger.warning(
-                "_fetch_tables_by_ids: Neo4j query failed", exc_info=True
-            )
-            return []
-        tables = []
-        for row in rows:
-            tid = row.get("id")
-            if not tid:
-                continue
-            cols = [c for c in (row.get("cols") or []) if c.get("name")]
-            tables.append(
-                {
-                    "id": tid,
-                    "name": row.get("name") or "",
-                    "description": row.get("description") or "",
-                    "schema_name": row.get("schema_name") or "",
-                    "label": "Table",
                     "columns": cols,
                 }
             )

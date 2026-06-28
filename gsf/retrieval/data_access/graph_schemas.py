@@ -124,6 +124,52 @@ def get_schemas_by_ids(relevant_schemas_ids: list = None):
     return all_schemas
 
 
+def fetch_tables_by_ids(table_ids: list[str]) -> list[dict]:
+    """Fetch Table nodes with full column lists from Neo4j.
+
+    Returns a list of dicts with keys: id, name, description,
+    schema_name, label, columns.
+    """
+    if not table_ids:
+        return []
+    query = f"""
+    UNWIND $table_ids AS tid
+    MATCH (tbl:{Labels.TABLE} {{id: tid}})
+    OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+    OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+    WITH tbl, sch,
+         collect({{name: col.name, data_type: col.data_type,
+                   description: col.description}}) AS cols
+    RETURN tbl.id AS id, tbl.name AS name,
+           tbl.description AS description,
+           sch.name AS schema_name, cols
+    """
+    try:
+        rows = get_neo4j_conn().query_read(query, {"table_ids": table_ids})
+    except Exception:
+        logger.warning("fetch_tables_by_ids: Neo4j query failed", exc_info=True)
+        return []
+    tables: list[dict] = []
+    seen_ids: set[str] = set()
+    for row in rows:
+        tid = row.get("id")
+        if not tid or str(tid) in seen_ids:
+            continue
+        seen_ids.add(str(tid))
+        cols = [c for c in (row.get("cols") or []) if c.get("name")]
+        tables.append(
+            {
+                "id": tid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "schema_name": row.get("schema_name") or "",
+                "label": Labels.TABLE,
+                "columns": cols,
+            }
+        )
+    return tables
+
+
 def _get_node_properties_by_id(id, label: str | list[str]):
     labels_list = label if isinstance(label, list) else [label]
     for lbl in labels_list:
