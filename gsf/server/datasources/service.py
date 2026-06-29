@@ -117,8 +117,11 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from gsf.utils import get_embed_params
     from gsf.vdb import get_data_vdb
-    from nemo_retriever.text_embed.runtime import embed_text_main_text_embed
-    from nemo_retriever.vdb import IngestVdbOperator
+    from nemo_retriever.models.inference.main_text_embed import (
+        TextEmbeddingConfig,
+        create_text_embeddings_for_df,
+    )
+    from nemo_retriever.operators.vdb import IngestVdbOperator
 
     unique_ids = set(dict.fromkeys(node_ids))
 
@@ -149,12 +152,16 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         return
 
     embed_params = get_embed_params()
-    embedded = embed_text_main_text_embed(
+    embedded, _ = create_text_embeddings_for_df(
         pd.DataFrame(records),
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
+        task_config={
+            "api_key": embed_params.api_key,
+            "endpoint_url": embed_params.embed_invoke_url,
+            "model_name": embed_params.model_name,
+        },
+        transform_config=TextEmbeddingConfig(
+            embed_modality=embed_params.embed_modality,
+        ),
     )
     rows = [
         row
