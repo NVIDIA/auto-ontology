@@ -40,6 +40,7 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_PROPERTY_OF,
 )
+from gsf.connectors import get_connectors
 from gsf.server.sql_utils import SqlParseError, get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params
 from gsf.vdb import get_semantic_vdb
@@ -173,6 +174,17 @@ def _link_to_term(attr_id: str, term_id: str) -> None:
     )
 
 
+def _resolve_connector(connector: str) -> str:
+    """Look up a loaded connector by name and return its ``database_name``.
+
+    Raises ``ValueError`` if no connector matches.
+    """
+    for c in get_connectors():
+        if getattr(c, "database_name", None) == connector:
+            return c.database_name
+    raise ValueError(f"Connector {connector!r} not found among loaded connectors")
+
+
 # ---------------------------------------------------------------------------
 # Embedding helpers
 # ---------------------------------------------------------------------------
@@ -182,6 +194,7 @@ def _embed_sql_attribute(
     embed_params: "EmbedParams",
     vdb: "VDB",
     attr_id: str,
+    database_name: str | None = None,
 ) -> None:
     """Fetch one SqlAttribute from Neo4j, embed it, and append to *vdb*.
 
@@ -229,7 +242,7 @@ def _embed_sql_attribute(
             "label": item.get("label", ""),
             "name": item.get("name", ""),
             "source_path": path,
-            "database_name": None,
+            "database_name": database_name,
         }
         rows.append(
             {
@@ -287,9 +300,12 @@ def create_sql_attribute(
     description: str,
     expression: str,
     term_id: str,
+    connector: str,
     source: str = "manual",
 ) -> dict[str, Any]:
     """Create a SqlAttribute, its Sql node, link to a Term, and embed."""
+    database_name = _resolve_connector(connector)
+
     conflict = _find_attr_by_name(name, exclude_id=None)
     if conflict is not None:
         raise SqlAttributeNameConflict(
@@ -307,7 +323,11 @@ def create_sql_attribute(
     if not term_rows:
         raise ValueError(f"Term with id {term_id!r} not found")
 
-    query_obj = validate_sql(expression, get_dialects(), get_schemas())
+    query_obj = validate_sql(
+        expression,
+        get_dialects(database_name),
+        get_schemas(database_name),
+    )
 
     attr_node = Neo4jNode(
         name=name,
@@ -325,12 +345,14 @@ def create_sql_attribute(
     _link_to_term(row["id"], term_id)
     row["term_name"] = term_rows[0]["name"]
     row["term_id"] = term_id
+    row["database_name"] = database_name
 
     vdb = get_semantic_vdb()
     _embed_sql_attribute(
         embed_params=get_embed_params(),
         vdb=vdb,
         attr_id=row["id"],
+        database_name=database_name,
     )
 
     return row
@@ -343,9 +365,11 @@ def update_sql_attribute(
     description: str,
     expression: str,
     term_id: str,
+    connector: str,
     source: str = "manual",
 ) -> dict[str, Any] | None:
     """Replace a SqlAttribute, re-parse SQL, re-link Term, and re-embed."""
+    database_name = _resolve_connector(connector)
     conn = get_neo4j_conn()
 
     existing = conn.query_read(
@@ -374,7 +398,11 @@ def update_sql_attribute(
     if not term_rows:
         raise ValueError(f"Term with id {term_id!r} not found")
 
-    query_obj = validate_sql(expression, get_dialects(), get_schemas())
+    query_obj = validate_sql(
+        expression,
+        get_dialects(database_name),
+        get_schemas(database_name),
+    )
 
     _detach_existing_sql_edges(attr_id)
 
@@ -417,6 +445,7 @@ def update_sql_attribute(
         embed_params=get_embed_params(),
         vdb=vdb,
         attr_id=attr_id,
+        database_name=database_name,
     )
 
     return {
@@ -425,6 +454,7 @@ def update_sql_attribute(
         "description": description,
         "expression": expression,
         "source": source,
+        "database_name": database_name,
         "term_name": term_rows[0]["name"],
         "term_id": term_id,
         "sql": expression,

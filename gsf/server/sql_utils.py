@@ -21,19 +21,39 @@ class SqlParseError(Exception):
     """SQL could not be parsed or resolved against the catalog."""
 
 
-def get_dialects() -> list[str]:
-    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
+def get_dialects(database_name: str | None = None) -> list[str]:
+    """Return SQL dialects from active connectors.
+
+    When *database_name* is given, only the connector whose
+    ``database_name`` matches is considered.
+    """
     connectors = get_connectors()
+    if database_name is not None:
+        connectors = [
+            c for c in connectors if getattr(c, "database_name", None) == database_name
+        ]
     dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
     if not dialects:
         return ["generic", "ansi", "postgres"]
     return dialects
 
 
-def get_schemas() -> dict:
-    """Return the full catalog snapshot for ``parse_query_single``."""
+def get_schemas(database_name: str | None = None) -> dict:
+    """Return catalog snapshot for ``parse_query_single``.
+
+    When *database_name* is given, the returned dict is filtered to
+    only schemas belonging to that database (matched via the Schema's
+    ``db_node.name``).
+    """
     schemas_ids = get_all_schemas_ids()
-    return get_schemas_by_ids(schemas_ids)
+    all_schemas = get_schemas_by_ids(schemas_ids)
+    if database_name is None:
+        return all_schemas
+    return {
+        k: v
+        for k, v in all_schemas.items()
+        if getattr(v.db_node, "name", None) == database_name
+    }
 
 
 def validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:

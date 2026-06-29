@@ -19,6 +19,7 @@ class SqlAttributeCreate(BaseModel):
     description: str
     expression: str
     term_id: str
+    connector: str
     source: str = "manual"
 
 
@@ -27,6 +28,7 @@ class SqlAttributeUpdate(BaseModel):
     description: str
     expression: str
     term_id: str
+    connector: str
     source: str = "manual"
 
 
@@ -62,6 +64,7 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
             description=body.description,
             expression=body.expression,
             term_id=body.term_id,
+            connector=body.connector,
             source=body.source,
         )
     except dal.SqlAttributeNameConflict as exc:
@@ -85,6 +88,7 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
             description=body.description,
             expression=body.expression,
             term_id=body.term_id,
+            connector=body.connector,
             source=body.source,
         )
     except dal.SqlAttributeNameConflict as exc:
