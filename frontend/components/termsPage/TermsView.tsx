@@ -77,52 +77,20 @@ const TermCard = ({ term, attributes, onClick }: TermCardProps) => (
 						Column Attributes
 					</span>
 				</div>
-				{attributes.length === 0 ? (
-					<p className="px-4 py-3 text-sm text-zinc-400 dark:text-zinc-500">None</p>
-				) : (
-					<table className="w-full text-sm">
-						<thead>
-							<tr className="border-b border-zinc-100 dark:border-zinc-800">
-								<th className="px-4 py-2 text-left text-xs font-medium text-zinc-400 dark:text-zinc-500">
-									Name
-								</th>
-								<th className="px-4 py-2 text-left text-xs font-medium text-zinc-400 dark:text-zinc-500">
-									Foreign Keys
-								</th>
-							</tr>
-						</thead>
-						<tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-							{attributes.map((attr) => (
-								<tr key={attr.id}>
-									<td className="px-4 py-2.5">
-										<span className="flex items-center gap-2 text-zinc-700 dark:text-zinc-300">
-											{attr.is_primary_key && (
-												<span className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
-													PK
-												</span>
-											)}
-											{attr.name}
-										</span>
-									</td>
-									<td className="px-4 py-2.5">
-										{attr.fk_count > 0 ? (
-											<span
-												title={`${attr.fk_count} foreign key reference${attr.fk_count > 1 ? 's' : ''}`}
-												className="text-xs font-medium text-blue-600 dark:text-blue-400"
-											>
-												{attr.fk_count}
-											</span>
-										) : (
-											<span className="text-xs text-zinc-400 dark:text-zinc-500">
-												—
-											</span>
-										)}
-									</td>
-								</tr>
-							))}
-						</tbody>
-					</table>
-				)}
+				<div className="flex items-center">
+					<span className="flex w-1/2 items-center justify-between border-r border-zinc-100 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+						<span>Column Attributes</span>
+						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
+							{attributes.length}
+						</span>
+					</span>
+					<span className="flex w-1/2 items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+						<span>Foreign Keys</span>
+						<span className="font-medium text-zinc-900 dark:text-zinc-100">
+							{attributes.reduce((sum, attr) => sum + attr.fk_count, 0)}
+						</span>
+					</span>
+				</div>
 			</div>
 
 			{/* SQL Attribute */}
