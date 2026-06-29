@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from gsf.server.custom_analyses import dal as custom_analyses_dal
-from gsf.server.datasources import dal
+from gsf.server.custom_analyses import service as custom_analyses_dal
+from gsf.server.datasources import service as dal
 
 
 class NodeUpdate(BaseModel):

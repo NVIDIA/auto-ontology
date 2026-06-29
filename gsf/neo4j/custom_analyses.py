@@ -151,7 +151,7 @@ def fetch_custom_analyses() -> list[dict[str, str]]:
 
 
 # ---------------------------------------------------------------------------
-# Embedding helper (called by server/custom_analyses/dal.py write path)
+# Embedding helper (called by server/custom_analyses/service.py write path)
 # ---------------------------------------------------------------------------
 
 
