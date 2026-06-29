@@ -134,7 +134,7 @@ export const TermsView = () => {
 			setLoading(true);
 			const [termsRes, attrsRes] = await Promise.all([
 				termsApi.list(),
-				termsApi.listAttributes(),
+				termsApi.listColumnAttributes(),
 			]);
 			if (cancelled) return;
 
@@ -180,7 +180,10 @@ export const TermsView = () => {
 	}, [router]);
 
 	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const res = await termsApi.get(termId);
+		const [res, attrsRes] = await Promise.all([
+			termsApi.get(termId),
+			termsApi.getColumnAttributes(termId),
+		]);
 		if (res.error === true || !res.data) {
 			return {
 				sections: [],
@@ -188,6 +191,8 @@ export const TermsView = () => {
 			};
 		}
 		const term = res.data;
+		const termAttrs = attrsRes.error !== true ? (attrsRes.data ?? []) : [];
+
 		return {
 			header: {
 				header: {
@@ -207,6 +212,19 @@ export const TermsView = () => {
 					id: 'entities',
 					title: 'Entities',
 					body: `Tables (${term.table_count})`,
+				},
+				{
+					type: ComposerSectionKind.DATA_TABLE,
+					id: 'column_attributes',
+					title: 'Column Attributes',
+					columns: [
+						{ key: 'source_column', label: 'Column Name' },
+						{ key: 'fk_count', label: 'Foreign Keys' },
+					],
+					rows: termAttrs.map((attr) => ({
+						source_column: attr.source_column,
+						fk_count: String(attr.fk_count),
+					})),
 				},
 			],
 		};
@@ -277,14 +295,6 @@ export const TermsView = () => {
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Terms
 				</h1>
-				<button
-					type="button"
-					onClick={openModal}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
-				>
-					<Icon name={IconName.Terms} className="h-4 w-4" />
-					New term
-				</button>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">

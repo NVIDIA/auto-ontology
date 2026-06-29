@@ -245,6 +245,29 @@ def fetch_column_attributes_with_fk_count() -> list[dict[str, Any]]:
     )
 
 
+def fetch_column_attributes_by_term_id(term_id: str) -> list[dict[str, Any]]:
+    """Return ColumnAttribute nodes for a single Term, enriched with FK count."""
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
+        WITH attr, count(col) AS fk_count
+        RETURN attr.id            AS id,
+               attr.name          AS name,
+               attr.description   AS description,
+               attr.term_name     AS term_name,
+               attr.source_column AS source_column,
+               attr.datatype      AS datatype,
+               attr.table_id      AS table_id,
+               fk_count,
+               fk_count > 0       AS is_primary_key
+        ORDER BY attr.name
+        """,
+        {"term_id": term_id, "source": SEMANTIC_SOURCE},
+    )
+
+
 def find_unlinked_fk_columns() -> list[dict[str, Any]]:
     """Return Column nodes that have no SEMANTIC_FK edge and no HAS_ATTRIBUTE edge.
 

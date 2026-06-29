@@ -20,10 +20,17 @@ def list_terms() -> dict:
     return {"data": terms, "count": len(terms)}
 
 
-@router.get("/terms/attributes")
-def list_term_attributes() -> dict:
+@router.get("/terms/column-attributes")
+def list_term_column_attributes() -> dict:
     """Return all ColumnAttribute nodes with FK count and primary-key flag."""
     attrs = neo4j_dal.fetch_column_attributes_with_fk_count()
+    return {"data": attrs, "count": len(attrs)}
+
+
+@router.get("/terms/{term_id}/column-attributes")
+def list_term_column_attributes_by_id(term_id: str) -> dict:
+    """Return ColumnAttribute nodes for a single Term with FK count."""
+    attrs = neo4j_dal.fetch_column_attributes_by_term_id(term_id)
     return {"data": attrs, "count": len(attrs)}
 
 

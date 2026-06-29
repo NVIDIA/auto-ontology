@@ -17,7 +17,9 @@ type SingleResponse = ResponseWithError<SingleResult>;
 
 export const termsApi = {
 	list: (): Promise<ListResponse> => requests.get<ListResult>('terms'),
-	listAttributes: (): Promise<AttributeListResponse> =>
-		requests.get<AttributeListResult>('terms/attributes'),
+	listColumnAttributes: (): Promise<AttributeListResponse> =>
+		requests.get<AttributeListResult>('terms/column-attributes'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
+	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
+		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
 };
