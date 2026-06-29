@@ -66,9 +66,7 @@ def test_compile_continues_after_error(
     _mock_process: MagicMock,
 ) -> None:
     """process_table raising an exception should not abort the loop."""
-    mock_fetch_tables.return_value = [
-        {"id": "t1", "name": "orders", "description": ""}
-    ]
+    mock_fetch_tables.return_value = [{"id": "t1", "name": "orders", "description": ""}]
     mock_fetch_ctx.return_value = {"columns": [{"name": "x"}], "fks": []}
 
     count = compile_semantic_layer("dbx")
