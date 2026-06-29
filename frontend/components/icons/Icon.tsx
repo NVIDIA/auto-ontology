@@ -23,6 +23,8 @@ import MaterializedViewSvg from './svg/materialized-view.svg';
 import SchemaSvg from './svg/schema.svg';
 import ColumnSvg from './svg/column.svg';
 import ChartLineSvg from './svg/chart-line.svg';
+import UsersSvg from './svg/users.svg';
+import KeySvg from './svg/key.svg';
 
 export enum IconName {
 	Menu = 'menu',
@@ -44,6 +46,8 @@ export enum IconName {
 	MaterializedView = 'materialized-view',
 	Schema = 'schema',
 	Column = 'column',
+	Users = 'users',
+	Key = 'key',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -66,6 +70,8 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.MaterializedView]: MaterializedViewSvg,
 	[IconName.Schema]: SchemaSvg,
 	[IconName.Column]: ColumnSvg,
+	[IconName.Users]: UsersSvg,
+	[IconName.Key]: KeySvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

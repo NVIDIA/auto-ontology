@@ -15,10 +15,12 @@
 		"format:check": "prettier --check ."
 	},
 	"dependencies": {
+		"@better-auth/sso": "^1.6.20",
 		"@nvidia/foundations-react-core": "^0.604.1",
 		"@prisma/adapter-pg": "^7.7.0",
 		"@prisma/client": "^7.7.0",
 		"axios": "^1.16.0",
+		"better-auth": "^1.6.20",
 		"dayjs": "^1.11.21",
 		"dotenv": "^17.4.2",
 		"next": "16.2.6",

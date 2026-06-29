@@ -7,49 +7,27 @@
 Read-only operations on the ``CustomAnalysis`` / ``Sql`` subgraph plus the
 small selection / rendering helpers used by the text-to-SQL agents to
 filter classified analyses and turn them into markdown.
+
+All direct Neo4j calls live in gsf/neo4j/custom_analyses.py.
+This module only keeps the pure-Python helpers.
 """
 
 from __future__ import annotations
 
 import logging
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+
+from gsf.neo4j.custom_analyses import fetch_custom_analyses
 
 logger = logging.getLogger(__name__)
 
-
-def fetch_custom_analyses() -> list[dict[str, str]]:
-    """Fetch all CustomAnalysis nodes from Neo4j and return as domain rules.
-
-    Each analysis becomes ``{"name": <name>, "description": <sql>}``.
-    """
-    query = (
-        f"MATCH (n:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL}) "
-        "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
-    )
-    try:
-        results = get_neo4j_conn().query_read(query=query, parameters={})
-    except Exception as e:
-        logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
-        return []
-
-    rules: list[dict[str, str]] = []
-    for row in results or []:
-        name = row.get("name", "")
-        description = row.get("description", "")
-        sql_code = row.get("sql_code", "")
-        if not name:
-            continue
-        parts = []
-        if description:
-            parts.append(description)
-        if sql_code:
-            parts.append(f"SQL: {sql_code}")
-        if parts:
-            rules.append({"name": name, "description": "\n".join(parts)})
-    logger.info("Fetched %d custom analyses from Neo4j as domain rules", len(rules))
-    return rules
+__all__ = [
+    "fetch_custom_analyses",
+    "get_custom_analyses_ids",
+    "build_custom_analyses_section",
+    "get_relevant_queries",
+]
 
 
 def get_custom_analyses_ids(items):
@@ -83,13 +61,11 @@ def build_custom_analyses_section(items, candidates):
     if not items:
         return ""
 
-    # Normalize to attribute access via getattr (fallback to dict.get)
     def _get(obj, key, default=None):
         return getattr(
             obj, key, obj.get(key, default) if isinstance(obj, dict) else default
         )
 
-    # Map candidate id -> candidate object
     by_id = {_get(c, "id"): c for c in candidates if _get(c, "id")}
 
     matched_lines = []

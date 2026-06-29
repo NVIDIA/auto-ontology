@@ -49,6 +49,12 @@ spec:
               value: "3000"
             - name: HOSTNAME
               value: "0.0.0.0"
+            {{- if .Values.appUrl }}
+            # Public origin of the app. Used by Better Auth for session cookies,
+            # CSRF, and OIDC redirect URIs. Must match the URL you browse to.
+            - name: APP_URL
+              value: {{ .Values.appUrl | quote }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /api/health

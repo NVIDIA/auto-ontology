@@ -2,13 +2,15 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { User } from '@/types/auth';
+
 export type ConversationAnalytics = {
 	id: string;
-	questionMessageId: string;
+	user: User;
+	source: string;
 	question: string;
 	questionTimestamp: string;
 	response: string | null;
-	responseMessageId: string | null;
 	responseTimestamp: string | null;
 	sql: string | null;
 };

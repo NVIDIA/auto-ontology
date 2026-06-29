@@ -5,7 +5,11 @@
 """Neo4j-backed schema / node lookups.
 
 Builds the :class:`Schema` objects consumed by the SQL parser plus generic
-``_get_node_properties_by_id`` / ``get_item_by_id`` helpers.
+``fetch_item_by_id`` helpers.
+
+All direct Neo4j calls live in gsf/neo4j/datasources.py.
+This module only keeps the pure-Python ``get_schemas_by_ids`` that assembles
+pandas DataFrames into :class:`Schema` objects.
 """
 
 from __future__ import annotations
@@ -16,55 +20,32 @@ import time
 import pandas as pd
 
 from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+
+from gsf.neo4j.datasources import (
+    fetch_all_schema_ids,
+    fetch_schemas_by_ids,
+    fetch_item_by_id,
+)
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
+__all__ = [
+    "fetch_all_schema_ids",
+    "fetch_item_by_id",
+    "get_schemas_by_ids",
+]
 
 
-def _get_schemas_from_graph_by_ids(
-    relevant_schemas_ids: list | None = None,
-) -> list[dict[str, str]]:
-    schema_ids = relevant_schemas_ids or []
-    query = f"""
-    MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(schema:{Labels.SCHEMA})
-          -[:{Edges.CONTAINS}]->(table:{Labels.TABLE})
-          -[:{Edges.CONTAINS}]->(column:{Labels.COLUMN})
-    WHERE size($relevant_schemas_ids) = 0
-       OR schema.id IN $relevant_schemas_ids
-    RETURN collect({{
-        column_name:  column.name,
-        column_id:    column.id,
-        table_name:   table.name,
-        table_id:     table.id,
-        database_name:      db.name,
-        table_schema: schema.name,
-        data_type:    column.data_type
-    }}) AS data
+def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
+    """Assemble :class:`Schema` objects from Neo4j catalog data.
+
+    Fetches raw column/table rows via :func:`gsf.neo4j.datasources.fetch_schemas_by_ids`
+    then builds the in-memory :class:`Schema` map consumed by the SQL parser.
     """
-    result = get_neo4j_conn().query_read(query, {"relevant_schemas_ids": schema_ids})
-    if len(result) > 0:
-        return result[0]["data"]
-    return []
-
-
-def get_all_schemas_ids():
-    query = f"""MATCH(s:{Labels.SCHEMA}) RETURN s.id as schema_id"""
-    result = pd.DataFrame(
-        get_neo4j_conn().query_read(
-            query=query,
-            parameters=None,
-        )
-    )
-    return result["schema_id"].tolist()
-
-
-def get_schemas_by_ids(relevant_schemas_ids: list = None):
     before_get_all = time.time()
-    data_array = _get_schemas_from_graph_by_ids(relevant_schemas_ids)
+    data_array = fetch_schemas_by_ids(relevant_schemas_ids)
     logger.info(f"time took to get all data from graph: {time.time() - before_get_all}")
     data_df = pd.DataFrame(data_array)
     dbs = list(data_df["database_name"].unique())
@@ -122,81 +103,3 @@ def get_schemas_by_ids(relevant_schemas_ids: list = None):
     )
     logger.info(f"total time for get_schemas_by_ids(): {time.time() - before_get_all}")
     return all_schemas
-
-
-def fetch_tables_by_ids(table_ids: list[str]) -> list[dict]:
-    """Fetch Table nodes with full column lists from Neo4j.
-
-    Returns a list of dicts with keys: id, name, description,
-    schema_name, label, columns.
-    """
-    if not table_ids:
-        return []
-    query = f"""
-    UNWIND $table_ids AS tid
-    MATCH (tbl:{Labels.TABLE} {{id: tid}})
-    OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-    OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-    WITH tbl, sch,
-         collect({{name: col.name, data_type: col.data_type,
-                   description: col.description}}) AS cols
-    RETURN tbl.id AS id, tbl.name AS name,
-           tbl.description AS description,
-           sch.name AS schema_name, cols
-    """
-    try:
-        rows = get_neo4j_conn().query_read(query, {"table_ids": table_ids})
-    except Exception:
-        logger.warning("fetch_tables_by_ids: Neo4j query failed", exc_info=True)
-        return []
-    tables: list[dict] = []
-    seen_ids: set[str] = set()
-    for row in rows:
-        tid = row.get("id")
-        if not tid or str(tid) in seen_ids:
-            continue
-        seen_ids.add(str(tid))
-        cols = [c for c in (row.get("cols") or []) if c.get("name")]
-        tables.append(
-            {
-                "id": tid,
-                "name": row.get("name") or "",
-                "description": row.get("description") or "",
-                "schema_name": row.get("schema_name") or "",
-                "label": Labels.TABLE,
-                "columns": cols,
-            }
-        )
-    return tables
-
-
-def _get_node_properties_by_id(id, label: str | list[str]):
-    labels_list = label if isinstance(label, list) else [label]
-    for lbl in labels_list:
-        if lbl not in _ALLOWED_NODE_LABELS:
-            logger.warning(
-                "Rejecting unknown label %r in _get_node_properties_by_id", lbl
-            )
-            return None
-    label_filter = "|".join(labels_list)
-    query = f"""
-        MATCH(n:{label_filter}{{id:$id}})
-        RETURN apoc.map.setKey(properties(n),"label", labels(n)[0]) as props
-    """
-
-    props = get_neo4j_conn().query_read_only(query, parameters={"id": id})
-    if len(props) == 0:
-        return None
-    else:
-        return props[0]["props"]
-
-
-def get_item_by_id(item_id, label):
-    result = _get_node_properties_by_id(item_id, label)
-    if result:
-        return result
-    else:
-        logger.error(
-            f"The required item with id : {item_id} is not found in graph. ERROR."
-        )
-        return None

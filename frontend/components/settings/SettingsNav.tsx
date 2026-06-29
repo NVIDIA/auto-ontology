@@ -16,10 +16,15 @@ const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
 	label: 'Semantic Input',
 	href: '/settings/semantic-input',
 };
+const ZONES_NAV_ITEM: NavItem = {
+	label: 'Zones',
+	href: '/settings/zones',
+};
 
 export const SETTINGS_NAV_ITEMS: readonly NavItem[] = [
 	CONNECTIONS_NAV_ITEM,
 	SEMANTIC_INPUT_NAV_ITEM,
+	ZONES_NAV_ITEM,
 ];
 
 function rowClassName(selected: boolean) {
@@ -49,7 +54,7 @@ export const SettingsNav = () => {
 		};
 	}, []);
 
-	const items = envManaged ? [SEMANTIC_INPUT_NAV_ITEM] : SETTINGS_NAV_ITEMS;
+	const items = envManaged ? [SEMANTIC_INPUT_NAV_ITEM, ZONES_NAV_ITEM] : SETTINGS_NAV_ITEMS;
 
 	return (
 		<nav

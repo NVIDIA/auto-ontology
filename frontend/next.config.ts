@@ -61,6 +61,10 @@ const nextConfig: NextConfig = {
 				destination: `${pythonApiUrl}/api/connections/:path*`,
 			},
 			{
+				source: '/api/zones/:path*',
+				destination: `${pythonApiUrl}/api/zones/:path*`,
+			},
+			{
 				source: '/api/health',
 				destination: `${pythonApiUrl}/api/health`,
 			},

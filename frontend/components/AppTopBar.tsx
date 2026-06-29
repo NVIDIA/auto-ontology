@@ -6,6 +6,7 @@
 
 import { Icon, IconName } from '@/components/icons';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
+import { UserMenu } from '@/components/UserMenu';
 import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
 
 export const AppTopBar = () => {
@@ -15,7 +16,10 @@ export const AppTopBar = () => {
 		<header className="flex h-[52px] shrink-0 items-center border-b border-zinc-200 bg-white px-4 pr-[40px] dark:border-zinc-800 dark:bg-zinc-950">
 			<Icon name={IconName.NvidiaLogo} className="mr-3 h-5 w-5 shrink-0" />
 			<Breadcrumbs items={items} />
-			{rightSlot ? <div className="ml-auto flex items-center gap-2">{rightSlot}</div> : null}
+			<div className="ml-auto flex items-center gap-3">
+				{rightSlot ? <div className="flex items-center gap-2">{rightSlot}</div> : null}
+				<UserMenu />
+			</div>
 		</header>
 	);
 };

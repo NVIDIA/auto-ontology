@@ -116,6 +116,11 @@ GSF resolves the source databases it connects to from two sources:
    `--set connectionStrings=<CONNECTION-STRINGS>` flag). This is a fallback: it
    is used only when there are no UI-added connections.
 
+## Authentication
+
+GSF Supports SSO for authentication.
+The Redirect URI should be configured in the IdP as: APP_URL/api/auth/sso/callback
+
 ## License
 
 GSF is licensed under the [Apache License, Version 2.0](./LICENSE).

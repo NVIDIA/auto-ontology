@@ -13,7 +13,8 @@ from typing import Any, TypedDict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from gsf.server.connections import dal, service
+from gsf.neo4j.connections import list_connections as _list_connections
+from gsf.server.connections import service
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ def is_env_source() -> bool:
 
 @router.get("/connections")
 def list_connections() -> dict:
-    rows = [_serialize_connection(conn) for conn in dal.list_connections()]
+    rows = [_serialize_connection(conn) for conn in _list_connections()]
     return {"data": rows, "count": len(rows)}
 
 

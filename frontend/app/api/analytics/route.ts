@@ -4,6 +4,8 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
+import { requireApiAdmin } from '@/auth/api-auth';
+import { Role } from '@/enums/auth';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -15,6 +17,10 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 };
 
 export async function GET(request: Request) {
+	// Viewing analytics (the report) is admin-only.
+	const denied = await requireApiAdmin();
+	if (denied) return denied;
+
 	const prisma = getPrisma();
 	const { searchParams } = new URL(request.url);
 
@@ -26,24 +32,19 @@ export async function GET(request: Request) {
 	const where = { questionTimestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
-	const data = await prisma.conversationAnalytics.findMany({
+	// The row stores only `userId`; join the User to resolve the display name.
+	const rows = await prisma.conversationAnalytics.findMany({
 		where,
 		orderBy: { questionTimestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
+		include: { user: { select: { id: true, name: true, email: true, role: true } } },
 	});
+
+	const data = rows.map((row) => ({
+		...row,
+		user: { ...row.user, role: (row.user.role as Role) ?? Role.Viewer },
+	}));
 
 	return NextResponse.json({ data, total });
-}
-
-export async function POST(req: Request) {
-	const prisma = getPrisma();
-	const body = await req.json();
-	const row = await prisma.conversationAnalytics.create({
-		data: {
-			questionMessageId: body.questionMessageId,
-			question: body.question ?? '',
-		},
-	});
-	return NextResponse.json(row, { status: 201 });
 }

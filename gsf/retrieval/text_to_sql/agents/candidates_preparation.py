@@ -23,12 +23,23 @@ Design Decisions:
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
 
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.neo4j.attributes import fetch_attr_column_contexts, find_join_path
+from gsf.neo4j.custom_analyses import (
+    fetch_custom_analyses_with_sql,
+    fetch_tables_from_custom_analyses,
+)
+from gsf.neo4j.datasources import fetch_tables_by_ids
+from gsf.neo4j.terms import fetch_term_synonyms
+from gsf.retrieval.data_access.relevant_tables import (
+    dedupe_merge_relevant_tables,
+    get_relevant_tables,
+    get_relevant_tables_from_candidates,
+)
+from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -43,6 +54,7 @@ from gsf.retrieval.text_to_sql.state import (
     get_question_for_processing,
     rules_to_text,
 )
+from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from gsf.retrieval.data_access.graph_schemas import fetch_tables_by_ids
@@ -61,50 +73,6 @@ def _qualified_name(t: dict) -> str:
 
 
 logger = logging.getLogger(__name__)
-
-
-def _extract_relevant_queries(candidates: list) -> list[dict]:
-    """Fetch name, description, and sql_full_query for each CustomAnalysis via HAS_SQL -> Sql.
-
-    Returns a list of dicts with keys: id, name, description, sql.
-    """
-    analysis_ids = [
-        str(c["id"])
-        for c in candidates
-        if c.get("label", "") == Labels.CUSTOM_ANALYSIS and c.get("id")
-    ]
-    if not analysis_ids:
-        return []
-
-    query = f"""
-    UNWIND $ids AS analysis_id
-    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
-    OPTIONAL MATCH (ca)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-    RETURN ca.id AS ca_id, ca.name AS name, ca.description AS description,
-           sql.sql_full_query AS sql_text
-    """
-    try:
-        rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
-    except Exception:
-        logger.warning("_extract_relevant_queries: Neo4j query failed", exc_info=True)
-        return []
-
-    seen_ids: set[str] = set()
-    result: list[dict] = []
-    for row in rows:
-        ca_id = row.get("ca_id") or ""
-        if ca_id in seen_ids:
-            continue
-        seen_ids.add(ca_id)
-        result.append(
-            {
-                "id": ca_id,
-                "name": (row.get("name") or "").strip(),
-                "description": (row.get("description") or "").strip(),
-                "sql": (row.get("sql_text") or "").strip(),
-            }
-        )
-    return result
 
 
 class CandidatePreparationAgent(BaseAgent):
@@ -160,13 +128,13 @@ class CandidatePreparationAgent(BaseAgent):
         question = get_question_for_processing(state)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
-        # Combined raw hits passed to helpers that may inspect relevant_tables.
         candidates = custom_analyses + column_attributes
 
-        # --- 1. Custom analyses (no filtering — retrieval already scoped by question) ---
+        # --- 1. Custom analyses ---
         self.logger.info("Retrieved %d custom analyses", len(custom_analyses))
 
-        relevant_queries = _extract_relevant_queries(custom_analyses)
+        analysis_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
+        relevant_queries = fetch_custom_analyses_with_sql(analysis_ids)
         self.logger.info(
             "Found %d relevant queries from custom analyses", len(relevant_queries)
         )
@@ -183,15 +151,15 @@ class CandidatePreparationAgent(BaseAgent):
             attr_ids = [
                 str(hit.get("id") or "") for hit in column_attributes if hit.get("id")
             ]
-            attr_ids = list(dict.fromkeys(attr_ids))  # deduplicate, preserve order
+            attr_ids = list(dict.fromkeys(attr_ids))
 
-            attr_contexts = self._fetch_attr_column_contexts(attr_ids)
+            attr_contexts = fetch_attr_column_contexts(attr_ids)
             self.logger.info(
                 "Fetched Neo4j context for %d/%d column attributes",
                 len(attr_contexts),
                 len(attr_ids),
             )
-            term_synonyms = self._fetch_term_synonyms(attr_ids)
+            term_synonyms = fetch_term_synonyms(attr_ids)
             self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
             anchor_id = self._identify_anchor(state, question, attr_contexts)
@@ -210,9 +178,7 @@ class CandidatePreparationAgent(BaseAgent):
                 for dest_id, dest_ctx in attr_contexts.items():
                     if dest_id == anchor_id:
                         continue
-                    join_path = self._find_join_path(
-                        anchor_ctx["col_id"], dest_ctx["col_id"]
-                    )
+                    join_path = find_join_path(anchor_ctx["col_id"], dest_ctx["col_id"])
                     attribute_join_paths.append(
                         {
                             "id": dest_id,
@@ -237,7 +203,6 @@ class CandidatePreparationAgent(BaseAgent):
         # --- 4. Retrieve relevant tables ---
         relevant_tables = get_relevant_tables_from_candidates(candidates)
 
-        # Also fetch tables directly connected to the retrieved ColumnAttributes via Neo4j.
         if attr_contexts:
             ca_table_ids = list(
                 dict.fromkeys(
@@ -284,7 +249,7 @@ class CandidatePreparationAgent(BaseAgent):
         # --- 4b. Add tables referenced by custom analyses via Neo4j ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
-            ca_linked_tables = self._fetch_tables_from_custom_analyses(ca_ids)
+            ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
             existing_ids = {t.get("id") for t in relevant_tables}
             added = 0
             for tbl in ca_linked_tables:
@@ -333,10 +298,7 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         analyses: list[dict],
     ) -> list[dict]:
-        """Use the LLM to decide which retrieved custom analyses are relevant.
-
-        On any failure the full list is returned unchanged (safe fallback).
-        """
+        """Use the LLM to decide which retrieved custom analyses are relevant."""
         if len(analyses) <= 1:
             return analyses
 
@@ -421,14 +383,7 @@ class CandidatePreparationAgent(BaseAgent):
         tables: list[dict],
         custom_analyses: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
-        """Use the LLM to decide which candidate tables are actually needed.
-
-        Sends table names and descriptions to the LLM alongside the user's
-        question, domain rules, and selected custom analyses (so the LLM
-        knows which tables the analyses' SQL requires).
-        Returns ``(filtered_tables, reasoning)``.
-        On any failure the full list is returned unchanged with empty reasoning.
-        """
+        """Use the LLM to decide which candidate tables are actually needed."""
         if len(tables) <= 2:
             return tables, ""
 
@@ -648,10 +603,7 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         contexts: dict[str, dict],
     ) -> str | None:
-        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question.
-
-        Falls back to the first key on any failure.
-        """
+        """Use the LLM to pick the primary (anchor) ColumnAttribute for the question."""
         ids = list(contexts.keys())
         if not ids:
             return None
@@ -709,115 +661,8 @@ class CandidatePreparationAgent(BaseAgent):
         )
         return ids[0]
 
-    def _fetch_col_table_contexts(self, col_ids: list[str]) -> dict[str, dict]:
-        """Batch Neo4j lookup: Column id -> {table_name, schema_name}."""
-        if not col_ids:
-            return {}
-        query = """
-        UNWIND $col_ids AS col_id
-        MATCH (col:Column {id: col_id})<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
-        RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
-        """
-        try:
-            rows = get_neo4j_conn().query_read(query, {"col_ids": col_ids})
-        except Exception:
-            self.logger.warning(
-                "_fetch_col_table_contexts: Neo4j query failed", exc_info=True
-            )
-            return {}
-        return {
-            r["col_id"]: {
-                "table_name": r.get("table_name") or "",
-                "schema_name": r.get("schema_name") or "",
-            }
-            for r in rows
-            if r.get("col_id")
-        }
-
-    def _find_join_path(self, anchor_col_id: str, dest_col_id: str) -> list[dict]:
-        """Find the shortest semantic join path between two Column nodes.
-
-        Traverses SEMANTIC_FK, HAS_ATTRIBUTE, and CONTAINS edges undirected.
-        Returns a list of hop dicts, each describing one (source_col -> target_col) step:
-            [{source_schema, source_table, source_column,
-              target_schema, target_table, target_column}, ...]
-        The first source_column is the anchor's physical column; the last
-        target_column is the destination's physical column.
-        Returns [] when anchor == dest or no path exists.
-        """
-        if anchor_col_id == dest_col_id:
-            return []
-
-        path_query = """
-        MATCH (col_anchor:Column {id: $anchor_col_id})
-        MATCH (col_dest:Column {id: $dest_col_id})
-        MATCH path = shortestPath(
-            (col_anchor)-[:SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS*..30]-(col_dest)
-        )
-        WHERE NONE(n IN nodes(path) WHERE n:Schema)
-        RETURN [n IN nodes(path) | {
-            id: n.id,
-            name: n.name,
-            label: labels(n)[0]
-        }] AS path_nodes
-        """
-        try:
-            rows = get_neo4j_conn().query_read(
-                path_query, {"anchor_col_id": anchor_col_id, "dest_col_id": dest_col_id}
-            )
-        except Exception:
-            self.logger.warning(
-                "_find_join_path: Neo4j query failed for %s -> %s",
-                anchor_col_id,
-                dest_col_id,
-                exc_info=True,
-            )
-            return []
-
-        if not rows:
-            self.logger.debug(
-                "_find_join_path: no path found for %s -> %s",
-                anchor_col_id,
-                dest_col_id,
-            )
-            return []
-
-        path_nodes: list[dict] = rows[0].get("path_nodes") or []
-
-        # Extract Column nodes in traversal order.
-        col_nodes = [n for n in path_nodes if n.get("label") == "Column"]
-        if len(col_nodes) < 2:
-            return []
-
-        # Enrich columns with their Table/Schema context in one batch query.
-        col_ids = [n["id"] for n in col_nodes if n.get("id")]
-        col_ctx = self._fetch_col_table_contexts(col_ids)
-
-        # Pair consecutive columns: (col_0, col_1) = hop 1, (col_2, col_3) = hop 2, …
-        hops: list[dict] = []
-        for i in range(0, len(col_nodes) - 1, 2):
-            src = col_nodes[i]
-            tgt = col_nodes[i + 1]
-            src_ctx = col_ctx.get(src.get("id") or "", {})
-            tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
-            hops.append(
-                {
-                    "source_schema": src_ctx.get("schema_name", ""),
-                    "source_table": src_ctx.get("table_name", ""),
-                    "source_column": src.get("name", ""),
-                    "target_schema": tgt_ctx.get("schema_name", ""),
-                    "target_table": tgt_ctx.get("table_name", ""),
-                    "target_column": tgt.get("name", ""),
-                }
-            )
-        return hops
-
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
-        """Build string representation of custom analyses for prompts.
-
-        Uses the enriched dicts from ``_extract_relevant_queries`` which contain
-        name, description, and sql fetched directly from Neo4j.
-        """
+        """Build string representation of custom analyses for prompts."""
         parts_list: list[str] = []
         for x in relevant_queries:
             name = (x.get("name") or "").strip()
