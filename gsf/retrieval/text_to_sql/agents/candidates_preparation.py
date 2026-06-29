@@ -55,14 +55,6 @@ from gsf.retrieval.text_to_sql.state import (
     rules_to_text,
 )
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from gsf.retrieval.data_access.graph_schemas import fetch_tables_by_ids
-from gsf.retrieval.data_access.relevant_tables import (
-    dedupe_merge_relevant_tables,
-    get_relevant_tables,
-    get_relevant_tables_from_candidates,
-)
 
 
 def _qualified_name(t: dict) -> str:
@@ -484,118 +476,6 @@ class CandidatePreparationAgent(BaseAgent):
             return tables, reasoning
 
         return filtered, reasoning
-
-    def _fetch_attr_column_contexts(self, attr_ids: list[str]) -> dict[str, dict]:
-        """Fetch Column + Table + Schema context for ColumnAttribute IDs from Neo4j.
-
-        Returns a mapping of attr_id -> {attr_name, attr_description, col_id, col_name, table_name, schema_name}.
-        """
-        if not attr_ids:
-            return {}
-        query = """
-        UNWIND $attr_ids AS attr_id
-        MATCH (attr:ColumnAttribute {id: attr_id})
-        OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
-        OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
-        RETURN attr.id AS attr_id, attr.name AS attr_name, attr.description AS attr_description,
-               col.id AS col_id, col.name AS col_name,
-               tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name
-        """
-        try:
-            rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
-        except Exception:
-            self.logger.warning(
-                "_fetch_attr_column_contexts: Neo4j query failed", exc_info=True
-            )
-            return {}
-        result: dict[str, dict] = {}
-        for row in rows:
-            aid = row.get("attr_id")
-            if not aid:
-                continue
-            result[aid] = {
-                "attr_name": row.get("attr_name") or "",
-                "attr_description": row.get("attr_description") or "",
-                "col_id": row.get("col_id"),
-                "col_name": row.get("col_name") or "",
-                "table_id": row.get("table_id"),
-                "table_name": row.get("table_name") or "",
-                "schema_name": row.get("schema_name") or "",
-            }
-        return result
-
-    def _fetch_term_synonyms(self, attr_ids: list[str]) -> dict[str, list[str]]:
-        """Fetch synonyms for Terms connected to the given ColumnAttribute IDs.
-
-        Returns a mapping of term_name -> list[synonym].
-        """
-        if not attr_ids:
-            return {}
-        query = """
-        UNWIND $attr_ids AS attr_id
-        MATCH (attr:ColumnAttribute {id: attr_id})-[:PROPERTY_OF]->(term:Term)
-        WHERE term.synonyms IS NOT NULL AND size(term.synonyms) > 0
-        RETURN DISTINCT term.name AS term_name, term.synonyms AS synonyms
-        """
-        try:
-            rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
-        except Exception:
-            self.logger.warning(
-                "_fetch_term_synonyms: Neo4j query failed", exc_info=True
-            )
-            return {}
-        result: dict[str, list[str]] = {}
-        for row in rows:
-            name = row.get("term_name")
-            syns = row.get("synonyms") or []
-            if name and syns:
-                result[name] = [s for s in syns if s]
-        return result
-
-    def _fetch_tables_from_custom_analyses(self, analysis_ids: list[str]) -> list[dict]:
-        """Fetch Tables referenced by CustomAnalysis nodes via HAS_SQL -> Sql -> SQL -> Table.
-
-        Returns a list of normalized table dicts ready for prompt consumption.
-        """
-        if not analysis_ids:
-            return []
-        query = f"""
-        UNWIND $ids AS analysis_id
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
-              -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-              -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-        OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
-        OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
-        WITH tbl, sch, collect({{name: col.name, data_type: col.data_type, description: col.description}}) AS cols
-        RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-               sch.name AS schema_name, cols
-        """
-        try:
-            rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
-        except Exception:
-            self.logger.warning(
-                "_fetch_tables_from_custom_analyses: Neo4j query failed", exc_info=True
-            )
-            return []
-        tables = []
-        seen: set[str] = set()
-        for row in rows:
-            tid = row.get("id")
-            if not tid or str(tid) in seen:
-                continue
-            seen.add(str(tid))
-            cols = [c for c in (row.get("cols") or []) if c.get("name")]
-            tables.append(
-                {
-                    "id": tid,
-                    "name": row.get("name") or "",
-                    "description": row.get("description") or "",
-                    "schema_name": row.get("schema_name") or "",
-                    "label": Labels.TABLE,
-                    "columns": cols,
-                }
-            )
-        return tables
 
     def _identify_anchor(
         self,
