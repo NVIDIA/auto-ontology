@@ -21,17 +21,18 @@ _NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
     "NVIDIA_API_KEY", ""
 )
 
-if not _NVIDIA_API_KEY:
-    raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. "
-        "Export it before running:\n\n"
-        "    export NVIDIA_API_KEY='nvapi-...'\n\n"
-        "Get your key at https://build.nvidia.com"
-    )
+_KEY_ERROR = (
+    "NVIDIA_API_KEY is not set. "
+    "Export it before running:\n\n"
+    "    export NVIDIA_API_KEY='nvapi-...'\n\n"
+    "Get your key at https://build.nvidia.com"
+)
 
 
 def get_embed_kwargs() -> dict[str, str]:
     """Keyword args for ``Retriever`` embed configuration."""
+    if not _NVIDIA_API_KEY:
+        raise EnvironmentError(_KEY_ERROR)
     return {
         "model_name": _EMBED_MODEL,
         "embed_invoke_url": _EMBED_ENDPOINT,
@@ -40,6 +41,8 @@ def get_embed_kwargs() -> dict[str, str]:
 
 
 def get_embed_params() -> EmbedParams:
+    if not _NVIDIA_API_KEY:
+        raise EnvironmentError(_KEY_ERROR)
     return EmbedParams(
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,
