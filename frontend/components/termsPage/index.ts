@@ -2,5 +2,4 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { DataTree, type DataTreeProps } from './DataTree';
-export { DataWorkspaceView, type DataWorkspaceViewProps } from './DataWorkspaceView';
+export { TermsView } from './TermsView';

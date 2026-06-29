@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SinglePageFormat } from '@/components/dataPage/SinglePageView';
+import type { SinglePageFormat } from '@/components/SinglePageView';
 import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';

@@ -10,6 +10,7 @@ import type { BreadcrumbItem } from '@/components/Breadcrumbs';
 
 const PATH_LABELS: Record<string, BreadcrumbItem> = {
 	'/chat': { label: 'Chat', href: '/chat' },
+	'/terms': { label: 'Terms', href: '/terms' },
 	'/analysis': { label: 'Analysis', href: '/analysis' },
 	'/data': { label: 'All Data', href: '/data' },
 	'/analytics': { label: 'Analytics', href: '/analytics' },

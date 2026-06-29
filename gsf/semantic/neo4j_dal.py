@@ -168,6 +168,23 @@ def fetch_all_terms_and_attributes() -> tuple[
     return terms, attrs
 
 
+def fetch_term_by_id(term_id: str) -> dict[str, Any] | None:
+    """Return a single Term node by its id with table count, or None if not found."""
+    conn = get_neo4j_conn()
+    rows = conn.query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        OPTIONAL MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        RETURN term.name AS name, term.description AS description,
+               term.synonyms AS synonyms, term.id AS id,
+               count(DISTINCT t) AS table_count
+        LIMIT 1
+        """,
+        {"term_id": term_id},
+    )
+    return rows[0] if rows else None
+
+
 def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -198,6 +215,34 @@ def fetch_terms_and_attributes_for_table(
         params,
     )
     return terms, attrs
+
+
+def fetch_column_attributes_with_fk_count() -> list[dict[str, Any]]:
+    """Return all ColumnAttribute nodes with:
+
+    * ``fk_count``   — number of Column nodes that point to this attribute
+                       via a SEMANTIC_FK edge (i.e. it is used as a FK target).
+    * ``is_primary_key`` — True when at least one FK references this attribute,
+                           meaning it acts as the primary-key anchor for its Term.
+    """
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
+        WITH attr, count(col) AS fk_count
+        RETURN attr.id           AS id,
+               attr.name         AS name,
+               attr.description  AS description,
+               attr.term_name    AS term_name,
+               attr.source_column AS source_column,
+               attr.datatype     AS datatype,
+               attr.table_id     AS table_id,
+               fk_count,
+               fk_count > 0      AS is_primary_key
+        ORDER BY attr.term_name, attr.name
+        """,
+        {"source": SEMANTIC_SOURCE},
+    )
 
 
 def find_unlinked_fk_columns() -> list[dict[str, Any]]:
