@@ -32,16 +32,11 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     Props,
 )
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-from gsf.retrieval.data_access.graph_schemas import (
-    get_all_schemas_ids,
-    get_schemas_by_ids,
-)
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
 
-from gsf.connectors import get_connectors
+from gsf.server.sql_utils import SqlParseError, get_dialects, get_schemas, validate_sql
 
 if TYPE_CHECKING:
     from nemo_retriever.common.params.models import EmbedParams
@@ -75,24 +70,8 @@ class CustomAnalysisSqlConflict(Exception):
     """
 
 
-class CustomAnalysisSqlError(Exception):
-    """Raised when the SQL can't be parsed against the current catalog.
-
-    Covers two failure modes from ``parse_query_single``:
-
-    * the parser itself raises (syntax error, unsupported dialect
-      construct, sqlglot blow-up) — mirrored from
-      ``SQLValidationAgent._sql_parse_validation`` in NeMo-Retriever,
-      which wraps the same call in ``try/except`` and returns
-      ``{"error": str(error)}``;
-    * the parser returns ``None`` because the SQL doesn't resolve to
-      any table the graph already knows about (typos, missing
-      ingestion, ...).
-
-    Either way we refuse the write: without a valid AST and at least
-    one resolved table the ``Sql -[:SQL]-> Table/Column`` edges that
-    downstream retrieval relies on can't be produced.
-    """
+class CustomAnalysisSqlError(SqlParseError):
+    """Raised when the SQL can't be parsed against the current catalog."""
 
 
 # ---------------------------------------------------------------------------
@@ -146,74 +125,6 @@ def list_custom_analyses() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # Write helpers (private)
 # ---------------------------------------------------------------------------
-
-
-def _get_dialects() -> list[str]:
-    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
-    connectors = get_connectors()
-    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
-    if not dialects:
-        return ["generic", "ansi", "postgres"]
-    return dialects
-
-
-def _get_schemas() -> dict:
-    """Return the full catalog snapshot for ``parse_query_single``."""
-    schemas_ids = get_all_schemas_ids()
-    return get_schemas_by_ids(schemas_ids)
-
-
-def _validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
-    """Validate ``sql`` against *schemas*, returning a query object.
-
-    Pure validation step: no graph writes happen here. Callers MUST run
-    this before any mutating call (``_detach_existing_sql_edges``,
-    ``_persist_analysis_with_sql``) so a parse failure can't leave the
-    graph in a half-updated state — e.g. ``update_custom_analysis`` used
-    to detach the old ``HAS_SQL`` edge first, then parse the new SQL, so
-    a 422 would orphan the ``CustomAnalysis`` from any ``Sql`` node.
-
-    ``parse_query_single`` can fail in two ways:
-
-    * raise (sqlglot syntax error, unsupported dialect construct, ...) —
-      mirrored from ``SQLValidationAgent._sql_parse_validation`` in
-      NeMo-Retriever, which wraps the same call in ``try/except`` and
-      returns ``{"error": str(error)}``;
-    * return ``None`` when the SQL parses but doesn't resolve to any
-      table the graph already knows about (typos, missing ingestion,
-      ...).
-
-    ``enrich_graph`` lets the raise propagate and only warns on
-    ``None``; the API path can't do either — a 500 leaks the parser's
-    internals to the UI, and a silently dropped write would leave the
-    UI thinking the analysis was saved. Both cases are converted to
-    :class:`CustomAnalysisSqlError` so the caller gets a 422 with a
-    message it can render.
-
-    Note: this leaves a gap NeMo-Retriever is expected to close
-    upstream — sqlglot silently parses garbage like ``"fghcghv"`` as
-    a bare ``Column`` expression, so ``parse_query_single`` returns
-    ``None`` and the 422 reads "doesn't reference any table" rather
-    than "not valid SQL". Once the parser surfaces that distinction
-    we can map it to a clearer message here without changing the API.
-    """
-    try:
-        query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
-    except Exception as exc:
-        # `parse_query_single` -> sqlglot can raise a variety of
-        # exception types for syntax / dialect issues; NeMo-Retriever's
-        # own validation agent uses the same broad `except Exception`.
-        raise CustomAnalysisSqlError(
-            f"SQL parse error: {exc}",
-        ) from exc
-
-    if query_obj is None:
-        raise CustomAnalysisSqlError(
-            "SQL doesn't reference any table known to the catalog; "
-            "ingest the schema first or check the query",
-        )
-
-    return query_obj
 
 
 def _find_analysis_by_name(
@@ -315,7 +226,7 @@ def _persist_analysis_with_sql(
     reproduce its match_props → append HAS_SQL edge → ``add_query``
     sequence verbatim.
 
-    ``query_obj`` must already be the result of :func:`_validate_sql`
+    ``query_obj`` must already be the result of :func:`validate_sql`
     — that split lets callers validate the SQL before doing any graph
     writes (so a parse failure on update doesn't strand the analysis
     without a ``HAS_SQL`` edge).
@@ -384,7 +295,7 @@ def create_custom_analysis(
             f"(id={sql_conflict['id']!r})",
         )
 
-    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
+    query_obj = validate_sql(sql, get_dialects(), get_schemas())
     analysis_node = Neo4jNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
@@ -465,7 +376,7 @@ def update_custom_analysis(
     # here used to land after `_detach_existing_sql_edges`, orphaning
     # the analysis from any `Sql` node and leaving the read endpoint
     # to return `sql: null` for an otherwise valid-looking record.
-    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
+    query_obj = validate_sql(sql, get_dialects(), get_schemas())
 
     _detach_existing_sql_edges(analysis_id)
 
