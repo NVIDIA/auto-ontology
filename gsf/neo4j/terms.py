@@ -23,6 +23,7 @@ from gsf.semantic.constants import (
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_REPRESENTS,
+    REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
 
