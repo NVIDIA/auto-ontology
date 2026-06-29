@@ -23,7 +23,7 @@ nvidiaApiKey: ""
 baseUrl: "https://integrate.api.nvidia.com/v1"
 modelName: "nvidia/nemotron-3-nano-30b-a3b"
 embedEndpoint: "https://integrate.api.nvidia.com/v1"
-embedModel: "nvidia/llama-nemotron-embed-1b-v2"
+embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # Better Auth signing key (sessions, CSRF, OIDC state). Leave empty to

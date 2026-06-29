@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from gsf.semantic import neo4j_dal
+from gsf.neo4j.datasources import fetch_table_context, fetch_all_tables_without_term
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
-from gsf.semantic.loaders import fetch_table_context
 from gsf.semantic.visit_enter import process_table
 
 logger = logging.getLogger(__name__)
@@ -21,7 +20,7 @@ def compile_semantic_layer(
 ) -> int:
     """Run full taxonomy compilation over every table in Neo4j."""
     summary = domain_summary or load_domain_summary(database_name)
-    tables = neo4j_dal.fetch_all_tables()
+    tables = fetch_all_tables_without_term()
     count = 0
 
     for table in tables:

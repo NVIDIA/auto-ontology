@@ -4,15 +4,9 @@
 
 import { authClient } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
+import type { User } from '@/types/auth';
 
-export type ManagedUser = {
-	id: string;
-	name: string;
-	email: string;
-	role: Role;
-};
-
-type ListResult = { users: ManagedUser[]; error: string | null };
+type ListResult = { users: User[]; error: string | null };
 
 export const usersApi = {
 	list: async (): Promise<ListResult> => {
@@ -20,12 +14,10 @@ export const usersApi = {
 		if (result.error) {
 			return { users: [], error: result.error.message ?? 'Failed to load users.' };
 		}
-		const users: ManagedUser[] = (result.data?.users ?? []).map((user) => ({
+		const users: User[] = (result.data?.users ?? []).map((user) => ({
 			id: user.id,
 			name: user.name,
 			email: user.email,
-			// Every user has a role (the admin plugin assigns defaultRole on
-			// create); fall back to Viewer defensively if it's ever missing.
 			role: (user.role as Role) ?? Role.Viewer,
 		}));
 		return { users, error: null };

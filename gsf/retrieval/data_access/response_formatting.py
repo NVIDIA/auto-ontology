@@ -18,7 +18,7 @@ import logging
 import re
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-from gsf.retrieval.data_access.graph_schemas import get_item_by_id
+from gsf.retrieval.data_access.graph_schemas import fetch_item_by_id
 
 logger = logging.getLogger(__name__)
 
@@ -105,7 +105,7 @@ def _highlight_entity(items_present: dict, text: str) -> str:
                 return f"<{_prepare_link(entity[0], eid, entity[1], entity[2])}>"
 
             try:
-                item = get_item_by_id(eid, name_or_label)
+                item = fetch_item_by_id(eid, name_or_label)
             except Exception:
                 logger.error("Something not ok with id, error raised")
                 return f"*{display_name or name_or_label}*"

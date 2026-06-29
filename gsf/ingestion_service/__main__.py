@@ -37,7 +37,7 @@ from gsf.connectors.connection_string_factory import (  # noqa: E402
 )
 from gsf.ingestion_service.ingest import run_ingest  # noqa: E402
 from gsf.ingestion_service.router import router  # noqa: E402
-from gsf.server.connections.dal import list_connections  # noqa: E402
+from gsf.neo4j.connections import list_connections  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

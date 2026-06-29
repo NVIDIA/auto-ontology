@@ -8,25 +8,10 @@ import type { ResponseWithError } from './types';
 
 type ListResult = { data: ConversationAnalytics[]; total: number };
 type ListResponse = ResponseWithError<ListResult>;
-type RowResponse = ResponseWithError<ConversationAnalytics>;
 
-type UpdatePayload = {
-	responseTimestamp: number;
-	response: string;
-	sql?: string;
-	responseMessageId?: string;
-};
-
+// Analytics rows are written server-side in the chat proxy route; the client
+// only reads the report.
 export const analyticsApi = {
 	list: (params: { skip?: number; limit?: number } = {}): Promise<ListResponse> =>
 		requests.get<ListResult>('analytics', params),
-
-	create: (questionMessageId: string, question: string): Promise<RowResponse> =>
-		requests.post<ConversationAnalytics>('analytics', { questionMessageId, question }),
-
-	update: (analyticsId: string, payload: UpdatePayload): Promise<RowResponse> =>
-		requests.patch<ConversationAnalytics>(
-			`analytics/${encodeURIComponent(analyticsId)}`,
-			payload,
-		),
 };

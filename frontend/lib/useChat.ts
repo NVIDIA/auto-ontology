@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamChat } from '@/api/chat';
 import { conversationsApi } from '@/api/conversations';
-import { analyticsApi } from '@/api/analytics';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 
 let nextId = 0;
@@ -15,9 +14,6 @@ const uid = () => `msg-${Date.now()}-${nextId++}`;
 
 const GENERIC_ERROR_MESSAGE =
 	'Something went wrong. Please try again, and if the issue persists, contact our support';
-
-const ABANDONED_RESPONSE_MESSAGE =
-	'The chat ended because you left the page. Need more help? Start a new chat.';
 
 // The agent returns the executed-DB rows under `sql_response_from_db`. It can
 // be a stringified markdown/CSV table or a structured ``list[dict]`` payload.
@@ -38,8 +34,6 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
-	const analyticsIdRef = useRef<string | null>(null);
-	const conversationIdRef = useRef<string | null>(null);
 
 	const appendAssistantMessage = useCallback(
 		(
@@ -59,24 +53,15 @@ export const useChat = () => {
 
 			if (!conversationId) return;
 
+			// Persist the assistant turn to the conversation history. Analytics
+			// is captured server-side in the chat proxy route, so there is no
+			// analytics work to do here.
 			conversationsApi
 				.addMessage(conversationId, {
 					role: 'assistant',
 					content,
 					sqlCode: extras?.sql ?? null,
 					sqlResponse: extras?.sqlResponse ?? null,
-				})
-				.then((msg) => {
-					const aid = analyticsIdRef.current;
-					analyticsIdRef.current = null;
-					if (aid) {
-						analyticsApi.update(aid, {
-							responseMessageId: msg.id,
-							response: content,
-							responseTimestamp: Date.now(),
-							...(extras?.sql ? { sql: extras.sql } : {}),
-						});
-					}
 				})
 				.catch(() => {});
 		},
@@ -87,11 +72,8 @@ export const useChat = () => {
 		() => () => {
 			controllerRef.current?.abort();
 			controllerRef.current = null;
-			if (analyticsIdRef.current) {
-				appendAssistantMessage(conversationIdRef.current, ABANDONED_RESPONSE_MESSAGE);
-			}
 		},
-		[appendAssistantMessage],
+		[],
 	);
 
 	const sendMessage = useCallback(
@@ -109,7 +91,6 @@ export const useChat = () => {
 			// accepts the request via the `onStart` callback below; on 409
 			// "Conversation in progress" (or any other pre-stream error) the
 			// message is never persisted, keeping the chat history clean.
-			conversationIdRef.current = conversationId;
 			setSteps([]);
 			setIsLoading(true);
 
@@ -121,14 +102,6 @@ export const useChat = () => {
 						if (conversationId) {
 							conversationsApi
 								.addMessage(conversationId, { role: 'user', content: text })
-								.then((msg) =>
-									analyticsApi
-										.create(msg.id, text)
-										.then((row) => {
-											if (!row.error) analyticsIdRef.current = row.id ?? null;
-										})
-										.catch(() => {}),
-								)
 								.catch(() => {});
 						}
 					},
@@ -184,8 +157,6 @@ export const useChat = () => {
 	const clearConversation = useCallback(() => {
 		controllerRef.current?.abort();
 		controllerRef.current = null;
-		analyticsIdRef.current = null;
-		conversationIdRef.current = null;
 		setMessages([]);
 		setSteps([]);
 		setIsLoading(false);
