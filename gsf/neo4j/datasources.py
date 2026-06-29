@@ -482,7 +482,7 @@ def fetch_tables_and_columns_by_node_ids(
             RETURN DISTINCT
                    c.id AS id,
                    t.name AS table_name,
-                   t.schema_name AS table_schema,
+                   s.name AS table_schema,
                    c.name AS column_name,
                    c.data_type AS data_type,
                    c.description AS description,
@@ -500,7 +500,7 @@ def fetch_tables_and_columns_by_node_ids(
                   -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: id}})
             RETURN t.id AS id,
                    t.name AS table_name,
-                   t.schema_name AS table_schema,
+                   s.name AS table_schema,
                    t.table_type AS table_type,
                    t.description AS description,
                    db.name AS database_name
