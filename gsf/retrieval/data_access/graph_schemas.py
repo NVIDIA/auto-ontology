@@ -5,7 +5,7 @@
 """Neo4j-backed schema / node lookups.
 
 Builds the :class:`Schema` objects consumed by the SQL parser plus generic
-``get_item_by_id`` helpers.
+``fetch_item_by_id`` helpers.
 
 All direct Neo4j calls live in gsf/neo4j/datasources.py.
 This module only keeps the pure-Python ``get_schemas_by_ids`` that assembles
@@ -24,16 +24,16 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from nemo_retriever.tabular_data.ingestion.model.schema import Schema
 
 from gsf.neo4j.datasources import (
-    get_all_schemas_ids,
-    get_item_by_id,
-    get_schemas_from_graph_by_ids,
+    fetch_all_schema_ids,
+    fetch_schemas_by_ids,
+    fetch_item_by_id,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "get_all_schemas_ids",
-    "get_item_by_id",
+    "fetch_all_schema_ids",
+    "fetch_item_by_id",
     "get_schemas_by_ids",
 ]
 
@@ -41,11 +41,11 @@ __all__ = [
 def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
     """Assemble :class:`Schema` objects from Neo4j catalog data.
 
-    Fetches raw column/table rows via :func:`gsf.neo4j.datasources.get_schemas_from_graph_by_ids`
+    Fetches raw column/table rows via :func:`gsf.neo4j.datasources.fetch_schemas_by_ids`
     then builds the in-memory :class:`Schema` map consumed by the SQL parser.
     """
     before_get_all = time.time()
-    data_array = get_schemas_from_graph_by_ids(relevant_schemas_ids)
+    data_array = fetch_schemas_by_ids(relevant_schemas_ids)
     logger.info(f"time took to get all data from graph: {time.time() - before_get_all}")
     data_df = pd.DataFrame(data_array)
     dbs = list(data_df["database_name"].unique())

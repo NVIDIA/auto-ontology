@@ -6,9 +6,12 @@
 
 Contains only functions that call ``get_neo4j_conn()`` directly.
 
+All read functions use the ``fetch_*`` prefix.
+Write functions use ``patch_*``, ``store_*``, or ``apply_*``.
+
 Non-Neo4j helpers that call these functions remain in their original locations:
-  - get_schemas_by_ids, get_item_by_id  →  retrieval/data_access/graph_schemas.py
-  - build_tables_index                  →  semantic/loaders.py
+  - get_schemas_by_ids  →  retrieval/data_access/graph_schemas.py
+  - build_tables_index  →  semantic/loaders.py
 """
 
 from __future__ import annotations
@@ -32,7 +35,7 @@ _ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
 # ---------------------------------------------------------------------------
 
 
-def list_databases() -> list[dict[str, Any]]:
+def fetch_databases() -> list[dict[str, Any]]:
     """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees."""
     rows = get_neo4j_conn().query_read(
         f"""
@@ -59,7 +62,7 @@ def list_databases() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
+def fetch_schemas_for_database(db_id: str) -> dict[str, Any] | None:
     """Return schemas_count and a list of schema summaries for a database.
 
     Returns a dict with ``schemas_count`` and ``schemas`` — a list of
@@ -81,6 +84,8 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
         """,
         {"db_id": db_id},
     )
+    if not rows:
+        return None
     record = rows[0]
     return {
         "schemas_count": record["schemas_count"],
@@ -88,39 +93,40 @@ def list_schemas_for_database(db_id: str) -> dict[str, Any] | None:
     }
 
 
-def get_all_schemas_ids() -> list[str]:
+def fetch_all_schema_ids() -> list[str]:
     """Return all Schema node IDs."""
-    result = pd.DataFrame(
-        get_neo4j_conn().query_read(
-            query=f"MATCH (s:{Labels.SCHEMA}) RETURN s.id AS schema_id",
-            parameters=None,
+    return [
+        r["schema_id"]
+        for r in get_neo4j_conn().query_read(
+            f"MATCH (s:{Labels.SCHEMA}) RETURN s.id AS schema_id",
         )
-    )
-    return result["schema_id"].tolist()
+    ]
 
 
-def get_schemas_from_graph_by_ids(
+def fetch_schemas_by_ids(
     relevant_schemas_ids: list | None = None,
 ) -> list[dict[str, str]]:
     """Return column-level rows for the given schema IDs (all schemas when empty)."""
     schema_ids = relevant_schemas_ids or []
-    query = f"""
-    MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(schema:{Labels.SCHEMA})
-          -[:{Edges.CONTAINS}]->(table:{Labels.TABLE})
-          -[:{Edges.CONTAINS}]->(column:{Labels.COLUMN})
-    WHERE size($relevant_schemas_ids) = 0
-       OR schema.id IN $relevant_schemas_ids
-    RETURN collect({{
-        column_name:   column.name,
-        column_id:     column.id,
-        table_name:    table.name,
-        table_id:      table.id,
-        database_name: db.name,
-        table_schema:  schema.name,
-        data_type:     column.data_type
-    }}) AS data
-    """
-    result = get_neo4j_conn().query_read(query, {"relevant_schemas_ids": schema_ids})
+    result = get_neo4j_conn().query_read(
+        f"""
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(schema:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(table:{Labels.TABLE})
+              -[:{Edges.CONTAINS}]->(column:{Labels.COLUMN})
+        WHERE size($schema_ids) = 0
+           OR schema.id IN $schema_ids
+        RETURN collect({{
+            column_name:   column.name,
+            column_id:     column.id,
+            table_name:    table.name,
+            table_id:      table.id,
+            database_name: db.name,
+            table_schema:  schema.name,
+            data_type:     column.data_type
+        }}) AS data
+        """,
+        {"schema_ids": schema_ids},
+    )
     return result[0]["data"] if result else []
 
 
@@ -178,8 +184,35 @@ RETURN t1.name AS source_table,
        j.join_columns AS join_columns
 """
 
+_FETCH_TABLES_BY_IDS = f"""
+UNWIND $table_ids AS tid
+MATCH (tbl:{Labels.TABLE} {{id: tid}})
+OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+                         description: col.description}}) AS cols
+RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
+       sch.name AS schema_name, cols
+"""
 
-def list_tables_for_schema(
+_APPLY_TABLE_METADATA = f"""
+UNWIND $rows AS row
+MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}})
+SET t.description = coalesce(row.description, t.description)
+"""
+
+_APPLY_COLUMN_METADATA = f"""
+UNWIND $rows AS row
+MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}})
+      -[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{name: row.column_name}})
+SET c.description = coalesce(row.description, c.description),
+    c.sample_values = coalesce(row.sample_values, c.sample_values)
+"""
+
+
+def fetch_tables_for_schema(
     schema_id: str,
     *,
     database_name: str
@@ -204,7 +237,7 @@ def list_tables_for_schema(
 
 
 def fetch_sorted_tables() -> list[dict[str, Any]]:
-    """All tables in Neo4j ordered by query_count descending."""
+    """Return all tables ordered by query_count descending."""
     rows = get_neo4j_conn().query_read(_FETCH_TABLES_QUERY)
     return [
         {
@@ -220,36 +253,25 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
 
 
 def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
+    """Return a single Table row by id, or None if not found."""
     rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
     return rows[0] if rows else None
 
 
 def fetch_table_by_name(name: str) -> dict[str, Any] | None:
+    """Return the first Table row matching *name*, or None if not found."""
     rows = get_neo4j_conn().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
     return rows[0] if rows else None
 
 
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Fetch Table node properties from Neo4j for the given table IDs."""
+    """Return Table rows with nested column summaries for the given IDs."""
     if not table_ids:
         return []
-    query = """
-    UNWIND $table_ids AS tid
-    MATCH (tbl:{TABLE} {{id: tid}})
-    OPTIONAL MATCH (tbl)<-[:{CONTAINS}]-(sch:{SCHEMA})
-    OPTIONAL MATCH (tbl)-[:{CONTAINS}]->(col:{COLUMN})
-    WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                             description: col.description}}) AS cols
-    RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           sch.name AS schema_name, cols
-    """.format(
-        TABLE=Labels.TABLE,
-        SCHEMA=Labels.SCHEMA,
-        COLUMN=Labels.COLUMN,
-        CONTAINS=Edges.CONTAINS,
-    )
     try:
-        rows = get_neo4j_conn().query_read(query, {"table_ids": table_ids})
+        rows = get_neo4j_conn().query_read(
+            _FETCH_TABLES_BY_IDS, {"table_ids": table_ids}
+        )
     except Exception:
         logger.warning("fetch_tables_by_ids: Neo4j query failed", exc_info=True)
         return []
@@ -287,11 +309,12 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
 
 
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
-    """JOIN-adjacent tables (undirected), one row per neighbour."""
+    """Return JOIN-adjacent tables (undirected), one row per neighbour."""
     return get_neo4j_conn().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
+    """Return all JOIN edges between tables."""
     return get_neo4j_conn().query_read(_FETCH_JOINS_QUERY)
 
 
@@ -323,8 +346,15 @@ RETURN src.name AS source_column,
        tgt_table.id AS target_table_id
 """
 
+_FETCH_COL_TABLE_CONTEXTS = f"""
+UNWIND $col_ids AS col_id
+MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
+      <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
+"""
 
-def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
+
+def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
     """Return a table dict with nested columns, or None if the table is missing."""
     rows = get_neo4j_conn().query_read(
         f"""
@@ -353,7 +383,7 @@ def list_columns_for_table(table_id: str) -> dict[str, Any] | None:
     return rows[0]
 
 
-def get_parent_table_id_for_column(column_id: str) -> str | None:
+def fetch_parent_table_id_for_column(column_id: str) -> str | None:
     """Return the id of the Table that contains this Column, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
@@ -367,7 +397,7 @@ def get_parent_table_id_for_column(column_id: str) -> str | None:
 
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:
-    """Columns and FKs for one table."""
+    """Return columns and FK edges for one table."""
     conn = get_neo4j_conn()
     rows = conn.query_read(_FETCH_COLUMNS_QUERY, {"table_id": table_id})
     columns = [
@@ -387,21 +417,13 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch Neo4j lookup: Column id -> {table_name, schema_name}."""
+    """Batch lookup: Column id → {table_name, schema_name}."""
     if not col_ids:
         return {}
-    query = """
-    UNWIND $col_ids AS col_id
-    MATCH (col:{COLUMN} {{id: col_id}})<-[:{CONTAINS}]-(tbl:{TABLE})<-[:{CONTAINS}]-(sch:{SCHEMA})
-    RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
-    """.format(
-        COLUMN=Labels.COLUMN,
-        TABLE=Labels.TABLE,
-        SCHEMA=Labels.SCHEMA,
-        CONTAINS=Edges.CONTAINS,
-    )
     try:
-        rows = get_neo4j_conn().query_read(query, {"col_ids": col_ids})
+        rows = get_neo4j_conn().query_read(
+            _FETCH_COL_TABLE_CONTEXTS, {"col_ids": col_ids}
+        )
     except Exception:
         logger.warning("fetch_col_table_contexts: Neo4j query failed", exc_info=True)
         return {}
@@ -422,7 +444,6 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
     """
     if not samples:
         return
-
     entries = [
         {"column_name": col, "sample_values": json.dumps(vals)}
         for col, vals in samples.items()
@@ -446,7 +467,7 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def get_tables_and_columns_by_node_ids(
+def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
     """Load Table/Column rows from Neo4j as dataframes for TabularFetchEmbeddingsOp."""
@@ -487,13 +508,11 @@ def get_tables_and_columns_by_node_ids(
             {"ids": node_ids},
         ),
     )
-
     database_name = ""
     if not tables_df.empty:
         database_name = str(tables_df.iloc[0].get("database_name") or "")
     elif not columns_df.empty:
         database_name = str(columns_df.iloc[0].get("database_name") or "")
-
     return tables_df, columns_df, database_name
 
 
@@ -511,25 +530,13 @@ def apply_metadata_batch(
     conn = get_neo4j_conn()
     if table_rows:
         conn.query_write(
-            query=(
-                f"UNWIND $rows AS row "
-                f"MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->"
-                f"(:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}}) "
-                f"SET t.description = coalesce(row.description, t.description)"
-            ),
-            parameters={"rows": table_rows, "database_name": database_name},
+            _APPLY_TABLE_METADATA,
+            {"rows": table_rows, "database_name": database_name},
         )
     if column_rows:
         conn.query_write(
-            query=(
-                f"UNWIND $rows AS row "
-                f"MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->"
-                f"(:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}})"
-                f"-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{name: row.column_name}}) "
-                f"SET c.description = coalesce(row.description, c.description), "
-                f"    c.sample_values = coalesce(row.sample_values, c.sample_values)"
-            ),
-            parameters={"rows": column_rows, "database_name": database_name},
+            _APPLY_COLUMN_METADATA,
+            {"rows": column_rows, "database_name": database_name},
         )
 
 
@@ -566,32 +573,32 @@ def patch_catalog_node(
     }
 
 
-def get_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
+def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
+    """Return all properties of the node with the given id and label, or None.
+
+    Rejects unknown labels and returns None with a warning instead of raising.
+    """
     labels_list = label if isinstance(label, list) else [label]
     for lbl in labels_list:
         if lbl not in _ALLOWED_NODE_LABELS:
             logger.warning(
-                "Rejecting unknown label %r in get_node_properties_by_id", lbl
+                "Rejecting unknown label %r in fetch_node_properties_by_id", lbl
             )
             return None
     label_filter = "|".join(labels_list)
-    query = f"""
-        MATCH(n:{label_filter}{{id:$id}})
-        RETURN apoc.map.setKey(properties(n),"label", labels(n)[0]) as props
-    """
-    props = get_neo4j_conn().query_read_only(query, parameters={"id": id})
-    if len(props) == 0:
-        return None
-    else:
-        return props[0]["props"]
+    props = get_neo4j_conn().query_read_only(
+        f"""
+        MATCH (n:{label_filter} {{id: $id}})
+        RETURN apoc.map.setKey(properties(n), "label", labels(n)[0]) AS props
+        """,
+        parameters={"id": id},
+    )
+    return props[0]["props"] if props else None
 
 
-def get_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
-    result = get_node_properties_by_id(item_id, label)
-    if result:
-        return result
-    else:
-        logger.error(
-            f"The required item with id : {item_id} is not found in graph. ERROR."
-        )
-        return None
+def fetch_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
+    """Like ``fetch_node_properties_by_id`` but logs an error when the node is missing."""
+    result = fetch_node_properties_by_id(item_id, label)
+    if result is None:
+        logger.error("Required item with id %r not found in graph.", item_id)
+    return result

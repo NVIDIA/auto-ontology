@@ -21,23 +21,23 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 )
 
 from gsf.neo4j.datasources import (
-    get_parent_table_id_for_column,
-    get_tables_and_columns_by_node_ids,
-    list_columns_for_table,
-    list_databases,
-    list_schemas_for_database,
-    list_tables_for_schema,
+    fetch_parent_table_id_for_column,
+    fetch_tables_and_columns_by_node_ids,
+    fetch_columns_for_table,
+    fetch_databases,
+    fetch_schemas_for_database,
+    fetch_tables_for_schema,
     patch_catalog_node,
 )
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "list_databases",
-    "list_schemas_for_database",
-    "list_tables_for_schema",
-    "list_columns_for_table",
-    "get_parent_table_id_for_column",
+    "fetch_databases",
+    "fetch_schemas_for_database",
+    "fetch_tables_for_schema",
+    "fetch_columns_for_table",
+    "fetch_parent_table_id_for_column",
     "update_node_properties",
 ]
 
@@ -96,7 +96,7 @@ def _get_node_ids_for_embedding_update(
         return []
 
     if has_description:
-        table_id = get_parent_table_id_for_column(node_id)
+        table_id = fetch_parent_table_id_for_column(node_id)
         targets = [node_id]
         if table_id is not None:
             targets.append(table_id)
@@ -122,7 +122,9 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
 
     unique_ids = set(dict.fromkeys(node_ids))
 
-    tables_df, columns_df, database_name = get_tables_and_columns_by_node_ids(node_ids)
+    tables_df, columns_df, database_name = fetch_tables_and_columns_by_node_ids(
+        node_ids
+    )
     if tables_df.empty and columns_df.empty:
         logger.info(
             "No Table/Column rows found for node_ids=%r; skipping VDB upsert.",

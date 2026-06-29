@@ -37,7 +37,7 @@ from gsf.neo4j.custom_analyses import (
     list_custom_analyses,
 )
 from gsf.retrieval.data_access.graph_schemas import (
-    get_all_schemas_ids,
+    fetch_all_schema_ids,
     get_schemas_by_ids,
 )
 
@@ -73,7 +73,7 @@ def _get_dialects() -> list[str]:
 
 def _get_schemas() -> dict:
     """Return the full catalog snapshot for ``parse_query_single``."""
-    schemas_ids = get_all_schemas_ids()
+    schemas_ids = fetch_all_schema_ids()
     return get_schemas_by_ids(schemas_ids)
 
 
