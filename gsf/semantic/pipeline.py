@@ -48,8 +48,7 @@ def compile_semantic_layer(
 
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
         futures = {
-            pool.submit(_process, table, i + 1): table
-            for i, table in enumerate(tables)
+            pool.submit(_process, table, i + 1): table for i, table in enumerate(tables)
         }
         for future in as_completed(futures):
             if future.result():
