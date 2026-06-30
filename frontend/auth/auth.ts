@@ -13,7 +13,6 @@ import { Role } from '@/enums/auth';
 
 const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
-/** Push a user record to the Neo4j graph. Fire-and-forget: never throws. */
 async function syncUserToNeo4j(user: {
 	id: string;
 	email: string;

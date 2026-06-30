@@ -92,12 +92,15 @@ def upsert_user(
         },
     )
     assert rows
-    conn.query_write(
-        f"""
-        MATCH (u:{LABEL_USER} {{id: $user_id}})
-        MATCH (z:{LABEL_ZONE})
-        MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
-        """,
-        {"user_id": user_id},
-    )
+    # Admins automatically gain access to every existing zone.
+    # Viewers start with no zone access — access must be explicitly granted.
+    if role == "admin":
+        conn.query_write(
+            f"""
+            MATCH (u:{LABEL_USER} {{id: $user_id}})
+            MATCH (z:{LABEL_ZONE})
+            MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
+            """,
+            {"user_id": user_id},
+        )
     return dict(rows[0])

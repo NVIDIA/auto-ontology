@@ -18,8 +18,6 @@ import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
 
-/** Inline styles are required here because zone colors are runtime API values
- *  that cannot be statically compiled into Tailwind utility classes. */
 function zoneChipStyle(color: string): React.CSSProperties {
 	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
 }
