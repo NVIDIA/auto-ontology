@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from gsf.neo4j.datasources import fetch_table_context, fetch_all_tables_without_term
+from gsf.dal.datasources import fetch_table_context, fetch_all_tables_without_term
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.visit_enter import process_table

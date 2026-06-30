@@ -4,7 +4,7 @@
 
 """Foreign-key / join discovery against Neo4j.
 
-* :func:`gsf.neo4j.foreign_keys.get_relevant_fks` expands outward up to 3
+* :func:`gsf.dal.foreign_keys.get_relevant_fks` expands outward up to 3
   levels through ``fk`` / ``join`` edges to gather all FK relationships among
   the connected tables.
 * :func:`_apply_foreign_key_hints` decorates relevant-table dicts in place.
@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from gsf.neo4j.foreign_keys import get_relevant_fks
+from gsf.dal.foreign_keys import get_relevant_fks
 from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
@@ -47,7 +47,7 @@ def get_relevant_fks_from_candidates_tables(
 
     Wraps :func:`~gsf.retrieval.data_access.relevant_tables.get_relevant_tables_from_candidates`
     and additionally fetches FK / join relationships for the resulting tables
-    via :func:`gsf.neo4j.foreign_keys.get_relevant_fks`, then applies FK hints in-place.
+    via :func:`gsf.dal.foreign_keys.get_relevant_fks`, then applies FK hints in-place.
 
     Returns:
         ``(relevant_tables, relevant_fks)``.

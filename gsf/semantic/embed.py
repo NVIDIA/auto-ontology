@@ -119,7 +119,7 @@ def embed_all_semantic_nodes(
     """
     from collections import defaultdict
 
-    from gsf.neo4j.terms import fetch_all_terms_and_attributes
+    from gsf.dal.terms import fetch_all_terms_and_attributes
 
     terms, attrs = fetch_all_terms_and_attributes()
     if not terms and not attrs:

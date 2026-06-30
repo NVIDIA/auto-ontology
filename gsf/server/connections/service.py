@@ -15,7 +15,7 @@ from gsf.connectors.registry import create_connector, invalidate_connectors_cach
 from gsf.connectors.vault import delete_secrets, is_vault_configured, write_secret
 from gsf.ingestion_service.client import trigger_ingest, trigger_ingest_delete
 from gsf.server.chat.worker import refresh_chat_workers
-from gsf.neo4j.connections import insert_connection, list_connections
+from gsf.dal.connections import insert_connection, list_connections
 
 logger = logging.getLogger(__name__)
 

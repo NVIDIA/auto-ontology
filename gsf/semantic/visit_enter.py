@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from gsf.neo4j.attributes import merge_column_attribute
-from gsf.neo4j.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.dal.attributes import merge_column_attribute
+from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder

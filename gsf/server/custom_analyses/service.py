@@ -4,7 +4,7 @@
 
 """Data Access Layer — CustomAnalysis write orchestration.
 
-All direct Neo4j calls live in gsf/neo4j/custom_analyses.py.
+All direct Neo4j calls live in gsf/dal/custom_analyses.py.
 This module only keeps orchestration: SQL validation, Neo4j node
 persistence, and VDB embedding — the three concerns that can't be
 cleanly separated into a pure-graph layer.
@@ -21,7 +21,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     Props,
 )
-from gsf.neo4j.custom_analyses import (
+from gsf.dal.custom_analyses import (
     CustomAnalysisNameConflict,
     CustomAnalysisSqlConflict,
     CustomAnalysisSqlError,

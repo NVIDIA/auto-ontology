@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.neo4j import terms as neo4j_terms
-from gsf.neo4j import datasources as neo4j_datasources
+from gsf.dal import terms as neo4j_terms
+from gsf.dal import datasources as neo4j_datasources
 from gsf.semantic.constants import SEMANTIC_SOURCE
 
 
-@patch("gsf.neo4j.terms.get_neo4j_conn")
+@patch("gsf.dal.terms.get_neo4j_conn")
 def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_terms.merge_term("Orders", "Order entity", "table-1")
@@ -20,14 +20,14 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     assert params["source"] == SEMANTIC_SOURCE
 
 
-@patch("gsf.neo4j.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.get_neo4j_conn")
 def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_sample_values("table-1", {})
     mock_conn.return_value.query_write.assert_not_called()
 
 
-@patch("gsf.neo4j.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.get_neo4j_conn")
 def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
     import json
 

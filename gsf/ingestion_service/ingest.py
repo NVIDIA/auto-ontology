@@ -22,7 +22,7 @@ from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
 from gsf.vdb import get_data_vdb, get_semantic_vdb
 from gsf.connectors.registry import create_connector
-from gsf.neo4j.connections import delete_database_subgraph
+from gsf.dal.connections import delete_database_subgraph
 from gsf.semantic.compile import run_semantic_compilation
 
 logger = logging.getLogger("ingestion_service.ingest")

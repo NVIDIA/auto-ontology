@@ -8,7 +8,7 @@ Read-only operations on the ``CustomAnalysis`` / ``Sql`` subgraph plus the
 small selection / rendering helpers used by the text-to-SQL agents to
 filter classified analyses and turn them into markdown.
 
-All direct Neo4j calls live in gsf/neo4j/custom_analyses.py.
+All direct Neo4j calls live in gsf/dal/custom_analyses.py.
 This module only keeps the pure-Python helpers.
 """
 
@@ -18,7 +18,7 @@ import logging
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
-from gsf.neo4j.custom_analyses import fetch_custom_analyses
+from gsf.dal.custom_analyses import fetch_custom_analyses
 
 logger = logging.getLogger(__name__)
 

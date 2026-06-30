@@ -24,7 +24,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
 
-from gsf.neo4j.attributes import (
+from gsf.dal.attributes import (
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,

@@ -4,7 +4,7 @@
 
 """Data Access Layer — catalog datasource queries and VDB re-embedding.
 
-All direct Neo4j calls live in gsf/neo4j/datasources.py.
+All direct Neo4j calls live in gsf/dal/datasources.py.
 This module only keeps the VDB orchestration: update_node_properties
 and its helpers that mix Neo4j reads with pgvector upserts.
 """
@@ -20,7 +20,7 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
     TabularFetchEmbeddingsOp,
 )
 
-from gsf.neo4j.datasources import (
+from gsf.dal.datasources import (
     fetch_parent_table_id_for_column,
     fetch_tables_and_columns_by_node_ids,
     fetch_columns_for_table,

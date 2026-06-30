@@ -27,7 +27,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
-from gsf.neo4j.datasources import fetch_tables_by_ids
+from gsf.dal.datasources import fetch_tables_by_ids
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
