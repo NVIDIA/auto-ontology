@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from gsf.server.sql_attributes import dal
+from gsf.server.sql_attributes import service as dal
 
 router = APIRouter()
 
