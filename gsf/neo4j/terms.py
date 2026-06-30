@@ -306,6 +306,103 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+def fetch_related_terms(term_id: str) -> list[dict[str, Any]]:
+    """Return Term nodes related to *term_id* by co-location in the same table.
+
+    Two terms are considered related when they are both connected to the same
+    Table node — either directly via a REPRESENTS edge, or indirectly through
+    the Column → ColumnAttribute → PROPERTY_OF path.
+
+    Step 1 — collect every table connected to *term_id* (both paths).
+    Step 2 — collect every other term connected to those same tables (both paths).
+    """
+    conn = get_neo4j_conn()
+    params = {"term_id": term_id}
+
+    # Step 1: tables for this term
+    table_rows = conn.query_read(
+        f"""
+        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{id: $term_id}})
+        RETURN ta.id AS table_id
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
+        RETURN ta.id AS table_id
+        """,
+        params,
+    )
+    if not table_rows:
+        return []
+
+    table_ids = [r["table_id"] for r in table_rows if r.get("table_id")]
+    if not table_ids:
+        return []
+
+    # Step 2: other terms in those tables
+    term_rows = conn.query_read(
+        f"""
+        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term_b:{LABEL_TERM})
+        WHERE ta.id IN $table_ids AND term_b.id <> $term_id
+        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
+                        term_b.description AS description
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE})
+              -[:{REL_PROPERTY_OF}]->(term_b:{LABEL_TERM})
+        WHERE ta.id IN $table_ids AND term_b.id <> $term_id
+        RETURN DISTINCT term_b.id AS id, term_b.name AS name,
+                        term_b.description AS description
+        """,
+        {"table_ids": table_ids, "term_id": term_id},
+    )
+    return [dict(r) for r in term_rows]
+
+
+def fetch_related_terms_counts() -> list[dict[str, Any]]:
+    """Return per-term related-term counts for all terms.
+
+    Builds a ``term_id → set(table_id)`` map and a ``table_id → set(term_id)``
+    reverse map from Neo4j, then computes for each term the number of distinct
+    other terms that share at least one table with it.
+
+    Each entry is ``{term_id: str, count: int}``.
+    """
+    conn = get_neo4j_conn()
+    params = {"source": SEMANTIC_SOURCE}
+
+    pairs = conn.query_read(
+        f"""
+        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
+        RETURN term.id AS term_id, ta.id AS table_id
+        UNION
+        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+              -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        RETURN term.id AS term_id, ta.id AS table_id
+        """,
+        params,
+    )
+
+    term_tables: dict[str, set[str]] = {}
+    table_terms: dict[str, set[str]] = {}
+    for row in pairs:
+        tid = row.get("term_id")
+        tab = row.get("table_id")
+        if tid and tab:
+            term_tables.setdefault(tid, set()).add(tab)
+            table_terms.setdefault(tab, set()).add(tid)
+
+    result: list[dict[str, Any]] = []
+    for term_id, tables in term_tables.items():
+        related: set[str] = set()
+        for tab_id in tables:
+            related.update(table_terms.get(tab_id, set()))
+        related.discard(term_id)
+        result.append({"term_id": term_id, "count": len(related)})
+    return result
+
+
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
     """Create a SEMANTIC_FK edge from a source Column to a target ColumnAttribute."""
     get_neo4j_conn().query_write(

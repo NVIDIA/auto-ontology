@@ -32,6 +32,7 @@ export enum ComposerSectionKind {
 	DATA_TABLE = 'dataTable',
 	LOADING_PANEL = 'loadingPanel',
 	ZONES_CHIPS = 'zonesChips',
+	RELATED_TERMS_CHIPS = 'relatedTermsChips',
 }
 
 export enum Usage {

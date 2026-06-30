@@ -35,10 +35,11 @@ const SectionHeading = ({ children }: { children: React.ReactNode }) => (
 type TermCardProps = {
 	term: Term;
 	attributes: TermAttribute[];
+	relatedCount: number;
 	onClick: (term: Term) => void;
 };
 
-const TermCard = ({ term, attributes, onClick }: TermCardProps) => (
+const TermCard = ({ term, attributes, relatedCount, onClick }: TermCardProps) => (
 	<li
 		role="button"
 		tabIndex={0}
@@ -78,29 +79,28 @@ const TermCard = ({ term, attributes, onClick }: TermCardProps) => (
 					</span>
 				</div>
 				<div className="flex items-center">
-					<span className="flex w-1/2 items-center justify-between border-r border-zinc-100 px-4 py-3 text-sm text-zinc-700 dark:border-zinc-800 dark:text-zinc-300">
+					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
 						<span>Column Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
 							{attributes.length}
 						</span>
 					</span>
-					<span className="flex w-1/2 items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
-						<span>Foreign Keys</span>
-						<span className="font-medium text-zinc-900 dark:text-zinc-100">
-							{attributes.reduce((sum, attr) => sum + attr.fk_count, 0)}
-						</span>
-					</span>
 				</div>
 			</div>
 
-			{/* SQL Attribute */}
+			{/* Related Terms */}
 			<div>
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
 					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
-						SQL Attribute
+						Related Terms
 					</span>
 				</div>
-				<p className="px-4 py-3 text-sm text-zinc-400 dark:text-zinc-500">None</p>
+				<div className="flex items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
+					<span>Related Terms</span>
+					<span className="font-medium text-zinc-900 dark:text-zinc-100">
+						{relatedCount}
+					</span>
+				</div>
 			</div>
 		</div>
 	</li>
@@ -113,6 +113,7 @@ export const TermsView = () => {
 
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [attrs, setAttrs] = useState<TermAttribute[]>([]);
+	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 
@@ -132,9 +133,10 @@ export const TermsView = () => {
 
 		(async () => {
 			setLoading(true);
-			const [termsRes, attrsRes] = await Promise.all([
+			const [termsRes, attrsRes, countsRes] = await Promise.all([
 				termsApi.list(),
 				termsApi.listColumnAttributes(),
+				termsApi.listRelatedCounts(),
 			]);
 			if (cancelled) return;
 
@@ -148,6 +150,14 @@ export const TermsView = () => {
 
 			if (attrsRes.error !== true) {
 				setAttrs(attrsRes.data ?? []);
+			}
+
+			if (countsRes.error !== true) {
+				const map = new Map<string, number>();
+				for (const { term_id, count } of countsRes.data ?? []) {
+					map.set(term_id, count);
+				}
+				setRelatedCountsMap(map);
 			}
 
 			setLoading(false);
@@ -180,9 +190,10 @@ export const TermsView = () => {
 	}, [router]);
 
 	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const [res, attrsRes] = await Promise.all([
+		const [res, attrsRes, relatedRes] = await Promise.all([
 			termsApi.get(termId),
 			termsApi.getColumnAttributes(termId),
+			termsApi.getRelatedTerms(termId),
 		]);
 		if (res.error === true || !res.data) {
 			return {
@@ -192,6 +203,7 @@ export const TermsView = () => {
 		}
 		const term = res.data;
 		const termAttrs = attrsRes.error !== true ? (attrsRes.data ?? []) : [];
+		const relatedTerms = relatedRes.error !== true ? (relatedRes.data ?? []) : [];
 
 		return {
 			header: {
@@ -224,16 +236,22 @@ export const TermsView = () => {
 					})),
 				},
 				{
+					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+					id: 'related_terms',
+					title: 'Related Terms',
+					terms: relatedTerms.map((t) => ({
+						id: t.id,
+						name: t.name,
+						description: t.description,
+					})),
+				},
+				{
 					type: ComposerSectionKind.DATA_TABLE,
 					id: 'column_attributes',
 					title: 'Column Attributes',
-					columns: [
-						{ key: 'source_column', label: 'Column Name' },
-						{ key: 'fk_count', label: 'Foreign Keys' },
-					],
+					columns: [{ key: 'source_column', label: 'Column Name' }],
 					rows: termAttrs.map((attr) => ({
 						source_column: attr.source_column,
-						fk_count: String(attr.fk_count),
 					})),
 				},
 			],
@@ -353,6 +371,7 @@ export const TermsView = () => {
 								key={term.id}
 								term={term}
 								attributes={attrsByTerm.get(term.name) ?? []}
+								relatedCount={relatedCountsMap.get(term.id) ?? 0}
 								onClick={handleCardClick}
 							/>
 						))}

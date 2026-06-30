@@ -27,11 +27,25 @@ def list_term_column_attributes() -> dict:
     return {"data": attrs, "count": len(attrs)}
 
 
+@router.get("/terms/related-counts")
+def list_related_terms_counts() -> dict:
+    """Return per-term related-term counts derived from SEMANTIC_FK join paths."""
+    counts = neo4j_dal.fetch_related_terms_counts()
+    return {"data": counts, "count": len(counts)}
+
+
 @router.get("/terms/{term_id}/column-attributes")
 def list_term_column_attributes_by_id(term_id: str) -> dict:
     """Return ColumnAttribute nodes for a single Term with FK count."""
     attrs = neo4j_dal.fetch_column_attributes_by_term_id(term_id)
     return {"data": attrs, "count": len(attrs)}
+
+
+@router.get("/terms/{term_id}/related-terms")
+def list_related_terms(term_id: str) -> dict:
+    """Return Term nodes related to the given term via SEMANTIC_FK join paths."""
+    related = neo4j_dal.fetch_related_terms(term_id)
+    return {"data": related, "count": len(related)}
 
 
 @router.get("/terms/{term_id}")

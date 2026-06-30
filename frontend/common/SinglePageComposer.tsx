@@ -55,6 +55,8 @@ function composerSectionHeading(section: ComposerSection): string {
 			return section.message;
 		case ComposerSectionKind.ZONES_CHIPS:
 			return `${section.title} (${section.zones.length})`;
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return `${section.title} (${section.terms.length})`;
 		default:
 			return section.title;
 	}
@@ -265,6 +267,30 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 							{section.zones.map((zone) => (
 								<li key={zone.id}>
 									<ZoneChip name={zone.name} color={zone.color} />
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			);
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.terms.length})
+					</h2>
+					{section.terms.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.terms.map((term) => (
+								<li key={term.id}>
+									<span
+										title={term.description ?? undefined}
+										className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+									>
+										{term.name}
+									</span>
 								</li>
 							))}
 						</ul>

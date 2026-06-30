@@ -31,3 +31,14 @@ export type TermAttribute = {
 	fk_count: number;
 	is_primary_key: boolean;
 };
+
+export type RelatedTerm = {
+	id: string;
+	name: string;
+	description: string | null;
+};
+
+export type RelatedTermCount = {
+	term_id: string;
+	count: number;
+};

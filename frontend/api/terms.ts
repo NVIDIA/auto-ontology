@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requests } from './requests';
-import type { Term, TermAttribute, TermDetail } from '@/types/terms';
+import type { RelatedTerm, RelatedTermCount, Term, TermAttribute, TermDetail } from '@/types/terms';
 import type { ResponseWithError } from './types';
 
 type ListResult = { data: Term[]; count: number };
@@ -15,11 +15,21 @@ type AttributeListResponse = ResponseWithError<AttributeListResult>;
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
 
+type RelatedTermsResult = { data: RelatedTerm[]; count: number };
+type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
+
+type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
+type RelatedCountsResponse = ResponseWithError<RelatedCountsResult>;
+
 export const termsApi = {
 	list: (): Promise<ListResponse> => requests.get<ListResult>('terms'),
 	listColumnAttributes: (): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>('terms/column-attributes'),
+	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
+		requests.get<RelatedCountsResult>('terms/related-counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
+	getRelatedTerms: (id: string): Promise<RelatedTermsResponse> =>
+		requests.get<RelatedTermsResult>(`terms/${id}/related-terms`),
 };
