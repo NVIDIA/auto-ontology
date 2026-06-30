@@ -43,7 +43,7 @@ _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-
 _NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
     "NVIDIA_API_KEY", ""
 )
-_WORKERS = 3
+_WORKERS = 2
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
