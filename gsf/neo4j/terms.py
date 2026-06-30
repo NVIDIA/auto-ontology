@@ -53,6 +53,18 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
+def get_term_by_id(term_id: str) -> dict[str, str] | None:
+    """Return ``{id, name}`` of a Term, or None."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{LABEL_TERM} {{id: $term_id}})
+        RETURN t.id AS id, t.name AS name LIMIT 1
+        """,
+        {"term_id": term_id},
+    )
+    return rows[0] if rows else None
+
+
 def merge_term(
     name: str,
     description: str,

@@ -29,11 +29,11 @@ from gsf.neo4j.sql_attributes import (
     find_attr_by_name,
     get_sql_attribute,
     get_sql_attribute_by_id,
-    get_term_by_id,
     link_to_term,
     list_sql_attributes,
     update_sql_attribute_props,
 )
+from gsf.neo4j.terms import get_term_by_id
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params

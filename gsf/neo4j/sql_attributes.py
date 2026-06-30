@@ -113,18 +113,6 @@ def get_sql_attribute_by_id(attr_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
-def get_term_by_id(term_id: str) -> dict[str, str] | None:
-    """Return ``{id, name}`` of a Term, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{LABEL_TERM} {{id: $term_id}})
-        RETURN t.id AS id, t.name AS name LIMIT 1
-        """,
-        {"term_id": term_id},
-    )
-    return rows[0] if rows else None
-
-
 # ---------------------------------------------------------------------------
 # Write helpers
 # ---------------------------------------------------------------------------
