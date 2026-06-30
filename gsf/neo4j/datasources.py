@@ -302,39 +302,35 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
         f"""
         MATCH (t:{Labels.TABLE})
         WHERE NOT (t)-[:{REL_REPRESENTS}]->()
-        RETURN t.id AS id, t.name AS name, t.description AS description
+        OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+        RETURN t.id AS id, t.name AS name, t.description AS description,
+               sch.name AS schema_name
         ORDER BY t.name
         """
     )
 
 
 def fetch_all_tables_with_term() -> list[dict[str, Any]]:
-    """Return Table nodes that already have a Term via REPRESENTS.
+    """Return Table nodes that already have a Term via REPRESENTS (one row per table).
 
-    Each row: ``{id, name, description, schema_name, term_id, term_name}``.
-    Tables whose Term already owns an auto-generated SqlAttribute are excluded
-    so the caller can safely iterate without duplicating work.
+    Each row: ``{id, name, description, schema_name, term_ids, term_names}``.
+    ``term_ids`` / ``term_names`` are lists of all Terms linked to the table.
     """
-    from gsf.semantic.constants import (
-        LABEL_SQL_ATTRIBUTE,
-        LABEL_TERM,
-        REL_PROPERTY_OF,
-        REL_REPRESENTS,
-    )
+    from gsf.semantic.constants import LABEL_TERM, REL_REPRESENTS
 
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM})
-        WHERE NOT EXISTS {{
-            MATCH (sa:{LABEL_SQL_ATTRIBUTE} {{source: 'auto'}})-[:{REL_PROPERTY_OF}]->(term)
-        }}
         OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-        RETURN t.id         AS id,
-               t.name       AS name,
+        WITH t, sch,
+             collect(DISTINCT term.id)   AS term_ids,
+             collect(DISTINCT term.name) AS term_names
+        RETURN t.id          AS id,
+               t.name        AS name,
                t.description AS description,
-               sch.name     AS schema_name,
-               term.id      AS term_id,
-               term.name    AS term_name
+               sch.name      AS schema_name,
+               term_ids,
+               term_names
         ORDER BY t.name
         """
     )

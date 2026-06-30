@@ -264,8 +264,8 @@ def create_sql_attribute_auto(
 
     query_obj = validate_sql(
         expression,
-        get_dialects(database_name),
-        get_schemas(database_name),
+        get_dialects(),
+        get_schemas(),
     )
 
     attr_node = Neo4jNode(

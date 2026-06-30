@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 
 _SYSTEM = """\
 You are an analytics engineer. Given a relational table with its columns, \
-propose up to 5 non-trivial derived business metrics that combine TWO or MORE \
-columns from the same table.
+propose non-trivial derived business metrics that combine TWO or MORE \
+columns from the same table. Only propose metrics that are genuinely \
+valuable — quality over quantity. It is perfectly fine to return zero \
+metrics if none are meaningful.
 
 Rules:
 1. Each metric MUST use at least two columns in a meaningful formula \
@@ -35,7 +37,15 @@ GROUP BY — produce row-level expressions only.
 5. Provide a concise business description for each metric.
 6. Return an empty list if the table has fewer than two numeric/date columns \
 or no meaningful multi-column metric can be derived.
-7. Focus on metrics that would be genuinely useful for business analysis."""
+7. Focus on metrics that would be genuinely useful for business analysis — \
+real KPIs, financial ratios, operational indicators. Do NOT propose \
+meaningless technical metrics like ratios of string lengths to IDs, \
+or combinations of surrogate keys with other values.
+8. NO DUPLICATES — every metric must have a unique formula. If two metrics \
+compute the same expression, keep only one.
+9. Do NOT use metadata columns (like last_edited_by, created_by, row IDs, \
+surrogate keys) as business metric inputs unless they carry real business \
+meaning."""
 
 
 def _format_column_line(col: dict[str, Any]) -> str:
@@ -82,11 +92,18 @@ def extract_sql_attributes(
         )
         return []
 
-    dialects = get_dialects(database_name)
-    schemas = get_schemas(database_name)
+    dialects = get_dialects()
+    schemas = get_schemas()
 
     valid: list[SqlAttributeProposal] = []
+    seen_expressions: set[str] = set()
     for proposal in result.metrics:
+        normalized = " ".join(proposal.expression.lower().split())
+        if normalized in seen_expressions:
+            logger.debug("Dropping duplicate proposal %r", proposal.name)
+            continue
+        seen_expressions.add(normalized)
+
         try:
             validate_sql(proposal.expression, dialects, schemas)
             valid.append(proposal)
@@ -96,4 +113,5 @@ def extract_sql_attributes(
                 proposal.name,
                 table["name"],
             )
+
     return valid

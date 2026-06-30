@@ -191,15 +191,15 @@ class SqlAttributeProposal(BaseModel):
 
 
 class SqlAttributeExtractionResult(BaseModel):
-    """LLM output: derived metrics for a single table (at most 5)."""
+    """LLM output: derived metrics for a single table."""
 
     model_config = ConfigDict(extra="forbid")
 
     metrics: list[SqlAttributeProposal] = Field(
-        ...,
-        max_length=5,
+        default_factory=list,
         description=(
             "Non-trivial derived business metrics that combine two or more columns. "
-            "Return an empty list when no meaningful metrics can be derived."
+            "Return an empty list when no meaningful metrics can be derived. "
+            "Only include metrics that are genuinely useful for business analysis."
         ),
     )

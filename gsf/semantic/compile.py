@@ -6,6 +6,8 @@ import logging
 
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import build_semantic_embedder
+from gsf.semantic.semantic_fk import resolve_semantic_fks
+
 from gsf.semantic.pipeline import compile_semantic_layer
 
 logger = logging.getLogger(__name__)
@@ -40,8 +42,6 @@ def run_semantic_compilation(
     logger.info("=" * 60)
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
-
-    from gsf.semantic.semantic_fk import resolve_semantic_fks
 
     logger.info("=" * 60)
     logger.info("Resolving semantic FK edges…")

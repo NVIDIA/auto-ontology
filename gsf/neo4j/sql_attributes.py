@@ -145,6 +145,18 @@ def link_to_term(attr_id: str, term_id: str) -> None:
     )
 
 
+def add_term_link(attr_id: str, term_id: str) -> None:
+    """Add a PROPERTY_OF edge without removing existing ones."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+        """,
+        {"attr_id": attr_id, "term_id": term_id},
+    )
+
+
 def update_sql_attribute_props(
     attr_id: str,
     *,
