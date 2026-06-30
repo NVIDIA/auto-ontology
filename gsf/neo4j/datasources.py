@@ -308,6 +308,38 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
     )
 
 
+def fetch_all_tables_with_term() -> list[dict[str, Any]]:
+    """Return Table nodes that already have a Term via REPRESENTS.
+
+    Each row: ``{id, name, description, schema_name, term_id, term_name}``.
+    Tables whose Term already owns an auto-generated SqlAttribute are excluded
+    so the caller can safely iterate without duplicating work.
+    """
+    from gsf.semantic.constants import (
+        LABEL_SQL_ATTRIBUTE,
+        LABEL_TERM,
+        REL_PROPERTY_OF,
+        REL_REPRESENTS,
+    )
+
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM})
+        WHERE NOT EXISTS {{
+            MATCH (sa:{LABEL_SQL_ATTRIBUTE} {{source: 'auto'}})-[:{REL_PROPERTY_OF}]->(term)
+        }}
+        OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+        RETURN t.id         AS id,
+               t.name       AS name,
+               t.description AS description,
+               sch.name     AS schema_name,
+               term.id      AS term_id,
+               term.name    AS term_name
+        ORDER BY t.name
+        """
+    )
+
+
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
     """Return JOIN-adjacent tables (undirected), one row per neighbour."""
     return get_neo4j_conn().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
