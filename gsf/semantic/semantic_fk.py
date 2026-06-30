@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -42,6 +43,7 @@ _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-
 _NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
     "NVIDIA_API_KEY", ""
 )
+_WORKERS = 3
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
@@ -116,23 +118,31 @@ def resolve_semantic_fks(database_name: str) -> int:
         return declared_written
 
     llm_written = 0
-    for col in llm_queue:
+
+    def _resolve_one(col: dict[str, Any]) -> bool:
         try:
             attr_id = _resolve_via_vdb(col, retriever)
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
-                llm_written += 1
                 logger.debug(
                     "resolve_semantic_fks [llm]: %s.%s → attr %s",
                     col.get("table_name"),
                     col.get("name"),
                     attr_id,
                 )
+                return True
         except Exception:
             logger.exception(
                 "resolve_semantic_fks [llm]: unexpected error for column %s",
                 col.get("id"),
             )
+        return False
+
+    with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
+        futures = {pool.submit(_resolve_one, col): col for col in llm_queue}
+        for future in as_completed(futures):
+            if future.result():
+                llm_written += 1
 
     total = declared_written + llm_written
     logger.info(
