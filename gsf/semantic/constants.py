@@ -11,11 +11,16 @@ LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
 
+# Semantic node labels
+LABEL_ZONE = "zone"
+
 # Semantic relationship types
 REL_HAS_ATTRIBUTE = "HAS_ATTRIBUTE"
+REL_PARTICIPANT_OF = "participant_of"
+REL_PART_OF = "PART_OF"
 REL_PROPERTY_OF = "PROPERTY_OF"
 REL_IS_A = "IS_A"
-REL_PART_OF = "PART_OF"
 REL_ROLE = "ROLE"
 REL_REPRESENTS = "REPRESENTS"
 REL_SEMANTIC_FK = "SEMANTIC_FK"
+REL_ZONE_OF = "zone_of"

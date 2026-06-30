@@ -18,6 +18,21 @@ import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
 
+/** Inline styles are required here because zone colors are runtime API values
+ *  that cannot be statically compiled into Tailwind utility classes. */
+function zoneChipStyle(color: string): React.CSSProperties {
+	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
+}
+
+const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
+	<span
+		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+		style={color ? zoneChipStyle(color) : undefined}
+	>
+		{name}
+	</span>
+);
+
 export type SinglePageComposerProps = {
 	sections: unknown[];
 	header?: {
@@ -40,6 +55,8 @@ function composerSectionHeading(section: ComposerSection): string {
 	switch (section.type) {
 		case ComposerSectionKind.LOADING_PANEL:
 			return section.message;
+		case ComposerSectionKind.ZONES_CHIPS:
+			return `${section.title} (${section.zones.length})`;
 		default:
 			return section.title;
 	}
@@ -235,6 +252,25 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 					<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
 						{section.message}
 					</p>
+				</div>
+			);
+		case ComposerSectionKind.ZONES_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.zones.length})
+					</h2>
+					{section.zones.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.zones.map((zone) => (
+								<li key={zone.id}>
+									<ZoneChip name={zone.name} color={zone.color} />
+								</li>
+							))}
+						</ul>
+					)}
 				</div>
 			);
 		default:

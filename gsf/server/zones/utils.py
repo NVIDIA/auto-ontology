@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 
-LABEL_ZONE = "zone"
-REL_ZONE_OF = "zone_of"
+from gsf.semantic.constants import LABEL_ZONE
+
 REL_CONTAINS = Edges.CONTAINS
 
 ZONE_DATA_LABELS = (

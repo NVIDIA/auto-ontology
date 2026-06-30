@@ -9,8 +9,15 @@ export type Term = {
 	synonyms: string[];
 };
 
+export type TermZone = {
+	id: string;
+	name: string;
+	color: string | null;
+};
+
 export type TermDetail = Term & {
 	table_count: number;
+	zones: TermZone[];
 };
 
 export type TermAttribute = {

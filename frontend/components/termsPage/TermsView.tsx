@@ -214,6 +214,16 @@ export const TermsView = () => {
 					body: `Tables (${term.table_count})`,
 				},
 				{
+					type: ComposerSectionKind.ZONES_CHIPS,
+					id: 'zones',
+					title: 'Zones',
+					zones: term.zones.map((z) => ({
+						id: z.id,
+						name: z.name,
+						color: z.color,
+					})),
+				},
+				{
 					type: ComposerSectionKind.DATA_TABLE,
 					id: 'column_attributes',
 					title: 'Column Attributes',

@@ -69,6 +69,14 @@ const nextConfig: NextConfig = {
 				destination: `${pythonApiUrl}/api/terms/:path*`,
 			},
 			{
+				source: '/api/users',
+				destination: `${pythonApiUrl}/api/users`,
+			},
+			{
+				source: '/api/users/:path*',
+				destination: `${pythonApiUrl}/api/users/:path*`,
+			},
+			{
 				source: '/api/health',
 				destination: `${pythonApiUrl}/api/health`,
 			},

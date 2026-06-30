@@ -21,9 +21,12 @@ from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
+    LABEL_ZONE,
     REL_HAS_ATTRIBUTE,
+    REL_PROPERTY_OF,
     REL_REPRESENTS,
     REL_SEMANTIC_FK,
+    REL_ZONE_OF,
     SEMANTIC_SOURCE,
 )
 
@@ -143,7 +146,12 @@ def fetch_all_terms_and_attributes() -> tuple[
 
 
 def fetch_term_by_id(term_id: str) -> dict[str, Any] | None:
-    """Return a single Term node by its id with table count, or None if not found."""
+    """Return a single Term node by its id with table count and zones, or None.
+
+    ``zones`` is resolved via the attribute → column → table → zone path:
+    a term participates in a zone when at least one of its ColumnAttributes
+    is linked to a column whose parent table belongs to that zone.
+    """
     conn = get_neo4j_conn()
     rows = conn.query_read(
         f"""
@@ -156,7 +164,27 @@ def fetch_term_by_id(term_id: str) -> dict[str, Any] | None:
         """,
         {"term_id": term_id},
     )
-    return rows[0] if rows else None
+    if not rows:
+        return None
+    result = dict(rows[0])
+    zone_rows = conn.query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
+              <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
+              <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
+        MATCH (z:{LABEL_ZONE})-[:{REL_ZONE_OF}]->(item)
+        WHERE item = t
+           OR (item)-[:{Edges.CONTAINS}*1..2]->(t)
+        RETURN DISTINCT z.id    AS id,
+                        z.name  AS name,
+                        z.color AS color
+        ORDER BY z.name
+        """,
+        {"term_id": term_id},
+    )
+    result["zones"] = [dict(r) for r in zone_rows]
+    return result
 
 
 def fetch_terms_and_attributes_for_table(

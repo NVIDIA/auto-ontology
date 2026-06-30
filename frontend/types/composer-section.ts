@@ -44,12 +44,26 @@ export type ComposerLoadingPanelSection = {
 	message: string;
 };
 
+export type ComposerZoneChip = {
+	id: string;
+	name: string;
+	color: string | null;
+};
+
+export type ComposerZonesSection = {
+	type: ComposerSectionKind.ZONES_CHIPS;
+	id: string;
+	title: string;
+	zones: ComposerZoneChip[];
+};
+
 export type ComposerSection =
 	| ComposerTextCardSection
 	| ComposerTagListSection
 	| ComposerInfoGridSection
 	| ComposerDataTableSection
-	| ComposerLoadingPanelSection;
+	| ComposerLoadingPanelSection
+	| ComposerZonesSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.TEXT_CARD,
@@ -57,6 +71,7 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.INFO_GRID,
 	ComposerSectionKind.DATA_TABLE,
 	ComposerSectionKind.LOADING_PANEL,
+	ComposerSectionKind.ZONES_CHIPS,
 ];
 
 export function isComposerSection(x: unknown): x is ComposerSection {

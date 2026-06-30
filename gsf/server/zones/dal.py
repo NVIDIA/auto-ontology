@@ -10,10 +10,11 @@ from typing import Any
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.neo4j.users import LABEL_USER
+from gsf.semantic.constants import REL_PARTICIPANT_OF, REL_ZONE_OF
 from gsf.server.zones.utils import (
     LABEL_ZONE,
     REL_CONTAINS,
-    REL_ZONE_OF,
     ZONE_DATA_LABELS,
     _resolve_api_name,
     format_zone,
@@ -199,6 +200,15 @@ def create_zone(
             seen.add(item_id)
             ordered_linked_ids.append(item_id)
         zone["items"] = ordered_linked_ids
+
+    conn.query_write(
+        f"""
+        MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (u:{LABEL_USER})
+        MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
+        """,
+        {"zone_id": zone["id"]},
+    )
 
     return zone
 
