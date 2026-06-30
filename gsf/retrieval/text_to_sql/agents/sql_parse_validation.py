@@ -28,7 +28,7 @@ from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 from gsf.retrieval.data_access.graph_schemas import (
-    get_all_schemas_ids,
+    fetch_all_schema_ids,
     get_schemas_by_ids,
 )
 
@@ -86,7 +86,7 @@ class SQLValidationAgent(BaseAgent):
         response = path_state.get("sql_generation_result")
         connectors = state.get("connectors") or []
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
-        schemas_ids = get_all_schemas_ids()
+        schemas_ids = fetch_all_schema_ids()
         schemas = get_schemas_by_ids(schemas_ids)
 
         validation_result = self._sql_parse_validation(

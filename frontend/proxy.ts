@@ -21,6 +21,12 @@ const PUBLIC_API_PREFIXES = ['/api/auth', '/api/health', '/api/sso-providers'];
 const isPublicApi = (pathname: string): boolean =>
 	PUBLIC_API_PREFIXES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
+// Any non-public API may be called with a service-to-service SSO bearer token
+// (see auth/bearer.ts) instead of a session cookie. This is an optimistic
+// presence check only — the route handler performs the real token verification.
+const hasBearerHeader = (request: NextRequest): boolean =>
+	request.headers.get('authorization')?.toLowerCase().startsWith('bearer ') === true;
+
 /**
  * For /api/* requests, moves the first `*_id` query parameter into the URL path
  * so the backend receives it as a path param.
@@ -70,10 +76,15 @@ export function proxy(request: NextRequest) {
 
 	if (pathname.startsWith('/api/')) {
 		// Gate API routes: handlers aren't covered by the page gate. This is an
-		// optimistic cookie-presence check (the route handlers do the real
-		// session validation via requireApiAuth) — reject outright when no
-		// session cookie is present, except for the public API allowlist.
-		if (!isPublicApi(pathname) && getSessionCookie(request) == null) {
+		// optimistic presence check (the route handlers do the real validation
+		// via requireApiAuth / resolveUser) — reject outright when there's
+		// neither a session cookie nor a bearer token, except for the public
+		// API allowlist.
+		if (
+			!isPublicApi(pathname) &&
+			!hasBearerHeader(request) &&
+			getSessionCookie(request) == null
+		) {
 			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 		}
 		return rewriteApiIdParam(request);

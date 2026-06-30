@@ -7,10 +7,11 @@
 import { useEffect, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import { Role } from '@/enums/auth';
-import { usersApi, type ManagedUser } from '@/api/users';
+import { usersApi } from '@/api/users';
 import { Table } from '@/components/Table';
 import { Toast } from '@/components/Toast';
 import type { TableColumn } from '@/types/table';
+import type { User } from '@/types/auth';
 
 const actionButtonClass =
 	'cursor-pointer rounded-md border border-zinc-300 px-2 py-1 text-xs font-medium text-zinc-600 transition-colors hover:bg-zinc-100 disabled:opacity-40 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-800';
@@ -19,7 +20,7 @@ const deleteButtonClass =
 	'cursor-pointer rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950';
 
 export const UsersManager = () => {
-	const [users, setUsers] = useState<ManagedUser[]>([]);
+	const [users, setUsers] = useState<User[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
@@ -53,12 +54,12 @@ export const UsersManager = () => {
 		setBusyId(null);
 	};
 
-	const toggleRole = (user: ManagedUser) => {
+	const toggleRole = (user: User) => {
 		const nextRole = user.role === Role.Admin ? Role.Viewer : Role.Admin;
 		return runAction(user.id, () => usersApi.setRole(user.id, nextRole));
 	};
 
-	const deleteUser = (user: ManagedUser) => {
+	const deleteUser = (user: User) => {
 		if (
 			!window.confirm(
 				`Delete user "${user.name || user.email}"? This permanently removes the account and its data.`,
@@ -69,7 +70,7 @@ export const UsersManager = () => {
 		return runAction(user.id, () => usersApi.remove(user.id));
 	};
 
-	const columns: TableColumn<ManagedUser>[] = [
+	const columns: TableColumn<User>[] = [
 		{
 			key: 'user',
 			header: 'User',

@@ -11,8 +11,8 @@ from typing import Any
 import psycopg
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.neo4j.connections import verify_connectivity
 from gsf.vdb.config import get_postgres_connection_string
 
 router = APIRouter()
@@ -20,7 +20,7 @@ router = APIRouter()
 
 def _check_neo4j() -> dict[str, str]:
     try:
-        get_neo4j_conn().verify_connectivity()
+        verify_connectivity()
         return {"status": "ok"}
     except Exception as exc:
         return {"status": "error", "detail": (str(exc) or type(exc).__name__)[:200]}

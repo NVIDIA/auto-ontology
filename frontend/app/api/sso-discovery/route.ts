@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/auth/auth-guards';
-import { Role } from '@/enums/auth';
+import { requireApiAdmin } from '@/auth/api-auth';
 
 const DISCOVERY_TIMEOUT_MS = 8000;
 
@@ -19,11 +18,9 @@ const DISCOVERY_TIMEOUT_MS = 8000;
  */
 export async function GET(request: Request) {
 	// Admin-only: this is an outbound fetch proxy, so don't expose it to
-	// non-admins (the edge middleware only checks for a session cookie).
-	const session = await getCurrentSession();
-	if (!session || session.user.role !== Role.Admin) {
-		return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-	}
+	// non-admins (the edge middleware only checks for a credential's presence).
+	const denied = await requireApiAdmin();
+	if (denied) return denied;
 
 	const issuer = new URL(request.url).searchParams.get('issuer')?.trim();
 	if (!issuer) {

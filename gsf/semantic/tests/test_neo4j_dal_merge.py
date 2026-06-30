@@ -4,33 +4,35 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.semantic import neo4j_dal
+from gsf.neo4j import terms as neo4j_terms
+from gsf.neo4j import datasources as neo4j_datasources
+from gsf.semantic.constants import SEMANTIC_SOURCE
 
 
-@patch("gsf.semantic.neo4j_dal.get_neo4j_conn")
+@patch("gsf.neo4j.terms.get_neo4j_conn")
 def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
-    neo4j_dal.merge_term("Orders", "Order entity", "table-1")
+    neo4j_terms.merge_term("Orders", "Order entity", "table-1")
     call = mock_conn.return_value.query_write.call_args
     query, params = call[0][0], call[0][1]
     assert "MERGE (term:Term" in query or "MERGE (term:" in query
     assert params["name"] == "Orders"
-    assert params["source"] == neo4j_dal.SEMANTIC_SOURCE
+    assert params["source"] == SEMANTIC_SOURCE
 
 
-@patch("gsf.semantic.neo4j_dal.get_neo4j_conn")
+@patch("gsf.neo4j.datasources.get_neo4j_conn")
 def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
-    neo4j_dal.store_column_sample_values("table-1", {})
+    neo4j_datasources.store_column_sample_values("table-1", {})
     mock_conn.return_value.query_write.assert_not_called()
 
 
-@patch("gsf.semantic.neo4j_dal.get_neo4j_conn")
+@patch("gsf.neo4j.datasources.get_neo4j_conn")
 def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
     import json
 
     mock_conn.return_value = MagicMock()
-    neo4j_dal.store_column_sample_values("table-1", {"amount": [10, 20, 30]})
+    neo4j_datasources.store_column_sample_values("table-1", {"amount": [10, 20, 30]})
     call = mock_conn.return_value.query_write.call_args
     params = call[0][1]
     assert params["table_id"] == "table-1"

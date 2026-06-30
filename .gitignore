@@ -33,9 +33,6 @@ lancedb/*
 .env.docker
 
 
-# WWI CSV data (local only)
-dev_tools/wwi/data/
-
 # IDE config (keep launch.json tracked)
 .vscode/*
 !.vscode/launch.json

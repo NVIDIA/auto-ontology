@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Data access for UI-managed database connections (Neo4j only).
+"""Neo4j data access for UI-managed database connections.
 
 Connection metadata is stored directly on ``Labels.DB`` nodes so that the UI
 connection and the catalog database share a single node.  A DB node is treated
@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 from typing import Any
+
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
@@ -102,3 +103,8 @@ def delete_database_subgraph(database_name: str) -> None:
         """,
         {"database_name": database_name},
     )
+
+
+def verify_connectivity() -> None:
+    """Probe the Neo4j connection. Raises if the database is unreachable."""
+    get_neo4j_conn().verify_connectivity()

@@ -5,60 +5,126 @@
 """
 SQL Reconstruction Agent
 
-This agent reconstructs SQL queries that failed validation.
-Used to fix SQL errors and improve SQL quality based on validation feedback.
+Reconstructs SQL queries that failed validation. On the first
+reconstruction attempt the agent classifies the error type via an LLM
+call. When the error is MISSING_DATA, it searches the data VDB for
+additional tables using LLM-suggested queries, enriches them with full
+column info from Neo4j, and merges them into the available context.
+For FIXABLE errors it proceeds directly to SQL reconstruction with the
+existing tables.
 
-Responsibilities:
-- Reconstruct SQL that failed validation
-- Fix errors based on validation feedback
-- Preserve candidate context for reconstruction
-- Store reconstructed SQL response in path_state
-
-Design Decisions:
-- Used when SQL validation fails
-- Uses error message from validation to guide reconstruction
-- Preserves relevant candidates and context
-- Can handle feedback scenarios differently
+All failed attempts are tracked and included in the reconstruction
+prompt so the LLM does not repeat the same broken SQL.
 """
 
-import logging
-from typing import Dict, Any
+from __future__ import annotations
 
-from langchain_core.messages import AIMessage
+import logging
+from enum import Enum
+from typing import Any, Dict
+
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, ConfigDict, Field
+
+from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
+from gsf.neo4j.datasources import fetch_tables_by_ids
+from gsf.retrieval.data_access.relevant_tables import (
+    dedupe_merge_relevant_tables,
+    get_relevant_tables,
+)
 from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
+    format_tables_for_prompt,
+)
 from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
-from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 
 logger = logging.getLogger(__name__)
 
+# ------------------------------------------------------------------
+# Error classification models
+# ------------------------------------------------------------------
+
+
+class ErrorType(str, Enum):
+    """Root-cause classification for reconstruction.
+
+    The only decision that matters is: do we need more tables or can we
+    fix the SQL with what we already have?  The error may have been
+    raised by sql_parse_validation, sql_execution, or intent_validation
+    -- but the *symptom* (syntax / runtime / wrong intent) doesn't
+    always match the *root cause*.  So we let the LLM decide.
+    """
+
+    MISSING_DATA = "missing_data"
+    FIXABLE = "fixable"
+
+
+class ErrorAnalysis(BaseModel):
+    """LLM output: classify the root cause and optionally suggest VDB queries."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    error_type: ErrorType = Field(
+        description=(
+            "Classify the root cause:\n"
+            "- missing_data: the available tables/columns are insufficient "
+            "to answer the question — new data must be discovered.\n"
+            "- fixable: the SQL has a syntax error, wrong column, runtime "
+            "failure, or wrong logic — it can be fixed with the same tables."
+        ),
+    )
+    search_queries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Only populate when error_type is 'missing_data'. "
+            "2-4 semantic search queries to find the missing data. "
+            "Each query should describe a concept, entity, or relationship "
+            "needed but not in the current tables."
+        ),
+    )
+    explanation: str = Field(
+        default="",
+        description="Brief explanation of the diagnosis.",
+    )
+
+
+_ANALYSIS_PROMPT_TEMPLATE = """\
+You are diagnosing why a SQL query could not be constructed or is incorrect.
+
+Question the user asked:
+"{question}"
+
+Tables available:
+{table_summary}
+
+Error / previous attempt:
+{error_context}
+
+Classify the ROOT CAUSE (not the symptom):
+- missing_data: the tables above do NOT contain the data needed to answer \
+the question — even a perfect SQL rewrite would fail because the right \
+tables/columns are absent. Provide 2-4 semantic search queries to find \
+the missing concepts in our ontology database (focus on entity names and \
+relationships, NOT SQL syntax).
+- fixable: the SQL can be corrected using the SAME tables (syntax error, \
+wrong column reference, wrong aggregation, bad logic, etc.). Leave \
+search_queries empty."""
+
+
+# ------------------------------------------------------------------
+# Agent
+# ------------------------------------------------------------------
+
 
 class SQLReconstructionAgent(BaseAgent):
-    """
-    Agent that reconstructs SQL queries that failed validation.
+    """Reconstruct failed SQL, diagnosing root cause and tracking history."""
 
-    This agent fixes SQL errors by using validation feedback and
-    reconstructing the query with corrections.
-
-    Input Requirements:
-    - path_state["error"]: Error message from validation
-    - path_state["sql_generation_result"]: Previous (incorrect) SQL response
-    - path_state["candidates"]: Relevant candidates for context
-    - state["initial_question"]: Original user question
-
-    Output:
-    - path_state["sql_generation_result"]: Reconstructed SQL response
-    - path_state["relevant_tables"]: Relevant tables
-    - path_state["custom_analyses_used"]: Semantic entity IDs used
-    - messages: Updated messages with reconstruction
-    """
-
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("sql_reconstruction")
 
     def validate_input(self, state: AgentState) -> bool:
@@ -72,34 +138,171 @@ class SQLReconstructionAgent(BaseAgent):
             return False
         return True
 
+    # ------------------------------------------------------------------
+    # Error analysis
+    # ------------------------------------------------------------------
+
+    def _analyze_error(
+        self,
+        state: AgentState,
+        question: str,
+        error_context: str,
+        existing_tables: list[dict],
+    ) -> ErrorAnalysis:
+        """Ask the LLM to classify the error and suggest search queries."""
+        llm = state["llm"]
+
+        table_summary = (
+            ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
+        )
+
+        prompt = _ANALYSIS_PROMPT_TEMPLATE.format(
+            question=question,
+            table_summary=table_summary,
+            error_context=error_context,
+        )
+
+        result = invoke_with_structured_output(
+            llm,
+            [SystemMessage(content=prompt)],
+            ErrorAnalysis,
+        )
+
+        if result is None:
+            return ErrorAnalysis(
+                error_type=ErrorType.FIXABLE,
+                explanation="LLM analysis returned None — defaulting to fixable.",
+            )
+        return result
+
+    # ------------------------------------------------------------------
+    # VDB discovery (MISSING_DATA path)
+    # ------------------------------------------------------------------
+
+    def _discover_tables(
+        self,
+        state: AgentState,
+        search_queries: list[str],
+        existing_tables: list[dict],
+    ) -> list[dict]:
+        """Search the data VDB for additional tables, enrich with Neo4j columns."""
+        data_retriever = state.get("data_retriever")
+        if data_retriever is None:
+            self.logger.warning("No data_retriever — skipping table discovery")
+            return []
+
+        existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
+
+        combined: list[dict] = []
+        for query_text in search_queries:
+            try:
+                hits = get_relevant_tables(data_retriever, query_text, k=3)
+                combined.extend(hits)
+            except Exception:
+                self.logger.warning(
+                    "Table discovery failed for query: %s",
+                    query_text,
+                    exc_info=True,
+                )
+
+        if not combined:
+            self.logger.info("VDB returned 0 hits for discovery queries")
+            return []
+
+        combined = dedupe_merge_relevant_tables(combined)
+
+        new_ids = [
+            str(t["id"])
+            for t in combined
+            if t.get("id") and str(t["id"]) not in existing_ids
+        ]
+        if not new_ids:
+            self.logger.info("Discovery found no tables beyond existing set")
+            return []
+
+        enriched = fetch_tables_by_ids(new_ids)
+        self.logger.info(
+            "Discovery found %d new table(s): %s",
+            len(enriched),
+            [t["name"] for t in enriched],
+        )
+        return enriched
+
+    @staticmethod
+    def _merge_tables(existing: list[dict], discovered: list[dict]) -> list[dict]:
+        """Merge discovered tables into existing, avoiding duplicates by id."""
+        by_id: dict[str, dict] = {}
+        for t in existing:
+            tid = str(t.get("id") or "")
+            if tid:
+                by_id[tid] = t
+        for tbl in discovered:
+            tid = str(tbl.get("id") or "")
+            if not tid:
+                continue
+            if tid in by_id:
+                old_cols = {c["name"] for c in by_id[tid].get("columns", [])}
+                for col in tbl.get("columns", []):
+                    if col.get("name") and col["name"] not in old_cols:
+                        by_id[tid].setdefault("columns", []).append(col)
+                        old_cols.add(col["name"])
+            else:
+                by_id[tid] = tbl
+        return list(by_id.values())
+
+    # ------------------------------------------------------------------
+    # Main execute
+    # ------------------------------------------------------------------
+
     def execute(self, state: AgentState) -> Dict[str, Any]:
-        """
-        Reconstruct SQL based on validation error.
-
-        Uses the validation error message to guide SQL reconstruction,
-        preserving relevant candidates and context.
-
-        Args:
-            state: Current agent state
-
-        Returns:
-            Dictionary with:
-            - path_state: Contains reconstructed SQL response
-            - messages: Updated messages with reconstruction
-            - thoughts: Reconstruction reasoning
-        """
         path_state = state.get("path_state", {})
         llm = state["llm"]
         error = path_state.get("error", "")
         incorrect_response = path_state.get("sql_generation_result")
         question = get_question_for_processing(state)
 
-        # Build messages list starting from state messages
         messages = state["messages"]
-        all_tables = None
+        relevant_tables = list(path_state.get("relevant_tables") or [])
 
-        # Include available table schemas so the LLM knows valid columns
-        relevant_tables = path_state.get("relevant_tables", [])
+        sql_code = getattr(incorrect_response, "sql_code", "") or ""
+
+        # --- Step 1: Classify the error (once per reconstruction chain) ---
+        if not path_state.get("error_analysis_done"):
+            path_state["error_analysis_done"] = True
+            response_text = getattr(incorrect_response, "response", "") or ""
+            error_context = f"SQL: {sql_code}\nResponse: {response_text}"
+
+            analysis = self._analyze_error(
+                state, question, error_context, relevant_tables
+            )
+            path_state["error_type"] = analysis.error_type.value
+            self.logger.info(
+                "Error analysis: %s — %s",
+                analysis.error_type.value,
+                analysis.explanation[:150],
+            )
+
+            if (
+                analysis.error_type == ErrorType.MISSING_DATA
+                and analysis.search_queries
+            ):
+                new_tables = self._discover_tables(
+                    state, analysis.search_queries, relevant_tables
+                )
+                if new_tables:
+                    relevant_tables = self._merge_tables(relevant_tables, new_tables)
+                    self.logger.info(
+                        "Tables after discovery: %d (%s)",
+                        len(relevant_tables),
+                        [t["name"] for t in relevant_tables],
+                    )
+
+        # --- Step 2: Accumulate failed attempts ---
+        failed_attempts: list[dict] = list(path_state.get("failed_attempts") or [])
+        failed_attempts.append({"sql": sql_code, "error": error})
+        path_state["failed_attempts"] = failed_attempts
+
+        # --- Step 3: Build reconstruction prompt ---
         tables_section = ""
         if relevant_tables:
             tables_section = (
@@ -107,27 +310,39 @@ class SQLReconstructionAgent(BaseAgent):
                 f"{format_tables_for_prompt(relevant_tables)}\n\n"
             )
 
-        # Build error prompt for reconstruction
+        history_section = ""
+        if len(failed_attempts) > 1:
+            history_lines = []
+            for i, attempt in enumerate(failed_attempts[:-1], 1):
+                history_lines.append(
+                    f"  Attempt {i}: {attempt['sql'][:200]}\n"
+                    f"  Error: {attempt['error'][:200]}"
+                )
+            history_section = (
+                "\nPREVIOUS FAILED ATTEMPTS (do NOT repeat any of these):\n"
+                + "\n".join(history_lines)
+                + "\n\n"
+            )
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
-            f"```sql\n{incorrect_response.sql_code}\n```\n\n"
+            f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
-            "Please correct the SQL. Do not return the same SQL — it is invalid.\n"
-            "Do not explain how you corrected the sql, like you were never wrong.\n"
+            f"{history_section}"
+            "Please correct the SQL. Do not return the same SQL — "
+            "it is invalid.\n"
+            "Do not explain how you corrected the sql, like you were "
+            "never wrong.\n"
             f"{tables_section}"
             f"The original question was: {question}.\n"
             "You must include corrected sql in your final answer.\n"
-            "Follow the rules defined in the previous messages for writing the final answer."
+            "Follow the rules defined in the previous messages for "
+            "writing the final answer."
         )
 
-        messages = messages + [AIMessage(content=error_prompt)]
+        messages = messages + [HumanMessage(content=error_prompt)]
 
-        # Choose schema based on context
-        # Use SQLGenerationModel for reconstruction (same as from_multiple_snippets)
-        # Formatting will be handled by SQLResponseFormattingAgent
-
-        schema = SQLGenerationModel  # Use SQLGenerationModel for all non-feedback cases
-        response = invoke_with_structured_output(llm, messages, schema)
+        response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 
         if response is None:
             self.logger.warning(
@@ -139,14 +354,16 @@ class SQLReconstructionAgent(BaseAgent):
             }
 
         sql_preview = (getattr(response, "sql_code", "") or "")[:100]
-        self.logger.info(f"SQL reconstructed: {sql_preview}...")
+        self.logger.info("SQL reconstructed: %s...", sql_preview)
 
         thought = getattr(response, "thought", "No explanation")
         response_explanation = getattr(response, "response", "") or thought
-        self.logger.info(f"Reconstruction explanation: {response_explanation[:100]}...")
+        self.logger.info(
+            "Reconstruction explanation: %s...",
+            response_explanation[:100],
+        )
 
-        # Extract custom analyses
-        custom_analyses_used = []
+        custom_analyses_used: list = []
         if hasattr(response, "custom_analyses_used"):
             custom_analyses_used = get_custom_analyses_ids(
                 response.custom_analyses_used
@@ -157,9 +374,7 @@ class SQLReconstructionAgent(BaseAgent):
             "path_state": {
                 **path_state,
                 "sql_generation_result": response,
-                "relevant_tables": all_tables
-                if all_tables is not None
-                else path_state.get("relevant_tables", []),
+                "relevant_tables": relevant_tables,
                 "custom_analyses_used": custom_analyses_used,
             },
         }

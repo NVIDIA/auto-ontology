@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from gsf.semantic import neo4j_dal
+from gsf.neo4j.attributes import merge_column_attribute
+from gsf.neo4j.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
@@ -77,12 +78,10 @@ def process_table(
 
     attr_count = 0
     for term, assignments in persisted_terms:
-        neo4j_dal.merge_term(
-            term.name, term.description, table_id, synonyms=term.synonyms
-        )
+        merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
         for assignment in assignments:
             spec = spec_by_column[assignment.source_column]
-            neo4j_dal.merge_column_attribute(
+            merge_column_attribute(
                 term_name=term.name,
                 table_id=table_id,
                 source_column=spec.source_column,
@@ -103,7 +102,7 @@ def process_table(
 
     if embedder is not None:
         try:
-            terms, attrs = neo4j_dal.fetch_terms_and_attributes_for_table(table_id)
+            terms, attrs = fetch_terms_and_attributes_for_table(table_id)
             from collections import defaultdict
 
             attrs_by_term: dict[str, list[dict]] = defaultdict(list)

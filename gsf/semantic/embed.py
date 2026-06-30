@@ -94,7 +94,9 @@ def build_semantic_embedder(
         embed_invoke_url=os.environ.get(
             "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
         ),
-        model_name=os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-1b-v2"),
+        model_name=os.environ.get(
+            "EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2"
+        ),
         api_key=api_key,
         embed_modality="text",
     )
@@ -117,9 +119,9 @@ def embed_all_semantic_nodes(
     """
     from collections import defaultdict
 
-    from gsf.semantic import neo4j_dal
+    from gsf.neo4j.terms import fetch_all_terms_and_attributes
 
-    terms, attrs = neo4j_dal.fetch_all_terms_and_attributes()
+    terms, attrs = fetch_all_terms_and_attributes()
     if not terms and not attrs:
         logger.info("embed_all_semantic_nodes: nothing to embed")
         return 0
