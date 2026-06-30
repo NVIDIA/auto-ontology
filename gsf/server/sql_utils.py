@@ -12,7 +12,7 @@ from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_s
 
 from gsf.connectors import get_connectors
 from gsf.retrieval.data_access.graph_schemas import (
-    get_all_schemas_ids,
+    fetch_all_schema_ids,
     get_schemas_by_ids,
 )
 
@@ -45,7 +45,7 @@ def get_schemas(database_name: str | None = None) -> dict:
     only schemas belonging to that database (matched via the Schema's
     ``db_node.name``).
     """
-    schemas_ids = get_all_schemas_ids()
+    schemas_ids = fetch_all_schema_ids()
     all_schemas = get_schemas_by_ids(schemas_ids)
     if database_name is None:
         return all_schemas
