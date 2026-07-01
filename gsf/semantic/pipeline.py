@@ -24,7 +24,6 @@ def _extract_sql_attributes_for_table(
     database_name: str,
 ) -> list[str]:
     """Run LLM extraction + persistence for one table. Returns created attr ids."""
-    from gsf.dal.sql_attributes import add_term_link
     from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
     from gsf.server.sql_attributes.service import create_sql_attribute_auto
 
@@ -48,13 +47,7 @@ def _extract_sql_attributes_for_table(
             if row is not None:
                 attr_id = row["id"]
                 created.append(attr_id)
-                for extra_term_id in term_ids[1:]:
-                    add_term_link(attr_id, extra_term_id)
-                logger.info(
-                    "  Created SqlAttribute %r (linked to %d terms)",
-                    proposal.name,
-                    len(term_ids),
-                )
+                logger.info("  Created SqlAttribute %r", proposal.name)
         except Exception:
             logger.warning(
                 "  Failed to persist SqlAttribute %r",

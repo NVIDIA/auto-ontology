@@ -131,25 +131,14 @@ def detach_existing_sql_edges(attr_id: str) -> None:
 
 
 def link_to_term(attr_id: str, term_id: str) -> None:
-    """Create PROPERTY_OF edge from SqlAttribute to Term (replacing any old one)."""
+    """Set the PROPERTY_OF edge from SqlAttribute to Term, replacing any prior link."""
     get_neo4j_conn().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
-        OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->()
+        OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->(existing)
+        WHERE existing.id <> $term_id
         DELETE old
         WITH attr
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
-        """,
-        {"attr_id": attr_id, "term_id": term_id},
-    )
-
-
-def add_term_link(attr_id: str, term_id: str) -> None:
-    """Add a PROPERTY_OF edge without removing existing ones."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
         """,
