@@ -12,20 +12,9 @@ import { connectionsApi } from '@/api/connections';
 type NavItem = { label: string; href: string };
 
 const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/connections' };
-const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
-	label: 'Semantic Input',
-	href: '/settings/semantic-input',
-};
-const ZONES_NAV_ITEM: NavItem = {
-	label: 'Zones',
-	href: '/settings/zones',
-};
-
-export const SETTINGS_NAV_ITEMS: readonly NavItem[] = [
-	CONNECTIONS_NAV_ITEM,
-	SEMANTIC_INPUT_NAV_ITEM,
-	ZONES_NAV_ITEM,
-];
+const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
+const USERS_NAV_ITEM: NavItem = { label: 'Users', href: '/settings/users' };
+const SSO_NAV_ITEM: NavItem = { label: 'Single Sign-On', href: '/settings/sso' };
 
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 items-center rounded-lg px-3 text-sm no-underline transition-colors ${
@@ -35,6 +24,8 @@ function rowClassName(selected: boolean) {
 	}`;
 }
 
+// The whole Settings section is admin-only (gated in app/settings/layout.tsx),
+// so no per-item role checks are needed here.
 export const SettingsNav = () => {
 	const pathname = usePathname();
 	// Hide the Connections section when connections are managed via the
@@ -54,7 +45,9 @@ export const SettingsNav = () => {
 		};
 	}, []);
 
-	const items = envManaged ? [SEMANTIC_INPUT_NAV_ITEM, ZONES_NAV_ITEM] : SETTINGS_NAV_ITEMS;
+	const items: NavItem[] = [];
+	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
+	items.push(ZONES_NAV_ITEM, USERS_NAV_ITEM, SSO_NAV_ITEM);
 
 	return (
 		<nav

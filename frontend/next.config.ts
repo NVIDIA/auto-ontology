@@ -8,8 +8,11 @@ import type { NextConfig } from 'next';
 
 dotenv.config({ path: path.resolve(__dirname, '..', '.env') });
 
-const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
-
+// NOTE: there are intentionally no `rewrites()`. Every /api/* path that used to
+// be proxied to the Python backend via a rewrite is now served by a dedicated,
+// permission-gated route handler under app/api/** that forwards to the backend
+// (see auth/proxy-backend.ts + withPermission). Rewrites bypass route handlers,
+// so they can't be access-controlled — hence the move.
 const nextConfig: NextConfig = {
 	output: process.env.NEXT_OUTPUT === 'standalone' ? 'standalone' : undefined,
 	outputFileTracingRoot: path.resolve(__dirname, '..'),
@@ -21,54 +24,6 @@ const nextConfig: NextConfig = {
 				as: '*.js',
 			},
 		},
-	},
-	async rewrites() {
-		return [
-			{
-				source: '/api/chat/:path*',
-				destination: `${pythonApiUrl}/api/chat/:path*`,
-			},
-			{
-				source: '/api/datasources/:path*',
-				destination: `${pythonApiUrl}/api/datasources/:path*`,
-			},
-			{
-				source: '/api/schemas/:path*',
-				destination: `${pythonApiUrl}/api/schemas/:path*`,
-			},
-			{
-				source: '/api/tables/:path*',
-				destination: `${pythonApiUrl}/api/tables/:path*`,
-			},
-			{
-				source: '/api/columns/:path*',
-				destination: `${pythonApiUrl}/api/columns/:path*`,
-			},
-			{
-				source: '/api/nodes/:path*',
-				destination: `${pythonApiUrl}/api/nodes/:path*`,
-			},
-			{
-				source: '/api/custom-analyses',
-				destination: `${pythonApiUrl}/api/custom-analyses`,
-			},
-			{
-				source: '/api/custom-analyses/:path*',
-				destination: `${pythonApiUrl}/api/custom-analyses/:path*`,
-			},
-			{
-				source: '/api/connections/:path*',
-				destination: `${pythonApiUrl}/api/connections/:path*`,
-			},
-			{
-				source: '/api/zones/:path*',
-				destination: `${pythonApiUrl}/api/zones/:path*`,
-			},
-			{
-				source: '/api/health',
-				destination: `${pythonApiUrl}/api/health`,
-			},
-		];
 	},
 };
 

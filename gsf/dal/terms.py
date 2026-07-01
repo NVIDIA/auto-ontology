@@ -4,7 +4,7 @@
 
 """Neo4j read/write for Term nodes.
 
-ColumnAttribute and SemanticFK operations live in gsf/neo4j/attributes.py.
+ColumnAttribute and SemanticFK operations live in gsf/dal/attributes.py.
 """
 
 from __future__ import annotations

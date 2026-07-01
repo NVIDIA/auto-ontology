@@ -27,13 +27,13 @@ from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.neo4j.attributes import fetch_attr_column_contexts, find_join_path
-from gsf.neo4j.custom_analyses import (
+from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
+from gsf.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
-from gsf.neo4j.datasources import fetch_tables_by_ids
-from gsf.neo4j.terms import fetch_term_synonyms
+from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.dal.terms import fetch_term_synonyms
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,

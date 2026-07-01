@@ -4,7 +4,7 @@
 
 """SqlAttribute write orchestration.
 
-All direct Neo4j calls live in gsf/neo4j/sql_attributes.py.
+All direct Neo4j calls live in gsf/dal/sql_attributes.py.
 This module keeps orchestration: connector resolution, SQL validation,
 Neo4j node persistence via add_query, and VDB embedding lifecycle.
 """
@@ -20,7 +20,7 @@ from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 
 from gsf.connectors import get_connectors
-from gsf.neo4j.sql_attributes import (
+from gsf.dal.sql_attributes import (
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
     delete_sql_attribute_node,
@@ -33,7 +33,7 @@ from gsf.neo4j.sql_attributes import (
     list_sql_attributes,
     update_sql_attribute_props,
 )
-from gsf.neo4j.terms import get_term_by_id
+from gsf.dal.terms import get_term_by_id
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params

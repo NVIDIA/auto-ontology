@@ -4,12 +4,11 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
+type Ctx = { params: Promise<{ id: string }> };
 
+export const PATCH = withPermission<Ctx>({ acronym: ['update'] })(async (req, { params }) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
@@ -23,14 +22,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 		data,
 	});
 	return NextResponse.json(acronym);
-}
+});
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const DELETE = withPermission<Ctx>({ acronym: ['delete'] })(async (_req, { params }) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	await prisma.acronym.delete({ where: { id } });
 	return new Response(null, { status: 204 });
-}
+});

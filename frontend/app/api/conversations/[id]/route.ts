@@ -4,19 +4,21 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getApiUser } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
+
+type Ctx = { params: Promise<{ id: string }> };
 
 const notFound = () => NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
-
+export const GET = withPermission<Ctx>({ conversation: ['read'] })(async (
+	_req,
+	{ params, user },
+) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	// Scope by userId so one user can't read another's conversation.
 	const conversation = await prisma.conversation.findFirst({
-		where: { id, userId },
+		where: { id, userId: user.id },
 		include: { messages: { orderBy: { createdAt: 'asc' } } },
 	});
 
@@ -25,19 +27,19 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	}
 
 	return NextResponse.json(conversation);
-}
+});
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
-
+export const PATCH = withPermission<Ctx>({ conversation: ['write'] })(async (
+	req,
+	{ params, user },
+) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
 
 	// updateMany so the userId filter applies; count tells us if it was owned.
 	const result = await prisma.conversation.updateMany({
-		where: { id, userId },
+		where: { id, userId: user.id },
 		data: { title: body.title },
 	});
 	if (result.count === 0) {
@@ -46,17 +48,17 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
 	const conversation = await prisma.conversation.findUnique({ where: { id } });
 	return NextResponse.json(conversation);
-}
+});
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
-
+export const DELETE = withPermission<Ctx>({ conversation: ['delete'] })(async (
+	_req,
+	{ params, user },
+) => {
 	const prisma = getPrisma();
 	const { id } = await params;
-	const result = await prisma.conversation.deleteMany({ where: { id, userId } });
+	const result = await prisma.conversation.deleteMany({ where: { id, userId: user.id } });
 	if (result.count === 0) {
 		return notFound();
 	}
 	return new Response(null, { status: 204 });
-}
+});

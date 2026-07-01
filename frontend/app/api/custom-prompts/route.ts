@@ -4,21 +4,15 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 
-export async function GET() {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const GET = withPermission({ prompt: ['read'] })(async () => {
 	const prisma = getPrisma();
 	const prompts = await prisma.prompt.findMany();
 	return NextResponse.json(prompts);
-}
+});
 
-export async function POST(req: Request) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const POST = withPermission({ prompt: ['create'] })(async (req) => {
 	const prisma = getPrisma();
 	const body = await req.json();
 	const prompt = await prisma.prompt.create({
@@ -27,4 +21,4 @@ export async function POST(req: Request) {
 		},
 	});
 	return NextResponse.json(prompt, { status: 201 });
-}
+});

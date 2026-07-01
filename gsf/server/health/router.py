@@ -12,7 +12,7 @@ import psycopg
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from gsf.neo4j.connections import verify_connectivity
+from gsf.dal.connections import verify_connectivity
 from gsf.vdb.config import get_postgres_connection_string
 
 router = APIRouter()

@@ -12,21 +12,6 @@ const PUBLIC_PATHS = ['/login'];
 const isPublicPath = (pathname: string): boolean =>
 	PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
-// API paths reachable without a session: Better Auth's own endpoints (sign-in,
-// SSO callback, session), the health check, and the public SSO-provider list
-// the login page reads before authenticating. Everything else under /api/*
-// requires a session.
-const PUBLIC_API_PREFIXES = ['/api/auth', '/api/health', '/api/sso-providers'];
-
-const isPublicApi = (pathname: string): boolean =>
-	PUBLIC_API_PREFIXES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
-
-// Any non-public API may be called with a service-to-service SSO bearer token
-// (see auth/bearer.ts) instead of a session cookie. This is an optimistic
-// presence check only — the route handler performs the real token verification.
-const hasBearerHeader = (request: NextRequest): boolean =>
-	request.headers.get('authorization')?.toLowerCase().startsWith('bearer ') === true;
-
 /**
  * For /api/* requests, moves the first `*_id` query parameter into the URL path
  * so the backend receives it as a path param.
@@ -50,8 +35,8 @@ function rewriteApiIdParam(request: NextRequest): NextResponse {
 /**
  * Optimistic, cookie-only auth gate (no DB call). Redirects unauthenticated
  * users to /login and authenticated users away from the auth pages. Role-based
- * gating of /admin/* happens in the pages themselves via requireAdmin(), since
- * the role is not present in the session cookie.
+ * gating of admin areas (e.g. /settings/*) happens in those layouts/pages via
+ * requireAdmin(), since the role is not present in the session cookie.
  */
 function guardPage(request: NextRequest): NextResponse {
 	const { pathname, search } = request.nextUrl;
@@ -74,19 +59,11 @@ function guardPage(request: NextRequest): NextResponse {
 export function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
+	// API routes are not auth-gated here: every route handler enforces its own
+	// access via withPublic / withPermission (see auth/with-auth.ts), which is
+	// the single source of truth. The middleware only performs the `*_id` → path
+	// rewrite for /api/*. Pages are still gated below (handlers can't redirect).
 	if (pathname.startsWith('/api/')) {
-		// Gate API routes: handlers aren't covered by the page gate. This is an
-		// optimistic presence check (the route handlers do the real validation
-		// via requireApiAuth / resolveUser) — reject outright when there's
-		// neither a session cookie nor a bearer token, except for the public
-		// API allowlist.
-		if (
-			!isPublicApi(pathname) &&
-			!hasBearerHeader(request) &&
-			getSessionCookie(request) == null
-		) {
-			return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-		}
 		return rewriteApiIdParam(request);
 	}
 

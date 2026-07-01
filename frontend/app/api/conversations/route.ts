@@ -4,28 +4,22 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getApiUser } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 
-export async function GET() {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
-
+export const GET = withPermission({ conversation: ['read'] })(async (_req, { user }) => {
 	const prisma = getPrisma();
 	const conversations = await prisma.conversation.findMany({
-		where: { userId },
+		where: { userId: user.id },
 		orderBy: { createdAt: 'desc' },
 	});
 	return NextResponse.json(conversations);
-}
+});
 
-export async function POST(req: Request) {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
-
+export const POST = withPermission({ conversation: ['write'] })(async (req, { user }) => {
 	const prisma = getPrisma();
 	const body = await req.json();
 	const conversation = await prisma.conversation.create({
-		data: { title: body.title ?? '', userId },
+		data: { title: body.title ?? '', userId: user.id },
 	});
 	return NextResponse.json(conversation, { status: 201 });
-}
+});

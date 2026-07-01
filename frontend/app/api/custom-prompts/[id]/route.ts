@@ -4,12 +4,11 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAuth } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 
-export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
+type Ctx = { params: Promise<{ id: string }> };
 
+export const GET = withPermission<Ctx>({ prompt: ['read'] })(async (_req, { params }) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	const prompt = await prisma.prompt.findUnique({ where: { id } });
@@ -19,12 +18,9 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	}
 
 	return NextResponse.json(prompt);
-}
+});
 
-export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const PATCH = withPermission<Ctx>({ prompt: ['update'] })(async (req, { params }) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
@@ -37,14 +33,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 		data,
 	});
 	return NextResponse.json(prompt);
-}
+});
 
-export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const DELETE = withPermission<Ctx>({ prompt: ['delete'] })(async (_req, { params }) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	await prisma.prompt.delete({ where: { id } });
 	return new Response(null, { status: 204 });
-}
+});

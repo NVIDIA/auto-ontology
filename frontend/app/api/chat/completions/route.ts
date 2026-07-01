@@ -10,8 +10,7 @@
 // nothing until the upstream connection closed, defeating SSE.
 
 import { after } from 'next/server';
-import { requireApiAuth } from '@/auth/api-auth';
-import { resolveUserId } from '@/auth/resolve-user';
+import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
@@ -59,7 +58,6 @@ const readFinalAnswer = async (
 
 	try {
 		for (;;) {
-			// eslint-disable-next-line no-await-in-loop
 			const { done, value } = await reader.read();
 			if (done) break;
 			buffer += decoder.decode(value, { stream: true });
@@ -77,10 +75,7 @@ const readFinalAnswer = async (
 	return { response, sql };
 };
 
-export async function POST(req: Request): Promise<Response> {
-	const denied = await requireApiAuth();
-	if (denied) return denied;
-
+export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const body = await req.text();
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
@@ -127,17 +122,13 @@ export async function POST(req: Request): Promise<Response> {
 
 	// Single writer for analytics, for every caller. Create the row up front,
 	// then tee the stream — one branch flows to the client untouched, the other
-	// is parsed after the response to backfill the final answer.
+	// is parsed after the response to backfill the final answer. `user` is the
+	// resolved GSF user (session or SSO bearer), injected by withPermission.
 	const question = extractQuestion(body);
-
-	// The query must belong to a known GSF user (session or SSO bearer). A bearer
-	// caller whose SSO identity has no matching GSF account is rejected.
-	const userId = await resolveUserId();
-	if (!userId) return new Response('Unauthorized', { status: 401 });
 
 	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({
-		data: { question, source, userId },
+		data: { question, source, userId: user.id },
 	});
 
 	const [toClient, toCapture] = upstream.body.tee();
@@ -156,4 +147,4 @@ export async function POST(req: Request): Promise<Response> {
 	});
 
 	return new Response(toClient, { status: 200, headers: responseHeaders });
-}
+});

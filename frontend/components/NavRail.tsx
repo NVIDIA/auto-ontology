@@ -19,11 +19,11 @@ const navItems: NavItem[] = [
 	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
 	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
 	{ icon: IconName.Database, href: '/data', label: 'Data Catalog' },
+	{ icon: IconName.Pencil, href: '/semantic-input', label: 'Semantic Input' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics', adminOnly: true },
-	{ icon: IconName.Settings, href: '/settings', label: 'Settings' },
-	{ icon: IconName.Users, href: '/admin/users', label: 'Users', adminOnly: true },
-	// SSO config is reachable as a tab within the admin (Users) section
-	// (see app/admin/layout.tsx), so it doesn't need its own nav-rail icon.
+	// Settings is admin-only and now also contains Users and Single Sign-On
+	// (see app/settings/*). Viewers don't see it.
+	{ icon: IconName.Settings, href: '/settings', label: 'Settings', adminOnly: true },
 ];
 
 export const NavRail = ({ isAdmin = false }: { isAdmin?: boolean }) => {

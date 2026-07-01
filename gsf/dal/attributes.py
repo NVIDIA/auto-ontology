@@ -24,7 +24,7 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
-from gsf.neo4j.datasources import fetch_col_table_contexts
+from gsf.dal.datasources import fetch_col_table_contexts
 
 logger = logging.getLogger(__name__)
 

@@ -4,7 +4,7 @@
 
 """Candidate retrieval: vector hits + Neo4j graph enrichment.
 
-* :func:`gsf.neo4j.candidates.expand_info` pulls graph properties for the
+* :func:`gsf.dal.candidates.expand_info` pulls graph properties for the
   (label, id) pairs returned by :func:`semantic_search.search_semantic_index`.
 * :func:`_get_candidates_information` glues the two together for a single
   question string.
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
-from gsf.neo4j.candidates import expand_info
+from gsf.dal.candidates import expand_info
 from gsf.retrieval.data_access.relevant_tables import (
     _normalize_table_to_relevant_shape,
 )
