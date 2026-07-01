@@ -4,7 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { requireApiAdmin } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 import { Role } from '@/enums/auth';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
@@ -16,11 +16,8 @@ const parseIntParam = (value: string | null, fallback: number): number => {
 	return Number.isFinite(parsed) ? parsed : fallback;
 };
 
-export async function GET(request: Request) {
-	// Viewing analytics (the report) is admin-only.
-	const denied = await requireApiAdmin();
-	if (denied) return denied;
-
+// Viewing the analytics report requires the analytics:read permission (admin).
+export const GET = withPermission({ analytics: ['read'] })(async (request) => {
 	const prisma = getPrisma();
 	const { searchParams } = new URL(request.url);
 
@@ -47,4 +44,4 @@ export async function GET(request: Request) {
 	}));
 
 	return NextResponse.json({ data, total });
-}
+});

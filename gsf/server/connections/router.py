@@ -13,7 +13,7 @@ from typing import Any, TypedDict
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-from gsf.neo4j.connections import list_connections as _list_connections
+from gsf.dal.connections import list_connections as _list_connections
 from gsf.server.connections import service
 
 logger = logging.getLogger(__name__)

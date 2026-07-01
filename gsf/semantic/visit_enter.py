@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from gsf.neo4j.attributes import merge_column_attribute
-from gsf.neo4j.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.dal.attributes import merge_column_attribute
+from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
@@ -57,9 +57,7 @@ def process_table(
         suggested_fk_columns=suggested_fk_names,
     )
     if not specs:
-        logger.warning(
-            "Table %s has no non-FK columns — skipping Term creation", table_name
-        )
+        logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
         return
 
     # --- LLM: propose Term(s) and display names ---
@@ -70,7 +68,7 @@ def process_table(
 
     if not persisted_terms:
         logger.warning(
-            "Table %s: LLM assigned no columns to any Term (%d candidates)",
+            "[%s] LLM assigned no columns to any Term (%d candidates)",
             table_name,
             len(specs),
         )
@@ -93,7 +91,7 @@ def process_table(
 
     term_names = [t.name for t, _ in persisted_terms]
     logger.info(
-        "Processed %s → Terms %s (%d attrs, %d suspected FKs)",
+        "[%s] → Terms %s (%d attrs, %d suspected FKs)",
         table_name,
         term_names,
         attr_count,
@@ -112,4 +110,4 @@ def process_table(
             for term in terms:
                 embedder.embed_term(term, attrs_by_term.get(term["name"], []))
         except Exception:
-            logger.warning("Inline embed failed for table %s", table_name)
+            logger.warning("[%s] inline embed failed", table_name)

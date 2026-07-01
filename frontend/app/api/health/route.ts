@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
+import { withPublic } from '@/auth/with-auth';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,11 +20,11 @@ async function checkPostgres(): Promise<CheckResult> {
 	}
 }
 
-export async function GET() {
+export const GET = withPublic(async () => {
 	const postgres = await checkPostgres();
 	const healthy = postgres.status === 'ok';
 	return NextResponse.json(
 		{ status: healthy ? 'ok' : 'degraded', postgres },
 		{ status: healthy ? 200 : 503 },
 	);
-}
+});

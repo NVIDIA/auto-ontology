@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING, Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.server.sql_utils import SqlParseError
+
 if TYPE_CHECKING:
     from nemo_retriever.common.params.models import EmbedParams
     from nemo_retriever.common.vdb.adt_vdb import VDB
@@ -40,7 +42,7 @@ class CustomAnalysisSqlConflict(Exception):
     """Raised when the submitted SQL is already linked to a different analysis."""
 
 
-class CustomAnalysisSqlError(Exception):
+class CustomAnalysisSqlError(SqlParseError):
     """Raised when the SQL can't be parsed against the current catalog."""
 
 

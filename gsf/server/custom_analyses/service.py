@@ -4,7 +4,7 @@
 
 """Data Access Layer — CustomAnalysis write orchestration.
 
-All direct Neo4j calls live in gsf/neo4j/custom_analyses.py.
+All direct Neo4j calls live in gsf/dal/custom_analyses.py.
 This module only keeps orchestration: SQL validation, Neo4j node
 persistence, and VDB embedding — the three concerns that can't be
 cleanly separated into a pure-graph layer.
@@ -21,10 +21,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     Props,
 )
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
-
-from gsf.connectors import get_connectors
-from gsf.neo4j.custom_analyses import (
+from gsf.dal.custom_analyses import (
     CustomAnalysisNameConflict,
     CustomAnalysisSqlConflict,
     CustomAnalysisSqlError,
@@ -36,10 +33,7 @@ from gsf.neo4j.custom_analyses import (
     get_custom_analysis_by_id,
     list_custom_analyses,
 )
-from gsf.retrieval.data_access.graph_schemas import (
-    fetch_all_schema_ids,
-    get_schemas_by_ids,
-)
+from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 
 if TYPE_CHECKING:
     pass
@@ -60,45 +54,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Write helpers (private)
 # ---------------------------------------------------------------------------
-
-
-def _get_dialects() -> list[str]:
-    """Return SQL dialects from active connectors (NeMo multi-connector order)."""
-    connectors = get_connectors()
-    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
-    if not dialects:
-        return ["generic", "ansi", "postgres"]
-    return dialects
-
-
-def _get_schemas() -> dict:
-    """Return the full catalog snapshot for ``parse_query_single``."""
-    schemas_ids = fetch_all_schema_ids()
-    return get_schemas_by_ids(schemas_ids)
-
-
-def _validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:
-    """Validate ``sql`` against *schemas*, returning a query object.
-
-    Pure validation step: no graph writes happen here. Callers MUST run
-    this before any mutating call (``detach_existing_sql_edges``,
-    ``_persist_analysis_with_sql``) so a parse failure can't leave the
-    graph in a half-updated state.
-    """
-    try:
-        query_obj = parse_query_single(sql=sql, dialects=dialects, schemas=schemas)
-    except Exception as exc:
-        raise CustomAnalysisSqlError(
-            f"SQL parse error: {exc}",
-        ) from exc
-
-    if query_obj is None:
-        raise CustomAnalysisSqlError(
-            "SQL doesn't reference any table known to the catalog; "
-            "ingest the schema first or check the query",
-        )
-
-    return query_obj
 
 
 def _persist_analysis_with_sql(
@@ -154,7 +109,7 @@ def create_custom_analysis(
             f"(id={sql_conflict['id']!r})",
         )
 
-    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
+    query_obj = validate_sql(sql, get_dialects(), get_schemas())
     analysis_node = Neo4jNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
@@ -208,7 +163,7 @@ def update_custom_analysis(
 
     # Validate BEFORE touching the graph so a parse failure can't orphan
     # the analysis from its Sql node.
-    query_obj = _validate_sql(sql, _get_dialects(), _get_schemas())
+    query_obj = validate_sql(sql, get_dialects(), get_schemas())
 
     detach_existing_sql_edges(analysis_id)
 

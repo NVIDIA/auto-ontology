@@ -3,8 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from 'next/server';
-import { getCurrentSession } from '@/auth/auth-guards';
-import { Role } from '@/enums/auth';
+import { withPermission } from '@/auth/with-auth';
 
 const DISCOVERY_TIMEOUT_MS = 8000;
 
@@ -16,15 +15,10 @@ const DISCOVERY_TIMEOUT_MS = 8000;
  * auto-discover from the issuer) lets us register providers with
  * `skipDiscovery: true`. For public IdPs that path requires no `trustedOrigins`
  * entry, so admins can add any provider without per-provider config.
+ *
+ * Gated on sso:manage (admin) — it's an outbound fetch proxy.
  */
-export async function GET(request: Request) {
-	// Admin-only: this is an outbound fetch proxy, so don't expose it to
-	// non-admins (the edge middleware only checks for a session cookie).
-	const session = await getCurrentSession();
-	if (!session || session.user.role !== Role.Admin) {
-		return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
-	}
-
+export const GET = withPermission({ sso: ['manage'] })(async (request) => {
 	const issuer = new URL(request.url).searchParams.get('issuer')?.trim();
 	if (!issuer) {
 		return NextResponse.json({ error: 'Missing "issuer" query parameter.' }, { status: 400 });
@@ -89,4 +83,4 @@ export async function GET(request: Request) {
 		jwksEndpoint: typeof doc.jwks_uri === 'string' ? doc.jwks_uri : null,
 		discoveryEndpoint,
 	});
-}
+});

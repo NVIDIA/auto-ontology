@@ -4,18 +4,20 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
-import { getApiUser } from '@/auth/api-auth';
+import { withPermission } from '@/auth/with-auth';
 
-export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
-	const { userId, deny } = await getApiUser();
-	if (deny) return deny;
+type Ctx = { params: Promise<{ id: string }> };
 
+export const POST = withPermission<Ctx>({ conversation: ['write'] })(async (
+	req,
+	{ params, user },
+) => {
 	const prisma = getPrisma();
 	const { id } = await params;
 	const body = await req.json();
 
 	// Only allow adding messages to a conversation the user owns.
-	const owned = await prisma.conversation.findFirst({ where: { id, userId } });
+	const owned = await prisma.conversation.findFirst({ where: { id, userId: user.id } });
 	if (!owned) {
 		return NextResponse.json({ error: 'Conversation not found' }, { status: 404 });
 	}
@@ -36,4 +38,4 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 	});
 
 	return NextResponse.json(message, { status: 201 });
-}
+});

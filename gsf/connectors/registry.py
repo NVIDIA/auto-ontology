@@ -83,7 +83,7 @@ def get_connectors() -> list[SQLDatabase]:
     """
     global _connectors
     if _connectors is None:
-        from gsf.neo4j.connections import list_connections
+        from gsf.dal.connections import list_connections
 
         try:
             connection_strings = [

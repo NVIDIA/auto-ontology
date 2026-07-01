@@ -1,6 +1,6 @@
 """Read metadata layer (Table, Column, fk, join) from Neo4j.
 
-All direct Neo4j calls live in gsf/neo4j/datasources.py.
+All direct Neo4j calls live in gsf/dal/datasources.py.
 This module only keeps the pure-Python helper build_tables_index.
 """
 
@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from gsf.neo4j.datasources import fetch_sorted_tables
+from gsf.dal.datasources import fetch_sorted_tables
 
 __all__ = ["build_tables_index", "fetch_sorted_tables"]
 
