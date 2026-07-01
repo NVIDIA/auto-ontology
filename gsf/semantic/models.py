@@ -169,6 +169,13 @@ class SqlAttributeProposal(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    question: str = Field(
+        ...,
+        description=(
+            "A realistic natural-language question a business user would ask "
+            'that this metric answers (e.g. "What is the profit margin?").'
+        ),
+    )
     name: str = Field(
         ...,
         description=(

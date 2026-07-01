@@ -17,18 +17,29 @@ from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
 
-_ID_SUFFIX = re.compile(r"(id|_id)$", re.IGNORECASE)
+_ID_SUFFIX = re.compile(r"(id|_id|code|_code|number|_number|num|_num)$", re.IGNORECASE)
 
 _SYSTEM = """\
-You are an analytics engineer. Given a relational table with its columns, \
-propose non-trivial derived business metrics that combine TWO or MORE \
-columns from the same table. Only propose metrics that are genuinely \
-valuable — quality over quantity. It is perfectly fine to return zero \
-metrics if none are meaningful.
+You are an analytics engineer building a semantic layer for a text-to-SQL \
+system. Given a relational table with its columns, propose derived business \
+metrics that combine TWO or MORE columns from the same table.
+
+PURPOSE: These metrics are stored in a semantic search index. When a \
+business user types a natural-language question (e.g. "What is the profit \
+margin per order?"), the system retrieves matching metrics to help generate \
+SQL. Only propose metrics that answer questions a real business analyst \
+would ask. For each metric you MUST provide a realistic example question \
+a user would ask that this metric answers.
+
+The Term below describes the business entity this table represents. \
+Metrics should relate to that entity's real-world meaning.
+
+Quality over quantity — it is perfectly fine to return zero metrics if \
+none are meaningful.
 
 Each column below is tagged with a role:
   [MEASURE] — a numeric or date value with real business magnitude \
-(price, quantity, amount, date, temperature, population, etc.).
+(price, quantity, amount, date, temperature, etc.).
   [ID]      — a surrogate key or primary-key identifier.
   [FK]      — a foreign-key reference to another table.
 
@@ -41,27 +52,36 @@ subtraction). They are categorical identifiers, not business values. \
 They may only appear in CASE/WHERE equality checks (e.g. IS NOT NULL).
 3. Audit and system columns (e.g. last_edited_by, valid_from, created_when, \
 row_version) are NOT business values — do not use them in arithmetic.
-4. NEVER divide by EXTRACT(YEAR ...) or EXTRACT(MONTH ...) — the calendar \
-year or month number is not a meaningful divisor.
-5. The SQL expression must be a valid SELECT ... FROM statement using \
+4. Record-versioning timestamp columns (temporal table pattern) track when \
+a database ROW was valid, NOT a business event. Do NOT build metrics from \
+them (no "validity duration", "is active", "days of validity", etc.).
+5. NEVER use string-length functions on text columns to create metrics. \
+Character counts of names, emails, URLs, or comments are not business values.
+6. NEVER divide by a year or month value — whether from EXTRACT(YEAR ...) \
+or from a column literally named "year" or "month". Calendar ordinals \
+are not meaningful divisors.
+7. The SQL expression must be a valid SELECT ... FROM statement using \
 fully qualified column names: schema.table.column. \
 Example: SELECT col_a - col_b FROM schema.table
-6. Do NOT use aggregate functions (SUM, COUNT, AVG) that require GROUP BY \
+8. Do NOT use aggregate functions (SUM, COUNT, AVG) that require GROUP BY \
 — produce row-level expressions only.
-7. Metric names must be user-friendly with spaces (e.g. Net Revenue).
-8. NO DUPLICATES — every metric must have a unique formula.
-9. Return an empty list when no genuinely useful metric can be derived.
+9. Metric names must be user-friendly with spaces (e.g. Net Revenue).
+10. NO DUPLICATES — every metric must have a unique formula.
+11. Return an empty list when no genuinely useful metric can be derived.
 
-Examples of GOOD metrics:
-  GOOD: SELECT unitprice * quantity - taxamount AS "Net Revenue" FROM ...
-  GOOD: SELECT expecteddeliverydate - orderdate AS "Lead Time Days" FROM ...
-  GOOD: SELECT CASE WHEN quantity > reorderpoint THEN 1 ELSE 0 END FROM ...
+Examples of GOOD metrics (note the realistic user question):
+  GOOD: question="What is the net revenue per order line?"
+        SELECT unitprice * quantity - taxamount AS "Net Revenue" FROM ...
+  GOOD: question="How many days until expected delivery?"
+        SELECT expecteddeliverydate - orderdate AS "Lead Time Days" FROM ...
+  GOOD: question="Which items need restocking?"
+        SELECT CASE WHEN quantity > reorderpoint THEN 1 ELSE 0 END FROM ...
 
-Examples of BAD metrics (do NOT propose these):
-  BAD: SELECT quantity / supplierid  — dividing by an ID is meaningless
-  BAD: SELECT lasteditedby * price   — audit column in arithmetic
-  BAD: SELECT length(name) / id      — string length ratio to an ID
-  BAD: SELECT quantity / EXTRACT(YEAR FROM orderdate) — year as divisor"""
+Examples of BAD metrics (do NOT propose — no user would ask these):
+  BAD: SELECT quantity / supplierid  — nobody asks "divide quantity by ID"
+  BAD: SELECT LENGTH(email) - LENGTH(phone)  — nobody asks about character counts
+  BAD: SELECT total_sales / year  — calendar year is not a divisor
+  BAD: SELECT (validto - validfrom) AS "Duration" — record-versioning, not business"""
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +132,22 @@ def _build_fk_set(ctx: dict[str, Any]) -> set[str]:
 # ---------------------------------------------------------------------------
 
 _DIVIDE_BY_YEAR_MONTH = re.compile(
-    r"/\s*(?:extract\s*\(\s*(?:year|month)\s+from\b)",
+    r"/\s*(?:"
+    r"extract\s*\(\s*(?:year|month)\s+from\b"
+    r"|(?:\w+\.)*\w*\.?\byear\b"
+    r"|(?:\w+\.)*\w*\.?\bmonth\b"
+    r")",
+    re.IGNORECASE,
+)
+
+_LENGTH_ARITH = re.compile(
+    r"(?:length|len|char_length)\s*\(.*?\)\s*[+\-*/]"
+    r"|[+\-*/]\s*(?:length|len|char_length)\s*\(",
+    re.IGNORECASE,
+)
+
+_VALIDFROM_TO = re.compile(
+    r"\bvalid_?(?:from|to)\b",
     re.IGNORECASE,
 )
 
@@ -135,9 +170,19 @@ def _uses_id_in_arithmetic(
     return False
 
 
+def _uses_length_arithmetic(expression: str) -> bool:
+    """Return True if LENGTH/LEN/CHAR_LENGTH appears in arithmetic."""
+    return bool(_LENGTH_ARITH.search(expression))
+
+
 def _uses_year_month_divisor(expression: str) -> bool:
-    """Return True if EXTRACT(YEAR/MONTH ...) is used as a divisor."""
+    """Return True if a year/month value is used as a divisor."""
     return bool(_DIVIDE_BY_YEAR_MONTH.search(expression))
+
+
+def _uses_validfrom_to(expression: str) -> bool:
+    """Return True if expression references validfrom/validto columns."""
+    return bool(_VALIDFROM_TO.search(expression))
 
 
 # ---------------------------------------------------------------------------
@@ -215,14 +260,28 @@ def extract_sql_attributes(
 
         if _uses_id_in_arithmetic(proposal.expression, id_and_fk_cols):
             logger.debug(
-                "Dropping proposal %r: uses ID/FK/META column in arithmetic",
+                "Dropping proposal %r: uses ID/FK column in arithmetic",
+                proposal.name,
+            )
+            continue
+
+        if _uses_length_arithmetic(proposal.expression):
+            logger.debug(
+                "Dropping proposal %r: uses LENGTH() in arithmetic",
                 proposal.name,
             )
             continue
 
         if _uses_year_month_divisor(proposal.expression):
             logger.debug(
-                "Dropping proposal %r: divides by EXTRACT(YEAR/MONTH)",
+                "Dropping proposal %r: divides by year/month value",
+                proposal.name,
+            )
+            continue
+
+        if _uses_validfrom_to(proposal.expression):
+            logger.debug(
+                "Dropping proposal %r: uses validfrom/validto versioning columns",
                 proposal.name,
             )
             continue
