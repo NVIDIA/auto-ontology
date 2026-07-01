@@ -249,9 +249,9 @@ export const TermsView = () => {
 					type: ComposerSectionKind.DATA_TABLE,
 					id: 'column_attributes',
 					title: 'Column Attributes',
-					columns: [{ key: 'source_column', label: 'Column Name' }],
+					columns: [{ key: 'name', label: 'Attribute Name' }],
 					rows: termAttrs.map((attr) => ({
-						source_column: attr.source_column,
+						name: attr.name,
 					})),
 				},
 			],
