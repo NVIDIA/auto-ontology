@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException
 
-from gsf.neo4j import terms as neo4j_dal
+from gsf.dal import terms as neo4j_dal
 
 router = APIRouter()
 

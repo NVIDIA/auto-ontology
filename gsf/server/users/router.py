@@ -14,7 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, EmailStr
 
-from gsf.neo4j import users as dal
+from gsf.dal import users as dal
 
 router = APIRouter()
 

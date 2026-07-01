@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.neo4j.users import LABEL_USER
+from gsf.dal.users import LABEL_USER
 from gsf.semantic.constants import REL_PARTICIPANT_OF, REL_ZONE_OF
 from gsf.server.zones.utils import (
     LABEL_ZONE,

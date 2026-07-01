@@ -9,7 +9,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from gsf.neo4j import users as users_dal
+from gsf.dal import users as users_dal
 from gsf.server.zones import dal
 
 router = APIRouter()
