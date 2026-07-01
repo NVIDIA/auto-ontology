@@ -21,14 +21,19 @@ def compile_semantic_layer(
     domain_summary: DomainSummary | None = None,
     embedder: SemanticEmbedder | None = None,
 ) -> int:
-    """Run full taxonomy compilation over every table in Neo4j."""
+    """Run full taxonomy compilation over every table in Neo4j.
+
+    Tables are processed in parallel (LLM calls for FK detection and term
+    extraction run concurrently). The commit phase (VDB dedup check, Neo4j
+    writes, VDB embedding) is serialized via ``_term_commit_lock`` in
+    ``visit_enter`` to prevent duplicate Terms.
+    """
     summary = domain_summary or load_domain_summary(database_name)
     tables = fetch_all_tables_without_term()
 
     def _process(table: dict, index: int) -> bool:
-        table_id = table["id"]
         table_name = table["name"]
-        ctx = fetch_table_context(table_id)
+        ctx = fetch_table_context(table["id"])
 
         if not ctx.get("columns"):
             logger.warning("Table %s has no columns — skipping", table_name)

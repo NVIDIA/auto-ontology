@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Any
 
 from gsf.dal.attributes import merge_column_attribute
@@ -15,6 +16,8 @@ from gsf.semantic.models import ColumnAttributeSpec
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
 
 logger = logging.getLogger(__name__)
+
+_term_commit_lock = threading.Lock()
 
 
 def _terms_with_assignments(
@@ -74,40 +77,69 @@ def process_table(
         )
         return
 
-    attr_count = 0
-    for term, assignments in persisted_terms:
-        merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
-        for assignment in assignments:
-            spec = spec_by_column[assignment.source_column]
-            merge_column_attribute(
-                term_name=term.name,
-                table_id=table_id,
-                source_column=spec.source_column,
-                attr_name=spec.display_name,
-                datatype=spec.datatype,
-                description=spec.description,
-            )
-            attr_count += 1
+    with _term_commit_lock:
+        if embedder is not None:
+            for term, _ in persisted_terms:
+                try:
+                    candidates = embedder.search_similar_terms(
+                        term.name, term.description
+                    )
+                    if candidates:
+                        from gsf.semantic.term_judge import judge_term_overlap
 
-    term_names = [t.name for t, _ in persisted_terms]
-    logger.info(
-        "[%s] → Terms %s (%d attrs, %d suspected FKs)",
-        table_name,
-        term_names,
-        attr_count,
-        len(all_fk_names),
-    )
+                        merge_into = judge_term_overlap(
+                            term.name, term.description, candidates
+                        )
+                        if merge_into:
+                            logger.info(
+                                "[%s] Merging proposed Term %r into existing %r",
+                                table_name,
+                                term.name,
+                                merge_into,
+                            )
+                            term.name = merge_into
+                except Exception:
+                    logger.warning(
+                        "[%s] Term dedup check failed for %r — proceeding as-is",
+                        table_name,
+                        term.name,
+                        exc_info=True,
+                    )
 
-    if embedder is not None:
-        try:
-            terms, attrs = fetch_terms_and_attributes_for_table(table_id)
-            from collections import defaultdict
+        attr_count = 0
+        for term, assignments in persisted_terms:
+            merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+            for assignment in assignments:
+                spec = spec_by_column[assignment.source_column]
+                merge_column_attribute(
+                    term_name=term.name,
+                    table_id=table_id,
+                    source_column=spec.source_column,
+                    attr_name=spec.display_name,
+                    datatype=spec.datatype,
+                    description=spec.description,
+                )
+                attr_count += 1
 
-            attrs_by_term: dict[str, list[dict]] = defaultdict(list)
-            for attr in attrs:
-                if attr.get("term_name"):
-                    attrs_by_term[attr["term_name"]].append(attr)
-            for term in terms:
-                embedder.embed_term(term, attrs_by_term.get(term["name"], []))
-        except Exception:
-            logger.warning("[%s] inline embed failed", table_name)
+        term_names = [t.name for t, _ in persisted_terms]
+        logger.info(
+            "[%s] → Terms %s (%d attrs, %d suspected FKs)",
+            table_name,
+            term_names,
+            attr_count,
+            len(all_fk_names),
+        )
+
+        if embedder is not None:
+            try:
+                terms, attrs = fetch_terms_and_attributes_for_table(table_id)
+                from collections import defaultdict
+
+                attrs_by_term: dict[str, list[dict]] = defaultdict(list)
+                for attr in attrs:
+                    if attr.get("term_name"):
+                        attrs_by_term[attr["term_name"]].append(attr)
+                for term in terms:
+                    embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+            except Exception:
+                logger.warning("[%s] inline embed failed", table_name)
