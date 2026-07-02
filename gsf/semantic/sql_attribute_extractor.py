@@ -41,13 +41,12 @@ Each column below is tagged with a role:
   [MEASURE] — a numeric or date value with real business magnitude \
 (price, quantity, amount, date, temperature, etc.).
   [ID]      — a surrogate key or primary-key identifier.
-  [FK]      — a foreign-key reference to another table.
 
 Rules:
 1. Each metric MUST use at least two MEASURE columns in a meaningful formula \
 (sum, difference, ratio, CASE expression, date arithmetic, etc.). \
 Do NOT propose metrics that simply rename or alias a single column.
-2. NEVER use [ID] or [FK] columns in arithmetic (division, multiplication, \
+2. NEVER use [ID] columns in arithmetic (division, multiplication, \
 subtraction). They are categorical identifiers, not business values. \
 They may only appear in CASE/WHERE equality checks (e.g. IS NOT NULL).
 3. Audit and system columns (e.g. last_edited_by, valid_from, created_when, \
@@ -89,15 +88,9 @@ Examples of BAD metrics (do NOT propose — no user would ask these):
 # ---------------------------------------------------------------------------
 
 
-def _classify_column(
-    col_name: str,
-    fk_columns: set[str],
-    table_name: str,
-) -> str:
-    """Return a role tag: FK, ID, or MEASURE."""
+def _classify_column(col_name: str, table_name: str) -> str:
+    """Return a role tag: ID or MEASURE."""
     lower = col_name.lower()
-    if lower in fk_columns:
-        return "FK"
     if _ID_SUFFIX.search(lower):
         return "ID"
     if lower == table_name.lower() + "id":
@@ -117,19 +110,10 @@ def _format_column_line(
     return line
 
 
-def _build_fk_set(ctx: dict[str, Any]) -> set[str]:
-    """Collect FK source column names from context (lowercased)."""
-    fk_cols: set[str] = set()
-    for fk in ctx.get("fks", []):
-        src = fk.get("source_column")
-        if src:
-            fk_cols.add(src.lower())
-    return fk_cols
-
-
 # ---------------------------------------------------------------------------
 # Post-LLM heuristic filter
 # ---------------------------------------------------------------------------
+
 
 _DIVIDE_BY_YEAR_MONTH = re.compile(
     r"/\s*(?:"
@@ -156,7 +140,7 @@ def _uses_id_in_arithmetic(
     expression: str,
     id_columns: set[str],
 ) -> bool:
-    """Return True if the expression uses any ID/FK column in arithmetic."""
+    """Return True if the expression uses any ID column in arithmetic."""
     if not id_columns:
         return False
     expr_lower = expression.lower()
@@ -192,30 +176,28 @@ def _uses_validfrom_to(expression: str) -> bool:
 
 def extract_sql_attributes(
     table: dict[str, Any],
-    ctx: dict[str, Any],
+    columns: list[dict[str, Any]],
     schema_name: str | None,
     term: dict[str, Any],
     database_name: str,
 ) -> list[SqlAttributeProposal]:
     """Ask the LLM to propose derived metrics, validate each SQL, return survivors."""
-    columns = ctx.get("columns", [])
     if len(columns) < 2:
         return []
 
-    fk_columns = _build_fk_set(ctx)
     table_name = table["name"]
     qualified_table = f"{schema_name}.{table_name}" if schema_name else table_name
 
     roles: dict[str, str] = {}
     col_lines_parts: list[str] = []
     for col in columns[:40]:
-        role = _classify_column(col["name"], fk_columns, table_name)
+        role = _classify_column(col["name"], table_name)
         roles[col["name"].lower()] = role
         col_lines_parts.append(_format_column_line(col, role))
 
     col_lines = "\n".join(col_lines_parts)
 
-    id_and_fk_cols = {name for name, role in roles.items() if role in ("ID", "FK")}
+    id_cols = {name for name, role in roles.items() if role == "ID"}
 
     measure_count = sum(1 for r in roles.values() if r == "MEASURE")
     if measure_count < 2:
@@ -258,9 +240,9 @@ def extract_sql_attributes(
             continue
         seen_expressions.add(normalized)
 
-        if _uses_id_in_arithmetic(proposal.expression, id_and_fk_cols):
+        if _uses_id_in_arithmetic(proposal.expression, id_cols):
             logger.debug(
-                "Dropping proposal %r: uses ID/FK column in arithmetic",
+                "Dropping proposal %r: uses ID column in arithmetic",
                 proposal.name,
             )
             continue

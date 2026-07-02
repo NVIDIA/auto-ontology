@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from typing import Any
 
 from gsf.dal.attributes import merge_column_attribute
@@ -34,19 +35,19 @@ def _terms_with_assignments(
 
 def _extract_sql_attributes_for_table(
     table: dict,
-    ctx: dict,
+    columns: list[dict],
     schema_name: str | None,
-    term_ids: list[str],
-    term_names: list[str],
+    term_id: str,
+    term_name: str,
     database_name: str,
 ) -> list[str]:
-    """Run LLM extraction + persistence for one table. Returns created attr names."""
+    """Run LLM extraction + persistence for one term's columns. Returns created attr names."""
     term = {
-        "name": term_names[0] if term_names else "",
+        "name": term_name,
         "description": table.get("description", ""),
     }
 
-    proposals = extract_sql_attributes(table, ctx, schema_name, term, database_name)
+    proposals = extract_sql_attributes(table, columns, schema_name, term, database_name)
     created_names: list[str] = []
 
     for proposal in proposals:
@@ -55,7 +56,7 @@ def _extract_sql_attributes_for_table(
                 name=proposal.name,
                 description=proposal.description,
                 expression=proposal.expression,
-                term_id=term_ids[0],
+                term_id=term_id,
                 database_name=database_name,
             )
             if row is not None:
@@ -150,29 +151,49 @@ def process_table(
             term_names=result_term_names, attr_names=result_attr_names
         )
 
+    # Build attrs_by_term — used for both embedding and SQL attr extraction
+    attrs_by_term: dict[str, list[dict]] = defaultdict(list)
+    for attr in attrs:
+        if attr.get("term_name"):
+            attrs_by_term[attr["term_name"]].append(attr)
+
+    # --- Embed terms and attributes ---
     if embedder is not None:
         try:
-            from collections import defaultdict
-
-            attrs_by_term: dict[str, list[dict]] = defaultdict(list)
-            for attr in attrs:
-                if attr.get("term_name"):
-                    attrs_by_term[attr["term_name"]].append(attr)
             for term in terms:
                 embedder.embed_term(term, attrs_by_term.get(term["name"], []))
         except Exception:
             logger.warning("[%s] inline embed failed", table_name)
 
+    # --- LLM: propose SqlAttributes ---
     result_sql_attr_names: list[str] = []
     if database_name is not None:
         try:
-            term_ids = [t["id"] for t in terms if t.get("id")]
-            term_names = [t["name"] for t in terms if t.get("name")]
+            col_by_name = {c["name"]: c for c in ctx.get("columns", [])}
             schema_name = table.get("schema_name")
-            if term_ids and len(ctx.get("columns", [])) >= 2:
-                result_sql_attr_names = _extract_sql_attributes_for_table(
-                    table, ctx, schema_name, term_ids, term_names, database_name
+
+            for term in terms:
+                term_id = term.get("id")
+                term_name_str = term.get("name")
+                term_col_names = [
+                    a["source_column"]
+                    for a in attrs_by_term.get(term_name_str, [])
+                    if a.get("source_column")
+                ]
+                filtered_cols = [
+                    col_by_name[n] for n in term_col_names if n in col_by_name
+                ]
+                if len(filtered_cols) < 2:
+                    continue
+                sql_names = _extract_sql_attributes_for_table(
+                    table,
+                    filtered_cols,
+                    schema_name,
+                    term_id,
+                    term_name_str,
+                    database_name,
                 )
+                result_sql_attr_names.extend(sql_names)
         except Exception:
             logger.warning(
                 "[%s] SqlAttribute extraction failed", table_name, exc_info=True
