@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.users import get_accessible_catalog_ids_for_zones
 from gsf.server.sql_utils import SqlParseError
 
 if TYPE_CHECKING:
@@ -51,11 +52,32 @@ class CustomAnalysisSqlError(SqlParseError):
 # ---------------------------------------------------------------------------
 
 
-def list_custom_analyses() -> list[dict[str, Any]]:
-    """Return every ``CustomAnalysis`` that has a linked ``Sql`` node."""
+def list_custom_analyses(
+    zone_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ``CustomAnalysis`` nodes joined with their ``Sql`` node.
+
+    When *zone_ids* is supplied, only analyses whose SQL references at
+    least one table reachable through those zones are returned.  Pass
+    ``None`` (or omit) to return all analyses (admin / internal callers).
+    """
+    params: dict[str, Any] = {}
+    if zone_ids is not None:
+        accessible = get_accessible_catalog_ids_for_zones(zone_ids)
+        params["table_ids"] = list(accessible["table_ids"])
+        zone_filter = (
+            f"WHERE EXISTS {{"
+            f" (sql)-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
+            f" WHERE tbl.id IN $table_ids"
+            f" }}"
+        )
+    else:
+        zone_filter = ""
+
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        {zone_filter}
         WITH ca, sql
         ORDER BY ca.name
 
@@ -66,6 +88,7 @@ def list_custom_analyses() -> list[dict[str, Any]]:
             sql: sql.sql_full_query
         }}) AS analyses
         """,
+        params,
     )
     return rows[0]["analyses"]
 

@@ -4,12 +4,24 @@
 
 'use client';
 
-import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useCallback,
+	type ReactNode,
+} from 'react';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { isComposerSection, type ComposerSection } from '@/types/composer-section';
+import {
+	isComposerSection,
+	type ComposerSection,
+	type ComposerZonesSection,
+} from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
@@ -171,6 +183,34 @@ const ReadOnlyTagList = ({
 	</div>
 );
 
+const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
+	const displayedZones = useMemo(() => {
+		if (Array.isArray(section.userZoneIds)) {
+			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
+		}
+		return section.zones;
+	}, [section.zones, section.userZoneIds]);
+
+	return (
+		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title} ({displayedZones.length})
+			</h2>
+			{displayedZones.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-2">
+					{displayedZones.map((zone) => (
+						<li key={zone.id}>
+							<ZoneChip name={zone.name} color={zone.color} />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
+
 function renderComposerSection(
 	section: ComposerSection,
 	onTermClick?: (termId: string) => void,
@@ -259,24 +299,7 @@ function renderComposerSection(
 				</div>
 			);
 		case ComposerSectionKind.ZONES_CHIPS:
-			return (
-				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{section.title} ({section.zones.length})
-					</h2>
-					{section.zones.length === 0 ? (
-						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
-					) : (
-						<ul className="mt-3 flex flex-wrap gap-2">
-							{section.zones.map((zone) => (
-								<li key={zone.id}>
-									<ZoneChip name={zone.name} color={zone.color} />
-								</li>
-							))}
-						</ul>
-					)}
-				</div>
-			);
+			return <ZonesSection section={section} />;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">

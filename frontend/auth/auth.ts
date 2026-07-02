@@ -76,10 +76,11 @@ export const auth = betterAuth({
 				// the role.
 				before: async (user) => {
 					const isFirstUser = (await prisma.user.count()) === 0;
+					const name = user.name || user.email;
 					return {
 						data: isFirstUser
-							? { ...user, role: Role.Admin, emailVerified: true }
-							: { ...user, role: Role.Viewer },
+							? { ...user, name, role: Role.Admin, emailVerified: true }
+							: { ...user, name, role: Role.Viewer },
 					};
 				},
 				after: async (user) => {

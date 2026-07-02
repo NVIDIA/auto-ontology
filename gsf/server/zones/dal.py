@@ -10,7 +10,7 @@ from typing import Any
 
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.users import LABEL_USER
+from gsf.dal.users import LABEL_ADMIN, LABEL_USER_MATCH
 from gsf.semantic.constants import REL_PARTICIPANT_OF, REL_ZONE_OF
 from gsf.server.zones.utils import (
     LABEL_ZONE,
@@ -58,7 +58,7 @@ def list_zones(user_id: str) -> list[dict[str, Any]]:
     """
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (u:{LABEL_USER} {{id: $user_id}})
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
         WITH u, u.role AS role
         MATCH (z:{LABEL_ZONE})
         WHERE role = 'admin'
@@ -87,7 +87,7 @@ def get_zone_by_id(
     if user_id is not None:
         access_rows = conn.query_read(
             f"""
-            MATCH (u:{LABEL_USER} {{id: $user_id}})
+            MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
             MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
             WHERE u.role = 'admin'
                OR EXISTS {{ MATCH (u)-[:{REL_PARTICIPANT_OF}]->(z) }}
@@ -234,12 +234,14 @@ def create_zone(
             ordered_linked_ids.append(item_id)
         zone["items"] = ordered_linked_ids
 
-    # Only admins get automatic access to new zones.
-    # Viewers must be explicitly granted access afterwards.
+    # Link all admin users to the new zone so the graph reflects full admin
+    # access (User->zone->data paths visible in Neo4j).  Viewers are granted
+    # access explicitly via grant_zone_access.  Admins are filtered out of
+    # list_zone_users so they never appear in the UI access list.
     conn.query_write(
         f"""
         MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
-        MATCH (u:{LABEL_USER} {{role: 'admin'}})
+        MATCH (u:{LABEL_ADMIN})
         MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
         """,
         {"zone_id": zone["id"]},
@@ -362,10 +364,15 @@ def delete_zone(zone_id: str) -> bool:
 
 
 def list_zone_users(zone_id: str) -> list[dict[str, Any]]:
-    """Return all users that have access to *zone_id* (via participant_of)."""
+    """Return viewer users that have explicit access to *zone_id*.
+
+    Admins access all zones via role check and are excluded from the result —
+    only explicitly-granted viewer relationships are returned.
+    """
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (u:{LABEL_USER})-[:{REL_PARTICIPANT_OF}]->(z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (u:{LABEL_USER_MATCH})-[:{REL_PARTICIPANT_OF}]->(z:{LABEL_ZONE} {{id: $zone_id}})
+        WHERE u.role <> 'admin'
         RETURN u.id    AS id,
                u.email AS email,
                u.name  AS name,
@@ -385,7 +392,7 @@ def grant_zone_access(zone_id: str, user_id: str) -> bool:
     conn = get_neo4j_conn()
     rows = conn.query_write(
         f"""
-        MATCH (u:{LABEL_USER} {{id: $user_id}})
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
         MATCH (z:{LABEL_ZONE} {{id: $zone_id}})
         MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
         RETURN u.id AS user_id, z.id AS zone_id
@@ -406,7 +413,7 @@ def revoke_zone_access(zone_id: str, user_id: str) -> bool:
     conn = get_neo4j_conn()
     rows = conn.query_write(
         f"""
-        MATCH (u:{LABEL_USER} {{id: $user_id}})-[r:{REL_PARTICIPANT_OF}]->(z:{LABEL_ZONE} {{id: $zone_id}})
+        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})-[r:{REL_PARTICIPANT_OF}]->(z:{LABEL_ZONE} {{id: $zone_id}})
         DELETE r
         RETURN u.id AS user_id
         """,

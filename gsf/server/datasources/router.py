@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from gsf.server.custom_analyses import service as custom_analyses_dal
@@ -44,9 +44,12 @@ def _count_payload(data: object) -> dict:
 
 
 @router.get("/schemas/{db_id}")
-def list_schemas_by_database(db_id: str) -> dict:
-    """Schemas for a database."""
-    result = dal.fetch_schemas_for_database(db_id)
+def list_schemas_by_database(
+    db_id: str,
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Schemas for a database, zone-scoped when zone_ids are provided."""
+    result = dal.fetch_schemas_for_database(db_id, zone_ids=zone_ids)
     return result
 
 
@@ -54,9 +57,12 @@ def list_schemas_by_database(db_id: str) -> dict:
 def list_tables_by_schema(
     schema_id: str,
     database_name: str | None = None,
+    zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Tables under a schema (lazy tree)."""
-    rows = dal.fetch_tables_for_schema(schema_id, database_name=database_name)
+    """Tables under a schema (lazy tree), zone-scoped when zone_ids are provided."""
+    rows = dal.fetch_tables_for_schema(
+        schema_id, database_name=database_name, zone_ids=zone_ids
+    )
     return _count_payload(rows)
 
 
@@ -73,8 +79,9 @@ def list_columns_by_table(table_id: str) -> dict:
 
 
 @router.get("/datasources/dbs")
-def list_databases() -> dict:
-    rows = dal.fetch_databases()
+def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """Databases visible via the given zones (all when zone_ids is absent)."""
+    rows = dal.fetch_databases(zone_ids=zone_ids)
     return _count_payload(rows)
 
 
@@ -84,9 +91,9 @@ def list_databases() -> dict:
 
 
 @router.get("/custom-analyses")
-def list_custom_analyses() -> dict:
-    """All CustomAnalysis nodes joined with their HAS_SQL neighbour."""
-    rows = custom_analyses_dal.list_custom_analyses()
+def list_custom_analyses(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """CustomAnalysis nodes joined with their HAS_SQL neighbour, zone-scoped when zone_ids are provided."""
+    rows = custom_analyses_dal.list_custom_analyses(zone_ids=zone_ids)
     return _count_payload(rows)
 
 

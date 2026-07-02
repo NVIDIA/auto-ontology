@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from gsf.dal import terms as neo4j_dal
 
@@ -14,23 +14,32 @@ router = APIRouter()
 
 
 @router.get("/terms")
-def list_terms() -> dict:
-    """Return all Term nodes from Neo4j."""
-    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes()
+def list_terms(zone_ids: list[str] | None = Query(default=None)) -> dict:
+    """Return Term nodes zone-scoped to the provided zones.
+
+    ``None`` (param absent) → no filter, return all (admin callers).
+    ``[]`` (empty list) → viewer with no zone access, returns empty.
+    ``[id, ...]`` → filter to terms reachable through those zones.
+    """
+    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(zone_ids=zone_ids)
     return {"data": terms, "count": len(terms)}
 
 
 @router.get("/terms/column-attributes")
-def list_term_column_attributes() -> dict:
-    """Return all ColumnAttribute nodes with FK count and primary-key flag."""
-    attrs = neo4j_dal.fetch_column_attributes_with_fk_count()
+def list_term_column_attributes(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return ColumnAttribute nodes with FK count (zone-scoped when zone_ids provided)."""
+    attrs = neo4j_dal.fetch_column_attributes_with_fk_count(zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 
 @router.get("/terms/related-counts")
-def list_related_terms_counts() -> dict:
-    """Return per-term related-term counts derived from SEMANTIC_FK join paths."""
-    counts = neo4j_dal.fetch_related_terms_counts()
+def list_related_terms_counts(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return per-term related-term counts, zone-scoped when zone_ids are provided."""
+    counts = neo4j_dal.fetch_related_terms_counts(zone_ids=zone_ids)
     return {"data": counts, "count": len(counts)}
 
 

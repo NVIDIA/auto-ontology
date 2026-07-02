@@ -18,6 +18,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
 )
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.users import get_accessible_catalog_ids_for_zones
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
@@ -124,16 +125,32 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     return result
 
 
-def fetch_all_terms_and_attributes() -> tuple[
-    list[dict[str, Any]], list[dict[str, Any]]
-]:
-    """Scan all semantic Term and ColumnAttribute nodes in Neo4j for embedding."""
+def fetch_all_terms_and_attributes(
+    zone_ids: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Scan semantic Term and ColumnAttribute nodes in Neo4j.
+
+    When *zone_ids* is supplied the result is restricted to terms and attributes
+    that belong to tables reachable through those zones.  Pass ``None`` (or omit)
+    to return all data (admin / internal callers).
+    """
     conn = get_neo4j_conn()
-    params = {"source": SEMANTIC_SOURCE}
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        table_ids = list(accessible["table_ids"])
+        table_filter = "WHERE t.id IN $table_ids"
+        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
+    else:
+        table_filter = ""
+        params = {"source": SEMANTIC_SOURCE}
+
     terms = conn.query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{source: $source}})
+        {table_filter}
         RETURN DISTINCT term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id
         """,
@@ -144,6 +161,7 @@ def fetch_all_terms_and_attributes() -> tuple[
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->
               (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        {table_filter}
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,
@@ -231,17 +249,32 @@ def fetch_terms_and_attributes_for_table(
     return terms, attrs
 
 
-def fetch_column_attributes_with_fk_count() -> list[dict[str, Any]]:
-    """Return all ColumnAttribute nodes with:
+def fetch_column_attributes_with_fk_count(
+    zone_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return ColumnAttribute nodes with FK count and primary-key flag.
 
-    * ``fk_count``   — number of Column nodes that point to this attribute
-                       via a SEMANTIC_FK edge (i.e. it is used as a FK target).
-    * ``is_primary_key`` — True when at least one FK references this attribute,
-                           meaning it acts as the primary-key anchor for its Term.
+    * ``fk_count``       — number of Column nodes referencing via SEMANTIC_FK.
+    * ``is_primary_key`` — True when at least one FK references this attribute.
+
+    When *zone_ids* is supplied only attributes reachable through those zones
+    are returned.
     """
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        table_ids = list(accessible["table_ids"])
+        table_filter = "WHERE attr.table_id IN $table_ids"
+        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
+    else:
+        table_filter = ""
+        params = {"source": SEMANTIC_SOURCE}
+
     return get_neo4j_conn().query_read(
         f"""
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        {table_filter}
         OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
         WITH attr, count(col) AS fk_count
         RETURN attr.id           AS id,
@@ -255,7 +288,7 @@ def fetch_column_attributes_with_fk_count() -> list[dict[str, Any]]:
                fk_count > 0      AS is_primary_key
         ORDER BY attr.term_name, attr.name
         """,
-        {"source": SEMANTIC_SOURCE},
+        params,
     )
 
 
@@ -371,26 +404,42 @@ def fetch_related_terms(term_id: str) -> list[dict[str, Any]]:
     return [dict(r) for r in term_rows]
 
 
-def fetch_related_terms_counts() -> list[dict[str, Any]]:
+def fetch_related_terms_counts(
+    zone_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
     """Return per-term related-term counts for all terms.
 
     Builds a ``term_id → set(table_id)`` map and a ``table_id → set(term_id)``
     reverse map from Neo4j, then computes for each term the number of distinct
     other terms that share at least one table with it.
 
+    When *zone_ids* is supplied the result is restricted to terms reachable
+    through those zones.  Pass ``None`` to return counts for all terms.
+
     Each entry is ``{term_id: str, count: int}``.
     """
     conn = get_neo4j_conn()
-    params = {"source": SEMANTIC_SOURCE}
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        table_ids = list(accessible["table_ids"])
+        table_filter = "WHERE ta.id IN $table_ids"
+        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
+    else:
+        table_filter = ""
+        params = {"source": SEMANTIC_SOURCE}
 
     pairs = conn.query_read(
         f"""
         MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
+        {table_filter}
         RETURN term.id AS term_id, ta.id AS table_id
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
               -[:{REL_HAS_ATTRIBUTE}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {table_filter}
         RETURN term.id AS term_id, ta.id AS table_id
         """,
         params,

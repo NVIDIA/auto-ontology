@@ -13,6 +13,8 @@ import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SqlEditor } from '@/components/SqlBlock';
 import { TagInput } from '@/components/TagInput';
 import { termsApi } from '@/api/terms';
+import { zonesApi } from '@/api/zones';
+import { useSession } from '@/auth/auth-client';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
 import type { Term, TermAttribute } from '@/types/terms';
@@ -111,6 +113,10 @@ export const TermsView = () => {
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 
+	const { data: session } = useSession();
+	const sessionUserId = session?.user?.id ?? null;
+	const sessionRole = session?.user?.role ?? null;
+
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [attrs, setAttrs] = useState<TermAttribute[]>([]);
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
@@ -189,74 +195,86 @@ export const TermsView = () => {
 		router.push('/terms');
 	}, [router]);
 
-	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const [res, attrsRes, relatedRes] = await Promise.all([
-			termsApi.get(termId),
-			termsApi.getColumnAttributes(termId),
-			termsApi.getRelatedTerms(termId),
-		]);
-		if (res.error === true || !res.data) {
-			return {
-				sections: [],
-				header: { header: { title: 'Term not found', withBorder: true } },
-			};
-		}
-		const term = res.data;
-		const termAttrs = attrsRes.error !== true ? (attrsRes.data ?? []) : [];
-		const relatedTerms = relatedRes.error !== true ? (relatedRes.data ?? []) : [];
+	const getSinglePage = useCallback(
+		async (termId: string): Promise<SinglePageFormat> => {
+			const isViewer = sessionRole !== null && sessionRole !== 'admin';
+			const [res, attrsRes, relatedRes, userZonesRes] = await Promise.all([
+				termsApi.get(termId),
+				termsApi.getColumnAttributes(termId),
+				termsApi.getRelatedTerms(termId),
+				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
+			]);
+			if (res.error === true || !res.data) {
+				return {
+					sections: [],
+					header: { header: { title: 'Term not found', withBorder: true } },
+				};
+			}
+			const term = res.data;
+			const termAttrs = attrsRes.error !== true ? (attrsRes.data ?? []) : [];
+			const relatedTerms = relatedRes.error !== true ? (relatedRes.data ?? []) : [];
 
-		return {
-			header: {
+			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
+			const userZoneIds: string[] | null =
+				userZonesRes !== null && userZonesRes.error !== true
+					? (userZonesRes.data ?? []).map((z) => z.id)
+					: null;
+
+			return {
 				header: {
-					title: term.name,
-					withBorder: true,
+					header: {
+						title: term.name,
+						withBorder: true,
+					},
 				},
-			},
-			sections: [
-				{
-					type: ComposerSectionKind.TEXT_CARD,
-					id: 'description',
-					title: 'Description',
-					body: term.description ?? '',
-				},
-				{
-					type: ComposerSectionKind.TEXT_CARD,
-					id: 'entities',
-					title: 'Entities',
-					body: `Tables (${term.table_count})`,
-				},
-				{
-					type: ComposerSectionKind.ZONES_CHIPS,
-					id: 'zones',
-					title: 'Zones',
-					zones: term.zones.map((z) => ({
-						id: z.id,
-						name: z.name,
-						color: z.color,
-					})),
-				},
-				{
-					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-					id: 'related_terms',
-					title: 'Related Terms',
-					terms: relatedTerms.map((t) => ({
-						id: t.id,
-						name: t.name,
-						description: t.description,
-					})),
-				},
-				{
-					type: ComposerSectionKind.DATA_TABLE,
-					id: 'column_attributes',
-					title: 'Column Attributes',
-					columns: [{ key: 'name', label: 'Attribute Name' }],
-					rows: termAttrs.map((attr) => ({
-						name: attr.name,
-					})),
-				},
-			],
-		};
-	}, []);
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: term.description ?? '',
+					},
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'entities',
+						title: 'Entities',
+						body: `Tables (${term.table_count})`,
+					},
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: term.zones.map((z) => ({
+							id: z.id,
+							name: z.name,
+							color: z.color,
+						})),
+						userZoneIds,
+					},
+					{
+						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+						id: 'related_terms',
+						title: 'Related Terms',
+						terms: relatedTerms.map((t) => ({
+							id: t.id,
+							name: t.name,
+							description: t.description,
+						})),
+					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'column_attributes',
+						title: 'Column Attributes',
+						columns: [{ key: 'name', label: 'Attribute Name' }],
+						rows: termAttrs.map((attr) => ({
+							name: attr.name,
+						})),
+					},
+				],
+			};
+		},
+		[sessionUserId, sessionRole],
+	);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 

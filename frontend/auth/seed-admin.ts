@@ -58,7 +58,7 @@ export const seedAdmin = async (): Promise<void> => {
 			data: {
 				id: userId,
 				email,
-				name: 'Admin',
+				name: email,
 				emailVerified: true,
 				role: Role.Admin,
 			},
@@ -72,7 +72,7 @@ export const seedAdmin = async (): Promise<void> => {
 				password: hashedPassword,
 			},
 		});
-		await syncToNeo4j({ id: userId, email, name: 'Admin', role: Role.Admin });
+		await syncToNeo4j({ id: userId, email, name: email, role: Role.Admin });
 		console.log(`[seed-admin] created bootstrap admin account for ${email}`);
 		return;
 	}
