@@ -13,7 +13,7 @@ from gsf.semantic.visit_enter import process_table
 
 logger = logging.getLogger(__name__)
 
-_WORKERS = 2
+_WORKERS = 3
 
 
 def compile_semantic_layer(
