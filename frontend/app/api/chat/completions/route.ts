@@ -12,7 +12,7 @@
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
-import { resolveZoneIds } from '@/auth/resolve-zones';
+import { resolveZoneIdsForChat } from '@/auth/resolve-zones';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -83,14 +83,17 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	// restrict retrieval candidates to zone-accessible tables.  The client only
 	// sends { question }; zone_ids are added here to prevent spoofing and to
 	// keep the client unaware of zone membership details.
-	const zoneIds = await resolveZoneIds(user.id, user.role);
+	// Always resolve zone IDs for chat — both admins and viewers are scoped to
+	// their zones here. Admins get all zones (Python returns all for admin role);
+	// viewers get only the zones they have been explicitly granted access to.
+	const zoneIds = await resolveZoneIdsForChat(user.id);
 
-	// Viewer with no zone access: short-circuit before hitting the backend.
+	// User with no zone access: short-circuit before hitting the backend.
 	// Without this guard, an empty zone list becomes `zone_ids: []` which the
 	// Python router converts to None (falsy check), bypassing all zone filters
-	// and effectively granting the viewer full catalog access — same bug that
+	// and effectively granting full catalog access — same bug that
 	// proxyToBackend already guards against for catalog API routes.
-	if (zoneIds !== null && zoneIds.length === 0) {
+	if (zoneIds.length === 0) {
 		return new Response(
 			JSON.stringify({
 				detail: "You don't have access to any data sources. Ask an admin to grant you zone access.",
@@ -102,7 +105,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	let body: string;
 	try {
 		const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-		body = JSON.stringify({ ...parsed, zone_ids: zoneIds ?? [] });
+		body = JSON.stringify({ ...parsed, zone_ids: zoneIds });
 	} catch {
 		body = rawBody;
 	}
