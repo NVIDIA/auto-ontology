@@ -11,8 +11,10 @@ from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
-from gsf.semantic.models import ColumnAttributeSpec
+from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
+from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
+from gsf.server.sql_attributes.service import create_sql_attribute_auto
 
 logger = logging.getLogger(__name__)
 
@@ -30,13 +32,53 @@ def _terms_with_assignments(
     return persisted
 
 
+def _extract_sql_attributes_for_table(
+    table: dict,
+    ctx: dict,
+    schema_name: str | None,
+    term_ids: list[str],
+    term_names: list[str],
+    database_name: str,
+) -> list[str]:
+    """Run LLM extraction + persistence for one table. Returns created attr names."""
+    term = {
+        "name": term_names[0] if term_names else "",
+        "description": table.get("description", ""),
+    }
+
+    proposals = extract_sql_attributes(table, ctx, schema_name, term, database_name)
+    created_names: list[str] = []
+
+    for proposal in proposals:
+        try:
+            row = create_sql_attribute_auto(
+                name=proposal.name,
+                description=proposal.description,
+                expression=proposal.expression,
+                term_id=term_ids[0],
+                database_name=database_name,
+            )
+            if row is not None:
+                created_names.append(row["name"])
+                logger.info("  Created SqlAttribute %r", proposal.name)
+        except Exception:
+            logger.warning(
+                "  Failed to persist SqlAttribute %r",
+                proposal.name,
+                exc_info=True,
+            )
+
+    return created_names
+
+
 def process_table(
     table: dict[str, Any],
     ctx: dict[str, Any],
     *,
     domain_summary: DomainSummary | None,
     embedder: SemanticEmbedder | None = None,
-) -> None:
+    database_name: str | None = None,
+) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes."""
     table_id = table["id"]
     table_name = table["name"]
@@ -58,7 +100,7 @@ def process_table(
     )
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
-        return
+        return ProcessTableResult()
 
     # --- LLM: propose Term(s) and display names ---
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
@@ -72,11 +114,13 @@ def process_table(
             table_name,
             len(specs),
         )
-        return
+        return ProcessTableResult()
 
-    attr_count = 0
+    result_term_names: list[str] = []
+    result_attr_names: list[str] = []
     for term, assignments in persisted_terms:
         merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+        result_term_names.append(term.name)
         for assignment in assignments:
             spec = spec_by_column[assignment.source_column]
             merge_column_attribute(
@@ -87,20 +131,27 @@ def process_table(
                 datatype=spec.datatype,
                 description=spec.description,
             )
-            attr_count += 1
+            result_attr_names.append(spec.display_name)
 
-    term_names = [t.name for t, _ in persisted_terms]
     logger.info(
         "[%s] → Terms %s (%d attrs, %d suspected FKs)",
         table_name,
-        term_names,
-        attr_count,
+        result_term_names,
+        len(result_attr_names),
         len(all_fk_names),
     )
 
+    # --- Fetch persisted terms once — reused for embedding and SQL attr extraction ---
+    try:
+        terms, attrs = fetch_terms_and_attributes_for_table(table_id)
+    except Exception:
+        logger.warning("[%s] failed to fetch persisted terms", table_name)
+        return ProcessTableResult(
+            term_names=result_term_names, attr_names=result_attr_names
+        )
+
     if embedder is not None:
         try:
-            terms, attrs = fetch_terms_and_attributes_for_table(table_id)
             from collections import defaultdict
 
             attrs_by_term: dict[str, list[dict]] = defaultdict(list)
@@ -111,3 +162,24 @@ def process_table(
                 embedder.embed_term(term, attrs_by_term.get(term["name"], []))
         except Exception:
             logger.warning("[%s] inline embed failed", table_name)
+
+    result_sql_attr_names: list[str] = []
+    if database_name is not None:
+        try:
+            term_ids = [t["id"] for t in terms if t.get("id")]
+            term_names = [t["name"] for t in terms if t.get("name")]
+            schema_name = table.get("schema_name")
+            if term_ids and len(ctx.get("columns", [])) >= 2:
+                result_sql_attr_names = _extract_sql_attributes_for_table(
+                    table, ctx, schema_name, term_ids, term_names, database_name
+                )
+        except Exception:
+            logger.warning(
+                "[%s] SqlAttribute extraction failed", table_name, exc_info=True
+            )
+
+    return ProcessTableResult(
+        term_names=result_term_names,
+        attr_names=result_attr_names,
+        sql_attr_names=result_sql_attr_names,
+    )

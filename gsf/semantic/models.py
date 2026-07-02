@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+
 from pydantic import BaseModel, ConfigDict, Field
+
+
+@dataclass
+class ProcessTableResult:
+    """Names of nodes created/merged for a single table."""
+
+    term_names: list[str] = field(default_factory=list)
+    attr_names: list[str] = field(default_factory=list)
+    sql_attr_names: list[str] = field(default_factory=list)
 
 
 class TermColumnRef(BaseModel):
