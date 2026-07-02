@@ -212,9 +212,7 @@ def _hits_to_semantic_rows(
         if cnt >= _resolve_label_k(per_label_k, lab_str):
             continue
         label_counts[lab_str] = cnt + 1
-        score = _vector_distance_value(
-            hit.get("_distance", hit.get("_score", hit.get("score")))
-        )
+        score = _vector_distance_value(hit.get("_distance"))
         row: dict = {
             "text": (hit.get("text") or "").strip(),
             "id": cid,
