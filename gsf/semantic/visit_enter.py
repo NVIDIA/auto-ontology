@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections import defaultdict
 from typing import Any
 
@@ -21,6 +22,12 @@ from gsf.server.sql_attributes.service import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
+# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# Without the lock, two threads could simultaneously propose the same Term,
+# both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
+_term_commit_lock = threading.Lock()
 
 
 def _terms_with_assignments(
@@ -122,57 +129,84 @@ def process_table(
         )
         return ProcessTableResult()
 
+    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # so the next thread's VDB search sees this thread's newly embedded terms.
     result_term_names: list[str] = []
     result_attr_names: list[str] = []
-    for term, assignments in persisted_terms:
-        merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
-        result_term_names.append(term.name)
-        for assignment in assignments:
-            spec = spec_by_column[assignment.source_column]
-            merge_column_attribute(
-                term_name=term.name,
-                table_id=table_id,
-                source_column=spec.source_column,
-                attr_name=spec.display_name,
-                datatype=spec.datatype,
-                description=spec.description,
-            )
-            result_attr_names.append(spec.display_name)
+    terms: list = []
+    attrs_by_term: dict[str, list[dict]] = defaultdict(list)
 
-    logger.info(
-        "[%s] → Terms %s (%d attrs, %d suspected FKs)",
-        table_name,
-        result_term_names,
-        len(result_attr_names),
-        len(all_fk_names),
-    )
+    with _term_commit_lock:
+        if embedder is not None:
+            for term, _ in persisted_terms:
+                try:
+                    candidates = embedder.search_similar_terms(
+                        term.name, term.description
+                    )
+                    if candidates:
+                        from gsf.semantic.term_judge import judge_term_overlap
 
-    # --- Fetch persisted terms once — reused for embedding and SQL attr extraction ---
-    try:
-        terms, attrs = fetch_terms_and_attributes_for_table(table_id)
-    except Exception:
-        logger.warning("[%s] failed to fetch persisted terms", table_name)
-        return ProcessTableResult(
-            term_names=result_term_names, attr_names=result_attr_names
+                        merge_into = judge_term_overlap(
+                            term.name, term.description, candidates
+                        )
+                        if merge_into:
+                            logger.info(
+                                "[%s] Merging proposed Term %r into existing %r",
+                                table_name,
+                                term.name,
+                                merge_into,
+                            )
+                            term.name = merge_into
+                except Exception:
+                    logger.warning(
+                        "[%s] Term dedup check failed for %r — proceeding as-is",
+                        table_name,
+                        term.name,
+                        exc_info=True,
+                    )
+
+        for term, assignments in persisted_terms:
+            merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+            result_term_names.append(term.name)
+            for assignment in assignments:
+                spec = spec_by_column[assignment.source_column]
+                merge_column_attribute(
+                    term_name=term.name,
+                    table_id=table_id,
+                    source_column=spec.source_column,
+                    attr_name=spec.display_name,
+                    datatype=spec.datatype,
+                    description=spec.description,
+                )
+                result_attr_names.append(spec.display_name)
+
+        logger.info(
+            "[%s] → Terms %s (%d attrs, %d suspected FKs)",
+            table_name,
+            result_term_names,
+            len(result_attr_names),
+            len(all_fk_names),
         )
 
-    # Build attrs_by_term — used for both embedding and SQL attr extraction
-    attrs_by_term: dict[str, list[dict]] = defaultdict(list)
-    for attr in attrs:
-        if attr.get("term_name"):
-            attrs_by_term[attr["term_name"]].append(attr)
-
-    # --- Embed terms and attributes ---
-    if embedder is not None:
+        # Fetch persisted terms — used for embedding and SQL attribute extraction
         try:
-            for term in terms:
-                embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+            terms, attrs = fetch_terms_and_attributes_for_table(table_id)
+            for attr in attrs:
+                if attr.get("term_name"):
+                    attrs_by_term[attr["term_name"]].append(attr)
         except Exception:
-            logger.warning("[%s] inline embed failed", table_name)
+            logger.warning("[%s] failed to fetch persisted terms", table_name)
 
-    # --- LLM: propose SqlAttributes ---
+        if embedder is not None and terms:
+            try:
+                for term in terms:
+                    embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+            except Exception:
+                logger.warning("[%s] inline embed failed", table_name)
+
+    # --- LLM: propose SqlAttributes (outside the lock — Term writes are complete) ---
     result_sql_attr_names: list[str] = []
-    if database_name is not None:
+    if database_name is not None and terms:
         try:
             col_by_name = {c["name"]: c for c in ctx.get("columns", [])}
             schema_name = table.get("schema_name")

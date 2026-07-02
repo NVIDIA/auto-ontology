@@ -6,6 +6,7 @@
 
 import logging
 import os
+import time
 from typing import Type, TypeVar
 
 from langchain_core.language_models import BaseChatModel
@@ -84,6 +85,18 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
+            is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
+            if is_rate_limit and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1)
+                logger.warning(
+                    "Rate-limited on attempt %d/%d for %s — retrying in %ds",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    schema_name,
+                    wait,
+                )
+                time.sleep(wait)
+                continue
             logger.error(
                 f"Unexpected error on attempt {attempt + 1}/{RETRY_MAX_ATTEMPTS} for {schema_name}: "
                 f"{type(e).__name__}: {e}",

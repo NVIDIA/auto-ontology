@@ -33,6 +33,47 @@ class SemanticEmbedder:
         self.embed_graph = Graph() >> _BatchEmbedActor(params=self.embed_params)
         self.ingest_op = IngestVdbOperator(vdb=self.vdb)
 
+    _SIMILARITY_THRESHOLD = 0.7
+
+    def search_similar_terms(
+        self,
+        term_name: str,
+        description: str,
+        top_k: int = 3,
+    ) -> list[dict[str, Any]]:
+        """Search VDB for existing Terms similar to a proposed one.
+
+        Reuses ``search_semantic_index`` from the retrieval pipeline.
+        Returns list of ``{"name", "content", "score"}`` above threshold,
+        where ``content`` is the raw text stored in the VDB.
+        """
+        from gsf.retrieval.data_access.semantic_search import search_semantic_index
+        from gsf.utils.retriever import get_semantic_objects_retriever
+
+        query_text = f"Term: {term_name}. {description}".strip()
+        retriever = get_semantic_objects_retriever()
+
+        hits = search_semantic_index(
+            retriever,
+            query_text,
+            label_filter=["Term"],
+            per_label_k=top_k,
+        )
+
+        candidates: list[dict[str, Any]] = []
+        for hit in hits:
+            score = hit.get("score", float("inf"))
+            if score > self._SIMILARITY_THRESHOLD:
+                continue
+            name = hit.get("name", "")
+            if not name or name == term_name:
+                continue
+            content = hit.get("text", "")
+            candidates.append({"name": name, "content": content, "score": score})
+
+        candidates.sort(key=lambda c: c["score"])
+        return candidates
+
     def embed_term(
         self,
         term: dict[str, Any],
