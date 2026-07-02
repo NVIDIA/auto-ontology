@@ -1,4 +1,3 @@
-
 """LLM inference for columns that look like foreign keys."""
 
 from __future__ import annotations
