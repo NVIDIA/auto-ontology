@@ -25,7 +25,12 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.semantic.constants import LABEL_ZONE, REL_PARTICIPANT_OF, REL_ZONE_OF
+from gsf.semantic.constants import (
+    LABEL_ZONE,
+    REL_HAS_DIRECT_ACCESS,
+    REL_PARTICIPANT_OF,
+    REL_ZONE_OF,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -145,6 +150,29 @@ def get_accessible_catalog_ids_for_zones(
     }
 
 
+def sync_admin_direct_access() -> None:
+    """Ensure every Admin node has a HAS_DIRECT_ACCESS edge to every Database.
+
+    Admin nodes already reach zoned data through the
+    ``participant_of -> zone -> zone_of -> item`` path.  This function adds an
+    explicit ``HAS_DIRECT_ACCESS`` edge from every Admin node to **all**
+    Database nodes so that the full catalog hierarchy (Database -> Schema ->
+    Table via CONTAINS) is reachable from admin in Neo4j regardless of zone
+    assignments.
+
+    The function is idempotent — safe to call repeatedly without side-effects.
+    It should be called when a user is promoted to admin and after bulk catalog
+    ingestion to cover newly-added databases.
+    """
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (u:{LABEL_ADMIN})
+        MATCH (db:{Labels.DB})
+        MERGE (u)-[:{REL_HAS_DIRECT_ACCESS}]->(db)
+        """,
+    )
+
+
 def get_user(user_id: str) -> dict[str, Any] | None:
     """Return a User node by its id, or *None* if it does not exist."""
     rows = get_neo4j_conn().query_read(
@@ -249,14 +277,19 @@ def upsert_user(
             """,
             {"user_id": user_id},
         )
+        # Ensure admin can reach catalog items not assigned to any zone.
+        sync_admin_direct_access()
     else:
         # When demoted from admin to viewer, remove all zone relationships so
         # the user starts with no zone access (access must be re-granted
-        # explicitly by an admin via grant_zone_access).
+        # explicitly by an admin via grant_zone_access).  Also remove any
+        # HAS_DIRECT_ACCESS edges that were created when the user was an admin.
         conn.query_write(
             f"""
-            MATCH (u:{LABEL_VIEWER} {{id: $user_id}})-[r:{REL_PARTICIPANT_OF}]->()
-            DELETE r
+            MATCH (u:{LABEL_VIEWER} {{id: $user_id}})
+            OPTIONAL MATCH (u)-[rp:{REL_PARTICIPANT_OF}]->()
+            OPTIONAL MATCH (u)-[rd:{REL_HAS_DIRECT_ACCESS}]->()
+            DELETE rp, rd
             """,
             {"user_id": user_id},
         )

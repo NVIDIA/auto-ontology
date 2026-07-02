@@ -335,7 +335,6 @@ def update_zone(
                 """,
                 {"zone_id": zone_id},
             )
-
     return get_zone_by_id(zone_id)
 
 
