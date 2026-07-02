@@ -62,8 +62,8 @@ class SemanticEmbedder:
 
         candidates: list[dict[str, Any]] = []
         for hit in hits:
-            score = hit.get("score", 0.0)
-            if score < self._SIMILARITY_THRESHOLD:
+            score = hit.get("score", float("inf"))
+            if score > self._SIMILARITY_THRESHOLD:
                 continue
             name = hit.get("name", "")
             if not name or name == term_name:
@@ -71,7 +71,7 @@ class SemanticEmbedder:
             content = hit.get("text", "")
             candidates.append({"name": name, "content": content, "score": score})
 
-        candidates.sort(key=lambda c: c["score"], reverse=True)
+        candidates.sort(key=lambda c: c["score"])
         return candidates
 
     def embed_term(

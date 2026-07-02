@@ -17,6 +17,10 @@ from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_te
 
 logger = logging.getLogger(__name__)
 
+# Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
+# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# Without the lock, two threads could simultaneously propose the same Term,
+# both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
 _term_commit_lock = threading.Lock()
 
 
@@ -77,6 +81,8 @@ def process_table(
         )
         return
 
+    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # so the next thread's VDB search sees this thread's newly embedded terms.
     with _term_commit_lock:
         if embedder is not None:
             for term, _ in persisted_terms:
