@@ -58,7 +58,8 @@ business values.
 qualified column names: schema.table.column.
 8. Do NOT use aggregate functions (SUM, COUNT, AVG) that require GROUP BY — \
 produce row-level expressions only.
-9. Metric names must be user-friendly with spaces (e.g. Net Revenue, Lead Time Days).
+9. Metric names must be user-friendly with spaces and MUST include the Term name \
+to be specific.
 10. NO DUPLICATES — every metric must have a unique formula.
 11. Return an empty list when no ontology-standard metric can be derived.
 
