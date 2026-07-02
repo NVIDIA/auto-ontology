@@ -13,7 +13,6 @@ from gsf.semantic.models import (
     SqlAttributeExtractionResult,
     SqlAttributeProposal,
 )
-from gsf.server.sql_utils import SqlParseError, get_dialects, get_schemas, validate_sql
 from gsf.utils.llm_invoke import get_llm_client, invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
@@ -230,10 +229,7 @@ def extract_sql_attributes(
         )
         return []
 
-    dialects = get_dialects()
-    schemas = get_schemas()
-
-    valid: list[SqlAttributeProposal] = []
+    proposals_to_create: list[SqlAttributeProposal] = []
     seen_expressions: set[str] = set()
     for proposal in result.metrics:
         normalized = " ".join(proposal.expression.lower().split())
@@ -277,14 +273,6 @@ def extract_sql_attributes(
             )
             continue
 
-        try:
-            validate_sql(proposal.expression, dialects, schemas)
-            valid.append(proposal)
-        except (SqlParseError, Exception):
-            logger.debug(
-                "Dropping invalid SqlAttribute proposal %r for table %s: bad SQL",
-                proposal.name,
-                table_name,
-            )
+        proposals_to_create.append(proposal)
 
-    return valid
+    return proposals_to_create
