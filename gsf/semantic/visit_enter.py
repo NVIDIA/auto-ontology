@@ -15,7 +15,10 @@ from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
-from gsf.server.sql_attributes.service import create_sql_attribute_auto
+from gsf.server.sql_attributes.service import (
+    SqlAttributeNameConflict,
+    create_sql_attribute,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,16 +55,18 @@ def _extract_sql_attributes_for_table(
 
     for proposal in proposals:
         try:
-            row = create_sql_attribute_auto(
+            row = create_sql_attribute(
                 name=proposal.name,
                 description=proposal.description,
                 expression=proposal.expression,
                 term_id=term_id,
-                database_name=database_name,
+                connector=database_name,
+                source="table",
             )
-            if row is not None:
-                created_names.append(row["name"])
-                logger.info("  Created SqlAttribute %r", proposal.name)
+            created_names.append(row["name"])
+            logger.info("  Created SqlAttribute %r", proposal.name)
+        except SqlAttributeNameConflict:
+            logger.debug("SqlAttribute %r already exists — skipping", proposal.name)
         except Exception:
             logger.warning(
                 "  Failed to persist SqlAttribute %r",

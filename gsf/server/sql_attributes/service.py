@@ -51,7 +51,6 @@ __all__ = [
     "list_sql_attributes",
     "get_sql_attribute",
     "create_sql_attribute",
-    "create_sql_attribute_auto",
     "update_sql_attribute",
     "delete_sql_attribute",
 ]
@@ -234,57 +233,6 @@ def create_sql_attribute(
         database_name=database_name,
     )
 
-    return row
-
-
-def create_sql_attribute_auto(
-    *,
-    name: str,
-    description: str,
-    expression: str,
-    term_id: str,
-    database_name: str,
-) -> dict[str, Any] | None:
-    """Create an auto-generated SqlAttribute (pipeline-friendly).
-
-    Unlike :func:`create_sql_attribute` this variant:
-    * takes ``database_name`` directly (no connector lookup)
-    * sets ``source="auto"``
-    * silently returns ``None`` on name conflicts instead of raising
-    * does NOT embed — the caller is expected to batch-embed afterwards
-    """
-    if find_attr_by_name(name, exclude_id=None) is not None:
-        logger.debug("SqlAttribute %r already exists — skipping", name)
-        return None
-
-    term = get_term_by_id(term_id)
-    if not term:
-        logger.warning("Term %r not found — skipping SqlAttribute %r", term_id, name)
-        return None
-
-    query_obj = validate_sql(
-        expression,
-        get_dialects(),
-        get_schemas(),
-    )
-
-    attr_node = Neo4jNode(
-        name=name,
-        label=LABEL_SQL_ATTRIBUTE,
-        props={
-            "name": name,
-            "description": description,
-            "expression": expression,
-            "source": "auto",
-        },
-        match_props={"name": name},
-    )
-
-    row = _persist_attr_with_sql(attr_node, expression, query_obj)
-    link_to_term(row["id"], term_id)
-    row["term_name"] = term["name"]
-    row["term_id"] = term_id
-    row["database_name"] = database_name
     return row
 
 
