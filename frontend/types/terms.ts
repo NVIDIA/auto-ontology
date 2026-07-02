@@ -20,7 +20,7 @@ export type TermDetail = Term & {
 	zones: TermZone[];
 };
 
-export type TermAttribute = {
+export type ColumnAttribute = {
 	id: string;
 	name: string;
 	description: string | null;
@@ -28,8 +28,6 @@ export type TermAttribute = {
 	source_column: string;
 	datatype: string | null;
 	table_id: string;
-	fk_count: number;
-	is_primary_key: boolean;
 };
 
 export type RelatedTerm = {

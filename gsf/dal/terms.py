@@ -26,7 +26,6 @@ from gsf.semantic.constants import (
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
-    REL_SEMANTIC_FK,
     REL_ZONE_OF,
     SEMANTIC_SOURCE,
 )
@@ -249,17 +248,10 @@ def fetch_terms_and_attributes_for_table(
     return terms, attrs
 
 
-def fetch_column_attributes_with_fk_count(
+def fetch_column_attributes(
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ColumnAttribute nodes with FK count and primary-key flag.
-
-    * ``fk_count``       — number of Column nodes referencing via SEMANTIC_FK.
-    * ``is_primary_key`` — True when at least one FK references this attribute.
-
-    When *zone_ids* is supplied only attributes reachable through those zones
-    are returned.
-    """
+    """Return ColumnAttribute nodes, optionally restricted to *zone_ids*."""
     accessible = (
         get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
     )
@@ -275,17 +267,13 @@ def fetch_column_attributes_with_fk_count(
         f"""
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
         {table_filter}
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
-        WITH attr, count(col) AS fk_count
-        RETURN attr.id           AS id,
-               attr.name         AS name,
-               attr.description  AS description,
-               attr.term_name    AS term_name,
+        RETURN attr.id            AS id,
+               attr.name          AS name,
+               attr.description   AS description,
+               attr.term_name     AS term_name,
                attr.source_column AS source_column,
-               attr.datatype     AS datatype,
-               attr.table_id     AS table_id,
-               fk_count,
-               fk_count > 0      AS is_primary_key
+               attr.datatype      AS datatype,
+               attr.table_id      AS table_id
         ORDER BY attr.term_name, attr.name
         """,
         params,
@@ -293,48 +281,21 @@ def fetch_column_attributes_with_fk_count(
 
 
 def fetch_column_attributes_by_term_id(term_id: str) -> list[dict[str, Any]]:
-    """Return ColumnAttribute nodes for a single Term, enriched with FK count."""
+    """Return ColumnAttribute nodes for a single Term."""
     return get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->(attr)
-        WITH attr, count(col) AS fk_count
         RETURN attr.id            AS id,
                attr.name          AS name,
                attr.description   AS description,
                attr.term_name     AS term_name,
                attr.source_column AS source_column,
                attr.datatype      AS datatype,
-               attr.table_id      AS table_id,
-               fk_count,
-               fk_count > 0       AS is_primary_key
+               attr.table_id      AS table_id
         ORDER BY attr.name
         """,
         {"term_id": term_id, "source": SEMANTIC_SOURCE},
-    )
-
-
-def find_unlinked_fk_columns() -> list[dict[str, Any]]:
-    """Return Column nodes that have no SEMANTIC_FK edge and no HAS_ATTRIBUTE edge.
-
-    These are FK columns that have not yet been linked to a ColumnAttribute.
-    Each row includes ``fk_target_col_id`` (the id of the declared FK target
-    Column, or ``None`` when no FOREIGN_KEY edge exists).
-    """
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-          AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
-        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-        RETURN col.id          AS id,
-               col.name        AS name,
-               col.description AS description,
-               col.sample_values AS sample_values,
-               t.name          AS table_name,
-               tgt.id          AS fk_target_col_id
-        """
     )
 
 
@@ -462,15 +423,3 @@ def fetch_related_terms_counts(
         related.discard(term_id)
         result.append({"term_id": term_id, "count": len(related)})
     return result
-
-
-def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
-    """Create a SEMANTIC_FK edge from a source Column to a target ColumnAttribute."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (src:{Labels.COLUMN} {{id: $src_id}})
-        MATCH (tgt:{LABEL_COLUMN_ATTRIBUTE} {{id: $tgt_id}})
-        MERGE (src)-[:{REL_SEMANTIC_FK}]->(tgt)
-        """,
-        {"src_id": src_column_id, "tgt_id": tgt_attr_id},
-    )

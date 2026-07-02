@@ -3,13 +3,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requests } from './requests';
-import type { RelatedTerm, RelatedTermCount, Term, TermAttribute, TermDetail } from '@/types/terms';
+import type {
+	ColumnAttribute,
+	RelatedTerm,
+	RelatedTermCount,
+	Term,
+	TermDetail,
+} from '@/types/terms';
 import type { ResponseWithError } from './types';
 
 type ListResult = { data: Term[]; count: number };
 type ListResponse = ResponseWithError<ListResult>;
 
-type AttributeListResult = { data: TermAttribute[]; count: number };
+type AttributeListResult = { data: ColumnAttribute[]; count: number };
 type AttributeListResponse = ResponseWithError<AttributeListResult>;
 
 type SingleResult = { data: TermDetail };

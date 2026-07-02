@@ -9,34 +9,16 @@ import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
-import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
-import { SqlEditor } from '@/components/SqlBlock';
-import { TagInput } from '@/components/TagInput';
 import { termsApi } from '@/api/terms';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { ComposerSectionKind } from '@/enums/datasources';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
-import type { Term, TermAttribute } from '@/types/terms';
-
-const FIELD_CLASS =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
-
-const Label = ({ children }: { children: React.ReactNode }) => (
-	<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
-		{children}
-	</label>
-);
-
-const SectionHeading = ({ children }: { children: React.ReactNode }) => (
-	<p className="text-xs font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500">
-		{children}
-	</p>
-);
+import type { ColumnAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
-	attributes: TermAttribute[];
+	attributes: ColumnAttribute[];
 	relatedCount: number;
 	onClick: (term: Term) => void;
 };
@@ -118,21 +100,10 @@ export const TermsView = () => {
 	const sessionRole = session?.user?.role ?? null;
 
 	const [terms, setTerms] = useState<Term[]>([]);
-	const [attrs, setAttrs] = useState<TermAttribute[]>([]);
+	const [attrs, setAttrs] = useState<ColumnAttribute[]>([]);
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
-
-	const [modalOpen, setModalOpen] = useState(false);
-	const [name, setName] = useState('');
-	const [description, setDescription] = useState('');
-	const [synonyms, setSynonyms] = useState<string[]>([]);
-	const [sqlAttrName, setSqlAttrName] = useState('');
-	const [sqlAttrDescription, setSqlAttrDescription] = useState('');
-	const [sql, setSql] = useState('');
-
-	const trimmedName = name.trim();
-	const canSubmit = trimmedName.length > 0;
 
 	useEffect(() => {
 		let cancelled = false;
@@ -175,7 +146,7 @@ export const TermsView = () => {
 	}, []);
 
 	const attrsByTerm = useMemo(() => {
-		const map = new Map<string, TermAttribute[]>();
+		const map = new Map<string, ColumnAttribute[]>();
 		for (const attr of attrs) {
 			const list = map.get(attr.term_name) ?? [];
 			list.push(attr);
@@ -278,32 +249,6 @@ export const TermsView = () => {
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 
-	const openModal = () => {
-		setName('');
-		setDescription('');
-		setSynonyms([]);
-		setSqlAttrName('');
-		setSqlAttrDescription('');
-		setSql('');
-		setModalOpen(true);
-	};
-
-	const handleClose = () => setModalOpen(false);
-
-	const handleSubmit = () => {
-		console.log('Create new term', {
-			name: trimmedName,
-			description: description.trim(),
-			synonyms,
-			sqlAttribute: {
-				name: sqlAttrName.trim(),
-				description: sqlAttrDescription.trim(),
-				sql: sql.trim(),
-			},
-		});
-		setModalOpen(false);
-	};
-
 	if (focusId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
 		return (
@@ -371,14 +316,6 @@ export const TermsView = () => {
 						<p className="mt-2 text-sm font-medium text-zinc-700 dark:text-zinc-300">
 							No Terms Created Yet
 						</p>
-						<button
-							type="button"
-							onClick={openModal}
-							className="mt-1 flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#6aa500]"
-						>
-							<Icon name={IconName.Terms} className="h-4 w-4" />
-							Create new term
-						</button>
 					</div>
 				)}
 
@@ -396,82 +333,6 @@ export const TermsView = () => {
 					</ul>
 				)}
 			</div>
-
-			<ModalCreateNewItem
-				open={modalOpen}
-				onClose={handleClose}
-				title="Create New Term"
-				submitLabel="Save"
-				onSubmit={handleSubmit}
-				canSubmit={canSubmit}
-				className="min-h-[500px] w-[640px] max-w-full"
-			>
-				<div>
-					<Label>Name</Label>
-					<input
-						type="text"
-						value={name}
-						onChange={(e) => setName(e.target.value)}
-						placeholder="Term name"
-						className={FIELD_CLASS}
-					/>
-				</div>
-
-				<div>
-					<Label>Description</Label>
-					<textarea
-						value={description}
-						onChange={(e) => setDescription(e.target.value)}
-						placeholder="Short description"
-						rows={3}
-						className={`${FIELD_CLASS} resize-y`}
-					/>
-				</div>
-
-				<div>
-					<Label>Synonyms</Label>
-					<TagInput
-						value={synonyms}
-						onChange={setSynonyms}
-						placeholder="Type and press Enter"
-						ariaLabel="Synonyms"
-					/>
-				</div>
-
-				<div className="pt-2">
-					<SectionHeading>SQL Attribute</SectionHeading>
-				</div>
-
-				<div>
-					<Label>Attribute Name</Label>
-					<input
-						type="text"
-						value={sqlAttrName}
-						onChange={(e) => setSqlAttrName(e.target.value)}
-						placeholder="Attribute name"
-						className={FIELD_CLASS}
-					/>
-				</div>
-
-				<div>
-					<Label>Attribute Description</Label>
-					<textarea
-						value={sqlAttrDescription}
-						onChange={(e) => setSqlAttrDescription(e.target.value)}
-						placeholder="Attribute description"
-						rows={2}
-						className={`${FIELD_CLASS} resize-y`}
-					/>
-				</div>
-
-				<SqlEditor
-					value={sql}
-					onChange={setSql}
-					label="SQL"
-					placeholder="SELECT ..."
-					rows={6}
-				/>
-			</ModalCreateNewItem>
 		</div>
 	);
 };

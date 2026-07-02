@@ -29,8 +29,8 @@ def list_terms(zone_ids: list[str] | None = Query(default=None)) -> dict:
 def list_term_column_attributes(
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return ColumnAttribute nodes with FK count (zone-scoped when zone_ids provided)."""
-    attrs = neo4j_dal.fetch_column_attributes_with_fk_count(zone_ids=zone_ids)
+    """Return ColumnAttribute nodes (zone-scoped when zone_ids provided)."""
+    attrs = neo4j_dal.fetch_column_attributes(zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 
