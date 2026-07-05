@@ -409,7 +409,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			const res = await datasources.updateNode(entityId, edits as NodePatch);
 			setSaving(false);
 
-			if (res.error === true) {
+			if (res.error) {
 				setSaveError(res.message ?? 'Failed to save changes');
 				return;
 			}

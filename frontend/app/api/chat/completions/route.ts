@@ -96,7 +96,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	if (zoneIds.length === 0) {
 		return new Response(
 			JSON.stringify({
-				detail: "You don't have access to any data sources. Ask an admin to grant you zone access.",
+				detail: 'Access denied: your account has not been granted access to any data zones. Please contact your administrator to request zone access.',
 			}),
 			{ status: 403, headers: { 'Content-Type': 'application/json' } },
 		);

@@ -117,7 +117,7 @@ export const TermsView = () => {
 			]);
 			if (cancelled) return;
 
-			if (termsRes.error === true) {
+			if (termsRes.error) {
 				setError(termsRes.message ?? 'Failed to load terms');
 				setTerms([]);
 			} else {
@@ -125,11 +125,11 @@ export const TermsView = () => {
 				setTerms(termsRes.data ?? []);
 			}
 
-			if (attrsRes.error !== true) {
+			if (!attrsRes.error) {
 				setAttrs(attrsRes.data ?? []);
 			}
 
-			if (countsRes.error !== true) {
+			if (!countsRes.error) {
 				const map = new Map<string, number>();
 				for (const { term_id, count } of countsRes.data ?? []) {
 					map.set(term_id, count);
@@ -175,19 +175,19 @@ export const TermsView = () => {
 				termsApi.getRelatedTerms(termId),
 				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
 			]);
-			if (res.error === true || !res.data) {
+			if (res.error || !res.data) {
 				return {
 					sections: [],
 					header: { header: { title: 'Term not found', withBorder: true } },
 				};
 			}
 			const term = res.data;
-			const termAttrs = attrsRes.error !== true ? (attrsRes.data ?? []) : [];
-			const relatedTerms = relatedRes.error !== true ? (relatedRes.data ?? []) : [];
+			const termAttrs = !attrsRes.error ? (attrsRes.data ?? []) : [];
+			const relatedTerms = !relatedRes.error ? (relatedRes.data ?? []) : [];
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
 			const userZoneIds: string[] | null =
-				userZonesRes !== null && userZonesRes.error !== true
+				userZonesRes !== null && !userZonesRes.error
 					? (userZonesRes.data ?? []).map((z) => z.id)
 					: null;
 
