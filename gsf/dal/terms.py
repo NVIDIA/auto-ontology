@@ -31,6 +31,16 @@ from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 
 logger = logging.getLogger(__name__)
 
+# Shared RETURN projection for ColumnAttribute rows — keep fetch_column_attributes
+# and fetch_column_attributes_by_term_id in sync when adding/removing fields.
+_COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
+               attr.name          AS name,
+               attr.description   AS description,
+               attr.term_name     AS term_name,
+               attr.source_column AS source_column,
+               attr.datatype      AS datatype,
+               attr.table_id      AS table_id"""
+
 
 def table_has_term(table_id: str) -> bool:
     rows = get_neo4j_conn().query_read(
@@ -301,13 +311,7 @@ def fetch_column_attributes(
         f"""
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
         {table_filter}
-        RETURN attr.id            AS id,
-               attr.name          AS name,
-               attr.description   AS description,
-               attr.term_name     AS term_name,
-               attr.source_column AS source_column,
-               attr.datatype      AS datatype,
-               attr.table_id      AS table_id
+        RETURN {_COLUMN_ATTRIBUTE_FIELDS}
         ORDER BY attr.term_name, attr.name
         """,
         params,
@@ -320,13 +324,7 @@ def fetch_column_attributes_by_term_id(term_id: str) -> list[dict[str, Any]]:
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
-        RETURN attr.id            AS id,
-               attr.name          AS name,
-               attr.description   AS description,
-               attr.term_name     AS term_name,
-               attr.source_column AS source_column,
-               attr.datatype      AS datatype,
-               attr.table_id      AS table_id
+        RETURN {_COLUMN_ATTRIBUTE_FIELDS}
         ORDER BY attr.name
         """,
         {"term_id": term_id, "source": SEMANTIC_SOURCE},
