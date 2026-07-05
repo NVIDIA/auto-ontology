@@ -215,7 +215,7 @@ def fetch_term_by_id(term_id: str) -> dict[str, Any] | None:
     result["zones"] = [dict(r) for r in zone_rows]
     return result
 
-    
+
 def fetch_table_schema_map(database_name: str) -> dict[str, str]:
     """Return ``{table_name_lower: schema_name}`` for every table in *database_name*.
 
