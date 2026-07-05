@@ -11,7 +11,7 @@ from typing import Any
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.users import LABEL_ADMIN, LABEL_USER_MATCH
-from gsf.semantic.constants import REL_PARTICIPANT_OF, REL_ZONE_OF
+from gsf.server.zones.constants import REL_PARTICIPANT_OF, REL_ZONE_OF
 from gsf.server.zones.utils import (
     LABEL_ZONE,
     REL_CONTAINS,

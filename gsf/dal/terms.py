@@ -22,13 +22,12 @@ from gsf.dal.users import get_accessible_catalog_ids_for_zones
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
-    LABEL_ZONE,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
     REL_REPRESENTS,
-    REL_ZONE_OF,
     SEMANTIC_SOURCE,
 )
+from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 
 logger = logging.getLogger(__name__)
 
