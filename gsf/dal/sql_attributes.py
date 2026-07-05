@@ -27,6 +27,10 @@ from gsf.server.sql_utils import SqlParseError
 
 logger = logging.getLogger(__name__)
 
+# Source values stored on SqlAttribute nodes.
+SQL_ATTR_SOURCE_MANUAL = "manual"
+SQL_ATTR_SOURCE_SQL = "sql"
+
 
 # ---------------------------------------------------------------------------
 # Domain errors
@@ -131,11 +135,12 @@ def detach_existing_sql_edges(attr_id: str) -> None:
 
 
 def link_to_term(attr_id: str, term_id: str) -> None:
-    """Create PROPERTY_OF edge from SqlAttribute to Term (replacing any old one)."""
+    """Set the PROPERTY_OF edge from SqlAttribute to Term, replacing any prior link."""
     get_neo4j_conn().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
-        OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->()
+        OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->(existing)
+        WHERE existing.id <> $term_id
         DELETE old
         WITH attr
         MATCH (term:{LABEL_TERM} {{id: $term_id}})

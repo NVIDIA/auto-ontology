@@ -6,6 +6,8 @@ import logging
 
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import build_semantic_embedder
+from gsf.semantic.semantic_fk import resolve_semantic_fks
+
 from gsf.semantic.pipeline import compile_semantic_layer
 
 logger = logging.getLogger(__name__)
@@ -41,12 +43,18 @@ def run_semantic_compilation(
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    from gsf.semantic.semantic_fk import resolve_semantic_fks
-
     logger.info("=" * 60)
     logger.info("Resolving semantic FK edges…")
     logger.info("=" * 60)
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
+
+    from gsf.semantic.sql_attribute_suggester import suggest_sql_attributes
+
+    logger.info("=" * 60)
+    logger.info("Suggesting SqlAttributes from query history…")
+    logger.info("=" * 60)
+    attr_count = suggest_sql_attributes(database_name)
+    logger.info("New SqlAttribute nodes written: %d", attr_count)
 
     return count

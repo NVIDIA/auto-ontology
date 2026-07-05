@@ -28,9 +28,10 @@ You propose business Terms for a relational table and assign candidate columns \
 to each Term with user-friendly display labels.
 
 Rules:
-1. Default to ONE Term that best represents the table. Add a second or third Term \
-only when columns clearly belong to distinct business concepts (e.g. audit metadata \
-vs core entity fields).
+1. Strongly prefer ONE Term per table. A second Term is warranted ONLY when the \
+table is a true junction between two unrelated entities. Never split a single \
+entity into separate Terms for its core fields versus its metadata, lifecycle, \
+or audit fields — those all belong to the same Term. If in doubt, use one Term.
 2. Term names must be user-friendly with spaces between words (e.g. Purchase Order, \
 not purchase_orders or PurchaseOrder).
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \

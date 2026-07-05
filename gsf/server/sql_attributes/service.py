@@ -12,7 +12,6 @@ Neo4j node persistence via add_query, and VDB embedding lifecycle.
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
@@ -37,6 +36,7 @@ from gsf.dal.terms import get_term_by_id
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params
+from gsf.utils.embedding import embed_docs_into_vdb
 from gsf.vdb import get_semantic_vdb
 
 if TYPE_CHECKING:
@@ -100,11 +100,6 @@ def _embed_sql_attribute(
     database_name: str | None = None,
 ) -> None:
     """Fetch docs from Neo4j, embed them, and upsert into *vdb*."""
-    import pandas as pd
-
-    from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
-    from nemo_retriever.operators.vdb import IngestVdbOperator
-
     docs = fetch_sql_attribute_docs(attr_id)
     if not docs:
         logger.info(
@@ -112,61 +107,7 @@ def _embed_sql_attribute(
             attr_id,
         )
         return
-
-    rows = []
-    for item in docs:
-        node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
-        tabular_fields = {
-            "id": node_id,
-            "label": item.get("label", ""),
-            "name": item.get("name", ""),
-            "source_path": path,
-            "database_name": database_name,
-        }
-        rows.append(
-            {
-                "text": (item.get("text") or "").strip(),
-                "_embed_modality": "text",
-                "path": path,
-                "page_number": -1,
-                "metadata": {
-                    **tabular_fields,
-                    "content_metadata": dict(tabular_fields),
-                },
-            }
-        )
-    df = pd.DataFrame(rows)
-
-    before = time.time()
-    embedded = embed_text_main_text_embed(
-        df,
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
-    )
-
-    with_embeddings = [
-        row
-        for row in embedded.to_dict(orient="records")
-        if (row.get("metadata") or {}).get("embedding")
-    ]
-    if not with_embeddings:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} SqlAttribute rows "
-            f"with embeddings; check upstream embed errors (often a transient "
-            f"{embed_params.embed_invoke_url} 5xx)."
-        )
-
-    IngestVdbOperator(vdb=vdb)(with_embeddings)
-    logger.info(
-        "Embedded and appended %d/%d SqlAttribute row(s) via %s in %.2fs.",
-        len(with_embeddings),
-        len(embedded),
-        type(vdb).__name__,
-        time.time() - before,
-    )
+    embed_docs_into_vdb(docs, embed_params, vdb, database_name)
 
 
 # ---------------------------------------------------------------------------
