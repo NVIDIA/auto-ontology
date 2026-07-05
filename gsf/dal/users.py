@@ -150,6 +150,32 @@ def get_accessible_catalog_ids_for_zones(
     }
 
 
+def resolve_table_filter(
+    zone_ids: list[str] | None,
+    column_ref: str,
+    *,
+    extra_params: dict[str, Any] | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Build a Cypher ``WHERE`` clause restricting *column_ref* to accessible tables.
+
+    *column_ref* is the Cypher expression to filter on, e.g. ``"t.id"`` or
+    ``"attr.table_id"``.  When *zone_ids* is ``None`` no filter is applied
+    (admin / internal callers who see the full unfiltered catalog).
+    *extra_params* are merged into the returned params dict unchanged (e.g.
+    query parameters unrelated to zone scoping).
+
+    Returns ``(where_clause, params)`` where *where_clause* is either an
+    empty string or a full ``WHERE <column_ref> IN $table_ids`` clause ready
+    to interpolate into an f-string query.
+    """
+    params = dict(extra_params or {})
+    if zone_ids is None:
+        return "", params
+    table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
+    params["table_ids"] = table_ids
+    return f"WHERE {column_ref} IN $table_ids", params
+
+
 def sync_admin_direct_access() -> None:
     """Ensure every Admin node has a HAS_DIRECT_ACCESS edge to every Database.
 

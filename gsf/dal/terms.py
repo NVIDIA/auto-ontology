@@ -18,7 +18,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
 )
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.users import get_accessible_catalog_ids_for_zones
+from gsf.dal.users import resolve_table_filter
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
@@ -56,7 +56,7 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
-def get_term_by_id(term_id: str) -> dict[str, str] | None:
+def get_slim_term_by_id(term_id: str) -> dict[str, str] | None:
     """Return ``{id, name}`` of a Term, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
@@ -133,16 +133,9 @@ def fetch_all_terms_and_attributes(
     to return all data (admin / internal callers).
     """
     conn = get_neo4j_conn()
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    table_filter, params = resolve_table_filter(
+        zone_ids, "t.id", extra_params={"source": SEMANTIC_SOURCE}
     )
-    if accessible is not None:
-        table_ids = list(accessible["table_ids"])
-        table_filter = "WHERE t.id IN $table_ids"
-        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
-    else:
-        table_filter = ""
-        params = {"source": SEMANTIC_SOURCE}
 
     terms = conn.query_read(
         f"""
@@ -173,7 +166,7 @@ def fetch_all_terms_and_attributes(
     return terms, attrs
 
 
-def fetch_term_by_id(term_id: str) -> dict[str, Any] | None:
+def get_full_term_by_id(term_id: str) -> dict[str, Any] | None:
     """Return a single Term node by its id with table count and zones, or None.
 
     ``zones`` is resolved via the attribute → column → table → zone path:
@@ -300,16 +293,9 @@ def fetch_column_attributes(
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return ColumnAttribute nodes, optionally restricted to *zone_ids*."""
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    table_filter, params = resolve_table_filter(
+        zone_ids, "attr.table_id", extra_params={"source": SEMANTIC_SOURCE}
     )
-    if accessible is not None:
-        table_ids = list(accessible["table_ids"])
-        table_filter = "WHERE attr.table_id IN $table_ids"
-        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
-    else:
-        table_filter = ""
-        params = {"source": SEMANTIC_SOURCE}
 
     return get_neo4j_conn().query_read(
         f"""
@@ -428,16 +414,9 @@ def fetch_related_terms_counts(
     Each entry is ``{term_id: str, count: int}``.
     """
     conn = get_neo4j_conn()
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    table_filter, params = resolve_table_filter(
+        zone_ids, "ta.id", extra_params={"source": SEMANTIC_SOURCE}
     )
-    if accessible is not None:
-        table_ids = list(accessible["table_ids"])
-        table_filter = "WHERE ta.id IN $table_ids"
-        params: dict[str, Any] = {"source": SEMANTIC_SOURCE, "table_ids": table_ids}
-    else:
-        table_filter = ""
-        params = {"source": SEMANTIC_SOURCE}
 
     pairs = conn.query_read(
         f"""

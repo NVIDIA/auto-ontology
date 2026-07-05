@@ -60,7 +60,7 @@ def list_related_terms(term_id: str) -> dict:
 @router.get("/terms/{term_id}")
 def get_term(term_id: str) -> dict:
     """Return a single Term node by id, including its resolved zones."""
-    term = neo4j_dal.fetch_term_by_id(term_id)
+    term = neo4j_dal.get_full_term_by_id(term_id)
     if term is None:
         raise HTTPException(status_code=404, detail="Term not found")
     return {"data": term}

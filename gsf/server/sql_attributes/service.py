@@ -32,7 +32,7 @@ from gsf.dal.sql_attributes import (
     list_sql_attributes,
     update_sql_attribute_props,
 )
-from gsf.dal.terms import get_term_by_id
+from gsf.dal.terms import get_slim_term_by_id
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params
@@ -138,7 +138,7 @@ def create_sql_attribute(
             f"SqlAttribute with name {name!r} already exists (id={conflict['id']!r})"
         )
 
-    term = get_term_by_id(term_id)
+    term = get_slim_term_by_id(term_id)
     if not term:
         raise ValueError(f"Term with id {term_id!r} not found")
 
@@ -203,7 +203,7 @@ def update_sql_attribute(
             f"SqlAttribute with name {name!r} already exists (id={conflict['id']!r})"
         )
 
-    term = get_term_by_id(term_id)
+    term = get_slim_term_by_id(term_id)
     if not term:
         raise ValueError(f"Term with id {term_id!r} not found")
 

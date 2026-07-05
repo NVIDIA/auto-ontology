@@ -25,7 +25,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.users import get_accessible_catalog_ids_for_zones
+from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
 
 logger = logging.getLogger(__name__)
 
@@ -268,16 +268,9 @@ def fetch_tables_for_schema(
     When *zone_ids* is supplied only tables reachable through those zones are
     returned.
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    where_clause, params = resolve_table_filter(
+        zone_ids, "t.id", extra_params={"schema_id": schema_id}
     )
-    if accessible is not None:
-        table_ids = list(accessible["table_ids"])
-        where_clause = "WHERE t.id IN $table_ids"
-        params: dict[str, Any] = {"schema_id": schema_id, "table_ids": table_ids}
-    else:
-        where_clause = ""
-        params = {"schema_id": schema_id}
 
     return get_neo4j_conn().query_read(
         f"""
