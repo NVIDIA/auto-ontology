@@ -117,40 +117,13 @@ def _worker_loop(
             continue
 
         try:
-            # payload is either a plain question string (legacy) or a
-            # (question, zone_ids) tuple when zone-scoped retrieval is requested.
-            if isinstance(payload, tuple):
-                question, zone_ids = payload
-            else:
-                question, zone_ids = payload, None
-
-            # When zone_ids are provided, resolve the accessible table IDs from
-            # those zones and inject them into path_state so that the retrieval
-            # pipeline can filter candidates to zone-accessible tables only.
-            path_state_extra: dict = {}
-            if zone_ids:
-                try:
-                    from gsf.dal.users import get_accessible_catalog_ids_for_zones
-
-                    accessible = get_accessible_catalog_ids_for_zones(zone_ids)
-                    path_state_extra["accessible_table_ids"] = list(
-                        accessible["table_ids"]
-                    )
-                except Exception:
-                    logger.warning(
-                        "Zone access lookup failed for zone_ids=%s — proceeding without filter",
-                        zone_ids,
-                        exc_info=True,
-                    )
-
             agent_payload = {
-                "question": question,
+                "question": payload,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
-                "path_state": path_state_extra,
             }
             for event in stream_agent_response(agent_payload):
                 out_q.put((_TAG_EVENT, event))
@@ -194,9 +167,8 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str, zone_ids: list[str] | None = None) -> None:
-        payload = (question, zone_ids) if zone_ids else question
-        self._in_q.put((_MSG_ASK, payload))
+    def submit(self, question: str) -> None:
+        self._in_q.put((_MSG_ASK, question))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

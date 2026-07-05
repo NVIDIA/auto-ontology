@@ -204,7 +204,7 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
-    worker.submit(request.question, zone_ids=request.zone_ids or None)
+    worker.submit(request.question)
     asyncio.create_task(_watch_disconnect(http_request, slot))
 
     return StreamingResponse(

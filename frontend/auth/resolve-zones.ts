@@ -43,13 +43,3 @@ export async function resolveZoneIds(
 	if (role === 'admin') return null;
 	return fetchUserZoneIds(userId);
 }
-
-/**
- * Like `resolveZoneIds` but always resolves zone IDs regardless of role.
- * Used by the chat endpoint where both admins and viewers are scoped to their
- * zones — admins get all zones (Python returns all for admin role),
- * viewers get only the zones they have been granted access to.
- */
-export async function resolveZoneIdsForChat(userId: string): Promise<string[]> {
-	return fetchUserZoneIds(userId);
-}

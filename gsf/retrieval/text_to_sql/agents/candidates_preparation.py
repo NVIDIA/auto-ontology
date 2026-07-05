@@ -255,25 +255,6 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in ca_linked_tables],
             )
 
-        # --- 4c. Zone access filter ---
-        # When accessible_table_ids is present in path_state the request comes
-        # from a viewer whose data access is restricted to specific zones.
-        # Tables outside those zones are removed before the LLM relevance step
-        # so that SQL is never generated against data the user cannot see.
-        accessible_table_ids = path_state.get("accessible_table_ids")
-        if accessible_table_ids is not None:
-            accessible_set = set(accessible_table_ids)
-            before_zone_filter = len(relevant_tables)
-            relevant_tables = [
-                t for t in relevant_tables if t.get("id") in accessible_set
-            ]
-            self.logger.info(
-                "Zone filter: %d → %d relevant tables (viewer has access to %d tables)",
-                before_zone_filter,
-                len(relevant_tables),
-                len(accessible_set),
-            )
-
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
             state,

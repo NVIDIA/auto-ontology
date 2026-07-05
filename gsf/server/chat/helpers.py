@@ -32,7 +32,3 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    zone_ids: list[str] = Field(
-        default=[],
-        description="Zone IDs the requesting user has access to; used for scoped retrieval",
-    )

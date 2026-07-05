@@ -12,7 +12,6 @@
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
-import { resolveZoneIdsForChat } from '@/auth/resolve-zones';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -77,38 +76,7 @@ const readFinalAnswer = async (
 };
 
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
-	const rawBody = await req.text();
-
-	// Resolve zone IDs server-side and inject them so the Python backend can
-	// restrict retrieval candidates to zone-accessible tables.  The client only
-	// sends { question }; zone_ids are added here to prevent spoofing and to
-	// keep the client unaware of zone membership details.
-	// Always resolve zone IDs for chat — both admins and viewers are scoped to
-	// their zones here. Admins get all zones (Python returns all for admin role);
-	// viewers get only the zones they have been explicitly granted access to.
-	const zoneIds = await resolveZoneIdsForChat(user.id);
-
-	// User with no zone access: short-circuit before hitting the backend.
-	// Without this guard, an empty zone list becomes `zone_ids: []` which the
-	// Python router converts to None (falsy check), bypassing all zone filters
-	// and effectively granting full catalog access — same bug that
-	// proxyToBackend already guards against for catalog API routes.
-	if (zoneIds.length === 0) {
-		return new Response(
-			JSON.stringify({
-				detail: 'Access denied: your account has not been granted access to any data zones. Please contact your administrator to request zone access.',
-			}),
-			{ status: 403, headers: { 'Content-Type': 'application/json' } },
-		);
-	}
-
-	let body: string;
-	try {
-		const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-		body = JSON.stringify({ ...parsed, zone_ids: zoneIds });
-	} catch {
-		body = rawBody;
-	}
+	const body = await req.text();
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -156,8 +124,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	// then tee the stream — one branch flows to the client untouched, the other
 	// is parsed after the response to backfill the final answer. `user` is the
 	// resolved GSF user (session or SSO bearer), injected by withPermission.
-	// question extraction runs on the original client body (before uid injection).
-	const question = extractQuestion(rawBody);
+	const question = extractQuestion(body);
 
 	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({
