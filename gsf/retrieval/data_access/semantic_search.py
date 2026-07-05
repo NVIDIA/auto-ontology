@@ -31,6 +31,8 @@ from typing import TYPE_CHECKING, Literal
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
+from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
+
 if TYPE_CHECKING:
     from nemo_retriever.graph.retriever import Retriever
 
@@ -48,7 +50,7 @@ PER_LABEL_LIMIT = 10
 PER_LABEL_LIMITS: dict[str, int] = {
     Labels.COLUMN: 10,
     Labels.CUSTOM_ANALYSIS: 3,
-    Labels.SQL_ATTRIBUTE: 3,
+    LABEL_SQL_ATTRIBUTE: 3,
 }
 
 

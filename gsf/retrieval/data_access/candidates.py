@@ -20,6 +20,8 @@ from typing import TYPE_CHECKING
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
+from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
+
 from gsf.dal.candidates import expand_info
 from gsf.retrieval.data_access.relevant_tables import (
     _normalize_table_to_relevant_shape,
@@ -128,7 +130,7 @@ def extract_candidates(
     Returns:
         ``(custom_analysis_candidates, column_candidates, sql_attribute_candidates)``
     """
-    target_labels = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN, Labels.SQL_ATTRIBUTE]
+    target_labels = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN, LABEL_SQL_ATTRIBUTE]
 
     pulls: list[str] = []
     if qwv := (query_with_values or "").strip():
@@ -158,7 +160,7 @@ def extract_candidates(
                 combined_custom.append(hit)
             elif lab == Labels.COLUMN:
                 combined_columns.append(hit)
-            elif lab == Labels.SQL_ATTRIBUTE:
+            elif lab == LABEL_SQL_ATTRIBUTE:
                 combined_sql_attrs.append(hit)
 
     out_custom = _dedupe_best_score_sort_cap(combined_custom)

@@ -19,6 +19,12 @@ from itertools import groupby
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.semantic.constants import (
+    LABEL_SQL_ATTRIBUTE,
+    LABEL_TERM,
+    REL_PROPERTY_OF,
+)
+
 
 logger = logging.getLogger(__name__)
 
@@ -86,10 +92,10 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                 apoc.map.setKey(properties(n), "sql", coalesce(sql_code, "")),
                                 {{relevant_tables: tables}}
                             ) as item',
-                        n:{Labels.SQL_ATTRIBUTE},
+                        n:{LABEL_SQL_ATTRIBUTE},
                             'MATCH(n)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
                             WITH n, head(collect(sql.sql_full_query)) as sql_code, head(collect(sql)) as sql_node
-                            MATCH (n)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
+                            MATCH (n)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
                             MATCH (sql_node)-[:{Edges.SQL}]->(t:{Labels.TABLE})
                                 <-[:{Edges.CONTAINS}]-(schema:{Labels.SCHEMA})
                                 <-[:{Edges.CONTAINS}]-(db:{Labels.DB})

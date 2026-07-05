@@ -25,6 +25,8 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.semantic.constants import REL_REPRESENTS
+
 logger = logging.getLogger(__name__)
 
 _ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
@@ -301,7 +303,7 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
-        WHERE NOT (t)-[:{Edges.REPRESENTS}]->()
+        WHERE NOT (t)-[:{REL_REPRESENTS}]->()
         OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
         RETURN t.id AS id, t.name AS name, t.description AS description,
                sch.name AS schema_name
