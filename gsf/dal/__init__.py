@@ -10,5 +10,5 @@ Each module is the single source of truth for a domain:
   connections     — UI-managed database connection metadata on DB nodes
   candidates      — Vector-hit graph enrichment at retrieval time
   users           — User node mirror of the PostgreSQL Better Auth records;
-                    each User is linked to every Zone via :participant_of
+                    each User is linked to every Zone via :PARTICIPANT_OF
 """

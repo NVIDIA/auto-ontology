@@ -57,18 +57,23 @@ def list_custom_analyses(
 ) -> list[dict[str, Any]]:
     """Return ``CustomAnalysis`` nodes joined with their ``Sql`` node.
 
-    When *zone_ids* is supplied, only analyses whose SQL references at
-    least one table reachable through those zones are returned.  Pass
-    ``None`` (or omit) to return all analyses (admin / internal callers).
+    *zone_ids* is a hard authorization boundary (the zones the requesting
+    user has been granted access to), not a relevance filter.  When supplied,
+    an analysis is only returned when **every** table its SQL references is
+    reachable through those zones — an analysis that touches even one
+    out-of-zone table is excluded entirely, since its SQL text would
+    otherwise leak the names/columns of tables the caller isn't authorized
+    to see.  Pass ``None`` (or omit) to return all analyses (admin /
+    internal callers).
     """
     params: dict[str, Any] = {}
     if zone_ids is not None:
         accessible = get_accessible_catalog_ids_for_zones(zone_ids)
         params["table_ids"] = list(accessible["table_ids"])
         zone_filter = (
-            f"WHERE EXISTS {{"
+            f"WHERE NOT EXISTS {{"
             f" (sql)-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
-            f" WHERE tbl.id IN $table_ids"
+            f" WHERE NOT tbl.id IN $table_ids"
             f" }}"
         )
     else:

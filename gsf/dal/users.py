@@ -66,7 +66,7 @@ def get_accessible_catalog_ids_for_zones(
     """
     conn = get_neo4j_conn()
 
-    # Collect items directly linked via zone → zone_of → item.
+    # Collect items directly linked via Zone → ZONE_OF → item.
     item_rows = conn.query_read(
         f"""
         UNWIND $zone_ids AS zone_id
@@ -180,7 +180,7 @@ def sync_admin_direct_access() -> None:
     """Ensure every Admin node has a HAS_DIRECT_ACCESS edge to every Database.
 
     Admin nodes already reach zoned data through the
-    ``participant_of -> zone -> zone_of -> item`` path.  This function adds an
+    ``PARTICIPANT_OF -> Zone -> ZONE_OF -> item`` path.  This function adds an
     explicit ``HAS_DIRECT_ACCESS`` edge from every Admin node to **all**
     Database nodes so that the full catalog hierarchy (Database -> Schema ->
     Table via CONTAINS) is reachable from admin in Neo4j regardless of zone

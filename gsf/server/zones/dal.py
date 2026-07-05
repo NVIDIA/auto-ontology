@@ -53,7 +53,7 @@ def list_zones(user_id: str) -> list[dict[str, Any]]:
     """Return zones visible to *user_id*.
 
     Admins see every zone.  Viewers see only zones to which they have been
-    explicitly granted access via a ``participant_of`` relationship.
+    explicitly granted access via a ``PARTICIPANT_OF`` relationship.
     Returns an empty list when *user_id* is unknown.
     """
     rows = get_neo4j_conn().query_read(
@@ -80,7 +80,7 @@ def get_zone_by_id(
     """Return one zone with its linked catalog data items.
 
     When *user_id* is supplied the zone is only returned if the user has
-    access (admin role or explicit ``participant_of`` relationship).
+    access (admin role or explicit ``PARTICIPANT_OF`` relationship).
     Passing ``user_id=None`` skips the access check (internal / admin use).
     """
     conn = get_neo4j_conn()
@@ -384,7 +384,7 @@ def list_zone_users(zone_id: str) -> list[dict[str, Any]]:
 
 
 def grant_zone_access(zone_id: str, user_id: str) -> bool:
-    """Create a ``participant_of`` edge from *user_id* to *zone_id*.
+    """Create a ``PARTICIPANT_OF`` edge from *user_id* to *zone_id*.
 
     Returns ``False`` when either the zone or the user does not exist.
     """
@@ -402,7 +402,7 @@ def grant_zone_access(zone_id: str, user_id: str) -> bool:
 
 
 def revoke_zone_access(zone_id: str, user_id: str) -> bool:
-    """Delete the ``participant_of`` edge between *user_id* and *zone_id*.
+    """Delete the ``PARTICIPANT_OF`` edge between *user_id* and *zone_id*.
 
     Returns ``False`` when the edge (or either node) does not exist.
     Admins always keep their implicit access — this only removes the stored
