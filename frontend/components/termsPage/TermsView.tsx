@@ -182,8 +182,8 @@ export const TermsView = () => {
 				};
 			}
 			const term = res.data;
-			const termAttrs = !attrsRes.error ? (attrsRes.data ?? []) : [];
-			const relatedTerms = !relatedRes.error ? (relatedRes.data ?? []) : [];
+			const termAttrs = attrsRes?.data ?? [];
+			const relatedTerms = relatedRes?.data ?? [];
 
 			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
 			const userZoneIds: string[] | null =
