@@ -45,9 +45,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         )
     semantic_retriever = payload.get("semantic_retriever")
     if semantic_retriever is None:
-        raise ValueError(
-            "TextToSQLPayload is missing required 'semantic_retriever' (nemo_retriever.retriever.Retriever "
-            "instance). Construct a Retriever once at startup and pass it in the payload."
+        logger.warning(
+            "No 'semantic_retriever' in payload — "
+            "ColumnAttribute, CustomAnalysis, and SqlAttribute searches will be skipped."
         )
 
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
