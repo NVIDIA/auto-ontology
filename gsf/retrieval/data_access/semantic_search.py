@@ -48,6 +48,7 @@ PER_LABEL_LIMIT = 10
 PER_LABEL_LIMITS: dict[str, int] = {
     Labels.COLUMN: 10,
     Labels.CUSTOM_ANALYSIS: 3,
+    Labels.SQL_ATTRIBUTE: 3,
 }
 
 

@@ -33,6 +33,10 @@ from gsf.dal.custom_analyses import (
     fetch_tables_from_custom_analyses,
 )
 from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.dal.sql_attributes import (
+    fetch_sql_attributes_with_sql,
+    fetch_tables_from_sql_attributes,
+)
 from gsf.dal.terms import fetch_term_synonyms
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
@@ -85,6 +89,8 @@ class CandidatePreparationAgent(BaseAgent):
     - path_state["similar_questions"]: Similar questions from history
     - path_state["custom_analyses"]: Filtered complex candidates
     - path_state["custom_analyses_str"]: String representation for prompts
+    - path_state["sql_attributes"]: Retrieved SqlAttribute details
+    - path_state["sql_attributes_str"]: String representation of SqlAttributes for prompts
     """
 
     def __init__(self):
@@ -95,10 +101,11 @@ class CandidatePreparationAgent(BaseAgent):
         path_state = state.get("path_state", {})
         has_col_attrs = bool(path_state.get("retrieved_column_attributes"))
         has_custom = bool(path_state.get("retrieved_custom_analyses"))
-        if not has_col_attrs and not has_custom:
+        has_sql_attrs = bool(path_state.get("retrieved_sql_attributes"))
+        if not has_col_attrs and not has_custom and not has_sql_attrs:
             self.logger.warning(
-                "No candidates for preparation: expected retrieved_column_attributes "
-                "or retrieved_custom_analyses in path_state"
+                "No candidates for preparation: expected retrieved_column_attributes, "
+                "retrieved_custom_analyses, or retrieved_sql_attributes in path_state"
             )
             return False
         return True
@@ -120,7 +127,8 @@ class CandidatePreparationAgent(BaseAgent):
         question = get_question_for_processing(state)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
-        candidates = custom_analyses + column_attributes
+        sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
+        candidates = custom_analyses + column_attributes + sql_attributes_raw
 
         # --- 1. Custom analyses ---
         self.logger.info("Retrieved %d custom analyses", len(custom_analyses))
@@ -255,6 +263,36 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in ca_linked_tables],
             )
 
+        # --- 4c. Enrich SqlAttributes with SQL + term from Neo4j ---
+        sql_attributes: list[dict] = []
+        if sql_attributes_raw:
+            sa_ids = [
+                str(hit.get("id") or "") for hit in sql_attributes_raw if hit.get("id")
+            ]
+            sa_ids = list(dict.fromkeys(sa_ids))
+            sql_attributes = fetch_sql_attributes_with_sql(sa_ids)
+            self.logger.info(
+                "Fetched %d/%d SqlAttribute details from Neo4j",
+                len(sql_attributes),
+                len(sa_ids),
+            )
+
+            sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
+            existing_ids = {t.get("id") for t in relevant_tables}
+            added = 0
+            for tbl in sa_linked_tables:
+                if tbl.get("id") not in existing_ids:
+                    relevant_tables.append(tbl)
+                    existing_ids.add(tbl.get("id"))
+                    added += 1
+            self.logger.info(
+                "Added %d table(s) from SqlAttribute SQL references: %s",
+                added,
+                [t["name"] for t in sa_linked_tables],
+            )
+
+        sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
+
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
             state,
@@ -277,6 +315,8 @@ class CandidatePreparationAgent(BaseAgent):
                 ],
                 "custom_analyses": custom_analyses,
                 "custom_analyses_str": custom_analyses_str,
+                "sql_attributes": sql_attributes,
+                "sql_attributes_str": sql_attributes_str,
                 "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
@@ -555,5 +595,28 @@ class CandidatePreparationAgent(BaseAgent):
             sql = (x.get("sql") or "").strip()
             if sql:
                 entry += f", sql: {sql}"
+            parts_list.append(entry)
+        return parts_list
+
+    def _build_sql_attributes_str(self, sql_attributes: list[dict]) -> list[str]:
+        """Build string representation of sql attributes for prompts."""
+        parts_list: list[str] = []
+        for x in sql_attributes:
+            name = (x.get("name") or "").strip()
+            if not name:
+                continue
+            entry = f"name: {name}"
+            desc = (x.get("description") or "").strip()
+            if desc:
+                entry += f", description: {desc}"
+            expr = (x.get("expression") or "").strip()
+            if expr:
+                entry += f", expression: {expr}"
+            sql = (x.get("sql") or "").strip()
+            if sql:
+                entry += f", sql: {sql}"
+            term = (x.get("term_name") or "").strip()
+            if term:
+                entry += f", term: {term}"
             parts_list.append(entry)
         return parts_list

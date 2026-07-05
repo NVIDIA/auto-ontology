@@ -10,7 +10,7 @@
   question string.
 * :func:`extract_candidates` runs the per-entity / per-query-with-values
   fan-out, deduplicates by (label, id) keeping the lowest vector distance,
-  and splits into ``(custom_analysis, column)`` streams.
+  and splits into ``(custom_analysis, column, sql_attribute)`` streams.
 """
 
 from __future__ import annotations
@@ -115,20 +115,20 @@ def extract_candidates(
     entities: list[str],
     query_with_values: str = "",
     database_name: str | None = None,
-) -> tuple[list[dict], list[dict]]:
+) -> tuple[list[dict], list[dict], list[dict]]:
     """One semantic search per pull string (``query_with_values`` and each entity name).
 
-    Each search fetches both custom-analysis and column candidates in a single
-    vector-store call, then splits by label in Python.
+    Each search fetches custom-analysis, column, and sql-attribute candidates
+    in a single vector-store call, then splits by label in Python.
 
     Merge streams, dedupe by (label, id) keeping the lowest vector distance
     (``score``), sort ascending by distance, cap at ``MAX_CALCULATION_CANDIDATES``
     per stream.
 
     Returns:
-        ``(custom_analysis_candidates, column_candidates)``
+        ``(custom_analysis_candidates, column_candidates, sql_attribute_candidates)``
     """
-    target_labels = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN]
+    target_labels = [Labels.CUSTOM_ANALYSIS, Labels.COLUMN, Labels.SQL_ATTRIBUTE]
 
     pulls: list[str] = []
     if qwv := (query_with_values or "").strip():
@@ -139,6 +139,7 @@ def extract_candidates(
 
     combined_custom: list[dict] = []
     combined_columns: list[dict] = []
+    combined_sql_attrs: list[dict] = []
 
     for text in pulls:
         hits = (
@@ -157,13 +158,21 @@ def extract_candidates(
                 combined_custom.append(hit)
             elif lab == Labels.COLUMN:
                 combined_columns.append(hit)
+            elif lab == Labels.SQL_ATTRIBUTE:
+                combined_sql_attrs.append(hit)
 
     out_custom = _dedupe_best_score_sort_cap(combined_custom)
     out_columns = _dedupe_best_score_sort_cap(combined_columns)
+    out_sql_attrs = _dedupe_best_score_sort_cap(combined_sql_attrs)
 
     logger.info(
-        f"extract_candidates: {len(out_custom)} custom_analysis, {len(out_columns)} column "
-        f"(max {MAX_CALCULATION_CANDIDATES} each), {len(pulls)} pulls"
+        "extract_candidates: %d custom_analysis, %d column, %d sql_attribute "
+        "(max %d each), %d pulls",
+        len(out_custom),
+        len(out_columns),
+        len(out_sql_attrs),
+        MAX_CALCULATION_CANDIDATES,
+        len(pulls),
     )
 
-    return out_custom, out_columns
+    return out_custom, out_columns, out_sql_attrs

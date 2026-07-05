@@ -34,7 +34,7 @@ from gsf.dal.sql_attributes import (
     update_sql_attribute_props,
 )
 from gsf.dal.terms import get_term_by_id
-from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
 from gsf.utils import get_embed_params
 from gsf.vdb import get_semantic_vdb
@@ -209,7 +209,7 @@ def create_sql_attribute(
 
     attr_node = Neo4jNode(
         name=name,
-        label=LABEL_SQL_ATTRIBUTE,
+        label=Labels.SQL_ATTRIBUTE,
         props={
             "name": name,
             "description": description,
@@ -283,7 +283,7 @@ def update_sql_attribute(
 
     attr_node = Neo4jNode(
         name=name,
-        label=LABEL_SQL_ATTRIBUTE,
+        label=Labels.SQL_ATTRIBUTE,
         props={
             "name": name,
             "description": description,

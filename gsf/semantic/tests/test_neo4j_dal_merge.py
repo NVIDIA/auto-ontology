@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from gsf.dal import terms as neo4j_terms
 from gsf.dal import datasources as neo4j_datasources
-from gsf.semantic.constants import SEMANTIC_SOURCE
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
 
 
 @patch("gsf.dal.terms.get_neo4j_conn")
@@ -17,7 +17,7 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     query, params = call[0][0], call[0][1]
     assert "MERGE (term:Term" in query or "MERGE (term:" in query
     assert params["name"] == "Orders"
-    assert params["source"] == SEMANTIC_SOURCE
+    assert params["source"] == Props.SEMANTIC_SOURCE
 
 
 @patch("gsf.dal.datasources.get_neo4j_conn")

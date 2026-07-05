@@ -296,12 +296,12 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
 def fetch_all_tables_without_term() -> list[dict[str, Any]]:
     """Return Table nodes that have not yet been assigned a Term."""
-    from gsf.semantic.constants import REL_REPRESENTS
+    from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
 
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})
-        WHERE NOT (t)-[:{REL_REPRESENTS}]->()
+        WHERE NOT (t)-[:{Edges.REPRESENTS}]->()
         RETURN t.id AS id, t.name AS name, t.description AS description
         ORDER BY t.name
         """

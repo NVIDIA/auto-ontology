@@ -250,16 +250,20 @@ class SQLFromCandidatesAgent(BaseAgent):
         similar_questions = path_state.get("similar_questions", [])
         custom_analyses = path_state.get("custom_analyses", [])
         custom_analyses_str = path_state.get("custom_analyses_str", [])
+        sql_attributes = path_state.get("sql_attributes", [])
+        sql_attributes_str = path_state.get("sql_attributes_str", [])
         term_synonyms: dict = path_state.get("term_synonyms") or {}
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
 
         self.logger.info(
-            "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, fallback_tables=%d",
+            "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, "
+            "sql_attributes=%d, fallback_tables=%d",
             primary_attribute.get("attr_name") if primary_attribute else None,
             len(attribute_join_paths),
             len(custom_analyses),
+            len(sql_attributes),
             len(relevant_tables),
         )
 
@@ -285,6 +289,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                     f"\nTable selection reasoning:\n{relevance_reasoning}\n"
                 )
             observation_block += f"\nlist of important semantic entities with sql snippets:\n{custom_analyses_str}\n"
+            if sql_attributes_str:
+                observation_block += (
+                    f"\nlist of sql attributes (derived metrics/formulas):\n"
+                    f"{sql_attributes_str}\n"
+                )
             if term_synonyms:
                 gloss_lines = ["TERM GLOSSARY (alternate names users may use):"]
                 for term_name, syns in term_synonyms.items():
@@ -312,6 +321,29 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
+            # Build sql attributes section for user prompt
+            sa_section = ""
+            if sql_attributes:
+                sa_lines = []
+                for a in sql_attributes:
+                    line = f"- {a.get('name', '(unnamed)')}"
+                    desc = (a.get("description") or "").strip()
+                    if desc:
+                        line += f": {desc}"
+                    expr = (a.get("expression") or "").strip()
+                    if expr:
+                        line += f"\n  Expression: {expr}"
+                    sql = (a.get("sql") or "").strip()
+                    if sql:
+                        line += f"\n  SQL: {sql}"
+                    sa_lines.append(line)
+                sa_section = (
+                    "SQL ATTRIBUTES (derived metrics/formulas — "
+                    "use their expressions and SQL as guidance):\n"
+                    + "\n".join(sa_lines)
+                    + "\n\n"
+                )
+
             # Build tables/schema section — semantic hint and available tables are co-equal.
             parts = []
             if primary_attribute:
@@ -333,7 +365,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
-                custom_analyses=ca_section,
+                custom_analyses=ca_section + sa_section,
             )
 
             # Choose system prompt based on context

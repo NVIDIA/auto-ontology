@@ -15,16 +15,9 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Edges,
     Labels,
+    Props,
 )
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-
-from gsf.semantic.constants import (
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_TERM,
-    REL_HAS_ATTRIBUTE,
-    REL_REPRESENTS,
-    SEMANTIC_SOURCE,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -32,11 +25,11 @@ logger = logging.getLogger(__name__)
 def table_has_term(table_id: str) -> bool:
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.REPRESENTS}]->
+              (term:{Labels.TERM} {{source: $source}})
         RETURN term.name AS name LIMIT 1
         """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
+        {"table_id": table_id, "source": Props.SEMANTIC_SOURCE},
     )
     return bool(rows)
 
@@ -44,11 +37,11 @@ def table_has_term(table_id: str) -> bool:
 def get_term_for_table(table_id: str) -> str | None:
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.REPRESENTS}]->
+              (term:{Labels.TERM} {{source: $source}})
         RETURN term.name AS name LIMIT 1
         """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
+        {"table_id": table_id, "source": Props.SEMANTIC_SOURCE},
     )
     return rows[0]["name"] if rows else None
 
@@ -57,7 +50,7 @@ def get_term_by_id(term_id: str) -> dict[str, str] | None:
     """Return ``{id, name}`` of a Term, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (t:{LABEL_TERM} {{id: $term_id}})
+        MATCH (t:{Labels.TERM} {{id: $term_id}})
         RETURN t.id AS id, t.name AS name LIMIT 1
         """,
         {"term_id": term_id},
@@ -75,11 +68,11 @@ def merge_term(
     rows = get_neo4j_conn().query_write(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})
-        MERGE (term:{LABEL_TERM} {{name: $name, source: $source}})
+        MERGE (term:{Labels.TERM} {{name: $name, source: $source}})
         ON CREATE SET term.id = randomUUID()
         SET term.description = $description,
             term.synonyms = $synonyms
-        MERGE (t)-[:{REL_REPRESENTS}]->(term)
+        MERGE (t)-[:{Edges.REPRESENTS}]->(term)
         RETURN term.id AS id
         """,
         {
@@ -87,7 +80,7 @@ def merge_term(
             "name": name,
             "description": description,
             "synonyms": synonyms or [],
-            "source": SEMANTIC_SOURCE,
+            "source": Props.SEMANTIC_SOURCE,
         },
     )
     return rows[0]["id"] if rows else None
@@ -125,11 +118,11 @@ def fetch_all_terms_and_attributes() -> tuple[
 ]:
     """Scan all semantic Term and ColumnAttribute nodes in Neo4j for embedding."""
     conn = get_neo4j_conn()
-    params = {"source": SEMANTIC_SOURCE}
+    params = {"source": Props.SEMANTIC_SOURCE}
     terms = conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE})-[:{Edges.REPRESENTS}]->
+              (term:{Labels.TERM} {{source: $source}})
         RETURN DISTINCT term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id
         """,
@@ -138,8 +131,8 @@ def fetch_all_terms_and_attributes() -> tuple[
     attrs = conn.query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              (col:{Labels.COLUMN})-[:{Edges.HAS_ATTRIBUTE}]->
+              (attr:{Labels.COLUMN_ATTRIBUTE} {{source: $source}})
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,
@@ -158,11 +151,11 @@ def fetch_terms_and_attributes_for_table(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (terms, attrs) written for a single table — used for inline embedding."""
     conn = get_neo4j_conn()
-    params = {"table_id": table_id, "source": SEMANTIC_SOURCE}
+    params = {"table_id": table_id, "source": Props.SEMANTIC_SOURCE}
     terms = conn.query_read(
         f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.REPRESENTS}]->
+              (term:{Labels.TERM} {{source: $source}})
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id
         """,
@@ -171,8 +164,8 @@ def fetch_terms_and_attributes_for_table(
     attrs = conn.query_read(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              (col:{Labels.COLUMN})-[:{Edges.HAS_ATTRIBUTE}]->
+              (attr:{Labels.COLUMN_ATTRIBUTE} {{source: $source}})
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,

@@ -19,6 +19,7 @@ from itertools import groupby
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -84,6 +85,37 @@ def expand_info(ids_and_labels: list | None) -> dict:
                             RETURN apoc.map.merge(
                                 apoc.map.setKey(properties(n), "sql", coalesce(sql_code, "")),
                                 {{relevant_tables: tables}}
+                            ) as item',
+                        n:{Labels.SQL_ATTRIBUTE},
+                            'MATCH(n)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+                            WITH n, head(collect(sql.sql_full_query)) as sql_code, head(collect(sql)) as sql_node
+                            MATCH (n)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
+                            MATCH (sql_node)-[:{Edges.SQL}]->(t:{Labels.TABLE})
+                                <-[:{Edges.CONTAINS}]-(schema:{Labels.SCHEMA})
+                                <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+                            WITH n, sql_code, term,
+                                 collect(apoc.map.merge(
+                                     properties(t),
+                                     {{label: "{Labels.TABLE}",
+                                      schema_name: schema.name,
+                                      database_name: db.name,
+                                      columns: [(t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN}) |
+                                          {{name: c.name,
+                                            data_type: toString(coalesce(c.data_type, "")),
+                                            description: CASE
+                                                WHEN c.description IS NOT NULL AND trim(c.description) <> ""
+                                                THEN c.description ELSE null END,
+                                            sample_values: CASE
+                                                WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
+                                                THEN c.sample_values ELSE null END
+                                          }}]
+                                     }}
+                                 )) AS tables
+                            RETURN apoc.map.merge(
+                                apoc.map.setKey(properties(n), "sql", coalesce(sql_code, "")),
+                                {{relevant_tables: tables,
+                                  term_name: term.name,
+                                  term_id: term.id}}
                             ) as item',
                         n:{Labels.COLUMN},
                             'MATCH(n)<-[:{Edges.CONTAINS}]-(parent)<-[:{Edges.CONTAINS}]-(schema:{Labels.SCHEMA})

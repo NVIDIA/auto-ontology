@@ -13,17 +13,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-
-from gsf.semantic.constants import (
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_TERM,
-    REL_HAS_ATTRIBUTE,
-    REL_PROPERTY_OF,
-    REL_SEMANTIC_FK,
-    SEMANTIC_SOURCE,
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+    Edges,
+    Labels,
+    Props,
 )
+from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 from gsf.dal.datasources import fetch_col_table_contexts
 
 logger = logging.getLogger(__name__)
@@ -48,8 +43,8 @@ def merge_column_attribute(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
               (col:{Labels.COLUMN} {{name: $source_column}})
-        MATCH (term:{LABEL_TERM} {{name: $term_name, source: $source}})
-        MERGE (attr:{LABEL_COLUMN_ATTRIBUTE} {{
+        MATCH (term:{Labels.TERM} {{name: $term_name, source: $source}})
+        MERGE (attr:{Labels.COLUMN_ATTRIBUTE} {{
             name: $attr_name,
             source_column: $source_column,
             term_name: $term_name,
@@ -59,8 +54,8 @@ def merge_column_attribute(
         ON CREATE SET attr.id = randomUUID()
         SET attr.datatype = $datatype,
             attr.description = coalesce($description, attr.description)
-        MERGE (col)-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+        MERGE (col)-[:{Edges.HAS_ATTRIBUTE}]->(attr)
+        MERGE (attr)-[:{Edges.PROPERTY_OF}]->(term)
         RETURN attr.id AS id
         """,
         {
@@ -70,7 +65,7 @@ def merge_column_attribute(
             "attr_name": attr_name,
             "datatype": datatype,
             "description": description,
-            "source": SEMANTIC_SOURCE,
+            "source": Props.SEMANTIC_SOURCE,
         },
     )
     return rows[0]["id"] if rows else None
@@ -80,11 +75,11 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     """Return the id of the ColumnAttribute connected to a given Column, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (col:{Labels.COLUMN} {{id: $col_id}})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        MATCH (col:{Labels.COLUMN} {{id: $col_id}})-[:{Edges.HAS_ATTRIBUTE}]->
+              (attr:{Labels.COLUMN_ATTRIBUTE} {{source: $source}})
         RETURN attr.id AS id LIMIT 1
         """,
-        {"col_id": column_id, "source": SEMANTIC_SOURCE},
+        {"col_id": column_id, "source": Props.SEMANTIC_SOURCE},
     )
     return rows[0]["id"] if rows else None
 
@@ -142,8 +137,8 @@ def find_unlinked_fk_columns() -> list[dict[str, Any]]:
     return get_neo4j_conn().query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-          AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
+        WHERE NOT (col)-[:{Edges.SEMANTIC_FK}]->()
+          AND NOT (col)-[:{Edges.HAS_ATTRIBUTE}]->()
         OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
         RETURN col.id          AS id,
                col.name        AS name,
@@ -160,8 +155,8 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
     get_neo4j_conn().query_write(
         f"""
         MATCH (src:{Labels.COLUMN} {{id: $src_id}})
-        MATCH (tgt:{LABEL_COLUMN_ATTRIBUTE} {{id: $tgt_id}})
-        MERGE (src)-[:{REL_SEMANTIC_FK}]->(tgt)
+        MATCH (tgt:{Labels.COLUMN_ATTRIBUTE} {{id: $tgt_id}})
+        MERGE (src)-[:{Edges.SEMANTIC_FK}]->(tgt)
         """,
         {"src_id": src_column_id, "tgt_id": tgt_attr_id},
     )

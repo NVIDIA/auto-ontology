@@ -18,11 +18,6 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.semantic.constants import (
-    LABEL_SQL_ATTRIBUTE,
-    LABEL_TERM,
-    REL_PROPERTY_OF,
-)
 from gsf.server.sql_utils import SqlParseError
 
 logger = logging.getLogger(__name__)
@@ -49,9 +44,9 @@ def list_sql_attributes() -> list[dict[str, Any]]:
     """Return every SqlAttribute with its connected Term and SQL text."""
     return get_neo4j_conn().query_read(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        MATCH (attr:{Labels.SQL_ATTRIBUTE})
+        MATCH (attr)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         RETURN attr.id          AS id,
                attr.name        AS name,
                attr.description AS description,
@@ -69,9 +64,9 @@ def get_sql_attribute(attr_id: str) -> dict[str, Any] | None:
     """Return a single SqlAttribute by id, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        OPTIONAL MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (attr)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         RETURN attr.id          AS id,
                attr.name        AS name,
                attr.description AS description,
@@ -90,7 +85,7 @@ def find_attr_by_name(name: str, exclude_id: str | None) -> dict[str, str] | Non
     """Return ``{id, name}`` of a SqlAttribute using *name*, or None."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (a:{LABEL_SQL_ATTRIBUTE} {{name: $name}})
+        MATCH (a:{Labels.SQL_ATTRIBUTE} {{name: $name}})
         WHERE $exclude_id IS NULL OR a.id <> $exclude_id
         RETURN a.id AS id, a.name AS name
         LIMIT 1
@@ -104,7 +99,7 @@ def get_sql_attribute_by_id(attr_id: str) -> str | None:
     """Return the id of the SqlAttribute, or None if it doesn't exist."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (a:{Labels.SQL_ATTRIBUTE} {{id: $id}})
         RETURN a.id AS id
         LIMIT 1
         """,
@@ -122,7 +117,7 @@ def detach_existing_sql_edges(attr_id: str) -> None:
     """Drop every HAS_SQL edge leaving the SqlAttribute."""
     get_neo4j_conn().query_write(
         f"""
-        MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (a:{Labels.SQL_ATTRIBUTE} {{id: $id}})
               -[r:{Edges.HAS_SQL}]->(:{Labels.SQL})
         DELETE r
         """,
@@ -134,12 +129,12 @@ def link_to_term(attr_id: str, term_id: str) -> None:
     """Create PROPERTY_OF edge from SqlAttribute to Term (replacing any old one)."""
     get_neo4j_conn().query_write(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
-        OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->()
+        MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: $attr_id}})
+        OPTIONAL MATCH (attr)-[old:{Edges.PROPERTY_OF}]->()
         DELETE old
         WITH attr
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+        MATCH (term:{Labels.TERM} {{id: $term_id}})
+        MERGE (attr)-[:{Edges.PROPERTY_OF}]->(term)
         """,
         {"attr_id": attr_id, "term_id": term_id},
     )
@@ -156,7 +151,7 @@ def update_sql_attribute_props(
     """SET properties on an existing SqlAttribute node."""
     get_neo4j_conn().query_write(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: $id}})
         SET attr.name        = $name,
             attr.description = $description,
             attr.expression  = $expression,
@@ -176,11 +171,111 @@ def delete_sql_attribute_node(attr_id: str) -> None:
     """DETACH DELETE the SqlAttribute node."""
     get_neo4j_conn().query_write(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: $id}})
         DETACH DELETE attr
         """,
         {"id": attr_id},
     )
+
+
+# ---------------------------------------------------------------------------
+# Retrieval-time helpers
+# ---------------------------------------------------------------------------
+
+
+def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
+    """Fetch id, name, description, expression, and SQL for each SqlAttribute.
+
+    Returns a list of dicts with keys: id, name, description, expression, sql.
+    """
+    if not attr_ids:
+        return []
+
+    query = f"""
+    UNWIND $ids AS attr_id
+    MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: attr_id}})
+    MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+    MATCH (attr)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
+    RETURN attr.id AS attr_id, attr.name AS name,
+           attr.description AS description,
+           attr.expression AS expression,
+           sql.sql_full_query AS sql_text,
+           term.name AS term_name
+    """
+    try:
+        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+    except Exception:
+        logger.warning(
+            "fetch_sql_attributes_with_sql: Neo4j query failed",
+            exc_info=True,
+        )
+        return []
+
+    seen_ids: set[str] = set()
+    result: list[dict[str, str]] = []
+    for row in rows:
+        aid = row.get("attr_id") or ""
+        if aid in seen_ids:
+            continue
+        seen_ids.add(aid)
+        result.append(
+            {
+                "id": aid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "expression": row.get("expression") or "",
+                "sql": row.get("sql_text") or "",
+                "term_name": row.get("term_name") or "",
+            }
+        )
+    return result
+
+
+def fetch_tables_from_sql_attributes(
+    attr_ids: list[str],
+) -> list[dict[str, Any]]:
+    """Fetch Tables referenced by SqlAttribute nodes via HAS_SQL -> Sql -> SQL -> Table."""
+    if not attr_ids:
+        return []
+    query = f"""
+    UNWIND $ids AS attr_id
+    MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: attr_id}})
+          -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
+    OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
+    WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+                             description: col.description}}) AS cols
+    RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
+           sch.name AS schema_name, cols
+    """
+    try:
+        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+    except Exception:
+        logger.warning(
+            "fetch_tables_from_sql_attributes: Neo4j query failed",
+            exc_info=True,
+        )
+        return []
+    tables: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        tid = row.get("id")
+        if not tid or str(tid) in seen:
+            continue
+        seen.add(str(tid))
+        cols = [c for c in (row.get("cols") or []) if c.get("name")]
+        tables.append(
+            {
+                "id": tid,
+                "name": row.get("name") or "",
+                "description": row.get("description") or "",
+                "schema_name": row.get("schema_name") or "",
+                "label": Labels.TABLE,
+                "columns": cols,
+            }
+        )
+    return tables
 
 
 # ---------------------------------------------------------------------------
@@ -196,9 +291,9 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
     """
     result = get_neo4j_conn().query_read(
         f"""
-        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
+        MATCH (attr:{Labels.SQL_ATTRIBUTE} {{id: $attr_id}})
               -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        OPTIONAL MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        MATCH (attr)-[:{Edges.PROPERTY_OF}]->(term:{Labels.TERM})
         RETURN collect({{
             text: 'sql_attribute: ' + attr.name +
                   CASE WHEN attr.description IS NOT NULL
