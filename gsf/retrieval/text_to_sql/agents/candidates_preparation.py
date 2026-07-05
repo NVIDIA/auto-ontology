@@ -610,11 +610,11 @@ class CandidatePreparationAgent(BaseAgent):
             if desc:
                 entry += f", description: {desc}"
             expr = (x.get("expression") or "").strip()
+            sql = (x.get("sql") or "").strip()
             if expr:
                 entry += f", expression: {expr}"
-            sql = (x.get("sql") or "").strip()
-            if sql:
-                entry += f", sql: {sql}"
+            if sql and sql != expr:
+                entry += f", full_query: {sql}"
             term = (x.get("term_name") or "").strip()
             if term:
                 entry += f", term: {term}"

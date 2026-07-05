@@ -127,9 +127,9 @@ def _llm_filter(llm, question: str, entity: str, candidates: list[dict]) -> list
     return [result.best_id]
 
 
-_CUSTOM_ANALYSIS_FILTER_PROMPT = """\
-You are filtering candidate custom analyses for relevance to a user question.
-Keep only analyses that could meaningfully contribute to answering the question.
+_CANDIDATE_FILTER_PROMPT = """\
+You are filtering candidate {candidate_type} for relevance to a user question.
+Keep only candidates that could meaningfully contribute to answering the question.
 Remove any that share no common domain, idea, or intent with the question.
 
 User question: {question}
@@ -141,12 +141,12 @@ Return the list of IDs to KEEP. If none are relevant, return an empty list.
 """
 
 
-def _llm_filter_custom_analyses(
-    llm, question: str, candidates: list[dict]
+def _llm_filter_candidates(
+    llm, question: str, candidates: list[dict], candidate_type: str
 ) -> list[dict]:
-    """Use the LLM to keep only custom analysis candidates relevant to *question*.
+    """Keep only candidates relevant to *question* via LLM.
 
-    Returns the filtered list; falls back to the original list on LLM failure.
+    Falls back to the original list on LLM failure.
     """
     if not candidates:
         return []
@@ -157,7 +157,8 @@ def _llm_filter_custom_analyses(
 
     messages = [
         SystemMessage(
-            content=_CUSTOM_ANALYSIS_FILTER_PROMPT.format(
+            content=_CANDIDATE_FILTER_PROMPT.format(
+                candidate_type=candidate_type,
                 question=question,
                 candidates_block=candidates_block,
             )
@@ -171,7 +172,8 @@ def _llm_filter_custom_analyses(
     kept_ids = set(result.kept_ids)
     filtered = [c for c in candidates if str(c.get("id") or "") in kept_ids]
     logger.debug(
-        "Custom analysis filter: %d → %d (kept ids: %s)",
+        "%s filter: %d → %d (kept ids: %s)",
+        candidate_type,
         len(candidates),
         len(filtered),
         kept_ids,
@@ -277,7 +279,12 @@ class CandidateRetrievalAgent(BaseAgent):
                     )
                 )
 
-        all_custom_hits = _llm_filter_custom_analyses(llm, question, all_custom_hits)
+        all_custom_hits = _llm_filter_candidates(
+            llm, question, all_custom_hits, "custom analyses"
+        )
+        all_sql_attr_hits = _llm_filter_candidates(
+            llm, question, all_sql_attr_hits, "SQL attributes"
+        )
 
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)

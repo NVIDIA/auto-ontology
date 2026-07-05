@@ -331,11 +331,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                     if desc:
                         line += f": {desc}"
                     expr = (a.get("expression") or "").strip()
+                    sql = (a.get("sql") or "").strip()
                     if expr:
                         line += f"\n  Expression: {expr}"
-                    sql = (a.get("sql") or "").strip()
-                    if sql:
-                        line += f"\n  SQL: {sql}"
+                    if sql and sql != expr:
+                        line += f"\n  Full query: {sql}"
                     sa_lines.append(line)
                 sa_section = (
                     "SQL ATTRIBUTES (derived metrics/formulas — "
