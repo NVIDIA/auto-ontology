@@ -146,6 +146,55 @@ def fetch_all_terms_and_attributes() -> tuple[
     return terms, attrs
 
 
+def fetch_table_schema_map(database_name: str) -> dict[str, str]:
+    """Return ``{table_name_lower: schema_name}`` for every table in *database_name*.
+
+    Used by the SqlAttribute suggester to qualify bare table names in
+    generated SELECT statements with their canonical schema prefix.
+    """
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+        RETURN t.name AS table_name, sch.name AS schema_name
+        """,
+        {"db_name": database_name},
+    )
+    return {
+        row["table_name"].lower(): row["schema_name"]
+        for row in rows
+        if row.get("table_name") and row.get("schema_name")
+    }
+
+
+def fetch_terms_with_sqls(source: str) -> list[dict[str, Any]]:
+    """Return every Term with the SQL queries from its connected tables.
+
+    Each row contains:
+      term_id, term_name, term_description,
+      sqls — list of {sql_text, props} where *props* holds all Sql node
+              properties (including count_monthly_YYYY_MM counters).
+
+    Only terms that have at least one associated Sql query are returned.
+    """
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{source: $source}})
+        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->(t)
+        WITH term,
+             collect({{sql_text: sql.sql_full_query,
+                       sql_id:   sql.id,
+                       props:    properties(sql)}}) AS sqls
+        RETURN term.id          AS term_id,
+               term.name        AS term_name,
+               term.description AS term_description,
+               sqls
+        """,
+        {"source": source},
+    )
+
+
 def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

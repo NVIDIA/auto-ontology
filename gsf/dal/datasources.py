@@ -302,7 +302,9 @@ def fetch_all_tables_without_term() -> list[dict[str, Any]]:
         f"""
         MATCH (t:{Labels.TABLE})
         WHERE NOT (t)-[:{Edges.REPRESENTS}]->()
-        RETURN t.id AS id, t.name AS name, t.description AS description
+        OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+        RETURN t.id AS id, t.name AS name, t.description AS description,
+               sch.name AS schema_name
         ORDER BY t.name
         """
     )

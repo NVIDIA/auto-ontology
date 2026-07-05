@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import threading
+from collections import defaultdict
 from typing import Any
 
 from gsf.dal.attributes import merge_column_attribute
@@ -11,10 +13,21 @@ from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
-from gsf.semantic.models import ColumnAttributeSpec
+from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
+from gsf.semantic.sql_attribute_extractor import extract_sql_attributes
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
+from gsf.server.sql_attributes.service import (
+    SqlAttributeNameConflict,
+    create_sql_attribute,
+)
 
 logger = logging.getLogger(__name__)
+
+# Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
+# the commit phase must be serial: VDB search → judge → Neo4j merge → VDB embed.
+# Without the lock, two threads could simultaneously propose the same Term,
+# both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
+_term_commit_lock = threading.Lock()
 
 
 def _terms_with_assignments(
@@ -30,13 +43,55 @@ def _terms_with_assignments(
     return persisted
 
 
+def _extract_sql_attributes_for_table(
+    table: dict,
+    columns: list[dict],
+    schema_name: str | None,
+    term_id: str,
+    term_name: str,
+    database_name: str,
+) -> list[str]:
+    """Run LLM extraction + persistence for one term's columns. Returns created attr names."""
+    term = {
+        "name": term_name,
+        "description": table.get("description", ""),
+    }
+
+    proposals = extract_sql_attributes(table, columns, schema_name, term, database_name)
+    created_names: list[str] = []
+
+    for proposal in proposals:
+        try:
+            row = create_sql_attribute(
+                name=proposal.name,
+                description=proposal.description,
+                expression=proposal.expression,
+                term_id=term_id,
+                connector=database_name,
+                source="table",
+            )
+            created_names.append(row["name"])
+            logger.info("  Created SqlAttribute %r", proposal.name)
+        except SqlAttributeNameConflict:
+            logger.debug("SqlAttribute %r already exists — skipping", proposal.name)
+        except Exception:
+            logger.warning(
+                "  Failed to persist SqlAttribute %r",
+                proposal.name,
+                exc_info=True,
+            )
+
+    return created_names
+
+
 def process_table(
     table: dict[str, Any],
     ctx: dict[str, Any],
     *,
     domain_summary: DomainSummary | None,
     embedder: SemanticEmbedder | None = None,
-) -> None:
+    database_name: str | None = None,
+) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes."""
     table_id = table["id"]
     table_name = table["name"]
@@ -58,7 +113,7 @@ def process_table(
     )
     if not specs:
         logger.warning("[%s] no non-FK columns — skipping Term creation", table_name)
-        return
+        return ProcessTableResult()
 
     # --- LLM: propose Term(s) and display names ---
     term_result = extract_term(table, ctx, specs, domain_summary=domain_summary)
@@ -72,42 +127,119 @@ def process_table(
             table_name,
             len(specs),
         )
-        return
+        return ProcessTableResult()
 
-    attr_count = 0
-    for term, assignments in persisted_terms:
-        merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
-        for assignment in assignments:
-            spec = spec_by_column[assignment.source_column]
-            merge_column_attribute(
-                term_name=term.name,
-                table_id=table_id,
-                source_column=spec.source_column,
-                attr_name=spec.display_name,
-                datatype=spec.datatype,
-                description=spec.description,
-            )
-            attr_count += 1
+    # Serialize: dedup check + Neo4j writes + VDB embed must be atomic
+    # so the next thread's VDB search sees this thread's newly embedded terms.
+    result_term_names: list[str] = []
+    result_attr_names: list[str] = []
+    terms: list = []
+    attrs_by_term: dict[str, list[dict]] = defaultdict(list)
 
-    term_names = [t.name for t, _ in persisted_terms]
-    logger.info(
-        "[%s] → Terms %s (%d attrs, %d suspected FKs)",
-        table_name,
-        term_names,
-        attr_count,
-        len(all_fk_names),
-    )
+    with _term_commit_lock:
+        if embedder is not None:
+            for term, _ in persisted_terms:
+                try:
+                    candidates = embedder.search_similar_terms(
+                        term.name, term.description
+                    )
+                    if candidates:
+                        from gsf.semantic.term_judge import judge_term_overlap
 
-    if embedder is not None:
+                        merge_into = judge_term_overlap(
+                            term.name, term.description, candidates
+                        )
+                        if merge_into:
+                            logger.info(
+                                "[%s] Merging proposed Term %r into existing %r",
+                                table_name,
+                                term.name,
+                                merge_into,
+                            )
+                            term.name = merge_into
+                except Exception:
+                    logger.warning(
+                        "[%s] Term dedup check failed for %r — proceeding as-is",
+                        table_name,
+                        term.name,
+                        exc_info=True,
+                    )
+
+        for term, assignments in persisted_terms:
+            merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+            result_term_names.append(term.name)
+            for assignment in assignments:
+                spec = spec_by_column[assignment.source_column]
+                merge_column_attribute(
+                    term_name=term.name,
+                    table_id=table_id,
+                    source_column=spec.source_column,
+                    attr_name=spec.display_name,
+                    datatype=spec.datatype,
+                    description=spec.description,
+                )
+                result_attr_names.append(spec.display_name)
+
+        logger.info(
+            "[%s] → Terms %s (%d attrs, %d suspected FKs)",
+            table_name,
+            result_term_names,
+            len(result_attr_names),
+            len(all_fk_names),
+        )
+
+        # Fetch persisted terms — used for embedding and SQL attribute extraction
         try:
             terms, attrs = fetch_terms_and_attributes_for_table(table_id)
-            from collections import defaultdict
-
-            attrs_by_term: dict[str, list[dict]] = defaultdict(list)
             for attr in attrs:
                 if attr.get("term_name"):
                     attrs_by_term[attr["term_name"]].append(attr)
-            for term in terms:
-                embedder.embed_term(term, attrs_by_term.get(term["name"], []))
         except Exception:
-            logger.warning("[%s] inline embed failed", table_name)
+            logger.warning("[%s] failed to fetch persisted terms", table_name)
+
+        if embedder is not None and terms:
+            try:
+                for term in terms:
+                    embedder.embed_term(term, attrs_by_term.get(term["name"], []))
+            except Exception:
+                logger.warning("[%s] inline embed failed", table_name)
+
+    # --- LLM: propose SqlAttributes (outside the lock — Term writes are complete) ---
+    result_sql_attr_names: list[str] = []
+    if database_name is not None and terms:
+        try:
+            col_by_name = {c["name"]: c for c in ctx.get("columns", [])}
+            schema_name = table.get("schema_name")
+
+            for term in terms:
+                term_id = term.get("id")
+                term_name_str = term.get("name")
+                term_col_names = [
+                    a["source_column"]
+                    for a in attrs_by_term.get(term_name_str, [])
+                    if a.get("source_column")
+                ]
+                filtered_cols = [
+                    col_by_name[n] for n in term_col_names if n in col_by_name
+                ]
+                if len(filtered_cols) < 2:
+                    continue
+                sql_names = _extract_sql_attributes_for_table(
+                    table,
+                    filtered_cols,
+                    schema_name,
+                    term_id,
+                    term_name_str,
+                    database_name,
+                )
+                result_sql_attr_names.extend(sql_names)
+        except Exception:
+            logger.warning(
+                "[%s] SqlAttribute extraction failed", table_name, exc_info=True
+            )
+
+    return ProcessTableResult(
+        term_names=result_term_names,
+        attr_names=result_attr_names,
+        sql_attr_names=result_sql_attr_names,
+    )

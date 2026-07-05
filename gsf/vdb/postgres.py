@@ -367,7 +367,7 @@ class PostgresVDB(VDB):
                         {
                             "text": doc.page_content,
                             "metadata": doc.metadata,
-                            "score": float(score),
+                            "_distance": float(score),
                         }
                         for doc, score in hits
                     ]
