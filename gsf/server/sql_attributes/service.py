@@ -63,8 +63,10 @@ __all__ = [
 
 def _resolve_connector(connector: str) -> str:
     """Look up a loaded connector by name and return its ``database_name``."""
+    key = connector.casefold()
     for c in get_connectors():
-        if getattr(c, "database_name", None) == connector:
+        db = getattr(c, "database_name", None)
+        if db is not None and db.casefold() == key:
             return c.database_name
     raise ValueError(f"Connector {connector!r} not found among loaded connectors")
 
