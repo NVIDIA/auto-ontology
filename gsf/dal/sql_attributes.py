@@ -270,10 +270,10 @@ def fetch_tables_from_sql_attributes(
     tables: list[dict[str, Any]] = []
     seen: set[str] = set()
     for row in rows:
-        tid = row.get("id")
-        if not tid or str(tid) in seen:
+        tid = row.get("id") or ""
+        if not tid or tid in seen:
             continue
-        seen.add(str(tid))
+        seen.add(tid)
         cols = [c for c in (row.get("cols") or []) if c.get("name")]
         tables.append(
             {
