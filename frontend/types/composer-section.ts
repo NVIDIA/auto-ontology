@@ -44,12 +44,47 @@ export type ComposerLoadingPanelSection = {
 	message: string;
 };
 
+export type ComposerZoneChip = {
+	id: string;
+	name: string;
+	color: string | null;
+};
+
+export type ComposerZonesSection = {
+	type: ComposerSectionKind.ZONES_CHIPS;
+	id: string;
+	title: string;
+	zones: ComposerZoneChip[];
+	/**
+	 * Zone IDs the current viewer has access to via `PARTICIPANT_OF` edges.
+	 * `null` means admin (no restriction — all zones are accessible).
+	 * `undefined` means access info was not loaded (treat like admin).
+	 * `string[]` means viewer — only zones in this list are accessible to the user.
+	 */
+	userZoneIds?: string[] | null;
+};
+
+export type ComposerRelatedTermChip = {
+	id: string;
+	name: string;
+	description: string | null;
+};
+
+export type ComposerRelatedTermsSection = {
+	type: ComposerSectionKind.RELATED_TERMS_CHIPS;
+	id: string;
+	title: string;
+	terms: ComposerRelatedTermChip[];
+};
+
 export type ComposerSection =
 	| ComposerTextCardSection
 	| ComposerTagListSection
 	| ComposerInfoGridSection
 	| ComposerDataTableSection
-	| ComposerLoadingPanelSection;
+	| ComposerLoadingPanelSection
+	| ComposerZonesSection
+	| ComposerRelatedTermsSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.TEXT_CARD,
@@ -57,6 +92,8 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.INFO_GRID,
 	ComposerSectionKind.DATA_TABLE,
 	ComposerSectionKind.LOADING_PANEL,
+	ComposerSectionKind.ZONES_CHIPS,
+	ComposerSectionKind.RELATED_TERMS_CHIPS,
 ];
 
 export function isComposerSection(x: unknown): x is ComposerSection {

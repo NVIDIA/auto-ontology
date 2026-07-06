@@ -80,7 +80,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		const res = await connectionsApi.test(buildConnection());
 		setTestingConnection(false);
 
-		if ('error' in res && res.error === true) {
+		if ('error' in res && res.error) {
 			setIsConnectionTested(false);
 			setAlert(res.message ?? 'Connection test failed.');
 			return;
@@ -108,7 +108,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		const res = await connectionsApi.create(buildConnection());
 		setLoading(false);
 
-		if ('error' in res && res.error === true) {
+		if ('error' in res && res.error) {
 			setAlert(res.message ?? 'Failed to create connection.');
 			return;
 		}

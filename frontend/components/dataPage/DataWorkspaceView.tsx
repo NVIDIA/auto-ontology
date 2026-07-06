@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/components/BackPanelLayout';
 import { DataTree } from './DataTree';
-import { SinglePageView, type SinglePageFormat } from './SinglePageView';
+import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import type { Database } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
@@ -47,7 +47,7 @@ export function DataWorkspaceView() {
 		setLoading(true);
 		try {
 			const res = await datasources.getDBs();
-			if (res.error === true) {
+			if (res.error) {
 				setLoadError(res.message ?? 'Failed to load databases');
 				return;
 			}
@@ -121,7 +121,7 @@ export function DataWorkspaceView() {
 		const db = next.find((d) => d.id === dbId);
 		if (db && db.schemas.length === 0) {
 			const r = await datasources.getSchemasForDatabase(dbId);
-			if (r.error === true || !r.data) return;
+			if (r.error || !r.data) return;
 			next = mergeSchemasIntoDatabase(next, dbId, r.data);
 		}
 
@@ -129,7 +129,7 @@ export function DataWorkspaceView() {
 			const sch = next.find((d) => d.id === dbId)?.schemas.find((s) => s.id === schemaId);
 			if (sch && sch.tables.length === 0 && (sch.tables_count ?? 0) > 0) {
 				const r = await datasources.getTablesForSchema(schemaId);
-				if (r.error === true || !r.data) return;
+				if (r.error || !r.data) return;
 				next = mergeTablesIntoSchema(next, schemaId, r.data);
 			}
 		}
@@ -139,7 +139,7 @@ export function DataWorkspaceView() {
 			const tbl = sch2?.tables.find((t) => t.id === tableId);
 			if (tbl && tbl.columns.length === 0 && tbl.columns_count > 0) {
 				const r = await datasources.getColumnsForTable(tableId);
-				if (r.error === true || !r.data) return;
+				if (r.error || !r.data) return;
 				next = mergeColumnsIntoTable(next, tableId, r.data);
 			}
 		}

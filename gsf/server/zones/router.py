@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from gsf.dal import users as users_dal
 from gsf.server.zones import dal
 
 router = APIRouter()
@@ -19,6 +20,7 @@ class ZoneCreate(BaseModel):
     description: str | None = None
     color: str
     items: list[str]
+    created_by: str  # user_id of the requesting user (must be admin)
 
 
 class ZoneUpdate(BaseModel):
@@ -28,17 +30,41 @@ class ZoneUpdate(BaseModel):
     items: list[str] | None = None
 
 
+class ZoneAccessGrant(BaseModel):
+    user_id: str
+
+
+def _require_admin(user_id: str) -> None:
+    """Raise 403 when *user_id* is not an admin (or does not exist)."""
+    user = users_dal.get_user(user_id)
+    if user is None:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=403, detail="Only admins can perform this action"
+        )
+
+
 @router.get("/zones")
-def list_zones() -> dict:
-    """All zones in the catalog."""
-    rows = dal.list_zones()
+def list_zones(uid: str = Query(..., description="Requesting user id")) -> dict:
+    """Zones visible to *uid*.
+
+    Admins see all zones; viewers see only zones they have been granted access to.
+    """
+    rows = dal.list_zones(uid)
     return {"data": rows, "count": len(rows)}
 
 
 @router.get("/zones/{zone_id}")
-def get_zone(zone_id: str) -> dict:
-    """One zone with its catalog data items."""
-    row = dal.get_zone_by_id(zone_id)
+def get_zone(
+    zone_id: str,
+    uid: str = Query(..., description="Requesting user id"),
+) -> dict:
+    """One zone with its catalog data items.
+
+    Returns 404 when the zone does not exist or the user has no access.
+    """
+    row = dal.get_zone_by_id(zone_id, user_id=uid)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": row}
@@ -46,7 +72,8 @@ def get_zone(zone_id: str) -> dict:
 
 @router.post("/zones", status_code=201)
 def create_zone(body: ZoneCreate) -> dict:
-    """Create a zone and attach catalog items."""
+    """Create a zone and attach catalog items.  Requires admin role."""
+    _require_admin(body.created_by)
     normalized_name = body.name.strip()
     if normalized_name == "":
         raise HTTPException(status_code=400, detail="Zone name is required")
@@ -101,3 +128,53 @@ def delete_zone(zone_id: str) -> dict:
     if not dal.delete_zone(zone_id):
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": {"id": zone_id}}
+
+
+# ---------------------------------------------------------------------------
+# Zone access management  (admin → viewer)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/zones/{zone_id}/access")
+def list_zone_access(
+    zone_id: str,
+    admin_uid: str = Query(..., description="Admin user id performing the request"),
+) -> dict:
+    """List all users that currently have access to a zone.  Requires admin."""
+    _require_admin(admin_uid)
+    rows = dal.list_zone_users(zone_id)
+    return {"data": rows, "count": len(rows)}
+
+
+@router.post("/zones/{zone_id}/access", status_code=201)
+def grant_zone_access(
+    zone_id: str,
+    body: ZoneAccessGrant,
+    admin_uid: str = Query(..., description="Admin user id performing the request"),
+) -> dict:
+    """Grant a user access to a zone.  Requires admin."""
+    _require_admin(admin_uid)
+    granted = dal.grant_zone_access(zone_id=zone_id, user_id=body.user_id)
+    if not granted:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Zone {zone_id!r} or user {body.user_id!r} not found",
+        )
+    return {"data": {"zone_id": zone_id, "user_id": body.user_id}}
+
+
+@router.delete("/zones/{zone_id}/access/{user_id}")
+def revoke_zone_access(
+    zone_id: str,
+    user_id: str,
+    admin_uid: str = Query(..., description="Admin user id performing the request"),
+) -> dict:
+    """Revoke a user's access to a zone.  Requires admin."""
+    _require_admin(admin_uid)
+    revoked = dal.revoke_zone_access(zone_id=zone_id, user_id=user_id)
+    if not revoked:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No access record found for user {user_id!r} on zone {zone_id!r}",
+        )
+    return {"data": {"zone_id": zone_id, "user_id": user_id}}

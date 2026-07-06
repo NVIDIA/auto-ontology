@@ -31,6 +31,8 @@ export enum ComposerSectionKind {
 	INFO_GRID = 'infoGrid',
 	DATA_TABLE = 'dataTable',
 	LOADING_PANEL = 'loadingPanel',
+	ZONES_CHIPS = 'zonesChips',
+	RELATED_TERMS_CHIPS = 'relatedTermsChips',
 }
 
 export enum Usage {

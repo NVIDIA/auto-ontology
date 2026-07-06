@@ -2,6 +2,5 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export { SinglePageView, type SinglePageFormat, type SinglePageViewProps } from './SinglePageView';
 export { DataTree, type DataTreeProps } from './DataTree';
 export { DataWorkspaceView, type DataWorkspaceViewProps } from './DataWorkspaceView';

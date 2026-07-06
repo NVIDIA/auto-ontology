@@ -26,7 +26,7 @@ export const ConnectionsView = () => {
 		try {
 			setError(null);
 			const res = await connectionsApi.getAll();
-			if (res.error === true) {
+			if (res.error) {
 				setError(res.message ?? 'Failed to load connections.');
 				setConnections([]);
 				return;
@@ -77,7 +77,7 @@ export const ConnectionsView = () => {
 		const res = await connectionsApi.delete(deletingConnection);
 		setDeleting(false);
 
-		if (res.error === true) {
+		if (res.error) {
 			setDeleteError(res.message ?? 'Failed to delete connection.');
 			return;
 		}

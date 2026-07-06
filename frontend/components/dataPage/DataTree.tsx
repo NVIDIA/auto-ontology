@@ -489,7 +489,7 @@ export function DataTree({
 	const loadSchemasForDatabase = useCallback(
 		async (dbId: string) => {
 			const res = await datasources.getSchemasForDatabase(dbId);
-			if (res.error === true || !res.data) return;
+			if (res.error || !res.data) return;
 			setDatabases((prev) => {
 				const next = mergeSchemasIntoDatabase(prev, dbId, res.data);
 				scheduleTreeDataNotify(onTreeDataUpdated, next);
@@ -503,7 +503,7 @@ export function DataTree({
 		async (schemaCompoundId: string) => {
 			const [, schemaElemId] = splitId(schemaCompoundId, 2);
 			const res = await datasources.getTablesForSchema(schemaElemId);
-			if (res.error === true || !res.data) return;
+			if (res.error || !res.data) return;
 			setDatabases((prev) => {
 				const next = mergeTablesIntoSchema(prev, schemaElemId, res.data);
 				scheduleTreeDataNotify(onTreeDataUpdated, next);
@@ -517,7 +517,7 @@ export function DataTree({
 		async (tableCompoundId: string) => {
 			const [, , tableElemId] = splitId(tableCompoundId, 3);
 			const res = await datasources.getColumnsForTable(tableElemId);
-			if (res.error === true || !res.data) return;
+			if (res.error || !res.data) return;
 			setDatabases((prev) => {
 				const next = mergeColumnsIntoTable(prev, tableElemId, res.data);
 				scheduleTreeDataNotify(onTreeDataUpdated, next);

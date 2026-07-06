@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
+import { usersApi } from '@/api/users';
 import { datasources } from '@/api/datasources';
 import { ModalWithSteps } from '@/components/ModalWithSteps';
 import { ConfirmModal } from '@/components/ConfirmModal';
@@ -16,8 +17,11 @@ import type { ColorOption } from '@/components/ColorPicker';
 import { Icon, IconName } from '@/components/icons';
 import { PopoverMenu } from '@/components/PopoverMenu';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
+import { UsersPicker } from '@/components/UsersPicker';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
+import type { User } from '@/types/auth';
+import { useSession } from '@/auth/auth-client';
 
 const ZONE_COLORS: readonly ColorOption[] = [
 	{ value: '#76b900', label: 'Lime', swatchClassName: 'bg-[#76b900]' },
@@ -142,6 +146,10 @@ const expandInitialZoneItemSelection = (
 	return expanded;
 };
 
+// ---------------------------------------------------------------------------
+// ZoneCard
+// ---------------------------------------------------------------------------
+
 const ZoneCard = ({
 	zone,
 	onEdit,
@@ -198,7 +206,14 @@ const ZoneCard = ({
 	</div>
 );
 
+// ---------------------------------------------------------------------------
+// Page
+// ---------------------------------------------------------------------------
+
 export default function ZonesSettingsPage() {
+	const { data: session } = useSession();
+	const currentUserId = session?.user?.id ?? '';
+
 	const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
 	const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
 	const [zones, setZones] = useState<Zone[]>([]);
@@ -228,6 +243,12 @@ export default function ZonesSettingsPage() {
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 	const [deletingZone, setDeletingZone] = useState(false);
 
+	// Users picker state
+	const [allUsers, setAllUsers] = useState<User[]>([]);
+	const [usersLoading, setUsersLoading] = useState(false);
+	const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set());
+	const [initialEditUserIds, setInitialEditUserIds] = useState<Set<string>>(new Set());
+
 	const normalizedName = name.trim();
 	const normalizedDescription = normalizeDescription(description);
 	const nameExists = zones.some((zone) => {
@@ -247,11 +268,13 @@ export default function ZonesSettingsPage() {
 		(normalizedName !== initialEditName ||
 			normalizedDescription !== initialEditDescription ||
 			color !== (initialEditColor ?? DEFAULT_ZONE_COLOR) ||
-			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems));
+			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems) ||
+			!setsAreEqual(selectedUserIds, initialEditUserIds));
 
 	const loadZones = useCallback(async () => {
+		if (!currentUserId) return;
 		setLoading(true);
-		const response = await zonesApi.getAll();
+		const response = await zonesApi.getAll(currentUserId);
 		if (response.error) {
 			setError(response.message ?? 'Failed to load zones.');
 			setZones([]);
@@ -261,11 +284,12 @@ export default function ZonesSettingsPage() {
 		setError(null);
 		setZones(response.data ?? []);
 		setLoading(false);
-	}, []);
+	}, [currentUserId]);
 
 	useEffect(() => {
+		if (!currentUserId) return;
 		let cancelled = false;
-		zonesApi.getAll().then((response) => {
+		zonesApi.getAll(currentUserId).then((response) => {
 			if (cancelled) return;
 			if (response.error) {
 				setError(response.message ?? 'Failed to load zones.');
@@ -276,6 +300,23 @@ export default function ZonesSettingsPage() {
 			}
 			setLoading(false);
 		});
+		return () => {
+			cancelled = true;
+		};
+	}, [currentUserId]);
+
+	// Load all users once on mount for the picker
+	useEffect(() => {
+		let cancelled = false;
+		const load = async () => {
+			setUsersLoading(true);
+			const { users } = await usersApi.list();
+			if (cancelled) return;
+			// Only show viewer users in picker — admins get access automatically
+			setAllUsers(users.filter((u) => u.role !== 'admin'));
+			setUsersLoading(false);
+		};
+		void load();
 		return () => {
 			cancelled = true;
 		};
@@ -297,11 +338,13 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(null);
 		setInitialEditColor(null);
 		setInitialEditSelectedItems(new Set());
+		setSelectedUserIds(new Set());
+		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
 	};
 
-	const openEditModal = (zone: Zone) => {
+	const openEditModal = async (zone: Zone) => {
 		setModalMode('edit');
 		setEditingZoneId(zone.id);
 		setName(zone.name);
@@ -317,8 +360,18 @@ export default function ZonesSettingsPage() {
 		setInitialEditDescription(normalizeDescription(zone.description ?? ''));
 		setInitialEditColor(zone.color ?? DEFAULT_ZONE_COLOR);
 		setInitialEditSelectedItems(new Set());
+		setSelectedUserIds(new Set());
+		setInitialEditUserIds(new Set());
 		setSubmitError(null);
 		setModalOpen(true);
+
+		// Load current zone users asynchronously
+		const accessResponse = await zonesApi.listAccess(zone.id, currentUserId);
+		if (!accessResponse.error) {
+			const ids = new Set((accessResponse.data ?? []).map((u) => u.id));
+			setSelectedUserIds(ids);
+			setInitialEditUserIds(new Set(ids));
+		}
 	};
 
 	const closeZoneModal = () => {
@@ -404,7 +457,7 @@ export default function ZonesSettingsPage() {
 		let effectiveSelectedItems = selectedItems;
 
 		if (modalMode === 'edit' && editingZoneId != null && !editItemsHydrated) {
-			const detailResponse = await zonesApi.getById(editingZoneId);
+			const detailResponse = await zonesApi.getById(editingZoneId, currentUserId);
 			if (detailResponse.error) {
 				setSubmitError(detailResponse.message ?? 'Failed to load zone items.');
 			} else {
@@ -431,6 +484,16 @@ export default function ZonesSettingsPage() {
 		setTreeExpandSelectedOnlyKey((prev) => prev + 1);
 	};
 
+	const syncZoneAccess = async (zoneId: string) => {
+		const toGrant = [...selectedUserIds].filter((id) => !initialEditUserIds.has(id));
+		const toRevoke = [...initialEditUserIds].filter((id) => !selectedUserIds.has(id));
+
+		await Promise.all([
+			...toGrant.map((uid) => zonesApi.grantAccess(zoneId, uid, currentUserId)),
+			...toRevoke.map((uid) => zonesApi.revokeAccess(zoneId, uid, currentUserId)),
+		]);
+	};
+
 	const handleSubmit = async () => {
 		if (!canSubmit || activeStep !== 1) return;
 		setSubmitting(true);
@@ -446,27 +509,36 @@ export default function ZonesSettingsPage() {
 				description: normalizedDescription ?? undefined,
 				color,
 				items: Array.from(normalizedSelectedItems),
+				created_by: currentUserId,
 			});
 
-			setSubmitting(false);
 			if (response.error) {
+				setSubmitting(false);
 				setSubmitError(response.message ?? 'Failed to create zone.');
 				return;
 			}
 
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
-				const { id, name, label, description, color } = created;
+				// Grant access to selected viewer users
+				await Promise.all(
+					[...selectedUserIds].map((uid) =>
+						zonesApi.grantAccess(created.id, uid, currentUserId),
+					),
+				);
+
+				const { id, name: n, label, description: d, color: c } = created;
 				setZones((prev) => {
 					const next = [
 						...prev.filter((z) => z.id !== created.id),
-						{ id, name, label, description, color },
+						{ id, name: n, label, description: d, color: c },
 					];
 					return next.sort((a, b) => a.name.localeCompare(b.name));
 				});
 			} else {
 				await loadZones();
 			}
+			setSubmitting(false);
 			setModalOpen(false);
 			return;
 		}
@@ -490,14 +562,22 @@ export default function ZonesSettingsPage() {
 			patch.items = Array.from(normalizedSelectedItems);
 		}
 
-		const response = await zonesApi.update(editingZoneId, patch);
+		const hasFieldChanges = Object.keys(patch).length > 0;
+		const hasUserChanges = !setsAreEqual(selectedUserIds, initialEditUserIds);
+
+		const [response] = await Promise.all([
+			hasFieldChanges ? zonesApi.update(editingZoneId, patch) : Promise.resolve(null),
+			hasUserChanges ? syncZoneAccess(editingZoneId) : Promise.resolve(),
+		]);
+
 		setSubmitting(false);
-		if (response.error) {
+
+		if (response && response.error) {
 			setSubmitError(response.message ?? 'Failed to update zone.');
 			return;
 		}
 
-		const updated = response.data;
+		const updated = response?.data;
 		if (updated != null) {
 			setZones((prev) =>
 				prev.map((zone) =>
@@ -590,7 +670,9 @@ export default function ZonesSettingsPage() {
 							<ZoneCard
 								key={zone.id}
 								zone={zone}
-								onEdit={openEditModal}
+								onEdit={(z) => {
+									void openEditModal(z);
+								}}
 								onDelete={handleRequestZoneDelete}
 							/>
 						))}
@@ -696,6 +778,12 @@ export default function ZonesSettingsPage() {
 								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
 						</div>
+						<UsersPicker
+							allUsers={allUsers}
+							selectedIds={selectedUserIds}
+							onChange={setSelectedUserIds}
+							loading={usersLoading}
+						/>
 					</>
 				) : (
 					<div className="space-y-3">

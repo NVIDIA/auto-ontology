@@ -85,7 +85,7 @@ export const AnalyticsView = () => {
 			setLoading(true);
 			const res = await analyticsApi.list();
 			if (cancelled) return;
-			if (res.error === true) {
+			if (res.error) {
 				setError(res.message ?? 'Failed to load analytics');
 				setRows([]);
 			} else {

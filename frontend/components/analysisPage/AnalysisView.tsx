@@ -41,7 +41,7 @@ export const AnalysisView = () => {
 			setLoading(true);
 			const res = await analyses.list();
 			if (cancelled) return;
-			if (res.error === true) {
+			if (res.error) {
 				setError(res.message ?? 'Failed to load custom analyses');
 				setItems([]);
 			} else {
@@ -96,7 +96,7 @@ export const AnalysisView = () => {
 		setDeleting(true);
 		const res = await analyses.delete(deletingItem.id);
 		setDeleting(false);
-		if (res.error === true) {
+		if (res.error) {
 			setDeleteError(res.message ?? 'Failed to delete custom analysis');
 			return;
 		}
@@ -132,7 +132,7 @@ export const AnalysisView = () => {
 
 		setSubmitting(false);
 
-		if (res.error === true) {
+		if (res.error) {
 			setSubmitError(
 				res.message ??
 					(editingId !== null

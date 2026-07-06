@@ -54,7 +54,8 @@ export const roles = {
 	// Viewer: read-only on glossary/prompts, full control of their own
 	// conversations, may run chat, may view custom analyses (not add/edit them),
 	// and may browse + edit the data catalog. No analytics, SSO, user mgmt, and
-	// no access at all to connections or zones (admin-only).
+	// no connection/zone management (admin-only). Viewers may read zones to
+	// display their own accessible zones in the term single page.
 	[Role.Viewer]: ac.newRole({
 		// For now viewers may fully manage the glossary, custom prompts, and
 		// custom analyses (create/edit/delete), so the create + edit controls on
@@ -65,6 +66,7 @@ export const roles = {
 		conversation: ['read', 'write', 'delete'],
 		chat: ['use'],
 		catalog: ['read', 'edit'],
+		zone: ['read'],
 	}),
 };
 

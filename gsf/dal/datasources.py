@@ -25,6 +25,8 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
+
 from gsf.semantic.constants import REL_REPRESENTS
 
 logger = logging.getLogger(__name__)
@@ -37,15 +39,34 @@ _ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
 # ---------------------------------------------------------------------------
 
 
-def fetch_databases() -> list[dict[str, Any]]:
-    """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees."""
+def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
+    """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees.
+
+    When *zone_ids* is supplied the result is restricted to databases (and schema
+    counts) reachable through those zones.  Pass ``None`` (or omit) to return
+    the full unfiltered catalog (admin / internal callers).
+    """
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        db_ids = list(accessible["db_ids"])
+        schema_ids = list(accessible["schema_ids"])
+        where_clause = "WHERE db.id IN $db_ids AND s.id IN $schema_ids"
+        params: dict[str, Any] = {"db_ids": db_ids, "schema_ids": schema_ids}
+    else:
+        where_clause = ""
+        params = {}
+
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+        {where_clause}
         RETURN db.id AS id, db.name AS name, db.description AS description,
                count(s) AS schema_count
         ORDER BY name
         """,
+        params,
     )
     return [
         {
@@ -64,18 +85,41 @@ def fetch_databases() -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
-def fetch_schemas_for_database(db_id: str) -> dict[str, Any] | None:
+def fetch_schemas_for_database(
+    db_id: str,
+    zone_ids: list[str] | None = None,
+) -> dict[str, Any] | None:
     """Return schemas_count and a list of schema summaries for a database.
 
     Returns a dict with ``schemas_count`` and ``schemas`` — a list of
     ``{id, schema_name, tables_count}`` dicts.
 
     Returns ``None`` if no ``Database`` matches ``db_id``.
+
+    When *zone_ids* is supplied only schemas (and their table counts) reachable
+    through those zones are returned.
     """
+    accessible = (
+        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
+    )
+    if accessible is not None:
+        schema_ids = list(accessible["schema_ids"])
+        table_ids = list(accessible["table_ids"])
+        where_clause = "WHERE s.id IN $schema_ids AND t.id IN $table_ids"
+        params: dict[str, Any] = {
+            "db_id": db_id,
+            "schema_ids": schema_ids,
+            "table_ids": table_ids,
+        }
+    else:
+        where_clause = ""
+        params = {"db_id": db_id}
+
     rows = get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+        {where_clause}
         WITH s.id AS id, s.name AS schema_name, s.description AS description,
              count(t) AS tables_count
         ORDER BY schema_name
@@ -84,7 +128,7 @@ def fetch_schemas_for_database(db_id: str) -> dict[str, Any] | None:
                       tables_count: tables_count}}) AS schemas
         RETURN size(schemas) AS schemas_count, schemas
         """,
-        {"db_id": db_id},
+        params,
     )
     if not rows:
         return None
@@ -219,13 +263,23 @@ def fetch_tables_for_schema(
     *,
     database_name: str
     | None = None,  # accepted for API compat; schema_id is globally unique
+    zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return Table payloads with column counts for a given schema."""
+    """Return Table payloads with column counts for a given schema.
+
+    When *zone_ids* is supplied only tables reachable through those zones are
+    returned.
+    """
+    where_clause, params = resolve_table_filter(
+        zone_ids, "t.id", extra_params={"schema_id": schema_id}
+    )
+
     return get_neo4j_conn().query_read(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
               (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+        {where_clause}
         RETURN t.id AS id,
                t.name AS name,
                t.table_type AS table_type,
@@ -234,7 +288,7 @@ def fetch_tables_for_schema(
                count(c) AS columns_count
         ORDER BY name
         """,
-        {"schema_id": schema_id},
+        params,
     )
 
 

@@ -4,11 +4,24 @@
 
 'use client';
 
-import { forwardRef, useEffect, useRef, useState, type ReactNode } from 'react';
+import {
+	forwardRef,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	useCallback,
+	type ReactNode,
+} from 'react';
+import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { isComposerSection, type ComposerSection } from '@/types/composer-section';
+import {
+	isComposerSection,
+	type ComposerSection,
+	type ComposerZonesSection,
+} from '@/types/composer-section';
 import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
@@ -17,6 +30,19 @@ import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
 
 export type ComposerEditValue = string | string[];
+
+function zoneChipStyle(color: string): React.CSSProperties {
+	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };
+}
+
+const ZoneChip = ({ name, color }: { name: string; color: string | null }) => (
+	<span
+		className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+		style={color ? zoneChipStyle(color) : undefined}
+	>
+		{name}
+	</span>
+);
 
 export type SinglePageComposerProps = {
 	sections: unknown[];
@@ -40,6 +66,10 @@ function composerSectionHeading(section: ComposerSection): string {
 	switch (section.type) {
 		case ComposerSectionKind.LOADING_PANEL:
 			return section.message;
+		case ComposerSectionKind.ZONES_CHIPS:
+			return `${section.title} (${section.zones.length})`;
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return `${section.title} (${section.terms.length})`;
 		default:
 			return section.title;
 	}
@@ -153,7 +183,38 @@ const ReadOnlyTagList = ({
 	</div>
 );
 
-function renderComposerSection(section: ComposerSection): ReactNode {
+const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
+	const displayedZones = useMemo(() => {
+		if (Array.isArray(section.userZoneIds)) {
+			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
+		}
+		return section.zones;
+	}, [section.zones, section.userZoneIds]);
+
+	return (
+		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+				{section.title} ({displayedZones.length})
+			</h2>
+			{displayedZones.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-2">
+					{displayedZones.map((zone) => (
+						<li key={zone.id}>
+							<ZoneChip name={zone.name} color={zone.color} />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
+
+function renderComposerSection(
+	section: ComposerSection,
+	onTermClick?: (termId: string) => void,
+): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
 			return (
@@ -237,6 +298,43 @@ function renderComposerSection(section: ComposerSection): ReactNode {
 					</p>
 				</div>
 			);
+		case ComposerSectionKind.ZONES_CHIPS:
+			return <ZonesSection section={section} />;
+		case ComposerSectionKind.RELATED_TERMS_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.terms.length})
+					</h2>
+					{section.terms.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.terms.map((term) => (
+								<li key={term.id}>
+									{onTermClick ? (
+										<button
+											type="button"
+											title={term.description ?? undefined}
+											onClick={() => onTermClick(term.id)}
+											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
+										>
+											{term.name}
+										</button>
+									) : (
+										<span
+											title={term.description ?? undefined}
+											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+										>
+											{term.name}
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			);
 		default:
 			return null;
 	}
@@ -264,6 +362,15 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onSave,
 			onCancel,
 		} = props;
+		const router = useRouter();
+
+		const handleTermClick = useCallback(
+			(termId: string) => {
+				router.push(`/terms?focus=${encodeURIComponent(termId)}`);
+			},
+			[router],
+		);
+
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
 		const entityId = (hh?.entityId as string) ?? '';
@@ -302,7 +409,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			const res = await datasources.updateNode(entityId, edits as NodePatch);
 			setSaving(false);
 
-			if (res.error === true) {
+			if (res.error) {
 				setSaveError(res.message ?? 'Failed to save changes');
 				return;
 			}
@@ -528,7 +635,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													}}
 												/>
 											) : (
-												renderComposerSection(section)
+												renderComposerSection(section, handleTermClick)
 											)}
 										</div>
 									);
