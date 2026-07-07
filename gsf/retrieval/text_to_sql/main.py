@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
 import time
 from datetime import datetime
 from typing import Generator
@@ -17,11 +18,21 @@ from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
+_ENTITY_MODEL = os.environ.get("ENTITY_EXTRACTION_MODEL")
+
 try:
     llm_client = get_llm_client()
 except ValueError as e:
     logger.error("Failed to initialize LLM client: %s", e)
     llm_client = None
+
+entity_llm_client = None
+if _ENTITY_MODEL:
+    try:
+        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=512)
+        logger.info("Entity extraction will use model: %s", _ENTITY_MODEL)
+    except ValueError as e:
+        logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)
 
 graph = create_graph()
 app = graph.compile()
@@ -64,7 +75,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         HumanMessage(content=payload["question"]),
     ]
 
-    return {
+    state: dict = {
         "llm": llm_client,
         "initial_question": payload["question"],
         "connectors": connectors,
@@ -75,6 +86,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "decision": "",
         "domain_rules": domain_rules,
     }
+    if entity_llm_client is not None:
+        state["entity_llm"] = entity_llm_client
+    return state
 
 
 def _extract_answer(final_state: dict) -> dict:

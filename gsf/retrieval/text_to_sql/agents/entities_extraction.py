@@ -56,7 +56,7 @@ class EntitiesExtractionAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         """Extract entities from the question only (no domain rules)."""
-        llm = state["llm"]
+        llm = state.get("entity_llm") or state["llm"]
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
 

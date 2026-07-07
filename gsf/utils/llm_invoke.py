@@ -25,17 +25,27 @@ _API_KEY = os.environ.get("NVIDIA_API_KEY", "")
 
 def get_llm_client(
     *,
+    model: str | None = None,
     temperature: float = 0.0,
     max_tokens: int = 4096,
 ) -> BaseChatModel:
+    """Create an LLM client.
+
+    Parameters
+    ----------
+    model : str | None
+        Override the default ``MODEL_NAME`` env var for this client.
+    """
     if not _API_KEY:
         raise EnvironmentError("NVIDIA_API_KEY is not set")
 
-    if _MODEL_NAME.startswith("openai/"):
+    resolved_model = model or _MODEL_NAME
+
+    if resolved_model.startswith("openai/"):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
-            model=_MODEL_NAME,
+            model=resolved_model,
             api_key=_API_KEY,
             base_url=_BASE_URL,
             temperature=temperature,
@@ -45,7 +55,7 @@ def get_llm_client(
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
     return ChatNVIDIA(
-        model=_MODEL_NAME,
+        model=resolved_model,
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
