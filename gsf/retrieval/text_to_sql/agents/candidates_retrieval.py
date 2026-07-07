@@ -16,6 +16,7 @@ Responsibilities:
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
@@ -260,31 +261,54 @@ class CandidateRetrievalAgent(BaseAgent):
         all_sql_attr_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            # CustomAnalysis: search once with the full question.
-            all_custom_hits = _search_by_label(
-                semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3
-            )
-            # SqlAttribute: search once with the full question.
-            all_sql_attr_hits = _search_by_label(
-                semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3
-            )
-            # ColumnAttribute: search per entity.
-            for entity in entities:
-                entity = (entity or "").strip()
-                if not entity:
-                    continue
-                all_col_attr_hits.extend(
-                    _search_by_label(
-                        semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2
-                    )
+            vdb_futures: dict = {}
+            with ThreadPoolExecutor(max_workers=8) as pool:
+                vdb_futures["custom"] = pool.submit(
+                    _search_by_label,
+                    semantic_retriever,
+                    question,
+                    Labels.CUSTOM_ANALYSIS,
+                    3,
                 )
+                vdb_futures["sql_attr"] = pool.submit(
+                    _search_by_label,
+                    semantic_retriever,
+                    question,
+                    LABEL_SQL_ATTRIBUTE,
+                    3,
+                )
+                clean_entities = [e.strip() for e in entities if (e or "").strip()]
+                for entity in clean_entities:
+                    vdb_futures[f"col_{entity}"] = pool.submit(
+                        _search_by_label,
+                        semantic_retriever,
+                        entity,
+                        LABEL_COLUMN_ATTRIBUTE,
+                        2,
+                    )
 
-        all_custom_hits = _llm_filter_candidates(
-            llm, question, all_custom_hits, "custom analyses"
-        )
-        all_sql_attr_hits = _llm_filter_candidates(
-            llm, question, all_sql_attr_hits, "SQL attributes"
-        )
+            all_custom_hits = vdb_futures["custom"].result()
+            all_sql_attr_hits = vdb_futures["sql_attr"].result()
+            for entity in clean_entities:
+                all_col_attr_hits.extend(vdb_futures[f"col_{entity}"].result())
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_custom = pool.submit(
+                _llm_filter_candidates,
+                llm,
+                question,
+                all_custom_hits,
+                "custom analyses",
+            )
+            f_sql_attr = pool.submit(
+                _llm_filter_candidates,
+                llm,
+                question,
+                all_sql_attr_hits,
+                "SQL attributes",
+            )
+        all_custom_hits = f_custom.result()
+        all_sql_attr_hits = f_sql_attr.result()
 
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
