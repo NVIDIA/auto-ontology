@@ -32,11 +32,9 @@ Rules:
 table is a true junction between two unrelated entities. Never split a single \
 entity into separate Terms for its core fields versus its metadata, lifecycle, \
 or audit fields — those all belong to the same Term. If in doubt, use one Term.
-2. Term names must be user-friendly with spaces between words (e.g. Purchase Order, \
-not purchase_orders or PurchaseOrder). When the table identifier includes a schema \
-(e.g. website.customers), incorporate the schema into the Term name to disambiguate \
-from same-named tables in other schemas (e.g. "Website Customers" vs "Sales Customers"). \
-Omit generic schemas like public, dbo, or main.
+2. Term names must be user-friendly with spaces between words. When the table \
+identifier includes a schema, incorporate the schema into the Term name to disambiguate \
+from same-named tables in other schemas. Omit generic schemas like public, dbo, or main.
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).

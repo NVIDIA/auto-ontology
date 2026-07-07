@@ -15,8 +15,7 @@ def to_term_name(table_name: str, schema_name: str = "") -> str:
     """User-friendly Term name from a table (and optional schema) name.
 
     The schema is prepended when it is non-generic and carries meaningful
-    disambiguation (e.g. ``website.customers`` → ``"Website Customers"``
-    vs ``public.orders`` → ``"Orders"``).
+    disambiguation.
     """
     parts = re.split(r"[_\s]+", table_name.strip())
     name = " ".join(p.capitalize() for p in parts if p)
