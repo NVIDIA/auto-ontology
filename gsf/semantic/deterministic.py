@@ -8,10 +8,23 @@ from typing import Any
 from gsf.semantic.models import ColumnAttributeSpec
 
 
-def to_term_name(table_name: str) -> str:
-    """CamelCase provisional Term from snake_case table name."""
+_GENERIC_SCHEMAS = {"public", "dbo", "main", "default"}
+
+
+def to_term_name(table_name: str, schema_name: str = "") -> str:
+    """User-friendly Term name from a table (and optional schema) name.
+
+    The schema is prepended when it is non-generic and carries meaningful
+    disambiguation (e.g. ``website.customers`` → ``"Website Customers"``
+    vs ``public.orders`` → ``"Orders"``).
+    """
     parts = re.split(r"[_\s]+", table_name.strip())
-    return "".join(p.capitalize() for p in parts if p)
+    name = " ".join(p.capitalize() for p in parts if p)
+    if schema_name and schema_name.lower() not in _GENERIC_SCHEMAS:
+        schema_parts = re.split(r"[_\s]+", schema_name.strip())
+        schema_prefix = " ".join(p.capitalize() for p in schema_parts if p)
+        return f"{schema_prefix} {name}"
+    return name
 
 
 def fk_source_columns(fks: list[dict[str, Any]]) -> set[str]:

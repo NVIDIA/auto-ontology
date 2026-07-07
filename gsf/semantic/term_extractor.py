@@ -33,7 +33,10 @@ table is a true junction between two unrelated entities. Never split a single \
 entity into separate Terms for its core fields versus its metadata, lifecycle, \
 or audit fields — those all belong to the same Term. If in doubt, use one Term.
 2. Term names must be user-friendly with spaces between words (e.g. Purchase Order, \
-not purchase_orders or PurchaseOrder).
+not purchase_orders or PurchaseOrder). When the table identifier includes a schema \
+(e.g. website.customers), incorporate the schema into the Term name to disambiguate \
+from same-named tables in other schemas (e.g. "Website Customers" vs "Sales Customers"). \
+Omit generic schemas like public, dbo, or main.
 3. Assign EVERY candidate column to exactly one Term. For each assignment return \
 source_column exactly as given and a display_name — a user-friendly ColumnAttribute \
 label with spaces between words (e.g. Order Date, Total Amount).
@@ -103,7 +106,8 @@ def _fallback_result(
     table: dict[str, Any],
     specs: list[ColumnAttributeSpec],
 ) -> TableTermsResult:
-    name = to_term_name(table["name"])
+    schema_name = table.get("schema_name") or ""
+    name = to_term_name(table["name"], schema_name)
     attributes = [
         TermAttributeAssignment(
             source_column=spec.source_column,
@@ -132,7 +136,8 @@ def _sanitize_result(
 ) -> TableTermsResult:
     spec_by_column = {spec.source_column: spec for spec in specs}
     allowed_columns = set(spec_by_column)
-    default_term = to_term_name(table["name"])
+    schema_name = table.get("schema_name") or ""
+    default_term = to_term_name(table["name"], schema_name)
 
     sanitized_terms: list[TermProposal] = []
     seen_term_names: set[str] = set()
@@ -222,6 +227,8 @@ def extract_term(
         return _fallback_result(table, specs)
 
     description = table.get("description") or ""
+    schema_name = table.get("schema_name") or ""
+    table_header = f"{schema_name}.{table['name']}" if schema_name else table["name"]
 
     spec_lines = "\n".join(_format_spec_line(spec) for spec in specs[:40])
     domain_block = ""
@@ -231,7 +238,7 @@ def extract_term(
             f"Core entities: {', '.join(domain_summary.core_entities[:12])}\n"
         )
     prompt = (
-        f"Table: {table['name']}\n"
+        f"Table: {table_header}\n"
         f"Description: {description}\n"
         f"Candidate columns (assign each to exactly one Term with a display_name):\n"
         f"{spec_lines}\n"
