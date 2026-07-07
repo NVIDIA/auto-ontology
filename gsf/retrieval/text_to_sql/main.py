@@ -35,29 +35,6 @@ if _ENTITY_MODEL:
         logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)
 
 
-_warmup_done = False
-
-
-def warmup_llm() -> None:
-    """Fire a trivial request to wake the NIM endpoint (avoids cold-start on first real query)."""
-    global _warmup_done
-    if _warmup_done:
-        return
-    _warmup_done = True
-    client = entity_llm_client or llm_client
-    if client is None:
-        return
-    t0 = time.perf_counter()
-    try:
-        client.invoke([HumanMessage(content="hi")])
-        logger.info("LLM warm-up completed in %.1fs", time.perf_counter() - t0)
-    except Exception:
-        logger.info(
-            "LLM warm-up call failed after %.1fs (non-fatal)",
-            time.perf_counter() - t0,
-        )
-
-
 graph = create_graph()
 app = graph.compile()
 
@@ -137,7 +114,6 @@ def stream_agent_response(
     """Yield ``{"type": "step", "node": ...}`` for each graph node,
     then ``{"type": "result", "answer": ...}`` with the final answer.
     On error yields ``{"type": "error", "message": ...}``."""
-    warmup_llm()
     t0 = time.perf_counter()
 
     state = _build_state(payload)
