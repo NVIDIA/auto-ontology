@@ -23,6 +23,7 @@ Design Decisions:
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -175,26 +176,37 @@ class CandidatePreparationAgent(BaseAgent):
                     "schema_name": anchor_ctx["schema_name"],
                 }
 
-                for dest_id, dest_ctx in attr_contexts.items():
-                    if dest_id == anchor_id:
-                        continue
-                    join_path = find_join_path(anchor_ctx["col_id"], dest_ctx["col_id"])
-                    attribute_join_paths.append(
-                        {
-                            "id": dest_id,
-                            "attr_name": dest_ctx["attr_name"],
-                            "col_name": dest_ctx["col_name"],
-                            "table_name": dest_ctx["table_name"],
-                            "schema_name": dest_ctx["schema_name"],
-                            "path": join_path,
-                        }
-                    )
-                    self.logger.info(
-                        "Join path to %s (%s): %d hop(s)",
-                        dest_ctx["attr_name"],
-                        dest_id,
-                        len(join_path),
-                    )
+                dest_items = [
+                    (did, dctx)
+                    for did, dctx in attr_contexts.items()
+                    if did != anchor_id
+                ]
+                with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
+                    futures = {
+                        pool.submit(
+                            find_join_path, anchor_ctx["col_id"], dctx["col_id"]
+                        ): (did, dctx)
+                        for did, dctx in dest_items
+                    }
+                    for future in as_completed(futures):
+                        dest_id, dest_ctx = futures[future]
+                        join_path = future.result()
+                        attribute_join_paths.append(
+                            {
+                                "id": dest_id,
+                                "attr_name": dest_ctx["attr_name"],
+                                "col_name": dest_ctx["col_name"],
+                                "table_name": dest_ctx["table_name"],
+                                "schema_name": dest_ctx["schema_name"],
+                                "path": join_path,
+                            }
+                        )
+                        self.logger.info(
+                            "Join path to %s (%s): %d hop(s)",
+                            dest_ctx["attr_name"],
+                            dest_id,
+                            len(join_path),
+                        )
             else:
                 self.logger.warning(
                     "No valid anchor attribute found — skipping join path computation"
@@ -225,18 +237,22 @@ class CandidatePreparationAgent(BaseAgent):
         additional_tables = []
         search_queries = [question] + path_state.get("entities", [])
         k_per_query = max(1, 5 // len(search_queries))
-        for query in search_queries:
-            try:
-                tables = get_relevant_tables(
-                    state["data_retriever"],
-                    query,
-                    k=k_per_query,
-                )
-                additional_tables.extend(tables)
-            except Exception:
-                self.logger.warning(
-                    "Table retrieval failed for query: %s", query, exc_info=True
-                )
+
+        def _fetch_tables_for_query(query: str) -> list[dict]:
+            return get_relevant_tables(state["data_retriever"], query, k=k_per_query)
+
+        with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
+            futures = {
+                pool.submit(_fetch_tables_for_query, q): q for q in search_queries
+            }
+            for future in as_completed(futures):
+                query = futures[future]
+                try:
+                    additional_tables.extend(future.result())
+                except Exception:
+                    self.logger.warning(
+                        "Table retrieval failed for query: %s", query, exc_info=True
+                    )
         additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
@@ -570,7 +586,9 @@ class CandidatePreparationAgent(BaseAgent):
         ]
 
         try:
-            result = invoke_with_structured_output(llm, messages, AnchorColumnModel)
+            result = invoke_with_structured_output(
+                llm.bind(max_tokens=1024), messages, AnchorColumnModel
+            )
         except Exception:
             self.logger.warning(
                 "_identify_anchor: LLM call failed — using first attribute",

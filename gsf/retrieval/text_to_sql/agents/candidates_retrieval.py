@@ -17,6 +17,7 @@ Responsibilities:
 
 import logging
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
@@ -261,26 +262,52 @@ class CandidateRetrievalAgent(BaseAgent):
         all_sql_attr_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            all_custom_hits = _search_by_label(
-                semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3
-            )
-            all_sql_attr_hits = _search_by_label(
-                semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3
-            )
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
-            for entity in clean_entities:
-                all_col_attr_hits.extend(
-                    _search_by_label(
-                        semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2
-                    )
-                )
 
-        all_custom_hits = _llm_filter_candidates(
-            llm, question, all_custom_hits, "custom analyses"
-        )
-        all_sql_attr_hits = _llm_filter_candidates(
-            llm, question, all_sql_attr_hits, "SQL attributes"
-        )
+            search_tasks: list[tuple[str, Any]] = [
+                ("custom", (semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3)),
+                ("sql_attr", (semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3)),
+                *[
+                    (
+                        f"col_attr:{entity}",
+                        (semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2),
+                    )
+                    for entity in clean_entities
+                ],
+            ]
+
+            with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
+                futures = {
+                    pool.submit(_search_by_label, *args): key
+                    for key, args in search_tasks
+                }
+                for future in as_completed(futures):
+                    key = futures[future]
+                    result = future.result()
+                    if key == "custom":
+                        all_custom_hits = result
+                    elif key == "sql_attr":
+                        all_sql_attr_hits = result
+                    else:
+                        all_col_attr_hits.extend(result)
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            future_custom = pool.submit(
+                _llm_filter_candidates,
+                llm,
+                question,
+                all_custom_hits,
+                "custom analyses",
+            )
+            future_sql_attr = pool.submit(
+                _llm_filter_candidates,
+                llm,
+                question,
+                all_sql_attr_hits,
+                "SQL attributes",
+            )
+            all_custom_hits = future_custom.result()
+            all_sql_attr_hits = future_sql_attr.result()
 
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
