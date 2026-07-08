@@ -9,6 +9,7 @@ import os
 import time
 from typing import Type, TypeVar
 
+import requests as _requests
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
@@ -16,6 +17,21 @@ from pydantic import BaseModel, ValidationError
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
+LLM_INVOKE_TIMEOUT_S = 50
+
+
+class _TimeoutSession(_requests.Session):
+    """requests.Session that enforces a default timeout on every request."""
+
+    def __init__(self, timeout: float = LLM_INVOKE_TIMEOUT_S, **kwargs):
+        super().__init__(**kwargs)
+        self._default_timeout = timeout
+
+    def request(self, method, url, **kwargs):
+        kwargs.setdefault("timeout", self._default_timeout)
+        return super().request(method, url, **kwargs)
+
+
 T = TypeVar("T", bound=BaseModel)
 
 _BASE_URL = os.environ.get("BASE_URL", "https://integrate.api.nvidia.com/v1")
@@ -54,13 +70,15 @@ def get_llm_client(
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
-    return ChatNVIDIA(
+    client = ChatNVIDIA(
         model=resolved_model,
         api_key=_API_KEY,
         base_url=_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
+    return client
 
 
 def safe_invoke_with_structured_output(
@@ -76,6 +94,17 @@ def safe_invoke_with_structured_output(
         try:
             model_llm = llm.with_structured_output(schema)
             result = model_llm.invoke(current_messages)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d for %s",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+                schema_name,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                continue
+            raise
         except ValidationError as e:
             if attempt < RETRY_MAX_ATTEMPTS - 1:
                 current_messages.append(

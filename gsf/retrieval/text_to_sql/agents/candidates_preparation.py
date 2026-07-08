@@ -238,12 +238,20 @@ class CandidatePreparationAgent(BaseAgent):
                     "Table retrieval failed for query: %s", query, exc_info=True
                 )
         additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
-        relevant_tables.extend(additional_tables)
+        seen_qnames: set[str] = set()
+        deduped_tables: list[dict] = []
+        for t in relevant_tables + additional_tables:
+            qn = _qualified_name(t).lower()
+            if qn in seen_qnames:
+                continue
+            seen_qnames.add(qn)
+            deduped_tables.append(t)
+        relevant_tables = deduped_tables
 
         self.logger.info(
             "Found %d relevant tables (after dedupe, capped at 20): %s",
             len(relevant_tables),
-            [t["name"] for t in relevant_tables],
+            [_qualified_name(t) for t in relevant_tables],
         )
 
         # --- 4b. Add tables referenced by custom analyses via Neo4j ---
@@ -303,7 +311,7 @@ class CandidatePreparationAgent(BaseAgent):
         self.logger.info(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
-            [t["name"] for t in relevant_tables],
+            [_qualified_name(t) for t in relevant_tables],
         )
 
         return {
