@@ -31,6 +31,15 @@ export const zonesApi = {
 	delete: (zoneId: string): Promise<ResponseWithError<{ data: { id: string } }>> =>
 		requests.delete(`zones/${zoneId}`),
 
+	setEnabled: (
+		zoneId: string,
+		enabled: boolean,
+		adminId: string,
+	): Promise<ResponseWithError<{ data: ZoneDetail }>> =>
+		requests.patch(`zones/${zoneId}/status?admin_uid=${encodeURIComponent(adminId)}`, {
+			enabled,
+		}),
+
 	listAccess: (
 		zoneId: string,
 		adminId: string,

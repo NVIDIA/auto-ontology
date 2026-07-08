@@ -35,6 +35,7 @@ def format_zone(
     row: dict,
     *,
     items: list[dict] | list[str] | None = None,
+    enabled: bool | None = None,
 ) -> dict:
     """Shape a zone row for API responses."""
     result = {
@@ -43,6 +44,7 @@ def format_zone(
         "description": row.get("description"),
         "color": row.get("color"),
         "label": LABEL_ZONE,
+        "enabled": enabled if enabled is not None else row.get("enabled", True),
     }
     if items is not None:
         result["items"] = items

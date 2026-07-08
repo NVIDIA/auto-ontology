@@ -34,6 +34,10 @@ class ZoneAccessGrant(BaseModel):
     user_id: str
 
 
+class ZoneStatusUpdate(BaseModel):
+    enabled: bool
+
+
 def _require_admin(user_id: str) -> None:
     """Raise 403 when *user_id* is not an admin (or does not exist)."""
     user = users_dal.get_user(user_id)
@@ -128,6 +132,25 @@ def delete_zone(zone_id: str) -> dict:
     if not dal.delete_zone(zone_id):
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": {"id": zone_id}}
+
+
+@router.patch("/zones/{zone_id}/status")
+def set_zone_status(
+    zone_id: str,
+    body: ZoneStatusUpdate,
+    admin_uid: str = Query(..., description="Admin user id performing the request"),
+) -> dict:
+    """Enable or disable a zone.  Requires admin role.
+
+    Disabling swaps the zone's Neo4j label from ``Zone`` to ``disableZone``
+    (re-enabling reverses it), which immediately revokes the catalog access
+    the zone granted without deleting it.
+    """
+    _require_admin(admin_uid)
+    row = dal.set_zone_enabled(zone_id, body.enabled)
+    if row is None:
+        raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
+    return {"data": row}
 
 
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ export type Zone = {
 	label: string;
 	description: string | null;
 	color: string | null;
+	enabled: boolean;
 };
 
 export type ZoneItem = {
