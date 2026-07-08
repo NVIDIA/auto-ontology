@@ -116,6 +116,21 @@ class CustomAnalysisFilterModel(BaseModel):
     )
 
 
+class CombinedCandidateFilterModel(BaseModel):
+    """LLM structured output for filtering both custom analyses and SQL attributes in one call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    custom_analysis_ids: list[str] = Field(
+        ...,
+        description="IDs of custom analyses to KEEP. Empty list if none are relevant.",
+    )
+    sql_attribute_ids: list[str] = Field(
+        ...,
+        description="IDs of SQL attributes to KEEP. Empty list if none are relevant.",
+    )
+
+
 class AnchorColumnModel(BaseModel):
     """LLM output for identifying the primary ColumnAttribute for the question."""
 
