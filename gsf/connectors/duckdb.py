@@ -52,7 +52,10 @@ class DuckDBDatabase(SQLDatabase):
     """
 
     def __init__(self, connection_string: str, *, read_only: bool = True) -> None:
-        self.conn = duckdb.connect(database=connection_string, read_only=read_only)
+        db_path = connection_string
+        if db_path.startswith("duckdb://"):
+            db_path = db_path[len("duckdb://"):]
+        self.conn = duckdb.connect(database=db_path, read_only=read_only)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
         logger.debug(
             "DuckDB connected (database=%r, read_only=%s).",

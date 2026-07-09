@@ -307,7 +307,7 @@ class SQLReconstructionAgent(BaseAgent):
         if relevant_tables:
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"
-                f"{format_tables_for_prompt(relevant_tables)}\n\n"
+                f"{format_tables_for_prompt(relevant_tables, target_schema=path_state.get('target_schema'))}\n\n"
             )
 
         history_section = ""

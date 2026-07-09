@@ -67,6 +67,10 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     initial_path_state = dict(payload.get("path_state") or {})
 
+    target_schema = payload.get("target_schema")
+    if target_schema:
+        initial_path_state["target_schema"] = target_schema
+
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
         custom_prompts=custom_prompts_text,

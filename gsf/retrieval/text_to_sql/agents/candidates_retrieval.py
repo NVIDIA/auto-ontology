@@ -48,12 +48,22 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
-def _search_by_label(retriever: object, entity: str, label: str, k: int) -> list[dict]:
+def _search_by_label(
+    retriever: object,
+    entity: str,
+    label: str,
+    k: int,
+    schema_name: str | None = None,
+) -> list[dict]:
     """Return up to *k* VDB hits for *label*."""
     try:
         return list(
             search_semantic_index(
-                retriever, entity, label_filter=[label], per_label_k=k
+                retriever,
+                entity,
+                label_filter=[label],
+                per_label_k=k,
+                schema_name=schema_name,
             )
         )
     except Exception:
@@ -323,6 +333,7 @@ class CandidateRetrievalAgent(BaseAgent):
         entities: list[str] = path_state.get("entities") or []
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
+        target_schema = path_state.get("target_schema")
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -332,12 +343,36 @@ class CandidateRetrievalAgent(BaseAgent):
             clean_entities = [e.strip() for e in entities if (e or "").strip()]
 
             search_tasks: list[tuple[str, Any]] = [
-                ("custom", (semantic_retriever, question, Labels.CUSTOM_ANALYSIS, 3)),
-                ("sql_attr", (semantic_retriever, question, LABEL_SQL_ATTRIBUTE, 3)),
+                (
+                    "custom",
+                    (
+                        semantic_retriever,
+                        question,
+                        Labels.CUSTOM_ANALYSIS,
+                        3,
+                        target_schema,
+                    ),
+                ),
+                (
+                    "sql_attr",
+                    (
+                        semantic_retriever,
+                        question,
+                        LABEL_SQL_ATTRIBUTE,
+                        3,
+                        target_schema,
+                    ),
+                ),
                 *[
                     (
                         f"col_attr:{entity}",
-                        (semantic_retriever, entity, LABEL_COLUMN_ATTRIBUTE, 2),
+                        (
+                            semantic_retriever,
+                            entity,
+                            LABEL_COLUMN_ATTRIBUTE,
+                            2,
+                            target_schema,
+                        ),
                     )
                     for entity in clean_entities
                 ],

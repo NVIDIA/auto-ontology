@@ -99,7 +99,9 @@ class SQLFromTablesAgent(BaseAgent):
             main_question=question,
             observation_block="",
             queries=[],
-            tables=format_tables_for_prompt(relevant_tables),
+            tables=format_tables_for_prompt(
+                relevant_tables, target_schema=path_state.get("target_schema")
+            ),
             qa_from_conversations=similar_questions,
             custom_analyses="",
         )

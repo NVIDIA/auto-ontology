@@ -42,6 +42,7 @@ class TextToSQLPayload(TypedDict):
     connectors: NotRequired[list[SQLDatabase]]
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
+    target_schema: NotRequired[str]
 
 
 class AgentState(TypedDict):

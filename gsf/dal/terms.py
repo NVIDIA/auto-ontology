@@ -184,8 +184,11 @@ def fetch_all_terms_and_attributes(
         MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{source: $source}})
         {term_filter}
-        RETURN DISTINCT term.name AS name, term.description AS description,
-               term.synonyms AS synonyms, term.id AS id
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+        WITH term, collect(DISTINCT sch.name) AS schemas
+        RETURN term.name AS name, term.description AS description,
+               term.synonyms AS synonyms, term.id AS id,
+               schemas AS schema_names
         """,
         term_params,
     )
@@ -195,13 +198,15 @@ def fetch_all_terms_and_attributes(
               (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
         {attr_filter}
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,
                attr.source_column AS source_column,
                col.name AS column_name,
                col.sample_values AS sample_values,
-               attr.id AS id
+               attr.id AS id,
+               sch.name AS schema_name
         """,
         attr_params,
     )
@@ -345,8 +350,10 @@ def fetch_terms_and_attributes_for_table(
         f"""
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
               (term:{LABEL_TERM} {{source: $source}})
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         RETURN term.name AS name, term.description AS description,
-               term.synonyms AS synonyms, term.id AS id
+               term.synonyms AS synonyms, term.id AS id,
+               collect(DISTINCT sch.name) AS schema_names
         """,
         params,
     )
@@ -355,12 +362,14 @@ def fetch_terms_and_attributes_for_table(
         MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
               (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,
                attr.source_column AS source_column,
                col.sample_values AS sample_values,
-               attr.id AS id
+               attr.id AS id,
+               sch.name AS schema_name
         """,
         params,
     )

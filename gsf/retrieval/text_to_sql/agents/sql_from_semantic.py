@@ -108,13 +108,17 @@ def _format_semantic_context(
     return "\n".join(lines)
 
 
-def format_tables_for_prompt(tables: list[dict]) -> str:
+def format_tables_for_prompt(
+    tables: list[dict], target_schema: str | None = None
+) -> str:
     """
     Format tables with clear column information to prevent cross-table column confusion.
 
     Args:
         tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
             ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
+        target_schema: When set, schema qualification is omitted from table names
+            because ``SET schema`` scopes execution to this schema already.
 
     Returns:
         Formatted string clearly showing which columns belong to each table
@@ -135,8 +139,10 @@ def format_tables_for_prompt(tables: list[dict]) -> str:
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # Build table header
-        if database_name and schema_name:
+        # When target_schema is set, execution is already scoped via SET schema
+        if target_schema:
+            full_name = table_name
+        elif database_name and schema_name:
             full_name = f"{database_name}.{schema_name}.{table_name}"
         elif schema_name:
             full_name = f"{schema_name}.{table_name}"
@@ -353,9 +359,12 @@ class SQLFromCandidatesAgent(BaseAgent):
                     _format_semantic_context(primary_attribute, attribute_join_paths)
                 )
             if relevant_tables:
+                target_schema = path_state.get("target_schema")
                 parts.append(
                     "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables)
+                    + format_tables_for_prompt(
+                        relevant_tables, target_schema=target_schema
+                    )
                 )
             tables_section = "\n\n".join(parts) if parts else "No tables available."
 

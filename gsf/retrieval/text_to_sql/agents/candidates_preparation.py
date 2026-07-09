@@ -126,6 +126,7 @@ class CandidatePreparationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
+        target_schema = path_state.get("target_schema")
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
@@ -239,7 +240,12 @@ class CandidatePreparationAgent(BaseAgent):
         k_per_query = max(1, 5 // len(search_queries))
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
-            return get_relevant_tables(state["data_retriever"], query, k=k_per_query)
+            return get_relevant_tables(
+                state["data_retriever"],
+                query,
+                k=k_per_query,
+                schema_name=target_schema,
+            )
 
         with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
             futures = {
@@ -263,6 +269,7 @@ class CandidatePreparationAgent(BaseAgent):
             seen_qnames.add(qn)
             deduped_tables.append(t)
         relevant_tables = deduped_tables
+
 
         self.logger.info(
             "Found %d relevant tables (after dedupe, capped at 20): %s",

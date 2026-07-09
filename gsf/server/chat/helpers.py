@@ -32,3 +32,11 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+
+
+class BirdChatRequest(BaseModel):
+    """Payload for BIRD benchmark evaluation — includes evidence hint."""
+
+    question: str = Field(..., min_length=1)
+    database: str = Field(..., min_length=1)
+    evidence: str = Field(default="")

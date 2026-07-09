@@ -124,10 +124,11 @@ def _escape_like(value: str) -> str:
 def _build_metadata_where_clause(
     labels: list[str] | None = None,
     database_name: str | None = None,
+    schema_name: str | None = None,
     *,
     fmt: MetadataFilterFormat = "sql",
 ) -> str | dict | None:
-    """Build a per-query metadata filter for ``label`` / ``database_name``.
+    """Build a per-query metadata filter for ``label`` / ``database_name`` / ``schema_name``.
 
     The output shape is selected by *fmt*:
 
@@ -142,9 +143,9 @@ def _build_metadata_where_clause(
       ``{"label": "Column"}``; multiple labels become ``{"label": [...]}``
       (which langchain-pgvector interprets as an ``IN``-list).
 
-    Returns ``None`` when neither *labels* nor *database_name* is supplied.
+    Returns ``None`` when no filter criteria are supplied.
     """
-    if not labels and not database_name:
+    if not labels and not database_name and not schema_name:
         return None
 
     if fmt == "dict":
@@ -153,6 +154,8 @@ def _build_metadata_where_clause(
             out["label"] = labels[0] if len(labels) == 1 else list(labels)
         if database_name:
             out["database_name"] = database_name
+        if schema_name:
+            out["schema_name"] = schema_name
         return out
 
     parts: list[str] = []
@@ -169,6 +172,10 @@ def _build_metadata_where_clause(
     if database_name:
         parts.append(
             f"""metadata LIKE '%"database_name":"{_escape_like(database_name)}"%' ESCAPE '\\'"""
+        )
+    if schema_name:
+        parts.append(
+            f"""metadata LIKE '%"schema_name":"{_escape_like(schema_name)}"%' ESCAPE '\\'"""
         )
     return " AND ".join(parts) if parts else None
 
@@ -236,14 +243,16 @@ def search_semantic_index(
     label_filter: list[str] | None = None,
     per_label_k: "int | dict[str, int]" = PER_LABEL_LIMIT,
     database_name: str | None = None,
+    schema_name: str | None = None,
 ) -> list[dict]:
     """Vector search via the injected :class:`~nemo_retriever.retriever.Retriever`.
 
     Runs one query **per label** with a server-side metadata filter on
-    ``label`` + ``database_name``, requesting exactly the label-specific *k*
-    rows.  *per_label_k* can be a single int or a ``{label: k}`` dict
-    (e.g. ``{"Column": 10, "CustomAnalysis": 3}``). When no *label_filter*
-    is given, falls back to a single query with ``DEFAULT_FETCH_LIMIT``.
+    ``label`` + ``database_name`` + ``schema_name``, requesting exactly the
+    label-specific *k* rows.  *per_label_k* can be a single int or a
+    ``{label: k}`` dict (e.g. ``{"Column": 10, "CustomAnalysis": 3}``).
+    When no *label_filter* is given, falls back to a single query with
+    ``DEFAULT_FETCH_LIMIT``.
 
     The filter format (SQL string vs. dict) is read off the VDB the caller
     plugged into the retriever — see :func:`_metadata_filter_format`.
@@ -258,6 +267,7 @@ def search_semantic_index(
         where_clause = _build_metadata_where_clause(
             labels=[label] if label else None,
             database_name=database_name,
+            schema_name=schema_name,
             fmt=fmt,
         )
         vdb_kwargs = {"where": where_clause} if where_clause else None
@@ -266,6 +276,7 @@ def search_semantic_index(
             if where_clause
             else DEFAULT_FETCH_LIMIT
         )
+
         hits = retriever.query(entity, top_k=top_k, vdb_kwargs=vdb_kwargs)
         all_hits.extend(hits)
 
