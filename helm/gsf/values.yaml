@@ -22,6 +22,9 @@ pgadminPassword: admin
 nvidiaApiKey: ""
 baseUrl: "https://integrate.api.nvidia.com/v1"
 modelName: "nvidia/nemotron-3-nano-30b-a3b"
+# Optional dedicated model for entity extraction in the text-to-SQL pipeline.
+# When empty, entity extraction falls back to modelName.
+entityExtractionModel: "meta/llama-3.1-8b-instruct"
 embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.

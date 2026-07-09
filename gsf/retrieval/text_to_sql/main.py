@@ -116,6 +116,8 @@ def stream_agent_response(
     On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
 
+    logger.info("Text-to-SQL agent started for question: %s", payload["question"])
+
     state = _build_state(payload)
     final_state = dict(state)
 
