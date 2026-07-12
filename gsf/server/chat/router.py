@@ -46,7 +46,7 @@ from typing import Generator
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from gsf.server.chat.helpers import NODE_LABELS, BirdChatRequest, ChatRequest
+from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, ChatRequestWithEvidence
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 
 logger = logging.getLogger(__name__)
@@ -218,7 +218,7 @@ async def chat_completions(
 
 
 @router.post("/chat/bird")
-async def chat_bird(request: BirdChatRequest) -> dict:
+async def chat_bird(request: ChatRequestWithEvidence) -> dict:
     """Non-streaming BIRD benchmark endpoint.
 
     Folds ``evidence`` into the question, calls the agent directly

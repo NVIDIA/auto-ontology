@@ -49,12 +49,16 @@ logger = logging.getLogger(__name__)
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
+    target_schema: str | None = None,
 ) -> str:
     """Format the semantic anchor + join-path context for the SQL prompt.
 
     Produces a human-readable block describing the anchor table/column and
     how to reach every other retrieved column via JOIN conditions derived
     from the semantic graph.
+
+    When *target_schema* is set, schema qualifiers are omitted because
+    ``SET schema`` already scopes execution.
 
     Example output::
 
@@ -71,7 +75,10 @@ def _format_semantic_context(
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    if target_schema:
+        anchor_full = anchor_table
+    else:
+        anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
@@ -89,7 +96,10 @@ def _format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
+            if target_schema:
+                full_table = table
+            else:
+                full_table = f"{schema}.{table}" if schema else table
             lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
             if path:
@@ -101,8 +111,12 @@ def _format_semantic_context(
                     tgt_s = hop.get("target_schema", "")
                     tgt_t = hop.get("target_table", "")
                     tgt_c = hop.get("target_column", "")
-                    src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                    tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
+                    if target_schema:
+                        src = f"{src_t}.{src_c}"
+                        tgt = f"{tgt_t}.{tgt_c}"
+                    else:
+                        src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
+                        tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
                     lines.append(f"      {src} = {tgt}")
 
     return "\n".join(lines)
@@ -353,10 +367,15 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
 
             # Build tables/schema section — semantic hint and available tables are co-equal.
+            target_schema = path_state.get("target_schema")
             parts = []
             if primary_attribute:
                 parts.append(
-                    _format_semantic_context(primary_attribute, attribute_join_paths)
+                    _format_semantic_context(
+                        primary_attribute,
+                        attribute_join_paths,
+                        target_schema=target_schema,
+                    )
                 )
             if relevant_tables:
                 target_schema = path_state.get("target_schema")
