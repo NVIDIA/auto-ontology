@@ -5,6 +5,20 @@
 	--color-foreground: #09090b;
 }
 
+/*
+ * Tailwind's preflight leaves <button> at the browser default cursor
+ * (arrow, not pointer) instead of resetting it — so every clickable button
+ * app-wide gets a pointer cursor here instead of needing a manual
+ * `cursor-pointer` class on each one. Disabled buttons are excluded so
+ * per-component `disabled:cursor-*` utilities keep working as expected.
+ */
+@layer base {
+	button:not(:disabled),
+	[role='button']:not([aria-disabled='true']) {
+		cursor: pointer;
+	}
+}
+
 @media (prefers-color-scheme: dark) {
 	:root {
 		--color-foreground: #fafafa;

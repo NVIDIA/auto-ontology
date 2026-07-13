@@ -115,6 +115,10 @@ class SemanticEmbedder:
         self.ingest_op(with_embeddings)
         return len(with_embeddings)
 
+    def embed_column_attributes(self, attrs: list[dict[str, Any]]) -> int:
+        """Embed only ColumnAttribute rows, without rewriting the parent Term row."""
+        return self.embed_term({}, attrs)
+
 
 def build_semantic_embedder(
     database_name: str,

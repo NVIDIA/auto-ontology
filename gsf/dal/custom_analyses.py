@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr
 from gsf.dal.users import get_accessible_catalog_ids_for_zones
 from gsf.server.sql_utils import SqlParseError
 
@@ -370,7 +371,7 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
     OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                             description: col.description}}) AS cols
+                             description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
            sch.name AS schema_name, cols
     """

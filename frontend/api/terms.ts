@@ -24,6 +24,9 @@ type SqlAttributeListResponse = ResponseWithError<SqlAttributeListResult>;
 
 type SingleResult = { data: TermDetail };
 type SingleResponse = ResponseWithError<SingleResult>;
+type UpdateResult = { data: { id: string; name: string; description: string | null } };
+type UpdateResponse = ResponseWithError<UpdateResult>;
+type TermUpdatePayload = { name?: string; description?: string | null };
 
 type RelatedTermsResult = { data: RelatedTerm[]; count: number };
 type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
@@ -46,6 +49,8 @@ export const termsApi = {
 	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
 		requests.get<RelatedCountsResult>('terms/related-counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
+	update: (id: string, payload: TermUpdatePayload): Promise<UpdateResponse> =>
+		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),
 	getColumnAttributes: (id: string): Promise<AttributeListResponse> =>
 		requests.get<AttributeListResult>(`terms/${id}/column-attributes`),
 	getSqlAttributes: (id: string): Promise<SqlAttributeListResponse> =>

@@ -52,6 +52,9 @@ spec:
           env:
             - name: PORT
               value: "3001"
+            # App version, logged at startup. Sourced from the Helm chart version.
+            - name: APP_VERSION
+              value: {{ .Chart.Version | quote }}
           readinessProbe:
             httpGet:
               path: /api/health

@@ -23,10 +23,14 @@ export type SinglePageViewProps = {
 	treeDataEpoch?: number;
 	parentId?: string;
 	isEditing?: boolean;
+	onPatchEdits?: (
+		edits: Record<string, ComposerEditValue>,
+	) => Promise<{ error?: boolean; message?: string }>;
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
+	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 };
@@ -39,10 +43,12 @@ export const SinglePageView = ({
 	treeFocusId = null,
 	treeDataEpoch = 0,
 	isEditing = false,
+	onPatchEdits,
 	onSave,
 	onCancel,
 	onDataTableRowClick,
 	onEditSql,
+	onSuggestDescription,
 	inlineSaveSectionId,
 	hideEditToolbar,
 }: SinglePageViewProps): React.JSX.Element | null => {
@@ -117,11 +123,13 @@ export const SinglePageView = ({
 				rightPanel={props?.rightPanel}
 				leftPanel={props?.leftPanel}
 				entityUpdatingProperties={props?.entityUpdatingProperties}
-				isEditing={isEditing}
+				isEditingMode={isEditing}
+				onPatchEdits={onPatchEdits}
 				onSave={onSave}
 				onCancel={onCancel}
 				onDataTableRowClick={onDataTableRowClick}
 				onEditSql={onEditSql}
+				onSuggestDescription={onSuggestDescription}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
 			/>

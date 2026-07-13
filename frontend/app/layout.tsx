@@ -39,6 +39,8 @@ export default async function RootLayout({
 }>) {
 	const session = await getCurrentSession();
 	const isAdmin = session?.user.role === Role.Admin;
+	// Injected at runtime by the Helm chart from the chart version (.Chart.Version).
+	const appVersion = process.env.APP_VERSION;
 
 	return (
 		<html
@@ -48,7 +50,7 @@ export default async function RootLayout({
 			<body className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
 				{session ? (
 					<BreadcrumbProvider>
-						<AppTopBar />
+						<AppTopBar version={appVersion} />
 						<div className="flex min-h-0 flex-1">
 							<NavRail isAdmin={isAdmin} />
 							<div className="min-w-0 flex-1">{children}</div>

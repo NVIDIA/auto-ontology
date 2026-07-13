@@ -15,8 +15,16 @@ export type TermZone = {
 	color: string | null;
 };
 
+export type TermTable = {
+	id: string;
+	name: string;
+	schema_id: string;
+	db_id: string;
+};
+
 export type TermDetail = Term & {
 	table_count: number;
+	tables: TermTable[];
 	zones: TermZone[];
 };
 

@@ -76,6 +76,32 @@ def get_slim_term_by_id(term_id: str) -> dict[str, str] | None:
     return rows[0] if rows else None
 
 
+def update_term(
+    term_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> dict[str, str] | None:
+    """Update a Term and return old/new values, or None when missing."""
+    rows = get_neo4j_conn().query_write(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        WITH term, term.name AS old_name
+        SET term.name = coalesce($name, term.name),
+            term.description = coalesce($description, term.description)
+        WITH term, old_name
+        OPTIONAL MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
+        SET attr.term_name = term.name
+        RETURN term.id AS id,
+               old_name,
+               term.name AS name,
+               term.description AS description
+        """,
+        {"term_id": term_id, "name": name, "description": description},
+    )
+    return dict(rows[0]) if rows else None
+
+
 def merge_term(
     name: str,
     description: str,
@@ -248,10 +274,20 @@ def get_full_term_by_id(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         {term_filter}
-        OPTIONAL MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        WITH term, collect(DISTINCT CASE WHEN t IS NULL THEN NULL ELSE {{
+                 id: t.id,
+                 name: t.name,
+                 schema_id: sch.id,
+                 db_id: db.id
+             }} END) AS raw_tables
+        WITH term, [tbl IN raw_tables WHERE tbl IS NOT NULL] AS tables
         RETURN term.name AS name, term.description AS description,
                term.synonyms AS synonyms, term.id AS id,
-               count(DISTINCT t) AS table_count
+               size(tables) AS table_count,
+               tables AS tables
         LIMIT 1
         """,
         term_params,
@@ -365,6 +401,96 @@ def fetch_terms_and_attributes_for_table(
         params,
     )
     return terms, attrs
+
+
+def fetch_term_and_column_attributes_for_embedding(
+    term_id: str,
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Return one Term and its ColumnAttributes for semantic VDB re-embedding."""
+    conn = get_neo4j_conn()
+    params = {"term_id": term_id}
+    terms = conn.query_read(
+        f"""
+        MATCH (term:{LABEL_TERM} {{id: $term_id}})
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
+        RETURN term.name AS name,
+               term.description AS description,
+               term.synonyms AS synonyms,
+               term.id AS id,
+               head(collect(DISTINCT db.name)) AS database_name
+        LIMIT 1
+        """,
+        params,
+    )
+    if not terms:
+        return None, []
+
+    attrs = conn.query_read(
+        f"""
+        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+              (term:{LABEL_TERM} {{id: $term_id}})
+        // ColumnAttribute embeddings include sample values from the owning Column.
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
+        RETURN attr.name AS name,
+               attr.description AS description,
+               attr.term_name AS term_name,
+               attr.source_column AS source_column,
+               col.sample_values AS sample_values,
+               attr.id AS id
+        """,
+        params,
+    )
+    return dict(terms[0]), [dict(attr) for attr in attrs]
+
+
+def fetch_column_attribute_embedding_contexts_by_column_id(
+    column_id: str,
+) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+    """Return Term + ColumnAttribute contexts affected by a Column sample update."""
+    conn = get_neo4j_conn()
+    rows = conn.query_read(
+        f"""
+        MATCH (col:{Labels.COLUMN} {{id: $column_id}})-[:{REL_HAS_ATTRIBUTE}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN term.name AS term_name,
+               term.description AS term_description,
+               term.synonyms AS term_synonyms,
+               term.id AS term_id,
+               head(collect(DISTINCT db.name)) AS database_name,
+               collect({{
+                   name: attr.name,
+                   description: attr.description,
+                   term_name: attr.term_name,
+                   source_column: attr.source_column,
+                   sample_values: col.sample_values,
+                   id: attr.id
+               }}) AS attrs
+        """,
+        {"column_id": column_id},
+    )
+    contexts: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
+    for row in rows:
+        term_id = row.get("term_id")
+        if not term_id:
+            continue
+        contexts.append(
+            (
+                {
+                    "name": row.get("term_name") or "",
+                    "description": row.get("term_description") or "",
+                    "synonyms": row.get("term_synonyms") or [],
+                    "id": term_id,
+                    "database_name": row.get("database_name") or "",
+                },
+                [dict(attr) for attr in row.get("attrs") or []],
+            )
+        )
+    return contexts
 
 
 def fetch_column_attributes(

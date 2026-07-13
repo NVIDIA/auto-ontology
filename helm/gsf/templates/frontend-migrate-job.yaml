@@ -1,5 +1,6 @@
 {{/*
-Runs `prisma db push` to sync the Postgres schema with prisma/schema.prisma.
+Runs prisma/migrate.sh, which guards then `prisma db push` to sync the
+Postgres schema with prisma/schema.prisma.
 
 Hook timing: post-install / post-upgrade. Postgres comes up in the same
 release, so a pre-install hook would race the StatefulSet. Post-install
@@ -9,6 +10,11 @@ for Postgres to be reachable, so first-install works.
 Prisma is scoped to the `public` schema only (schemas = ["public"] +
 multiSchema). Ingestion's vector table lives in the separate `vdb` schema
 (see gsf/vdb), so `db push` never sees it and cannot drop it.
+
+The wrapper first empties conversation_analytics IFF it predates the
+required user_id column (idempotent, no-op otherwise), because `db push`
+cannot add a NOT NULL column to a table that already has rows. See
+frontend/prisma/migrate.sh.
 
 No `--accept-data-loss`: if the `public` schema still drifts from
 prisma/schema.prisma, this intentionally refuses to drop and the Job
@@ -55,7 +61,5 @@ spec:
             - secretRef:
                 name: {{ include "gsf.secretName" . }}
           command:
-            - node
-            - node_modules/prisma/build/index.js
-            - db
-            - push
+            - sh
+            - prisma/migrate.sh

@@ -36,6 +36,11 @@ class SqlAttributeUpdate(BaseModel):
     source: str = "manual"
 
 
+class SqlAttributeMetadataPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
+
+
 @router.get("/sql-attributes")
 def list_sql_attributes() -> dict:
     """All SqlAttribute nodes with their linked Term."""
@@ -61,6 +66,22 @@ def get_sql_attribute(
             detail=f"SqlAttribute {attr_id!r} not found",
         )
     return {"data": row}
+
+
+@router.get("/sql-attributes/{attr_id}/description-suggestion")
+def get_sql_attribute_description_suggestion(attr_id: str) -> dict:
+    """LLM-generated (or cached) description suggestion for a SqlAttribute.
+
+    Returns 404 when no SqlAttribute with that id exists. ``data`` is
+    ``null`` when a suggestion could not be produced (e.g. the LLM call
+    failed) — that is not treated as an error.
+    """
+    if dal.get_sql_attribute_by_id(attr_id) is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"SqlAttribute {attr_id!r} not found",
+        )
+    return {"data": dal.suggest_sql_attribute_description(attr_id)}
 
 
 @router.post("/sql-attributes/validate")
@@ -133,6 +154,40 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except (ValueError, dal.SqlAttributeSqlError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"SqlAttribute {attr_id!r} not found",
+        )
+    return {"data": row}
+
+
+@router.patch("/sql-attributes/{attr_id}")
+def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
+    """Patch SqlAttribute name/description without touching SQL expression."""
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=422, detail="No SqlAttribute fields to update")
+
+    name = patch.get("name")
+    if isinstance(name, str):
+        name = name.strip()
+    if "name" in patch and not name:
+        raise HTTPException(
+            status_code=422, detail="SQL attribute name cannot be blank"
+        )
+
+    try:
+        row = dal.update_sql_attribute(
+            attr_id=attr_id,
+            name=name if isinstance(name, str) else None,
+            description=patch.get("description"),
+        )
+    except dal.SqlAttributeNameConflict as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
     if row is None:
         raise HTTPException(
             status_code=404,

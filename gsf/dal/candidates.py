@@ -19,6 +19,7 @@ from itertools import groupby
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
@@ -77,9 +78,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                               columns: [(t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN}) |
                                                   {{name: c.name,
                                                     data_type: toString(coalesce(c.data_type, "")),
-                                                    description: CASE
-                                                        WHEN c.description IS NOT NULL AND trim(c.description) <> ""
-                                                        THEN c.description ELSE null END,
+                                                    description: {column_description_expr("c")},
                                                     sample_values: CASE
                                                         WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                         THEN c.sample_values ELSE null END
@@ -108,9 +107,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                       columns: [(t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN}) |
                                           {{name: c.name,
                                             data_type: toString(coalesce(c.data_type, "")),
-                                            description: CASE
-                                                WHEN c.description IS NOT NULL AND trim(c.description) <> ""
-                                                THEN c.description ELSE null END,
+                                            description: {column_description_expr("c")},
                                             sample_values: CASE
                                                 WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                 THEN c.sample_values ELSE null END
@@ -130,8 +127,7 @@ def expand_info(ids_and_labels: list | None) -> dict:
                                  [(parent)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN}) |
                                   {{name: c.name,
                                     data_type: toString(coalesce(c.data_type, "")),
-                                    description: CASE WHEN c.description IS NOT NULL AND trim(c.description) <> ""
-                                                      THEN c.description ELSE null END,
+                                    description: {column_description_expr("c")},
                                     sample_values: CASE WHEN c.sample_values IS NOT NULL AND size(c.sample_values) > 0
                                                         THEN c.sample_values ELSE null END
                                   }}] AS column_list

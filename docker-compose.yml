@@ -136,8 +136,10 @@ services:
         condition: service_healthy
 
   # One-shot Job: sync the Postgres schema from prisma/schema.prisma via
-  # `prisma db push` (mirrors the Helm `frontend-migrate` hook). Runs without
-  # --accept-data-loss, so it refuses to drop tables outside the Prisma schema.
+  # prisma/migrate.sh (mirrors the Helm `frontend-migrate` hook). The wrapper
+  # empties conversation_analytics IFF it predates the required user_id column,
+  # then runs `prisma db push` without --accept-data-loss, so it still refuses
+  # to drop tables outside the Prisma schema.
   frontend-migrate:
     build:
       context: ./frontend
@@ -152,7 +154,7 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
-    command: ["node", "node_modules/prisma/build/index.js", "db", "push"]
+    command: ["sh", "prisma/migrate.sh"]
     restart: "no"
     depends_on:
       postgres:

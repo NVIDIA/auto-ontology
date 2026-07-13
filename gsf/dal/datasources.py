@@ -25,6 +25,7 @@ import pandas as pd
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr
 from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
 
 from gsf.semantic.constants import REL_REPRESENTS
@@ -236,7 +237,7 @@ MATCH (tbl:{Labels.TABLE} {{id: tid}})
 OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
 OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: col.description}}) AS cols
+                         description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
        sch.name AS schema_name, cols
 """
@@ -387,7 +388,7 @@ OPTIONAL MATCH (c)-[fk:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
 RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
-       c.description AS description,
+       {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
        fk IS NOT NULL AS is_foreign_key
@@ -424,7 +425,7 @@ def fetch_columns_for_table(table_id: str) -> dict[str, Any] | None:
                  ordinal_position: c.ordinal_position,
                  column_name: c.name,
                  data_type: c.data_type,
-                 description: c.description,
+                 description: {column_description_expr("c")},
                  sample_values: c.sample_values
              }}) AS columns
         RETURN t.name AS table_name,
@@ -520,6 +521,31 @@ def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
     )
 
 
+def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
+    """Write is_unique flags onto Column nodes for a given table.
+
+    Skips silently when *uniqueness* is empty.
+    """
+    if not uniqueness:
+        return
+    entries = [
+        {"column_name": col, "is_unique": bool(is_unique)}
+        for col, is_unique in uniqueness.items()
+    ]
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+        WHERE col.name IN [e IN $entries | e.column_name]
+        WITH col,
+             [e IN $entries WHERE e.column_name = col.name | e.is_unique][0]
+             AS iu
+        WHERE iu IS NOT NULL
+        SET col.is_unique = iu
+        """,
+        {"table_id": table_id, "entries": entries},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Cross-entity (Table + Column batch operations)
 # ---------------------------------------------------------------------------
@@ -543,7 +569,7 @@ def fetch_tables_and_columns_by_node_ids(
                    s.name AS table_schema,
                    c.name AS column_name,
                    c.data_type AS data_type,
-                   c.description AS description,
+                   {column_description_expr("c")} AS description,
                    c.sample_values AS sample_values,
                    db.name AS database_name
             """,

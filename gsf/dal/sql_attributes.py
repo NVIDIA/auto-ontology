@@ -18,6 +18,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.cypher_fragments import column_description_expr
 from gsf.dal.users import get_accessible_catalog_ids_for_zones
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
@@ -54,6 +55,7 @@ SqlAttributeSqlError = SqlParseError
 _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.name          AS name,
                attr.description   AS description,
+               attr.description_suggestion AS description_suggestion,
                attr.expression    AS expression,
                attr.source        AS source,
                sql.sql_full_query AS sql"""
@@ -307,22 +309,25 @@ def link_to_term(attr_id: str, term_id: str) -> None:
     )
 
 
-def update_sql_attribute_props(
+def update_sql_attribute(
     attr_id: str,
     *,
-    name: str,
-    description: str,
-    expression: str,
-    source: str,
+    name: str | None = None,
+    description: str | None = None,
+    expression: str | None = None,
+    source: str | None = None,
 ) -> None:
-    """SET properties on an existing SqlAttribute node."""
+    """SET properties on an existing SqlAttribute node.
+
+    Omitted fields (``None``) are left unchanged.
+    """
     get_neo4j_conn().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-        SET attr.name        = $name,
-            attr.description = $description,
-            attr.expression  = $expression,
-            attr.source      = $source
+        SET attr.name        = coalesce($name, attr.name),
+            attr.description = coalesce($description, attr.description),
+            attr.expression  = coalesce($expression, attr.expression),
+            attr.source      = coalesce($source, attr.source)
         """,
         {
             "id": attr_id,
@@ -331,6 +336,43 @@ def update_sql_attribute_props(
             "expression": expression,
             "source": source,
         },
+    )
+
+
+def set_sql_attribute_description_suggestion(
+    attr_id: str,
+    description_suggestion: str,
+) -> None:
+    """SET the cached LLM description suggestion on a SqlAttribute node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        SET attr.description_suggestion = $description_suggestion
+        """,
+        {"id": attr_id, "description_suggestion": description_suggestion},
+    )
+
+
+def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
+    """REMOVE the cached LLM description suggestion from a SqlAttribute node."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
+        REMOVE attr.description_suggestion
+        """,
+        {"id": attr_id},
+    )
+
+
+def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
+    """REMOVE cached LLM suggestions from every SqlAttribute of a Term."""
+    get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+              (term:{LABEL_TERM} {{id: $term_id}})
+        REMOVE attr.description_suggestion
+        """,
+        {"term_id": term_id},
     )
 
 
@@ -412,7 +454,7 @@ def fetch_tables_from_sql_attributes(
     OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
     OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                             description: col.description}}) AS cols
+                             description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
            sch.name AS schema_name, cols
     """

@@ -6,12 +6,22 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from gsf.dal import sql_attributes as sql_attr_dal
-from gsf.dal import terms as neo4j_dal
+from gsf.dal import terms as terms_dal
+from gsf.server.terms import service as term_service
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+class TermUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    description: str | None = None
 
 
 @router.get("/terms")
@@ -28,7 +38,7 @@ def list_terms(
     *q*, when given, additionally filters to terms whose name contains it
     (case-insensitive).
     """
-    terms, _attrs = neo4j_dal.fetch_all_terms_and_attributes(
+    terms, _attrs = terms_dal.fetch_all_terms_and_attributes(
         zone_ids=zone_ids, search=q
     )
     return {"data": terms, "count": len(terms)}
@@ -39,7 +49,7 @@ def list_term_column_attributes(
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
     """Return ColumnAttribute nodes (zone-scoped when zone_ids provided)."""
-    attrs = neo4j_dal.fetch_column_attributes(zone_ids=zone_ids)
+    attrs = terms_dal.fetch_column_attributes(zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 
@@ -57,7 +67,7 @@ def list_related_terms_counts(
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
     """Return per-term related-term counts, zone-scoped when zone_ids are provided."""
-    counts = neo4j_dal.fetch_related_terms_counts(zone_ids=zone_ids)
+    counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
     return {"data": counts, "count": len(counts)}
 
 
@@ -71,7 +81,7 @@ def list_term_column_attributes_by_id(
     Zone-scoped when zone_ids are provided, so a viewer can't see attributes
     of out-of-zone tables just because they belong to a term they can see.
     """
-    attrs = neo4j_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
+    attrs = terms_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
 
 
@@ -99,8 +109,51 @@ def list_related_terms(
     Zone-scoped when zone_ids are provided, so related terms outside the
     caller's zones are never surfaced as clickable chips.
     """
-    related = neo4j_dal.fetch_related_terms(term_id, zone_ids=zone_ids)
+    related = terms_dal.fetch_related_terms(term_id, zone_ids=zone_ids)
     return {"data": related, "count": len(related)}
+
+
+@router.patch("/terms/{term_id}")
+def update_term(term_id: str, body: TermUpdate) -> dict:
+    """Update a Term and invalidate dependent SqlAttribute suggestions."""
+    patch = body.model_dump(exclude_unset=True)
+    if not patch:
+        raise HTTPException(status_code=422, detail="No Term fields to update")
+
+    name = patch.get("name")
+    if isinstance(name, str):
+        name = name.strip()
+    if "name" in patch and not name:
+        raise HTTPException(status_code=422, detail="Term name cannot be blank")
+
+    row = terms_dal.update_term(
+        term_id,
+        name=name if isinstance(name, str) else None,
+        description=patch.get("description"),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Term not found")
+
+    name_changed = (row.get("old_name") or "").strip() != row["name"].strip()
+    if name_changed:
+        sql_attr_dal.clear_sql_attribute_description_suggestions_for_term(term_id)
+
+    try:
+        term_service.refresh_term_embeddings(
+            term_id, refresh_dependent_attrs=name_changed
+        )
+    except Exception:
+        logger.warning(
+            "Failed to refresh Term embeddings for %r", term_id, exc_info=True
+        )
+
+    return {
+        "data": {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row.get("description"),
+        }
+    }
 
 
 @router.get("/terms/{term_id}")
@@ -114,7 +167,7 @@ def get_term(
     out-of-zone table is treated as not found, so a viewer can't bypass the
     ``/terms`` list's zone scoping by requesting a term directly by id.
     """
-    term = neo4j_dal.get_full_term_by_id(term_id, zone_ids=zone_ids)
+    term = terms_dal.get_full_term_by_id(term_id, zone_ids=zone_ids)
     if term is None:
         raise HTTPException(status_code=404, detail="Term not found")
     return {"data": term}
