@@ -134,25 +134,53 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
 # ---------------------------------------------------------------------------
 
 
-def find_unlinked_fk_columns() -> list[dict[str, Any]]:
+def find_unlinked_fk_columns(
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
     """Return Column nodes with no SEMANTIC_FK and no HAS_ATTRIBUTE edge.
 
     These are FK columns that have not yet been linked to a ColumnAttribute.
+
+    When *database_name* is provided, only columns belonging to that database
+    are returned. Multiple databases can be co-resident in the same Neo4j
+    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass'
+    FK-resolution isolated to a single database. When omitted, every unlinked
+    FK column in the graph is returned.
     """
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-          AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
-        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-        RETURN col.id          AS id,
-               col.name        AS name,
-               col.description AS description,
-               col.sample_values AS sample_values,
-               t.name          AS table_name,
-               tgt.id          AS fk_target_col_id
-        """
-    )
+    if database_name is not None:
+        result = get_neo4j_conn().query_read(
+            f"""
+            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                  (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
+              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
+            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            RETURN col.id          AS id,
+                   col.name        AS name,
+                   col.description AS description,
+                   col.sample_values AS sample_values,
+                   t.name          AS table_name,
+                   tgt.id          AS fk_target_col_id
+            """,
+            {"database_name": database_name},
+        )
+    else:
+        result = get_neo4j_conn().query_read(
+            f"""
+            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
+              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
+            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            RETURN col.id          AS id,
+                   col.name        AS name,
+                   col.description AS description,
+                   col.sample_values AS sample_values,
+                   t.name          AS table_name,
+                   tgt.id          AS fk_target_col_id
+            """
+        )
+    return result
 
 
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:

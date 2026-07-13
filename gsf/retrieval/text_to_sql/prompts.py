@@ -67,13 +67,43 @@ create_sql_user_prompt = (
 )
 
 
-def create_sql_from_candidates_prompt() -> str:
+def create_sql_from_candidates_prompt(
+    *,
+    dialect: str | None = None,
+    target_schema: str | None = None,
+) -> str:
     """System prompt for SQL generation from semantic retrieval candidates."""
-    return """You are an expert SQL query builder. You MUST always produce a SQL query.
+    bare_table_names = target_schema is not None or (dialect or "").lower() == "sqlite"
+    if bare_table_names:
+        table_name_rule = (
+            "- Use table names exactly as shown in AVAILABLE TABLES "
+            "(no schema or database prefix).\n"
+        )
+        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+FROM sales AS s
+JOIN customers AS c ON s.customer_id = c.customer_id
+WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
+GROUP BY c.country_name
+ORDER BY total_sales DESC;"""
+    else:
+        table_name_rule = (
+            "- Use fully qualified table names exactly as provided "
+            "(e.g., schema.table_name).\n"
+            "  Never drop the schema/database prefix.\n"
+        )
+        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
+FROM PUBLIC.SALES AS s
+JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
+WHERE s.order_date BETWEEN
+  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
+  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
+GROUP BY c.country_name
+ORDER BY total_sales DESC;"""
+
+    return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
 Key rules:
-- Use fully qualified table names exactly as provided (e.g., schema.table_name).
-  Never drop the schema/database prefix.
+{table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
 - File contents (if present) are inputs only — use them as literals, filters,
@@ -84,8 +114,7 @@ Key rules:
   use them instead. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
   actually need:
-    JOIN target_schema.target_table ON source_schema.source_table.source_column
-         = target_schema.target_table.target_column
+    JOIN target_table ON source_table.source_column = target_table.target_column
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
@@ -122,14 +151,7 @@ thought:
 Join sales and customers, filter last full quarter, aggregate by country.
 
 sql_code:
-SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
-GROUP BY c.country_name
-ORDER BY total_sales DESC;
+{example_sql}
 
 response:
 This calculates total sales revenue per country for the most recently completed

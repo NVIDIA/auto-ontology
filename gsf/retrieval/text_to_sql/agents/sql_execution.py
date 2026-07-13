@@ -9,6 +9,7 @@ Executes validated SQL via the injected DB connector.
 """
 
 import logging
+import re
 from typing import Any, Dict, Optional
 
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -26,6 +27,13 @@ class QueryResponse:
         self.error = error
 
 
+def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
+    """Strip invalid schema qualifiers for dialects that don't use them."""
+    if (dialect or "").lower() == "sqlite":
+        return re.sub(r"\bPUBLIC\.", "", sql, flags=re.IGNORECASE)
+    return sql
+
+
 def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
     """Execute SQL against the supplied ``connector``.
 
@@ -38,6 +46,8 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
             result=None, sliced=False, error="No connector available to execute SQL."
         )
     try:
+        dialect = getattr(connector, "dialect", "")
+        sql = _sanitize_sql_for_dialect(sql, dialect)
         df = connector.execute(sql)
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")

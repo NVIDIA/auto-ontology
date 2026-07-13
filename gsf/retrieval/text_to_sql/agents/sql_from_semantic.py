@@ -78,7 +78,9 @@ def _format_semantic_context(
     if target_schema:
         anchor_full = anchor_table
     else:
-        anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+        anchor_full = (
+            f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+        )
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
@@ -115,8 +117,12 @@ def _format_semantic_context(
                         src = f"{src_t}.{src_c}"
                         tgt = f"{tgt_t}.{tgt_c}"
                     else:
-                        src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                        tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
+                        src = (
+                            f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
+                        )
+                        tgt = (
+                            f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
+                        )
                     lines.append(f"      {src} = {tgt}")
 
     return "\n".join(lines)
@@ -399,7 +405,10 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
 
             # Choose system prompt based on context
-            system_prompt = create_sql_from_candidates_prompt()
+            system_prompt = create_sql_from_candidates_prompt(
+                dialect=dialect,
+                target_schema=target_schema,
+            )
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),

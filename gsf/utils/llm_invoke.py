@@ -6,6 +6,8 @@
 
 import logging
 import os
+import random
+import threading
 import time
 from typing import Type, TypeVar
 
@@ -18,6 +20,21 @@ logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = 50
+
+# Bound total concurrent LLM requests across all worker threads so the pipeline's
+# nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
+# per-worker request cap (which surfaces as HTTP 503 ResourceExhausted).
+LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "6"))
+_INFLIGHT = threading.BoundedSemaphore(LLM_MAX_INFLIGHT)
+
+# Substrings that indicate a transient, retryable server condition.
+_RETRYABLE_TOKENS = (
+    "429",
+    "Too Many Requests",
+    "503",
+    "ResourceExhausted",
+    "Service Unavailable",
+)
 
 
 class _TimeoutSession(_requests.Session):
@@ -93,7 +110,8 @@ def safe_invoke_with_structured_output(
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             model_llm = llm.with_structured_output(schema)
-            result = model_llm.invoke(current_messages)
+            with _INFLIGHT:
+                result = model_llm.invoke(current_messages)
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
@@ -103,6 +121,8 @@ def safe_invoke_with_structured_output(
                 schema_name,
             )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                time.sleep(wait)
                 continue
             raise
         except ValidationError as e:
@@ -124,11 +144,12 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
-            is_rate_limit = "429" in str(e) or "Too Many Requests" in str(e)
-            if is_rate_limit and attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1)
+            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
-                    "Rate-limited on attempt %d/%d for %s — retrying in %ds",
+                    "Retryable LLM error (endpoint saturated/rate-limited) on attempt "
+                    "%d/%d for %s — retrying in %.1fs",
                     attempt + 1,
                     RETRY_MAX_ATTEMPTS,
                     schema_name,

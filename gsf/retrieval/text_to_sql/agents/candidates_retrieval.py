@@ -53,7 +53,7 @@ def _search_by_label(
     entity: str,
     label: str,
     k: int,
-    schema_name: str | None = None,
+    database_name: str | None = None,
 ) -> list[dict]:
     """Return up to *k* VDB hits for *label*."""
     try:
@@ -63,7 +63,7 @@ def _search_by_label(
                 entity,
                 label_filter=[label],
                 per_label_k=k,
-                schema_name=schema_name,
+                database_name=database_name,
             )
         )
     except Exception:

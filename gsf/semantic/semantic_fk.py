@@ -65,7 +65,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     Runs after the taxonomy while-loop in ``compile_semantic_layer``.
     Returns the total number of SEMANTIC_FK edges created.
     """
-    candidates = find_unlinked_fk_columns()
+    candidates = find_unlinked_fk_columns(database_name)
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
         return 0

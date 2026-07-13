@@ -30,7 +30,7 @@ def compile_semantic_layer(
     ``visit_enter`` to prevent duplicate Terms.
     """
     summary = domain_summary or load_domain_summary(database_name)
-    tables = fetch_all_tables_without_term()
+    tables = fetch_all_tables_without_term(database_name)
 
     def _process(table: dict, index: int) -> ProcessTableResult | None:
         table_name = table["name"]

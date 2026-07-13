@@ -11,6 +11,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 
 from gsf.connectors import get_connectors
+from gsf.dal.datasources import fetch_schema_ids_for_database
 from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
@@ -41,19 +42,17 @@ def get_dialects(database_name: str | None = None) -> list[str]:
 def get_schemas(database_name: str | None = None) -> dict:
     """Return catalog snapshot for ``parse_query_single``.
 
-    When *database_name* is given, the returned dict is filtered to
-    only schemas belonging to that database (matched via the Schema's
-    ``db_node.name``).
+    When *database_name* is given, the catalog is built from only that
+    database's schema IDs. This avoids schema-name collisions (e.g. many
+    SQLite DBs all using ``main``) that would otherwise merge/overwrite
+    each other in the assembled ``all_schemas`` map.
     """
-    schemas_ids = fetch_all_schema_ids()
-    all_schemas = get_schemas_by_ids(schemas_ids)
     if database_name is None:
-        return all_schemas
-    return {
-        k: v
-        for k, v in all_schemas.items()
-        if getattr(v.db_node, "name", None) == database_name
-    }
+        schemas_ids = fetch_all_schema_ids()
+        return get_schemas_by_ids(schemas_ids)
+
+    scoped_ids = fetch_schema_ids_for_database(database_name)
+    return get_schemas_by_ids(scoped_ids)
 
 
 def validate_sql(sql: str, dialects: list[str], schemas: dict) -> Any:

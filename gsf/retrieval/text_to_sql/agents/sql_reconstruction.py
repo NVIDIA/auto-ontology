@@ -193,10 +193,16 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
+        database_name = (state.get("path_state") or {}).get("target_schema")
         combined: list[dict] = []
         for query_text in search_queries:
             try:
-                hits = get_relevant_tables(data_retriever, query_text, k=3)
+                hits = get_relevant_tables(
+                    data_retriever,
+                    query_text,
+                    k=3,
+                    database_name=database_name,
+                )
                 combined.extend(hits)
             except Exception:
                 self.logger.warning(

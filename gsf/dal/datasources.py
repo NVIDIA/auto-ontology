@@ -149,6 +149,26 @@ def fetch_all_schema_ids() -> list[str]:
     ]
 
 
+def fetch_schema_ids_for_database(database_name: str) -> list[str]:
+    """Return Schema node IDs belonging to a single database.
+
+    Scopes the catalog build to one database so schema-name collisions
+    (e.g. multiple SQLite DBs all using ``main``) don't overwrite each
+    other in the assembled ``all_schemas`` map.
+    """
+    return [
+        r["schema_id"]
+        for r in get_neo4j_conn().query_read(
+            f"""
+            MATCH (db:{Labels.DB} {{name: $database_name}})
+                  -[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
+            RETURN s.id AS schema_id
+            """,
+            {"database_name": database_name},
+        )
+    ]
+
+
 def fetch_schemas_by_ids(
     relevant_schemas_ids: list | None = None,
 ) -> list[dict[str, str]]:
@@ -350,9 +370,31 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     return tables
 
 
-def fetch_all_tables_without_term() -> list[dict[str, Any]]:
-    """Return Table nodes that have not yet been assigned a Term."""
+def fetch_all_tables_without_term(
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Return Table nodes that have not yet been assigned a Term.
+
+    When *database_name* is provided, only tables belonging to that database
+    are returned. Multiple databases can be co-resident in the same Neo4j
+    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass — and
+    the ``database_name`` its embeddings are tagged with — isolated to a single
+    database. When omitted, every term-less table in the graph is returned.
+    """
     from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
+
+    if database_name is not None:
+        return get_neo4j_conn().query_read(
+            f"""
+            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
+                  (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
+            WHERE NOT (t)-[:{REL_REPRESENTS}]->()
+            RETURN t.id AS id, t.name AS name, t.description AS description,
+                   sch.name AS schema_name
+            ORDER BY t.name
+            """,
+            {"database_name": database_name},
+        )
 
     return get_neo4j_conn().query_read(
         f"""
