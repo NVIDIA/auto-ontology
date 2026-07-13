@@ -87,6 +87,9 @@ services:
       POSTGRES_PORT: "5432"
       NEO4J_URI: bolt://neo4j:7687
       INGESTION_SERVICE_URL: http://ingestion-service:3002
+      # Source DB override: reach the pgvector container by service name, not
+      # localhost (which resolves to this container inside the compose network).
+      CONNECTION_STRINGS: postgresql://postgres:tomer_is_my_queen@postgres:5432/amazon
     depends_on:
       postgres:
         condition: service_started
@@ -123,6 +126,9 @@ services:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
       NEO4J_URI: bolt://neo4j:7687
+      # Source DB override: reach the pgvector container by service name, not
+      # localhost (which resolves to this container inside the compose network).
+      CONNECTION_STRINGS: postgresql://postgres:tomer_is_my_queen@postgres:5432/amazon
     depends_on:
       postgres:
         condition: service_started
@@ -162,7 +168,7 @@ services:
     container_name: gsf-frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3100:3000"
     env_file:
       - .env
     environment:

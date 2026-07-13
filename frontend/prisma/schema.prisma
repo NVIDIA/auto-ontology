@@ -174,3 +174,17 @@ model SsoProvider {
   @@map("ssoProvider")
   @@schema("public")
 }
+
+// pgvector ingest store managed outside Prisma. Declared here so `db push`
+// does not drop the table.
+model NvIngestTabular {
+  langchainId       String  @id @map("langchain_id") @db.Uuid
+  content           String
+  embedding         Unsupported("vector(2048)")
+  databaseName      String? @map("database_name") @db.VarChar(100)
+  label             String? @db.VarChar(100)
+  langchainMetadata Json?   @map("langchain_metadata")
+
+  @@map("nv_ingest_tabular")
+  @@schema("public")
+}
