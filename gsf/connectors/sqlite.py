@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
@@ -50,11 +51,30 @@ class SQLiteDatabase(SQLDatabase):
         self._db_path = db_path
         self._connection_string = connection_string
         self._database_name = db_path.stem
-        self._conn = sqlite3.connect(str(db_path))
-        self._conn.row_factory = sqlite3.Row
+        # sqlite3 connections are bound to the thread that created them, but the
+        # semantic-compilation pipeline profiles tables across a ThreadPoolExecutor.
+        # Give each thread its own connection (mirroring the Postgres pool) so a
+        # connection is never shared across threads.
+        self._local = threading.local()
+        self._all_conns: list[sqlite3.Connection] = []
+        self._conns_lock = threading.Lock()
+        # Open eagerly on the constructing thread to surface connection errors early.
+        self._conn
         logger.debug(
             "SQLite connected (database=%r, path=%s).", self._database_name, db_path
         )
+
+    @property
+    def _conn(self) -> sqlite3.Connection:
+        """Return this thread's SQLite connection, creating it on first use."""
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(str(self._db_path))
+            conn.row_factory = sqlite3.Row
+            self._local.conn = conn
+            with self._conns_lock:
+                self._all_conns.append(conn)
+        return conn
 
     @property
     def dialect(self) -> str:
@@ -164,4 +184,11 @@ class SQLiteDatabase(SQLDatabase):
         return pd.DataFrame(rows)
 
     def close(self) -> None:
-        self._conn.close()
+        with self._conns_lock:
+            for conn in self._all_conns:
+                try:
+                    conn.close()
+                except Exception:
+                    logger.exception("Failed to close SQLite connection")
+            self._all_conns.clear()
+        self._local = threading.local()
