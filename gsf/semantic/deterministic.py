@@ -96,11 +96,27 @@ def _describe_column_batch(
         logger.warning("column description batch failed — proceeding without them")
         return {}
 
-    return {
-        d.column_name: d.description.strip()
-        for d in result.descriptions
-        if d.column_name and d.description.strip()
-    }
+    # The prompt annotates each column as "<name> (<dtype>)". When a column name
+    # # contains spaces or parentheses (e.g. BIRD's "Academic Year",
+    # "Charter School (Y/N)"), the model sometimes echoes the annotation back as
+    # the column_name (e.g. "Academic Year (TEXT)"). Resolve each returned name
+    # to the requested physical name: exact match first, then the longest
+    # requested name the returned string starts with.
+    requested_names = [c.get("name", "") for c in columns if c.get("name")]
+    requested_set = set(requested_names)
+    out: dict[str, str] = {}
+    for d in result.descriptions:
+        raw = d.column_name or ""
+        desc = (d.description or "").strip()
+        if not desc:
+            continue
+        if raw in requested_set:
+            out.setdefault(raw, desc)
+            continue
+        prefixes = [n for n in requested_names if n and raw.startswith(n)]
+        if prefixes:
+            out.setdefault(max(prefixes, key=len), desc)
+    return out
 
 
 def _generate_column_descriptions(

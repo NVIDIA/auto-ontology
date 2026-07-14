@@ -48,6 +48,16 @@ from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 logger = logging.getLogger(__name__)
 
 
+def _hop_column(hop: dict, side: str) -> str:
+    """Format a hop endpoint (``side`` is ``"source"`` or ``"target"``) as
+    ``schema.table.column`` (or ``table.column`` when the schema is absent)."""
+    schema = hop.get(f"{side}_schema", "")
+    table = hop.get(f"{side}_table", "")
+    column = hop.get(f"{side}_column", "")
+    prefix = f"{schema}.{table}" if schema else table
+    return f"{prefix}.{column}"
+
+
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
@@ -96,16 +106,19 @@ def _format_semantic_context(
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
-                for hop in path:
-                    src_s = hop.get("source_schema", "")
-                    src_t = hop.get("source_table", "")
-                    src_c = hop.get("source_column", "")
-                    tgt_s = hop.get("target_schema", "")
-                    tgt_t = hop.get("target_table", "")
-                    tgt_c = hop.get("target_column", "")
-                    src = f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                    tgt = f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
-                    lines.append(f"      {src} = {tgt}")
+                # The anchor column is the first hop's source; the destination
+                # is the last hop's target. Within a hop, source/target are the
+                # same table (navigation), so the actual cross-table joins are
+                # between consecutive hops: target[i] = source[i+1].
+                if len(path) == 1:
+                    left = _hop_column(path[0], "source")
+                    right = _hop_column(path[0], "target")
+                    lines.append(f"      {left} = {right}")
+                else:
+                    for cur, nxt in zip(path, path[1:]):
+                        left = _hop_column(cur, "target")
+                        right = _hop_column(nxt, "source")
+                        lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 
