@@ -97,21 +97,6 @@ class SQLExecutionAgent(BaseAgent):
         relevant_tables = path_state.get("relevant_tables", [])
         connector = resolve_connector_from_tables(relevant_tables, connectors)
 
-        # Scope execution to target_schema when set.
-        # TODO: add dialect-specific schema switching for Postgres (SET search_path),
-        #       Snowflake (USE SCHEMA), etc.
-        target_schema = path_state.get("target_schema")
-        if target_schema and connector is not None:
-            dialect = getattr(connector, "dialect", "")
-
-            if dialect == "duckdb":
-                try:
-                    connector.execute(f"SET schema = '{target_schema}'")
-                except Exception:
-                    self.logger.warning(
-                        "SET schema = '%s' failed", target_schema, exc_info=True
-                    )
-
         response_from_db = _run_sql(sql_code, connector)
 
         if response_from_db.error:

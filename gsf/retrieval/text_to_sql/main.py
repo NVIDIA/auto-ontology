@@ -67,13 +67,13 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     initial_path_state = dict(payload.get("path_state") or {})
 
-    target_schema = payload.get("target_schema")
-    if target_schema:
-        initial_path_state["target_schema"] = target_schema
+    target_db = payload.get("target_db")
+    if target_db:
+        initial_path_state["target_db"] = target_db
     elif len(connectors) == 1:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
-            initial_path_state["target_schema"] = connector_db
+            initial_path_state["target_db"] = connector_db
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),

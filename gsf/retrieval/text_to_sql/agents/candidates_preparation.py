@@ -105,7 +105,7 @@ class CandidatePreparationAgent(BaseAgent):
         has_sql_attrs = bool(path_state.get("retrieved_sql_attributes"))
         if not has_col_attrs and not has_custom and not has_sql_attrs:
             connectors = state.get("connectors") or []
-            if path_state.get("target_schema") or (
+            if path_state.get("target_db") or (
                 len(connectors) == 1 and getattr(connectors[0], "database_name", None)
             ):
                 return True
@@ -131,11 +131,11 @@ class CandidatePreparationAgent(BaseAgent):
         """
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        target_schema = path_state.get("target_schema")
-        if not target_schema:
+        target_db = path_state.get("target_db")
+        if not target_db:
             connectors = state.get("connectors") or []
             if len(connectors) == 1:
-                target_schema = getattr(connectors[0], "database_name", None)
+                target_db = getattr(connectors[0], "database_name", None)
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
@@ -253,7 +253,7 @@ class CandidatePreparationAgent(BaseAgent):
                 state["data_retriever"],
                 query,
                 k=k_per_query,
-                database_name=target_schema,
+                database_name=target_db,
             )
 
         with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:

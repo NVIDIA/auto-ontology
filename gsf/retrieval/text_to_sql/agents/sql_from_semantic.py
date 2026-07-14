@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
-    target_schema: str | None = None,
+    target_db: str | None = None,
 ) -> str:
     """Format the semantic anchor + join-path context for the SQL prompt.
 
@@ -57,8 +57,8 @@ def _format_semantic_context(
     how to reach every other retrieved column via JOIN conditions derived
     from the semantic graph.
 
-    When *target_schema* is set, schema qualifiers are omitted because
-    ``SET schema`` already scopes execution.
+    When *target_db* is set, schema qualifiers are omitted because
+    execution is already scoped to that database.
 
     Example output::
 
@@ -75,7 +75,7 @@ def _format_semantic_context(
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    if target_schema:
+    if target_db:
         anchor_full = anchor_table
     else:
         anchor_full = (
@@ -98,7 +98,7 @@ def _format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            if target_schema:
+            if target_db:
                 full_table = table
             else:
                 full_table = f"{schema}.{table}" if schema else table
@@ -113,7 +113,7 @@ def _format_semantic_context(
                     tgt_s = hop.get("target_schema", "")
                     tgt_t = hop.get("target_table", "")
                     tgt_c = hop.get("target_column", "")
-                    if target_schema:
+                    if target_db:
                         src = f"{src_t}.{src_c}"
                         tgt = f"{tgt_t}.{tgt_c}"
                     else:
@@ -129,7 +129,7 @@ def _format_semantic_context(
 
 
 def format_tables_for_prompt(
-    tables: list[dict], target_schema: str | None = None
+    tables: list[dict], target_db: str | None = None
 ) -> str:
     """
     Format tables with clear column information to prevent cross-table column confusion.
@@ -137,8 +137,8 @@ def format_tables_for_prompt(
     Args:
         tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
             ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
-        target_schema: When set, schema qualification is omitted from table names
-            because ``SET schema`` scopes execution to this schema already.
+        target_db: When set, schema qualification is omitted from table names
+            because execution is already scoped to this database.
 
     Returns:
         Formatted string clearly showing which columns belong to each table
@@ -159,8 +159,8 @@ def format_tables_for_prompt(
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # When target_schema is set, execution is already scoped via SET schema
-        if target_schema:
+        # When target_db is set, execution is already scoped to that database
+        if target_db:
             full_name = table_name
         elif database_name and schema_name:
             full_name = f"{database_name}.{schema_name}.{table_name}"
@@ -373,22 +373,22 @@ class SQLFromCandidatesAgent(BaseAgent):
                 )
 
             # Build tables/schema section — semantic hint and available tables are co-equal.
-            target_schema = path_state.get("target_schema")
+            target_db = path_state.get("target_db")
             parts = []
             if primary_attribute:
                 parts.append(
                     _format_semantic_context(
                         primary_attribute,
                         attribute_join_paths,
-                        target_schema=target_schema,
+                        target_db=target_db,
                     )
                 )
             if relevant_tables:
-                target_schema = path_state.get("target_schema")
+                target_db = path_state.get("target_db")
                 parts.append(
                     "AVAILABLE TABLES (schema context):\n"
                     + format_tables_for_prompt(
-                        relevant_tables, target_schema=target_schema
+                        relevant_tables, target_db=target_db
                     )
                 )
             tables_section = "\n\n".join(parts) if parts else "No tables available."
@@ -407,7 +407,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Choose system prompt based on context
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
-                target_schema=target_schema,
+                target_db=target_db,
             )
 
             messages = state["messages"] + [

@@ -70,10 +70,10 @@ create_sql_user_prompt = (
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
-    target_schema: str | None = None,
+    target_db: str | None = None,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates."""
-    bare_table_names = target_schema is not None or (dialect or "").lower() == "sqlite"
+    bare_table_names = target_db is not None or (dialect or "").lower() == "sqlite"
     if bare_table_names:
         table_name_rule = (
             "- Use table names exactly as shown in AVAILABLE TABLES "

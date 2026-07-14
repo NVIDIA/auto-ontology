@@ -90,7 +90,7 @@ class SQLFromTablesAgent(BaseAgent):
             relevant_tables = get_relevant_tables(
                 state["data_retriever"],
                 question,
-                database_name=path_state.get("target_schema"),
+                database_name=path_state.get("target_db"),
             )
         similar_questions = []
 
@@ -104,7 +104,7 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block="",
             queries=[],
             tables=format_tables_for_prompt(
-                relevant_tables, target_schema=path_state.get("target_schema")
+                relevant_tables, target_db=path_state.get("target_db")
             ),
             qa_from_conversations=similar_questions,
             custom_analyses="",

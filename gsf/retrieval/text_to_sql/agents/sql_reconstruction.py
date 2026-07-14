@@ -193,7 +193,7 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
-        database_name = (state.get("path_state") or {}).get("target_schema")
+        database_name = (state.get("path_state") or {}).get("target_db")
         combined: list[dict] = []
         for query_text in search_queries:
             try:
@@ -313,7 +313,7 @@ class SQLReconstructionAgent(BaseAgent):
         if relevant_tables:
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"
-                f"{format_tables_for_prompt(relevant_tables, target_schema=path_state.get('target_schema'))}\n\n"
+                f"{format_tables_for_prompt(relevant_tables, target_db=path_state.get('target_db'))}\n\n"
             )
 
         history_section = ""

@@ -241,7 +241,7 @@ async def chat_bird(request: ChatRequestWithEvidence) -> dict:
         "connectors": get_connectors(),
         "acronyms": fetch_acronyms(),
         "custom_prompts": fetch_custom_prompts(),
-        "target_schema": request.database,
+        "target_db": request.database,
     }
     result = get_agent_response(payload)
     return {

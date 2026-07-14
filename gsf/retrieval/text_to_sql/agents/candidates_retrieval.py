@@ -333,7 +333,7 @@ class CandidateRetrievalAgent(BaseAgent):
         entities: list[str] = path_state.get("entities") or []
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
-        target_schema = path_state.get("target_schema")
+        target_db = path_state.get("target_db")
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -350,7 +350,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         Labels.CUSTOM_ANALYSIS,
                         3,
-                        target_schema,
+                        target_db,
                     ),
                 ),
                 (
@@ -360,7 +360,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         question,
                         LABEL_SQL_ATTRIBUTE,
                         3,
-                        target_schema,
+                        target_db,
                     ),
                 ),
                 *[
@@ -371,7 +371,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             entity,
                             LABEL_COLUMN_ATTRIBUTE,
                             2,
-                            target_schema,
+                            target_db,
                         ),
                     )
                     for entity in clean_entities
