@@ -1,0 +1,103 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Builds the GSF FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
+# deploy repo consumes it by digest; GitHub and GitLab stay decoupled, linked
+# only through nvcr.io (mirrors staging-publish-chart.yml). Requires repo secret:
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
+#
+# The image serves both the API server (`server`) and the ingestion service
+# (`ingestion_service`); the ingestion entrypoint exposes /health on 3002, which
+# the chart's readiness probe requires. Rebuild here whenever app code changes.
+
+name: 'Staging: Publish app image to nvcr.io'
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Override image tag (default: stg.<timestamp>)'
+        required: false
+  push:
+    branches: [main, feat/astra-nightly-deploy]
+    paths:
+      - 'gsf/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - 'Dockerfile'
+      - '.github/workflows/staging-publish-image.yml'
+
+env:
+  # nvcr.io allows only org/team/image (3 segments); the app image shares the
+  # nvcr.io/nvstaging/gsf/gsf repo with the OCI chart, distinguished by tag.
+  IMAGE: nvcr.io/nvstaging/gsf/gsf
+
+jobs:
+  publish-image:
+    name: Build & push amd64 app image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          set -euo pipefail
+          # Staging app images: tag is stg.<UTC ts> only (no version prefix).
+          # The constant "stg." prefix lets the deploy repo's nightly roll
+          # (gsf/gsf-demo-deploy: ci/roll-stg.sh) pick app images and skip the
+          # OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
+          t='${{ github.event.inputs.tag }}'
+          if [ -z "$t" ]; then
+            t="stg.$(date -u +%Y%m%d%H%M%S)"
+          fi
+          echo "tag=$t" >>"$GITHUB_OUTPUT"
+          echo "Image tag: $t"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to nvcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: nvcr.io
+          username: '$oauthtoken'
+          password: ${{ secrets.NGC_API_KEY }}
+
+      - name: Build & push (linux/amd64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          provenance: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published app image"
+            echo ""
+            echo "- Image: \`${IMAGE}:${{ steps.meta.outputs.tag }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Pin in the umbrella as:"
+            echo '```yaml'
+            echo "    image:"
+            echo "      repository: ${IMAGE}"
+            echo "      tag: ${{ steps.meta.outputs.tag }}"
+            echo "      digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

@@ -4,6 +4,23 @@
 # IfNotPresent prevents the cluster from trying to pull from a remote registry.
 imagePullPolicy: IfNotPresent
 
+# Image pull secrets for private registries (e.g. nvcr.io). Empty for local /
+# minikube (public images). A deployment overlay can set, e.g.:
+#   imagePullSecrets:
+#     - name: nvcr-creds
+imagePullSecrets: []
+
+# When enabled, the chart renders an in-cluster Secret (<release>-secrets) from
+# the values below — convenient for local / minikube. Disable it when an
+# external mechanism (e.g. the External Secrets Operator) supplies that Secret.
+bundledSecret:
+  enabled: true
+
+# Extra annotations merged into the backend / ingestion / frontend pod templates.
+# A GitOps overlay can bump a value here (e.g. rolledAt) to force a fresh rollout
+# even when image references are unchanged.
+podAnnotations: {}
+
 # ------------------------------------------------------------------
 # Shared credentials — populate a single k8s Secret (<release>-secrets)
 # consumed by all GSF workloads.
@@ -22,6 +39,9 @@ pgadminPassword: admin
 nvidiaApiKey: ""
 baseUrl: "https://integrate.api.nvidia.com/v1"
 modelName: "nvidia/nemotron-3-nano-30b-a3b"
+# Optional dedicated model for entity extraction in the text-to-SQL pipeline.
+# When empty, entity extraction falls back to modelName.
+entityExtractionModel: "meta/llama-3.1-8b-instruct"
 embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
@@ -54,6 +74,9 @@ postgres:
     port: 5432
   persistence:
     size: 5Gi
+    # Set to a specific class on clusters without a default dynamic provisioner
+    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
+    storageClassName: ""
   resources:
     requests:
       cpu: 100m
@@ -63,6 +86,9 @@ postgres:
 # pgAdmin
 # ------------------------------------------------------------------
 pgadmin:
+  # Optional DB admin UI. Handy for local/minikube; disabled on Astra via the
+  # deploy overlay (gsf.pgadmin.enabled=false).
+  enabled: true
   image:
     repository: dpage/pgadmin4
     tag: latest
@@ -89,6 +115,9 @@ neo4j:
     logsSize: 1Gi
     pluginsSize: 1Gi
     importSize: 1Gi
+    # Set to a specific class on clusters without a default dynamic provisioner
+    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
+    storageClassName: ""
   resources:
     requests:
       cpu: 200m
@@ -101,6 +130,7 @@ backend:
   image:
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3001
   replicas: 1
@@ -117,6 +147,7 @@ ingestion:
     # Reuses the backend image with a different entrypoint arg.
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3002
   replicas: 1
@@ -132,6 +163,7 @@ frontend:
   image:
     repository: nvcr.io/nvstaging/gsf/gsf-frontend
     tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3000
     nodePort: 30000

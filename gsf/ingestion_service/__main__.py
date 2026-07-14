@@ -40,6 +40,7 @@ from gsf.ingestion_service.config import (  # noqa: E402
 from gsf.ingestion_service.data_scheduler import DataScheduler  # noqa: E402
 from gsf.ingestion_service.router import router  # noqa: E402
 from gsf.ingestion_service.semantic_scheduler import SemanticScheduler  # noqa: E402
+from gsf.version import get_app_version  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,7 @@ def main() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    logger.info("Starting GSF Ingestion Service — app version %s", get_app_version())
     uvicorn.run(
         app,
         host="0.0.0.0",

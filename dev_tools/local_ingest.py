@@ -16,7 +16,6 @@ from __future__ import annotations
 import logging
 import os
 
-from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
 from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
     TabularSchemaExtractOp,
@@ -27,10 +26,9 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_data_vdb, get_semantic_vdb
+from gsf.utils import get_embed_params
+from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import create_connector
-
-from dev_tools.evaluation.enrich_graph import add_custom_analyses, apply_metadata
 
 logger = logging.getLogger("dev_tools.local_ingest")
 
@@ -40,11 +38,11 @@ def run_ingest(connection_string: str) -> None:
     connector = create_connector(connection_string)
     database_name = connector.database_name
 
-    TABULAR_PARAMS = TabularExtractParams(
+    tabular_params = TabularExtractParams(
         connector=connector,
     )
 
-    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
+    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=tabular_params)
     extract_results = extract_graph.execute(None)
     schema_data = extract_results[0] if extract_results else None
     if not (isinstance(schema_data, tuple) and len(schema_data) == 2):
@@ -53,7 +51,6 @@ def run_ingest(connection_string: str) -> None:
             f"got {type(schema_data).__name__}."
         )
 
-    apply_metadata(database_name)
     embed_params = get_embed_params()
 
     embed_graph = (
@@ -64,31 +61,16 @@ def run_ingest(connection_string: str) -> None:
     results = embed_graph.execute(schema_data)
     result_df = results[0] if results else None
 
-    # Build the pgvector VDB once. PostgresVDB.__init__ wipes existing rows
-    # for `database_name`, so reuse the same instance for the custom-analysis
-    # append below — calling get_data_vdb(database_name=...) again would re-delete
-    # everything we just wrote.
+    # PostgresVDB.__init__ wipes existing rows for `database_name` before we
+    # re-ingest, so the store starts clean for this database.
     vdb = get_data_vdb(database_name=database_name)
 
     if result_df is not None and not result_df.empty:
         ingest_op = IngestVdbOperator(vdb=vdb)
         ingest_op(result_df.to_dict(orient="records"))
-        print(
-            "Tabular ingest result:",
-            len(result_df),
-            "rows written to pgvector)",
-        )
+        logger.info("Tabular ingest: %d rows written to pgvector.", len(result_df))
     else:
-        print("Tabular ingest result: no rows produced")
-
-    # Custom analyses live in the semantic-layer collection, so embed them
-    # through a dedicated semantic VDB rather than the tabular `vdb` above.
-    add_custom_analyses(
-        connector.database_name,
-        connector.dialect,
-        embed_params=embed_params,
-        vdb=get_semantic_vdb(database_name=connector.database_name),
-    )
+        logger.info("Tabular ingest: no rows produced.")
 
 
 if __name__ == "__main__":
@@ -98,14 +80,15 @@ if __name__ == "__main__":
     )
     # Remote source DB to extract tabular schema/embeddings from. Kept separate
     # from the local POSTGRES_* vars (which point at the pgvector store).
-    _CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "").split(",")
-    if not _CONNECTION_STRINGS:
+    _CONNECTION_STRINGS = os.environ.get("CONNECTION_STRINGS", "")
+    connection_string = _CONNECTION_STRINGS.split(",")[0].strip()
+    if not connection_string:
         raise EnvironmentError(
             "CONNECTION_STRINGS is not set. Add it to your .env, e.g.:\n\n"
             "    CONNECTION_STRINGS=postgresql://user:password@host:5432/dbname"
         )
     try:
-        run_ingest(_CONNECTION_STRINGS[0])
+        run_ingest(connection_string)
     except KeyboardInterrupt:
         logger.info("local_ingest: shutting down")
         raise SystemExit(0)

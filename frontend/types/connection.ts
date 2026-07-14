@@ -20,6 +20,8 @@ export type SnowflakeConnectionParams = {
 	user: string;
 	password: string;
 	database: string;
+	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
+	schemas?: string[];
 };
 
 export type HeavyDBConnectionParams = {

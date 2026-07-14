@@ -35,6 +35,11 @@ node_modules
 **/*.spec.tsx
 playwright-report
 test-results
+# The `**/test` rule above is meant for test dirs, but it also matches the
+# app-router API route `app/api/connections/test/` — which must ship in the
+# image (dropping it makes /api/connections/test 405). Re-include it.
+!app/api/connections/test
+!app/api/connections/test/**
 
 # Logs
 *.log

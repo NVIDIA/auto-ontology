@@ -157,8 +157,19 @@ export const TermsView = () => {
 	const [deletingSqlAttr, setDeletingSqlAttr] = useState<SqlAttributeDeleteTarget | null>(null);
 	const [deletingSqlAttrBusy, setDeletingSqlAttrBusy] = useState(false);
 	const [deleteSqlAttrError, setDeleteSqlAttrError] = useState<string | null>(null);
+	const [termEditing, setTermEditing] = useState(false);
 	const [sqlAttrEditing, setSqlAttrEditing] = useState(false);
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
+
+	const [prevFocusId, setPrevFocusId] = useState(focusId);
+	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
+	if (focusId !== prevFocusId || sqlAttrId !== prevSqlAttrId) {
+		setPrevFocusId(focusId);
+		setPrevSqlAttrId(sqlAttrId);
+		setTermEditing(false);
+		setSqlAttrEditing(false);
+		setSqlAttrEditError(null);
+	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
 	const [sqlEditOriginalValue, setSqlEditOriginalValue] = useState('');
@@ -382,29 +393,87 @@ export const TermsView = () => {
 		return res;
 	};
 
-	const handleSqlAttrEditSave = async (edits: Record<string, ComposerEditValue>) => {
-		if (focusedSqlAttr == null || focusId == null) return;
+	const handleSqlAttrEditSave = async (payload: Record<string, ComposerEditValue>) => {
+		if (focusedSqlAttr == null || focusId == null) {
+			return { error: true, message: 'SQL attribute not found' };
+		}
 		setSqlAttrEditError(null);
 		const description =
-			typeof edits.description === 'string'
-				? edits.description
+			typeof payload.description === 'string'
+				? payload.description
 				: (focusedSqlAttr.description ?? '');
-		const expression =
-			typeof edits.sql === 'string'
-				? edits.sql
-				: (focusedSqlAttr.expression ?? focusedSqlAttr.sql ?? '');
-		const res = await updateSqlAttr({
-			id: focusedSqlAttr.id,
-			name: focusedSqlAttr.name,
-			description,
-			expression,
-			termId: focusedSqlAttr.term_id,
-		});
-		if (res.error) {
-			setSqlAttrEditError(res.message ?? 'Failed to update SQL attribute');
-			return;
+		const name = typeof payload.name === 'string' ? payload.name.trim() : focusedSqlAttr.name;
+		if (!name) {
+			return { error: true, message: 'SQL attribute name cannot be blank' };
 		}
-		setSqlAttrEditing(false);
+
+		const patch: { name?: string; description?: string } = {};
+		if (name !== focusedSqlAttr.name.trim()) {
+			patch.name = name;
+		}
+		if (description !== (focusedSqlAttr.description ?? '')) {
+			patch.description = description;
+		}
+		if (Object.keys(patch).length === 0) {
+			return { error: false };
+		}
+
+		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, patch);
+		if (res.error) {
+			return { error: true, message: res.message ?? 'Failed to update SQL attribute' };
+		}
+		setSqlAttrs((prev) =>
+			prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
+		);
+		setSqlAttrsEpoch((prev) => prev + 1);
+		return { error: false };
+	};
+
+	const handleTermEditSave = async (payload: Record<string, ComposerEditValue>) => {
+		if (focusedTerm == null || focusId == null) {
+			return { error: true, message: 'Term not found' };
+		}
+
+		const name =
+			typeof payload.name === 'string' ? payload.name.trim() : focusedTerm.name.trim();
+		if (!name) {
+			return { error: true, message: 'Term name cannot be blank' };
+		}
+
+		const description =
+			typeof payload.description === 'string'
+				? payload.description
+				: (focusedTerm.description ?? '');
+
+		const patch: { name?: string; description?: string } = {};
+		if (name !== focusedTerm.name.trim()) {
+			patch.name = name;
+		}
+		if (description !== (focusedTerm.description ?? '')) {
+			patch.description = description;
+		}
+		if (Object.keys(patch).length === 0) {
+			return { error: false };
+		}
+
+		const res = await termsApi.update(focusId, patch);
+		if (res.error) {
+			return { error: true, message: res.message ?? 'Failed to update term' };
+		}
+
+		setTerms((prev) =>
+			prev.map((term) =>
+				term.id === focusId
+					? {
+							...term,
+							name: res.data.name,
+							description: res.data.description,
+						}
+					: term,
+			),
+		);
+		setSqlAttrsEpoch((prev) => prev + 1);
+		return { error: false };
 	};
 
 	const trimmedSqlEditValue = sqlEditValue.trim();
@@ -476,6 +545,7 @@ export const TermsView = () => {
 		}
 		resetSqlEditModal();
 		setSqlEditModalOpen(false);
+		setSqlAttrEditing(false);
 	};
 
 	const handleSqlAttrClick = useCallback(
@@ -510,7 +580,14 @@ export const TermsView = () => {
 					: null;
 
 			return {
-				header: { header: { title: attr.name, withBorder: true } },
+				header: {
+					header: {
+						title: attr.name,
+						withBorder: true,
+						showContentHeader: true,
+						titleEditable: true,
+					},
+				},
 				sections: [
 					{
 						type: ComposerSectionKind.TEXT_CARD,
@@ -518,6 +595,7 @@ export const TermsView = () => {
 						title: 'Description',
 						body: attr.description ?? '',
 						editable: true,
+						suggestable: true,
 					},
 					{
 						type: ComposerSectionKind.SQL_BLOCK,
@@ -575,6 +653,8 @@ export const TermsView = () => {
 					header: {
 						title: term.name,
 						withBorder: true,
+						showContentHeader: true,
+						titleEditable: true,
 					},
 				},
 				sections: [
@@ -583,12 +663,23 @@ export const TermsView = () => {
 						id: 'description',
 						title: 'Description',
 						body: term.description ?? '',
+						editable: true,
 					},
 					{
-						type: ComposerSectionKind.TEXT_CARD,
+						type: ComposerSectionKind.TAG_LIST,
+						id: 'synonyms',
+						title: 'Synonyms',
+						values: term.synonyms ?? [],
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
 						id: 'entities',
 						title: 'Entities',
-						body: `Tables (${term.table_count})`,
+						entities: (term.tables ?? []).map((table) => ({
+							id: table.id,
+							name: table.name,
+							focusId: [table.db_id, table.schema_id, table.id].join('|'),
+						})),
 					},
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,
@@ -677,18 +768,7 @@ export const TermsView = () => {
 						{sqlAttrTitle}
 					</span>
 					<div className="ml-auto flex shrink-0 items-center gap-1">
-						{sqlAttrEditing ? (
-							<button
-								type="button"
-								onClick={() => {
-									setSqlAttrEditing(false);
-									setSqlAttrEditError(null);
-								}}
-								className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
-							>
-								Read mode
-							</button>
-						) : (
+						{sqlAttrEditing ? null : (
 							<>
 								<button
 									type="button"
@@ -720,23 +800,32 @@ export const TermsView = () => {
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						key={sqlAttrId}
 						dataId={sqlAttrId}
 						title={sqlAttrTitle}
 						getSinglePage={getSqlAttributeSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
 						isEditing={sqlAttrEditing}
-						onSave={handleSqlAttrEditSave}
+						onPatchEdits={handleSqlAttrEditSave}
+						onSave={() => {
+							setSqlAttrEditing(false);
+							setSqlAttrEditError(null);
+						}}
 						onCancel={() => {
 							setSqlAttrEditing(false);
 							setSqlAttrEditError(null);
 						}}
-						inlineSaveSectionId="description"
-						hideEditToolbar
 						onEditSql={(_sectionId, sql) => {
 							resetSqlEditModal();
 							setSqlEditValue(sql);
 							setSqlEditOriginalValue(sql);
 							setSqlEditModalOpen(true);
+						}}
+						onSuggestDescription={async (sectionId) => {
+							if (sectionId !== 'description') return null;
+							const res = await sqlAttributesApi.suggestDescription(sqlAttrId);
+							if (res.error) return null;
+							return res.data;
 						}}
 					/>
 				</main>
@@ -815,28 +904,50 @@ export const TermsView = () => {
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{termTitle}
 					</span>
-					<button
-						type="button"
-						onClick={() => setCreateSqlAttrModalOpen(true)}
-						className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
-					>
-						<svg
-							className="h-4 w-4"
-							viewBox="0 0 20 20"
-							fill="currentColor"
-							aria-hidden
+					<div className="ml-auto flex items-center gap-2">
+						{termEditing ? null : (
+							<button
+								type="button"
+								onClick={() => {
+									setTermEditing(true);
+								}}
+								className="cursor-pointer rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
+							>
+								Edit term
+							</button>
+						)}
+						<button
+							type="button"
+							onClick={() => setCreateSqlAttrModalOpen(true)}
+							className="flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
 						>
-							<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-						</svg>
-						Create new sql attribute
-					</button>
+							<svg
+								className="h-4 w-4"
+								viewBox="0 0 20 20"
+								fill="currentColor"
+								aria-hidden
+							>
+								<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
+							</svg>
+							Create new sql attribute
+						</button>
+					</div>
 				</header>
 				<main className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 					<SinglePageView
+						key={focusId}
 						dataId={focusId}
 						title={termTitle}
 						getSinglePage={getSinglePage}
 						treeDataEpoch={sqlAttrsEpoch}
+						isEditing={termEditing}
+						onPatchEdits={handleTermEditSave}
+						onSave={() => {
+							setTermEditing(false);
+						}}
+						onCancel={() => {
+							setTermEditing(false);
+						}}
 						onDataTableRowClick={handleSqlAttrClick}
 					/>
 				</main>

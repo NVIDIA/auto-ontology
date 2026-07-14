@@ -8,7 +8,8 @@ import type { ConnectionInput } from '@/types/connection';
 import type { ApiError, ApiResponse, ResponseWithCount } from './types';
 
 type CreateResponse = ApiError | { data: Connection };
-type TestResponse = ApiError | { success: true };
+// A successful test also returns the connection's schemas (for the picker).
+type TestResponse = ApiError | { success: true; schemas: string[] };
 
 const err = (message: string): ApiError => ({ error: true, message });
 
@@ -22,15 +23,18 @@ export const connectionsApi = {
 		requests.post<{ data: Connection }>('connections', { connection: input }),
 
 	test: async (input: ConnectionInput): Promise<TestResponse> => {
-		const res = await requests.post<{ success: boolean }>('connections/test', {
-			connection: input,
-		});
+		const res = await requests.post<{ success: boolean; schemas?: string[] }>(
+			'connections/test',
+			{ connection: input },
+		);
 
 		if (res.error || res.success !== true) {
 			return err(res.message ?? 'Connection test failed.');
 		}
 
-		return { success: true };
+		// The test also reports the connection's schemas (empty for connectors
+		// that don't enumerate them) so the UI can offer a schema picker.
+		return { success: true, schemas: res.schemas ?? [] };
 	},
 
 	delete: (databaseName: string) =>

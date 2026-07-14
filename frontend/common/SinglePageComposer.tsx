@@ -26,6 +26,7 @@ import { Icon, IconName } from '@/components/icons';
 import { TagInput } from '@/components/TagInput';
 import { Table } from '@/components/Table';
 import { SqlBlock } from '@/components/SqlBlock';
+import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import { Toast } from '@/components/Toast';
@@ -58,11 +59,18 @@ export type SinglePageComposerProps = {
 		headerProps: Record<string, unknown>;
 	};
 	entityUpdatingProperties?: Record<string, string | string[]>;
-	isEditing?: boolean;
+	isEditingMode?: boolean;
+	/** Saves pending field edits. Overrides the default `datasources.updateNode` path used for catalog nodes. */
+	onPatchEdits?: (
+		edits: Record<string, ComposerEditValue>,
+	) => Promise<{ error?: boolean; message?: string }>;
+	/** Called after Save succeeds, or when Save has nothing to persist. */
 	onSave?: (edits: Record<string, ComposerEditValue>) => void;
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
+	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
+	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 };
@@ -80,18 +88,97 @@ function composerSectionHeading(section: ComposerSection): string {
 	}
 }
 
+const DescriptionSuggestion = ({
+	onSuggest,
+	onApply,
+}: {
+	onSuggest: () => Promise<string | null>;
+	onApply: (suggestion: string) => void;
+}) => {
+	const [suggestion, setSuggestion] = useState<string | null>(null);
+	const [loading, setLoading] = useState(true);
+	const [error, setError] = useState<string | null>(null);
+	const onSuggestRef = useRef(onSuggest);
+
+	useEffect(() => {
+		onSuggestRef.current = onSuggest;
+	}, [onSuggest]);
+
+	// Fetch exactly once per mount — this component only exists while the
+	// description card is in edit mode, so mounting *is* "entering edit mode".
+	// `loading`/`error` already start at their correct values above, so no
+	// setState is needed before the async call resolves.
+	useEffect(() => {
+		let cancelled = false;
+		onSuggestRef
+			.current()
+			.then((result) => {
+				if (cancelled) return;
+				if (result == null || result.trim() === '') {
+					setError('No suggestion available');
+					return;
+				}
+				setSuggestion(result);
+			})
+			.catch(() => {
+				if (!cancelled) setError('Failed to generate a suggestion');
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
+		return () => {
+			cancelled = true;
+		};
+	}, []);
+
+	if (!loading && suggestion == null && error == null) return null;
+
+	return (
+		<div className="mt-3 rounded-lg border border-[#76b900]/40 bg-[#76b900]/[0.06] p-4 dark:border-[#76b900]/30 dark:bg-[#76b900]/10">
+			<div className="flex items-center justify-between gap-3">
+				<h3 className="text-xs font-semibold uppercase tracking-wide text-[#4d7a00] dark:text-[#a3d63a]">
+					Description Suggestion
+				</h3>
+				{suggestion != null && (
+					<button
+						type="button"
+						onClick={() => onApply(suggestion)}
+						className="shrink-0 cursor-pointer rounded-md border border-[#76b900]/60 bg-white px-2.5 py-1 text-xs font-medium text-[#4d7a00] transition-colors hover:bg-[#76b900]/10 dark:border-[#76b900]/50 dark:bg-zinc-950 dark:text-[#a3d63a] dark:hover:bg-[#76b900]/15"
+					>
+						Apply as Description
+					</button>
+				)}
+			</div>
+			<div className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+				{loading ? (
+					<span className="flex items-center gap-2 italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">
+						<Spinner aria-label="Generating suggestion" className="h-3.5 w-3.5" />
+						Generating suggestion…
+					</span>
+				) : suggestion != null ? (
+					suggestion
+				) : (
+					<span className="italic text-[#4d7a00]/70 dark:text-[#a3d63a]/70">{error}</span>
+				)}
+			</div>
+		</div>
+	);
+};
+
 const EditableTextCard = ({
 	section,
 	onChange,
 	onSave,
 	saving = false,
 	autoFocus = false,
+	onSuggest,
 }: {
-	section: { id: string; title: string; body: string };
+	section: { id: string; title: string; body: string; suggestable?: boolean };
 	onChange: (sectionId: string, value: string) => void;
 	onSave?: () => void;
 	saving?: boolean;
 	autoFocus?: boolean;
+	onSuggest?: () => Promise<string | null>;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
@@ -103,6 +190,11 @@ const EditableTextCard = ({
 	const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
 		setValue(e.target.value);
 		onChange(section.id, e.target.value);
+	};
+
+	const handleApplySuggestion = (suggestion: string) => {
+		setValue(suggestion);
+		onChange(section.id, suggestion);
 	};
 
 	return (
@@ -117,6 +209,9 @@ const EditableTextCard = ({
 				rows={4}
 				className="mt-3 w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300"
 			/>
+			{section.suggestable === true && onSuggest != null && (
+				<DescriptionSuggestion onSuggest={onSuggest} onApply={handleApplySuggestion} />
+			)}
 			{onSave != null && (
 				<div className="mt-3 flex justify-end">
 					<button
@@ -245,6 +340,7 @@ function renderComposerSection(
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void,
 	isEditingActive = false,
 	onEditSql?: (sectionId: string, sql: string) => void,
+	onEntityClick?: (focusId: string) => void,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -384,6 +480,41 @@ function renderComposerSection(
 					)}
 				</div>
 			);
+		case ComposerSectionKind.ENTITY_CHIPS:
+			return (
+				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						{section.title} ({section.entities.length})
+					</h2>
+					{section.entities.length === 0 ? (
+						<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+					) : (
+						<ul className="mt-3 flex flex-wrap gap-2">
+							{section.entities.map((entity) => (
+								<li key={entity.id}>
+									{onEntityClick ? (
+										<button
+											type="button"
+											title={entity.name}
+											onClick={() => onEntityClick(entity.focusId)}
+											className="inline-flex cursor-pointer items-center rounded-full border border-zinc-300 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 transition-colors hover:border-[#76b900]/60 hover:bg-[#76b900]/10 hover:text-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:border-[#76b900]/50 dark:hover:bg-[#76b900]/15 dark:hover:text-[#a3d63a]"
+										>
+											{entity.name}
+										</button>
+									) : (
+										<span
+											title={entity.name}
+											className="inline-flex items-center rounded-full border border-zinc-200 bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+										>
+											{entity.name}
+										</span>
+									)}
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+			);
 		case ComposerSectionKind.SQL_BLOCK:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
@@ -438,11 +569,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			rightPanel,
 			pdfProps,
 			entityUpdatingProperties,
-			isEditing,
+			isEditingMode: controlledEditingMode = false,
+			onPatchEdits,
 			onSave,
 			onCancel,
 			onDataTableRowClick,
 			onEditSql,
+			onSuggestDescription,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 		} = props;
@@ -455,9 +588,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			[router],
 		);
 
+		const handleEntityClick = useCallback(
+			(focusId: string) => {
+				router.push(catalogPathFromFocusId(focusId));
+			},
+			[router],
+		);
+
 		const hh = header?.header;
 		const title = (hh?.title as string) ?? 'Untitled';
 		const entityId = (hh?.entityId as string) ?? '';
+		const showContentHeader = hh?.showContentHeader === true;
+		const titleEditable = hh?.titleEditable === true;
+		const shouldAutofocusTitle = showContentHeader && titleEditable;
 		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
 		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
 
@@ -470,16 +613,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					s.editable === true,
 			)?.id ?? null;
 		const hasEditableSections = firstEditableId !== null;
-		const [localIsEditing, setLocalIsEditing] = useState(false);
+		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
-		const isEditingActive = isEditing || localIsEditing;
+		const isEditingActive = controlledEditingMode || localEditingMode;
 
+		const titleInputRef = useRef<HTMLInputElement>(null);
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
 
-		// Reset the save error when an *externally* controlled `isEditing` prop
+		// Reset the save error when an *externally* controlled `isEditingMode` prop
 		// flips to true (e.g. a parent toggling edit mode) — mirrors what the
-		// internal "Edit" button already does for `localIsEditing`. Adjusted
+		// internal "Edit" button already does for `localEditingMode`. Adjusted
 		// during render (not in an effect) per
 		// https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes.
 		const [prevIsEditingActive, setPrevIsEditingActive] = useState(isEditingActive);
@@ -499,12 +643,22 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			}
 		}, [isEditingActive]);
 
+		useEffect(() => {
+			if (isEditingActive && shouldAutofocusTitle) {
+				titleInputRef.current?.focus();
+			}
+		}, [isEditingActive, shouldAutofocusTitle]);
+
 		const handleSave = async () => {
 			const edits = pendingEditsRef.current;
 			if (saving) return;
 
-			if (!entityId || Object.keys(edits).length === 0) {
-				setLocalIsEditing(false);
+			const hasPendingEdits = Object.keys(edits).length > 0;
+			const usesDefaultCatalogSave = onPatchEdits == null;
+			const hasNothingToSave = !entityId || !hasPendingEdits;
+
+			if (usesDefaultCatalogSave && hasNothingToSave) {
+				setLocalEditingMode(false);
 				setSaveError(null);
 				onSave?.(edits);
 				return;
@@ -512,7 +666,9 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 
 			setSaving(true);
 			setSaveError(null);
-			const res = await datasources.updateNode(entityId, edits as NodePatch);
+			const res = onPatchEdits
+				? await onPatchEdits(edits)
+				: await datasources.updateNode(entityId, edits as NodePatch);
 			setSaving(false);
 
 			if (res.error) {
@@ -520,7 +676,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				return;
 			}
 
-			setLocalIsEditing(false);
+			setLocalEditingMode(false);
 			onSave?.(edits);
 		};
 
@@ -604,7 +760,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 								onClick={() => {
 									pendingEditsRef.current = {};
 									setSaveError(null);
-									setLocalIsEditing(true);
+									setLocalEditingMode(true);
 								}}
 								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
 							>
@@ -619,7 +775,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									disabled={saving}
 									onClick={() => {
 										if (saving) return;
-										setLocalIsEditing(false);
+										setLocalEditingMode(false);
 										setSaveError(null);
 										onCancel?.();
 									}}
@@ -696,6 +852,28 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 							</div>
 						) : (
 							<div className="space-y-5">
+								{showContentHeader ? (
+									<div>
+										{isEditingActive && titleEditable ? (
+											<input
+												ref={titleInputRef}
+												key={title}
+												type="text"
+												autoFocus
+												defaultValue={title}
+												onChange={(e) => {
+													pendingEditsRef.current.name = e.target.value;
+												}}
+												className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+												aria-label="Name"
+											/>
+										) : (
+											<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+												{title}
+											</h1>
+										)}
+									</div>
+								) : null}
 								{sections.map((section, i) => {
 									if (!isComposerSection(section)) {
 										return (
@@ -732,7 +910,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 											{isEditableTextCard ? (
 												<EditableTextCard
 													section={section}
-													autoFocus={section.id === firstEditableId}
+													autoFocus={
+														!shouldAutofocusTitle &&
+														section.id === firstEditableId
+													}
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}
@@ -744,11 +925,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 															: undefined
 													}
 													saving={saving}
+													onSuggest={
+														section.suggestable === true &&
+														onSuggestDescription != null
+															? () => onSuggestDescription(section.id)
+															: undefined
+													}
 												/>
 											) : isEditableTagList ? (
 												<EditableTagListCard
 													section={section}
-													autoFocus={section.id === firstEditableId}
+													autoFocus={
+														!shouldAutofocusTitle &&
+														section.id === firstEditableId
+													}
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}
@@ -760,6 +950,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onDataTableRowClick,
 													isEditingActive,
 													onEditSql,
+													handleEntityClick,
 												)
 											)}
 										</div>

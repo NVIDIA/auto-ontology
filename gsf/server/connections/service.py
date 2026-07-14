@@ -28,8 +28,13 @@ def _database_already_connected(database_name: str) -> bool:
     )
 
 
-def test_connection(connection: dict[str, Any]) -> None:
-    """Validate credentials for the settings UI test action."""
+def test_connection(connection: dict[str, Any]) -> list[str]:
+    """Validate credentials for the settings UI test action.
+
+    Returns the connection's schemas when the connector supports enumerating
+    them (currently Snowflake); enumerating doubles as the connectivity check.
+    Connectors without schema enumeration just ``ping()`` and return ``[]``.
+    """
     database_name = str(connection.get("database") or "").strip()
     if not database_name:
         raise ValueError("Database name is required")
@@ -40,7 +45,13 @@ def test_connection(connection: dict[str, Any]) -> None:
     connection_string = build_connection_string(connection)
     connector = create_connector(connection_string)
     try:
+        # ``get_schemas`` runs a real query, so it validates connectivity and
+        # credentials just like ``ping`` while also returning the schema list.
+        get_schemas = getattr(connector, "get_schemas", None)
+        if get_schemas is not None:
+            return list(get_schemas())
         connector.ping()
+        return []
     finally:
         connector.close()
 

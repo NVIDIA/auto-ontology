@@ -24,13 +24,15 @@ You review relational table metadata and produce two outputs:
    - ends with _id or Id and has a meaningful prefix naming a different entity (e.g. customer_id,
      orderId) — NOT a bare "id"/"_id"/"Id" column or one whose prefix matches the table name
    - has a description that contains words like "references", "identifier of", or names another table
-   - non-unique sample values
    - has an integer or string type consistent with identifiers
    - semantically points to a row in another table
    - is UUID-typed and is not the table's own primary key
 
-   Omit columns that are measures, timestamps, free text, flags, or otherwise unlikely to
-   reference another table. Return an empty list when none qualify.
+   Omit columns that are measures, physical measurements/dimensions (e.g.
+   weight, height, length, width, size, volume), name/label columns (e.g.
+   name, title, label, description), timestamps, free text, flags, or
+   otherwise unlikely to reference another table. Return an empty list when
+   none qualify.
 
 2. pk_column_names — columns that appear to be the table's own primary key even if not
    explicitly declared as such. These are typically a bare "id", "uuid", or "<table_name>_id"
@@ -90,8 +92,14 @@ def _format_column_line(col: dict[str, Any]) -> str:
 def suggest_potential_foreign_keys(
     table: dict[str, Any],
     ctx: dict[str, Any],
+    columns_profiling_samples: dict[str, dict[str, Any]] | None = None,
 ) -> PotentialFkResult:
-    """Ask the LLM which non-PK, non-declared-FK columns may be foreign keys."""
+    """Ask the LLM which non-PK, non-declared-FK columns may be foreign keys.
+
+    *columns_profiling_samples* maps each column to its profiling data
+    (``{"sample_values": [...], "is_unique": bool}``) when a live sample was
+    available.
+    """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])
     pk_names = _pk_column_names(table)
@@ -136,16 +144,25 @@ def suggest_potential_foreign_keys(
         filtered.append(
             PotentialFkSuggestion(column_name=name, rationale=item.rationale.strip())
         )
+    profiling = columns_profiling_samples or {}
     for col in candidates:
         name = col.get("name", "")
         if name in seen:
             continue
-        if (col.get("data_type") or "").lower() == "uuid" and name not in llm_pk_names:
+        is_unique = (profiling.get(name) or {}).get("is_unique")
+        if (
+            (col.get("data_type") or "").lower() == "uuid"
+            and name not in llm_pk_names
+            and is_unique is False
+        ):
             seen.add(name)
             filtered.append(
                 PotentialFkSuggestion(
                     column_name=name,
-                    rationale="uuid type, not a declared or inferred primary key — almost certainly references another entity",
+                    rationale=(
+                        "uuid type, not a declared or inferred primary key — "
+                        "almost certainly references another entity"
+                    ),
                 )
             )
 

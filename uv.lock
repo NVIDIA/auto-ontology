@@ -938,7 +938,7 @@ wheels = [
 [[package]]
 name = "gsf-server"
 version = "0.1.1"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
     { name = "fastapi" },
@@ -1724,7 +1724,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.6.23.dev20260623113708"
+version = "2026.7.8.dev20260708084246"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#ee3230910b7d25a267386a11a8a4fec2882ac324" }
 dependencies = [
     { name = "backoff" },

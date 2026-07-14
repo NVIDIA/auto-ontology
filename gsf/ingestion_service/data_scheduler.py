@@ -15,7 +15,7 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from gsf.ingestion_service.connections import resolve_connection_strings
+from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
 from gsf.ingestion_service.ingest import run_ingest
 from gsf.ingestion_service.scheduler import IntervalScheduler
 
@@ -35,8 +35,13 @@ class DataScheduler(IntervalScheduler):
         super().__init__(interval)
 
     async def _run_once(self) -> None:
-        connections = resolve_connection_strings()
-        if not connections:
+        # Reload connectors each pass so newly added connections are picked up
+        # without a restart. get_connectors caches, so invalidate first; the
+        # returned connectors carry each connection's schema allowlist and are
+        # owned by the cache (run_ingest must not close them).
+        invalidate_connectors_cache()
+        connectors = get_connectors()
+        if not connectors:
             logger.info(
                 "ingest: no connections configured. "
                 "Add a connection in Settings → Connections or set "
@@ -44,10 +49,11 @@ class DataScheduler(IntervalScheduler):
             )
             return
 
-        logger.info("ingest: starting (%s connection(s))", len(connections))
-        for connection_string in connections:
+        logger.info("ingest: starting (%s connection(s))", len(connectors))
+        for connector in connectors:
+            database_name = getattr(connector, "database_name", "?")
             try:
-                await asyncio.to_thread(run_ingest, connection_string)
+                await asyncio.to_thread(run_ingest, connector)
             except Exception:
-                logger.exception("ingest: failed for connection %s", connection_string)
+                logger.exception("ingest: failed for connection %s", database_name)
         logger.info("ingest: finished")

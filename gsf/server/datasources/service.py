@@ -29,6 +29,8 @@ from gsf.dal.datasources import (
     fetch_tables_for_schema,
     patch_catalog_node,
 )
+from gsf.dal.terms import fetch_column_attribute_embedding_contexts_by_column_id
+from gsf.semantic.embed import build_semantic_embedder
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +71,16 @@ def update_node_properties(
     )
     if reembed_ids:
         _refresh_vdb_embeddings(reembed_ids)
+
+    if patched["label"] == Labels.COLUMN and "sample_values" in properties:
+        try:
+            _refresh_semantic_column_attribute_embeddings(node_id)
+        except Exception:
+            logger.warning(
+                "Failed to refresh semantic ColumnAttribute embeddings for column %r",
+                node_id,
+                exc_info=True,
+            )
 
     return result
 
@@ -177,3 +189,19 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     for nid in unique_ids:
         vdb.delete_by_id(nid)
     IngestVdbOperator(vdb=vdb)(rows)
+
+
+def _refresh_semantic_column_attribute_embeddings(column_id: str) -> None:
+    """Refresh semantic VDB rows whose text includes this Column's sample values."""
+    contexts = fetch_column_attribute_embedding_contexts_by_column_id(column_id)
+    for term, attrs in contexts:
+        if not attrs:
+            continue
+        embedder = build_semantic_embedder(term.get("database_name") or "", reset=False)
+        if embedder is None:
+            return
+        for attr in attrs:
+            attr_id = attr.get("id")
+            if attr_id:
+                embedder.vdb.delete_by_id(attr_id)
+        embedder.embed_column_attributes(attrs)

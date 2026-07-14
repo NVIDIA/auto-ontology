@@ -35,6 +35,31 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{/*
+Image reference for a component image map. Prefers an immutable digest when
+`.digest` is set (e.g. GitOps digest-pinning), otherwise falls back to `:tag`.
+Usage: {{ include "gsf.image" .Values.backend.image }}
+*/}}
+{{- define "gsf.image" -}}
+{{- if .digest -}}
+{{ .repository }}@{{ .digest }}
+{{- else -}}
+{{ .repository }}:{{ .tag }}
+{{- end -}}
+{{- end -}}
+
+{{/*
+Image pull secrets shared by all GSF workload pods. Empty by default (local /
+minikube pull public images); set `imagePullSecrets` to pull private images
+(e.g. a private registry credential such as nvcr.io).
+*/}}
+{{- define "gsf.imagePullSecrets" -}}
+{{- with .Values.imagePullSecrets }}
+imagePullSecrets:
+{{- toYaml . | nindent 0 }}
+{{- end }}
+{{- end -}}
+
+{{/*
 Init containers that block until Postgres and Neo4j are reachable.
 A Service routes only to Ready endpoints, so `nc -z` succeeds only after
 each datastore's readiness probe has passed.
@@ -51,6 +76,7 @@ each datastore's readiness probe has passed.
         echo "waiting for postgres..."
         sleep 2
       done
+  {{- include "gsf.initResources" . | nindent 2 }}
 - name: wait-for-neo4j
   image: busybox:1.36
   imagePullPolicy: {{ .Values.imagePullPolicy }}
@@ -62,4 +88,21 @@ each datastore's readiness probe has passed.
         echo "waiting for neo4j..."
         sleep 2
       done
+  {{- include "gsf.initResources" . | nindent 2 }}
+{{- end -}}
+
+{{/*
+Tiny resource bounds for the busybox wait-* init containers. Without an explicit
+limit, some namespace LimitRanges inject a large default limits.cpu, which
+(because pod quota counts max(initContainers, sum(containers))) can make every
+pod claim that much CPU and exhaust a ResourceQuota.
+*/}}
+{{- define "gsf.initResources" -}}
+resources:
+  requests:
+    cpu: 10m
+    memory: 16Mi
+  limits:
+    cpu: 100m
+    memory: 64Mi
 {{- end -}}

@@ -4,7 +4,99 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.semantic.visit_enter import process_table
+import pandas as pd
+
+from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
+
+
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_unhashable_values(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+) -> None:
+    # Postgres array / JSON columns come back as Python lists/dicts, which are
+    # unhashable — profiling must not crash on them.
+    df = pd.DataFrame(
+        {
+            "id": [1, 2],
+            "tags": [["a", "b"], ["a", "b"]],
+            "meta": [{"k": 1}, {"k": 2}],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "tags", "data_type": "ARRAY"},
+        {"name": "meta", "data_type": "jsonb"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert set(result) == {"id", "tags", "meta"}
+    assert result["tags"]["is_unique"] is False  # ["a","b"] repeated
+    assert result["meta"]["is_unique"] is True
+    assert result["id"]["is_unique"] is True
+
+
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+) -> None:
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "status": ["open", "open", "closed", "open"],
+            "created_at": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+            "token": ["a" * 40, "b" * 40, "a" * 40, "c" * 40],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "status", "data_type": "text"},
+        {"name": "created_at", "data_type": "timestamp"},
+        {"name": "token", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    sql = connector.execute.call_args[0][0]
+    assert "public.orders" in sql
+    assert "LIMIT 1000" in sql
+
+    # Returned dict includes every column (dates, long strings included),
+    # each with its top-5 sample values and is_unique flag.
+    assert set(result) == {"id", "status", "created_at", "token"}
+    assert result["status"]["sample_values"][0] == "open"
+    assert len(result["created_at"]["sample_values"]) == 4
+    assert result["id"]["is_unique"] is True
+    assert result["status"]["is_unique"] is False
+    assert result["created_at"]["is_unique"] is True
+    assert result["token"]["is_unique"] is False
+
+    # Uniqueness persisted for every column.
+    uniqueness = mock_store_unique.call_args[0][1]
+    assert uniqueness == {
+        "id": True,
+        "status": False,
+        "created_at": True,
+        "token": False,
+    }
+
+    # Stored sample values exclude the date column and the >30-char token values.
+    stored = mock_store_samples.call_args[0][1]
+    assert "created_at" not in stored
+    assert "token" not in stored
+    assert stored["status"][0] == "open"
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")

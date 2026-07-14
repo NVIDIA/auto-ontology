@@ -6,6 +6,9 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "postgres") | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
+  {{- with .Values.postgres.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   resources:
     requests:
       storage: {{ .Values.postgres.persistence.size }}

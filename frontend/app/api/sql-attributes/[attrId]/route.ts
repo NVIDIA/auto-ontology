@@ -25,6 +25,9 @@ export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) =
 // Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.
 export const PUT = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
 
+// Patching name/description does not touch SQL expression.
+export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+
 // Deleting a SqlAttribute mutates catalog data and the backend handles graph
 // cleanup plus VDB embedding deletion.
 export const DELETE = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));

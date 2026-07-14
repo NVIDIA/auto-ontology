@@ -38,8 +38,10 @@ from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
+from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_original_question,
     get_question_for_processing,
 )
 
@@ -265,7 +267,11 @@ class SQLReconstructionAgent(BaseAgent):
         llm = state["llm"]
         error = path_state.get("error", "")
         incorrect_response = path_state.get("sql_generation_result")
-        question = get_question_for_processing(state)
+        original_question = get_original_question(state)
+        sanitized_question = get_question_for_processing(state)
+        question_block = format_dual_question_block(
+            original_question, sanitized_question
+        )
 
         messages = state["messages"]
         relevant_tables = list(path_state.get("relevant_tables") or [])
@@ -279,7 +285,7 @@ class SQLReconstructionAgent(BaseAgent):
             error_context = f"SQL: {sql_code}\nResponse: {response_text}"
 
             analysis = self._analyze_error(
-                state, question, error_context, relevant_tables
+                state, question_block, error_context, relevant_tables
             )
             path_state["error_type"] = analysis.error_type.value
             self.logger.info(
@@ -340,7 +346,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
-            f"The original question was: {question}.\n"
+            f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "
             "writing the final answer."

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from gsf.semantic.deterministic import (
     column_attribute_specs,
     fk_source_columns,
@@ -10,7 +12,8 @@ from gsf.semantic.deterministic import (
 )
 
 
-def test_excludes_suggested_fk_columns() -> None:
+@patch("gsf.semantic.deterministic._generate_column_descriptions", return_value={})
+def test_excludes_suggested_fk_columns(_mock_desc) -> None:
     columns = [
         {"name": "id", "data_type": "integer"},
         {"name": "vendor_id", "data_type": "integer"},
@@ -24,7 +27,8 @@ def test_excludes_suggested_fk_columns() -> None:
     assert {s.source_column for s in specs} == {"id", "amount"}
 
 
-def test_excludes_fk_columns() -> None:
+@patch("gsf.semantic.deterministic._generate_column_descriptions", return_value={})
+def test_excludes_fk_columns(_mock_desc) -> None:
     columns = [
         {"name": "id", "data_type": "integer"},
         {"name": "customer_id", "data_type": "integer"},
@@ -34,6 +38,22 @@ def test_excludes_fk_columns() -> None:
     specs = column_attribute_specs(columns, fks)
     assert {s.source_column for s in specs} == {"id", "amount"}
     assert fk_source_columns(fks) == {"customer_id"}
+
+
+@patch(
+    "gsf.semantic.deterministic._generate_column_descriptions",
+    return_value={"amount": "The monetary amount of the order."},
+)
+def test_llm_description_used_as_fallback(_mock_desc) -> None:
+    columns = [
+        {"name": "id", "data_type": "integer", "description": "Primary key."},
+        {"name": "amount", "data_type": "numeric"},
+    ]
+    specs = {s.source_column: s for s in column_attribute_specs(columns, [])}
+    # Existing description wins over the LLM one.
+    assert specs["id"].description == "Primary key."
+    # LLM description fills in when the column has none.
+    assert specs["amount"].description == "The monetary amount of the order."
 
 
 def test_to_term_name() -> None:

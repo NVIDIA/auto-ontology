@@ -35,11 +35,13 @@ from gsf.retrieval.data_access.custom_analyses import (
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_original_question,
     get_question_for_processing,
 )
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_dual_question_block,
 )
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
@@ -269,7 +271,11 @@ class SQLFromCandidatesAgent(BaseAgent):
         path_state = state.get("path_state", {})
         llm = state["llm"]
         connectors = state.get("connectors") or []
-        question = get_question_for_processing(state)
+        original_question = get_original_question(state)
+        sanitized_question = get_question_for_processing(state)
+        main_question = format_dual_question_block(
+            original_question, sanitized_question
+        )
 
         primary_attribute: dict | None = path_state.get("primary_attribute")
         attribute_join_paths: list[dict] = path_state.get("attribute_join_paths") or []
@@ -396,7 +402,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
-                main_question=question,
+                main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
@@ -417,7 +423,7 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             # Add calendar time window reminder if needed
             if any(
-                phrase in question.lower()
+                phrase in sanitized_question.lower()
                 for phrase in ["last week", "last month", "last year"]
             ):
                 messages.append(

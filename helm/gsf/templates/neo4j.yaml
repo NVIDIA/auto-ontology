@@ -13,6 +13,9 @@ metadata:
     {{- include "gsf.componentLabels" (dict "Chart" $.Chart "Release" $.Release "Values" $.Values "component" "neo4j") | nindent 4 }}
 spec:
   accessModes: ["ReadWriteOnce"]
+  {{- with $.Values.neo4j.persistence.storageClassName }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
   resources:
     requests:
       storage: {{ $pvc.size }}

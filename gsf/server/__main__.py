@@ -23,6 +23,9 @@ logging.basicConfig(
 
 load_env()
 
+logger = logging.getLogger(__name__)
+
+from gsf.version import get_app_version  # noqa: E402
 from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.connections.router import router as connections_router  # noqa: E402
@@ -54,6 +57,8 @@ async def lifespan(_app: FastAPI):
 
 
 def main() -> None:
+    logger.info("Starting GSF API server — app version %s", get_app_version())
+
     app = FastAPI(title="GSF API", lifespan=lifespan)
 
     app.add_middleware(

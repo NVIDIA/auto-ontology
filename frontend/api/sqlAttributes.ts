@@ -23,11 +23,18 @@ export type SqlAttributeValidatePayload = {
 	attribute_id?: string;
 };
 
+export type SqlAttributePatchPayload = {
+	name?: string;
+	description?: string | null;
+};
+
 type ValidateResult = { data: { valid: boolean; expression: string } };
 type ValidateResponse = ResponseWithError<ValidateResult>;
 type CreateResponse = ResponseWithError<SingleResult>;
 type UpdateResponse = ResponseWithError<SingleResult>;
 type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
+type SuggestDescriptionResult = { data: string | null };
+type SuggestDescriptionResponse = ResponseWithError<SuggestDescriptionResult>;
 
 export const sqlAttributesApi = {
 	get: (id: string): Promise<SingleResponse> =>
@@ -38,6 +45,12 @@ export const sqlAttributesApi = {
 		requests.post<SingleResult>('sql-attributes', payload),
 	update: (id: string, payload: SqlAttributeCreatePayload): Promise<UpdateResponse> =>
 		requests.put<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
+	patch: (id: string, payload: SqlAttributePatchPayload): Promise<UpdateResponse> =>
+		requests.patch<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
 	delete: (id: string): Promise<DeleteResponse> =>
 		requests.delete<{ data: { id: string } }>(`sql-attributes/${encodeURIComponent(id)}`),
+	suggestDescription: (id: string): Promise<SuggestDescriptionResponse> =>
+		requests.get<SuggestDescriptionResult>(
+			`sql-attributes/${encodeURIComponent(id)}/description-suggestion`,
+		),
 };

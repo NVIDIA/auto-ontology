@@ -110,6 +110,32 @@ class ColumnAttributeSpec(BaseModel):
     description: str | None = None
 
 
+class ColumnDescription(BaseModel):
+    """LLM-generated business description for a single column."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    column_name: str = Field(
+        ...,
+        description="Physical column name — must match a provided column.",
+    )
+    description: str = Field(
+        default="",
+        description="One concise sentence describing what the column represents.",
+    )
+
+
+class ColumnDescriptionResult(BaseModel):
+    """LLM output: business descriptions for a table's columns."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    descriptions: list[ColumnDescription] = Field(
+        default_factory=list,
+        description="One entry per column provided in the prompt.",
+    )
+
+
 class PotentialFkSuggestion(BaseModel):
     """One column the LLM suspects is a foreign key."""
 

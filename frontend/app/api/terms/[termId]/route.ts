@@ -22,3 +22,6 @@ export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) =
 	}
 	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });
 });
+
+// Updating a Term name invalidates cached SqlAttribute description suggestions in backend.
+export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));

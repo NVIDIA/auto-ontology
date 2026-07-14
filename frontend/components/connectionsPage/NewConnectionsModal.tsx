@@ -8,11 +8,15 @@ import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
 import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWithSteps';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
+import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
 import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/enums/connection';
 import type { ConnectionInput } from '@/types/connection';
 
-const NEW_CONNECTION_STEPS = ['Select Connector', 'Connect'] as const;
+const BASE_STEPS = ['Select Connector', 'Connect'] as const;
+// Schema selection is only offered for Snowflake, since ingestion schema
+// filtering is currently implemented for the Snowflake connector.
+const SCHEMA_STEP = 'Select Schemas';
 
 type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
 
@@ -32,29 +36,53 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	const [values, setValues] = useState<FieldValues>({});
 	const [alert, setAlert] = useState<string | null>(null);
 
+	// Schema picker state (Snowflake only). `availableSchemas` is populated from
+	// the connection-test response, so there's no separate fetch.
+	const [availableSchemas, setAvailableSchemas] = useState<string[]>([]);
+	const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+
+	const isSnowflake = connectionType === ConnectionType.SNOWFLAKE;
+
+	const steps = useMemo(
+		() => (isSnowflake ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),
+		[isSnowflake],
+	);
+
 	const buildConnection = useCallback((): ConnectionInput => {
 		const fields = CONNECTION_FIELDS[connectionType];
 		const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
-		// The discriminated union maps 1:1 to the per-type field keys.
-		return { type: connectionType, ...Object.fromEntries(entries) } as ConnectionInput;
-	}, [connectionType, values]);
+		const base = { type: connectionType, ...Object.fromEntries(entries) };
+		// Only attach the optional schema allowlist for Snowflake; empty = all.
+		if (isSnowflake && selectedSchemas.length > 0) {
+			return { ...base, schemas: selectedSchemas } as ConnectionInput;
+		}
+		return base as ConnectionInput;
+	}, [connectionType, values, isSnowflake, selectedSchemas]);
 
-	const canContinue = useMemo(() => {
-		if (activeStep === 0) return false;
-		return CONNECTION_FIELDS[connectionType].every(
-			(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
-		);
-	}, [activeStep, connectionType, values]);
+	const fieldsComplete = useMemo(
+		() =>
+			CONNECTION_FIELDS[connectionType].every(
+				(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+			),
+		[connectionType, values],
+	);
+
+	const canContinue = activeStep === 0 ? false : fieldsComplete;
 
 	const handleNext = useCallback((): void => {
 		setAlert(null);
-		setActiveStep((prev) => Math.min(prev + 1, NEW_CONNECTION_STEPS.length - 1));
-	}, []);
+		setActiveStep((prev) => Math.min(prev + 1, steps.length - 1));
+	}, [steps.length]);
 
 	const handleBack = useCallback((): void => {
 		setAlert(null);
 		setActiveStep((prev) => Math.max(prev - 1, 0));
 	}, []);
+
+	const resetSchemaState = (): void => {
+		setAvailableSchemas([]);
+		setSelectedSchemas([]);
+	};
 
 	const handleSelectType = (type: ConnectionType): void => {
 		setConnectionType(type);
@@ -62,6 +90,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setAlert(null);
 		setIsConnectionTested(false);
 		setTestSuccessMessage(null);
+		resetSchemaState();
 		setActiveStep(1);
 	};
 
@@ -70,6 +99,8 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setIsConnectionTested(false);
 		setTestSuccessMessage(null);
 		setAlert(null);
+		// Credentials changed — any previously fetched schemas are now stale.
+		resetSchemaState();
 	};
 
 	const handleTestConnection = useCallback(async (): Promise<void> => {
@@ -94,6 +125,8 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 
 		setIsConnectionTested(true);
 		setTestSuccessMessage('Connection successful.');
+		// The test response carries the connection's schemas — feed the picker.
+		setAvailableSchemas(res.schemas);
 		setAlert(null);
 	}, [buildConnection]);
 
@@ -117,10 +150,10 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	}, [buildConnection, isConnectionTested, onConfirm]);
 
 	const renderStepContent = (step: number) => {
-		switch (step) {
-			case 0:
+		switch (steps[step]) {
+			case 'Select Connector':
 				return <ConnectionTypeStep onSelect={handleSelectType} />;
-			case 1:
+			case 'Connect':
 				return (
 					<ConnectionConnectStep
 						connectionType={connectionType}
@@ -130,9 +163,22 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 						onTestConnection={() => {
 							void handleTestConnection();
 						}}
-						testDisabled={!canContinue || loading}
+						testDisabled={!fieldsComplete || loading}
 						testingConnection={testingConnection}
 					/>
+				);
+			case SCHEMA_STEP:
+				return (
+					<div className="flex flex-col gap-2">
+						<p className="px-2 text-xs text-zinc-500 dark:text-zinc-400">
+							Leave empty to ingest all schemas.
+						</p>
+						<ConnectionSelectDataStep
+							availableDatabases={availableSchemas}
+							selectedDatabases={selectedSchemas}
+							onSelectionChange={setSelectedSchemas}
+						/>
+					</div>
 				);
 			default:
 				return null;
@@ -148,7 +194,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 			{ label: 'Back', onClick: handleBack, variant: 'outline' },
 		];
 
-		const isLastStep = activeStep === NEW_CONNECTION_STEPS.length - 1;
+		const isLastStep = activeStep === steps.length - 1;
 		if (isLastStep) {
 			actions.push({
 				label: 'Create',
@@ -159,10 +205,12 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 				loading,
 			});
 		} else {
+			// Only reachable on the Connect step for Snowflake; require a
+			// successful test before advancing so the schema list can load.
 			actions.push({
 				label: 'Next',
 				onClick: handleNext,
-				disabled: !canContinue || loading,
+				disabled: !canContinue || loading || testingConnection || !isConnectionTested,
 				loading,
 			});
 		}
@@ -170,6 +218,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		return actions;
 	}, [
 		activeStep,
+		steps.length,
 		canContinue,
 		handleBack,
 		handleCreate,
@@ -185,7 +234,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 			open={open}
 			onClose={onCancel}
 			title="Create New Connection"
-			steps={[...NEW_CONNECTION_STEPS]}
+			steps={steps}
 			activeStep={activeStep}
 			onActiveStepChange={setActiveStep}
 			footerActions={footerActions}

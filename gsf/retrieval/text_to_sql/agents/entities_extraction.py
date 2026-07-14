@@ -35,7 +35,10 @@ class EntitiesExtractionModel(BaseModel):
         description=(
             "Concepts explicitly mentioned in the question that refer to "
             "database entities. Only extract what the question actually says. "
-            "Ignore values, dates, numbers, and constants."
+            "When words describe a single filterable item, keep them in one "
+            "phrase instead of splitting. Keep brand names, product names, and "
+            "descriptive named constants; omit numeric literals, dates, and "
+            "number-based thresholds."
         ),
     )
 

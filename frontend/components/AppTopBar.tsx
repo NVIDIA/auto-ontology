@@ -9,7 +9,7 @@ import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { UserMenu } from '@/components/UserMenu';
 import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
 
-export const AppTopBar = () => {
+export const AppTopBar = ({ version }: { version?: string }) => {
 	const { items, rightSlot } = useBreadcrumbs();
 
 	return (
@@ -18,7 +18,7 @@ export const AppTopBar = () => {
 			<Breadcrumbs items={items} />
 			<div className="ml-auto flex items-center gap-3">
 				{rightSlot ? <div className="flex items-center gap-2">{rightSlot}</div> : null}
-				<UserMenu />
+				<UserMenu version={version} />
 			</div>
 		</header>
 	);

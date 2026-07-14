@@ -17,6 +17,12 @@ from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
+from gsf.retrieval.text_to_sql.agents.question_sanitization import (
+    QuestionSanitizationAgent,
+)
+from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
+    EmptyLikeResultCheckAgent,
+)
 from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
@@ -185,6 +191,7 @@ def create_graph():
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
+    question_sanitization_agent = QuestionSanitizationAgent()
     entities_extraction_agent = EntitiesExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -194,6 +201,7 @@ def create_graph():
     sql_validation_agent = SQLValidationAgent()
     intent_validation_agent = IntentValidationAgent()
     sql_execution_agent = SQLExecutionAgent()
+    empty_like_result_check_agent = EmptyLikeResultCheckAgent()
     response_agent = ResponseAgent()
     sql_unconstructable_agent = SQLUnconstructableAgent()
 
@@ -201,6 +209,9 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
+    sanitize_question_node = _make_node(
+        "sanitize_question", agent_wrapper(question_sanitization_agent)
+    )
     entities_extraction_node = _make_node(
         "entities_extraction", agent_wrapper(entities_extraction_agent)
     )
@@ -230,6 +241,9 @@ def create_graph():
     execute_sql_query_node = _make_node(
         "execute_sql_query", agent_wrapper(sql_execution_agent)
     )
+    check_empty_like_result_node = _make_node(
+        "check_empty_like_result", agent_wrapper(empty_like_result_check_agent)
+    )
     format_and_respond_node = _make_node(
         "format_and_respond", agent_wrapper(response_agent)
     )
@@ -242,9 +256,10 @@ def create_graph():
     graph = StateGraph(AgentState)
 
     # -----------------    ENTRY POINT   ------------------
-    graph.set_entry_point("entities_extraction")
+    graph.set_entry_point("sanitize_question")
 
     # Add only nodes instantiated above.
+    graph.add_node("sanitize_question", sanitize_question_node)
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -256,10 +271,12 @@ def create_graph():
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("validate_intent", validate_intent_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
+    graph.add_node("check_empty_like_result", check_empty_like_result_node)
     graph.add_node("format_and_respond", format_and_respond_node)
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
+    graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
     graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
@@ -301,11 +318,20 @@ def create_graph():
         "execute_sql_query",
         route_sql_validation,
         {
-            "valid_sql": "format_and_respond",
+            "valid_sql": "check_empty_like_result",
             "invalid_sql": "reconstruct_sql",
             "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
-            "skip_intent_validation": "format_and_respond",
+            "skip_intent_validation": "check_empty_like_result",
+        },
+    )
+
+    graph.add_conditional_edges(
+        "check_empty_like_result",
+        route_decision,
+        {
+            "valid_sql": "format_and_respond",
+            "invalid_sql": "reconstruct_sql",
         },
     )
 

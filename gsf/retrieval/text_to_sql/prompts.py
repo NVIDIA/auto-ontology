@@ -206,10 +206,86 @@ Only fail validation for serious, critical errors that
 would make the query unusable."""
 
 
-def create_intent_validation_prompt(
-    question: str, entities_text: str, sql_code: str
+def format_dual_question_block(original_question: str, sanitized_question: str) -> str:
+    """Format original and sanitized questions for SQL generation/validation."""
+    if original_question.strip() == sanitized_question.strip():
+        return sanitized_question
+    return (
+        f"Original user request:\n{original_question}\n\n"
+        f"Sanitized SQL intent:\n{sanitized_question}"
+    )
+
+
+def create_empty_like_check_prompt(
+    question_block: str,
+    sql_code: str,
 ) -> str:
-    return f"""User's Question: {question}
+    return f"""You analyze a SQL query that executed successfully but returned zero rows.
+
+The SQL contains LIKE or ILIKE predicates. Your job is to classify each LIKE/ILIKE
+predicate as essential or non-essential.
+
+Definitions:
+- Essential: identifies the main subject of the question — the thing the user is
+  searching for.
+- Non-essential: constrains a feature, preference, descriptive attribute, or
+  additional filter that is not the main subject.
+
+Rules:
+- List every LIKE/ILIKE predicate from the SQL exactly as it appears (column,
+  operator, and pattern).
+- Put predicates to remove in non_essential_like_predicates.
+- Put predicates that must be preserved in essential_like_predicates.
+- If uncertain whether a predicate is essential, treat it as essential.
+- Do not suggest removing joins, numeric thresholds, or non-LIKE filters.
+
+User question:
+{question_block}
+
+SQL:
+```sql
+{sql_code}
+```
+"""
+
+
+def create_question_sanitization_prompt(question: str) -> str:
+    return f"""You rewrite conversational user requests into concise, SQL-ready questions.
+
+Rules:
+- Remove personal background, narrative fluff, and filler.
+- Preserve every factual constraint: numbers, product names, brands, categories, and qualifiers
+  such as "similar", "natural ingredients", or "expensive is okay".
+- Do NOT invent constraints that are not in the original text.
+- If the input is already a direct question, return it unchanged.
+- Output one concise question or search intent, not a paragraph.
+
+Examples:
+
+Input: We're planning a road trip next summer and my whole family loves hiking.
+I need a tent that can fit 4 people, and lighter is better since we'll carry it.
+Output: Find a 4-person tent, prioritizing lighter weight.
+
+Input: My old headphones broke. I mostly listen on the train so I'd really like
+good noise cancelling, and I'd prefer to stay under $200.
+Output: Find noise-cancelling headphones under $200.
+
+Input: How many shipments were delivered last month?
+Output: How many shipments were delivered last month?
+
+Input: {question}
+Output:"""
+
+
+def create_intent_validation_prompt(
+    original_question: str,
+    sanitized_question: str,
+    entities_text: str,
+    sql_code: str,
+) -> str:
+    question_block = format_dual_question_block(original_question, sanitized_question)
+    return f"""User's Question:
+{question_block}
 
 Generated SQL Query:
 ```sql
@@ -237,6 +313,15 @@ Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
 - Qualified entity phrases that combine a subject with its relevant action or attribute
   ("order shipment", "employee hire", "ticket resolution")
+- Filter-item rule: when several words together describe a single item the user wants to
+  filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
+  of the same filter item into separate entries.
+  Example: "waterproof hiking tent for family camping" → ["waterproof hiking tent for family camping"],
+  not ["waterproof hiking tent", "family camping"].
+  This rule applies only to one filterable item. Do not merge separate retrieval targets
+  (e.g. a subject entity and a time dimension still get separate entries when appropriate).
+- Keep names and descriptive text that identify something: brand names, product names,
+  vendor names, categories, and other named constants (e.g. "Salomon Speedcross", "Grip Rx").
 - For interrogative words (who/what/which/whose), resolve to the implied entity type
   AND, if the question contains a qualifying descriptor, include it twice: once alone
   and once combined with the resolved type.
@@ -244,8 +329,11 @@ Guidelines for what to include in required_entity_name:
 
 Guidelines for what to exclude from required_entity_name:
 - Bare action verbs ("submitted", "approved", "closed", "assigned")
-- Date/time values and granularity words ("January", "Q3", "monthly", "fiscal year")
+- Numeric values: counts, amounts, prices, years, and other number literals
+  (e.g. 1000, $150, 2023, Q2) — omit these from phrases; they are not entity names
+- Date/time values when they are numeric or calendar literals, not named descriptions
 - Aggregation indicators ("count", "total", "average", "sum", "min", "max")
+  when standing alone, not part of a measurable phrase
 - Status and filter adjectives when standing alone ("open", "active", "high-priority")
 
 Date rule: When a question references a time-qualified event, collapse subject + action
@@ -265,6 +353,12 @@ Examples:
 
   Q: "Who are the reviewers assigned to pending tasks?"
   → required_entity_name: ["task", "reviewer", "assigned reviewer"]
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → required_entity_name: ["waterproof hiking tent for family camping"]
+
+  Q: "Recommend trail running shoes similar to Salomon Speedcross."
+  → required_entity_name: ["trail running shoes similar to Salomon Speedcross"]
 
 Question: {question}
 """

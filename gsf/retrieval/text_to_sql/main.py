@@ -29,7 +29,7 @@ except ValueError as e:
 entity_llm_client = None
 if _ENTITY_MODEL:
     try:
-        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=512)
+        entity_llm_client = get_llm_client(model=_ENTITY_MODEL, max_tokens=2048)
         logger.info("Entity extraction will use model: %s", _ENTITY_MODEL)
     except ValueError as e:
         logger.warning("Failed to init entity LLM (%s): %s", _ENTITY_MODEL, e)
@@ -123,6 +123,8 @@ def stream_agent_response(
     then ``{"type": "result", "answer": ...}`` with the final answer.
     On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
+
+    logger.info("Text-to-SQL agent started for question: %s", payload["question"])
 
     state = _build_state(payload)
     final_state = dict(state)

@@ -35,6 +35,7 @@ from gsf.retrieval.text_to_sql.prompts import (
 )
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
+    get_original_question,
     get_question_for_processing,
 )
 
@@ -144,9 +145,12 @@ class IntentValidationAgent(BaseAgent):
             }
 
         # Get user's question
-        question = get_question_for_processing(state)
+        original_question = get_original_question(state)
+        sanitized_question = get_question_for_processing(state)
 
-        validation_prompt = create_intent_validation_prompt(question, "", sql_code)
+        validation_prompt = create_intent_validation_prompt(
+            original_question, sanitized_question, "", sql_code
+        )
 
         messages = [
             SystemMessage(content=INTENT_VALIDATION_SYSTEM_PROMPT),

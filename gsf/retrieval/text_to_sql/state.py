@@ -60,15 +60,20 @@ class AgentState(TypedDict):
     domain_rules: list[dict[str, str]]
 
 
+def get_original_question(state: AgentState) -> str:
+    """Raw user question as submitted, without sanitization."""
+    return state.get("initial_question", "")
+
+
 def get_question_for_processing(state: AgentState) -> str:
     """
-    Question string for retrieval, SQL, and validation.
+    Question string for retrieval and semantic search.
 
-    Uses ``path_state["normalized_question"]`` when set (e.g. after entity extraction),
+    Uses ``path_state["normalized_question"]`` when set (e.g. after sanitization),
     otherwise ``initial_question``.
     """
     path_state = state.get("path_state", {})
-    normalized_question = path_state.get("initial_question")
+    normalized_question = path_state.get("normalized_question")
     if normalized_question:
         return normalized_question
     return state.get("initial_question", "")
@@ -88,6 +93,7 @@ __all__ = [
     "AgentPayload",
     "TextToSQLPayload",
     "AgentState",
+    "get_original_question",
     "get_question_for_processing",
     "rules_to_text",
 ]

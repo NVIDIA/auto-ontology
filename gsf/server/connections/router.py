@@ -56,8 +56,9 @@ def list_connections() -> dict:
 
 @router.post("/connections/test")
 def test_connection(body: ConnectionBody) -> dict:
+    """Validate a connection and return its schemas (for the schema picker)."""
     try:
-        service.test_connection(body.connection)
+        schemas = service.test_connection(body.connection)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -65,7 +66,7 @@ def test_connection(body: ConnectionBody) -> dict:
             status_code=422,
             detail=f"Connection test failed: {exc}",
         ) from exc
-    return {"success": True}
+    return {"success": True, "schemas": schemas}
 
 
 @router.post("/connections", status_code=201)

@@ -83,6 +83,8 @@ services:
       - .env
     environment:
       POSTGRES_HOST: postgres
+      # In-network port; POSTGRES_PORT in .env is the host-side mapping.
+      POSTGRES_PORT: "5432"
       NEO4J_URI: bolt://neo4j:7687
       INGESTION_SERVICE_URL: http://ingestion-service:3002
     depends_on:
@@ -103,10 +105,23 @@ services:
     command: ["ingestion_service"]
     ports:
       - "3002:3002"
+    # The image healthcheck targets the backend (:3001/api/health);
+    # the ingestion service serves /health on :3002.
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3002/health', timeout=3).status == 200 else 1)\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     env_file:
       - .env
     environment:
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
       NEO4J_URI: bolt://neo4j:7687
     depends_on:
       postgres:
@@ -115,8 +130,10 @@ services:
         condition: service_healthy
 
   # One-shot Job: sync the Postgres schema from prisma/schema.prisma via
-  # `prisma db push` (mirrors the Helm `frontend-migrate` hook). Runs without
-  # --accept-data-loss, so it refuses to drop tables outside the Prisma schema.
+  # prisma/migrate.sh (mirrors the Helm `frontend-migrate` hook). The wrapper
+  # empties conversation_analytics IFF it predates the required user_id column,
+  # then runs `prisma db push` without --accept-data-loss, so it still refuses
+  # to drop tables outside the Prisma schema.
   frontend-migrate:
     build:
       context: ./frontend
@@ -130,7 +147,8 @@ services:
       - .env
     environment:
       POSTGRES_HOST: postgres
-    command: ["node", "node_modules/prisma/build/index.js", "db", "push"]
+      POSTGRES_PORT: "5432"
+    command: ["sh", "prisma/migrate.sh"]
     restart: "no"
     depends_on:
       postgres:
@@ -152,9 +170,12 @@ services:
     environment:
       PYTHON_API_URL: ${PYTHON_API_URL:-http://gsf:3001}
       POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
     depends_on:
+      # Healthy (not just started): the frontend's seed-admin syncs the admin
+      # user to the backend at boot and fails if :3001 isn't accepting yet.
       gsf:
-        condition: service_started
+        condition: service_healthy
       frontend-migrate:
         condition: service_completed_successfully
 

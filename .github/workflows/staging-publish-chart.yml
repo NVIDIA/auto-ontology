@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Publishes the portable GSF Helm chart to nvcr.io as an OCI artifact. The Astra
+# deploy repo (gsf-app-deploy) consumes it as a chart dependency; GitHub and
+# GitLab stay decoupled, linked only through nvcr.io. Requires repo secret:
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
+
+name: 'Staging: Publish Helm chart to nvcr.io'
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override chart version (SemVer). Default: <Chart base>-stg.<timestamp>'
+        required: false
+  push:
+    branches: [main]
+    paths:
+      - 'helm/gsf/**'
+
+env:
+  CHART_DIR: helm/gsf
+  # nvcr.io allows only org/team/image (3 segments), so the chart is published to
+  # nvcr.io/nvstaging/gsf/gsf (same repo as the app image, distinct -stg.* tags).
+  OCI_REPO: oci://nvcr.io/nvstaging/gsf
+
+jobs:
+  publish-chart:
+    name: Package & push OCI chart
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+
+      - name: Compute chart version
+        id: ver
+        run: |
+          set -euo pipefail
+          base=$(awk '/^version:/{print $2; exit}' "$CHART_DIR/Chart.yaml")
+          ver='${{ github.event.inputs.version }}'
+          if [ -z "$ver" ]; then
+            ver="${base}-stg.$(date -u +%Y%m%d%H%M%S)"
+          fi
+          echo "version=$ver" >>"$GITHUB_OUTPUT"
+          echo "Chart version: $ver"
+
+      - name: Lint chart
+        run: helm lint "$CHART_DIR"
+
+      - name: Login to nvcr.io
+        run: |
+          echo "${{ secrets.NGC_API_KEY }}" | \
+            helm registry login nvcr.io --username '$oauthtoken' --password-stdin
+
+      - name: Package & push
+        run: |
+          set -euo pipefail
+          helm package "$CHART_DIR" \
+            --version "${{ steps.ver.outputs.version }}" \
+            --app-version "${{ steps.ver.outputs.version }}"
+          helm push "gsf-${{ steps.ver.outputs.version }}.tgz" "$OCI_REPO"
+
+      - name: Summary
+        run: |
+          echo "Published \`${OCI_REPO}/gsf:${{ steps.ver.outputs.version }}\`" >>"$GITHUB_STEP_SUMMARY"
