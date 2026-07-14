@@ -217,9 +217,9 @@ async def chat_completions(
     )
 
 
-@router.post("/chat/bird")
-async def chat_bird(request: ChatRequestWithEvidence) -> dict:
-    """Non-streaming BIRD benchmark endpoint.
+@router.post("/chat/with-evidence")
+async def chat_with_evidence(request: ChatRequestWithEvidence) -> dict:
+    """Non-streaming chat endpoint with optional evidence and database scope.
 
     Folds ``evidence`` into the question, calls the agent directly
     (no warm-pool), and returns the result dict synchronously.
