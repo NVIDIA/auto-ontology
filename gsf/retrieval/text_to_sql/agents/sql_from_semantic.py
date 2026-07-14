@@ -130,9 +130,7 @@ def _format_semantic_context(
     return "\n".join(lines)
 
 
-def format_tables_for_prompt(
-    tables: list[dict], target_db: str | None = None
-) -> str:
+def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -> str:
     """
     Format tables with clear column information to prevent cross-table column confusion.
 
@@ -393,9 +391,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 target_db = path_state.get("target_db")
                 parts.append(
                     "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(
-                        relevant_tables, target_db=target_db
-                    )
+                    + format_tables_for_prompt(relevant_tables, target_db=target_db)
                 )
             tables_section = "\n\n".join(parts) if parts else "No tables available."
 

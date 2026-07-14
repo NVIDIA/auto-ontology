@@ -52,7 +52,9 @@ class SQLiteDatabase(SQLDatabase):
         self._database_name = db_path.stem
         self._conn = sqlite3.connect(str(db_path))
         self._conn.row_factory = sqlite3.Row
-        logger.debug("SQLite connected (database=%r, path=%s).", self._database_name, db_path)
+        logger.debug(
+            "SQLite connected (database=%r, path=%s).", self._database_name, db_path
+        )
 
     @property
     def dialect(self) -> str:
@@ -67,7 +69,9 @@ class SQLiteDatabase(SQLDatabase):
         if cur.description is None:
             return pd.DataFrame()
         rows = cur.fetchall()
-        return pd.DataFrame([dict(row) for row in rows], columns=[col[0] for col in cur.description])
+        return pd.DataFrame(
+            [dict(row) for row in rows], columns=[col[0] for col in cur.description]
+        )
 
     def get_tables(self) -> pd.DataFrame:
         view_type = TableTypes.VIEW
@@ -143,7 +147,9 @@ class SQLiteDatabase(SQLDatabase):
         tables = self.get_tables()
         rows: list[dict[str, object]] = []
         for table_name in tables["table_name"]:
-            fks = self._conn.execute(f'PRAGMA foreign_key_list("{table_name}")').fetchall()
+            fks = self._conn.execute(
+                f'PRAGMA foreign_key_list("{table_name}")'
+            ).fetchall()
             for _id, _seq, ref_table, from_col, ref_col, *_rest in fks:
                 rows.append(
                     {
