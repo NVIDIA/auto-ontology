@@ -94,7 +94,10 @@ def _format_semantic_context(
     if attribute_join_paths:
         lines.append("")
         lines.append(
-            "SUGGESTED JOIN PATHS (derived from semantic model — use only the hops you need):"
+            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
+            "This is our most reliable knowledge of how these tables join: use these "
+            "exact join conditions almost always, and only deviate if they clearly "
+            "cannot answer the question. Use only the hops you need:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
@@ -365,18 +368,22 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            # Build tables/schema section — semantic hint and available tables are co-equal.
-            parts = []
+            # Build the join-paths section (semantic hint + suggested joins).
+            join_paths = ""
             if primary_attribute:
-                parts.append(
-                    _format_semantic_context(primary_attribute, attribute_join_paths)
+                join_paths = (
+                    "## Semantic Hints & Join Paths\n"
+                    + _format_semantic_context(primary_attribute, attribute_join_paths)
+                    + "\n\n"
                 )
-            if relevant_tables:
-                parts.append(
-                    "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables)
-                )
-            tables_section = "\n\n".join(parts) if parts else "No tables available."
+
+            # Build the available-tables schema section.
+            tables_section = (
+                "AVAILABLE TABLES (schema context):\n"
+                + format_tables_for_prompt(relevant_tables)
+                if relevant_tables
+                else "No tables available."
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
@@ -386,6 +393,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
 

@@ -37,6 +37,7 @@ create_sql_user_prompt = (
     "**Joins**\n"
     "- Join only when necessary; choose join type (INNER / LEFT / RIGHT) "
     "based on the question's intent. Avoid fan-out from many-to-many joins.\n\n"
+    "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "
