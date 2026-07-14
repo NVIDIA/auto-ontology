@@ -81,6 +81,17 @@ def get_llm_client(
     return client
 
 
+def invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """Invoke the LLM with a single system-message *prompt* and return its text.
+
+    Free-text counterpart to :func:`invoke_with_structured_output`, for callers
+    that parse the raw response themselves (e.g. the text-to-PQL pipeline).
+    """
+    response = llm.invoke([SystemMessage(content=prompt)])
+    content = getattr(response, "content", response)
+    return content if isinstance(content, str) else str(content)
+
+
 def safe_invoke_with_structured_output(
     llm: BaseChatModel,
     messages: list[BaseMessage],

@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import logging
+import os
+
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
 from gsf.retrieval.text_to_sql.state import (
@@ -20,6 +22,11 @@ from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtract
 from gsf.retrieval.text_to_sql.agents.question_sanitization import (
     QuestionSanitizationAgent,
 )
+from gsf.retrieval.text_to_sql.agents.prediction_classification import (
+    PredictionClassificationAgent,
+)
+from gsf.retrieval.text_to_sql.agents.prediction_graph import PredictionGraphAgent
+from gsf.retrieval.text_to_sql.agents.kumo_prediction import KumoPredictionAgent
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
@@ -125,6 +132,16 @@ def route_translation(state: AgentState) -> str:
     return "end"
 
 
+def _prediction_enabled() -> bool:
+    """Whether the KumoRFM prediction branch should be built into the graph.
+
+    Evaluated ONCE at graph-creation (startup), not per request: when
+    ``KUMO_RFM_API_KEY`` is unset the prediction nodes/edges are never added, so
+    the classify → prepare-graph → predict path simply does not exist.
+    """
+    return bool(os.environ.get("KUMO_RFM_API_KEY"))
+
+
 def route_decision(state: AgentState) -> str:
     """
     Generic router — returns the current ``decision`` value from state,
@@ -187,6 +204,11 @@ def wrap_node_with_logging(node_name: str, fn):
 
 
 def create_graph():
+
+    # KumoRFM prediction is wired in only when configured — decided once here at
+    # graph creation (startup), never per request.
+    prediction_enabled = _prediction_enabled()
+    logger.info("Text-to-SQL graph: prediction branch %s", prediction_enabled)
 
     # ==================== CREATE AGENT INSTANCES ====================
 
@@ -279,7 +301,53 @@ def create_graph():
     graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
-    graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
+
+    if prediction_enabled:
+        # After candidate preparation, a decision tree routes prediction questions
+        # to the KumoRFM tool (scoped to the relevant tables just prepared) and
+        # everything else into SQL construction. The prediction path itself is two
+        # nodes: ``prepare_prediction_graph`` (build the graph/model) →
+        # ``kumo_predict`` (generate PQL + predict), so the slow build step streams
+        # its own progress. Built only when KumoRFM is configured (KUMO_RFM_API_KEY).
+        graph.add_node(
+            "classify_prediction",
+            _make_node(
+                "classify_prediction",
+                agent_wrapper(PredictionClassificationAgent()),
+            ),
+        )
+        graph.add_node(
+            "prepare_prediction_graph",
+            _make_node(
+                "prepare_prediction_graph", agent_wrapper(PredictionGraphAgent())
+            ),
+        )
+        graph.add_node(
+            "kumo_predict",
+            _make_node("kumo_predict", agent_wrapper(KumoPredictionAgent())),
+        )
+
+        graph.add_edge("prepare_candidates", "classify_prediction")
+        graph.add_conditional_edges(
+            "classify_prediction",
+            route_decision,
+            {
+                "prediction": "prepare_prediction_graph",
+                "sql": "construct_sql_from_candidates",
+            },
+        )
+        graph.add_conditional_edges(
+            "prepare_prediction_graph",
+            route_decision,
+            {
+                "predict_ready": "kumo_predict",
+                "predict_failed": END,
+            },
+        )
+        graph.add_edge("kumo_predict", END)
+    else:
+        # KumoRFM not configured — skip the prediction branch entirely.
+        graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
