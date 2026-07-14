@@ -104,7 +104,15 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 			>
 				<FormattedContent content={message.content} className="text-sm leading-relaxed" />
 
-				{message.sql && <SqlBlock sql={message.sql} className="mt-3" />}
+				{message.sql && (
+					<SqlBlock
+						sql={message.sql}
+						label={
+							message.sql.trim().toUpperCase().startsWith('PREDICT') ? 'PQL' : 'SQL'
+						}
+						className="mt-3"
+					/>
+				)}
 
 				{showQueryResults && (
 					<QueryResultsSection
