@@ -43,6 +43,10 @@ from gsf.retrieval.text_to_sql.prompts import (
     create_sql_user_prompt,
     format_dual_question_block,
 )
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    build_evidence_hints_block,
+    extract_evidence,
+)
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
@@ -333,6 +337,10 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            if extract_evidence(original_question):
+                evidence_hints = build_evidence_hints_block(original_question)
+                if evidence_hints:
+                    observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
             ca_section = ""
@@ -407,9 +415,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
 
             # Choose system prompt based on context
+            has_evidence = extract_evidence(original_question) is not None
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
+                has_evidence=has_evidence,
             )
 
             messages = state["messages"] + [

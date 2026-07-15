@@ -29,10 +29,20 @@ from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_t
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    build_evidence_hints_block,
+    extract_evidence,
+)
+from gsf.retrieval.text_to_sql.state import (
+    AgentState,
+    get_original_question,
+    get_question_for_processing,
+)
 from gsf.retrieval.text_to_sql.prompts import (
+    create_sql_from_candidates_prompt,
     create_sql_general_prompt,
     create_sql_user_prompt,
+    format_dual_question_block,
 )
 from gsf.retrieval.data_access.relevant_tables import get_relevant_tables
 
@@ -80,9 +90,14 @@ class SQLFromTablesAgent(BaseAgent):
         path_state = state.get("path_state", {})
         llm = state["llm"]
         connectors = state.get("connectors") or []
+        original_question = get_original_question(state)
         question = get_question_for_processing(state)
-
-        system_prompt = create_sql_general_prompt
+        has_evidence = extract_evidence(original_question) is not None
+        main_question = (
+            format_dual_question_block(original_question, question)
+            if has_evidence
+            else question
+        )
 
         # Get relevant tables (search if not already available)
         relevant_tables = path_state.get("relevant_tables", [])
@@ -96,12 +111,27 @@ class SQLFromTablesAgent(BaseAgent):
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
+        target_db = path_state.get("target_db")
+
+        if has_evidence:
+            system_prompt = create_sql_from_candidates_prompt(
+                dialect=dialect,
+                target_db=target_db,
+                has_evidence=True,
+            )
+        else:
+            system_prompt = create_sql_general_prompt
+
+        observation_block = ""
+        evidence_hints = build_evidence_hints_block(original_question)
+        if evidence_hints:
+            observation_block = f"\n{evidence_hints}\n"
 
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
-            main_question=question,
-            observation_block="",
+            main_question=main_question,
+            observation_block=observation_block,
             queries=[],
             tables=format_tables_for_prompt(
                 relevant_tables, target_db=path_state.get("target_db")

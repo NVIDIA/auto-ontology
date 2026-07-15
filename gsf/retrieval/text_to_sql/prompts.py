@@ -52,10 +52,13 @@ create_sql_user_prompt = (
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
     "**Style**\n"
-    "- When the question refers to an entity without specifying whether it "
-    "wants the entity's ID or its name, include BOTH the id and name columns for that entity in the "
-    "SELECT. Only when the question explicitly asks for just one of them, "
-    "prefer the asked column over the other.\n"
+    "- SELECT only what is asked. Don't add the ranked/aggregated metric "
+    "(the SUM/COUNT/AVG in ORDER BY) unless the question asks for its value. "
+    "To identify an entity (who/which/what), return one identifying column "
+    "(name if it exists, else id), not both.\n"
+    "- If evidence maps an answer concept to specific columns, preserve that "
+    "projection exactly; do not collapse, reshape, or replace those columns "
+    "unless the question explicitly asks for a transformed value.\n"
     "- Time windows: 'last week/month/year' means the most recent "
     "completed calendar period, not a rolling window.\n"
     "- Infer LIMIT from the question's intent: "
@@ -74,6 +77,7 @@ def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
+    has_evidence: bool = False,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates."""
     bare_table_names = target_db is not None or (dialect or "").lower() == "sqlite"
@@ -103,9 +107,22 @@ WHERE s.order_date BETWEEN
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
 
+    evidence_block = (
+        "## Evidence Priority\n"
+        'The question includes an "Evidence:" section — treat it as authoritative '
+        "ground truth. Evidence overrides semantic hints, examples, descriptions, and "
+        "your own interpretation. Apply every evidence clause exactly: use named "
+        "columns/tables, formulas, filters, synonyms, ranking rules, and LIKE patterns "
+        "as specified. If evidence maps a requested answer to columns, SELECT those "
+        "columns exactly. Do NOT substitute semantically similar columns or raw "
+        "question literals when evidence gives an exact SQL mapping.\n\n"
+        if has_evidence
+        else ""
+    )
+
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
-Key rules:
+{evidence_block}Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
@@ -131,6 +148,11 @@ Key rules:
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
+- Never match a human name/label against an id or foreign-key column (`*_id`,
+  `link_to_*`). To filter by a name, join to the table holding the name columns
+  (first_name/last_name/*_name) and filter there. Join each foreign key to the
+  primary key it actually references (e.g. `expense.link_to_member` =
+  `member.member_id`, never `event.event_id`).
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.

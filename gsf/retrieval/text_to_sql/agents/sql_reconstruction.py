@@ -38,6 +38,10 @@ from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
+from gsf.retrieval.text_to_sql.evidence_hints import (
+    build_evidence_hints_block,
+    extract_evidence,
+)
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
@@ -336,6 +340,12 @@ class SQLReconstructionAgent(BaseAgent):
                 + "\n\n"
             )
 
+        evidence_section = ""
+        if extract_evidence(original_question):
+            evidence_hints = build_evidence_hints_block(original_question)
+            if evidence_hints:
+                evidence_section = f"{evidence_hints}\n\n"
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
@@ -346,6 +356,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
+            f"{evidence_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "
