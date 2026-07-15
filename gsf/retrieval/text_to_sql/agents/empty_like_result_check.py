@@ -6,8 +6,9 @@
 Empty-result LIKE check after SQL execution.
 
 When execution succeeds but returns an empty result set and the SQL contains
-LIKE/ILIKE predicates, use an LLM to identify non-essential filters and route
-once to reconstruction with explicit removal guidance.
+LIKE/ILIKE predicates, deterministically relax every multi-word predicate by
+matching each word separately (col ILIKE '%w1%' AND col ILIKE '%w2%' ...), then
+re-execute the rewritten SQL directly. No LLM is involved.
 """
 
 from __future__ import annotations
@@ -17,50 +18,19 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.messages import SystemMessage
-from pydantic import BaseModel, ConfigDict, Field
-
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.prompts import (
-    create_empty_like_check_prompt,
-    format_dual_question_block,
-)
-from gsf.retrieval.text_to_sql.state import (
-    AgentState,
-    get_original_question,
-    get_question_for_processing,
-)
-from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.retrieval.text_to_sql.state import AgentState
 
 logger = logging.getLogger(__name__)
 
 _LIKE_PATTERN = re.compile(r"\bI?LIKE\b", re.IGNORECASE)
 
-_EMPTY_LIKE_SYSTEM_PROMPT = """You classify LIKE/ILIKE predicates in SQL queries.
-Be conservative: only mark a predicate non-essential when it clearly filters on
-a feature, preference, or additional attribute rather than the main subject."""
-
-
-class EmptyLikeCheckModel(BaseModel):
-    """LLM classification of LIKE/ILIKE predicates after an empty result set."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    non_essential_like_predicates: list[str] = Field(
-        default_factory=list,
-        description=(
-            "LIKE/ILIKE predicates to remove or relax. Each entry should quote "
-            "the full predicate exactly as it appears in the SQL."
-        ),
-    )
-    essential_like_predicates: list[str] = Field(
-        default_factory=list,
-        description=(
-            "LIKE/ILIKE predicates that identify the main subject and must be "
-            "preserved. Each entry should quote the full predicate exactly as "
-            "it appears in the SQL."
-        ),
-    )
+# Matches a single ``<column> LIKE|ILIKE '<pattern>'`` predicate. The column may
+# be a simple or dotted/quoted identifier (e.g. p.description, "My Col").
+_LIKE_PREDICATE_RE = re.compile(
+    r"(?P<col>[\w.\"]+)\s+(?P<op>I?LIKE)\s+'(?P<pat>[^']*)'",
+    re.IGNORECASE,
+)
 
 
 def _is_empty_db_result(result: Any) -> bool:
@@ -92,6 +62,40 @@ def _sql_has_like(sql: str) -> bool:
     return bool(_LIKE_PATTERN.search(sql or ""))
 
 
+def _pattern_words(pattern: str) -> list[str]:
+    """Return the non-wildcard words of a LIKE pattern (e.g. '%a b%' -> [a, b])."""
+    return [
+        token.strip("%_")
+        for token in re.split(r"\s+", pattern.strip())
+        if token.strip("%_")
+    ]
+
+
+def split_multiword_likes(sql: str) -> tuple[str, int]:
+    """Rewrite every multi-word LIKE/ILIKE predicate into per-word ANDed matches.
+
+    ``col ILIKE '%empty playing box%'`` becomes
+    ``(col ILIKE '%empty%' AND col ILIKE '%playing%' AND col ILIKE '%box%')``.
+    Single-word predicates are left untouched.
+
+    Returns the rewritten SQL and the number of predicates that were split.
+    """
+    count = 0
+
+    def _replace(match: re.Match) -> str:
+        nonlocal count
+        words = _pattern_words(match.group("pat"))
+        if len(words) < 2:
+            return match.group(0)
+        count += 1
+        col = match.group("col")
+        op = match.group("op")
+        parts = [f"{col} {op} '%{word}%'" for word in words]
+        return "(" + " AND ".join(parts) + ")"
+
+    return _LIKE_PREDICATE_RE.sub(_replace, sql or ""), count
+
+
 def _get_sql_code(path_state: dict) -> str:
     sql_code = path_state.get("sql_code")
     if sql_code and str(sql_code).strip():
@@ -100,27 +104,8 @@ def _get_sql_code(path_state: dict) -> str:
     return getattr(llm_result, "sql_code", "") or ""
 
 
-def build_empty_like_reconstruction_error(
-    essential: list[str],
-    non_essential: list[str],
-) -> str:
-    essential_lines = "\n".join(f"- {item}" for item in essential) or "- (none)"
-    non_essential_lines = "\n".join(f"- {item}" for item in non_essential)
-    return (
-        "SQL executed successfully but returned an empty result set. The SQL "
-        "contains LIKE/ILIKE filters. Reconstruct the SQL by removing or "
-        "relaxing ONLY the non-essential LIKE/ILIKE predicates listed below. "
-        "Never remove predicates that identify the main subject of the question. "
-        "Do not remove joins, numeric thresholds, or other essential filters.\n\n"
-        "Remove these non-essential LIKE/ILIKE predicates:\n"
-        f"{non_essential_lines}\n\n"
-        "Preserve these essential LIKE/ILIKE predicates:\n"
-        f"{essential_lines}"
-    )
-
-
 class EmptyLikeResultCheckAgent(BaseAgent):
-    """Use LLM to detect removable LIKE filters after an empty execution result."""
+    """Deterministically relax multi-word LIKE filters after an empty result."""
 
     def __init__(self) -> None:
         super().__init__("empty_like_result_check")
@@ -151,52 +136,27 @@ class EmptyLikeResultCheckAgent(BaseAgent):
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
-        original_question = get_original_question(state)
-        sanitized_question = get_question_for_processing(state)
-        question_block = format_dual_question_block(
-            original_question, sanitized_question
-        )
-
-        prompt = create_empty_like_check_prompt(question_block, sql_code)
-        messages = [
-            SystemMessage(content=_EMPTY_LIKE_SYSTEM_PROMPT),
-            SystemMessage(content=prompt),
-        ]
-
-        try:
-            result = invoke_with_structured_output(
-                state["llm"], messages, EmptyLikeCheckModel
-            )
-        except Exception as exc:
-            self.logger.warning("Empty LIKE LLM check failed: %s", exc)
-            return {"decision": "valid_sql", "path_state": path_state}
-
-        if result is None:
-            self.logger.warning("Empty LIKE LLM check returned None")
-            return {"decision": "valid_sql", "path_state": path_state}
-
-        non_essential = [
-            item.strip()
-            for item in result.non_essential_like_predicates
-            if item.strip()
-        ]
-        essential = [
-            item.strip() for item in result.essential_like_predicates if item.strip()
-        ]
-
-        if not non_essential:
+        rewritten_sql, split_count = split_multiword_likes(sql_code)
+        if split_count == 0:
             self.logger.info(
-                "LLM found no non-essential LIKE/ILIKE predicates — passing through"
+                "No multi-word LIKE/ILIKE predicates to split — passing through"
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
         path_state["empty_like_retry_attempted"] = True
-        path_state["error"] = build_empty_like_reconstruction_error(
-            essential, non_essential
-        )
+        path_state["sql_code"] = rewritten_sql
+        # Keep the generation result in sync so downstream/display show the SQL
+        # that actually ran.
+        gen_result = path_state.get("sql_generation_result")
+        if gen_result is not None and hasattr(gen_result, "sql_code"):
+            try:
+                gen_result.sql_code = rewritten_sql
+            except Exception:  # noqa: BLE001 - best-effort sync, never fatal
+                self.logger.debug("Could not sync sql_generation_result.sql_code")
+
         self.logger.info(
-            "Empty result — routing to reconstruction to remove %d non-essential "
-            "LIKE/ILIKE predicate(s)",
-            len(non_essential),
+            "Empty result — split %d multi-word LIKE/ILIKE predicate(s) in place; "
+            "re-executing rewritten SQL",
+            split_count,
         )
-        return {"decision": "invalid_sql", "path_state": path_state}
+        return {"decision": "re_execute", "path_state": path_state}

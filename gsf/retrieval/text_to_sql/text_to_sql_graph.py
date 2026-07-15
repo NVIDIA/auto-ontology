@@ -18,9 +18,8 @@ from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
 from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
-from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
-from gsf.retrieval.text_to_sql.agents.question_sanitization import (
-    QuestionSanitizationAgent,
+from gsf.retrieval.text_to_sql.agents.question_understanding import (
+    QuestionUnderstandingAgent,
 )
 from gsf.retrieval.text_to_sql.agents.prediction_classification import (
     PredictionClassificationAgent,
@@ -213,8 +212,7 @@ def create_graph():
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
-    question_sanitization_agent = QuestionSanitizationAgent()
-    entities_extraction_agent = EntitiesExtractionAgent()
+    question_understanding_agent = QuestionUnderstandingAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     sql_from_tables_agent = SQLFromTablesAgent()
@@ -231,11 +229,8 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
-    sanitize_question_node = _make_node(
-        "sanitize_question", agent_wrapper(question_sanitization_agent)
-    )
-    entities_extraction_node = _make_node(
-        "entities_extraction", agent_wrapper(entities_extraction_agent)
+    understand_question_node = _make_node(
+        "understand_question", agent_wrapper(question_understanding_agent)
     )
     retrieve_candidates_node = _make_node(
         "retrieve_candidates", agent_wrapper(retrieval_agent)
@@ -278,11 +273,10 @@ def create_graph():
     graph = StateGraph(AgentState)
 
     # -----------------    ENTRY POINT   ------------------
-    graph.set_entry_point("sanitize_question")
+    graph.set_entry_point("understand_question")
 
     # Add only nodes instantiated above.
-    graph.add_node("sanitize_question", sanitize_question_node)
-    graph.add_node("entities_extraction", entities_extraction_node)
+    graph.add_node("understand_question", understand_question_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node(
@@ -298,8 +292,7 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
-    graph.add_edge("sanitize_question", "entities_extraction")
-    graph.add_edge("entities_extraction", "retrieve_candidates")
+    graph.add_edge("understand_question", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
 
     if prediction_enabled:
@@ -399,7 +392,7 @@ def create_graph():
         route_decision,
         {
             "valid_sql": "format_and_respond",
-            "invalid_sql": "reconstruct_sql",
+            "re_execute": "execute_sql_query",
         },
     )
 
