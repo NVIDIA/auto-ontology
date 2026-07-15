@@ -175,7 +175,13 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
-    Traverses SEMANTIC_FK, HAS_ATTRIBUTE, and CONTAINS edges undirected.
+    SEMANTIC_FK is directional (Column -> ColumnAttribute) and is followed
+    only in that outgoing direction: an FK column points at the attribute it
+    references. Traversing it undirected would hop from one FK column up to a
+    shared target attribute and back down a *different* FK column, fabricating
+    a join between two unrelated columns that merely reference the same target
+    (e.g. two person-id columns). HAS_ATTRIBUTE and CONTAINS stay undirected.
+
     Returns a list of hop dicts:
         [{source_schema, source_table, source_column,
           target_schema, target_table, target_column}, ...]
@@ -184,13 +190,24 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     if anchor_col_id == dest_col_id:
         return []
 
+    # apoc.path.expandConfig is used instead of shortestPath because Cypher's
+    # variable-length patterns apply a single direction to every relationship
+    # type, whereas we need SEMANTIC_FK outgoing-only (">") while keeping
+    # HAS_ATTRIBUTE and CONTAINS bidirectional. bfs + limit:1 yields the
+    # shortest path; labelFilter "-Schema" keeps Schema nodes out of the path.
     path_query = """
     MATCH (col_anchor:Column {id: $anchor_col_id})
     MATCH (col_dest:Column {id: $dest_col_id})
-    MATCH path = shortestPath(
-        (col_anchor)-[:SEMANTIC_FK|HAS_ATTRIBUTE|CONTAINS*..30]-(col_dest)
-    )
-    WHERE NONE(n IN nodes(path) WHERE n:Schema)
+    CALL apoc.path.expandConfig(col_anchor, {
+        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
+        labelFilter: '-Schema',
+        terminatorNodes: [col_dest],
+        bfs: true,
+        uniqueness: 'NODE_GLOBAL',
+        minLevel: 1,
+        maxLevel: 30,
+        limit: 1
+    }) YIELD path
     RETURN [n IN nodes(path) | {
         id: n.id,
         name: n.name,
