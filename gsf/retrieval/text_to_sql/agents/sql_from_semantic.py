@@ -337,6 +337,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                     "MUST use one of these terms, and EVERY term listed below MUST "
                     "appear as such a filter. Do NOT invent other text-search "
                     "filters.",
+                    "- EXCEPTION: if a term is clearly the wrong word for this "
+                    "domain/context, do NOT filter on it — omit that term entirely "
+                    "rather than force a match that would miss valid rows.",
                     "- Only filter on columns that ACTUALLY EXIST in the AVAILABLE "
                     "TABLES above — never assume a column exists.",
                     "- Pick whichever existing column best fits each term. If "
