@@ -52,6 +52,23 @@ from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 logger = logging.getLogger(__name__)
 
 
+def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
+    """Format a hop endpoint (``side`` is ``"source"`` or ``"target"``) as
+    ``schema.table.column`` (or ``table.column`` when the schema is absent).
+
+    When *target_db* is set, the schema qualifier is omitted because execution
+    is already scoped to that database.
+    """
+    schema = hop.get(f"{side}_schema", "")
+    table = hop.get(f"{side}_table", "")
+    column = hop.get(f"{side}_column", "")
+    if target_db or not schema:
+        prefix = table
+    else:
+        prefix = f"{schema}.{table}"
+    return f"{prefix}.{column}"
+
+
 def _format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
@@ -97,7 +114,10 @@ def _format_semantic_context(
     if attribute_join_paths:
         lines.append("")
         lines.append(
-            "SUGGESTED JOIN PATHS (derived from semantic model — use only the hops you need):"
+            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
+            "This is our most reliable knowledge of how these tables join: use these "
+            "exact join conditions almost always, and only deviate if they clearly "
+            "cannot answer the question. Use only the hops you need:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
@@ -112,24 +132,19 @@ def _format_semantic_context(
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
-                for hop in path:
-                    src_s = hop.get("source_schema", "")
-                    src_t = hop.get("source_table", "")
-                    src_c = hop.get("source_column", "")
-                    tgt_s = hop.get("target_schema", "")
-                    tgt_t = hop.get("target_table", "")
-                    tgt_c = hop.get("target_column", "")
-                    if target_db:
-                        src = f"{src_t}.{src_c}"
-                        tgt = f"{tgt_t}.{tgt_c}"
-                    else:
-                        src = (
-                            f"{src_s}.{src_t}.{src_c}" if src_s else f"{src_t}.{src_c}"
-                        )
-                        tgt = (
-                            f"{tgt_s}.{tgt_t}.{tgt_c}" if tgt_s else f"{tgt_t}.{tgt_c}"
-                        )
-                    lines.append(f"      {src} = {tgt}")
+                # The anchor column is the first hop's source; the destination
+                # is the last hop's target. Within a hop, source/target are the
+                # same table (navigation), so the actual cross-table joins are
+                # between consecutive hops: target[i] = source[i+1].
+                if len(path) == 1:
+                    left = _hop_column(path[0], "source", target_db)
+                    right = _hop_column(path[0], "target", target_db)
+                    lines.append(f"      {left} = {right}")
+                else:
+                    for cur, nxt in zip(path, path[1:]):
+                        left = _hop_column(cur, "target", target_db)
+                        right = _hop_column(nxt, "source", target_db)
+                        lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 
@@ -384,24 +399,28 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            # Build tables/schema section — semantic hint and available tables are co-equal.
             target_db = path_state.get("target_db")
-            parts = []
+
+            # Build the join-paths section (semantic hint + suggested joins).
+            join_paths = ""
             if primary_attribute:
-                parts.append(
-                    _format_semantic_context(
+                join_paths = (
+                    "## Semantic Hints & Join Paths\n"
+                    + _format_semantic_context(
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
                     )
+                    + "\n\n"
                 )
-            if relevant_tables:
-                target_db = path_state.get("target_db")
-                parts.append(
-                    "AVAILABLE TABLES (schema context):\n"
-                    + format_tables_for_prompt(relevant_tables, target_db=target_db)
-                )
-            tables_section = "\n\n".join(parts) if parts else "No tables available."
+
+            # Build the available-tables schema section.
+            tables_section = (
+                "AVAILABLE TABLES (schema context):\n"
+                + format_tables_for_prompt(relevant_tables, target_db=target_db)
+                if relevant_tables
+                else "No tables available."
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
@@ -411,6 +430,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )
 

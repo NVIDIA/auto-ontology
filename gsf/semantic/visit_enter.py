@@ -309,7 +309,7 @@ def process_table(
     specs = column_attribute_specs(
         ctx.get("columns", []),
         declared_fks,
-        suggested_fk_columns=suggested_fk_names,
+        suggested_fk_columns=all_fk_names,
         columns_profiling_samples=columns_profiling_samples,
     )
     if not specs:
