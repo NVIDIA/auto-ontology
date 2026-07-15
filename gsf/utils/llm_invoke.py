@@ -60,7 +60,7 @@ def get_llm_client(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 4096,
+    max_tokens: int = 8182,
 ) -> BaseChatModel:
     """Create an LLM client.
 
