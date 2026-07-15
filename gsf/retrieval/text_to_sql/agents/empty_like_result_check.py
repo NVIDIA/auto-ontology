@@ -9,7 +9,8 @@ When execution succeeds but returns an empty result set and the SQL contains
 LIKE/ILIKE predicates, deterministically rewrite it and re-execute directly
 (no LLM involved):
 - Remove any LIKE/ILIKE predicate that contains a word not present in the
-  extracted value entities (a filter not grounded in what the user searched for).
+  extracted value or metadata entities (a filter not grounded in what the user
+  searched for). Predicates on schema dimensions (metadata entities) are kept.
 - Relax every remaining multi-word predicate by matching each word separately
   (col ILIKE '%w1%' AND col ILIKE '%w2%' ...).
 """
@@ -190,7 +191,11 @@ class EmptyLikeResultCheckAgent(BaseAgent):
             return {"decision": "valid_sql", "path_state": path_state}
 
         value_entities: list[str] = path_state.get("value_entities") or []
-        allowed_words = _value_words(value_entities)
+        metadata_entities: list[str] = path_state.get("metadata_entities") or []
+        # Predicates on schema dimensions (metadata entities) are legitimate
+        # filters, not free-text searches — treat their words as backed so they
+        # are never dropped as "unbacked".
+        allowed_words = _value_words(value_entities) | _value_words(metadata_entities)
 
         # 1) Drop LIKE/ILIKE predicates not grounded in the value entities.
         rewritten_sql, removed_count = remove_unbacked_likes(sql_code, allowed_words)
