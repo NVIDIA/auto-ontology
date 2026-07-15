@@ -332,17 +332,21 @@ class SQLFromCandidatesAgent(BaseAgent):
             value_terms = [v.strip() for v in value_entities if v and v.strip()]
             if value_terms:
                 value_lines = [
-                    "**Search Values**",
-                    "- SEARCH VALUES (text-search filter values). Every LIKE/ILIKE "
-                    "or text-equality WHERE filter in the SQL MUST use one of these "
-                    "terms, and EVERY term below MUST appear as such a filter in the "
-                    "SQL. Do NOT invent other text-search filters. Only filter on "
-                    "columns that ACTUALLY EXIST in the AVAILABLE TABLES above — "
-                    "never assume a column exists. Pick whichever existing column "
-                    "best fits each term; if unsure, prefer a description- or "
-                    "features-type column only when one actually exists in AVAILABLE TABLES. "
-                    "Avoid matching a term against title or name columns when the term "
-                    "is more than 2 words.",
+                    "**Search Values** (text-search filter values):",
+                    "- Every LIKE/ILIKE or text-equality WHERE filter in the SQL "
+                    "MUST use one of these terms, and EVERY term listed below MUST "
+                    "appear as such a filter. Do NOT invent other text-search "
+                    "filters.",
+                    "- Only filter on columns that ACTUALLY EXIST in the AVAILABLE "
+                    "TABLES above — never assume a column exists.",
+                    "- Pick whichever existing column best fits each term. If "
+                    "unsure, prefer a description-type column for the main entity, "
+                    "or a features-type column for adjective/feature values — only "
+                    "when such a column actually exists.",
+                    "- Avoid matching a term against title or name columns when the "
+                    "term is more than 2 words.",
+                    "",
+                    "Terms:",
                 ]
                 value_lines.extend(f"  - {term}" for term in value_terms)
                 search_values = "\n".join(value_lines) + "\n\n"

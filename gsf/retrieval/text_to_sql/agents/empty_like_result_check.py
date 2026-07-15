@@ -6,9 +6,12 @@
 Empty-result LIKE check after SQL execution.
 
 When execution succeeds but returns an empty result set and the SQL contains
-LIKE/ILIKE predicates, deterministically relax every multi-word predicate by
-matching each word separately (col ILIKE '%w1%' AND col ILIKE '%w2%' ...), then
-re-execute the rewritten SQL directly. No LLM is involved.
+LIKE/ILIKE predicates, deterministically rewrite it and re-execute directly
+(no LLM involved):
+- Remove any LIKE/ILIKE predicate that contains a word not present in the
+  extracted value entities (a filter not grounded in what the user searched for).
+- Relax every remaining multi-word predicate by matching each word separately
+  (col ILIKE '%w1%' AND col ILIKE '%w2%' ...).
 """
 
 from __future__ import annotations
@@ -26,9 +29,10 @@ logger = logging.getLogger(__name__)
 _LIKE_PATTERN = re.compile(r"\bI?LIKE\b", re.IGNORECASE)
 
 # Matches a single ``<column> LIKE|ILIKE '<pattern>'`` predicate. The column may
-# be a simple or dotted/quoted identifier (e.g. p.description, "My Col").
+# be a simple or dotted/quoted identifier (e.g. p.description, "My Col") or a
+# function-wrapped one (e.g. LOWER(details), LOWER(p.description)).
 _LIKE_PREDICATE_RE = re.compile(
-    r"(?P<col>[\w.\"]+)\s+(?P<op>I?LIKE)\s+'(?P<pat>[^']*)'",
+    r"(?P<col>\w+\s*\(\s*[\w.\"]+\s*\)|[\w.\"]+)\s+(?P<op>I?LIKE)\s+'(?P<pat>[^']*)'",
     re.IGNORECASE,
 )
 
@@ -69,6 +73,55 @@ def _pattern_words(pattern: str) -> list[str]:
         for token in re.split(r"\s+", pattern.strip())
         if token.strip("%_")
     ]
+
+
+def _value_words(value_entities: list[str]) -> set[str]:
+    """Lowercased set of individual words across all value entities."""
+    words: set[str] = set()
+    for entity in value_entities:
+        for token in re.split(r"\W+", (entity or "").lower()):
+            if token:
+                words.add(token)
+    return words
+
+
+def remove_unbacked_likes(sql: str, allowed_words: set[str]) -> tuple[str, int]:
+    """Remove LIKE/ILIKE predicates containing any word not in *allowed_words*.
+
+    A predicate is kept only when EVERY one of its pattern words appears in
+    *allowed_words* (the value-entity vocabulary); if it contains even one word
+    that is not in there, the whole predicate is removed along with one adjacent
+    boolean connector. A lone unbacked predicate is replaced with ``TRUE`` to
+    keep the WHERE clause valid.
+
+    Returns the rewritten SQL and the number of predicates removed.
+    """
+    if not allowed_words:
+        return sql, 0
+
+    removed = 0
+    for match in list(_LIKE_PREDICATE_RE.finditer(sql)):
+        text = match.group(0)
+        words = _pattern_words(match.group("pat"))
+        if words and all(word.lower() in allowed_words for word in words):
+            continue  # every word is backed by a value entity — keep it
+
+        escaped = re.escape(text)
+        new_sql, hits = re.subn(
+            r"\s+(?:AND|OR)\s+" + escaped, "", sql, flags=re.IGNORECASE
+        )
+        if hits == 0:
+            new_sql, hits = re.subn(
+                escaped + r"\s+(?:AND|OR)\s+", "", sql, flags=re.IGNORECASE
+            )
+        if hits == 0:
+            new_sql = sql.replace(text, "TRUE")
+            hits = 1 if new_sql != sql else 0
+        if hits:
+            removed += 1
+            sql = new_sql
+
+    return sql, removed
 
 
 def split_multiword_likes(sql: str) -> tuple[str, int]:
@@ -136,10 +189,17 @@ class EmptyLikeResultCheckAgent(BaseAgent):
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
-        rewritten_sql, split_count = split_multiword_likes(sql_code)
-        if split_count == 0:
+        value_entities: list[str] = path_state.get("value_entities") or []
+        allowed_words = _value_words(value_entities)
+
+        # 1) Drop LIKE/ILIKE predicates not grounded in the value entities.
+        rewritten_sql, removed_count = remove_unbacked_likes(sql_code, allowed_words)
+        # 2) Relax the remaining multi-word predicates into per-word matches.
+        rewritten_sql, split_count = split_multiword_likes(rewritten_sql)
+
+        if removed_count == 0 and split_count == 0:
             self.logger.info(
-                "No multi-word LIKE/ILIKE predicates to split — passing through"
+                "No unbacked or multi-word LIKE/ILIKE predicates — passing through"
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
@@ -155,8 +215,9 @@ class EmptyLikeResultCheckAgent(BaseAgent):
                 self.logger.debug("Could not sync sql_generation_result.sql_code")
 
         self.logger.info(
-            "Empty result — split %d multi-word LIKE/ILIKE predicate(s) in place; "
-            "re-executing rewritten SQL",
+            "Empty result — removed %d unbacked and split %d multi-word LIKE/ILIKE "
+            "predicate(s) in place; re-executing rewritten SQL",
+            removed_count,
             split_count,
         )
         return {"decision": "re_execute", "path_state": path_state}
