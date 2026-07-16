@@ -68,12 +68,12 @@ def _sql_has_like(sql: str) -> bool:
 
 
 def _pattern_words(pattern: str) -> list[str]:
-    """Return the non-wildcard words of a LIKE pattern (e.g. '%a b%' -> [a, b])."""
-    return [
-        token.strip("%_")
-        for token in re.split(r"\s+", pattern.strip())
-        if token.strip("%_")
-    ]
+    """Return the alphanumeric words of a LIKE pattern.
+
+    Splits on any non-word character — whitespace, wildcards (% _), hyphens and
+    other (incl. unicode) punctuation — so tokenization matches ``_value_words``.
+    """
+    return [token for token in re.split(r"\W+", pattern) if token]
 
 
 def _value_words(value_entities: list[str]) -> set[str]:
