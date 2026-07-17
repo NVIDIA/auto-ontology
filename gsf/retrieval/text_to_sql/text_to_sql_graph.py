@@ -18,6 +18,12 @@ from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
 from gsf.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
+from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
+    EmptyResultValueRepairAgent,
+)
+from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
+    ProactiveValueCheckAgent,
+)
 from gsf.retrieval.text_to_sql.agents.entities_extraction import EntitiesExtractionAgent
 from gsf.retrieval.text_to_sql.agents.question_sanitization import (
     QuestionSanitizationAgent,
@@ -39,6 +45,10 @@ from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructio
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
 from gsf.retrieval.text_to_sql.base import agent_wrapper
+from gsf.retrieval.text_to_sql.db_probe.config import (
+    is_db_probe_enabled,
+    is_db_probe_proactive,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -243,6 +253,28 @@ def create_graph():
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
     )
+    # Live DB grounding is now a repair signal, not always-on context: the
+    # value-repair node only runs after an empty execution result, and is only
+    # wired in when DB_PROBE_ENABLED is truthy.
+    db_probe_enabled = is_db_probe_enabled()
+    logger.info("Text-to-SQL graph: db-probe branch %s", db_probe_enabled)
+    value_repair_node = (
+        _make_node(
+            "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
+        )
+        if db_probe_enabled
+        else None
+    )
+    # Optional proactive (pre-execution) literal check — opt-in via DB_PROBE_PROACTIVE.
+    proactive_enabled = is_db_probe_proactive()
+    logger.info("Text-to-SQL graph: db-probe proactive %s", proactive_enabled)
+    proactive_value_node = (
+        _make_node(
+            "precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent())
+        )
+        if proactive_enabled
+        else None
+    )
     construct_sql_not_from_snippets_node = _make_node(
         "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
@@ -285,6 +317,10 @@ def create_graph():
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
+    if value_repair_node is not None:
+        graph.add_node("check_value_repair", value_repair_node)
+    if proactive_value_node is not None:
+        graph.add_node("precheck_value_repair", proactive_value_node)
     graph.add_node(
         "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
     )
@@ -301,6 +337,11 @@ def create_graph():
     graph.add_edge("sanitize_question", "entities_extraction")
     graph.add_edge("entities_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
+
+    after_prepare = (
+        "classify_prediction" if prediction_enabled else "construct_sql_from_candidates"
+    )
+    graph.add_edge("prepare_candidates", after_prepare)
 
     if prediction_enabled:
         # After candidate preparation, a decision tree routes prediction questions
@@ -327,7 +368,6 @@ def create_graph():
             _make_node("kumo_predict", agent_wrapper(KumoPredictionAgent())),
         )
 
-        graph.add_edge("prepare_candidates", "classify_prediction")
         graph.add_conditional_edges(
             "classify_prediction",
             route_decision,
@@ -345,9 +385,6 @@ def create_graph():
             },
         )
         graph.add_edge("kumo_predict", END)
-    else:
-        # KumoRFM not configured — skip the prediction branch entirely.
-        graph.add_edge("prepare_candidates", "construct_sql_from_candidates")
 
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
@@ -358,13 +395,19 @@ def create_graph():
         },
     )
 
+    # When the proactive check is enabled, every route that would otherwise go
+    # straight to execution is funnelled through it first.
+    pre_execute_target = (
+        "precheck_value_repair" if proactive_value_node is not None else "execute_sql_query"
+    )
+
     # SQL validation → route
     graph.add_conditional_edges(
         "validate_sql_query",
         route_sql_validation,
         {
             "valid_sql": "validate_intent",  # Validate intent after syntax validation succeeds
-            "skip_intent_validation": "execute_sql_query",  # Skip intent validation after 5+ reconstructions
+            "skip_intent_validation": pre_execute_target,  # Skip intent validation after 5+ reconstructions
             "invalid_sql": "reconstruct_sql",
             "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
@@ -376,10 +419,20 @@ def create_graph():
         "validate_intent",
         route_intent_validation,
         {
-            "valid_sql": "execute_sql_query",  # Format after both validations succeed
+            "valid_sql": pre_execute_target,  # Format after both validations succeed
             "invalid_sql": "reconstruct_sql",  # Reconstruct if intent is invalid
         },
     )
+
+    if proactive_value_node is not None:
+        graph.add_conditional_edges(
+            "precheck_value_repair",
+            route_decision,
+            {
+                "valid_sql": "execute_sql_query",
+                "invalid_sql": "reconstruct_sql",
+            },
+        )
 
     # SQL execution → route (use route_sql_validation to enforce attempt limits)
     graph.add_conditional_edges(
@@ -394,14 +447,29 @@ def create_graph():
         },
     )
 
+    # After the empty-LIKE check, optionally run the value-repair check (also
+    # gated on an empty result). When probing is disabled it goes straight to
+    # formatting, exactly as before.
+    empty_like_valid_target = (
+        "check_value_repair" if value_repair_node is not None else "format_and_respond"
+    )
     graph.add_conditional_edges(
         "check_empty_like_result",
         route_decision,
         {
-            "valid_sql": "format_and_respond",
+            "valid_sql": empty_like_valid_target,
             "invalid_sql": "reconstruct_sql",
         },
     )
+    if value_repair_node is not None:
+        graph.add_conditional_edges(
+            "check_value_repair",
+            route_decision,
+            {
+                "valid_sql": "format_and_respond",
+                "invalid_sql": "reconstruct_sql",
+            },
+        )
 
     graph.add_conditional_edges(
         "construct_sql_not_from_snippets",
