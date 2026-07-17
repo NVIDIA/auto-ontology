@@ -38,7 +38,6 @@ create_sql_user_prompt = (
     "- Join only when necessary; choose join type (INNER / LEFT / RIGHT) "
     "based on the question's intent. Avoid fan-out from many-to-many joins.\n\n"
     "{join_paths}\n\n"
-    "{search_values}"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "
@@ -52,23 +51,21 @@ create_sql_user_prompt = (
     "CROSS JOIN LATERAL, LATERAL JOIN, NATURAL JOIN, implicit comma joins, "
     "or any other vendor-specific or non-standard syntax.\n"
     "- Preserve the exact capitalization of values, names, and identifiers "
-    "from the user's question.\n"
-    "- If a word the user used is clearly the wrong term for the context, do "
-    "NOT put that word in the SQL — omit it rather than filter on a term that "
-    "would miss valid results.\n\n"
+    "from the user's question.\n\n"
     "**Style**\n"
-    "- CRITICAL RULE: When the question refers to an entity or a list of entities "
-    "(e.g. 'which item', 'list the products', 'find the product'), ALWAYS select "
-    "BOTH that entity's ID column AND its name / title column, unless the user "
-    "asks specifically otherwise. The ID is required for benchmarks, while the "
-    "name / title is needed for the chat application and reranking.\n"
-    "- Add LIMIT ONLY when the question specifies an explicit number of items "
-    "(e.g. 'top 10 products', 'show 5 orders', 'the 3 cheapest items') — use "
-    "that number. Otherwise do NOT add LIMIT. Even for open-ended requests like "
-    "'recommend me a product with ...', the user does not know exactly what they "
-    "want, so return multiple matching rows rather than a single one.\n"
+    "- When the question refers to an entity without specifying whether it "
+    "wants the entity's ID or its name, include BOTH the id and name columns for that entity in the "
+    "SELECT. Only when the question explicitly asks for just one of them, "
+    "prefer the asked column over the other.\n"
     "- Time windows: 'last week/month/year' means the most recent "
     "completed calendar period, not a rolling window.\n"
+    "- Infer LIMIT from the question's intent: "
+    "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
+    "is paired with a number, add LIMIT with that number; "
+    "if a superlative appears without a number, add LIMIT 1; "
+    "if a specific count is requested without a superlative, "
+    "add LIMIT with that number; "
+    "otherwise do not add LIMIT.\n"
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
@@ -201,95 +198,65 @@ def format_dual_question_block(original_question: str, sanitized_question: str) 
     )
 
 
-def create_question_understanding_prompt(question: str) -> str:
-    return f"""You are a database schema analyst. Given a conversational user request, \
-produce THREE things in one structured response:
+def create_empty_like_check_prompt(
+    question_block: str,
+    sql_code: str,
+) -> str:
+    return f"""You analyze a SQL query that executed successfully but returned zero rows.
 
-1. normalized_question — a concise, SQL-ready rewrite of the request.
-2. metadata — schema-level concepts (columns, tables, relationships).
-3. values — concrete items/values the user is searching or filtering for.
+The SQL contains LIKE or ILIKE predicates. Your job is to classify each LIKE/ILIKE
+predicate as essential or non-essential.
 
-====================================================================
-PART 1 — normalized_question
-====================================================================
-Rewrite the user's request into one concise, SQL-ready question.
+Definitions:
+- Essential: identifies the main subject of the question — the thing the user is
+  searching for.
+- Non-essential: constrains a feature, preference, descriptive attribute, or
+  additional filter that is not the main subject.
+
+Rules:
+- List every LIKE/ILIKE predicate from the SQL exactly as it appears (column,
+  operator, and pattern).
+- Put predicates to remove in non_essential_like_predicates.
+- Put predicates that must be preserved in essential_like_predicates.
+- If uncertain whether a predicate is essential, treat it as essential.
+- Do not suggest removing joins, numeric thresholds, or non-LIKE filters.
+
+User question:
+{question_block}
+
+SQL:
+```sql
+{sql_code}
+```
+"""
+
+
+def create_question_sanitization_prompt(question: str) -> str:
+    return f"""You rewrite conversational user requests into concise, SQL-ready questions.
+
 Rules:
 - Remove personal background, narrative fluff, and filler.
-- Preserve EVERY factual constraint: numbers, thresholds, prices, counts,
-  product names, brands, categories, and qualifiers such as "similar",
-  "natural ingredients", or "expensive is okay". Do NOT drop constraints.
+- Preserve every factual constraint: numbers, product names, brands, categories, and qualifiers
+  such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.
 - If the input is already a direct question, return it unchanged.
 - Output one concise question or search intent, not a paragraph.
 
 Examples:
-  Input: We're planning a road trip next summer and my whole family loves hiking.
-  I need a tent that can fit 4 people, and lighter is better since we'll carry it.
-  normalized_question: Find a 4-person tent, prioritizing lighter weight.
 
-  Input: How many shipments were delivered last month?
-  normalized_question: How many shipments were delivered last month?
+Input: We're planning a road trip next summer and my whole family loves hiking.
+I need a tent that can fit 4 people, and lighter is better since we'll carry it.
+Output: Find a 4-person tent, prioritizing lighter weight.
 
-TWO GLOBAL RULES (apply to both metadata and values):
-- NO DUPLICATION: a concept appears in AT MOST ONE list. Never repeat the same
-  term — or any component word of a value item — across both lists.
-- NEVER SPLIT: one real-world item is exactly ONE entry. Never break an item into
-  its modifier, noun, and purpose, and never emit the item's component nouns as
-  separate entries anywhere.
+Input: My old headphones broke. I mostly listen on the train so I'd really like
+good noise cancelling, and I'd prefer to stay under $200.
+Output: Find noise-cancelling headphones under $200.
 
-Both "metadata" and "values" are arrays of plain strings.
+Input: How many shipments were delivered last month?
+Output: How many shipments were delivered last month?
 
-====================================================================
-PART 2 — metadata (schema-level concepts)
-====================================================================
-Populate "metadata" with schema-level dimensions the user EXPLICITLY filters,
-groups, or aggregates on that are DISTINCT from the item being searched. Each
-entry is a single string (preserve the exact casing from the question).
-
-Include:
-- Explicit filter/aggregate dimensions: an explicit price/quantity/category or
-  date constraint ("under $100" -> "price"; "in 2023" -> a date concept).
-- Time dimensions collapsed into one compact phrase ending with "date". If a
-  granularity is mentioned (quarter/month/week/year/day), include it before
-  "date". Example: "invoices closed in Q2" -> "invoice closure quarter date".
-- For pure counting/aggregation questions with NO product/item search, the
-  subject nouns go here (e.g. "shipment", "salary", "engineer") and values is [].
-
-Exclude from metadata:
-- The searched item or ANY of its component nouns. If the value item is a
-  "waterproof hiking tent for two", then "tent", "hiking", and "waterproof" must
-  NOT appear here.
-- Bare action verbs, numeric/date literals, and standalone aggregation words.
-- Soft preferences that are not real filters ("a bit expensive", "if possible").
-
-====================================================================
-PART 3 — values (concrete search/filter targets)
-====================================================================
-Populate "values" with the concrete item(s) the user wants to find (the things
-that become LIKE/ILIKE/WHERE filters). Usually there is exactly ONE such item.
-Each entry is a single, SHORT, product-style phrase — the concise form only:
-- Drop connective/purpose words ("to hold", "that can", "for", "used for") and
-  incidental descriptors (quantities, "empty", condition or preference words),
-  then rephrase into a canonical noun phrase while KEEPING the qualifier that
-  defines what the item IS. Never reduce it to a bare generic noun (do not shrink
-  "waterproof hiking tent" to "tent").
-  Example: "stand to hold potted plants" -> "plant stand".
-- Preserve the exact casing of proper nouns from the question.
-- Keep brand names, product names, vendor names, and named constants.
-- Keep the item whole: do NOT create separate entries for its parts, and do NOT
-  also list those parts under metadata.
-
-Examples:
-  Q: "Recommend trail running shoes similar to Salomon Speedcross under $150."
-  -> metadata: ["price"]
-     values:   ["trail running shoes"]
-
-  Q: "What is the average salary of engineers hired in 2023?"
-  -> metadata: ["salary", "engineer", "engineer hire date"]
-     values:   []
-
-Question: {question}
-"""
+Input: {question}
+Output:"""
 
 
 def create_prediction_classification_prompt(question: str) -> str:
@@ -379,6 +346,69 @@ Check for CRITICAL issues ONLY (be lenient):
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 
 Provide your analysis."""
+
+
+def create_entity_extraction_prompt(question: str) -> str:
+    return f"""You are a database schema analyst. Given a question, populate the field \
+"required_entity_name" with 1–5 noun phrases that correspond to database tables, \
+columns, or relationships.
+
+Preserve the exact casing of terms as they appear in the question. Do not lowercase,
+uppercase, or normalize them.
+
+Guidelines for what to include in required_entity_name:
+- Subject nouns and domain terms ("invoice", "customer", "shipment")
+- Qualified entity phrases that combine a subject with its relevant action or attribute
+  ("order shipment", "employee hire", "ticket resolution")
+- Filter-item rule: when several words together describe a single item the user wants to
+  filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
+  of the same filter item into separate entries.
+  Example: "waterproof hiking tent for family camping" → ["waterproof hiking tent for family camping"],
+  not ["waterproof hiking tent", "family camping"].
+  This rule applies only to one filterable item. Do not merge separate retrieval targets
+  (e.g. a subject entity and a time dimension still get separate entries when appropriate).
+- Keep names and descriptive text that identify something: brand names, product names,
+  vendor names, categories, and other named constants (e.g. "Salomon Speedcross", "Grip Rx").
+- For interrogative words (who/what/which/whose), resolve to the implied entity type
+  AND, if the question contains a qualifying descriptor, include it twice: once alone
+  and once combined with the resolved type.
+  Example: "who are the active assignees" → ["assignee", "active assignee"]
+
+Guidelines for what to exclude from required_entity_name:
+- Bare action verbs ("submitted", "approved", "closed", "assigned")
+- Numeric values: counts, amounts, prices, years, and other number literals
+  (e.g. 1000, $150, 2023, Q2) — omit these from phrases; they are not entity names
+- Date/time values when they are numeric or calendar literals, not named descriptions
+- Aggregation indicators ("count", "total", "average", "sum", "min", "max")
+  when standing alone, not part of a measurable phrase
+- Status and filter adjectives when standing alone ("open", "active", "high-priority")
+
+Date rule: When a question references a time-qualified event, collapse subject + action
++ granularity into one compact phrase ending with "date". Do NOT emit the verb, a
+column-name guess, the date value, and the granularity as separate entries.
+  If a granularity is mentioned (quarter, month, week, year, day), include it before "date".
+  If no granularity is mentioned, end with just "date".
+  Example: "invoices closed in Q2" → required_entity_name: ["invoice", "invoice closure quarter date"]
+  Example: "orders placed last year" → required_entity_name: ["order", "order placement date"]
+
+Examples:
+  Q: "How many shipments were delivered last month?"
+  → required_entity_name: ["shipment", "shipment delivery month date"]
+
+  Q: "What is the average salary of engineers hired in 2023?"
+  → required_entity_name: ["salary", "engineer", "engineer hire date"]
+
+  Q: "Who are the reviewers assigned to pending tasks?"
+  → required_entity_name: ["task", "reviewer", "assigned reviewer"]
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → required_entity_name: ["waterproof hiking tent for family camping"]
+
+  Q: "Recommend trail running shoes similar to Salomon Speedcross."
+  → required_entity_name: ["trail running shoes similar to Salomon Speedcross"]
+
+Question: {question}
+"""
 
 
 CUSTOM_ANALYSIS_RELEVANCE_FILTER_PROMPT = """You are a database domain expert.

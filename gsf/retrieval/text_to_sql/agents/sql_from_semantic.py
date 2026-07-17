@@ -277,7 +277,6 @@ class SQLFromCandidatesAgent(BaseAgent):
         sql_attributes = path_state.get("sql_attributes", [])
         sql_attributes_str = path_state.get("sql_attributes_str", [])
         term_synonyms: dict = path_state.get("term_synonyms") or {}
-        value_entities: list[str] = path_state.get("value_entities") or []
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
@@ -326,33 +325,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
-
-            # Build the search-values section (mandatory text-search filters).
-            search_values = ""
-            value_terms = [v.strip() for v in value_entities if v and v.strip()]
-            if value_terms:
-                value_lines = [
-                    "**Search Values** (text-search filter values):",
-                    "- Every LIKE/ILIKE or text-equality WHERE filter in the SQL "
-                    "MUST use one of these terms, and EVERY term listed below MUST "
-                    "appear as such a filter. Do NOT invent other text-search "
-                    "filters.",
-                    "- EXCEPTION: if a term is clearly the wrong word for this "
-                    "domain/context, do NOT filter on it — omit that term entirely "
-                    "rather than force a match that would miss valid rows.",
-                    "- Only filter on columns that ACTUALLY EXIST in the AVAILABLE "
-                    "TABLES above — never assume a column exists.",
-                    "- Pick whichever existing column best fits each term. If "
-                    "unsure, prefer a description-type column for the main entity, "
-                    "or a features-type column for adjective/feature values — only "
-                    "when such a column actually exists.",
-                    "- Avoid matching a term against title or name columns when the "
-                    "term is more than 2 words.",
-                    "",
-                    "Terms:",
-                ]
-                value_lines.extend(f"  - {term}" for term in value_terms)
-                search_values = "\n".join(value_lines) + "\n\n"
 
             # Build custom analyses section for user prompt
             ca_section = ""
@@ -422,7 +394,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
                 join_paths=join_paths,
-                search_values=search_values,
                 custom_analyses=ca_section + sa_section,
             )
 
