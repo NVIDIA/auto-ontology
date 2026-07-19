@@ -24,9 +24,7 @@ _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
-_NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
-    "NVIDIA_API_KEY", ""
-)
+_NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "")
 
 _KEY_ERROR = (
     "NVIDIA_API_KEY is not set. "
