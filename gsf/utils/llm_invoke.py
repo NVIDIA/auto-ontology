@@ -36,7 +36,6 @@ _RETRYABLE_TOKENS = (
     "Service Unavailable",
 )
 
-
 class _TimeoutSession(_requests.Session):
     """requests.Session that enforces a default timeout on every request."""
 
@@ -81,7 +80,10 @@ def get_llm_client(
             model=resolved_model,
             api_key=_API_KEY,
             base_url=_BASE_URL,
-            temperature=temperature,
+            # temperature omitted: gpt-5.x/o-series reject any explicit value and
+            # only allow the server default (1). Unset => langchain sends no
+            # temperature field, so the provider default applies.
+            # temperature=temperature,
             max_tokens=max_tokens,
         )
 
@@ -91,7 +93,7 @@ def get_llm_client(
         model=resolved_model,
         api_key=_API_KEY,
         base_url=_BASE_URL,
-        temperature=temperature,
+        # temperature=temperature,  # omitted — provider default applies
         max_tokens=max_tokens,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)

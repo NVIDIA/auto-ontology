@@ -25,7 +25,7 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, AIMessage
+from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -154,7 +154,7 @@ class IntentValidationAgent(BaseAgent):
 
         messages = [
             SystemMessage(content=INTENT_VALIDATION_SYSTEM_PROMPT),
-            AIMessage(content=validation_prompt),
+            HumanMessage(content=validation_prompt),
         ]
 
         # Call LLM for validation

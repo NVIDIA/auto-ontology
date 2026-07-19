@@ -23,7 +23,7 @@ Design Decisions:
 import logging
 from typing import Any, Dict
 
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.utils.llm_invoke import invoke_with_structured_output
@@ -143,7 +143,7 @@ class SQLFromTablesAgent(BaseAgent):
 
         messages = state["messages"] + [
             SystemMessage(content=system_prompt),
-            AIMessage(content=user_prompt),
+            HumanMessage(content=user_prompt),
         ]
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)

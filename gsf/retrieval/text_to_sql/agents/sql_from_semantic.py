@@ -24,7 +24,7 @@ Design Decisions:
 
 import logging
 from typing import Any, Dict
-from langchain_core.messages import AIMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from gsf.utils.llm_invoke import safe_invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -444,7 +444,7 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             messages = state["messages"] + [
                 SystemMessage(content=system_prompt),
-                AIMessage(content=user_prompt),
+                HumanMessage(content=user_prompt),
             ]
 
             # Add calendar time window reminder if needed
