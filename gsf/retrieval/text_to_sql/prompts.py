@@ -52,6 +52,7 @@ create_sql_user_prompt = (
     "or any other vendor-specific or non-standard syntax.\n"
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
+    "{dialect_rules}"
     "**Style**\n"
     "- SELECT only the columns explicitly asked; extra columns make the result "
     "wrong even when the rows are right. For superlative/ranking questions "
@@ -77,18 +78,103 @@ create_sql_user_prompt = (
 )
 
 
+# Functions the LLM reaches for (Postgres / Snowflake / BigQuery / PostGIS
+# habits) that are absent from the stdlib SQLite build used at execution time.
+# Math builtins (sin/cos/acos/radians/sqrt/pi/pow/ln/log/exp/mod/…) ARE
+# available, so distance math can be written by hand.
+_SQLITE_DIALECT_RULES = (
+    "**SQLite-specific (STRICT — these will error at execution)**\n"
+    "- No LEAST / GREATEST. Use scalar MIN(a, b, …) / MAX(a, b, …) instead.\n"
+    "- No spatial / PostGIS functions (ST_Distance, ST_X, ST_Y, ST_DWithin, "
+    "POINT, distance(), …). Compute great-circle distance by hand with the "
+    "Haversine formula using sin/cos/acos/radians/sqrt (all available).\n"
+    "- No statistical aggregates (STDDEV, STDDEV_POP, VARIANCE, VAR_POP, "
+    "PERCENTILE_CONT, PERCENTILE_DISC, MEDIAN, CORR, REGR_*). Derive them with "
+    "plain arithmetic (AVG, SUM, COUNT, window functions).\n"
+    "- No STRING_AGG / ARRAY_AGG — use GROUP_CONCAT. No generate_series.\n"
+    "- No EXTRACT(...) / DATE_TRUNC / DATE_PART / AGE / NOW() / INTERVAL "
+    "literals. Use strftime(), date(), datetime() for all date/time work.\n"
+    "- No :: casts and no ILIKE. Use CAST(x AS type); LIKE is case-insensitive "
+    "for ASCII.\n"
+    "- Coordinates and other composite columns are stored as TEXT, not JSON or "
+    "arrays. Do NOT use json_extract on non-JSON text — inspect the value shape "
+    "and parse with substr()/instr()/CAST as needed.\n"
+    "- Prefer built-in aggregate/math functions and window functions only.\n\n"
+)
+
+
+# Snowflake folds unquoted identifiers to UPPERCASE. Datasets loaded from
+# BigQuery/Google-public-data (e.g. Spider2 PATENTS) keep their original
+# lowercase, case-sensitive column names, so an unquoted/upper reference raises
+# "invalid identifier". Nested BigQuery RECORD/REPEATED fields land as VARIANT
+# arrays that need LATERAL FLATTEN to unnest.
+_SNOWFLAKE_DIALECT_RULES = (
+    "**Snowflake-specific (STRICT — these OVERRIDE the generic syntax bans above)**\n"
+    "- The general rule against `::` casts and LATERAL joins does NOT apply here: "
+    "Snowflake REQUIRES `::type` casts and `LATERAL FLATTEN` to read VARIANT data.\n"
+    "- Identifiers are CASE-SENSITIVE when quoted, and Snowflake folds unquoted "
+    "names to UPPERCASE. The schema above lists the real stored names. Wrap every "
+    'table and column identifier in double quotes using the EXACT case shown, e.g. '
+    '`SELECT t."publication_number" FROM "PATENTS"."PUBLICATIONS" AS t`. '
+    "Never reference a lowercase column unquoted — it will fail as 'invalid identifier'.\n"
+    "- Aliases you define may stay unquoted; only real table/column names need the "
+    "exact-case double quotes.\n"
+    "- VARIANT / ARRAY / OBJECT columns hold nested (semi-structured) data. To read "
+    "fields inside them, use LATERAL FLATTEN: "
+    '`FROM "T", LATERAL FLATTEN(input => "T"."assignee_harmonized") f` then '
+    'access `f.value:"name"::string`. Selecting a VARIANT column directly returns '
+    "the whole JSON, not scalar fields.\n"
+    "- Use `:` / `[...]` path syntax for OBJECT fields and `::type` casts on the "
+    "extracted values (e.g. `f.value:\"name\"::string`).\n"
+    "- Date columns loaded from BigQuery are often integer epoch/`YYYYMMDD` NUMBERs, "
+    "not DATE types — check the sample values and cast/parse accordingly.\n\n"
+)
+
+
+# Dialects with a single flat namespace (no schemas): tables are referenced by
+# bare name. Everything else (Postgres, Snowflake, HeavyDB) namespaces tables
+# under a schema that MUST be kept in the identifier (``schema.table``).
+_SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
+
+
+def format_dialect_rules(dialect: str | None) -> str:
+    """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
+
+    SQLite lacks many functions the model habitually emits (spatial,
+    LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
+    identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
+    lowercase columns (Spider2 PATENTS etc.). Returns '' for other dialects.
+    """
+    normalized = (dialect or "").strip().lower()
+    if normalized == "sqlite":
+        return _SQLITE_DIALECT_RULES
+    if normalized == "snowflake":
+        return _SNOWFLAKE_DIALECT_RULES
+    return ""
+
+
 def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
     has_evidence: bool = False,
 ) -> str:
-    """System prompt for SQL generation from semantic retrieval candidates."""
-    bare_table_names = target_db is not None or (dialect or "").lower() == "sqlite"
+    """System prompt for SQL generation from semantic retrieval candidates.
+
+    Table naming is gated on the **dialect**, not on ``target_db``: schema-less
+    dialects (SQLite/DuckDB, incl. BIRD) use bare table names, while schema
+    dialects (Postgres/Snowflake) keep the ``schema.table`` qualifier. Scoping a
+    query to one database (``target_db``) removes only the *database* prefix — the
+    schema is still required to resolve the table, so it is never dropped here.
+    """
+    bare_table_names = (dialect or "").lower() in _SCHEMALESS_DIALECTS
     if bare_table_names:
         table_name_rule = (
             "- Use table names exactly as shown in AVAILABLE TABLES "
-            "(no schema or database prefix).\n"
+            "(unqualified — do NOT add a schema or database prefix).\n"
+        )
+        join_template = (
+            "    JOIN target_table ON source_table.source_column = target_table.target_column"
         )
         example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
 FROM sales AS s
@@ -98,9 +184,13 @@ GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
     else:
         table_name_rule = (
-            "- Use fully qualified table names exactly as provided "
-            "(e.g., schema.table_name).\n"
-            "  Never drop the schema/database prefix.\n"
+            "- Use table names exactly as shown in AVAILABLE TABLES, INCLUDING the "
+            "schema prefix (e.g., schema.table_name). Never drop the schema; do NOT "
+            "add a database-name prefix.\n"
+        )
+        join_template = (
+            "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
+            "         = target_schema.target_table.target_column"
         )
         example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
 FROM PUBLIC.SALES AS s
@@ -141,7 +231,7 @@ ORDER BY total_sales DESC;"""
   use them instead. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
   actually need:
-    JOIN target_table ON source_table.source_column = target_table.target_column
+{join_template}
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,

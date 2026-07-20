@@ -42,6 +42,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_general_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
     format_dual_question_block,
 )
 from gsf.retrieval.data_access.relevant_tables import get_relevant_tables
@@ -130,6 +131,7 @@ class SQLFromTablesAgent(BaseAgent):
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
+            dialect_rules=format_dialect_rules(dialect),
             main_question=main_question,
             observation_block=observation_block,
             queries=[],

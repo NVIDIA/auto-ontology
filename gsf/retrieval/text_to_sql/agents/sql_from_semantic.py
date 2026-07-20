@@ -41,6 +41,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
     format_dual_question_block,
 )
 from gsf.retrieval.text_to_sql.evidence_hints import (
@@ -56,13 +57,14 @@ def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
     """Format a hop endpoint (``side`` is ``"source"`` or ``"target"``) as
     ``schema.table.column`` (or ``table.column`` when the schema is absent).
 
-    When *target_db* is set, the schema qualifier is omitted because execution
-    is already scoped to that database.
+    ``target_db`` scopes execution to one database, so the *database* prefix is
+    dropped — but the schema qualifier is kept whenever present, since schema
+    dialects (Postgres/Snowflake) need it to resolve the table.
     """
     schema = hop.get(f"{side}_schema", "")
     table = hop.get(f"{side}_table", "")
     column = hop.get(f"{side}_column", "")
-    if target_db or not schema:
+    if not schema:
         prefix = table
     else:
         prefix = f"{schema}.{table}"
@@ -98,12 +100,9 @@ def _format_semantic_context(
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    if target_db:
-        anchor_full = anchor_table
-    else:
-        anchor_full = (
-            f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
-        )
+    anchor_full = (
+        f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    )
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
@@ -124,10 +123,7 @@ def _format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            if target_db:
-                full_table = table
-            else:
-                full_table = f"{schema}.{table}" if schema else table
+            full_table = f"{schema}.{table}" if schema else table
             lines.append(f"  {attr_name}: {full_table}.{col_name}")
             path = entry.get("path") or []
             if path:
@@ -156,8 +152,9 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
     Args:
         tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
             ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
-        target_db: When set, schema qualification is omitted from table names
-            because execution is already scoped to this database.
+        target_db: When set, only the *database* prefix is omitted (execution is
+            already scoped to this database). The schema qualifier is kept when
+            present, since schema dialects (Postgres/Snowflake) need it.
 
     Returns:
         Formatted string clearly showing which columns belong to each table
@@ -178,10 +175,10 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # When target_db is set, execution is already scoped to that database
-        if target_db:
-            full_name = table_name
-        elif database_name and schema_name:
+        # target_db scopes execution to one database, so drop only the *database*
+        # prefix; keep the schema (Postgres/Snowflake need schema.table). SQLite/
+        # BIRD tables carry no schema_name, so this collapses to a bare name.
+        if database_name and schema_name and not target_db:
             full_name = f"{database_name}.{schema_name}.{table_name}"
         elif schema_name:
             full_name = f"{schema_name}.{table_name}"
@@ -425,6 +422,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
+                dialect_rules=format_dialect_rules(dialect),
                 main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,
