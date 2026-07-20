@@ -25,7 +25,7 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 from pydantic import BaseModel, Field
-from langchain_core.messages import SystemMessage, AIMessage, HumanMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
