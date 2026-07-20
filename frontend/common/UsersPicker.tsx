@@ -6,7 +6,6 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { User } from '@/types/auth';
-import type { ZoneUser } from '@/types/zones';
 
 const getInitials = (name: string): string => {
 	const parts = name.trim().split(/\s+/);
@@ -14,7 +13,7 @@ const getInitials = (name: string): string => {
 	return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
 };
 
-export const UserAvatar = ({ user }: { user: User | ZoneUser }) => (
+export const UserAvatar = ({ user }: { user: User }) => (
 	<span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-teal-600 text-[10px] font-semibold text-white">
 		{getInitials(user.name)}
 	</span>
