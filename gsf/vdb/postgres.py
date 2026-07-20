@@ -12,7 +12,9 @@ column so it can be used as a delete/search filter.
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import threading
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -383,14 +385,42 @@ class PostgresVDB(VDB):
         return self.write_to_index(records)
 
     def close(self) -> None:
-        # Drop the store reference; the engine's pool is managed by PGEngine.
+        """Dispose the engine's connection pool.
+
+        If called from the engine's event-loop thread, dispose is scheduled
+        without waiting to avoid a self-join deadlock.
+        """
         self._store = None
-        if self._engine is not None:
+        engine = self._engine
+        if engine is None:
+            return
+        self._engine = None
+
+        loop = getattr(engine, "_loop", None)
+        thread = getattr(engine, "_thread", None)
+
+        on_loop_thread = thread is not None and thread is threading.current_thread()
+        if not on_loop_thread:
             try:
-                self._engine._run_as_sync(self._engine._pool.dispose())
-            except Exception:
-                pass
-            self._engine = None
+                running = asyncio.get_running_loop()
+            except RuntimeError:
+                running = None
+            on_loop_thread = running is not None and running is loop
+
+        if on_loop_thread:
+            # Can't block on the loop from within it; schedule dispose
+            # non-blocking so it runs once the loop is free again.
+            if loop is not None and loop.is_running():
+                try:
+                    asyncio.run_coroutine_threadsafe(engine._pool.dispose(), loop)
+                except Exception:
+                    pass
+            return
+
+        try:
+            engine._run_as_sync(engine._pool.dispose())
+        except Exception:
+            pass
 
     def __del__(self) -> None:
         try:

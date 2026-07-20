@@ -59,7 +59,7 @@ def get_llm_client(
     *,
     model: str | None = None,
     temperature: float = 0.0,
-    max_tokens: int = 8182,
+    max_tokens: int = 8192,
 ) -> BaseChatModel:
     """Create an LLM client.
 
@@ -73,7 +73,7 @@ def get_llm_client(
 
     resolved_model = model or _MODEL_NAME
 
-    if resolved_model.startswith("openai/"):
+    if resolved_model.startswith(("openai/", "azure/")):
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
@@ -85,7 +85,9 @@ def get_llm_client(
             # temperature field, so the provider default applies.
             # temperature=temperature,
             max_tokens=max_tokens,
-        )
+            timeout=LLM_INVOKE_TIMEOUT_S,
+            max_retries=0,
+            )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -93,7 +95,7 @@ def get_llm_client(
         model=resolved_model,
         api_key=_API_KEY,
         base_url=_BASE_URL,
-        # temperature=temperature,  # omitted — provider default applies
+        temperature=temperature,
         max_tokens=max_tokens,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
