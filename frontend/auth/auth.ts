@@ -11,30 +11,6 @@ import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/auth/auth-access';
 import { Role } from '@/enums/auth';
 
-const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
-
-async function syncUserToNeo4j(user: {
-	id: string;
-	email: string;
-	name: string;
-	role?: string | null;
-}): Promise<void> {
-	try {
-		await fetch(`${pythonApiUrl}/api/users`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({
-				id: user.id,
-				email: user.email,
-				name: user.name,
-				role: user.role ?? Role.Viewer,
-			}),
-		});
-	} catch (err) {
-		console.error('[auth] failed to sync user to Neo4j', err);
-	}
-}
-
 const prisma = getPrisma();
 
 // During `next build` the module is evaluated but no auth request is handled,
@@ -82,15 +58,6 @@ export const auth = betterAuth({
 							? { ...user, name, role: Role.Admin, emailVerified: true }
 							: { ...user, name, role: Role.Viewer },
 					};
-				},
-				after: async (user) => {
-					await syncUserToNeo4j(user);
-				},
-			},
-			update: {
-				after: async (user) => {
-					// Sync role / name changes (e.g. admin promotes a viewer).
-					await syncUserToNeo4j(user);
 				},
 			},
 		},

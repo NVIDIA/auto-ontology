@@ -26,13 +26,6 @@ export type ZoneCreated = Zone & {
 	items: string[];
 };
 
-export type ZoneUser = {
-	id: string;
-	name: string;
-	email: string;
-	role: string;
-};
-
 export type ZoneCreateInput = {
 	name: string;
 	description?: string;

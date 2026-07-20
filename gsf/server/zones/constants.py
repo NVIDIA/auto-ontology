@@ -7,10 +7,6 @@
 from __future__ import annotations
 
 REL_ZONE_OF = "ZONE_OF"
-# Relationship from a viewer's :User node to a Zone they've been explicitly
-# granted access to.  Admins never get this edge — their "sees every zone"
-# access is derived from PostgreSQL (role == "admin") at query time instead.
-REL_PARTICIPANT_OF = "PARTICIPANT_OF"
 LABEL_ZONE = "Zone"
 # Label applied to a zone node in place of LABEL_ZONE while it is disabled by
 # an admin. Swapping the label (rather than storing a boolean property) keeps

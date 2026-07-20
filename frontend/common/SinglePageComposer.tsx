@@ -4,15 +4,7 @@
 
 'use client';
 
-import {
-	forwardRef,
-	useEffect,
-	useMemo,
-	useRef,
-	useState,
-	useCallback,
-	type ReactNode,
-} from 'react';
+import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
@@ -322,12 +314,7 @@ const ReadOnlyTagList = ({
 };
 
 const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
-	const displayedZones = useMemo(() => {
-		if (Array.isArray(section.userZoneIds)) {
-			return section.zones.filter((z) => (section.userZoneIds as string[]).includes(z.id));
-		}
-		return section.zones;
-	}, [section.zones, section.userZoneIds]);
+	const displayedZones = section.zones;
 
 	return (
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">

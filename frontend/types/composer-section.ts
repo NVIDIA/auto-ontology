@@ -72,13 +72,6 @@ export type ComposerZonesSection = {
 	id: string;
 	title: string;
 	zones: ComposerZoneChip[];
-	/**
-	 * Zone IDs the current viewer has access to via `PARTICIPANT_OF` edges.
-	 * `null` means admin (no restriction — all zones are accessible).
-	 * `undefined` means access info was not loaded (treat like admin).
-	 * `string[]` means viewer — only zones in this list are accessible to the user.
-	 */
-	userZoneIds?: string[] | null;
 };
 
 export type ComposerRelatedTermChip = {

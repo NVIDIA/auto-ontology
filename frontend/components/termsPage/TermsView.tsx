@@ -13,8 +13,6 @@ import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SearchInput } from '@/common/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
-import { zonesApi } from '@/api/zones';
-import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
 import { Label } from '@/common/Label';
@@ -160,10 +158,6 @@ export const TermsView = () => {
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
 	const colAttrId = searchParams.get('colAttr');
-
-	const { data: session } = useSession();
-	const sessionUserId = session?.user?.id ?? null;
-	const sessionRole = session?.user?.role ?? null;
 
 	const [terms, setTerms] = useState<Term[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
@@ -730,11 +724,7 @@ export const TermsView = () => {
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, userZonesRes] = await Promise.all([
-				sqlAttributesApi.get(attrId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
-			]);
+			const res = await sqlAttributesApi.get(attrId);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
@@ -752,12 +742,6 @@ export const TermsView = () => {
 				if (!exists) return [...prev, attr];
 				return prev.map((a) => (a.id === attr.id ? attr : a));
 			});
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
 
 			return {
 				header: {
@@ -794,22 +778,19 @@ export const TermsView = () => {
 							color: z.color,
 							enabled: z.enabled,
 						})),
-						userZoneIds,
 					},
 				],
 			};
 		},
-		[sessionUserId, sessionRole],
+		[],
 	);
 
 	const getSinglePage = useCallback(
 		async (termId: string): Promise<SinglePageFormat> => {
-			const isViewer = sessionRole !== null && sessionRole !== 'admin';
-			const [res, attrsRes, sqlAttrsRes, userZonesRes] = await Promise.all([
+			const [res, attrsRes, sqlAttrsRes] = await Promise.all([
 				termsApi.get(termId),
 				termsApi.getColumnAttributes(termId),
 				termsApi.getSqlAttributes(termId),
-				isViewer && sessionUserId ? zonesApi.getAll(sessionUserId) : Promise.resolve(null),
 			]);
 			if (res.error || !res.data) {
 				return {
@@ -829,12 +810,6 @@ export const TermsView = () => {
 			// the user has opened this term's detail page.
 			setSqlAttrs(termSqlAttrs);
 			setColumnAttrs(termAttrs);
-
-			// null = admin (no zone restriction), string[] = viewer's accessible zone IDs
-			const userZoneIds: string[] | null =
-				userZonesRes !== null && !userZonesRes.error
-					? (userZonesRes.data ?? []).map((z) => z.id)
-					: null;
 
 			return {
 				header: {
@@ -879,7 +854,6 @@ export const TermsView = () => {
 							color: z.color,
 							enabled: z.enabled,
 						})),
-						userZoneIds,
 					},
 					{
 						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
@@ -923,7 +897,7 @@ export const TermsView = () => {
 				],
 			};
 		},
-		[sessionUserId, sessionRole],
+		[],
 	);
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;

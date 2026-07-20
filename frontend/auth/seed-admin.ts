@@ -7,25 +7,6 @@ import { hashPassword } from 'better-auth/crypto';
 import { getPrisma } from '@/lib/prisma';
 import { Role } from '@/enums/auth';
 
-const pythonApiUrl = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
-
-async function syncToNeo4j(user: {
-	id: string;
-	email: string;
-	name: string;
-	role: string;
-}): Promise<void> {
-	try {
-		await fetch(`${pythonApiUrl}/api/users`, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(user),
-		});
-	} catch (err) {
-		console.error('[seed-admin] failed to sync admin to Neo4j', err);
-	}
-}
-
 /**
  * Idempotently ensure the bootstrap admin account described by the
  * GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD env vars. Runs once at server startup
@@ -72,7 +53,6 @@ export const seedAdmin = async (): Promise<void> => {
 				password: hashedPassword,
 			},
 		});
-		await syncToNeo4j({ id: userId, email, name: email, role: Role.Admin });
 		console.log(`[seed-admin] created bootstrap admin account for ${email}`);
 		return;
 	}
@@ -101,6 +81,5 @@ export const seedAdmin = async (): Promise<void> => {
 			},
 		});
 	}
-	await syncToNeo4j({ id: existing.id, email, name: existing.name, role: Role.Admin });
 	console.log(`[seed-admin] updated bootstrap admin account for ${email}`);
 };

@@ -30,10 +30,6 @@ class ZoneUpdate(BaseModel):
     items: list[str] | None = None
 
 
-class ZoneAccessGrant(BaseModel):
-    user_id: str
-
-
 class ZoneStatusUpdate(BaseModel):
     enabled: bool
 
@@ -48,12 +44,8 @@ def _require_admin(user_id: str) -> None:
 
 @router.get("/zones")
 def list_zones(uid: str = Query(..., description="Requesting user id")) -> dict:
-    """Zones visible to *uid*.
-
-    Admins (per PostgreSQL role) see all zones; viewers see only zones they
-    have been granted access to.
-    """
-    rows = dal.list_zones(uid, is_admin=postgres_dal.is_admin(uid))
+    """Return every zone to the requesting user."""
+    rows = dal.list_zones()
     return {"data": rows, "count": len(rows)}
 
 
@@ -62,11 +54,8 @@ def get_zone(
     zone_id: str,
     uid: str = Query(..., description="Requesting user id"),
 ) -> dict:
-    """One zone with its catalog data items.
-
-    Returns 404 when the zone does not exist or the user has no access.
-    """
-    row = dal.get_zone_by_id(zone_id, user_id=uid, is_admin=postgres_dal.is_admin(uid))
+    """Return one zone with its catalog data items."""
+    row = dal.get_zone_by_id(zone_id)
     if row is None:
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": row}
@@ -149,53 +138,3 @@ def set_zone_status(
     if row is None:
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": row}
-
-
-# ---------------------------------------------------------------------------
-# Zone access management  (admin → viewer)
-# ---------------------------------------------------------------------------
-
-
-@router.get("/zones/{zone_id}/access")
-def list_zone_access(
-    zone_id: str,
-    admin_uid: str = Query(..., description="Admin user id performing the request"),
-) -> dict:
-    """List all users that currently have access to a zone.  Requires admin."""
-    _require_admin(admin_uid)
-    rows = dal.list_zone_users(zone_id)
-    return {"data": rows, "count": len(rows)}
-
-
-@router.post("/zones/{zone_id}/access", status_code=201)
-def grant_zone_access(
-    zone_id: str,
-    body: ZoneAccessGrant,
-    admin_uid: str = Query(..., description="Admin user id performing the request"),
-) -> dict:
-    """Grant a user access to a zone.  Requires admin."""
-    _require_admin(admin_uid)
-    granted = dal.grant_zone_access(zone_id=zone_id, user_id=body.user_id)
-    if not granted:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Zone {zone_id!r} or user {body.user_id!r} not found",
-        )
-    return {"data": {"zone_id": zone_id, "user_id": body.user_id}}
-
-
-@router.delete("/zones/{zone_id}/access/{user_id}")
-def revoke_zone_access(
-    zone_id: str,
-    user_id: str,
-    admin_uid: str = Query(..., description="Admin user id performing the request"),
-) -> dict:
-    """Revoke a user's access to a zone.  Requires admin."""
-    _require_admin(admin_uid)
-    revoked = dal.revoke_zone_access(zone_id=zone_id, user_id=user_id)
-    if not revoked:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No access record found for user {user_id!r} on zone {zone_id!r}",
-        )
-    return {"data": {"zone_id": zone_id, "user_id": user_id}}

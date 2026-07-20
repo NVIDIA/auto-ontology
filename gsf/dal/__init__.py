@@ -9,8 +9,6 @@ Each module is the single source of truth for a domain:
   foreign_keys    — FK and join edge traversal
   connections     — UI-managed database connection metadata on DB nodes
   candidates      — Vector-hit graph enrichment at retrieval time
-  users           — Single :User node mirror of the PostgreSQL Better Auth
-                    records; role (admin/viewer) lives in Postgres only —
-                    see gsf.server.users.postgres_dal — and viewers are
-                    linked to their granted Zones via :PARTICIPANT_OF
+  users           — Zone-scope helpers for catalog queries. Users and
+                    user-to-zone relationships are not stored in Neo4j.
 """

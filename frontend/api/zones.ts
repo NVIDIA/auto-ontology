@@ -10,7 +10,6 @@ import type {
 	ZoneCreateInput,
 	ZoneDetail,
 	ZoneUpdateInput,
-	ZoneUser,
 } from '@/types/zones';
 
 export const zonesApi = {
@@ -39,28 +38,4 @@ export const zonesApi = {
 		requests.patch(`zones/${zoneId}/status?admin_uid=${encodeURIComponent(adminId)}`, {
 			enabled,
 		}),
-
-	listAccess: (
-		zoneId: string,
-		adminId: string,
-	): Promise<ResponseWithError<{ data: ZoneUser[]; count: number }>> =>
-		requests.get(`zones/${zoneId}/access`, { admin_uid: adminId }),
-
-	grantAccess: (
-		zoneId: string,
-		userId: string,
-		adminId: string,
-	): Promise<ResponseWithError<{ data: { zone_id: string; user_id: string } }>> =>
-		requests.post(`zones/${zoneId}/access?admin_uid=${encodeURIComponent(adminId)}`, {
-			user_id: userId,
-		}),
-
-	revokeAccess: (
-		zoneId: string,
-		userId: string,
-		adminId: string,
-	): Promise<ResponseWithError<{ data: { zone_id: string; user_id: string } }>> =>
-		requests.delete(
-			`zones/${zoneId}/access/${encodeURIComponent(userId)}?admin_uid=${encodeURIComponent(adminId)}`,
-		),
 };
