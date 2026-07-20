@@ -66,9 +66,7 @@ class EmptyResultValueRepairAgent(BaseAgent):
             mismatches = find_literal_mismatches(executor, dialect, sql_code)
 
         if not mismatches:
-            self.logger.info(
-                "Empty result but no literal mismatches — passing through"
-            )
+            self.logger.info("Empty result but no literal mismatches — passing through")
             return {"decision": "valid_sql", "path_state": path_state}
 
         path_state["value_repair_attempted"] = True

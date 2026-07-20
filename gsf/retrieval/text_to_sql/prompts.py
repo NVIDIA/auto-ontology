@@ -114,7 +114,7 @@ _SNOWFLAKE_DIALECT_RULES = (
     "Snowflake REQUIRES `::type` casts and `LATERAL FLATTEN` to read VARIANT data.\n"
     "- Identifiers are CASE-SENSITIVE when quoted, and Snowflake folds unquoted "
     "names to UPPERCASE. The schema above lists the real stored names. Wrap every "
-    'table and column identifier in double quotes using the EXACT case shown, e.g. '
+    "table and column identifier in double quotes using the EXACT case shown, e.g. "
     '`SELECT t."publication_number" FROM "PATENTS"."PUBLICATIONS" AS t`. '
     "Never reference a lowercase column unquoted — it will fail as 'invalid identifier'.\n"
     "- Aliases you define may stay unquoted; only real table/column names need the "
@@ -125,7 +125,7 @@ _SNOWFLAKE_DIALECT_RULES = (
     'access `f.value:"name"::string`. Selecting a VARIANT column directly returns '
     "the whole JSON, not scalar fields.\n"
     "- Use `:` / `[...]` path syntax for OBJECT fields and `::type` casts on the "
-    "extracted values (e.g. `f.value:\"name\"::string`).\n"
+    'extracted values (e.g. `f.value:"name"::string`).\n'
     "- Date columns loaded from BigQuery are often integer epoch/`YYYYMMDD` NUMBERs, "
     "not DATE types — check the sample values and cast/parse accordingly.\n\n"
 )
@@ -173,9 +173,7 @@ def create_sql_from_candidates_prompt(
             "- Use table names exactly as shown in AVAILABLE TABLES "
             "(unqualified — do NOT add a schema or database prefix).\n"
         )
-        join_template = (
-            "    JOIN target_table ON source_table.source_column = target_table.target_column"
-        )
+        join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
         example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
 FROM sales AS s
 JOIN customers AS c ON s.customer_id = c.customer_id

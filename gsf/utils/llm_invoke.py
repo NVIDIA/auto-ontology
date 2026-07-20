@@ -36,6 +36,7 @@ _RETRYABLE_TOKENS = (
     "Service Unavailable",
 )
 
+
 class _TimeoutSession(_requests.Session):
     """requests.Session that enforces a default timeout on every request."""
 
@@ -87,7 +88,7 @@ def get_llm_client(
             max_tokens=max_tokens,
             timeout=LLM_INVOKE_TIMEOUT_S,
             max_retries=0,
-            )
+        )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
 

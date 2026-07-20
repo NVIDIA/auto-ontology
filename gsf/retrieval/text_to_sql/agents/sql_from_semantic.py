@@ -100,9 +100,7 @@ def _format_semantic_context(
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = (
-        f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
-    )
+    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",

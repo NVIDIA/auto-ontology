@@ -40,6 +40,7 @@ def _first_value(row: dict) -> Any:
         return None
     return next(iter(row.values()))
 
+
 # How similar a used literal must be to a real value to count as a fixable
 # near-miss (difflib ratio, 0..1). Below this we treat the value as legitimately
 # absent and do not repair.
