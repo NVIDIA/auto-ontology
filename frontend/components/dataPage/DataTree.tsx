@@ -11,7 +11,7 @@ import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
 import { Icon, IconName } from '@/components/icons';
 import { datasources } from '@/api/datasources';
-import { catalogKindForTableType, catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import {
@@ -268,8 +268,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				icon={catalogNodeInfo[catalogKindForTableType(table.table_type)].icon}
-				title={catalogNodeInfo[catalogKindForTableType(table.table_type)].title}
+				icon={catalogNodeInfo[table.table_type].icon}
+				title={catalogNodeInfo[table.table_type].title}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}

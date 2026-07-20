@@ -30,6 +30,7 @@ from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.connections.router import router as connections_router  # noqa: E402
 from gsf.server.datasources.router import router as datasources_router  # noqa: E402
+from gsf.server.exploration.router import router as exploration_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
 from gsf.server.semantic_compilation.router import (  # noqa: E402
     router as semantic_compilation_router,
@@ -75,6 +76,7 @@ def main() -> None:
     app.include_router(
         datasources_router, prefix="/api", tags=["datasources", "connectors"]
     )
+    app.include_router(exploration_router, prefix="/api", tags=["exploration"])
     app.include_router(connections_router, prefix="/api", tags=["connections"])
     app.include_router(chat_router, prefix="/api", tags=["chat"])
     app.include_router(health_router, prefix="/api", tags=["health"])

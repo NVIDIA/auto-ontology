@@ -19,14 +19,18 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, La
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
-from gsf.dal.users import get_accessible_catalog_ids_for_zones
+from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
     REL_PROPERTY_OF,
 )
 from gsf.server.sql_utils import SqlParseError
-from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
+from gsf.server.zones.constants import (
+    LABEL_ZONE_DISABLED,
+    REL_ZONE_OF,
+    ZONE_LABEL_PATTERN,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,18 +68,22 @@ _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
 def _sql_attr_zone_filter(
     zone_ids: list[str] | None,
     extra_params: dict[str, Any] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Return a Cypher ``WHERE`` clause and params for SqlAttribute zone scoping.
 
     The tables that scope a SqlAttribute are the ones its SQL actually
     references (``SqlAttribute -[HAS_SQL]-> Sql -[SQL]-> Table``), not the
     tables that represent its parent Term. The attribute is visible in the
-    given zones only when every table its SQL touches is accessible.
+    given zones only when every table its SQL touches is accessible. Pass a
+    pre-resolved *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``)
+    to avoid a repeat Neo4j round trip when the caller already has it.
     """
     params = dict(extra_params or {})
     if zone_ids is None:
         return "", params
-    table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    table_ids = list(resolved["table_ids"])
     attr_filter = (
         f"WHERE NOT EXISTS {{"
         f" (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})"
@@ -152,6 +160,34 @@ def list_sql_attributes() -> list[dict[str, Any]]:
     return _query_sql_attributes(order_by="attr.name")
 
 
+def fetch_sql_attribute_counts(
+    zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return per-term SqlAttribute counts, zone-scoped when zone_ids are provided.
+
+    Uses the same ``_sql_attr_zone_filter`` as every other SqlAttribute read:
+    an attribute only counts when every table its SQL actually references is
+    reachable through *zone_ids*. Pass a pre-resolved *data_ids_by_zone*
+    (see ``resolve_accessible_catalog_ids``) when the caller already
+    resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
+
+    Each entry is ``{term_id: str, count: int}``. Terms with zero
+    SqlAttributes are omitted.
+    """
+    attr_filter, params = _sql_attr_zone_filter(
+        zone_ids, data_ids_by_zone=data_ids_by_zone
+    )
+    return get_neo4j_conn().query_read(
+        f"""
+        MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
+        {attr_filter}
+        RETURN term.id AS term_id, count(DISTINCT attr) AS count
+        """,
+        params,
+    )
+
+
 def get_full_sql_attribute_by_id(
     attr_id: str,
     zone_ids: list[str] | None = None,
@@ -164,6 +200,11 @@ def get_full_sql_attribute_by_id(
     can differ from what the SQL text queries.  When *zone_ids* is supplied
     the attribute must pass the all-or-nothing zone check, otherwise
     ``None`` is returned so viewers cannot read out-of-zone attributes.
+    When *zone_ids* is supplied, disabled zones are excluded outright from
+    the result — a viewer never sees a disabled zone chip even if its id
+    ended up in *zone_ids*. Pass ``None`` to skip the check and include
+    disabled zones (with ``enabled: False``) so admins can see and manage
+    them.
     """
     conn = get_neo4j_conn()
     rows = _query_sql_attributes(attr_id=attr_id, zone_ids=zone_ids)
@@ -171,7 +212,11 @@ def get_full_sql_attribute_by_id(
         return None
     result = dict(rows[0])
 
-    zone_filter = "" if zone_ids is None else "AND z.id IN $zone_ids"
+    zone_filter = (
+        ""
+        if zone_ids is None
+        else f"AND z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+    )
     zone_params: dict[str, Any] = {"attr_id": attr_id}
     if zone_ids is not None:
         zone_params["zone_ids"] = zone_ids
@@ -181,13 +226,14 @@ def get_full_sql_attribute_by_id(
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
               -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
               -[:{Edges.SQL}]->(t:{Labels.TABLE})
-        MATCH (z:{LABEL_ZONE})-[:{REL_ZONE_OF}]->(item)
+        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
         WHERE (item = t
            OR (item)-[:{Edges.CONTAINS}*1..2]->(t))
               {zone_filter}
         RETURN DISTINCT z.id    AS id,
                         z.name  AS name,
-                        z.color AS color
+                        z.color AS color,
+                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
         ORDER BY z.name
         """,
         zone_params,
@@ -451,8 +497,8 @@ def fetch_tables_from_sql_attributes(
     MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: attr_id}})
           -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
           -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-    OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
-    OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
+    MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,

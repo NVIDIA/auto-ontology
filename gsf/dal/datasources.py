@@ -26,9 +26,16 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, La
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
-from gsf.dal.users import get_accessible_catalog_ids_for_zones, resolve_table_filter
+from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 
-from gsf.semantic.constants import REL_REPRESENTS
+from gsf.semantic.constants import (
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_TERM,
+    REL_HAS_ATTRIBUTE,
+    REL_PROPERTY_OF,
+    REL_REPRESENTS,
+    REL_SEMANTIC_FK,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +54,10 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
     counts) reachable through those zones.  Pass ``None`` (or omit) to return
     the full unfiltered catalog (admin / internal callers).
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None:
-        db_ids = list(accessible["db_ids"])
-        schema_ids = list(accessible["schema_ids"])
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    if data_ids_by_zone is not None:
+        db_ids = list(data_ids_by_zone["db_ids"])
+        schema_ids = list(data_ids_by_zone["schema_ids"])
         where_clause = "WHERE db.id IN $db_ids AND s.id IN $schema_ids"
         params: dict[str, Any] = {"db_ids": db_ids, "schema_ids": schema_ids}
     else:
@@ -100,12 +105,10 @@ def fetch_schemas_for_database(
     When *zone_ids* is supplied only schemas (and their table counts) reachable
     through those zones are returned.
     """
-    accessible = (
-        get_accessible_catalog_ids_for_zones(zone_ids) if zone_ids is not None else None
-    )
-    if accessible is not None:
-        schema_ids = list(accessible["schema_ids"])
-        table_ids = list(accessible["table_ids"])
+    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+    if data_ids_by_zone is not None:
+        schema_ids = list(data_ids_by_zone["schema_ids"])
+        table_ids = list(data_ids_by_zone["table_ids"])
         where_clause = "WHERE s.id IN $schema_ids AND t.id IN $table_ids"
         params: dict[str, Any] = {
             "db_id": db_id,
@@ -216,20 +219,20 @@ ORDER BY query_count DESC
 
 _FETCH_TABLE_BY_ID = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
-OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
 RETURN t.id AS id,
        t.name AS name,
-       coalesce(s.name, '') AS schema_name,
+       s.name AS schema_name,
        t.description AS description,
        t.pk as pk
 """
 
 _FETCH_TABLE_BY_NAME = f"""
 MATCH (t:{Labels.TABLE} {{name: $name}})
-OPTIONAL MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
+MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
 RETURN t.id AS id,
        t.name AS name,
-       coalesce(s.name, '') AS schema_name,
+       s.name AS schema_name,
        t.description AS description,
        t.pk as pk
 LIMIT 1
@@ -254,8 +257,8 @@ RETURN t1.name AS source_table,
 _FETCH_TABLES_BY_IDS = f"""
 UNWIND $table_ids AS tid
 MATCH (tbl:{Labels.TABLE} {{id: tid}})
-OPTIONAL MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-OPTIONAL MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
+MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
@@ -279,6 +282,41 @@ SET c.description = coalesce(row.description, c.description),
 """
 
 
+# Shared middle segment of the Table Cypher queries below: given `db, s, t`
+# in scope, computes `columns_count`, `sql_count` and `unique_term_ids` (a
+# Table's terms via both REPRESENTS and the ColumnAttribute/SEMANTIC_FK
+# path, deduplicated). Interpolate between a query's initial MATCH/WHERE and
+# its RETURN — used by both ``fetch_tables_for_schema`` (below) and
+# ``gsf.dal.exploration.fetch_data_exploration_graph`` (every visible table)
+# so the two stay in sync instead of drifting as separately-maintained
+# copies. Public (no leading underscore) so the Exploration DAL can import it.
+TABLE_COUNTS_SUBQUERY = f"""
+MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+WITH db, s, t, count(DISTINCT c) AS columns_count
+OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
+WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
+OPTIONAL MATCH (t)-[:{REL_REPRESENTS}]->(represented:{LABEL_TERM})
+WITH db, s, t, columns_count, sql_count,
+     collect(DISTINCT represented.id) AS represented_term_ids
+OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
+      -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+      (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
+      (attribute_term:{LABEL_TERM})
+WITH db, s, t, columns_count, sql_count,
+     represented_term_ids,
+     collect(DISTINCT attribute_term.id) AS attribute_term_ids
+WITH db, s, t, columns_count, sql_count,
+     represented_term_ids + attribute_term_ids AS all_term_ids
+WITH db, s, t, columns_count, sql_count,
+     reduce(unique_ids = [], term_id IN all_term_ids |
+         CASE
+             WHEN term_id IS NULL OR term_id IN unique_ids THEN unique_ids
+             ELSE unique_ids + term_id
+         END
+     ) AS unique_term_ids
+"""
+
+
 def fetch_tables_for_schema(
     schema_id: str,
     *,
@@ -286,7 +324,7 @@ def fetch_tables_for_schema(
     | None = None,  # accepted for API compat; schema_id is globally unique
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return Table payloads with column counts for a given schema.
+    """Return Table payloads with column, SQL, and Term counts for a schema.
 
     When *zone_ids* is supplied only tables reachable through those zones are
     returned.
@@ -299,14 +337,17 @@ def fetch_tables_for_schema(
         f"""
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
               (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
+              (t:{Labels.TABLE})
         {where_clause}
+        {TABLE_COUNTS_SUBQUERY}
         RETURN t.id AS id,
                t.name AS name,
                t.table_type AS table_type,
                db.name AS database_name,
                s.name AS schema_name, t.description AS description,
-               count(c) AS columns_count
+               columns_count,
+               sql_count,
+               size(unique_term_ids) AS terms_count
         ORDER BY name
         """,
         params,
@@ -401,7 +442,7 @@ def fetch_all_tables_without_term(
         f"""
         MATCH (t:{Labels.TABLE})
         WHERE NOT (t)-[:{REL_REPRESENTS}]->()
-        OPTIONAL MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+        MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
         RETURN t.id AS id, t.name AS name, t.description AS description,
                sch.name AS schema_name
         ORDER BY t.name
@@ -425,15 +466,14 @@ def fetch_join_edges() -> list[dict[str, Any]]:
 
 _FETCH_COLUMNS_QUERY = f"""
 MATCH (t:{Labels.TABLE} {{id: $table_id}})
-OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-OPTIONAL MATCH (c)-[fk:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
+MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
 RETURN c.id AS id,
        c.name AS name,
        c.data_type AS data_type,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
-       fk IS NOT NULL AS is_foreign_key
+       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
 ORDER BY c.ordinal_position
 """
 
@@ -712,12 +752,12 @@ def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
             )
             return None
     label_filter = "|".join(labels_list)
-    props = get_neo4j_conn().query_read_only(
+    props = get_neo4j_conn().query_read(
         f"""
         MATCH (n:{label_filter} {{id: $id}})
         RETURN apoc.map.setKey(properties(n), "label", labels(n)[0]) AS props
         """,
-        parameters={"id": id},
+        {"id": id},
     )
     return props[0]["props"] if props else None
 

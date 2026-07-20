@@ -6,8 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/components/icons';
-import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
-import { ConfirmModal } from '@/components/ConfirmModal';
+import { ModalCreateNewItem, ConfirmModal } from '@/components/modal';
 import { PopoverMenu } from '@/components/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
 

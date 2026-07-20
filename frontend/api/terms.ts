@@ -9,6 +9,7 @@ import type {
 	RelatedTermCount,
 	SqlAttribute,
 	Term,
+	TermCount,
 	TermDetail,
 } from '@/types/terms';
 import type { ResponseWithError } from './types';
@@ -34,6 +35,9 @@ type RelatedTermsResponse = ResponseWithError<RelatedTermsResult>;
 type RelatedCountsResult = { data: RelatedTermCount[]; count: number };
 type RelatedCountsResponse = ResponseWithError<RelatedCountsResult>;
 
+type AttributeCountsResult = { data: TermCount[]; count: number };
+type AttributeCountsResponse = ResponseWithError<AttributeCountsResult>;
+
 export type TermsListParams = {
 	/** Case-insensitive substring filter on the term name. */
 	q?: string;
@@ -48,6 +52,10 @@ export const termsApi = {
 		requests.get<SqlAttributeListResult>('terms/sql-attributes'),
 	listRelatedCounts: (): Promise<RelatedCountsResponse> =>
 		requests.get<RelatedCountsResult>('terms/related-counts'),
+	listColumnAttributeCounts: (): Promise<AttributeCountsResponse> =>
+		requests.get<AttributeCountsResult>('terms/column-attributes/counts'),
+	listSqlAttributeCounts: (): Promise<AttributeCountsResponse> =>
+		requests.get<AttributeCountsResult>('terms/sql-attributes/counts'),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),
 	update: (id: string, payload: TermUpdatePayload): Promise<UpdateResponse> =>
 		requests.patch<UpdateResult>(`terms/${encodeURIComponent(id)}`, payload),

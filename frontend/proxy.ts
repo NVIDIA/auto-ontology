@@ -49,9 +49,14 @@ function guardPage(request: NextRequest): NextResponse {
 		return NextResponse.redirect(loginUrl);
 	}
 
-	if (hasSession && isPublic) {
-		return NextResponse.redirect(new URL('/chat', request.url));
-	}
+	// NOTE: we deliberately do NOT bounce a cookie-bearing request off /login
+	// here. getSessionCookie() only checks presence, not validity — a stale or
+	// rotated-secret cookie looks "logged in" to the middleware but is rejected
+	// by the authoritative requireUser() on protected pages. Bouncing it to
+	// /chat would ping-pong forever (/login → /chat → requireUser → /login).
+	// Redirecting an already-authenticated user off /login is instead handled
+	// authoritatively on the login page via useSession() (which validates and
+	// clears an invalid cookie).
 
 	return NextResponse.next();
 }

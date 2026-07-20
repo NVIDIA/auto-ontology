@@ -66,6 +66,8 @@ export const acronymsApi = {
 export const semanticCompilationApi = {
 	get: () => json<{ enabled: boolean }>('/api/configurations/semantic-compilation'),
 
+	getStatus: () => json<{ calculated: boolean }>('/api/semantic-compilation/status'),
+
 	setEnabled: (enabled: boolean) =>
 		json<{ enabled: boolean }>('/api/configurations/semantic-compilation', {
 			method: 'PUT',

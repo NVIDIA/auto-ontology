@@ -37,6 +37,7 @@ const stripHoverClasses = (classes: string): string =>
 const bodyCellClasses = <T,>(column: TableColumn<T>, cellClassName: string): string =>
 	cx(
 		cellClassName,
+		'align-top',
 		column.nowrap && 'whitespace-nowrap',
 		column.truncate && (column.maxWidthClass ?? 'max-w-0'),
 		column.className,

@@ -4,29 +4,29 @@
 
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/ConfirmModal';
+import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
 import { SearchInput } from '@/components/SearchInput';
 import { termsApi } from '@/api/terms';
 import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { zonesApi } from '@/api/zones';
 import { useSession } from '@/auth/auth-client';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
-import type { ComposerEditValue } from '@/common/SinglePageComposer';
+import { type ComposerEditValue } from '@/common/SinglePageComposer';
+import { Label } from '@/components/Label';
 import { ComposerSectionKind } from '@/enums/datasources';
-import { ModalCreateNewItem } from '@/components/ModalCreateNewItem';
 import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
 import { SqlEditor } from '@/components/SqlBlock';
-import type { ColumnAttribute, SqlAttribute, Term } from '@/types/terms';
+import type { SqlAttribute, Term } from '@/types/terms';
 
 type TermCardProps = {
 	term: Term;
-	attributes: ColumnAttribute[];
-	sqlAttributes: SqlAttribute[];
+	columnAttributeCount: number;
+	sqlAttributeCount: number;
 	relatedCount: number;
 	onClick: (term: Term) => void;
 };
@@ -36,7 +36,13 @@ type SqlAttributeDeleteTarget = {
 	name: string;
 };
 
-const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: TermCardProps) => (
+const TermCard = ({
+	term,
+	columnAttributeCount,
+	sqlAttributeCount,
+	relatedCount,
+	onClick,
+}: TermCardProps) => (
 	<li
 		role="button"
 		tabIndex={0}
@@ -66,8 +72,8 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 			</p>
 		)}
 
-		{/* Three-column section */}
-		<div className="mt-4 grid grid-cols-3 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+		{/* Four-column section */}
+		<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
 			{/* Column Attributes */}
 			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
@@ -79,7 +85,7 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
 						<span>Column Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
-							{attributes.length}
+							{columnAttributeCount}
 						</span>
 					</span>
 				</div>
@@ -96,14 +102,14 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
 						<span>SQL Attributes</span>
 						<span className="ml-1.5 font-medium text-zinc-900 dark:text-zinc-100">
-							{sqlAttributes.length}
+							{sqlAttributeCount}
 						</span>
 					</span>
 				</div>
 			</div>
 
 			{/* Related Terms */}
-			<div>
+			<div className="border-r border-zinc-200 dark:border-zinc-700">
 				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
 					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
 						Related Terms
@@ -114,6 +120,29 @@ const TermCard = ({ term, attributes, sqlAttributes, relatedCount, onClick }: Te
 					<span className="font-medium text-zinc-900 dark:text-zinc-100">
 						{relatedCount}
 					</span>
+				</div>
+			</div>
+
+			{/* Zones */}
+			<div>
+				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+					<span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+						Zones
+					</span>
+				</div>
+				<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
+					{term.zones.length > 0 ? (
+						term.zones.map((zone) => (
+							<Label
+								key={zone.id}
+								label={zone.name}
+								color={zone.color}
+								muted={!zone.enabled}
+							/>
+						))
+					) : (
+						<span className="text-sm text-zinc-500 dark:text-zinc-400">-</span>
+					)}
 				</div>
 			</div>
 		</div>
@@ -136,8 +165,9 @@ export const TermsView = () => {
 	const sessionRole = session?.user?.role ?? null;
 
 	const [terms, setTerms] = useState<Term[]>([]);
-	const [attrs, setAttrs] = useState<ColumnAttribute[]>([]);
 	const [sqlAttrs, setSqlAttrs] = useState<SqlAttribute[]>([]);
+	const [columnAttrCountsMap, setColumnAttrCountsMap] = useState<Map<string, number>>(new Map());
+	const [sqlAttrCountsMap, setSqlAttrCountsMap] = useState<Map<string, number>>(new Map());
 	const [relatedCountsMap, setRelatedCountsMap] = useState<Map<string, number>>(new Map());
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -184,16 +214,23 @@ export const TermsView = () => {
 
 		(async () => {
 			setLoading(true);
-			// Attributes/SQL attributes/related counts don't depend on the term
+			// SQL attributes/counts/related counts don't depend on the term
 			// search — only fetch them once, up front, and just re-fetch `terms`
 			// as the (debounced) search query changes.
 			const loadAux = !loadedAuxRef.current;
-			const [termsRes, attrsRes, sqlAttrsRes, countsRes] = await Promise.all([
-				termsApi.list(debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined),
-				loadAux ? termsApi.listColumnAttributes() : Promise.resolve(null),
-				loadAux ? termsApi.listSqlAttributes() : Promise.resolve(null),
-				loadAux ? termsApi.listRelatedCounts() : Promise.resolve(null),
-			]);
+			const [termsRes, sqlAttrsRes, columnAttrCountsRes, sqlAttrCountsRes, relatedCountsRes] =
+				await Promise.all([
+					termsApi.list(debouncedSearchQuery ? { q: debouncedSearchQuery } : undefined),
+					// Only SQL attributes need the full list here (to resolve the
+					// focused SQL attribute's title/body) — Column Attribute counts
+					// come from the lightweight counts endpoint, matching how
+					// Exploration renders the same numbers without downloading
+					// every attribute up front.
+					loadAux ? termsApi.listSqlAttributes() : Promise.resolve(null),
+					loadAux ? termsApi.listColumnAttributeCounts() : Promise.resolve(null),
+					loadAux ? termsApi.listSqlAttributeCounts() : Promise.resolve(null),
+					loadAux ? termsApi.listRelatedCounts() : Promise.resolve(null),
+				]);
 			if (cancelled) return;
 
 			if (termsRes.error) {
@@ -204,17 +241,29 @@ export const TermsView = () => {
 				setTerms(termsRes.data ?? []);
 			}
 
-			if (attrsRes != null && !attrsRes.error) {
-				setAttrs(attrsRes.data ?? []);
-			}
-
 			if (sqlAttrsRes != null && !sqlAttrsRes.error) {
 				setSqlAttrs(sqlAttrsRes.data ?? []);
 			}
 
-			if (countsRes != null && !countsRes.error) {
+			if (columnAttrCountsRes != null && !columnAttrCountsRes.error) {
 				const map = new Map<string, number>();
-				for (const { term_id, count } of countsRes.data ?? []) {
+				for (const { term_id, count } of columnAttrCountsRes.data ?? []) {
+					map.set(term_id, count);
+				}
+				setColumnAttrCountsMap(map);
+			}
+
+			if (sqlAttrCountsRes != null && !sqlAttrCountsRes.error) {
+				const map = new Map<string, number>();
+				for (const { term_id, count } of sqlAttrCountsRes.data ?? []) {
+					map.set(term_id, count);
+				}
+				setSqlAttrCountsMap(map);
+			}
+
+			if (relatedCountsRes != null && !relatedCountsRes.error) {
+				const map = new Map<string, number>();
+				for (const { term_id, count } of relatedCountsRes.data ?? []) {
 					map.set(term_id, count);
 				}
 				setRelatedCountsMap(map);
@@ -228,26 +277,6 @@ export const TermsView = () => {
 			cancelled = true;
 		};
 	}, [debouncedSearchQuery]);
-
-	const attrsByTerm = useMemo(() => {
-		const map = new Map<string, ColumnAttribute[]>();
-		for (const attr of attrs) {
-			const list = map.get(attr.term_name) ?? [];
-			list.push(attr);
-			map.set(attr.term_name, list);
-		}
-		return map;
-	}, [attrs]);
-
-	const sqlAttrsByTerm = useMemo(() => {
-		const map = new Map<string, SqlAttribute[]>();
-		for (const attr of sqlAttrs) {
-			const list = map.get(attr.term_name) ?? [];
-			list.push(attr);
-			map.set(attr.term_name, list);
-		}
-		return map;
-	}, [sqlAttrs]);
 
 	const handleCardClick = useCallback(
 		(term: Term) => {
@@ -612,6 +641,7 @@ export const TermsView = () => {
 							id: z.id,
 							name: z.name,
 							color: z.color,
+							enabled: z.enabled,
 						})),
 						userZoneIds,
 					},
@@ -689,6 +719,7 @@ export const TermsView = () => {
 							id: z.id,
 							name: z.name,
 							color: z.color,
+							enabled: z.enabled,
 						})),
 						userZoneIds,
 					},
@@ -706,9 +737,15 @@ export const TermsView = () => {
 						type: ComposerSectionKind.DATA_TABLE,
 						id: 'column_attributes',
 						title: 'Column Attributes',
-						columns: [{ key: 'name', label: 'Attribute Name' }],
+						columns: [
+							{ key: 'name', label: 'Attribute Name' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{ key: 'sample_values', label: 'Sample Values', kind: 'tags' },
+						],
 						rows: termAttrs.map((attr) => ({
 							name: attr.name,
+							description: attr.description ?? '',
+							sample_values: attr.sample_values ?? [],
 						})),
 					},
 					{
@@ -731,14 +768,7 @@ export const TermsView = () => {
 
 	const focusedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedSqlAttr =
-		sqlAttrId != null
-			? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ??
-				(focusedTerm != null
-					? (sqlAttrsByTerm
-							.get(focusedTerm.name)
-							?.find((attr) => attr.id === sqlAttrId) ?? null)
-					: null))
-			: null;
+		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
 
 	if (focusId != null && sqlAttrId != null) {
 		const termTitle = focusedTerm?.name ?? focusId;
@@ -1062,8 +1092,8 @@ export const TermsView = () => {
 							<TermCard
 								key={term.id}
 								term={term}
-								attributes={attrsByTerm.get(term.name) ?? []}
-								sqlAttributes={sqlAttrsByTerm.get(term.name) ?? []}
+								columnAttributeCount={columnAttrCountsMap.get(term.id) ?? 0}
+								sqlAttributeCount={sqlAttrCountsMap.get(term.id) ?? 0}
 								relatedCount={relatedCountsMap.get(term.id) ?? 0}
 								onClick={handleCardClick}
 							/>

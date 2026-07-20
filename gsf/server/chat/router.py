@@ -46,12 +46,20 @@ from typing import Generator
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from gsf.dal.terms import semantic_layer_calculated
 from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, ChatRequestWithEvidence
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+# Returned as the 409 detail when a chat is attempted before the semantic
+# layer has been built.
+_SEMANTIC_MISSING_MSG = (
+    "The semantic layer hasn't been created yet, so I can't answer questions. "
+    "Enable semantic compilation to build it."
+)
 
 # How often the watchdog polls the ASGI disconnect signal. Small enough that
 # a navigate-away → come-back-and-ask flow always finds the slot free.
@@ -180,6 +188,11 @@ def _stream_with_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
+    # Block chat when the semantic layer hasn't been built — no connectors/graph
+    # run happens. The chat page gates on the status API; this is the backstop.
+    if not semantic_layer_calculated():
+        raise HTTPException(status_code=409, detail=_SEMANTIC_MISSING_MSG)
+
     pool = get_pool()
     worker = pool.acquire()
     slot = _Slot(

@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
-import { ModalWithSteps, type StepperFooterAction } from '@/components/ModalWithSteps';
+import { ModalWithSteps, type StepperFooterAction } from '@/components/modal';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
@@ -14,8 +14,6 @@ import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/en
 import type { ConnectionInput } from '@/types/connection';
 
 const BASE_STEPS = ['Select Connector', 'Connect'] as const;
-// Schema selection is only offered for Snowflake, since ingestion schema
-// filtering is currently implemented for the Snowflake connector.
 const SCHEMA_STEP = 'Select Schemas';
 
 type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
@@ -36,28 +34,28 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	const [values, setValues] = useState<FieldValues>({});
 	const [alert, setAlert] = useState<string | null>(null);
 
-	// Schema picker state (Snowflake only). `availableSchemas` is populated from
-	// the connection-test response, so there's no separate fetch.
+	// `availableSchemas` is populated from the connection-test response, so
+	// there's no separate fetch.
 	const [availableSchemas, setAvailableSchemas] = useState<string[]>([]);
 	const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
 
-	const isSnowflake = connectionType === ConnectionType.SNOWFLAKE;
+	const supportsSchemaSelection =
+		connectionType === ConnectionType.DATABRICKS || connectionType === ConnectionType.SNOWFLAKE;
 
 	const steps = useMemo(
-		() => (isSnowflake ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),
-		[isSnowflake],
+		() => (supportsSchemaSelection ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),
+		[supportsSchemaSelection],
 	);
 
 	const buildConnection = useCallback((): ConnectionInput => {
 		const fields = CONNECTION_FIELDS[connectionType];
 		const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
 		const base = { type: connectionType, ...Object.fromEntries(entries) };
-		// Only attach the optional schema allowlist for Snowflake; empty = all.
-		if (isSnowflake && selectedSchemas.length > 0) {
+		if (supportsSchemaSelection && selectedSchemas.length > 0) {
 			return { ...base, schemas: selectedSchemas } as ConnectionInput;
 		}
 		return base as ConnectionInput;
-	}, [connectionType, values, isSnowflake, selectedSchemas]);
+	}, [connectionType, values, supportsSchemaSelection, selectedSchemas]);
 
 	const fieldsComplete = useMemo(
 		() =>
@@ -205,8 +203,8 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 				loading,
 			});
 		} else {
-			// Only reachable on the Connect step for Snowflake; require a
-			// successful test before advancing so the schema list can load.
+			// Require a successful test before advancing so the schema list can
+			// load.
 			actions.push({
 				label: 'Next',
 				onClick: handleNext,

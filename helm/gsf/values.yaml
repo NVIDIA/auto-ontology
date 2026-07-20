@@ -49,6 +49,14 @@ embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
+# HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.
+vaultAddr: ""
+vaultNamespace: ""
+vaultRoleId: ""
+vaultSecretId: ""
+# Optional Vault mount overrides (defaults shown).
+vaultAuthMount: "approle/nvdcs/dc1"
+vaultKvMount: "gsf"
 # Better Auth signing key (sessions, CSRF, OIDC state). Leave empty to
 # auto-generate a stable random secret on first install and preserve it across
 # upgrades. Set explicitly to share one value across environments/replicas.

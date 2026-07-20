@@ -4,10 +4,9 @@
 
 """Build a connector connection string from a structured connection object.
 
-UI-managed connections are stored as a JSON ``connection`` object (the form
-fields) on the catalog DB node. The connectors still consume a connection
-string, so this module is the single place that converts the structured form
-into the ``libpq``/Snowflake URL the connectors expect.
+UI-managed connections are stored as a JSON ``connection`` object on the
+catalog DB node or in Vault. The connectors still consume a connection string,
+so this module converts the structured form into the URL the connectors expect.
 """
 
 from __future__ import annotations
@@ -55,6 +54,18 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         return (
             f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
             f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
+        )
+
+    if conn_type == "databricks":
+        host = _require(connection, "host").rstrip("/")
+        if host.startswith(("https://", "http://")):
+            host = host.split("://", 1)[1]
+        http_path = _require(connection, "http_path")
+        access_token = _require(connection, "password")
+        catalog = _require(connection, "database")
+        return (
+            f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
+            f"?http_path={_enc(http_path)}"
         )
 
     if conn_type == "heavydb":

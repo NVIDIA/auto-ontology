@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from gsf.server.custom_analyses import service as custom_analyses_dal
 from gsf.server.datasources import service as dal
+from gsf.server.pql_analyses import service as pql_analyses_dal
 
 
 class NodeUpdate(BaseModel):
@@ -26,6 +27,12 @@ class CustomAnalysisCreate(BaseModel):
     name: str = Field(..., min_length=1)
     description: str
     sql: str = Field(..., min_length=1)
+
+
+class PqlAnalysisCreate(BaseModel):
+    name: str = Field(..., min_length=1)
+    description: str
+    pql: str = Field(..., min_length=1)
 
 
 router = APIRouter()
@@ -192,6 +199,82 @@ def delete_custom_analysis(analysis_id: str) -> dict:
         raise HTTPException(
             status_code=404,
             detail=f"CustomAnalysis {analysis_id!r} not found",
+        )
+    return {"data": row}
+
+
+# ---------------------------------------------------------------------------
+# PQL analyses (/api/pql-analyses) — verified PQL few-shots for prediction
+# ---------------------------------------------------------------------------
+
+
+@router.get("/pql-analyses")
+def list_pql_analyses() -> dict:
+    """All PqlAnalysis nodes ``{id, name, description, pql}``."""
+    return _count_payload(pql_analyses_dal.list_pql_analyses())
+
+
+@router.post("/pql-analyses", status_code=201)
+def create_pql_analysis(body: PqlAnalysisCreate) -> dict:
+    """Create a new PqlAnalysis (verified PQL example) and embed it.
+
+    Returns 409 when ``name`` or ``pql`` is already used by another PqlAnalysis.
+    The PQL text is stored as-is — it is validated against the prediction graph at
+    predict time, not here.
+    """
+    try:
+        row = pql_analyses_dal.create_pql_analysis(
+            name=body.name,
+            description=body.description,
+            pql=body.pql,
+        )
+    except (
+        pql_analyses_dal.PqlAnalysisNameConflict,
+        pql_analyses_dal.PqlAnalysisPqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"data": row}
+
+
+@router.put("/pql-analyses/{analysis_id}")
+def update_pql_analysis(analysis_id: str, body: PqlAnalysisCreate) -> dict:
+    """Replace a PqlAnalysis (matched by id) and re-embed it.
+
+    Returns 404 when no PqlAnalysis with ``analysis_id`` exists, and 409 when
+    ``name`` or ``pql`` is already taken by a different PqlAnalysis.
+    """
+    try:
+        row = pql_analyses_dal.update_pql_analysis(
+            analysis_id=analysis_id,
+            name=body.name,
+            description=body.description,
+            pql=body.pql,
+        )
+    except (
+        pql_analyses_dal.PqlAnalysisNameConflict,
+        pql_analyses_dal.PqlAnalysisPqlConflict,
+    ) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"PqlAnalysis {analysis_id!r} not found",
+        )
+    return {"data": row}
+
+
+@router.delete("/pql-analyses/{analysis_id}")
+def delete_pql_analysis(analysis_id: str) -> dict:
+    """Delete a PqlAnalysis (with its VDB embedding).
+
+    Returns 404 when no PqlAnalysis with ``analysis_id`` exists.
+    """
+    row = pql_analyses_dal.delete_pql_analysis(analysis_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"PqlAnalysis {analysis_id!r} not found",
         )
     return {"data": row}
 

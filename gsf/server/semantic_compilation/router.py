@@ -15,6 +15,7 @@ import logging
 
 from fastapi import APIRouter
 
+from gsf.dal.terms import semantic_layer_calculated
 from gsf.server.ingestion.proxy import trigger_semantic_compile
 
 logger = logging.getLogger(__name__)
@@ -27,3 +28,9 @@ async def trigger() -> dict[str, str]:
     """Ask the ingestion service to run (and schedule) semantic compilation."""
     trigger_semantic_compile()
     return {"status": "accepted"}
+
+
+@router.get("/semantic-compilation/status")
+def semantic_status() -> dict[str, bool]:
+    """Report whether the semantic layer has been calculated (any Term exists)."""
+    return {"calculated": semantic_layer_calculated()}

@@ -4,12 +4,14 @@
 
 /** Connector kinds supported in the new-connection wizard. */
 export enum ConnectionType {
+	DATABRICKS = 'databricks',
 	POSTGRESQL = 'postgresql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
+	[ConnectionType.DATABRICKS]: 'Databricks',
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
@@ -20,6 +22,7 @@ export const isConnectionType = (value: string | null | undefined): value is Con
 
 export type ConnectionFieldKey =
 	| 'host'
+	| 'http_path'
 	| 'port'
 	| 'account'
 	| 'warehouse'
@@ -39,6 +42,20 @@ export type ConnectionField = {
 
 /** Form fields rendered per connector type. `database` is the connection identity. */
 export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
+	[ConnectionType.DATABRICKS]: [
+		{
+			key: 'host',
+			label: 'Server hostname',
+			placeholder: 'dbc-a1b2345c-d6e7.cloud.databricks.com',
+		},
+		{
+			key: 'http_path',
+			label: 'HTTP path',
+			placeholder: '/sql/1.0/warehouses/a1b234c567d8e9fa',
+		},
+		{ key: 'password', label: 'Access token', secret: true },
+		{ key: 'database', label: 'Catalog', placeholder: 'main' },
+	],
 	[ConnectionType.POSTGRESQL]: [
 		{ key: 'host', label: 'Host', placeholder: 'localhost' },
 		{ key: 'port', label: 'Port', placeholder: '5432' },

@@ -19,6 +19,7 @@ const navItems: NavItem[] = [
 	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
 	{ icon: IconName.Terms, href: '/terms', label: 'Terms' },
 	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
+	{ icon: IconName.Exploration, href: '/exploration', label: 'Exploration' },
 	{ icon: IconName.Database, href: '/data', label: 'Data Catalog' },
 	{ icon: IconName.Pencil, href: '/semantic-input', label: 'Semantic Input' },
 	{ icon: IconName.ChartLine, href: '/analytics', label: 'Analytics', adminOnly: true },

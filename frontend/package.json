@@ -21,6 +21,8 @@
 		"@prisma/client": "^7.7.0",
 		"axios": "^1.16.0",
 		"better-auth": "^1.6.20",
+		"cytoscape": "^3.34.0",
+		"cytoscape-euler": "^1.2.4",
 		"dayjs": "^1.11.21",
 		"dotenv": "^17.4.2",
 		"jose": "^6.1.0",
@@ -32,6 +34,7 @@
 	"devDependencies": {
 		"@svgr/webpack": "^8.1.0",
 		"@tailwindcss/postcss": "^4",
+		"@types/cytoscape-euler": "^1.2.4",
 		"@types/node": "^20",
 		"@types/pg": "^8.20.0",
 		"@types/react": "^19",

@@ -37,6 +37,10 @@ def list_terms(
 
     *q*, when given, additionally filters to terms whose name contains it
     (case-insensitive).
+
+    Each returned term carries its resolved ``zones``, so the Terms list
+    and the Exploration graph can render Zone chips from this single
+    response without a separate per-page zones request.
     """
     terms, _attrs = terms_dal.fetch_all_terms_and_attributes(
         zone_ids=zone_ids, search=q
@@ -53,6 +57,15 @@ def list_term_column_attributes(
     return {"data": attrs, "count": len(attrs)}
 
 
+@router.get("/terms/column-attributes/counts")
+def list_term_column_attribute_counts(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return per-term ColumnAttribute counts, zone-scoped when zone_ids are provided."""
+    counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
+    return {"data": counts, "count": len(counts)}
+
+
 @router.get("/terms/sql-attributes")
 def list_term_sql_attributes(
     zone_ids: list[str] | None = Query(default=None),
@@ -60,6 +73,15 @@ def list_term_sql_attributes(
     """Return SqlAttribute nodes (zone-scoped when zone_ids provided)."""
     attrs = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
     return {"data": attrs, "count": len(attrs)}
+
+
+@router.get("/terms/sql-attributes/counts")
+def list_term_sql_attribute_counts(
+    zone_ids: list[str] | None = Query(default=None),
+) -> dict:
+    """Return per-term SqlAttribute counts, zone-scoped when zone_ids are provided."""
+    counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
+    return {"data": counts, "count": len(counts)}
 
 
 @router.get("/terms/related-counts")
@@ -76,7 +98,7 @@ def list_term_column_attributes_by_id(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return ColumnAttribute nodes for a single Term with FK count.
+    """Return ColumnAttribute nodes for a single Term.
 
     Zone-scoped when zone_ids are provided, so a viewer can't see attributes
     of out-of-zone tables just because they belong to a term they can see.
@@ -104,7 +126,11 @@ def list_related_terms(
     term_id: str,
     zone_ids: list[str] | None = Query(default=None),
 ) -> dict:
-    """Return Term nodes related to the given term via SEMANTIC_FK join paths.
+    """Return Term nodes related to the given term via co-located tables.
+
+    A related term shares at least one table with *term_id*, reached
+    through any of REPRESENTS, ColumnAttribute PROPERTY_OF, or SEMANTIC_FK
+    join paths — see ``fetch_related_terms`` for the full breakdown.
 
     Zone-scoped when zone_ids are provided, so related terms outside the
     caller's zones are never surfaced as clickable chips.

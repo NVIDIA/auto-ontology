@@ -30,12 +30,23 @@ export type ComposerInfoGridSection = {
 	items: { label: string; value: string }[];
 };
 
+export type ComposerDataTableColumn = {
+	key: string;
+	label: string;
+	/** Renders the cell as a list of read-only pills instead of plain text. Defaults to `'text'`. */
+	kind?: 'text' | 'tags';
+	/** Clips long text to one line and shows the full value in a popover on hover, only when clipped. */
+	truncate?: boolean;
+	/** Tailwind max-width class applied when `truncate` is set. Defaults to `max-w-sm`. */
+	maxWidthClass?: string;
+};
+
 export type ComposerDataTableSection = {
 	type: ComposerSectionKind.DATA_TABLE;
 	id: string;
 	title: string;
-	columns: { key: string; label: string }[];
-	rows: Record<string, string>[];
+	columns: ComposerDataTableColumn[];
+	rows: Record<string, string | string[]>[];
 	/** When set with `onDataTableRowClick`, rows become clickable using this field as id. */
 	rowIdKey?: string;
 	/** Shown instead of the table (columns included) when `rows` is empty. */
@@ -53,6 +64,7 @@ export type ComposerZoneChip = {
 	id: string;
 	name: string;
 	color: string | null;
+	enabled: boolean;
 };
 
 export type ComposerZonesSection = {

@@ -121,9 +121,10 @@ _REPAIR_BODY = (
 
 _SNOWFLAKE_CASE_NOTE = (
     "## Identifier casing (Snowflake)\n"
-    "This warehouse is Snowflake, where unquoted identifiers are stored UPPERCASE. Write every table name in\n"
-    "the PQL in UPPERCASE, exactly as it appears in the Graph section above (e.g. `GPU_ALLOCATIONS.*`, not\n"
-    "`gpu_allocations.*`; `FOR EACH GPUS.gpu_id`). A lowercased table name fails to parse against the graph."
+    "This warehouse is Snowflake, where unquoted identifiers are stored UPPERCASE. Write every table AND column\n"
+    "name in the PQL in UPPERCASE, exactly as it appears in the Graph section above (e.g. `GPU_ALLOCATIONS.*`,\n"
+    "not `gpu_allocations.*`; `FOR EACH GPUS.GPU_ID`, not `GPUS.gpu_id`). A lowercased identifier fails against\n"
+    "the graph and the live database."
 )
 
 _ENTITY_SQL_INSTRUCTION = (

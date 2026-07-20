@@ -4,6 +4,16 @@
 
 import { ConnectionType } from '@/enums/connection';
 
+export type DatabricksConnectionParams = {
+	type: ConnectionType.DATABRICKS;
+	host: string;
+	http_path: string;
+	password: string;
+	database: string;
+	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
+	schemas?: string[];
+};
+
 export type PostgresConnectionParams = {
 	type: ConnectionType.POSTGRESQL;
 	host: string;
@@ -36,6 +46,7 @@ export type HeavyDBConnectionParams = {
 
 /** Structured connection form fields, discriminated by `type`. */
 export type ConnectionParams =
+	| DatabricksConnectionParams
 	| PostgresConnectionParams
 	| SnowflakeConnectionParams
 	| HeavyDBConnectionParams;

@@ -21,7 +21,7 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, La
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
-from gsf.dal.users import get_accessible_catalog_ids_for_zones
+from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
 
 if TYPE_CHECKING:
@@ -69,8 +69,8 @@ def list_custom_analyses(
     """
     params: dict[str, Any] = {}
     if zone_ids is not None:
-        accessible = get_accessible_catalog_ids_for_zones(zone_ids)
-        params["table_ids"] = list(accessible["table_ids"])
+        data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
+        params["table_ids"] = list(data_ids_by_zone["table_ids"])
         zone_filter = (
             f"WHERE NOT EXISTS {{"
             f" (sql)-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
@@ -368,8 +368,8 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
           -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
           -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-    OPTIONAL MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
-    OPTIONAL MATCH (tbl)-[:CONTAINS]->(col:Column)
+    MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    MATCH (tbl)-[:CONTAINS]->(col:Column)
     WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,

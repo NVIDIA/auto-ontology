@@ -8,3 +8,4 @@ export { ChatInput } from './ChatInput';
 export { MessageList } from './MessageList';
 export { MessageBubble } from './MessageBubble';
 export { ThinkingMessage } from './ThinkingMessage';
+export { SemanticNotReady } from './SemanticNotReady';

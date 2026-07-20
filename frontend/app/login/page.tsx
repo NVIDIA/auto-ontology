@@ -8,6 +8,7 @@ import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Icon, IconName } from '@/components/icons';
 import { authApi, type SsoProvider } from '@/api/auth';
+import { useSession } from '@/auth/auth-client';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
@@ -28,12 +29,24 @@ const LoginForm = () => {
 	// admin can still sign in if the SSO provider is unreachable.
 	const [showPasswordLogin, setShowPasswordLogin] = useState(false);
 
+	// Authoritative session check (validates the cookie server-side and clears
+	// it if invalid). Used to send an already-authenticated user to their
+	// destination — the middleware no longer bounces cookie-bearing requests off
+	// /login, since a stale cookie there would loop against requireUser().
+	const { data: session, isPending: sessionPending } = useSession();
+
 	useEffect(() => {
 		authApi
 			.listProviders()
 			.then(setProviders)
 			.finally(() => setProvidersLoaded(true));
 	}, []);
+
+	useEffect(() => {
+		if (session) {
+			router.replace(next);
+		}
+	}, [session, router, next]);
 
 	const ssoEnabled = providers.length > 0;
 
@@ -58,31 +71,16 @@ const LoginForm = () => {
 	// The password "backdoor" — reachable via /login?password (or the link
 	// below) so the local admin can still sign in if SSO is down.
 	const passwordMode = showPasswordLogin || params.has('password');
-	// A failed SSO callback bounces back to /login carrying an error; don't
-	// auto-redirect in that case or we'd loop forever back to the IdP.
-	const hasError = params.has('error') || next.includes('error=');
-	// When SSO is configured, send the user straight to the provider on load
-	// (no button click) — unless they want the password form or just errored out.
-	const autoRedirect = ssoEnabled && !passwordMode && !hasError;
 
-	useEffect(() => {
-		if (providersLoaded && autoRedirect && providers[0]) {
-			authApi.signInWithProvider(providers[0].providerId, next);
-		}
-	}, [providersLoaded, autoRedirect, providers, next]);
-
-	// Avoid flashing the form before providers load, and while the auto-redirect
-	// to the IdP is kicking off.
-	if (!providersLoaded || autoRedirect) {
-		return (
-			<p className="w-full max-w-sm text-center text-sm text-zinc-500">
-				{autoRedirect ? 'Redirecting to SSO…' : null}
-			</p>
-		);
+	// Avoid flashing the form before we know whether SSO is configured, and while
+	// an already-authenticated user is being redirected to their destination.
+	if (!providersLoaded || sessionPending || session) {
+		return <p className="w-full max-w-sm text-center text-sm text-zinc-500" />;
 	}
 
-	// SSO configured but auto-redirect was suppressed (an error bounced the user
-	// back): offer the SSO button to retry, plus the password backdoor.
+	// SSO configured: show a "Sign in with SSO" button (no auto-login) so the
+	// user explicitly starts the flow, plus the password backdoor for the local
+	// bootstrap admin.
 	if (ssoEnabled && !passwordMode) {
 		return (
 			<div className="flex w-full max-w-sm flex-col gap-4">

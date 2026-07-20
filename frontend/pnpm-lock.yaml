@@ -26,6 +26,12 @@ importers:
       better-auth:
         specifier: ^1.6.20
         version: 1.6.20(@prisma/client@7.7.0(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(typescript@5.9.3))(mysql2@3.15.3)(next@16.2.6(@babel/core@7.29.0)(react-dom@19.2.4(react@19.2.4))(react@19.2.4))(pg@8.20.0)(prisma@7.7.0(@types/react-dom@19.2.3(@types/react@19.2.14))(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(typescript@5.9.3))(react-dom@19.2.4(react@19.2.4))(react@19.2.4)(vitest@4.1.4(@types/node@20.19.39)(jsdom@26.1.0)(vite@8.0.8(@types/node@20.19.39)(jiti@2.6.1)))
+      cytoscape:
+        specifier: ^3.34.0
+        version: 3.34.0
+      cytoscape-euler:
+        specifier: ^1.2.4
+        version: 1.2.4(cytoscape@3.34.0)
       dayjs:
         specifier: ^1.11.21
         version: 1.11.21
@@ -54,6 +60,9 @@ importers:
       '@tailwindcss/postcss':
         specifier: ^4
         version: 4.2.2
+      '@types/cytoscape-euler':
+        specifier: ^1.2.4
+        version: 1.2.4
       '@types/node':
         specifier: ^20
         version: 20.19.39
@@ -2224,6 +2233,9 @@ packages:
   '@types/chai@5.2.3':
     resolution: {integrity: sha512-Mw558oeA9fFbv65/y4mHtXDs9bPnFMZAL/jxdPFUpOHHIXX91mcgEHbS5Lahr+pwZFR8A7GQleRWeI6cGFC2UA==}
 
+  '@types/cytoscape-euler@1.2.4':
+    resolution: {integrity: sha512-FLksAiQmkspblLEyHwUPnGvStuIac7qmQt5bZfA3r4/8p6a3tpE36GTR5hgvNm9IJU5ID2NkWmAoh9xiOcgCvw==}
+
   '@types/deep-eql@4.0.2':
     resolution: {integrity: sha512-c9h9dVVMigMPc4bwTvC5dxqtqJZwQPePsWjPlpSOnojbor6pGqdk541lfA7AqFQr5pB1BRdq0juY9db81BwyFw==}
 
@@ -2833,6 +2845,15 @@ packages:
 
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
+
+  cytoscape-euler@1.2.4:
+    resolution: {integrity: sha512-RRYQydZ3E+UDao0MwFy7zXk08MHhdO9X/+HVoeurDCsg7P51tJ7fKIS4VSAe/TztM/V97MnbtJky9QihZ7nKDw==}
+    peerDependencies:
+      cytoscape: ^3.0.0
+
+  cytoscape@3.34.0:
+    resolution: {integrity: sha512-62rNSrioXw93uliKFBwjukeQyeWwH2PqDrTac31r2P6464u3AUvTk0xS4LVvT251g7IgkFunrI48ZEZGjywSOg==}
+    engines: {node: '>=0.10'}
 
   damerau-levenshtein@1.0.8:
     resolution: {integrity: sha512-sdQSFB7+llfUcQHUQO3+B8ERRj0Oa4w9POWMI/puGtuf7gFywGmkaLCElnudfTiKZV+NvHqL0ifzdrI8Ro7ESA==}
@@ -7105,6 +7126,10 @@ snapshots:
       '@types/deep-eql': 4.0.2
       assertion-error: 2.0.1
 
+  '@types/cytoscape-euler@1.2.4':
+    dependencies:
+      cytoscape: 3.34.0
+
   '@types/deep-eql@4.0.2': {}
 
   '@types/estree@1.0.8': {}
@@ -7714,6 +7739,12 @@ snapshots:
       rrweb-cssom: 0.8.0
 
   csstype@3.2.3: {}
+
+  cytoscape-euler@1.2.4(cytoscape@3.34.0):
+    dependencies:
+      cytoscape: 3.34.0
+
+  cytoscape@3.34.0: {}
 
   damerau-levenshtein@1.0.8: {}
 

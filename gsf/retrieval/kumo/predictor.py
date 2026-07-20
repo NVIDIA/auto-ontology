@@ -22,6 +22,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -32,7 +33,12 @@ logger = logging.getLogger(__name__)
 # Bounds so building the graph on a large database stays tractable. The whole
 # (capped) dataset is uploaded to the hosted KumoRFM service.
 _MAX_TABLES = int(os.environ.get("KUMO_MAX_TABLES", "20"))
-_MAX_ROWS_PER_TABLE = int(os.environ.get("KUMO_MAX_ROWS_PER_TABLE", "5000"))
+# Rows sampled per table into the graph. Unlimited by default; set
+# KUMO_MAX_ROWS_PER_TABLE to a positive integer to cap it.
+_raw_max_rows = os.environ.get("KUMO_MAX_ROWS_PER_TABLE")
+_MAX_ROWS_PER_TABLE: int | None = (
+    int(_raw_max_rows) if _raw_max_rows and int(_raw_max_rows) > 0 else None
+)
 _MAX_PREVIEW_ROWS = int(os.environ.get("KUMO_MAX_PREVIEW_ROWS", "50"))
 _MAX_ENTITIES = int(os.environ.get("KUMO_MAX_ENTITIES", "2000"))
 
@@ -55,9 +61,14 @@ def _ensure_init() -> None:
 
         import kumoai.rfm as rfm
 
+        before = time.perf_counter()
         rfm.init(url=url, api_key=api_key)
         _initialized = True
-        logger.info("KumoRFM initialized (url=%s)", url or "<default>")
+        logger.info(
+            "KumoRFM initialized (url=%s) in %.2fs",
+            url or "<default>",
+            time.perf_counter() - before,
+        )
 
 
 def _quote(schema: str, table: str) -> str:
@@ -103,15 +114,31 @@ def _load_relevant_frames(
             str(t.get("database_name") or ""), default_connector
         )
         name = table if table not in frames else f"{schema}_{table}"
+        limit = f" LIMIT {_MAX_ROWS_PER_TABLE}" if _MAX_ROWS_PER_TABLE else ""
+        logger.info(
+            "kumo: loading rows for %s.%s (limit=%s)...",
+            schema,
+            table,
+            _MAX_ROWS_PER_TABLE or "none",
+        )
+        t_start = time.perf_counter()
         try:
-            df = connector.execute(
-                f"SELECT * FROM {_quote(schema, table)} LIMIT {_MAX_ROWS_PER_TABLE}"
-            )
+            df = connector.execute(f"SELECT * FROM {_quote(schema, table)}{limit}")
         except Exception:
             logger.exception("kumo: failed to load rows for %s.%s", schema, table)
             continue
+        elapsed = time.perf_counter() - t_start
         if df is None or df.empty:
+            logger.info("kumo: %s.%s returned 0 rows in %.2fs", schema, table, elapsed)
             continue
+        logger.info(
+            "kumo: loaded %d row(s) x %d col(s) from %s.%s in %.2fs",
+            len(df),
+            len(df.columns),
+            schema,
+            table,
+            elapsed,
+        )
         frames[name] = df
         if schema:
             name_map[name] = _quote(schema, table)
@@ -200,6 +227,7 @@ class PredictionContext:
     graph_col_stypes: Any
     time_columns: Any
     table_names: dict[str, str]
+    examples: list[dict[str, str]]
 
 
 def _col_name_lower(col: Any) -> str | None:
@@ -305,6 +333,7 @@ def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
     join_paths: list[dict[str, Any]] | None = None,
+    examples: list[dict[str, str]] | None = None,
 ) -> PredictionContext | dict[str, Any]:
     """Build the KumoRFM graph + model scoped to the relevant tables.
 
@@ -313,9 +342,12 @@ def build_prediction_context(
     (``attribute_join_paths``) from the text-to-SQL state supplies the table
     relationships: its catalog-derived joins are used as the graph's edges, and
     KumoRFM's own heuristic ``infer_links`` is used only as a fallback when no usable
-    join path is available. Returns a :class:`PredictionContext` on success, or a
-    graceful error response dict when there is nothing to build a graph from.
+    join path is available. ``examples`` are verified ``{question, query}`` PQL
+    few-shots carried into generation. Returns a :class:`PredictionContext` on
+    success, or a graceful error response dict when there is nothing to build a graph
+    from.
     """
+    logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
     _ensure_init()
 
     import kumoai.rfm as rfm
@@ -325,14 +357,29 @@ def build_prediction_context(
     if not connectors:
         return _error_response("No database connection is configured.")
 
+    logger.info(
+        "kumo: loading sample rows for %d relevant table(s)...",
+        len(relevant_tables or []),
+    )
+    _load_start = time.perf_counter()
     frames, name_map = _load_relevant_frames(connectors, relevant_tables or [])
     if not frames:
         return _error_response(
             "No relevant tables were available to build a prediction graph."
         )
-    logger.info("kumo: building graph from %d table(s)", len(frames))
+    logger.info(
+        "kumo: loaded %d frame(s) in %.2fs; building graph from %d table(s)",
+        len(frames),
+        time.perf_counter() - _load_start,
+        len(frames),
+    )
 
+    _graph_start = time.perf_counter()
     graph = rfm.LocalGraph.from_data(frames, infer_metadata=True, verbose=False)
+    logger.info(
+        "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
+        time.perf_counter() - _graph_start,
+    )
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
@@ -360,6 +407,7 @@ def build_prediction_context(
         graph_col_stypes=col_stypes,
         time_columns=time_columns,
         table_names=name_map,
+        examples=examples or [],
     )
 
 
@@ -381,6 +429,7 @@ def run_prediction(
         table_names=context.table_names,
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
+        examples=context.examples,
     )
 
     return _format_result(result)

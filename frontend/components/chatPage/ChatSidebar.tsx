@@ -9,7 +9,7 @@ import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/ConfirmModal';
+import { ConfirmModal } from '@/components/modal';
 import { PopoverMenu } from '@/components/PopoverMenu';
 
 type ChatSidebarProps = {

@@ -9,8 +9,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from gsf.dal import users as users_dal
-from gsf.server.zones import dal
+from gsf.dal import zones as dal
+from gsf.server.users import postgres_dal
 
 router = APIRouter()
 
@@ -39,11 +39,8 @@ class ZoneStatusUpdate(BaseModel):
 
 
 def _require_admin(user_id: str) -> None:
-    """Raise 403 when *user_id* is not an admin (or does not exist)."""
-    user = users_dal.get_user(user_id)
-    if user is None:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if user.get("role") != "admin":
+    """Raise 403 when *user_id* is not an admin per PostgreSQL."""
+    if not postgres_dal.is_admin(user_id):
         raise HTTPException(
             status_code=403, detail="Only admins can perform this action"
         )
@@ -53,9 +50,10 @@ def _require_admin(user_id: str) -> None:
 def list_zones(uid: str = Query(..., description="Requesting user id")) -> dict:
     """Zones visible to *uid*.
 
-    Admins see all zones; viewers see only zones they have been granted access to.
+    Admins (per PostgreSQL role) see all zones; viewers see only zones they
+    have been granted access to.
     """
-    rows = dal.list_zones(uid)
+    rows = dal.list_zones(uid, is_admin=postgres_dal.is_admin(uid))
     return {"data": rows, "count": len(rows)}
 
 
@@ -68,7 +66,7 @@ def get_zone(
 
     Returns 404 when the zone does not exist or the user has no access.
     """
-    row = dal.get_zone_by_id(zone_id, user_id=uid)
+    row = dal.get_zone_by_id(zone_id, user_id=uid, is_admin=postgres_dal.is_admin(uid))
     if row is None:
         raise HTTPException(status_code=404, detail=f"Zone {zone_id!r} not found")
     return {"data": row}

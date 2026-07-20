@@ -4,17 +4,17 @@
 
 """Neo4j data access for User nodes.
 
-User nodes mirror the authoritative records kept in PostgreSQL (Better Auth).
-They are created here so that other graph entities (e.g. conversations,
-analytics) can be linked to a user node without crossing the SQL/graph
-boundary at query time.
+Only **viewers** are represented in the graph as a ``:User`` node.  Admins
+need no node at all: they already see every zone and every unzoned catalog
+item — that is decided purely from PostgreSQL (see
+``gsf.server.users.postgres_dal``) at query time, with no graph relationship
+involved.  A viewer's node is what ``PARTICIPANT_OF`` edges (explicit zone
+grants) attach to.
 
 The ``id`` field is the PostgreSQL user id and acts as the natural key.
-
-Each node carries exactly one role label — either ``Admin`` or ``Viewer`` —
-that mirrors the ``role`` property.  When a user's role changes the old
-label is removed and the new one is set so that the graph label always
-reflects current access level.
+Promoting a viewer to admin deletes their ``:User`` node (and any zone
+grants with it); demoting an admin back to viewer creates a fresh node with
+no zone access, which must be re-granted explicitly.
 """
 
 from __future__ import annotations
@@ -25,23 +25,12 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.server.zones.constants import (
-    LABEL_ZONE,
-    REL_HAS_DIRECT_ACCESS,
-    REL_PARTICIPANT_OF,
-    REL_ZONE_OF,
-)
-
+from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 
 logger = logging.getLogger(__name__)
 
-# Role labels — each user node carries exactly one of these.
-LABEL_ADMIN = "Admin"
-LABEL_VIEWER = "Viewer"
-
-# Cypher label-union pattern used in MATCH clauses to find any user node
-# regardless of its current role label.
-LABEL_USER_MATCH = f"{LABEL_ADMIN}|{LABEL_VIEWER}"
+# Label carried by every viewer node. Admins have no node in the graph.
+LABEL_USER = "User"
 
 
 def get_accessible_catalog_ids_for_zones(
@@ -150,11 +139,36 @@ def get_accessible_catalog_ids_for_zones(
     }
 
 
+def resolve_accessible_catalog_ids(
+    zone_ids: list[str] | None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> dict[str, set[str]] | None:
+    """Resolve *zone_ids* to accessible catalog ids, reusing *data_ids_by_zone* if given.
+
+    ``get_accessible_catalog_ids_for_zones`` costs several Neo4j round trips.
+    Callers that need the resolved ids in more than one place for the same
+    request (e.g. the Exploration graph builders, which combine node,
+    zone-map and edge queries) should resolve it once via this helper and
+    thread the result through every downstream call as *data_ids_by_zone*,
+    instead of letting each one re-resolve the same *zone_ids* independently.
+
+    Returns ``None`` when *zone_ids* is ``None`` (no zone scoping — admin /
+    internal callers). Returns *data_ids_by_zone* unchanged when already
+    supplied.
+    """
+    if zone_ids is None:
+        return None
+    if data_ids_by_zone is not None:
+        return data_ids_by_zone
+    return get_accessible_catalog_ids_for_zones(zone_ids)
+
+
 def resolve_table_filter(
     zone_ids: list[str] | None,
     column_ref: str,
     *,
     extra_params: dict[str, Any] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Build a Cypher ``WHERE`` clause restricting *column_ref* to accessible tables.
 
@@ -162,7 +176,9 @@ def resolve_table_filter(
     ``"attr.table_id"``.  When *zone_ids* is ``None`` no filter is applied
     (admin / internal callers who see the full unfiltered catalog).
     *extra_params* are merged into the returned params dict unchanged (e.g.
-    query parameters unrelated to zone scoping).
+    query parameters unrelated to zone scoping). Pass a pre-resolved
+    *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``) to avoid a
+    repeat Neo4j round trip when the caller already has it for this request.
 
     Returns ``(where_clause, params)`` where *where_clause* is either an
     empty string or a full ``WHERE <column_ref> IN $table_ids`` clause ready
@@ -171,43 +187,22 @@ def resolve_table_filter(
     params = dict(extra_params or {})
     if zone_ids is None:
         return "", params
-    table_ids = list(get_accessible_catalog_ids_for_zones(zone_ids)["table_ids"])
-    params["table_ids"] = table_ids
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    params["table_ids"] = list(resolved["table_ids"])
     return f"WHERE {column_ref} IN $table_ids", params
 
 
-def sync_admin_direct_access() -> None:
-    """Ensure every Admin node has a HAS_DIRECT_ACCESS edge to every Database.
-
-    Admin nodes already reach zoned data through the
-    ``PARTICIPANT_OF -> Zone -> ZONE_OF -> item`` path.  This function adds an
-    explicit ``HAS_DIRECT_ACCESS`` edge from every Admin node to **all**
-    Database nodes so that the full catalog hierarchy (Database -> Schema ->
-    Table via CONTAINS) is reachable from admin in Neo4j regardless of zone
-    assignments.
-
-    The function is idempotent — safe to call repeatedly without side-effects.
-    It should be called when a user is promoted to admin and after bulk catalog
-    ingestion to cover newly-added databases.
-    """
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (u:{LABEL_ADMIN})
-        MATCH (db:{Labels.DB})
-        MERGE (u)-[:{REL_HAS_DIRECT_ACCESS}]->(db)
-        """,
-    )
-
-
 def get_user(user_id: str) -> dict[str, Any] | None:
-    """Return a User node by its id, or *None* if it does not exist."""
+    """Return a viewer's User node by its id, or *None* if it does not exist.
+
+    Always ``None`` for admins — they have no graph node.
+    """
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
+        MATCH (u:{LABEL_USER} {{id: $user_id}})
         RETURN u.id    AS id,
                u.email AS email,
-               u.name  AS name,
-               u.role  AS role
+               u.name  AS name
         LIMIT 1
         """,
         {"user_id": user_id},
@@ -216,14 +211,13 @@ def get_user(user_id: str) -> dict[str, Any] | None:
 
 
 def list_users() -> list[dict[str, Any]]:
-    """Return all User nodes ordered by email."""
+    """Return all viewer User nodes ordered by email. Admins are never listed here."""
     rows = get_neo4j_conn().query_read(
         f"""
-        MATCH (u:{LABEL_USER_MATCH})
+        MATCH (u:{LABEL_USER})
         RETURN u.id    AS id,
                u.email AS email,
-               u.name  AS name,
-               u.role  AS role
+               u.name  AS name
         ORDER BY u.email
         """
     )
@@ -237,86 +231,40 @@ def upsert_user(
     name: str,
     role: str,
 ) -> dict[str, Any]:
-    """Create or update a User node identified by *user_id*.
+    """Sync *user_id* into the graph according to its PostgreSQL *role*.
 
-    Each node carries exactly one role label (``Admin`` or ``Viewer``).
-    On create the correct label is set immediately.  On update the old
-    label is removed and the new one applied, so a role change is handled
-    atomically without leaving stale labels.
+    *role* only decides which branch runs here — it is never stored on the
+    node.  Viewers get (or keep) a ``:User`` node with up-to-date ``email``/
+    ``name`` properties.  Admins get no node at all — if one exists (e.g.
+    from before the user was promoted), it is deleted along with any zone
+    grants, since an admin's access is derived entirely from PostgreSQL and
+    needs no graph state.
 
-    Returns the node's stored properties.
+    Returns the resulting properties (synthesized for admins, since there is
+    no node to read them back from).
     """
     conn = get_neo4j_conn()
-    label = LABEL_ADMIN if role == "admin" else LABEL_VIEWER
 
-    existing = conn.query_read(
-        f"""
-        MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
-        RETURN u.id AS id
-        LIMIT 1
-        """,
-        {"user_id": user_id},
-    )
-
-    if existing:
-        # Node exists: update properties and swap role label if it changed.
-        rows = conn.query_write(
-            f"""
-            MATCH (u:{LABEL_USER_MATCH} {{id: $user_id}})
-            REMOVE u:{LABEL_ADMIN}, u:{LABEL_VIEWER}
-            SET u:{label},
-                u.email = $email,
-                u.name  = $name,
-                u.role  = $role
-            RETURN u.id    AS id,
-                   u.email AS email,
-                   u.name  AS name,
-                   u.role  AS role
-            """,
-            {"user_id": user_id, "email": email, "name": name, "role": role},
-        )
-    else:
-        # Node does not exist yet: create with the correct role label.
-        rows = conn.query_write(
-            f"""
-            CREATE (u:{label} {{id: $user_id, email: $email, name: $name, role: $role}})
-            RETURN u.id    AS id,
-                   u.email AS email,
-                   u.name  AS name,
-                   u.role  AS role
-            """,
-            {"user_id": user_id, "email": email, "name": name, "role": role},
-        )
-
-    assert rows
-    # Admins are linked to every existing zone so that the graph reflects full
-    # access (visible in Neo4j as Admin->zone->data paths).  Viewers start with
-    # no zone access — access must be granted explicitly via grant_zone_access.
-    # The list_zone_users query filters admins out so they never appear in the
-    # UI access list (their access is implicit, not an explicit assignment).
     if role == "admin":
         conn.query_write(
             f"""
-            MATCH (u:{LABEL_ADMIN} {{id: $user_id}})
-            MATCH (z:{LABEL_ZONE})
-            MERGE (u)-[:{REL_PARTICIPANT_OF}]->(z)
+            MATCH (u:{LABEL_USER} {{id: $user_id}})
+            DETACH DELETE u
             """,
             {"user_id": user_id},
         )
-        # Ensure admin can reach catalog items not assigned to any zone.
-        sync_admin_direct_access()
-    else:
-        # When demoted from admin to viewer, remove all zone relationships so
-        # the user starts with no zone access (access must be re-granted
-        # explicitly by an admin via grant_zone_access).  Also remove any
-        # HAS_DIRECT_ACCESS edges that were created when the user was an admin.
-        conn.query_write(
-            f"""
-            MATCH (u:{LABEL_VIEWER} {{id: $user_id}})
-            OPTIONAL MATCH (u)-[rp:{REL_PARTICIPANT_OF}]->()
-            OPTIONAL MATCH (u)-[rd:{REL_HAS_DIRECT_ACCESS}]->()
-            DELETE rp, rd
-            """,
-            {"user_id": user_id},
-        )
+        return {"id": user_id, "email": email, "name": name}
+
+    rows = conn.query_write(
+        f"""
+        MERGE (u:{LABEL_USER} {{id: $user_id}})
+        SET u.email = $email,
+            u.name  = $name
+        RETURN u.id    AS id,
+               u.email AS email,
+               u.name  AS name
+        """,
+        {"user_id": user_id, "email": email, "name": name},
+    )
+    assert rows
     return dict(rows[0])

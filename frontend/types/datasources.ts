@@ -22,6 +22,8 @@ export type Table = {
 	database_name: string;
 	schema_name: string;
 	columns_count: number;
+	sql_count?: number;
+	terms_count?: number;
 	columns: Column[];
 	table_type: TableType;
 	description?: string;

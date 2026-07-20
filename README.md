@@ -58,7 +58,7 @@ The endpoints and models are configured via the `BASE_URL`, `MODEL_NAME`,
 - An **NVIDIA API key** for NVIDIA NIM (chat and ingestion). Get one at
   <https://build.nvidia.com>.
 - Connection details for the source database(s) you want to query
-  (Postgres, Snowflake, or DuckDB).
+  (Databricks, Postgres, Snowflake, or DuckDB).
 
 ### Installation
 

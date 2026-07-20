@@ -17,6 +17,8 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 export type ProxyOptions = {
 	/** When set, appended as repeated `?zone_ids=<id>` params for zone-scoped filtering. */
 	zoneIds?: string[];
+	/** Response body returned when a viewer has no zones. */
+	emptyResponse?: unknown;
 };
 
 export async function proxyToBackend(req: Request, options?: ProxyOptions): Promise<Response> {
@@ -24,7 +26,7 @@ export async function proxyToBackend(req: Request, options?: ProxyOptions): Prom
 	// rather than forwarding the request without zone_ids (which would make
 	// the backend return all data, effectively treating the viewer as admin).
 	if (options?.zoneIds !== undefined && options.zoneIds.length === 0) {
-		return new Response(JSON.stringify({ data: [], count: 0 }), {
+		return new Response(JSON.stringify(options.emptyResponse ?? { data: [], count: 0 }), {
 			headers: { 'Content-Type': 'application/json' },
 		});
 	}

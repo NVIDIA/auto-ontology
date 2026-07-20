@@ -32,8 +32,9 @@ def test_connection(connection: dict[str, Any]) -> list[str]:
     """Validate credentials for the settings UI test action.
 
     Returns the connection's schemas when the connector supports enumerating
-    them (currently Snowflake); enumerating doubles as the connectivity check.
-    Connectors without schema enumeration just ``ping()`` and return ``[]``.
+    them (currently Databricks and Snowflake); enumerating doubles as the
+    connectivity check. Connectors without schema enumeration just ``ping()``
+    and return ``[]``.
     """
     database_name = str(connection.get("database") or "").strip()
     if not database_name:

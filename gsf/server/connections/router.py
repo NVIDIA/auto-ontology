@@ -31,10 +31,15 @@ class PublicConnection(TypedDict):
 
 
 def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
-    """Shape a connection object into the public connection payload."""
+    """Shape a connection object into a credential-free public payload."""
+    public_connection = {
+        key: value
+        for key, value in connection.items()
+        if key not in {"password", "password_env"}
+    }
     return {
         "database_name": str(connection.get("database") or ""),
-        "connection": connection,
+        "connection": public_connection,
     }
 
 

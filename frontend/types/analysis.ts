@@ -8,3 +8,10 @@ export type CustomAnalysis = {
 	description: string;
 	sql: string;
 };
+
+export type PqlAnalysis = {
+	id: string;
+	name: string;
+	description: string;
+	pql: string;
+};

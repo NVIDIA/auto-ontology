@@ -8,7 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Placeholders } from '@/assets/images/placeholders';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
-import { ConfirmModal } from '@/components/ConfirmModal';
+import { ConfirmModal } from '@/components/modal';
 import { Icon, IconName } from '@/components/icons';
 import { connectionsApi } from '@/api/connections';
 import type { Connection } from '@/types/connection';

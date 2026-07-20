@@ -113,11 +113,20 @@ class SnowflakeDatabase(SQLDatabase):
             self._warehouse,
             self._database_name,
         ) = _parse_connection_string(connection_string)
-        # Optional ingestion allowlist: when set, schema introspection only
-        # returns objects in these schemas. Empty/None means "all schemas".
+        # Optional ingestion allowlist: an explicit structured-connection
+        # selection takes precedence; otherwise a URL ``schema=`` parameter
+        # scopes env-var connections such as CONNECTION_STRINGS. Without this
+        # fallback, ``schema=`` only sets Snowflake's current schema while
+        # introspection still returns every visible schema in the database.
+        url_schema = self._connect_kwargs.get("schema")
+        filter_schemas = schemas or ([str(url_schema)] if url_schema else None)
+
+        # Empty/None means "all schemas".
         # Compared case-insensitively (Snowflake upper-cases unquoted names).
         self._schema_filter: set[str] | None = (
-            {s.upper() for s in schemas if s and s.strip()} if schemas else None
+            {s.upper() for s in filter_schemas if s and s.strip()}
+            if filter_schemas
+            else None
         )
         if self._schema_filter:
             logger.info(
@@ -156,7 +165,10 @@ class SnowflakeDatabase(SQLDatabase):
                     cur.execute(sql)
                 if cur.description is None:
                     return pd.DataFrame()
-                columns = [desc[0].lower() for desc in cur.description]
+                # Return the real column names as Snowflake reports them (unquoted
+                # identifiers come back UPPERCASE). The introspection queries below
+                # quote their aliases to keep their lowercase result keys stable.
+                columns = [desc[0] for desc in cur.description]
                 return pd.DataFrame(cur.fetchall(), columns=columns)
 
     # ------------------------------------------------------------------
@@ -169,7 +181,7 @@ class SnowflakeDatabase(SQLDatabase):
         Used by the connection UI to let the user pick which schemas to ingest.
         """
         df = self.execute("""
-            SELECT SCHEMA_NAME AS schema_name
+            SELECT SCHEMA_NAME AS "schema_name"
             FROM INFORMATION_SCHEMA.SCHEMATA
             WHERE SCHEMA_NAME != 'INFORMATION_SCHEMA'
             ORDER BY SCHEMA_NAME
@@ -182,9 +194,9 @@ class SnowflakeDatabase(SQLDatabase):
         return self._filter_by_schema(
             self.execute("""
             SELECT
-                TABLE_SCHEMA AS table_schema,
-                TABLE_NAME   AS table_name,
-                TABLE_TYPE   AS table_type
+                TABLE_SCHEMA AS "table_schema",
+                TABLE_NAME   AS "table_name",
+                TABLE_TYPE   AS "table_type"
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'
             ORDER BY TABLE_SCHEMA, TABLE_NAME
@@ -194,12 +206,12 @@ class SnowflakeDatabase(SQLDatabase):
     def get_columns(self) -> pd.DataFrame:
         df = self.execute("""
             SELECT
-                TABLE_SCHEMA     AS table_schema,
-                TABLE_NAME       AS table_name,
-                COLUMN_NAME      AS column_name,
-                DATA_TYPE        AS data_type,
-                IS_NULLABLE      AS is_nullable,
-                ORDINAL_POSITION AS ordinal_position
+                TABLE_SCHEMA     AS "table_schema",
+                TABLE_NAME       AS "table_name",
+                COLUMN_NAME      AS "column_name",
+                DATA_TYPE        AS "data_type",
+                IS_NULLABLE      AS "is_nullable",
+                ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'
             ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION
@@ -218,8 +230,8 @@ class SnowflakeDatabase(SQLDatabase):
         try:
             df = self.execute(f"""
                 SELECT
-                    END_TIME   AS end_time,
-                    QUERY_TEXT AS query_text
+                    END_TIME   AS "end_time",
+                    QUERY_TEXT AS "query_text"
                 FROM TABLE(
                     INFORMATION_SCHEMA.QUERY_HISTORY(
                         DATEADD(hour, -{hours}, CURRENT_TIMESTAMP()),
@@ -232,6 +244,7 @@ class SnowflakeDatabase(SQLDatabase):
                     'DROP', 'COMMIT', 'ALTER_SESSION', 'CALL'
                 )
                   AND EXECUTION_STATUS = 'SUCCESS'
+                  AND NULLIF(TRIM(QUERY_TEXT), '') IS NOT NULL
                   AND LOWER(QUERY_TEXT) NOT LIKE '%information_schema%'
                 ORDER BY END_TIME DESC
             """)
@@ -248,6 +261,9 @@ class SnowflakeDatabase(SQLDatabase):
                 columns=["table_schema", "table_name", "view_definition"]
             )
 
+        # SHOW VIEWS returns fixed metadata columns; normalize their case here
+        # since execute() no longer lower-cases result headers.
+        df.columns = [str(c).lower() for c in df.columns]
         df = df.loc[df["schema_name"] != "INFORMATION_SCHEMA"]
         df = df.rename(
             columns={
@@ -271,6 +287,7 @@ class SnowflakeDatabase(SQLDatabase):
                 ]
             )
 
+        df.columns = [str(c).lower() for c in df.columns]
         df = df.rename(
             columns={
                 "schema_name": "table_schema",
@@ -294,6 +311,7 @@ class SnowflakeDatabase(SQLDatabase):
                 ]
             )
 
+        df.columns = [str(c).lower() for c in df.columns]
         df = df.rename(
             columns={
                 "fk_schema_name": "table_schema",

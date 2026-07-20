@@ -12,6 +12,7 @@ const PATH_LABELS: Record<string, BreadcrumbItem> = {
 	'/chat': { label: 'Chat', href: '/chat' },
 	'/terms': { label: 'Terms', href: '/terms' },
 	'/analysis': { label: 'Analysis', href: '/analysis' },
+	'/exploration': { label: 'Exploration', href: '/exploration' },
 	'/data': { label: 'All Data', href: '/data' },
 	'/analytics': { label: 'Analytics', href: '/analytics' },
 	'/settings': { label: 'Settings', href: '/settings' },

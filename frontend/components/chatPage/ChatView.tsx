@@ -14,9 +14,11 @@ import {
 	type ConversationSummary,
 	type ConversationDetail,
 } from '@/api/conversations';
+import { semanticCompilationApi } from '@/api/settings';
 import { ChatSidebar } from './ChatSidebar';
 import { MessageList } from './MessageList';
 import { ChatInput } from './ChatInput';
+import { SemanticNotReady } from './SemanticNotReady';
 
 export const ChatView = () => {
 	const router = useRouter();
@@ -30,6 +32,8 @@ export const ChatView = () => {
 	const [conversations, setConversations] = useState<Conversation[]>([]);
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [messageListLoading, setMessageListLoading] = useState<boolean>(focusId != null);
+	// null = still checking; false = semantic layer missing (block the chat area).
+	const [semanticReady, setSemanticReady] = useState<boolean>(false);
 	const loadedFocusRef = useRef<string | null>(null);
 
 	const { messages, setMessages, steps, isLoading, sendMessage, clearConversation } = useChat();
@@ -84,6 +88,19 @@ export const ChatView = () => {
 			.finally(() => {
 				if (active) setSidebarLoading(false);
 			});
+		return () => {
+			active = false;
+		};
+	}, []);
+
+	useEffect(() => {
+		let active = true;
+		semanticCompilationApi.getStatus().then((res) => {
+			debugger;
+			if (active) {
+				setSemanticReady(res.calculated);
+			}
+		});
 		return () => {
 			active = false;
 		};
@@ -220,14 +237,24 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				<MessageList
-					messages={messages}
-					isLoading={isLoading}
-					steps={steps}
-					messageListLoading={messageListLoading}
-				/>
+				{!semanticReady ? (
+					<SemanticNotReady />
+				) : (
+					<>
+						<MessageList
+							messages={messages}
+							isLoading={isLoading}
+							steps={steps}
+							messageListLoading={messageListLoading}
+						/>
 
-				<ChatInput onSend={handleSend} onStop={clearConversation} isLoading={isLoading} />
+						<ChatInput
+							onSend={handleSend}
+							onStop={clearConversation}
+							isLoading={isLoading}
+						/>
+					</>
+				)}
 			</main>
 		</div>
 	);

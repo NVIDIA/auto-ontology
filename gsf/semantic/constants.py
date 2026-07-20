@@ -11,6 +11,11 @@ LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
 
+# PQL (predictive) custom analyses — the KumoRFM-prediction twin of CustomAnalysis.
+# Stored under their own label so they never mix into the SQL text-to-SQL retrieval;
+# retrieved only as few-shot examples for PQL generation.
+LABEL_PQL_ANALYSIS = "PqlAnalysis"
+
 # Semantic relationship types
 REL_HAS_ATTRIBUTE = "HAS_ATTRIBUTE"
 REL_PART_OF = "PART_OF"

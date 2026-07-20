@@ -53,12 +53,13 @@ def _sql_table(table: str, table_names: dict[str, str] | None) -> str:
 
     The Kumo graph refers to tables by their bare name (``GPUS``); the live
     database needs ``"SCHEMA"."GPUS"``. ``table_names`` maps the graph name to
-    that qualified form (matched case-insensitively).
+    that qualified form. Graph and PQL table names carry the catalog's real
+    casing, so the lookup is an exact match.
     """
     if table_names:
-        for name, qualified in table_names.items():
-            if name.lower() == table.lower():
-                return qualified
+        qualified = table_names.get(table)
+        if qualified is not None:
+            return qualified
     return quote_ident(table)
 
 
@@ -70,14 +71,14 @@ def _qualify_from_clauses(sql: str, table_names: dict[str, str] | None) -> str:
 
     Only the table token following FROM / JOIN is rewritten (quoted or not), so
     column references are untouched. Used for the LLM's entity-selection SQL,
-    whose table names are the bare graph names.
+    whose table names are the bare graph names (matched on the catalog's real
+    casing).
     """
     if not table_names:
         return sql
-    lookup = {name.lower(): qualified for name, qualified in table_names.items()}
 
     def repl(match: "re.Match[str]") -> str:
-        qualified = lookup.get(match.group(2).lower())
+        qualified = table_names.get(match.group(2))
         return f"{match.group(1)} {qualified}" if qualified else match.group(0)
 
     return _FROM_JOIN_RE.sub(repl, sql)
@@ -439,8 +440,9 @@ def aggregate_prediction_by(
     value_col = _prediction_value_column(prediction, id_col=id_col)
     try:
         dim = connector.execute(
-            f"SELECT {pk}, {group_by} FROM {_sql_table(table, table_names)} "
-            f"WHERE {pk} IS NOT NULL"
+            f"SELECT {quote_ident(pk)}, {quote_ident(group_by)} "
+            f"FROM {_sql_table(table, table_names)} "
+            f"WHERE {quote_ident(pk)} IS NOT NULL"
         )
     except Exception as exc:  # noqa: BLE001 - turn an opaque warehouse error into an actionable group-by error
         try:
@@ -990,12 +992,9 @@ def _resolve_indices(
         if entity is None:
             return []
         table, pk = entity
-        # Bare (unquoted) column identifier: the connector lower-cased the graph
-        # column names, so a quoted lower-case name won't match a Snowflake column
-        # (stored upper-case). Bare lets each dialect apply its default casing.
         df = connector.execute(
-            f"SELECT DISTINCT {pk} FROM {_sql_table(table, table_names)} "
-            f"WHERE {pk} IS NOT NULL LIMIT {int(max_entities)}"
+            f"SELECT DISTINCT {quote_ident(pk)} FROM {_sql_table(table, table_names)} "
+            f"WHERE {quote_ident(pk)} IS NOT NULL LIMIT {int(max_entities)}"
         )
     if df.empty:
         return []
@@ -1090,7 +1089,8 @@ def _forecast_anchor(
         import pandas as pd
 
         df = connector.execute(
-            f"SELECT MAX({time_col}) AS m FROM {_sql_table(tm.group(1), table_names)}"
+            f"SELECT MAX({quote_ident(time_col)}) AS m "
+            f"FROM {_sql_table(tm.group(1), table_names)}"
         )
         data_max = (
             pd.Timestamp(df.iloc[0, 0])
@@ -1127,8 +1127,8 @@ def _resolve_single_index(
     safe = str(entity).replace("'", "''")
     string_type = "VARCHAR"
     df = connector.execute(
-        f"SELECT {pk} FROM {_sql_table(table, table_names)} "
-        f"WHERE CAST({pk} AS {string_type}) = '{safe}' LIMIT 1"
+        f"SELECT {quote_ident(pk)} FROM {_sql_table(table, table_names)} "
+        f"WHERE CAST({quote_ident(pk)} AS {string_type}) = '{safe}' LIMIT 1"
     )
     return df.iloc[:, 0].tolist() if not df.empty else []
 
@@ -1260,15 +1260,17 @@ def generate_pql(
     persist_lock: Any = None,
     time_columns: dict[str, str | None] | None = None,
     table_names: dict[str, str] | None = None,
+    examples: list[dict[str, str]] | None = None,
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
 
     The repair signal is the cheap ``validate_pql`` parse error (or a ``predict`` error); on failure
     ``(prev_pql, error)`` is fed back. ``escalation_llm`` handles the final attempt (D11).
+
+    ``examples`` are verified ``{question, query}`` PQL few-shots (retrieved from the
+    ``PqlAnalysis`` corpus); they populate the prompt's "Verified examples" section.
     """
-    # RAG retrieval intentionally omitted in this port (no verified-example corpus):
-    # the prompt runs with no few-shot examples or domain docs.
-    examples: list[dict[str, str]] = []
+    examples = examples or []
     docs: list[str] = []
 
     result = PqlGenerationResult(question=question)

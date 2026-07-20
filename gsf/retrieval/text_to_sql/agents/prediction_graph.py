@@ -22,10 +22,14 @@ import logging
 from typing import Any, Dict
 
 from langchain_core.messages import AIMessage
+from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
 
+from gsf.dal.datasources import fetch_table_by_name
 from gsf.retrieval.kumo import PredictionContext, build_prediction_context
+from gsf.retrieval.kumo.pql_gen import _TABLE_COL
+from gsf.retrieval.kumo.rag import fetch_pql_examples
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.state import AgentState
+from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +42,56 @@ def _error_response(message: str) -> Dict[str, Any]:
         "custom_analyses_used": [],
         "sql_response_from_db": None,
     }
+
+
+def _pql_tables(pql: str) -> set[str]:
+    """Table names referenced in a PQL (the left side of every ``TABLE.COLUMN``)."""
+    return {m.group(1) for m in _TABLE_COL.finditer(pql or "")}
+
+
+def _enrich_relevant_tables(
+    relevant_tables: list[dict[str, Any]],
+    examples: list[dict[str, str]],
+) -> list[dict[str, Any]]:
+    """Add any table referenced by a retrieved PQL example but missing from
+    ``relevant_tables``, resolved from the catalog by name.
+
+    Done BEFORE the graph is built so the added tables are loaded into the graph
+    (and auto-linked by metadata inference) — the LLM is guided by these examples,
+    so every table they reference must exist in the graph or the PQL won't parse.
+    """
+    existing = {str(t.get("name") or "").upper() for t in relevant_tables}
+    referenced: set[str] = set()
+    for ex in examples:
+        referenced |= _pql_tables(ex.get("query") or "")
+
+    enriched = list(relevant_tables)
+    added: list[str] = []
+    for name in sorted(referenced):
+        if name.upper() in existing:
+            continue
+        row = fetch_table_by_name(name)
+        if not row or not row.get("name"):
+            continue
+        enriched.append(
+            {
+                "id": row.get("id"),
+                "name": row.get("name"),
+                "schema_name": row.get("schema_name") or "",
+                "description": row.get("description") or "",
+                "pk": row.get("pk"),
+                "label": Labels.TABLE,
+            }
+        )
+        existing.add(name.upper())
+        added.append(row["name"])
+    if added:
+        logger.info(
+            "kumo: enriched graph with %d table(s) from PQL examples: %s",
+            len(added),
+            added,
+        )
+    return enriched
 
 
 class PredictionGraphAgent(BaseAgent):
@@ -53,12 +107,20 @@ class PredictionGraphAgent(BaseAgent):
         # and use the catalog-derived join paths as the graph's table relationships.
         relevant_tables = path_state.get("relevant_tables") or []
         join_paths = path_state.get("attribute_join_paths") or []
+        # Few-shot PQL examples retrieved from the verified PqlAnalysis corpus.
+        examples = fetch_pql_examples(
+            state.get("semantic_retriever"), get_original_question(state)
+        )
+        # Enrich the table set with any table the examples reference before the
+        # graph is built, so the LLM can never cite a table absent from the graph.
+        relevant_tables = _enrich_relevant_tables(relevant_tables, examples)
 
         try:
             context = build_prediction_context(
                 connectors,
                 relevant_tables,
                 join_paths=join_paths,
+                examples=examples,
             )
         except Exception as exc:
             self.logger.exception("KumoRFM graph preparation failed")

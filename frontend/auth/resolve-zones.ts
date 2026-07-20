@@ -22,11 +22,13 @@ async function fetchUserZoneIds(userId: string): Promise<string[]> {
 	try {
 		const url = `${PYTHON_API_URL}/api/zones?uid=${encodeURIComponent(userId)}`;
 		const res = await fetch(url, { headers: { Accept: 'application/json' } });
-		if (!res.ok) return [];
+		if (!res.ok) {
+			throw new Error(`Failed to resolve accessible zones: ${res.status}`);
+		}
 		const json = (await res.json()) as ZonesResponse;
 		return (json.data ?? []).map((z) => z.id);
-	} catch {
-		return [];
+	} catch (error) {
+		throw new Error('Failed to resolve accessible zones', { cause: error });
 	}
 }
 
