@@ -48,6 +48,21 @@ def list_terms(
     return {"data": terms, "count": len(terms)}
 
 
+@router.get("/terms/get-all")
+def get_all_terms(
+    zone_ids: list[str] | None = Query(default=None),
+) -> list[dict]:
+    """Return every term available to the user as a list of ``{name, attributes}``.
+
+    Each term carries a merged ``attributes`` list of its ColumnAttributes and
+    SqlAttributes, each projected to ``{name, description}``. Zone-scoped like
+    ``/terms``: ``None`` (param absent) → all terms (admin), ``[]`` → viewer with
+    no zone access → empty, ``[id, ...]`` → only terms reachable through those
+    zones.
+    """
+    return term_service.get_all_terms_with_attributes(zone_ids=zone_ids)
+
+
 @router.get("/terms/column-attributes")
 def list_term_column_attributes(
     zone_ids: list[str] | None = Query(default=None),
