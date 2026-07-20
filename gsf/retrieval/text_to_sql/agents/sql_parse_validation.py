@@ -23,6 +23,9 @@ Design Decisions:
 import logging
 from typing import Dict, Any
 
+import sqlglot
+from sqlglot import expressions as exp
+
 from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
@@ -33,6 +36,96 @@ from gsf.retrieval.data_access.graph_schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+# sqlglot dialect names differ slightly from our connector dialect strings.
+_SQLGLOT_DIALECTS = {
+    "sqlite": "sqlite",
+    "postgres": "postgres",
+    "postgresql": "postgres",
+    "snowflake": "snowflake",
+    "duckdb": "duckdb",
+    "mysql": "mysql",
+    "heavydb": "postgres",
+}
+
+
+def _unwrap_projection(e: exp.Expression) -> exp.Expression:
+    """Strip an alias wrapper so ``NULL AS x`` is seen as ``NULL``."""
+    return e.this if isinstance(e, exp.Alias) else e
+
+
+def _is_always_false(cond: exp.Expression | None) -> bool:
+    """True for constant-false predicates like ``1=0``, ``0=1``, ``FALSE``."""
+    if cond is None:
+        return False
+    if isinstance(cond, exp.Boolean):
+        return cond.this is False
+    if isinstance(cond, exp.EQ):
+        left, right = cond.left, cond.right
+        if (
+            isinstance(left, exp.Literal)
+            and isinstance(right, exp.Literal)
+            and left.is_number
+            and right.is_number
+        ):
+            return left.name != right.name
+    return False
+
+
+def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
+    """Return a human-readable reason when *sql* is a placeholder/no-op query.
+
+    Flags queries that parse and execute fine but can never answer the question:
+    ``SELECT NULL`` / constant-only projections, always-false ``WHERE`` clauses
+    (``1=0``), and ``LIMIT 0``. Returns ``""`` when the SQL looks like real work.
+
+    Inspects only the OUTERMOST SELECT, so legitimate ``EXISTS (SELECT 1 ...)``
+    subqueries are not flagged.
+    """
+    if not sql or not sql.strip():
+        return "the generated SQL is empty"
+
+    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
+    try:
+        parsed = sqlglot.parse_one(sql, read=read)
+    except Exception:
+        # Unparseable here → let the normal parse validator handle it.
+        return ""
+    if parsed is None:
+        return ""
+
+    select = parsed if isinstance(parsed, exp.Select) else parsed.find(exp.Select)
+    if select is None:
+        return ""
+
+    projections = list(select.expressions or [])
+    if projections and all(
+        isinstance(_unwrap_projection(p), (exp.Null, exp.Literal, exp.Boolean))
+        for p in projections
+    ):
+        return (
+            "the query only selects constant/NULL values instead of real data "
+            "from the tables (e.g. SELECT NULL)"
+        )
+
+    where = select.args.get("where")
+    if where is not None and _is_always_false(where.this):
+        return (
+            "the query has an always-false WHERE condition (e.g. 1=0), so it can "
+            "never return any rows"
+        )
+
+    limit = select.args.get("limit")
+    if limit is not None:
+        limit_expr = getattr(limit, "expression", None)
+        if (
+            isinstance(limit_expr, exp.Literal)
+            and limit_expr.is_number
+            and limit_expr.name == "0"
+        ):
+            return "the query uses LIMIT 0, so it always returns no rows"
+
+    return ""
 
 
 class SQLValidationAgent(BaseAgent):
@@ -97,6 +190,23 @@ class SQLValidationAgent(BaseAgent):
             error_msg = validation_result["error"]
             self.logger.info(f"SQL validation failed: {error_msg}")
             path_state["error"] = error_msg
+            return {
+                "decision": "invalid_sql",
+                "path_state": path_state,
+            }
+
+        degenerate_dialect = dialects[0] if dialects else None
+        degenerate_reason = detect_degenerate_sql(response.sql_code, degenerate_dialect)
+
+        if degenerate_reason:
+            self.logger.info("Degenerate SQL rejected: %s", degenerate_reason)
+            path_state["error"] = (
+                f"The generated SQL is a placeholder that does not answer the "
+                f"question: {degenerate_reason}. Rewrite a real query that selects "
+                f"the requested data from the available tables. Do NOT use SELECT "
+                f"NULL, constant-only projections, always-false conditions such as "
+                f"WHERE 1=0, or LIMIT 0."
+            )
             return {
                 "decision": "invalid_sql",
                 "path_state": path_state,
