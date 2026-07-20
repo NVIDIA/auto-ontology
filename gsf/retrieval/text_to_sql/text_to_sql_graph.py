@@ -46,7 +46,6 @@ from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructa
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
 from gsf.retrieval.text_to_sql.base import agent_wrapper
 from gsf.retrieval.text_to_sql.db_probe.config import (
-    is_db_probe_enabled,
     is_db_probe_proactive,
 )
 
@@ -253,25 +252,16 @@ def create_graph():
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
     )
-    # Live DB grounding is now a repair signal, not always-on context: the
-    # value-repair node only runs after an empty execution result, and is only
-    # wired in when DB_PROBE_ENABLED is truthy.
-    db_probe_enabled = is_db_probe_enabled()
-    logger.info("Text-to-SQL graph: db-probe branch %s", db_probe_enabled)
-    value_repair_node = (
-        _make_node(
-            "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
-        )
-        if db_probe_enabled
-        else None
+    # Live DB grounding is a repair signal, not always-on context: the
+    # value-repair node only runs after an empty execution result.
+    value_repair_node = _make_node(
+        "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
     )
     # Optional proactive (pre-execution) literal check — opt-in via DB_PROBE_PROACTIVE.
     proactive_enabled = is_db_probe_proactive()
     logger.info("Text-to-SQL graph: db-probe proactive %s", proactive_enabled)
     proactive_value_node = (
-        _make_node(
-            "precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent())
-        )
+        _make_node("precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent()))
         if proactive_enabled
         else None
     )
@@ -317,8 +307,7 @@ def create_graph():
     graph.add_node("entities_extraction", entities_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
-    if value_repair_node is not None:
-        graph.add_node("check_value_repair", value_repair_node)
+    graph.add_node("check_value_repair", value_repair_node)
     if proactive_value_node is not None:
         graph.add_node("precheck_value_repair", proactive_value_node)
     graph.add_node(
@@ -398,7 +387,9 @@ def create_graph():
     # When the proactive check is enabled, every route that would otherwise go
     # straight to execution is funnelled through it first.
     pre_execute_target = (
-        "precheck_value_repair" if proactive_value_node is not None else "execute_sql_query"
+        "precheck_value_repair"
+        if proactive_value_node is not None
+        else "execute_sql_query"
     )
 
     # SQL validation → route
@@ -447,29 +438,24 @@ def create_graph():
         },
     )
 
-    # After the empty-LIKE check, optionally run the value-repair check (also
-    # gated on an empty result). When probing is disabled it goes straight to
-    # formatting, exactly as before.
-    empty_like_valid_target = (
-        "check_value_repair" if value_repair_node is not None else "format_and_respond"
-    )
+    # After the empty-LIKE check, run the value-repair check (also gated on an
+    # empty result at run time).
     graph.add_conditional_edges(
         "check_empty_like_result",
         route_decision,
         {
-            "valid_sql": empty_like_valid_target,
+            "valid_sql": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
         },
     )
-    if value_repair_node is not None:
-        graph.add_conditional_edges(
-            "check_value_repair",
-            route_decision,
-            {
-                "valid_sql": "format_and_respond",
-                "invalid_sql": "reconstruct_sql",
-            },
-        )
+    graph.add_conditional_edges(
+        "check_value_repair",
+        route_decision,
+        {
+            "valid_sql": "format_and_respond",
+            "invalid_sql": "reconstruct_sql",
+        },
+    )
 
     graph.add_conditional_edges(
         "construct_sql_not_from_snippets",

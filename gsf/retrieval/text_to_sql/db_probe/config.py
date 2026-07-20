@@ -4,9 +4,9 @@
 
 """Configuration for live DB probing.
 
-All knobs are environment-driven so probing can be toggled and tuned without
-code changes. Probing is OFF by default: the pipeline behaves exactly as before
-unless ``DB_PROBE_ENABLED`` is truthy.
+All knobs are environment-driven so probing can be tuned without code changes.
+The empty-result value-repair node is always wired in; the proactive
+pre-execution literal check remains opt-in via ``DB_PROBE_PROACTIVE``.
 """
 
 from __future__ import annotations
@@ -30,29 +30,15 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
-def is_db_probe_enabled() -> bool:
-    """Whether the value-repair node is wired into the graph.
-
-    Evaluated at graph-creation time (like the KumoRFM branch), so flipping the
-    flag requires rebuilding the graph — not a per-request toggle. Gates the
-    post-execution, empty-result value-repair check (near-zero cost on the
-    common path).
-    """
-    return os.environ.get("DB_PROBE_ENABLED", "").strip().lower() in _TRUTHY
-
-
 def is_db_probe_proactive() -> bool:
     """Whether the *proactive* pre-execution literal check is wired in.
 
     Off by default: unlike the empty-result check this runs on every query with
     a categorical filter (a few cheap DISTINCT probes), so it trades some
     always-on cost for catching wrong literals that would return non-empty but
-    wrong rows. Requires ``DB_PROBE_ENABLED`` as well.
+    wrong rows. Opt-in via ``DB_PROBE_PROACTIVE``.
     """
-    return (
-        is_db_probe_enabled()
-        and os.environ.get("DB_PROBE_PROACTIVE", "").strip().lower() in _TRUTHY
-    )
+    return os.environ.get("DB_PROBE_PROACTIVE", "").strip().lower() in _TRUTHY
 
 
 # Hard caps — keep Phase 1 cheap and always-on-safe.
@@ -71,7 +57,6 @@ DB_PROBE_LOW_CARD_THRESHOLD = _int_env("DB_PROBE_LOW_CARD_THRESHOLD", 20)
 
 
 __all__ = [
-    "is_db_probe_enabled",
     "is_db_probe_proactive",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",

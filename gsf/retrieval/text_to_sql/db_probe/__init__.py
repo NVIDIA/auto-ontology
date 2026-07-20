@@ -19,7 +19,6 @@ This package:
 """
 
 from gsf.retrieval.text_to_sql.db_probe.config import (
-    is_db_probe_enabled,
     is_db_probe_proactive,
     DB_PROBE_MAX_CALLS,
     DB_PROBE_MAX_ROWS,
@@ -35,7 +34,6 @@ from gsf.retrieval.text_to_sql.db_probe.literal_check import (
 )
 
 __all__ = [
-    "is_db_probe_enabled",
     "is_db_probe_proactive",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",
