@@ -19,7 +19,8 @@ dependencies = [
     "python-dotenv>=1.2.2",
     "snowflake-connector-python>=4.6.0",
     "uvicorn[standard]>=0.32.0",
-    "kumoai>=2.22.0",
+    "nvidia-sdfm>=0.1.0",
+    "nvidia-sdfm[kumorfm]>=0.1.0; sys_platform == 'linux'",
     "databricks-sql-connector>=4.3.0",
 ]
 
@@ -38,6 +39,14 @@ packages = ["gsf"]
 
 [tool.uv]
 package = true
+
+[[tool.uv.index]]
+name = "pypi"
+url = "https://pypi.org/simple"
+
+[[tool.uv.index]]
+name = "nv-shared"
+url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple"
 
 [dependency-groups]
 dev = [

@@ -37,7 +37,7 @@ class KumoModel:
 
         Raises ``ValueError`` with the server's detail on invalid PQL — the
         repair-loop signal. Wraps ``KumoRFM._parse_query`` (the seam in
-        kumoai 2.22.0), kept here so the call site is swappable.
+        kumorfm 2.23.0), kept here so the call site is swappable.
         """
         return self.model._parse_query(query)
 
