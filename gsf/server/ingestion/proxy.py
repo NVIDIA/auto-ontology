@@ -6,7 +6,7 @@
 
 Lightweight on purpose: it only depends on ``httpx`` so the server can trigger
 ingest over HTTP without importing ``gsf.ingestion_service.ingest`` (which pulls
-in heavy ``nemo_retriever`` deps and requires ``NVIDIA_API_KEY`` at import time).
+in heavy ``nemo_retriever`` deps and requires ``REASONING_API_KEY`` at import time).
 """
 
 from __future__ import annotations

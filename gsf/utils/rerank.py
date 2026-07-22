@@ -20,14 +20,16 @@ _RERANK_ENDPOINT = os.environ.get(
     "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking",
 )
 _RERANK_MODEL = os.environ.get("RERANK_MODEL", "nvidia/llama-nemotron-rerank-1b-v2")
-_RERANK_API_KEY = os.environ.get("RERANK_API_KEY", "") or os.environ.get(
-    "NVIDIA_API_KEY", ""
+_RERANK_API_KEY = (
+    os.environ.get("RERANK_API_KEY", "")
+    or os.environ.get("REASONING_API_KEY", "")
+    or os.environ.get("NVIDIA_API_KEY", "")
 )
 
 _KEY_ERROR = (
-    "NVIDIA_API_KEY is not set. "
-    "Export it (or RERANK_API_KEY) before running:\n\n"
-    "    export NVIDIA_API_KEY='nvapi-...'\n\n"
+    "RERANK_API_KEY is not set. "
+    "Export it (or REASONING_API_KEY) before running:\n\n"
+    "    export RERANK_API_KEY='nvapi-...'\n\n"
     "Get your key at https://build.nvidia.com"
 )
 

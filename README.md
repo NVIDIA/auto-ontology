@@ -44,9 +44,9 @@ GSF uses NVIDIA NIM endpoints for inference — either the hosted endpoints on
 - **Embeddings:**
   [llama-nemotron-embed-vl-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2)
 
-The endpoints and models are configured via the `BASE_URL`, `MODEL_NAME`,
+The endpoints and models are configured via the `REASONING_ENDPOINT`, `REASONING_MODEL`,
 `EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require an
-`NVIDIA_API_KEY`.
+`REASONING_API_KEY`.
 
 ## Deployment
 
@@ -75,7 +75,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    ```
 
 2. Create your environment file (.env) from the template and fill in the values
-   (Postgres/Neo4j credentials, `NVIDIA_API_KEY`, `CONNECTION_STRINGS`, etc.).
+   (Postgres/Neo4j credentials, `REASONING_API_KEY`, `CONNECTION_STRINGS`, etc.).
    See [`.env.example`](./.env.example) for the full list of variables:
 
    ```bash

@@ -10,7 +10,7 @@ from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
-# Load .env from current working directory so NVIDIA_API_KEY, BASE_URL are set (run from repo root)
+# Load .env from current working directory so REASONING_API_KEY, REASONING_ENDPOINT are set (run from repo root)
 try:
     from dotenv import load_dotenv
 

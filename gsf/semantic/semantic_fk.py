@@ -43,8 +43,10 @@ _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
 _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
-_NVIDIA_API_KEY = os.environ.get("EMBED_API_KEY", "") or os.environ.get(
-    "NVIDIA_API_KEY", ""
+_NVIDIA_API_KEY = (
+    os.environ.get("EMBED_API_KEY", "")
+    or os.environ.get("REASONING_API_KEY", "")
+    or os.environ.get("NVIDIA_API_KEY", "")
 )
 _WORKERS = 2
 
@@ -114,7 +116,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     retriever = _build_retriever(database_name)
     if retriever is None:
         logger.warning(
-            "resolve_semantic_fks: NVIDIA_API_KEY not set — skipping LLM/VDB path "
+            "resolve_semantic_fks: EMBED_API_KEY not set — skipping LLM/VDB path "
             "for %d column(s)",
             len(llm_queue),
         )

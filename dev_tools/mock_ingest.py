@@ -43,7 +43,11 @@ logger = logging.getLogger("dev_tools.mock_ingest")
 MOCK_DATABASE_NAME = "mock_shop"
 MOCK_SCHEMA = "public"
 
-_NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+_NVIDIA_API_KEY = (
+    os.environ.get("EMBED_API_KEY", "")
+    or os.environ.get("REASONING_API_KEY", "")
+    or os.environ.get("NVIDIA_API_KEY", "")
+)
 _EMBED_ENDPOINT = os.environ.get(
     "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
 )
@@ -51,8 +55,8 @@ _EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-
 
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(
-        "NVIDIA_API_KEY is not set. Export it before running, e.g.:\n\n"
-        "    export NVIDIA_API_KEY='nvapi-...'\n"
+        "EMBED_API_KEY is not set. Export it before running, e.g.:\n\n"
+        "    export EMBED_API_KEY='nvapi-...'\n"
     )
 
 
