@@ -39,8 +39,8 @@ from gsf.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
 
-_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://integrate.api.nvidia.com/v1")
-_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://inference-api.nvidia.com/v1")
+_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
 

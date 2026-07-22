@@ -21,21 +21,13 @@ logger = logging.getLogger(__name__)
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time; a mismatch produces garbage results
 # or a dimension error from pgvector. Each field falls back to DEFAULT_AGENT_<field>.
-_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://integrate.api.nvidia.com/v1")
-_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://inference-api.nvidia.com/v1")
+_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2")
 _EMBED_API_KEY = resolve("EMBED", "API_KEY")
-_KEY_ERROR = (
-    "_EMBED_API_KEY is not set. "
-    "Export it before running:\n\n"
-    "    export EMBED_API_KEY='nvapi-...'\n\n"
-    "Get your key at https://build.nvidia.com"
-)
 
 
 def get_embed_kwargs() -> dict[str, str]:
     """Keyword args for ``Retriever`` embed configuration."""
-    if not _EMBED_API_KEY:
-        raise EnvironmentError(_KEY_ERROR)
     return {
         "model_name": _EMBED_MODEL,
         "embed_invoke_url": _EMBED_ENDPOINT,
@@ -44,8 +36,6 @@ def get_embed_kwargs() -> dict[str, str]:
 
 
 def get_embed_params() -> EmbedParams:
-    if not _EMBED_API_KEY:
-        raise EnvironmentError(_KEY_ERROR)
     return EmbedParams(
         embed_invoke_url=_EMBED_ENDPOINT,
         model_name=_EMBED_MODEL,

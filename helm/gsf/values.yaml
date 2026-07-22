@@ -37,12 +37,12 @@ pgadminEmail: admin@example.com
 pgadminPassword: admin
 # NVIDIA NIM — default triplet; every model triplet falls back to these per field.
 defaultAgentApiKey: ""
-defaultAgentEndpoint: "https://integrate.api.nvidia.com/v1"
-defaultAgentModel: "nvidia/nemotron-3-nano-30b-a3b"
+defaultAgentEndpoint: "https://inference-api.nvidia.com/v1"
+defaultAgentModel: "aws/anthropic/bedrock-claude-opus-4-8"
 # KumoRFM (predictions). Leave the key empty to disable the prediction tool.
 kumoRfmApiKey: ""
 kumoRfmApiUrl: "https://kumorfm.ai/api"
-embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
+embedModel: "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.

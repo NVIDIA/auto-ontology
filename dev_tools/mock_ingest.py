@@ -44,8 +44,8 @@ MOCK_DATABASE_NAME = "mock_shop"
 MOCK_SCHEMA = "public"
 
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
-_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://integrate.api.nvidia.com/v1")
-_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://inference-api.nvidia.com/v1")
+_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2")
 
 if not _NVIDIA_API_KEY:
     raise EnvironmentError(

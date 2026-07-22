@@ -21,21 +21,12 @@ _RERANK_ENDPOINT = resolve(
     "ENDPOINT",
     "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking",
 )
-_RERANK_MODEL = resolve("RERANK", "MODEL", "nvidia/llama-nemotron-rerank-1b-v2")
+_RERANK_MODEL = resolve("RERANK", "MODEL", "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2")
 _RERANK_API_KEY = resolve("RERANK", "API_KEY")
-
-_KEY_ERROR = (
-    "RERANK_API_KEY is not set. "
-    "Export it (or REASONING_API_KEY) before running:\n\n"
-    "    export RERANK_API_KEY='nvapi-...'\n\n"
-    "Get your key at https://build.nvidia.com"
-)
 
 
 def get_rerank_kwargs() -> dict[str, str]:
     """Keyword args for ``rerank_hits`` (remote NeMo reranking endpoint)."""
-    if not _RERANK_API_KEY:
-        raise EnvironmentError(_KEY_ERROR)
     return {
         "rerank_invoke_url": _RERANK_ENDPOINT,
         "model_name": _RERANK_MODEL,
