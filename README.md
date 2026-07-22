@@ -36,17 +36,36 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 
 ### NVIDIA NIM
 
-GSF uses NVIDIA NIM endpoints for inference — either the hosted endpoints on
-[build.nvidia.com](https://build.nvidia.com) or self-hosted NIMs:
+GSF uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA
+inference API ([inference-api.nvidia.com](https://inference-api.nvidia.com)) or self-hosted NIMs:
 
 - **LLM:**
-  [nemotron-3-nano-30b-a3b](https://build.nvidia.com/nvidia/nemotron-3-nano-30b-a3b/modelcard)
+  [aws/anthropic/bedrock-claude-opus-4-8](https://inference.nvidia.com/aws/anthropic/bedrock-claude-opus-4-8?search=opus)
 - **Embeddings:**
-  [llama-nemotron-embed-vl-1b-v2](https://build.nvidia.com/nvidia/llama-nemotron-embed-vl-1b-v2)
+  [llama-nemotron-embed-vl-1b-v2](https://inference.nvidia.com/nvidia/nvidia/llama-nemotron-embed-vl-1b-v2)
 
-The endpoints and models are configured via the `REASONING_ENDPOINT`, `REASONING_MODEL`,
-`EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require an
-`REASONING_API_KEY`.
+The endpoints and models are configured via the `DEFAULT_AGENT_ENDPOINT`, `DEFAULT_AGENT_MODEL`,
+`EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
+`DEFAULT_AGENT_API_KEY`.
+
+#### Model triplets
+
+Each model role is configured by a **triplet** of environment variables —
+`<PREFIX>_ENDPOINT` (URL), `<PREFIX>_API_KEY`, and `<PREFIX>_MODEL`:
+
+| Prefix | Role |
+|---|---|
+| `DEFAULT_AGENT` | Shared default; every field below falls back to it. |
+| `REASONING` | Main chat / NL-to-SQL model. |
+| `NON_REASONING` | Lighter model used for entity extraction. |
+| `EMBED` | Text-embedding model (must match between ingest and query). |
+| `RERANK` | Reranker used by the retrieval flow. |
+
+You can set a full triplet, only some of its fields, or none at all — any field
+left unset falls back to the matching `DEFAULT_AGENT_<FIELD>`. So the simplest
+setup is to fill in `DEFAULT_AGENT_*` and override per-triplet fields only where
+they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
+back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
 ## Deployment
 
@@ -55,8 +74,8 @@ The endpoints and models are configured via the `REASONING_ENDPOINT`, `REASONING
 - **Docker** with **Docker Compose v2** (e.g. Docker Desktop on macOS/Windows,
   Docker Engine on Linux) for the local stack. For Kubernetes deployments see
   [`DEPLOYMENT.md`](./DEPLOYMENT.md).
-- An **NVIDIA API key** for NVIDIA NIM (chat and ingestion). Get one at
-  <https://build.nvidia.com>.
+- An **NVIDIA API key** for NVIDIA NIM (chat and ingestion) from the NVIDIA
+  inference API at <https://inference-api.nvidia.com>.
 - Connection details for the source database(s) you want to query
   (Databricks, Postgres, Snowflake, or DuckDB).
 
@@ -75,7 +94,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    ```
 
 2. Create your environment file (.env) from the template and fill in the values
-   (Postgres/Neo4j credentials, `REASONING_API_KEY`, `CONNECTION_STRINGS`, etc.).
+   (Postgres/Neo4j credentials, `DEFAULT_AGENT_API_KEY`, `CONNECTION_STRINGS`, etc.).
    See [`.env.example`](./.env.example) for the full list of variables:
 
    ```bash
