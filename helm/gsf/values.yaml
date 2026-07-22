@@ -35,14 +35,13 @@ neo4jPassword: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
-# NVIDIA NIM
-nvidiaApiKey: ""
-baseUrl: "https://integrate.api.nvidia.com/v1"
-modelName: "nvidia/nemotron-3-nano-30b-a3b"
+# NVIDIA NIM — default triplet; every model triplet falls back to these per field.
+defaultAgentApiKey: ""
+defaultAgentEndpoint: "https://integrate.api.nvidia.com/v1"
+defaultAgentModel: "nvidia/nemotron-3-nano-30b-a3b"
 # KumoRFM (predictions). Leave the key empty to disable the prediction tool.
 kumoRfmApiKey: ""
 kumoRfmApiUrl: "https://kumorfm.ai/api"
-embedEndpoint: "https://integrate.api.nvidia.com/v1"
 embedModel: "nvidia/llama-nemotron-embed-vl-1b-v2"
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
