@@ -39,9 +39,6 @@ pgadminPassword: admin
 nvidiaApiKey: ""
 baseUrl: "https://integrate.api.nvidia.com/v1"
 modelName: "nvidia/nemotron-3-nano-30b-a3b"
-# Optional dedicated model for entity extraction in the text-to-SQL pipeline.
-# When empty, entity extraction falls back to modelName.
-entityExtractionModel: "meta/llama-3.1-8b-instruct"
 # KumoRFM (predictions). Leave the key empty to disable the prediction tool.
 kumoRfmApiKey: ""
 kumoRfmApiUrl: "https://kumorfm.ai/api"
