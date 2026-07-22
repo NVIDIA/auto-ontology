@@ -11,20 +11,18 @@ model, and API key from the environment and hands back the keyword args
 
 from __future__ import annotations
 
-import os
+from gsf.utils.model_config import resolve
 
 # Hosted NeMo reranking endpoint — no local GPU required. Override RERANK_ENDPOINT
-# to point at a self-hosted vLLM/NIM ranking server.
-_RERANK_ENDPOINT = os.environ.get(
-    "RERANK_ENDPOINT",
+# to point at a self-hosted vLLM/NIM ranking server. Each field falls back to
+# DEFAULT_AGENT_<field> when unset.
+_RERANK_ENDPOINT = resolve(
+    "RERANK",
+    "ENDPOINT",
     "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking",
 )
-_RERANK_MODEL = os.environ.get("RERANK_MODEL", "nvidia/llama-nemotron-rerank-1b-v2")
-_RERANK_API_KEY = (
-    os.environ.get("RERANK_API_KEY", "")
-    or os.environ.get("REASONING_API_KEY", "")
-    or os.environ.get("NVIDIA_API_KEY", "")
-)
+_RERANK_MODEL = resolve("RERANK", "MODEL", "nvidia/llama-nemotron-rerank-1b-v2")
+_RERANK_API_KEY = resolve("RERANK", "API_KEY")
 
 _KEY_ERROR = (
     "RERANK_API_KEY is not set. "

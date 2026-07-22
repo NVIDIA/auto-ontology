@@ -16,6 +16,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
+from gsf.utils.model_config import resolve
+
 logger = logging.getLogger(__name__)
 
 RETRY_MAX_ATTEMPTS = 3
@@ -51,20 +53,22 @@ class _TimeoutSession(_requests.Session):
 
 T = TypeVar("T", bound=BaseModel)
 
-# Main agent (reasoning) model triplet. REASONING_API_KEY falls back to the legacy
-# NVIDIA_API_KEY name for backward compatibility.
-_BASE_URL = os.environ.get("REASONING_ENDPOINT", "https://integrate.api.nvidia.com/v1")
-_MODEL_NAME = os.environ.get("REASONING_MODEL", "nvidia/nemotron-3-nano-30b-a3b")
-_API_KEY = os.environ.get("REASONING_API_KEY", "") or os.environ.get(
-    "NVIDIA_API_KEY", ""
-)
+# Main (reasoning) model triplet. Each field falls back to DEFAULT_AGENT_<field>
+# (and the API key additionally to the legacy NVIDIA_API_KEY) when unset.
+_BASE_URL = resolve("REASONING", "ENDPOINT", "https://integrate.api.nvidia.com/v1")
+_MODEL_NAME = resolve("REASONING", "MODEL", "nvidia/nemotron-3-nano-30b-a3b")
+_API_KEY = resolve("REASONING", "API_KEY")
 
 # Non-reasoning model. Kept fully separate (key/endpoint/model) so it can point at
-# a different endpoint than the main agent model (e.g. inference vs integrate
-# API). Endpoint/model fall back to the main agent value when unset.
-_NON_REASONING_BASE_URL = os.environ.get("NON_REASONING_ENDPOINT", _BASE_URL)
-_NON_REASONING_MODEL_NAME = os.environ.get("NON_REASONING_MODEL", _MODEL_NAME)
-_NON_REASONING_API_KEY = os.environ.get("NON_REASONING_API_KEY", "")
+# a different endpoint than the main model (e.g. inference vs integrate API). Each
+# field falls back to DEFAULT_AGENT_<field> when unset.
+_NON_REASONING_BASE_URL = resolve(
+    "NON_REASONING", "ENDPOINT", "https://integrate.api.nvidia.com/v1"
+)
+_NON_REASONING_MODEL_NAME = resolve(
+    "NON_REASONING", "MODEL", "nvidia/nemotron-3-nano-30b-a3b"
+)
+_NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
 def _build_client(

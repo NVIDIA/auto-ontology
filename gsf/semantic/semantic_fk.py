@@ -18,7 +18,6 @@ Algorithm
 from __future__ import annotations
 
 import logging
-import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -34,20 +33,15 @@ from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
+from gsf.utils.model_config import resolve
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
 
-_EMBED_ENDPOINT = os.environ.get(
-    "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
-)
-_EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
-_NVIDIA_API_KEY = (
-    os.environ.get("EMBED_API_KEY", "")
-    or os.environ.get("REASONING_API_KEY", "")
-    or os.environ.get("NVIDIA_API_KEY", "")
-)
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://integrate.api.nvidia.com/v1")
+_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2")
+_NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
 
 _SYSTEM_PROMPT = """\

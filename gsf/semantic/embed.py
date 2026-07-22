@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,6 +12,7 @@ from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.utils.model_config import resolve
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -126,24 +126,19 @@ def build_semantic_embedder(
     reset: bool,
 ) -> SemanticEmbedder | None:
     """Construct an embedder bound to the semantic VDB, or None when disabled."""
-    api_key = (
-        os.environ.get("EMBED_API_KEY", "")
-        or os.environ.get("REASONING_API_KEY", "")
-        or os.environ.get("NVIDIA_API_KEY", "")
-    )
+    api_key = resolve("EMBED", "API_KEY")
     if not api_key:
         logger.warning(
-            "EMBED_API_KEY / REASONING_API_KEY not set — semantic VDB embedding disabled"
+            "EMBED_API_KEY / DEFAULT_AGENT_API_KEY not set — "
+            "semantic VDB embedding disabled"
         )
         return None
 
     embed_params = EmbedParams(
-        embed_invoke_url=os.environ.get(
-            "EMBED_ENDPOINT", "https://integrate.api.nvidia.com/v1"
+        embed_invoke_url=resolve(
+            "EMBED", "ENDPOINT", "https://integrate.api.nvidia.com/v1"
         ),
-        model_name=os.environ.get(
-            "EMBED_MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2"
-        ),
+        model_name=resolve("EMBED", "MODEL", "nvidia/llama-nemotron-embed-vl-1b-v2"),
         api_key=api_key,
         embed_modality="text",
     )
