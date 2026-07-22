@@ -138,7 +138,9 @@ def build_semantic_embedder(
         embed_invoke_url=resolve(
             "EMBED", "ENDPOINT", "https://inference-api.nvidia.com/v1"
         ),
-        model_name=resolve("EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2"),
+        model_name=resolve(
+            "EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2"
+        ),
         api_key=api_key,
         embed_modality="text",
     )
