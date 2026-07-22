@@ -40,12 +40,9 @@ packages = ["gsf"]
 package = true
 
 [[tool.uv.index]]
-name = "pypi"
-url = "https://pypi.org/simple"
-
-[[tool.uv.index]]
-name = "nv-shared"
-url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple"
+name = "vendored-sdfm"
+url = "vendor/wheels"
+format = "flat"
 
 [dependency-groups]
 dev = [

@@ -1388,7 +1388,7 @@ wheels = [
 [[package]]
 name = "kumorfm"
 version = "2.23.0"
-source = { registry = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple" }
+source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
     { name = "jinja2" },
@@ -1404,8 +1404,8 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
-    { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/kumorfm/2.23.0/kumorfm-2.23.0-cp312-cp312-macosx_12_0_arm64.whl", hash = "sha256:6cd0cdc68379a2d71298d5042056d29b5398172b07cc8e9fe23f042490f0f4c6" },
-    { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/kumorfm/2.23.0/kumorfm-2.23.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:808bc35d9a0d398f7516d1d2946a5c17665c8822ef14395c60056df6a6d63754" },
+    { path = "kumorfm-2.23.0-cp312-cp312-macosx_12_0_arm64.whl" },
+    { path = "kumorfm-2.23.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
 ]
 
 [[package]]
@@ -2016,15 +2016,14 @@ wheels = [
 [[package]]
 name = "nvidia-sdfm"
 version = "0.1.0"
-source = { registry = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple" }
+source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "pandas" },
     { name = "requests" },
     { name = "sdfm-connectors" },
 ]
-sdist = { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/nvidia-sdfm/0.1.0/nvidia_sdfm-0.1.0.tar.gz", hash = "sha256:b7114972932b4d941efd3ce6f50c1906e3722396980d417c1c6a35f96be175b7" }
 wheels = [
-    { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/nvidia-sdfm/0.1.0/nvidia_sdfm-0.1.0-py3-none-any.whl", hash = "sha256:6b81ea4322b4f1bac94c5e4e490a6b291f80fb2f07b9e9b218cff91521b6cd60" },
+    { path = "nvidia_sdfm-0.1.0-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -3239,14 +3238,13 @@ wheels = [
 [[package]]
 name = "sdfm-connectors"
 version = "0.2.0"
-source = { registry = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/simple" }
+source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "pandas" },
     { name = "pyarrow" },
 ]
-sdist = { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/sdfm-connectors/0.2.0/sdfm_connectors-0.2.0.tar.gz", hash = "sha256:1d371852b02ea56d5175ebd69dbcef58c35e1827b031998934d08bd74fc53325" }
 wheels = [
-    { url = "https://urm.nvidia.com/artifactory/api/pypi/nv-shared-pypi/sdfm-connectors/0.2.0/sdfm_connectors-0.2.0-py3-none-any.whl", hash = "sha256:9fa8719901362cfcb4de5b45cddc9c532c64823ba8944fed64179a95cbf93c52" },
+    { path = "sdfm_connectors-0.2.0-py3-none-any.whl" },
 ]
 
 [[package]]

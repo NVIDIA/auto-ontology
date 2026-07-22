@@ -22,7 +22,7 @@
 # ---------------------------------------------------------------------------
 
 ARG PYTHON_VERSION=3.12
-ARG UV_VERSION=0.5.11
+ARG UV_VERSION=0.11.20
 ARG BASE_IMG=nvcr.io/nvidia/base/ubuntu
 ARG BASE_IMG_TAG=jammy-20250619
 
@@ -49,12 +49,13 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 # Install uv
-COPY --from=ghcr.io/astral-sh/uv:0.5.11 /uv /usr/local/bin/uv
+COPY --from=ghcr.io/astral-sh/uv:0.11.20 /uv /usr/local/bin/uv
 
 WORKDIR /app
 
 # Copy lock + project metadata first to maximise layer caching.
-COPY pyproject.toml uv.lock ./
+COPY pyproject.toml uv.lock .python-version ./
+COPY vendor/ vendor/
 
 # Resolve and install the dependency closure into /opt/venv.
 RUN --mount=type=cache,target=/root/.cache/uv \
