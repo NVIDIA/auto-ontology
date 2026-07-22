@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: Python Lint and Format
+name: GSF CI
 
 on:
   push:
@@ -36,3 +36,47 @@ jobs:
           version: '0.15.9'
           args: format --check
           src: './gsf'
+
+  build_image:
+    name: Build GSF Server image
+    runs-on: ubuntu-latest
+    # The `secrets` context is not allowed in `if:` expressions, so surface the
+    # NGC key as an env var and gate the nvcr.io login on that instead. The
+    # Dockerfile FROMs nvcr.io/nvidia/base/ubuntu; in-org PRs pull it
+    # authenticated, forks fall back to an anonymous pull.
+    env:
+      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to nvcr.io (for base image)
+        if: ${{ env.NGC_API_KEY != '' }}
+        uses: docker/login-action@v3
+        with:
+          registry: nvcr.io
+          username: '$oauthtoken'
+          password: ${{ env.NGC_API_KEY }}
+
+      - name: Build GSF Server image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          push: false
+          load: false
+          cache-from: type=gha,scope=server
+          cache-to: type=gha,mode=max,scope=server
+          provenance: false
