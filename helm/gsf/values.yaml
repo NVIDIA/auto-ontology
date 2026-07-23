@@ -36,13 +36,23 @@ neo4jPassword: ""
 pgadminEmail: admin@example.com
 pgadminPassword: admin
 # NVIDIA NIM — default triplet; every model triplet falls back to these per field.
+# Leave endpoint/model empty to auto-derive them from the API key prefix
+# (sk- -> inference-api, nvapi- -> integrate/build.nvidia.com).
 defaultModelsApiKey: ""
-defaultModelsEndpoint: "https://inference-api.nvidia.com/v1"
-defaultModelsModel: "aws/anthropic/bedrock-claude-opus-4-8"
+defaultModelsEndpoint: ""
+defaultModelsModel: ""
+# Legacy value names (pre-triplet). Still honored so existing
+# --set nvidiaApiKey / baseUrl / modelName configs keep working.
+nvidiaApiKey: ""
+baseUrl: ""
+modelName: ""
 # KumoRFM (predictions). Leave the key empty to disable the prediction tool.
 kumoRfmApiKey: ""
 kumoRfmApiUrl: "https://kumorfm.ai/api"
-embedModel: "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2"
+# Embedding endpoint/model. Leave empty to inherit from the default triplet /
+# auto-derive from the API key prefix; set to override just the embedder.
+embedEndpoint: ""
+embedModel: ""
 # Ingestion targets - comma-separated list of PG URLs the worker reads from.
 connectionStrings: ""
 # HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.
