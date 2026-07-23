@@ -8,8 +8,9 @@ Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``) exposes
 three fields — ``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as
 ``<PREFIX>_<FIELD>`` env vars. Any field left unset falls back to the
 corresponding ``DEFAULT_MODELS_<FIELD>``, so a single ``DEFAULT_MODELS_*`` triplet
-can supply the shared endpoint/key/model for all of them. API keys additionally
-fall back to the legacy ``NVIDIA_API_KEY`` name for backward compatibility.
+can supply the shared endpoint/key/model for all of them. Each field also falls
+back to its legacy pre-triplet env var name (``NVIDIA_API_KEY`` / ``BASE_URL`` /
+``MODEL_NAME``) for backward compatibility.
 
 When even ``DEFAULT_MODELS_<FIELD>`` is unset, a built-in default is used. There
 are two sets — one for ``sk-`` inference-api keys and one for ``nvapi-``
@@ -57,11 +58,20 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
 _FALLBACK_KEY_PREFIX = "sk-"
 
 
+# Legacy (pre-triplet) env var names, still honored so existing deployments and
+# --set nvidiaApiKey / BASE_URL / MODEL_NAME configs keep working.
+_LEGACY_ENV: dict[str, str] = {
+    "API_KEY": "NVIDIA_API_KEY",
+    "ENDPOINT": "BASE_URL",
+    "MODEL": "MODEL_NAME",
+}
+
+
 def _default(field: str) -> str:
-    """``DEFAULT_MODELS_<field>``; API keys fall back to legacy ``NVIDIA_API_KEY``."""
+    """Shared default for *field*: ``DEFAULT_MODELS_<field>`` then the legacy name."""
     value = os.environ.get(f"DEFAULT_MODELS_{field}", "")
-    if not value and field == "API_KEY":
-        value = os.environ.get("NVIDIA_API_KEY", "")
+    if not value and field in _LEGACY_ENV:
+        value = os.environ.get(_LEGACY_ENV[field], "")
     return value
 
 
