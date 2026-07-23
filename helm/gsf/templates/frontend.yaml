@@ -37,6 +37,7 @@ spec:
       {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         {{- include "gsf.waitForDeps" . | nindent 8 }}
+        {{- include "gsf.waitForSchema" . | nindent 8 }}
       containers:
         - name: frontend
           image: "{{ include "gsf.image" .Values.frontend.image }}"

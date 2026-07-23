@@ -2,10 +2,15 @@
 Runs prisma/migrate.sh, which guards then `prisma db push` to sync the
 Postgres schema with prisma/schema.prisma.
 
-Hook timing: post-install / post-upgrade. Postgres comes up in the same
-release, so a pre-install hook would race the StatefulSet. Post-install
-runs after the StatefulSet exists but the Job's own init container waits
-for Postgres to be reachable, so first-install works.
+Ordering: this is a normal release resource (NOT a Helm hook), created
+alongside the frontend rather than after it. That matters because the frontend
+gates its own startup on the schema (gsf.waitForSchema) so its seed-admin never
+runs before the tables exist; a post-install hook would deadlock that gate
+(frontend would never become Ready, so the hook would never run). The Job's own
+wait-for-postgres init container handles Postgres readiness, and `helm --wait`
+waits for the Job to complete. Naming per `.Release.Revision` gives a fresh Job
+each upgrade (Job specs are immutable, so a stable name could not re-run), and
+ttlSecondsAfterFinished garbage-collects finished Jobs.
 
 Prisma is scoped to the `public` schema only (schemas = ["public"] +
 multiSchema). Ingestion's vector table lives in the separate `vdb` schema
@@ -23,15 +28,12 @@ fails. Resolve drift by hand rather than silently dropping data.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: frontend-migrate
+  name: frontend-migrate-{{ .Release.Revision }}
   labels:
     {{- include "gsf.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend-migrate") | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-weight": "0"
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
   backoffLimit: 3
+  ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:

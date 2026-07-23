@@ -92,6 +92,36 @@ each datastore's readiness probe has passed.
 {{- end -}}
 
 {{/*
+Init container that blocks until the frontend's Prisma schema exists in Postgres,
+gating on the `user` table that seed-admin (auth/seed-admin.ts, run from
+instrumentation.ts on boot) writes to. Without this the frontend can start and
+seed the bootstrap admin before the migrate Job has created the tables, which
+fails with TableDoesNotExist and leaves no admin account (login then fails).
+Polls with psql from the same image Postgres uses, so the client is guaranteed
+present and already pulled. Runs after gsf.waitForDeps, so Postgres is reachable.
+*/}}
+{{- define "gsf.waitForSchema" -}}
+- name: wait-for-schema
+  image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  envFrom:
+    - secretRef:
+        name: {{ include "gsf.secretName" . }}
+  command:
+    - sh
+    - -c
+    - |
+      until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
+        "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='user'" \
+        2>/dev/null | grep -q 1; do
+        echo "waiting for prisma schema (public.user)..."
+        sleep 2
+      done
+  {{- include "gsf.initResources" . | nindent 2 }}
+{{- end -}}
+
+{{/*
 Tiny resource bounds for the busybox wait-* init containers. Without an explicit
 limit, some namespace LimitRanges inject a large default limits.cpu, which
 (because pod quota counts max(initContainers, sum(containers))) can make every
