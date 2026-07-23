@@ -97,7 +97,7 @@ export type ComposerRelatedTermsSection = {
 export type ComposerEntity = {
 	id: string;
 	name: string;
-	/** Catalog focus path (`dbId|schemaId|tableId`) used to navigate to the entity. */
+	/** Catalog focus path (`dbId|schemaId|tableId` or `…|columnId`) used to navigate. */
 	focusId: string;
 };
 

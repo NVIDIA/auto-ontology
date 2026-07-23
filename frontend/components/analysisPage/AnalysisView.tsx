@@ -6,9 +6,9 @@
 
 import { useEffect, useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal, ModalCreateNewItem } from '@/components/modal';
-import { SqlBlock, SqlEditor } from '@/components/SqlBlock';
+import { Icon, IconName } from '@/common/icons';
+import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
+import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 

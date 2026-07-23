@@ -5,7 +5,7 @@
 'use client';
 
 import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 
 type ChatInputProps = {
 	onSend: (text: string) => void;

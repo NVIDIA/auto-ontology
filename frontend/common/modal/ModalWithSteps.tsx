@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { Modal } from './Modal';
 
 export type StepperFooterAction = {

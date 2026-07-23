@@ -4,8 +4,8 @@
 
 'use client';
 
-import { Icon, IconName } from '@/components/icons';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { Icon, IconName } from '@/common/icons';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {

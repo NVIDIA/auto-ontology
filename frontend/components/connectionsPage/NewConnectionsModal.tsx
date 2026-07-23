@@ -6,7 +6,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import { connectionsApi } from '@/api/connections';
-import { ModalWithSteps, type StepperFooterAction } from '@/components/modal';
+import { ModalWithSteps, type StepperFooterAction } from '@/common/modal';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';

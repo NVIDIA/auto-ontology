@@ -6,7 +6,7 @@ import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 import { resolveZoneIds } from '@/auth/resolve-zones';
 
-// termsApi.getAll — list Term nodes, zone-scoped for viewers.
+// termsApi.list — list Terms and their page summary data, zone-scoped for viewers.
 export const GET = withPermission({ catalog: ['read'] })(async (req, { user }) => {
 	const zoneIds = await resolveZoneIds(user.id, user.role);
 	return proxyToBackend(req, { zoneIds: zoneIds ?? undefined });

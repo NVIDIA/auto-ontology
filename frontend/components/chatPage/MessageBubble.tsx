@@ -8,7 +8,7 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ChatMessage } from '@/types/chat';
 import { formatDate } from '@/common/date';
 import { parseSqlResponse, type ParsedTable } from '@/lib/parseSqlResponse';
-import { SqlBlock } from '@/components/SqlBlock';
+import { SqlBlock } from '@/common/SqlBlock';
 import { DynamicTable } from './DynamicTable';
 import { FormattedContent } from './FormattedContent';
 

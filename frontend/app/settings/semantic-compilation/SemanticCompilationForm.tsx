@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { semanticCompilationApi } from '@/api/settings';
-import { Toast } from '@/components/Toast';
+import { Toast } from '@/common/Toast';
 
 export const SemanticCompilationForm = ({ initialEnabled }: { initialEnabled: boolean }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first

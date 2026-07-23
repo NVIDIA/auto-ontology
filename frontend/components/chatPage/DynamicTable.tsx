@@ -6,7 +6,7 @@
 
 import { useMemo, useState } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
-import { Table } from '@/components/Table';
+import { Table } from '@/common/Table';
 import type { TableColumn } from '@/types/table';
 
 const PAGE_SIZE = 10;

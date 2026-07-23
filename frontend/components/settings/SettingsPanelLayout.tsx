@@ -5,7 +5,7 @@
 'use client';
 
 import { type ReactNode } from 'react';
-import { BackPanelLayout } from '@/components/BackPanelLayout';
+import { BackPanelLayout } from '@/common/BackPanelLayout';
 import { SettingsNav } from '@/components/settings/SettingsNav';
 
 type SettingsPanelLayoutProps = {

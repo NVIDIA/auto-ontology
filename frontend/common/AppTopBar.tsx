@@ -4,9 +4,9 @@
 
 'use client';
 
-import { Icon, IconName } from '@/components/icons';
-import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { UserMenu } from '@/components/UserMenu';
+import { Icon, IconName } from '@/common/icons';
+import { Breadcrumbs } from '@/common/Breadcrumbs';
+import { UserMenu } from '@/common/UserMenu';
 import { useBreadcrumbs } from '@/contexts/BreadcrumbContext';
 
 export const AppTopBar = ({ version }: { version?: string }) => {

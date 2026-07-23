@@ -8,9 +8,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
 import { formatDate } from '@/common/date';
-import { Icon, IconName } from '@/components/icons';
-import { ConfirmModal } from '@/components/modal';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { Icon, IconName } from '@/common/icons';
+import { ConfirmModal } from '@/common/modal';
+import { PopoverMenu } from '@/common/PopoverMenu';
 
 type ChatSidebarProps = {
 	conversations: Conversation[];

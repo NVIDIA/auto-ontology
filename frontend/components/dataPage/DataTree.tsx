@@ -9,7 +9,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { DataModels } from '@/enums/datasources';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { datasources } from '@/api/datasources';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';

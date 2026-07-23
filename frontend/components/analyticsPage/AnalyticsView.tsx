@@ -6,9 +6,9 @@
 
 import { useEffect, useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { Table } from '@/components/Table';
-import { Toast } from '@/components/Toast';
+import { Icon, IconName } from '@/common/icons';
+import { Table } from '@/common/Table';
+import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
 import type { ConversationAnalytics } from '@/types/analytics';

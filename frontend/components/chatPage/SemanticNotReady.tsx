@@ -5,7 +5,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 
 // Blocks the chat conversation area when the semantic layer hasn't been
 // calculated yet: the agent can't answer questions without it.

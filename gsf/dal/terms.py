@@ -15,6 +15,7 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
+from gsf.dal.attributes import fetch_column_attribute_columns_map
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
@@ -31,6 +32,7 @@ from gsf.server.zones.constants import (
     REL_ZONE_OF,
     ZONE_LABEL_PATTERN,
 )
+from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +48,13 @@ _COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.datatype      AS datatype,
                attr.table_id      AS table_id,
                col.sample_values  AS sample_values"""
+
+
+def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Normalize ``sample_values`` on each row via ``parse_sample_values``."""
+    for row in rows:
+        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+    return rows
 
 
 def semantic_layer_calculated() -> bool:
@@ -174,12 +183,12 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
     return result
 
 
-def fetch_all_terms_and_attributes(
+def fetch_all_terms(
     zone_ids: list[str] | None = None,
     search: str | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Scan semantic Term and ColumnAttribute nodes in Neo4j.
+) -> list[dict[str, Any]]:
+    """Scan semantic Term nodes in Neo4j.
 
     *zone_ids* is a hard authorization boundary (the zones the requesting
     user has been granted access to), not a relevance filter.  A Term can be
@@ -188,15 +197,11 @@ def fetch_all_terms_and_attributes(
     represents it is reachable through those zones — a term that also
     represents an out-of-zone table is excluded entirely, mirroring the
     all-or-nothing rule used for CustomAnalysis
-    (see ``gsf.dal.custom_analyses.list_custom_analyses``).  ColumnAttribute
-    rows are naturally owned by exactly one table (via CONTAINS), so a plain
-    accessible-table filter is correct for them without this check.  Pass
-    ``None`` (or omit) to return all data (admin / internal callers).
+    (see ``gsf.dal.custom_analyses.list_custom_analyses``).  Pass ``None``
+    (or omit) to return all terms (admin / internal callers).
 
     *search* is a case-insensitive substring filter applied to the term's
-    name only. It only narrows the ``terms`` result — ``attrs`` (used for
-    embedding, not text search) is unaffected. Pass ``None`` (or omit, or an
-    empty string) to skip filtering.
+    name. Pass ``None`` (or omit, or an empty string) to skip filtering.
 
     Each term row additionally carries a ``zones`` list, resolved via
     ``fetch_term_zones_map`` — the same attribute → column → table → zone
@@ -212,12 +217,6 @@ def fetch_all_terms_and_attributes(
     """
     conn = get_neo4j_conn()
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    attr_filter, attr_params = resolve_table_filter(
-        zone_ids,
-        "t.id",
-        extra_params={"source": SEMANTIC_SOURCE},
-        data_ids_by_zone=data_ids_by_zone,
-    )
 
     term_params: dict[str, Any] = {"source": SEMANTIC_SOURCE}
     term_conditions: list[str] = []
@@ -251,7 +250,30 @@ def fetch_all_terms_and_attributes(
         term_params,
     )
     zones_by_term = fetch_term_zones_map(zone_ids)
-    terms = [{**dict(row), "zones": zones_by_term.get(row["id"], [])} for row in terms]
+    return [{**dict(row), "zones": zones_by_term.get(row["id"], [])} for row in terms]
+
+
+def fetch_all_terms_and_attributes(
+    zone_ids: list[str] | None = None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Scan every semantic Term and ColumnAttribute node in Neo4j.
+
+    Used only by ``embed_all_semantic_nodes`` for a one-shot bulk re-embed of
+    the whole graph: unlike ``fetch_all_terms``, this also runs a second,
+    global Neo4j scan for every ColumnAttribute (needed to rebuild each
+    Term's embedding text). Callers that only need Term rows — the
+    ``/terms`` list, the Exploration semantic graph — should call
+    ``fetch_all_terms`` instead and skip that second query entirely. Pass
+    ``None`` (or omit) to scan the whole graph (admin / internal callers).
+    """
+    conn = get_neo4j_conn()
+    terms = fetch_all_terms(zone_ids=zone_ids)
+
+    attr_filter, attr_params = resolve_table_filter(
+        zone_ids,
+        "t.id",
+        extra_params={"source": SEMANTIC_SOURCE},
+    )
     attrs = conn.query_read(
         f"""
         MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->
@@ -283,7 +305,7 @@ def get_full_term_by_id(
     Term can be represented by more than one Table (see ``merge_term``), so
     when *zone_ids* is supplied the term is only returned when **every**
     table that represents it is reachable through those zones — matching the
-    all-or-nothing rule used by ``fetch_all_terms_and_attributes`` for the
+    all-or-nothing rule used by ``fetch_all_terms`` for the
     ``/terms`` list, so a viewer can't bypass list-level zone scoping by
     requesting a term directly by id.  Returns ``None`` (→ 404) when the
     check fails.  Pass ``None`` to skip the check (admin / internal callers).
@@ -671,24 +693,23 @@ def fetch_column_attribute_counts(
     )
 
 
-def fetch_column_attributes(
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return ColumnAttribute nodes, optionally restricted to *zone_ids*."""
-    table_filter, params = resolve_table_filter(
-        zone_ids, "attr.table_id", extra_params={"source": SEMANTIC_SOURCE}
-    )
+def _fetch_attr_zones_by_table(
+    rows: list[dict[str, Any]],
+    zone_ids: list[str] | None,
+) -> dict[str, list[dict[str, Any]]]:
+    """Return ``{table_id: [zone, ...]}`` for the owning tables of *rows*.
 
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-        {table_filter}
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        RETURN {_COLUMN_ATTRIBUTE_FIELDS}
-        ORDER BY attr.term_name, attr.name
-        """,
-        params,
-    )
+    A ColumnAttribute is owned by exactly one table (``attr.table_id``), so its
+    zones are its table's zones. This reuses ``fetch_table_zones_map`` rather
+    than duplicating the table→zone resolution. Imported locally because
+    ``gsf.dal.exploration`` imports from this module (avoids a circular import).
+    """
+    from gsf.dal.exploration import fetch_table_zones_map
+
+    table_ids = list({row["table_id"] for row in rows if row.get("table_id")})
+    if not table_ids:
+        return {}
+    return fetch_table_zones_map(zone_ids=zone_ids, table_ids=table_ids)
 
 
 def fetch_column_attributes_by_term_id(
@@ -701,13 +722,17 @@ def fetch_column_attributes_by_term_id(
     attributes owned by tables reachable through those zones are returned —
     a ColumnAttribute is owned by exactly one table, so a plain membership
     filter is sufficient here (no all-or-nothing check needed).
+
+    Each attribute includes ``primary_column`` (HAS_ATTRIBUTE owner) and
+    ``referenced_columns`` (SEMANTIC_FK sources) with catalog path ids for
+    navigation.
     """
     table_filter, params = resolve_table_filter(
         zone_ids,
         "attr.table_id",
         extra_params={"term_id": term_id, "source": SEMANTIC_SOURCE},
     )
-    return get_neo4j_conn().query_read(
+    rows = get_neo4j_conn().query_read(
         f"""
         MATCH (term:{LABEL_TERM} {{id: $term_id}})
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
@@ -718,6 +743,18 @@ def fetch_column_attributes_by_term_id(
         """,
         params,
     )
+    attr_ids = [row["id"] for row in rows]
+    zones_by_table = _fetch_attr_zones_by_table(rows, zone_ids)
+    columns_by_attr = fetch_column_attribute_columns_map(attr_ids)
+    empty_columns = {"primary_column": None, "referenced_columns": []}
+    return [
+        {
+            **row,
+            "zones": zones_by_table.get(row["table_id"], []),
+            **columns_by_attr.get(row["id"], empty_columns),
+        }
+        for row in _with_parsed_sample_values(rows)
+    ]
 
 
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
@@ -759,7 +796,7 @@ def fetch_related_terms(
     zones, so sharing a table the caller can't see never surfaces a related
     term.  Step 2 additionally requires that a candidate related term's own
     REPRESENTS-tables are *all* within *zone_ids* — matching the
-    all-or-nothing rule used by ``fetch_all_terms_and_attributes`` for the
+    all-or-nothing rule used by ``fetch_all_terms`` for the
     ``/terms`` list — so a related term the caller couldn't otherwise open
     (it would 404 via ``get_full_term_by_id``) is never shown as a chip.
     Pass ``None`` to skip zone scoping (admin / internal callers).
@@ -856,7 +893,7 @@ def fetch_related_terms_counts(
     all-or-nothing rule applied consistently to both paths — a term whose
     ColumnAttribute happens to live on an in-zone table doesn't get a free
     pass if it also REPRESENTS an out-of-zone table — so this function stays
-    in agreement with ``fetch_all_terms_and_attributes`` (the ``/terms``
+    in agreement with ``fetch_all_terms`` (the ``/terms``
     list) and ``fetch_related_terms`` (the single-term related list): a
     term's count here always matches how many terms actually show up on its
     detail page.  Pass ``None`` to return counts for all terms (admin /

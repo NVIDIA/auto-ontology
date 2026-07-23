@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { ConnectionType, connectionDisplayName } from '@/enums/connection';
 
 export type ConnectionTypeStepProps = {

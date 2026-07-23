@@ -6,7 +6,7 @@
 
 import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { useSession } from '@/auth/auth-client';
 

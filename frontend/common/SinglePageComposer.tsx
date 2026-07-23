@@ -22,25 +22,26 @@ import {
 	type ComposerSection,
 	type ComposerZonesSection,
 } from '@/types/composer-section';
-import { Icon, IconName } from '@/components/icons';
-import { TagInput } from '@/components/TagInput';
-import { Table } from '@/components/Table';
-import { TruncatedText } from '@/components/TruncatedText';
-import { SqlBlock } from '@/components/SqlBlock';
+import { Icon, IconName } from '@/common/icons';
+import { TagInput } from '@/common/TagInput';
+import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
+import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
-import { Toast } from '@/components/Toast';
-import { Label } from '@/components/Label';
+import { Toast } from '@/common/Toast';
+import { Label } from '@/common/Label';
 
 export type ComposerEditValue = string | string[];
 
 export const LabelList = ({ values }: { values: string[] }) => {
-	if (values.length === 0) return <span>—</span>;
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	if (nonEmptyValues.length === 0) return <span>—</span>;
 	return (
 		<ul className="flex flex-wrap gap-1">
-			{values.map((v, i) => (
+			{nonEmptyValues.map((v, i) => (
 				<li key={`${v}-${i}`}>
 					<Label label={v} maxWidthClass="max-w-[16rem]" />
 				</li>
@@ -297,25 +298,28 @@ const ReadOnlyTagList = ({
 	title: string;
 	values: string[];
 	sectionId: string;
-}) => (
-	<div
-		id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
-		className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-	>
-		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
-		{values.length === 0 ? (
-			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
-		) : (
-			<ul className="mt-3 flex flex-wrap gap-1.5">
-				{values.map((v, i) => (
-					<li key={`${v}-${i}`}>
-						<Label label={v} maxWidthClass="max-w-[24rem]" />
-					</li>
-				))}
-			</ul>
-		)}
-	</div>
-);
+}) => {
+	const nonEmptyValues = values.filter((v) => v.trim() !== '');
+	return (
+		<div
+			id={sectionId === 'sample_values' ? 'sample-values-section' : undefined}
+			className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+		>
+			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h2>
+			{nonEmptyValues.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-1.5">
+					{nonEmptyValues.map((v, i) => (
+						<li key={`${v}-${i}`}>
+							<Label label={v} maxWidthClass="max-w-[24rem]" />
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
 
 const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 	const displayedZones = useMemo(() => {

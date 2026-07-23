@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import type { SinglePageFormat } from '@/components/SinglePageView';
+import type { SinglePageFormat } from '@/common/SinglePageView';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
@@ -280,7 +280,7 @@ export function buildTreeFocusPageFormat(
 					type: ComposerSectionKind.TAG_LIST,
 					id: 'sample_values',
 					title: 'Sample Values',
-					values: column.sample_values ?? [],
+					values: Array.isArray(column.sample_values) ? column.sample_values : [],
 					editable: true,
 				},
 				{

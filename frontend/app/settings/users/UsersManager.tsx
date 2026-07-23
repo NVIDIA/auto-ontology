@@ -8,8 +8,8 @@ import { useEffect, useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
 import { Role } from '@/enums/auth';
 import { usersApi } from '@/api/users';
-import { Table } from '@/components/Table';
-import { Toast } from '@/components/Toast';
+import { Table } from '@/common/Table';
+import { Toast } from '@/common/Toast';
 import type { TableColumn } from '@/types/table';
 import type { User } from '@/types/auth';
 

@@ -6,9 +6,9 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { BackPanelLayout } from '@/components/BackPanelLayout';
+import { BackPanelLayout } from '@/common/BackPanelLayout';
 import { DataTree } from './DataTree';
-import { SinglePageView, type SinglePageFormat } from '@/components/SinglePageView';
+import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import type { Database } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';

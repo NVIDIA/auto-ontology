@@ -4,8 +4,8 @@
 
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
-import { NavRail } from '@/components/NavRail';
-import { AppTopBar } from '@/components/AppTopBar';
+import { NavRail } from '@/common/NavRail';
+import { AppTopBar } from '@/common/AppTopBar';
 import { BreadcrumbProvider } from '@/contexts/BreadcrumbContext';
 import { getCurrentSession } from '@/auth/auth-guards';
 import { Role } from '@/enums/auth';

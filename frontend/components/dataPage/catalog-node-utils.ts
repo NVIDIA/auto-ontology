@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { IconName } from '@/components/icons';
+import { IconName } from '@/common/icons';
 import { DataModels, TableType } from '@/enums/datasources';
 
 /** Shared UI metadata for catalog nodes. ``DataModels.TABLE`` and ``TableType.BASE_TABLE`` both key as ``base table``. */

@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { authApi, type SsoProvider } from '@/api/auth';
-import { Toast } from '@/components/Toast';
+import { Toast } from '@/common/Toast';
 
 // Only one provider is supported; its id is a fixed constant. It's the DB key
 // and the providerId segment of the native callback (/api/auth/sso/callback/sso).

@@ -7,9 +7,9 @@
 import { useEffect, useState } from 'react';
 
 import { termsApi } from '@/api/terms';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import type { SqlAttribute } from '@/types/terms';
-import { SqlBlock } from '@/components/SqlBlock';
+import { SqlBlock } from '@/common/SqlBlock';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */

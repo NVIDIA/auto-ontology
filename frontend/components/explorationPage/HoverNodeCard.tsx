@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationNode } from '@/types/exploration';

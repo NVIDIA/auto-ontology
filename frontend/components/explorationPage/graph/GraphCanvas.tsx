@@ -9,8 +9,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import cytoscape, { type Core, type ElementDefinition, type EventObject } from 'cytoscape';
 import euler from 'cytoscape-euler';
 
-import SnowflakeSvg from '@/components/icons/svg/snowflake.svg';
-import TermsSvg from '@/components/icons/svg/terms.svg';
+import SnowflakeSvg from '@/common/icons/svg/snowflake.svg';
+import TermsSvg from '@/common/icons/svg/terms.svg';
 import type { ExplorationGraph } from '@/types/exploration';
 
 cytoscape.use(euler);

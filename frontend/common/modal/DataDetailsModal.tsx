@@ -9,13 +9,13 @@ import NextLink from 'next/link';
 
 import { datasources } from '@/api/datasources';
 import { explorationApi } from '@/api/exploration';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { Column } from '@/types/datasources';
 import type { TableExplorationDetails } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
-import { SqlBlock } from '@/components/SqlBlock';
-import { Table } from '@/components/Table';
+import { SqlBlock } from '@/common/SqlBlock';
+import { Table } from '@/common/Table';
 import { Modal } from './Modal';
 
 export type DataDetailsKind = 'columns' | 'queries' | 'terms';

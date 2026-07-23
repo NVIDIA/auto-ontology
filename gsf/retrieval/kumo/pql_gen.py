@@ -86,7 +86,13 @@ def _qualify_from_clauses(sql: str, table_names: dict[str, str] | None) -> str:
 
 _PQL_FENCE = re.compile(r"```pql\s*(.*?)```", re.DOTALL | re.IGNORECASE)
 _GENERIC_FENCE = re.compile(r"```(?:sql)?\s*(.*?)```", re.DOTALL | re.IGNORECASE)
-_PREDICT_START = re.compile(r"\bPREDICT\b", re.IGNORECASE)
+_PREDICT_LINE_START = re.compile(r"(?im)^[ \t]*PREDICT\b")
+_QUALIFIED_IDENTIFIER = re.compile(
+    r"\b(?P<table>[A-Za-z_]\w*)\.(?P<column>[A-Za-z_]\w*)\b"
+)
+_GRAPH_TABLE_LINE = re.compile(
+    r"(?m)^(?P<table>[A-Za-z_]\w*)\((?P<columns>.*)\)(?:\s+--.*)?$"
+)
 _FOR_ENTITY = re.compile(
     r"\bFOR\s+(?P<each>EACH\s+)?(?P<table>[A-Za-z_][\w]*)\.(?P<pk>[A-Za-z_][\w]*)",
     re.IGNORECASE,
@@ -847,16 +853,60 @@ def _explain_resilient(explain_fn: Callable[[list[int] | None], Any]) -> Any:
 
 
 def extract_pql(text: str) -> str:
-    """Pull the PQL out of a model response (```pql fence, [PQL] tag, or first PREDICT...)."""
+    """Pull a PQL statement from a model response.
+
+    An unfenced response must put ``PREDICT`` at the start of a line. This
+    avoids treating prose such as "we need to predict ..." as executable PQL.
+    PQL is a single statement, so only that line is accepted when no explicit
+    fence/tag bounds it.
+    """
     match = _PQL_FENCE.search(text)
     if match and match.group(1).strip():
         candidate = match.group(1)
+        bounded = True
     else:
         tag = re.search(r"\[PQL\](.*?)\[/PQL\]", text, re.DOTALL | re.IGNORECASE)
         candidate = tag.group(1) if tag else text
-    start = _PREDICT_START.search(candidate)
-    pql = candidate[start.start() :] if start else candidate
+        bounded = tag is not None
+    start = _PREDICT_LINE_START.search(candidate)
+    if start is None:
+        return ""
+    pql = candidate[start.start() :]
+    if not bounded:
+        pql = pql.splitlines()[0]
     return pql.strip().rstrip(";").strip()
+
+
+def canonicalize_pql_identifiers(pql: str, graph_ddl: str) -> str:
+    """Match qualified PQL identifiers to the graph's exact casing.
+
+    Snowflake commonly reports uppercase identifiers while PostgreSQL and
+    Databricks commonly report lowercase identifiers. KumoRFM's parser is
+    case-sensitive, so generated identifiers are rewritten using graph metadata
+    instead of connector-specific assumptions.
+    """
+    tables: dict[str, tuple[str, dict[str, str]]] = {}
+    for match in _GRAPH_TABLE_LINE.finditer(graph_ddl):
+        table = match.group("table")
+        columns: dict[str, str] = {}
+        for definition in match.group("columns").split(","):
+            parts = definition.strip().split(maxsplit=1)
+            if parts:
+                columns[parts[0].casefold()] = parts[0]
+        tables[table.casefold()] = (table, columns)
+
+    def replace(match: re.Match[str]) -> str:
+        entry = tables.get(match.group("table").casefold())
+        if entry is None:
+            return match.group(0)
+        table, columns = entry
+        column = columns.get(
+            match.group("column").casefold(),
+            match.group("column"),
+        )
+        return f"{table}.{column}"
+
+    return _QUALIFIED_IDENTIFIER.sub(replace, pql)
 
 
 def extract_entity_sql(text: str) -> str | None:
@@ -978,17 +1028,30 @@ def _resolve_indices(
     connector: SQLDatabase,
     max_entities: int,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
 ) -> list[Any]:
-    """Resolve the entity-id list to score: from ``entity_sql`` if given, else all PKs of the entity table.
+    """Resolve entity IDs, constrained to rows loaded into the Kumo graph.
 
-    Both paths go through the connector's ``execute`` seam, capped at ``max_entities``.
-    Bare graph table names are schema-qualified via ``table_names`` so the SQL
-    resolves against the live database.
+    An explicit entity-selection query is still executed against the source,
+    then intersected with graph IDs. Without a filter, graph IDs are used
+    directly instead of issuing a second nondeterministic ``LIMIT`` query whose
+    rows may differ from the graph sample.
     """
+    entity = parse_entity(pql)
+    available = (
+        available_entity_ids.get(entity[0].casefold())
+        if available_entity_ids and entity
+        else None
+    )
     if entity_sql:
         df = connector.execute(_qualify_from_clauses(entity_sql, table_names))
+        ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
+        if available is not None:
+            allowed = set(available)
+            ids = [value for value in ids if value in allowed]
+    elif available is not None:
+        ids = available
     else:
-        entity = parse_entity(pql)
         if entity is None:
             return []
         table, pk = entity
@@ -996,9 +1059,7 @@ def _resolve_indices(
             f"SELECT DISTINCT {quote_ident(pk)} FROM {_sql_table(table, table_names)} "
             f"WHERE {quote_ident(pk)} IS NOT NULL LIMIT {int(max_entities)}"
         )
-    if df.empty:
-        return []
-    ids = df.iloc[:, 0].dropna().tolist()
+        ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
     if len(ids) > max_entities:
         logger.info("Capping entities from %d to %d.", len(ids), max_entities)
         ids = ids[:max_entities]
@@ -1115,6 +1176,7 @@ def _resolve_single_index(
     entity: str | None,
     connector: SQLDatabase,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
 ) -> list[Any]:
     """Resolve one entity-id (the PK value to explain) to its correctly-typed value via the read-only guard.
 
@@ -1124,6 +1186,11 @@ def _resolve_single_index(
     if parsed is None or entity is None:
         return []
     table, pk = parsed
+    if available_entity_ids:
+        for value in available_entity_ids.get(table.casefold(), []):
+            if str(value) == str(entity):
+                return [value]
+        return []
     safe = str(entity).replace("'", "''")
     string_type = "VARCHAR"
     df = connector.execute(
@@ -1358,6 +1425,7 @@ def generate_pql(
     persist_lock: Any = None,
     time_columns: dict[str, str | None] | None = None,
     table_names: dict[str, str] | None = None,
+    available_entity_ids: dict[str, list[Any]] | None = None,
     examples: list[dict[str, str]] | None = None,
 ) -> PqlGenerationResult:
     """Generate a PQL, validate it cheaply against the graph, scope entities, and predict (with repair).
@@ -1413,6 +1481,20 @@ def generate_pql(
             )
             continue
         pql = extract_pql(raw)
+        if not pql:
+            prev_error = (
+                "The response did not contain a PQL statement beginning with "
+                "PREDICT on its own line."
+            )
+            result.error = prev_error
+            logger.info(
+                "PQL attempt %d/%d failed: %s",
+                attempt,
+                max_tries,
+                prev_error,
+            )
+            continue
+        pql = canonicalize_pql_identifiers(pql, graph_ddl)
         pql = prefer_explicit_change_targets(
             pql,
             question,
@@ -1435,7 +1517,11 @@ def generate_pql(
             kumo_model.validate_pql(pql)
             if explain:
                 indices = _resolve_single_index(
-                    pql, explain_entity, connector, table_names
+                    pql,
+                    explain_entity,
+                    connector,
+                    table_names,
+                    available_entity_ids,
                 )
                 if not indices:
                     raise ValueError(
@@ -1497,7 +1583,12 @@ def generate_pql(
                         )
                     result.entity_sql = None
                 indices = _resolve_indices(
-                    pql, scope_sql, connector, entity_cap, table_names
+                    pql,
+                    scope_sql,
+                    connector,
+                    entity_cap,
+                    table_names,
+                    available_entity_ids,
                 )
                 if forecast:
                     if len(indices) > 1:

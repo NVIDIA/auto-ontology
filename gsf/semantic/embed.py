@@ -217,14 +217,14 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: str | None) -> str:
+def _format_sample_values(raw: str | list[Any] | None) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
     if not raw:
         return ""
     try:
         import json
 
-        values = json.loads(raw)
+        values = json.loads(raw) if isinstance(raw, str) else list(raw)
         non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
         if not non_null:
             return ""

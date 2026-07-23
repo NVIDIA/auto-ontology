@@ -6,7 +6,7 @@
 
 import Link from 'next/link';
 import { Fragment } from 'react';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 
 export type BreadcrumbItem = {
 	label: string;

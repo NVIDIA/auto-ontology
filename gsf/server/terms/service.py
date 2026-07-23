@@ -9,42 +9,74 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from gsf.dal import attributes as attributes_dal
 from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
 from gsf.semantic.embed import build_semantic_embedder
-from gsf.utils import get_embed_params
+from gsf.server.datasources import service as datasources_service
+from gsf.utils import get_embed_params, parse_sample_values
 from gsf.utils.embedding import embed_docs_into_vdb
 
 logger = logging.getLogger(__name__)
 
 
-def get_all_terms_with_attributes(
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return every term available to the user as ``{name, attributes}``.
+def update_column_attribute(
+    term_id: str,
+    attr_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    sample_values: list[str] | None = None,
+) -> dict[str, Any] | None:
+    """Update ColumnAttribute metadata and refresh related VDB rows.
 
-    Terms and their attributes are zone-scoped via *zone_ids* (``None`` → admin /
-    no filter, ``[]`` → viewer with no access → empty). Each term's ``attributes``
-    list merges its ColumnAttributes and SqlAttributes, each projected to just
-    ``{name, description}``. Attributes are bucketed onto terms by ``term_name``
-    (the term's natural key), which both attribute kinds carry.
+    ``sample_values`` live on the owning Column. When provided, this updates
+    that Column (same path as catalog column edit), re-embeds the Column in
+    the data VDB, then re-embeds this ColumnAttribute in the semantic VDB.
     """
-    terms, column_attrs = terms_dal.fetch_all_terms_and_attributes(zone_ids=zone_ids)
-    sql_attrs = sql_attr_dal.fetch_sql_attributes(zone_ids=zone_ids)
+    row = attributes_dal.update_column_attribute(
+        attr_id,
+        term_id,
+        name=name,
+        description=description,
+    )
+    if row is None:
+        return None
 
-    attrs_by_term: dict[str, list[dict[str, Any]]] = {}
-    for attr in (*column_attrs, *sql_attrs):
-        attrs_by_term.setdefault(attr.get("term_name"), []).append(
-            {"name": attr.get("name"), "description": attr.get("description")}
+    if sample_values is not None:
+        column_id = row.get("column_id")
+        if not column_id:
+            raise ValueError(
+                "ColumnAttribute has no owning Column; sample values cannot be updated"
+            )
+        # Reuses catalog Column patch: writes Column.sample_values and
+        # refreshes the Column row in the data VDB. It also best-effort
+        # refreshes semantic ColumnAttribute rows; we still re-embed this
+        # attribute below so Term synonyms stay in the semantic text.
+        datasources_service.update_node_properties(
+            column_id,
+            {"sample_values": sample_values},
         )
+        row["sample_values"] = sample_values
+    else:
+        row["sample_values"] = parse_sample_values(row.get("sample_values"))
 
-    return [
-        {
-            "name": term.get("name"),
-            "attributes": attrs_by_term.get(term.get("name"), []),
+    embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
+    if embedder is not None:
+        embedder.vdb.delete_by_id(attr_id)
+        attr = {
+            "id": row["id"],
+            "name": row["name"],
+            "description": row.get("description"),
+            "term_name": row.get("term_name"),
+            "source_column": row.get("source_column"),
+            "sample_values": row.get("sample_values"),
         }
-        for term in terms
-    ]
+        # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
+        term_ctx = {"synonyms": row.get("term_synonyms") or []}
+        embedder.embed_term(term_ctx, [attr])
+
+    return row
 
 
 def refresh_term_embeddings(term_id: str, *, refresh_dependent_attrs: bool) -> None:

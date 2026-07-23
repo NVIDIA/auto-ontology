@@ -10,8 +10,8 @@ import type { Core } from 'cytoscape';
 
 import { explorationApi } from '@/api/exploration';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
-import { Icon, IconName } from '@/components/icons';
-import { SearchInput } from '@/components/SearchInput';
+import { Icon, IconName } from '@/common/icons';
+import { SearchInput } from '@/common/SearchInput';
 import {
 	ColumnAttributesModal,
 	DataDetailsModal,
@@ -20,7 +20,7 @@ import {
 	SemanticRelationshipModal,
 	SqlAttributesModal,
 	type DataDetailsKind,
-} from '@/components/modal';
+} from '@/common/modal';
 import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
 import type { ExplorationGraph } from '@/types/exploration';

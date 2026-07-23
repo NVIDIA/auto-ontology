@@ -20,7 +20,7 @@ from gsf.dal.datasources import TABLE_COUNTS_SUBQUERY
 from gsf.dal.sql_attributes import fetch_sql_attribute_counts
 from gsf.dal.terms import (
     build_term_table_maps,
-    fetch_all_terms_and_attributes,
+    fetch_all_terms,
     fetch_column_attribute_counts,
     fetch_term_table_pairs,
 )
@@ -210,6 +210,7 @@ def fetch_table_exploration_details(
 def fetch_table_zones_map(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    table_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Return ``{table_id: [zone, ...]}`` for every visible Table.
 
@@ -230,16 +231,25 @@ def fetch_table_zones_map(
     (admin / internal callers). Pass a pre-resolved *data_ids_by_zone*
     (see ``resolve_accessible_catalog_ids``) when the caller already
     resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
+    Pass *table_ids* to further restrict the scan to a known set of tables
+    (e.g. the owning tables of a batch of ColumnAttributes); it is
+    intersected with the zone-accessible tables so it never widens access.
     """
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
     params: dict[str, Any] = {}
-    table_filter = ""
+    filter_ids: set[str] | None = None
     if data_ids_by_zone is not None:
-        table_ids = list(data_ids_by_zone["table_ids"])
-        if not table_ids:
+        filter_ids = set(data_ids_by_zone["table_ids"])
+    if table_ids is not None:
+        filter_ids = (
+            set(table_ids) if filter_ids is None else filter_ids & set(table_ids)
+        )
+    table_filter = ""
+    if filter_ids is not None:
+        if not filter_ids:
             return {}
         table_filter = "WHERE t.id IN $table_ids"
-        params["table_ids"] = table_ids
+        params["table_ids"] = list(filter_ids)
 
     # A viewer never sees a disabled zone's chip, even if its id ended up in
     # zone_ids (e.g. access granted before the zone was disabled) — admins
@@ -382,16 +392,14 @@ def fetch_semantic_exploration_graph(
     *zone_ids* is resolved to accessible catalog ids exactly once (see
     ``resolve_accessible_catalog_ids``) and threaded through every
     sub-query below. Previously each of the four calls below re-resolved
-    the same *zone_ids* independently — and ``fetch_all_terms_and_attributes``
-    even did so twice internally — for five redundant Neo4j round trips
-    collapsed into the one made here.
+    the same *zone_ids* independently — and ``fetch_all_terms`` even did so
+    twice internally — for five redundant Neo4j round trips collapsed into
+    the one made here.
     """
     limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
     data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
 
-    terms, _attrs = fetch_all_terms_and_attributes(
-        zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone
-    )
+    terms = fetch_all_terms(zone_ids=zone_ids, data_ids_by_zone=data_ids_by_zone)
     column_counts = {
         row["term_id"]: row["count"]
         for row in fetch_column_attribute_counts(

@@ -4,7 +4,7 @@
 
 'use client';
 
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 
 /** Small link-style icon button shown next to a count, only rendered when count > 0. */
 export const DetailLinkButton = ({

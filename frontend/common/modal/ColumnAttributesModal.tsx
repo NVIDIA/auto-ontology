@@ -7,12 +7,12 @@
 import { useEffect, useState } from 'react';
 
 import { termsApi } from '@/api/terms';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import type { ColumnAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
 import { LabelList } from '@/common/SinglePageComposer';
-import { Table } from '@/components/Table';
-import { TruncatedText } from '@/components/TruncatedText';
+import { Table } from '@/common/Table';
+import { TruncatedText } from '@/common/TruncatedText';
 import { Modal } from './Modal';
 
 /** Minimal Term reference — decoupled from any specific page's node/row shape. */

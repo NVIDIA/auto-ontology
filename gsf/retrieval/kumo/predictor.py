@@ -227,6 +227,7 @@ class PredictionContext:
     graph_col_stypes: Any
     time_columns: Any
     table_names: dict[str, str]
+    entity_ids: dict[str, list[Any]]
     examples: list[dict[str, str]]
 
 
@@ -329,6 +330,51 @@ def _apply_join_paths(graph: Any, join_paths: list[dict[str, Any]] | None) -> in
     return covered
 
 
+def _deduplicate_inferred_links(graph: Any) -> int:
+    """Keep one deterministic FK when inference links the same table pair twice.
+
+    KumoRFM cannot disambiguate an aggregation when a child table has multiple
+    foreign keys to the same parent (for example ``job_id`` and
+    ``restart_of_job_id``). Prefer the foreign key whose name exactly matches
+    the destination primary key, then the shortest/lexicographically first
+    name. Catalog-derived join paths do not use this fallback because they
+    already scope the graph to the relationship relevant to the question.
+    """
+    grouped: dict[tuple[str, str], list[Any]] = {}
+    for edge in graph.edges:
+        grouped.setdefault((edge.src_table, edge.dst_table), []).append(edge)
+
+    removed = 0
+    for (_src, dst), edges in grouped.items():
+        if len(edges) < 2:
+            continue
+        primary_key = _col_name_lower(graph[dst].primary_key) or ""
+        keep = min(
+            edges,
+            key=lambda edge: (
+                edge.fkey.lower() != primary_key,
+                len(edge.fkey),
+                edge.fkey.lower(),
+            ),
+        )
+        for edge in edges:
+            if edge == keep:
+                continue
+            graph.unlink(edge.src_table, edge.fkey, edge.dst_table)
+            removed += 1
+            logger.info(
+                "kumo: removed ambiguous inferred link %s.%s -> %s "
+                "(keeping %s.%s -> %s)",
+                edge.src_table,
+                edge.fkey,
+                edge.dst_table,
+                keep.src_table,
+                keep.fkey,
+                keep.dst_table,
+            )
+    return removed
+
+
 def build_prediction_context(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]] | None = None,
@@ -375,7 +421,15 @@ def build_prediction_context(
     )
 
     _graph_start = time.perf_counter()
-    graph = rfm.LocalGraph.from_data(frames, infer_metadata=True, verbose=False)
+    # Passing an explicit empty edge list suppresses LocalGraph's automatic
+    # relationship inference. This lets catalog join paths take precedence and
+    # avoids inferring the same links twice.
+    graph = rfm.LocalGraph.from_data(
+        frames,
+        edges=[],
+        infer_metadata=True,
+        verbose=False,
+    )
     logger.info(
         "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
         time.perf_counter() - _graph_start,
@@ -388,6 +442,7 @@ def build_prediction_context(
         logger.info("kumo: no catalog join paths; inferring links heuristically")
         try:
             graph.infer_links()
+            _deduplicate_inferred_links(graph)
         except Exception:
             logger.exception(
                 "kumo: infer_links failed; proceeding without inferred links"
@@ -395,6 +450,14 @@ def build_prediction_context(
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
     kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
+    entity_ids: dict[str, list[Any]] = {}
+    for name, table in graph.tables.items():
+        primary_key = getattr(table.primary_key, "name", None)
+        frame = frames.get(name)
+        if primary_key and frame is not None and primary_key in frame.columns:
+            entity_ids[name.casefold()] = (
+                frame[primary_key].dropna().drop_duplicates().tolist()
+            )
 
     # Entity-selection SQL runs against the live GSF database connection (the
     # first configured connector — the source of the catalog tables). ``table_names``
@@ -407,6 +470,7 @@ def build_prediction_context(
         graph_col_stypes=col_stypes,
         time_columns=time_columns,
         table_names=name_map,
+        entity_ids=entity_ids,
         examples=examples or [],
     )
 
@@ -427,6 +491,7 @@ def run_prediction(
         graph_col_stypes=context.graph_col_stypes,
         time_columns=context.time_columns,
         table_names=context.table_names,
+        available_entity_ids=context.entity_ids,
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
         examples=context.examples,

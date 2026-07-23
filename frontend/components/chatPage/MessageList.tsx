@@ -6,7 +6,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { ChatMessage, GraphStep } from '@/types/chat';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingMessage } from './ThinkingMessage';
 

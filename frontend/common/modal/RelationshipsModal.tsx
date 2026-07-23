@@ -11,8 +11,8 @@ import { ExplorationLayer } from '@/enums/exploration';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import type { ExplorationNode } from '@/types/exploration';
 import type { TableColumn } from '@/types/table';
-import { Icon, IconName } from '@/components/icons';
-import { Table } from '@/components/Table';
+import { Icon, IconName } from '@/common/icons';
+import { Table } from '@/common/Table';
 import { Modal } from './Modal';
 
 type RelationshipsModalProps = {

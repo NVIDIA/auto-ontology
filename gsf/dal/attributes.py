@@ -76,6 +76,45 @@ def merge_column_attribute(
     return rows[0]["id"] if rows else None
 
 
+def update_column_attribute(
+    attr_id: str,
+    term_id: str,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+) -> dict[str, Any] | None:
+    """Update ColumnAttribute metadata and return its embedding context."""
+    rows = get_neo4j_conn().query_write(
+        f"""
+        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
+              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
+        SET attr.name = coalesce($name, attr.name),
+            attr.description = coalesce($description, attr.description)
+        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
+        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS id,
+               attr.name AS name,
+               attr.description AS description,
+               attr.term_name AS term_name,
+               attr.source_column AS source_column,
+               col.id AS column_id,
+               col.sample_values AS sample_values,
+               term.id AS term_id,
+               term.synonyms AS term_synonyms,
+               head(collect(DISTINCT db.name)) AS database_name
+        """,
+        {
+            "attr_id": attr_id,
+            "term_id": term_id,
+            "name": name,
+            "description": description,
+        },
+    )
+    return dict(rows[0]) if rows else None
+
+
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
     """Return the id of the ColumnAttribute connected to a given Column, or None."""
     rows = get_neo4j_conn().query_read(
@@ -180,6 +219,81 @@ def find_unlinked_fk_columns(
                    tgt.id          AS fk_target_col_id
             """
         )
+    return result
+
+
+_COLUMN_PATH_RETURN = (
+    "col.id AS id, col.name AS column_name, "
+    "t.id AS table_id, t.name AS table_name, "
+    "sch.id AS schema_id, db.id AS db_id"
+)
+
+
+def _column_path_dict(row: dict[str, Any]) -> dict[str, Any]:
+    """Project a Neo4j column-path row into the API column-ref shape."""
+    return {
+        "id": row["id"],
+        "column_name": row["column_name"],
+        "table_id": row["table_id"],
+        "table_name": row["table_name"],
+        "schema_id": row["schema_id"],
+        "db_id": row["db_id"],
+    }
+
+
+def fetch_column_attribute_columns_map(
+    attr_ids: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Return primary/referenced columns keyed by ColumnAttribute id.
+
+    Each value is ``{primary_column, referenced_columns}``. Missing
+    attributes are omitted; callers should default to
+    ``primary_column=None`` / ``referenced_columns=[]``.
+
+    Each column dict includes catalog path ids (``db_id``, ``schema_id``,
+    ``table_id``, ``id``) plus display names so the UI can navigate to
+    ``/data?focus=db|schema|table|column``.
+    """
+    if not attr_ids:
+        return {}
+
+    conn = get_neo4j_conn()
+    primary_rows = conn.query_read(
+        f"""
+        UNWIND $attr_ids AS attr_id
+        MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
+        """,
+        {"attr_ids": attr_ids},
+    )
+    referenced_rows = conn.query_read(
+        f"""
+        UNWIND $attr_ids AS attr_id
+        MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->
+              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
+        ORDER BY t.name, col.name
+        """,
+        {"attr_ids": attr_ids},
+    )
+
+    result: dict[str, dict[str, Any]] = {
+        attr_id: {"primary_column": None, "referenced_columns": []}
+        for attr_id in attr_ids
+    }
+    for row in primary_rows:
+        attr_id = row["attr_id"]
+        if attr_id in result and result[attr_id]["primary_column"] is None:
+            result[attr_id]["primary_column"] = _column_path_dict(row)
+    for row in referenced_rows:
+        attr_id = row["attr_id"]
+        if attr_id in result:
+            result[attr_id]["referenced_columns"].append(_column_path_dict(row))
     return result
 
 

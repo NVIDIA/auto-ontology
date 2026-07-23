@@ -5,9 +5,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Icon, IconName } from '@/components/icons';
-import { ModalCreateNewItem, ConfirmModal } from '@/components/modal';
-import { PopoverMenu } from '@/components/PopoverMenu';
+import { Icon, IconName } from '@/common/icons';
+import { ModalCreateNewItem, ConfirmModal } from '@/common/modal';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { acronymsApi, promptsApi, type Acronym, type Prompt } from '@/api/settings';
 
 type SettingsSectionProps = {

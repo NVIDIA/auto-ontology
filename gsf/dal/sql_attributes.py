@@ -242,13 +242,6 @@ def get_full_sql_attribute_by_id(
     return result
 
 
-def fetch_sql_attributes(
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return SqlAttribute nodes, optionally restricted to zone-visible terms."""
-    return _query_sql_attributes(zone_ids=zone_ids, order_by="term.name, attr.name")
-
-
 def fetch_sql_attributes_by_term_id(
     term_id: str,
     zone_ids: list[str] | None = None,

@@ -6,10 +6,10 @@
 
 import { useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 import type { ExplorationForeignKey, ExplorationLink } from '@/types/exploration';
 import { LabelList } from '@/common/SinglePageComposer';
-import { SqlBlock } from '@/components/SqlBlock';
+import { SqlBlock } from '@/common/SqlBlock';
 import { Modal } from './Modal';
 
 type QueryCarouselModalProps = {

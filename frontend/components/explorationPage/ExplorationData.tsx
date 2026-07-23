@@ -6,12 +6,12 @@
 
 import { useState } from 'react';
 
-import { Icon } from '@/components/icons';
+import { Icon } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
-import { DetailLinkButton } from '@/components/DetailLinkButton';
+import { DetailLinkButton } from '@/common/DetailLinkButton';
 import type {
 	DataExplorationGraph,
 	ExplorationDataNode,

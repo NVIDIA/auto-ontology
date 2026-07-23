@@ -6,10 +6,10 @@
 
 import { useState } from 'react';
 
-import { Icon, IconName } from '@/components/icons';
-import { DetailLinkButton } from '@/components/DetailLinkButton';
+import { Icon, IconName } from '@/common/icons';
+import { DetailLinkButton } from '@/common/DetailLinkButton';
 import { ExplorationLayer } from '@/enums/exploration';
-import { Label } from '@/components/Label';
+import { Label } from '@/common/Label';
 import type {
 	ExplorationGraph,
 	ExplorationTermNode,

@@ -5,7 +5,7 @@
 'use client';
 
 import type { GraphStep } from '@/types/chat';
-import { Icon, IconName } from '@/components/icons';
+import { Icon, IconName } from '@/common/icons';
 
 type ThinkingMessageProps = {
 	steps: GraphStep[];
