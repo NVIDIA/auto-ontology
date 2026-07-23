@@ -44,9 +44,9 @@ inference API ([inference-api.nvidia.com](https://inference-api.nvidia.com)) or 
 - **Embeddings:**
   [llama-nemotron-embed-vl-1b-v2](https://inference.nvidia.com/nvidia/nvidia/llama-nemotron-embed-vl-1b-v2)
 
-The endpoints and models are configured via the `DEFAULT_AGENT_ENDPOINT`, `DEFAULT_AGENT_MODEL`,
+The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
 `EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
-`DEFAULT_AGENT_API_KEY`.
+`DEFAULT_MODELS_API_KEY`.
 
 #### Model triplets
 
@@ -55,15 +55,15 @@ Each model role is configured by a **triplet** of environment variables —
 
 | Prefix | Role |
 |---|---|
-| `DEFAULT_AGENT` | Shared default; every field below falls back to it. |
+| `DEFAULT_MODELS` | Shared default; every field below falls back to it. |
 | `REASONING` | Main chat / NL-to-SQL model. |
 | `NON_REASONING` | Lighter model used for entity extraction. |
 | `EMBED` | Text-embedding model (must match between ingest and query). |
 | `RERANK` | Reranker used by the retrieval flow. |
 
 You can set a full triplet, only some of its fields, or none at all — any field
-left unset falls back to the matching `DEFAULT_AGENT_<FIELD>`. So the simplest
-setup is to fill in `DEFAULT_AGENT_*` and override per-triplet fields only where
+left unset falls back to the matching `DEFAULT_MODELS_<FIELD>`. So the simplest
+setup is to fill in `DEFAULT_MODELS_*` and override per-triplet fields only where
 they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
 back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
@@ -94,7 +94,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    ```
 
 2. Create your environment file (.env) from the template and fill in the values
-   (Postgres/Neo4j credentials, `DEFAULT_AGENT_API_KEY`, `CONNECTION_STRINGS`, etc.).
+   (Postgres/Neo4j credentials, `DEFAULT_MODELS_API_KEY`, `CONNECTION_STRINGS`, etc.).
    See [`.env.example`](./.env.example) for the full list of variables:
 
    ```bash

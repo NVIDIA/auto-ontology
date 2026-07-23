@@ -7,11 +7,11 @@
 Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``) exposes
 three fields — ``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as
 ``<PREFIX>_<FIELD>`` env vars. Any field left unset falls back to the
-corresponding ``DEFAULT_AGENT_<FIELD>``, so a single ``DEFAULT_AGENT_*`` triplet
+corresponding ``DEFAULT_MODELS_<FIELD>``, so a single ``DEFAULT_MODELS_*`` triplet
 can supply the shared endpoint/key/model for all of them. API keys additionally
 fall back to the legacy ``NVIDIA_API_KEY`` name for backward compatibility.
 
-When even ``DEFAULT_AGENT_<FIELD>`` is unset, a built-in default is used. There
+When even ``DEFAULT_MODELS_<FIELD>`` is unset, a built-in default is used. There
 are two sets — one for ``sk-`` inference-api keys and one for ``nvapi-``
 integrate/build.nvidia.com keys — and the set is chosen from the API key that
 applies to the same triplet.
@@ -23,7 +23,7 @@ import os
 
 # Built-in endpoint/model defaults, selected by the triplet's API key prefix.
 # Keyed by ``<PREFIX>_<FIELD>``. API keys are intentionally absent (they have no
-# safe hardcoded default and fall back to ``DEFAULT_AGENT_API_KEY`` /
+# safe hardcoded default and fall back to ``DEFAULT_MODELS_API_KEY`` /
 # ``NVIDIA_API_KEY`` instead).
 _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
     # inference-api.nvidia.com (sk-... keys).
@@ -58,8 +58,8 @@ _FALLBACK_KEY_PREFIX = "sk-"
 
 
 def _default(field: str) -> str:
-    """``DEFAULT_AGENT_<field>``; API keys fall back to legacy ``NVIDIA_API_KEY``."""
-    value = os.environ.get(f"DEFAULT_AGENT_{field}", "")
+    """``DEFAULT_MODELS_<field>``; API keys fall back to legacy ``NVIDIA_API_KEY``."""
+    value = os.environ.get(f"DEFAULT_MODELS_{field}", "")
     if not value and field == "API_KEY":
         value = os.environ.get("NVIDIA_API_KEY", "")
     return value
@@ -83,7 +83,7 @@ def resolve(prefix: str, field: str) -> str:
     """Resolve one triplet field.
 
     Order of precedence: the ``<prefix>_<field>`` env var, then the shared
-    ``DEFAULT_AGENT_<field>``, then a built-in default chosen by whether the
+    ``DEFAULT_MODELS_<field>``, then a built-in default chosen by whether the
     triplet's API key is an ``sk-`` or ``nvapi-`` key.
     """
     key = f"{prefix}_{field}"

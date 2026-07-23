@@ -53,7 +53,7 @@ class _TimeoutSession(_requests.Session):
 
 T = TypeVar("T", bound=BaseModel)
 
-# Main (reasoning) model triplet. Each field falls back to DEFAULT_AGENT_<field>
+# Main (reasoning) model triplet. Each field falls back to DEFAULT_MODELS_<field>
 # (and the API key additionally to the legacy NVIDIA_API_KEY) when unset.
 _BASE_URL = resolve("REASONING", "ENDPOINT")
 _MODEL_NAME = resolve("REASONING", "MODEL")
@@ -61,7 +61,7 @@ _API_KEY = resolve("REASONING", "API_KEY")
 
 # Non-reasoning model. Kept fully separate (key/endpoint/model) so it can point at
 # a different endpoint than the main model (e.g. inference vs integrate API). Each
-# field falls back to DEFAULT_AGENT_<field> when unset.
+# field falls back to DEFAULT_MODELS_<field> when unset.
 _NON_REASONING_BASE_URL = resolve("NON_REASONING", "ENDPOINT")
 _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")

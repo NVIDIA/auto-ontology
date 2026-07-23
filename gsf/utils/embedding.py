@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time; a mismatch produces garbage results
-# or a dimension error from pgvector. Each field falls back to DEFAULT_AGENT_<field>.
+# or a dimension error from pgvector. Each field falls back to DEFAULT_MODELS_<field>.
 _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _EMBED_API_KEY = resolve("EMBED", "API_KEY")

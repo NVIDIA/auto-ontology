@@ -129,7 +129,7 @@ def build_semantic_embedder(
     api_key = resolve("EMBED", "API_KEY")
     if not api_key:
         logger.warning(
-            "EMBED_API_KEY / DEFAULT_AGENT_API_KEY not set — "
+            "EMBED_API_KEY / DEFAULT_MODELS_API_KEY not set — "
             "semantic VDB embedding disabled"
         )
         return None
