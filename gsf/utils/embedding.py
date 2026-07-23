@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 # Remote NIM embedding endpoint — no local GPU required.
 # MUST match the model used at ingest time; a mismatch produces garbage results
 # or a dimension error from pgvector. Each field falls back to DEFAULT_AGENT_<field>.
-_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT", "https://inference-api.nvidia.com/v1")
-_EMBED_MODEL = resolve("EMBED", "MODEL", "nvidia/nvidia/llama-nemotron-embed-vl-1b-v2")
+_EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
+_EMBED_MODEL = resolve("EMBED", "MODEL")
 _EMBED_API_KEY = resolve("EMBED", "API_KEY")
 
 

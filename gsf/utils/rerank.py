@@ -16,12 +16,8 @@ from gsf.utils.model_config import resolve
 # Hosted NeMo reranking endpoint — no local GPU required. Override RERANK_ENDPOINT
 # to point at a self-hosted vLLM/NIM ranking server. Each field falls back to
 # DEFAULT_AGENT_<field> when unset.
-_RERANK_ENDPOINT = resolve(
-    "RERANK",
-    "ENDPOINT",
-    "https://ai.api.nvidia.com/v1/retrieval/nvidia/llama-nemotron-rerank-1b-v2/reranking",
-)
-_RERANK_MODEL = resolve("RERANK", "MODEL", "nvidia/nvidia/llama-3.2-nv-rerankqa-1b-v2")
+_RERANK_ENDPOINT = resolve("RERANK", "ENDPOINT")
+_RERANK_MODEL = resolve("RERANK", "MODEL")
 _RERANK_API_KEY = resolve("RERANK", "API_KEY")
 
 
