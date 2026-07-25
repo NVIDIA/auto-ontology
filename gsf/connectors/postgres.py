@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import weakref
 from typing import Optional
 
 import pandas as pd
@@ -47,6 +48,12 @@ class PostgresDatabase(SQLDatabase):
             check=ConnectionPool.check_connection,
             open=True,
         )
+        # Close the pool at GC or interpreter exit (whichever comes first) so its
+        # worker/scheduler threads stop gracefully. Without this, psycopg_pool's
+        # own finalizer warns ("couldn't stop thread ... within 5.0 seconds") and
+        # stalls shutdown ~5s per thread when a caller forgets to close(). Binding
+        # ``self._pool.close`` (not ``self``) keeps the connector GC-eligible.
+        self._finalizer = weakref.finalize(self, self._pool.close)
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
 
     @property
@@ -198,5 +205,8 @@ class PostgresDatabase(SQLDatabase):
             conn.execute("SELECT schema_name FROM information_schema.schemata")
 
     def close(self) -> None:
+        finalizer = getattr(self, "_finalizer", None)
+        if finalizer is not None:
+            finalizer.detach()
         if self._pool and not self._pool.closed:
             self._pool.close()
