@@ -4,6 +4,8 @@ from __future__ import annotations
 
 SEMANTIC_SOURCE = "semantic"
 
+SQL_ATTR_SOURCE_BRIDGE = "bridgeTable"
+
 # Semantic node labels
 LABEL_TERM = "Term"
 LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"

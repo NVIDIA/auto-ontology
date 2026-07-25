@@ -90,6 +90,19 @@ def get_term_for_table(table_id: str) -> str | None:
     return rows[0]["name"] if rows else None
 
 
+def get_term_id_for_table(table_id: str) -> str | None:
+    """Return the Term id linked via REPRESENTS, or None."""
+    rows = get_neo4j_conn().query_read(
+        f"""
+        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
+              (term:{LABEL_TERM} {{source: $source}})
+        RETURN term.id AS id LIMIT 1
+        """,
+        {"table_id": table_id, "source": SEMANTIC_SOURCE},
+    )
+    return rows[0]["id"] if rows else None
+
+
 def get_slim_term_by_id(term_id: str) -> dict[str, str] | None:
     """Return ``{id, name}`` of a Term, or None."""
     rows = get_neo4j_conn().query_read(
