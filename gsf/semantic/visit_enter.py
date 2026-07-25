@@ -14,6 +14,7 @@ from gsf.dal.datasources import (
     store_column_uniqueness,
 )
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.semantic.constants import SQL_ATTR_SOURCE_TABLE
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import SemanticEmbedder
@@ -93,7 +94,7 @@ def _extract_sql_attributes_for_table(
                 expression=proposal.expression,
                 term_id=term_id,
                 connector=database_name,
-                source="table",
+                source=SQL_ATTR_SOURCE_TABLE,
             )
             created_names.append(row["name"])
             logger.info("  Created SqlAttribute %r", proposal.name)
