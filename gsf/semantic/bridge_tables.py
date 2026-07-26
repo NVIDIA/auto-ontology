@@ -6,7 +6,9 @@
 
 After semantic FK resolution, discovers tables whose columns are entirely
 foreign keys, generates a structural join SQL via LLM, and persists a
-SqlAttribute owned by the bridge table's Term.
+SqlAttribute on the better-matching of the Terms that REPRESENT the FK
+target tables (chosen by reranking those Terms against the SqlAttribute
+description). No new Term is created for the bridge table itself.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from nemo_retriever.operators.rerank import rerank_hits
 from pydantic import BaseModel, ConfigDict
 
 from gsf.dal.datasources import fetch_bridge_table_candidates
@@ -23,13 +26,14 @@ from gsf.dal.sql_attributes import (
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
 )
-from gsf.dal.terms import get_term_id_for_table, merge_term
+from gsf.dal.terms import get_term_record_for_table
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from gsf.server.sql_attributes.service import create_sql_attribute
 from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
+from gsf.utils.rerank import get_rerank_kwargs
 
 logger = logging.getLogger(__name__)
 
@@ -40,28 +44,6 @@ class _BridgeSqlAttributeProposal(BaseModel):
     name: str
     description: str
     expression: str
-
-
-def _table_name_to_term_name(table_name: str) -> str:
-    return " ".join(part.capitalize() for part in table_name.replace("_", " ").split())
-
-
-def _junction_description(
-    bridge_table: str,
-    fk_pairs: list[dict[str, Any]],
-) -> str:
-    related = sorted(
-        {pair["target_table"] for pair in fk_pairs if pair.get("target_table")}
-    )
-    if not related:
-        return f"Junction table represented by {bridge_table}."
-    if len(related) == 1:
-        return (
-            f"Self-referential junction table linking rows of {related[0]} "
-            f"via {bridge_table}."
-        )
-    joined = ", ".join(related[:-1]) + f" and {related[-1]}"
-    return f"Junction table linking {joined}."
 
 
 def _format_fk_block(fk_pairs: list[dict[str, Any]]) -> str:
@@ -79,19 +61,89 @@ def _format_fk_block(fk_pairs: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _ensure_bridge_term_id(candidate: dict[str, Any]) -> str | None:
-    table_id = candidate["table_id"]
-    existing = get_term_id_for_table(table_id)
-    if existing:
-        return existing
+def _target_terms_for_bridge(candidate: dict[str, Any]) -> list[dict[str, str]]:
+    """Terms that REPRESENT the distinct FK target tables of a bridge."""
+    terms: list[dict[str, str]] = []
+    seen_term_ids: set[str] = set()
+    seen_table_ids: set[str] = set()
+    for pair in candidate.get("fk_pairs") or []:
+        table_id = pair.get("target_table_id")
+        if not table_id or table_id in seen_table_ids:
+            continue
+        seen_table_ids.add(table_id)
+        record = get_term_record_for_table(table_id)
+        if not record or not record.get("id"):
+            logger.warning(
+                "Bridge FK target table %r (%s) has no REPRESENTS Term.",
+                pair.get("target_table"),
+                table_id,
+            )
+            continue
+        term_id = record["id"]
+        if term_id in seen_term_ids:
+            continue
+        seen_term_ids.add(term_id)
+        terms.append(record)
+    return terms
 
-    table_name = candidate.get("table_name") or ""
-    fk_pairs = candidate.get("fk_pairs") or []
-    term_name = _table_name_to_term_name(table_name)
-    description = candidate.get("description") or _junction_description(
-        table_name, fk_pairs
+
+def _term_hit_text(term: dict[str, str]) -> str:
+    name = (term.get("name") or "").strip()
+    description = (term.get("description") or "").strip()
+    if name and description:
+        return f"{name}. {description}"
+    return name or description
+
+
+def _pick_owner_term_id(
+    terms: list[dict[str, str]],
+    sql_attr_description: str,
+) -> str | None:
+    """Choose the Term that best matches the SqlAttribute description.
+
+    With a single candidate (self-referential bridge, or only one FK target
+    has a Term), that Term wins without calling the reranker. With two or
+    more, rerank by ``sql_attr_description`` and take the highest score.
+    """
+    if not terms:
+        return None
+    if len(terms) == 1:
+        return terms[0]["id"]
+
+    query = (sql_attr_description or "").strip()
+    if not query:
+        logger.warning(
+            "SqlAttribute description empty — falling back to first target Term %r.",
+            terms[0].get("name"),
+        )
+        return terms[0]["id"]
+
+    hits = [
+        {"id": t["id"], "text": _term_hit_text(t), "name": t.get("name")} for t in terms
+    ]
+    hits = [h for h in hits if (h.get("text") or "").strip()]
+    if not hits:
+        return terms[0]["id"]
+
+    try:
+        ranked = rerank_hits(query, hits, top_n=1, **get_rerank_kwargs())
+    except Exception:
+        logger.exception(
+            "Rerank failed for bridge owner selection — falling back to first Term."
+        )
+        return terms[0]["id"]
+
+    if not ranked:
+        return terms[0]["id"]
+
+    winner = ranked[0]
+    logger.info(
+        "Bridge owner Term chosen by rerank: %r (score=%s) among %d candidate(s).",
+        winner.get("name") or winner.get("id"),
+        winner.get("_rerank_score"),
+        len(hits),
     )
-    return merge_term(term_name, description, table_id)
+    return winner.get("id") or terms[0]["id"]
 
 
 def _generate_bridge_sql_attribute(
@@ -178,10 +230,12 @@ def build_bridge_tables_sql_attributes(database_name: str) -> int:
     created = 0
     for candidate in candidates:
         table_name = candidate.get("table_name") or candidate.get("table_id")
-        term_id = _ensure_bridge_term_id(candidate)
-        if not term_id:
+
+        target_terms = _target_terms_for_bridge(candidate)
+        if not target_terms:
             logger.warning(
-                "Bridge table %r: could not resolve Term — skipping.", table_name
+                "Bridge table %r: no REPRESENTS Terms on FK targets — skipping.",
+                table_name,
             )
             continue
 
@@ -189,6 +243,13 @@ def build_bridge_tables_sql_attributes(database_name: str) -> int:
         if proposal is None:
             logger.warning(
                 "Bridge table %r: LLM returned no proposal — skipping.", table_name
+            )
+            continue
+
+        term_id = _pick_owner_term_id(target_terms, proposal.description)
+        if not term_id:
+            logger.warning(
+                "Bridge table %r: could not pick an owner Term — skipping.", table_name
             )
             continue
 
@@ -231,7 +292,10 @@ def build_bridge_tables_sql_attributes(database_name: str) -> int:
             continue
 
         logger.info(
-            "Bridge table %r: created SqlAttribute %r.", table_name, proposal.name
+            "Bridge table %r: created SqlAttribute %r on Term %r.",
+            table_name,
+            proposal.name,
+            term_id,
         )
         created += 1
 

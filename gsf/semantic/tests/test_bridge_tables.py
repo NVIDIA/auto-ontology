@@ -6,42 +6,13 @@ from unittest.mock import MagicMock, patch
 
 from gsf.dal import datasources as neo4j_datasources
 from gsf.dal.sql_attributes import SqlAttributeNameConflict
-from gsf.semantic import bridge_tables
 from gsf.semantic.bridge_tables import (
     _BridgeSqlAttributeProposal,
-    _junction_description,
-    _table_name_to_term_name,
+    _pick_owner_term_id,
+    _target_terms_for_bridge,
     build_bridge_tables_sql_attributes,
 )
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
-
-
-def test_table_name_to_term_name() -> None:
-    assert _table_name_to_term_name("order_items") == "Order Items"
-
-
-def test_junction_description_lists_related_tables() -> None:
-    desc = _junction_description(
-        "order_items",
-        [
-            {"target_table": "orders"},
-            {"target_table": "products"},
-        ],
-    )
-    assert "orders" in desc
-    assert "products" in desc
-
-
-def test_junction_description_self_referential() -> None:
-    desc = _junction_description(
-        "also_buy",
-        [
-            {"target_table": "product"},
-            {"target_table": "product"},
-        ],
-    )
-    assert "product" in desc
-    assert "Self-referential" in desc
 
 
 @patch("gsf.dal.datasources.get_neo4j_conn")
@@ -92,14 +63,74 @@ def test_fetch_bridge_table_candidates_returns_empty(mock_conn: MagicMock) -> No
     assert neo4j_datasources.fetch_bridge_table_candidates("shop") == []
 
 
+@patch("gsf.semantic.bridge_tables.get_term_record_for_table")
+def test_target_terms_for_bridge_dedupes_self_referential(
+    mock_get_term: MagicMock,
+) -> None:
+    mock_get_term.return_value = {
+        "id": "term-product",
+        "name": "Product",
+        "description": "A sellable item.",
+    }
+    terms = _target_terms_for_bridge(
+        {
+            "fk_pairs": [
+                {"target_table_id": "t-product", "target_table": "product"},
+                {"target_table_id": "t-product", "target_table": "product"},
+            ]
+        }
+    )
+    assert len(terms) == 1
+    assert terms[0]["id"] == "term-product"
+    assert mock_get_term.call_count == 1
+
+
+def test_pick_owner_term_single_candidate_skips_rerank() -> None:
+    term_id = _pick_owner_term_id(
+        [{"id": "term-a", "name": "Orders", "description": "Customer orders"}],
+        "Links orders to products.",
+    )
+    assert term_id == "term-a"
+
+
+@patch("gsf.semantic.bridge_tables.rerank_hits")
+def test_pick_owner_term_reranks_two_candidates(mock_rerank: MagicMock) -> None:
+    mock_rerank.return_value = [
+        {
+            "id": "term-products",
+            "name": "Products",
+            "text": "Products. Sellable goods.",
+            "_rerank_score": 0.9,
+        }
+    ]
+    term_id = _pick_owner_term_id(
+        [
+            {"id": "term-orders", "name": "Orders", "description": "Customer orders"},
+            {
+                "id": "term-products",
+                "name": "Products",
+                "description": "Sellable goods.",
+            },
+        ],
+        "Links orders to products via a junction table.",
+    )
+    assert term_id == "term-products"
+    mock_rerank.assert_called_once()
+    args, kwargs = mock_rerank.call_args
+    assert args[0] == "Links orders to products via a junction table."
+    assert {h["id"] for h in args[1]} == {"term-orders", "term-products"}
+
+
 @patch("gsf.semantic.bridge_tables.create_sql_attribute")
+@patch("gsf.semantic.bridge_tables._pick_owner_term_id")
 @patch("gsf.semantic.bridge_tables._generate_bridge_sql_attribute")
-@patch("gsf.semantic.bridge_tables._ensure_bridge_term_id")
+@patch("gsf.semantic.bridge_tables._target_terms_for_bridge")
 @patch("gsf.semantic.bridge_tables.fetch_bridge_table_candidates")
 def test_build_bridge_tables_persists_with_bridge_source(
     mock_fetch: MagicMock,
-    mock_term: MagicMock,
+    mock_terms: MagicMock,
     mock_llm: MagicMock,
+    mock_pick: MagicMock,
     mock_create: MagicMock,
 ) -> None:
     mock_fetch.return_value = [
@@ -111,7 +142,10 @@ def test_build_bridge_tables_persists_with_bridge_source(
             "fk_pairs": [],
         }
     ]
-    mock_term.return_value = "term-bridge"
+    mock_terms.return_value = [
+        {"id": "term-orders", "name": "Orders", "description": "Orders"},
+        {"id": "term-products", "name": "Products", "description": "Products"},
+    ]
     mock_llm.return_value = _BridgeSqlAttributeProposal(
         name="Order Products",
         description="Links orders to products.",
@@ -121,28 +155,66 @@ def test_build_bridge_tables_persists_with_bridge_source(
             "JOIN sales.products p ON p.id = oi.product_id"
         ),
     )
+    mock_pick.return_value = "term-products"
     mock_create.return_value = {"id": "attr-1"}
 
     count = build_bridge_tables_sql_attributes("shop")
 
     assert count == 1
+    mock_pick.assert_called_once_with(
+        mock_terms.return_value, "Links orders to products."
+    )
     mock_create.assert_called_once_with(
         name="Order Products",
         description="Links orders to products.",
         expression=mock_llm.return_value.expression,
-        term_id="term-bridge",
+        term_id="term-products",
         connector="shop",
         source=SQL_ATTR_SOURCE_BRIDGE,
     )
 
 
 @patch("gsf.semantic.bridge_tables.create_sql_attribute")
+@patch("gsf.semantic.bridge_tables._pick_owner_term_id")
 @patch("gsf.semantic.bridge_tables._generate_bridge_sql_attribute")
-@patch("gsf.semantic.bridge_tables._ensure_bridge_term_id")
+@patch("gsf.semantic.bridge_tables._target_terms_for_bridge")
 @patch("gsf.semantic.bridge_tables.fetch_bridge_table_candidates")
 def test_build_bridge_tables_skips_name_conflict(
     mock_fetch: MagicMock,
-    mock_term: MagicMock,
+    mock_terms: MagicMock,
+    mock_llm: MagicMock,
+    mock_pick: MagicMock,
+    mock_create: MagicMock,
+) -> None:
+    mock_fetch.return_value = [
+        {
+            "table_id": "t-bridge",
+            "table_name": "order_items",
+            "schema_name": "sales",
+            "fk_pairs": [],
+        }
+    ]
+    mock_terms.return_value = [
+        {"id": "term-orders", "name": "Orders", "description": "Orders"}
+    ]
+    mock_llm.return_value = _BridgeSqlAttributeProposal(
+        name="Order Products",
+        description="Links orders to products.",
+        expression="SELECT * FROM sales.order_items",
+    )
+    mock_pick.return_value = "term-orders"
+    mock_create.side_effect = SqlAttributeNameConflict("exists")
+
+    assert build_bridge_tables_sql_attributes("shop") == 0
+
+
+@patch("gsf.semantic.bridge_tables.create_sql_attribute")
+@patch("gsf.semantic.bridge_tables._generate_bridge_sql_attribute")
+@patch("gsf.semantic.bridge_tables._target_terms_for_bridge")
+@patch("gsf.semantic.bridge_tables.fetch_bridge_table_candidates")
+def test_build_bridge_tables_skips_when_no_target_terms(
+    mock_fetch: MagicMock,
+    mock_terms: MagicMock,
     mock_llm: MagicMock,
     mock_create: MagicMock,
 ) -> None:
@@ -154,46 +226,8 @@ def test_build_bridge_tables_skips_name_conflict(
             "fk_pairs": [],
         }
     ]
-    mock_term.return_value = "term-bridge"
-    mock_llm.return_value = _BridgeSqlAttributeProposal(
-        name="Order Products",
-        description="Links orders to products.",
-        expression="SELECT * FROM sales.order_items",
-    )
-    mock_create.side_effect = SqlAttributeNameConflict("exists")
+    mock_terms.return_value = []
 
     assert build_bridge_tables_sql_attributes("shop") == 0
-
-
-@patch("gsf.semantic.bridge_tables.merge_term")
-@patch("gsf.semantic.bridge_tables.get_term_id_for_table")
-def test_ensure_bridge_term_creates_when_missing(
-    mock_get_term: MagicMock,
-    mock_merge: MagicMock,
-) -> None:
-    mock_get_term.return_value = None
-    mock_merge.return_value = "term-new"
-
-    term_id = bridge_tables._ensure_bridge_term_id(
-        {
-            "table_id": "t1",
-            "table_name": "order_items",
-            "fk_pairs": [
-                {"target_table": "orders"},
-                {"target_table": "products"},
-            ],
-        }
-    )
-
-    assert term_id == "term-new"
-    mock_merge.assert_called_once()
-    assert mock_merge.call_args[0][0] == "Order Items"
-
-
-@patch("gsf.semantic.bridge_tables.get_term_id_for_table")
-def test_ensure_bridge_term_reuses_existing(mock_get_term: MagicMock) -> None:
-    mock_get_term.return_value = "term-existing"
-    term_id = bridge_tables._ensure_bridge_term_id(
-        {"table_id": "t1", "table_name": "order_items", "fk_pairs": []}
-    )
-    assert term_id == "term-existing"
+    mock_llm.assert_not_called()
+    mock_create.assert_not_called()
