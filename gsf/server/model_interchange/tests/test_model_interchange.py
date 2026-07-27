@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,10 +14,10 @@ import yaml
 
 from gsf.dal.model_interchange import (
     UnknownDatabaseIdsError,
+    _resolve_entity,
     assemble_export_document,
     resolve_sql_column_ids,
     validate_database_ids,
-    _resolve_entity,
 )
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
@@ -32,6 +33,12 @@ from gsf.server.model_interchange.embed import (
     flush_import_embeddings,
 )
 from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
+
+
+@contextmanager
+def _null_transaction():
+    """Stand in for ``write_transaction`` so unit tests need no live Neo4j."""
+    yield
 
 
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:
@@ -217,7 +224,7 @@ def test_export_model_all_databases_uses_empty_filter(
     mock_fetch.assert_called_once_with([])
 
 
-@patch("gsf.dal.model_interchange.get_neo4j_conn")
+@patch("gsf.dal.model_interchange.graph")
 def test_validate_database_ids_raises_for_unknown(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = [{"ids": ["db-1"]}]
 
@@ -323,7 +330,7 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
     ]
 
 
-@patch("gsf.dal.model_interchange.get_neo4j_conn")
+@patch("gsf.dal.model_interchange.graph")
 def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = [{"id": "live-1"}]
 
@@ -335,7 +342,7 @@ def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> N
     mock_conn.return_value.query_read.assert_called_once()
 
 
-@patch("gsf.dal.model_interchange.get_neo4j_conn")
+@patch("gsf.dal.model_interchange.graph")
 def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = []
     mock_conn.return_value.query_write.return_value = [{"id": "new-1"}]
@@ -353,6 +360,7 @@ def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     assert write_params["props"]["name"] == "orders"
 
 
+@patch("gsf.dal.model_interchange.write_transaction", _null_transaction)
 @patch("gsf.dal.model_interchange._import_custom_analyses")
 @patch("gsf.dal.model_interchange._import_sql_attributes")
 @patch("gsf.dal.model_interchange._import_semantic_fks")
@@ -382,3 +390,31 @@ def test_apply_import_model_creates_when_catalog_missing(
     assert summary["database_ids"] == ["live-db"]
     assert "created" in summary
     assert "skipped" in summary
+
+
+@patch("gsf.dal.model_interchange._import_terms", side_effect=RuntimeError("bad sql"))
+@patch("gsf.dal.model_interchange._import_joins")
+@patch("gsf.dal.model_interchange._import_foreign_keys")
+@patch("gsf.dal.model_interchange._delete_scoped_semantics_not_in_payload")
+@patch("gsf.dal.model_interchange._import_catalog")
+@patch("gsf.dal.model_interchange.write_transaction")
+def test_apply_import_model_runs_in_one_transaction(
+    mock_transaction: MagicMock,
+    mock_catalog: MagicMock,
+    *_mocks: MagicMock,
+) -> None:
+    """A failure part-way through must not escape the transaction scope."""
+    from gsf.dal.model_interchange import apply_import_model
+
+    mock_transaction.return_value = _null_transaction()
+    mock_catalog.return_value = ["live-db"]
+    document = assemble_export_document(
+        _export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    with pytest.raises(RuntimeError, match="bad sql"):
+        apply_import_model(document, replace=True, embed_buffer=None)
+
+    mock_transaction.assert_called_once()

@@ -17,9 +17,9 @@ from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
     Labels,
     Props,
 )
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.custom_analyses import detach_existing_sql_edges as detach_ca_sql_edges
+from gsf.dal.neo4j_tx import graph, write_transaction
 from gsf.dal.sql_attributes import detach_existing_sql_edges, link_to_term
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
@@ -229,7 +229,7 @@ def validate_database_ids(database_ids: list[str]) -> None:
     """Raise :class:`UnknownDatabaseIdsError` when any id is missing."""
     if not database_ids:
         return
-    rows = get_neo4j_conn().query_read(_LIST_DATABASE_IDS_QUERY)
+    rows = graph().query_read(_LIST_DATABASE_IDS_QUERY)
     known = set(rows[0]["ids"]) if rows else set()
     unknown = [db_id for db_id in database_ids if db_id not in known]
     if unknown:
@@ -239,7 +239,7 @@ def validate_database_ids(database_ids: list[str]) -> None:
 def fetch_export_rows(database_ids: list[str]) -> dict[str, Any]:
     """Return raw Neo4j rows used to assemble a :class:`GsfModelDocument`."""
     params = {"database_ids": database_ids, "source": SEMANTIC_SOURCE}
-    conn = get_neo4j_conn()
+    conn = graph()
     return {
         "catalog": conn.query_read(_EXPORT_CATALOG_QUERY, params),
         "foreign_keys": conn.query_read(_EXPORT_FKS_QUERY, params),
@@ -479,7 +479,26 @@ def apply_import_model(
 
     When *embed_buffer* is supplied, pre-embed rows for newly created nodes
     are appended for a later :func:`flush_import_embeddings` call.
+
+    The whole import is one transaction, so a failure part-way through (an
+    unparsable SQL attribute, say) leaves the graph untouched rather than
+    half-populated.
     """
+    with write_transaction():
+        return _apply_import_model(
+            document,
+            replace=replace,
+            embed_buffer=embed_buffer,
+        )
+
+
+def _apply_import_model(
+    document: GsfModelDocument,
+    *,
+    replace: bool,
+    embed_buffer: ImportEmbedBuffer | None = None,
+) -> dict[str, Any]:
+    """Apply the document. Callers go through :func:`apply_import_model`."""
     id_map: dict[str, str] = {}
     column_meta: dict[str, ColumnCatalogMeta] = {}
     created: dict[str, int] = {
@@ -572,7 +591,7 @@ def _resolve_entity(
     onto an existing catalog). Newly created nodes get a fresh UUID ``id``
     and ``imported_id`` set to the YAML id.
     """
-    conn = get_neo4j_conn()
+    conn = graph()
     existing = conn.query_read(
         f"""
         MATCH (n:{label})
@@ -639,7 +658,7 @@ def _import_catalog(
         if was_created:
             created["databases"] += 1
             if db_name:
-                get_neo4j_conn().query_write(
+                graph().query_write(
                     f"""
                     MATCH (db:{Labels.DB} {{id: $id}})
                     SET db.name = $name
@@ -661,7 +680,7 @@ def _import_catalog(
                 created["schemas"] += 1
             else:
                 skipped["schemas"] += 1
-            get_neo4j_conn().query_write(
+            graph().query_write(
                 f"""
                 MATCH (db:{Labels.DB} {{id: $db_id}})
                 MATCH (sch:{Labels.SCHEMA} {{id: $schema_id}})
@@ -686,7 +705,7 @@ def _import_catalog(
                     created["tables"] += 1
                 else:
                     skipped["tables"] += 1
-                get_neo4j_conn().query_write(
+                graph().query_write(
                     f"""
                     MATCH (sch:{Labels.SCHEMA} {{id: $schema_id}})
                     MATCH (tbl:{Labels.TABLE} {{id: $table_id}})
@@ -742,7 +761,7 @@ def _import_catalog(
                             )
                     else:
                         skipped["columns"] += 1
-                    get_neo4j_conn().query_write(
+                    graph().query_write(
                         f"""
                         MATCH (tbl:{Labels.TABLE} {{id: $table_id}})
                         MATCH (col:{Labels.COLUMN} {{id: $column_id}})
@@ -786,7 +805,7 @@ def _import_foreign_keys(document: GsfModelDocument, id_map: dict[str, str]) -> 
     ]
     if not rows:
         return
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         UNWIND $rows AS row
         MATCH (src:{Labels.COLUMN} {{id: row.source_column_id}})
@@ -812,7 +831,7 @@ def _import_joins(document: GsfModelDocument, id_map: dict[str, str]) -> None:
     ]
     if not rows:
         return
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         UNWIND $rows AS row
         MATCH (t1:{Labels.TABLE} {{id: row.source_table_id}})
@@ -853,7 +872,7 @@ def _delete_scoped_semantics_not_in_payload(
         "keep_ca_ids": keep_ca_ids,
         "source": SEMANTIC_SOURCE,
     }
-    conn = get_neo4j_conn()
+    conn = graph()
     # Match keep sets against imported_id (YAML id) or live id.
     conn.query_write(
         f"""
@@ -944,7 +963,7 @@ def _import_terms(
             _remap(id_map, table_id, kind="term represents table")
             for table_id in term.represents
         ]
-        get_neo4j_conn().query_write(
+        graph().query_write(
             f"""
             MATCH (term:{LABEL_TERM} {{id: $term_id}})
             OPTIONAL MATCH (:{Labels.TABLE})-[old:{REL_REPRESENTS}]->(term)
@@ -1003,7 +1022,7 @@ def _import_column_attributes(
             else:
                 skipped["column_attributes"] += 1
             live_col_id = _remap(id_map, attr.column_id, kind="column attribute column")
-            get_neo4j_conn().query_write(
+            graph().query_write(
                 f"""
                 MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
                 MATCH (col:{Labels.COLUMN} {{id: $column_id}})
@@ -1044,7 +1063,7 @@ def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> 
     ]
     if not rows:
         return
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         UNWIND $rows AS row
         MATCH (col:{Labels.COLUMN} {{id: row.column_id}})
@@ -1056,7 +1075,7 @@ def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> 
 
 
 def _database_name_for_term(term_id: str) -> str | None:
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (tbl:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{id: $term_id}})
         MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
@@ -1131,7 +1150,7 @@ def _import_sql_attributes(
             created["sql_attributes"] += 1
             live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
             database_name = _database_name_for_term(live_term_id)
-            get_neo4j_conn().query_write(
+            graph().query_write(
                 f"""
                 MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
                 SET attr.name = $name,
@@ -1204,7 +1223,7 @@ def _import_custom_analyses(
             except ModelImportValidationError:
                 live_col_id = None
             if live_col_id:
-                rows = get_neo4j_conn().query_read(
+                rows = graph().query_read(
                     f"""
                     MATCH (col:{Labels.COLUMN} {{id: $column_id}})<-[:{Edges.CONTAINS}]-
                           (tbl:{Labels.TABLE})<-[:{Edges.CONTAINS}]-
@@ -1218,7 +1237,7 @@ def _import_custom_analyses(
                 if rows:
                     database_name = rows[0]["database_name"]
 
-        get_neo4j_conn().query_write(
+        graph().query_write(
             f"""
             MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $id}})
             SET ca.name = $name,

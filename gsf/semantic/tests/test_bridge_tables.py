@@ -15,7 +15,7 @@ from gsf.semantic.bridge_tables import (
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_fetch_bridge_table_candidates_query_uses_bridge_source(
     mock_conn: MagicMock,
 ) -> None:
@@ -57,7 +57,7 @@ def test_fetch_bridge_table_candidates_query_uses_bridge_source(
     assert "HAS_ATTRIBUTE" in query
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_fetch_bridge_table_candidates_returns_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = []
     assert neo4j_datasources.fetch_bridge_table_candidates("shop") == []

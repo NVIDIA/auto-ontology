@@ -4,7 +4,7 @@
 
 """Neo4j data access for SqlAttribute / Sql subgraph.
 
-Contains only functions that call ``get_neo4j_conn()`` directly.
+Contains only functions that call ``graph()`` directly.
 
 Orchestration (SQL validation, connector resolution, VDB lifecycle)
 lives in ``gsf/server/sql_attributes/service.py``.
@@ -16,9 +16,9 @@ import logging
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
@@ -139,7 +139,7 @@ def _query_sql_attributes(
         {attr_filter}
         """
 
-    return get_neo4j_conn().query_read(
+    return graph().query_read(
         f"""
         {anchor}
         MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
@@ -175,7 +175,7 @@ def fetch_sql_attribute_counts(
     attr_filter, params = _sql_attr_zone_filter(
         zone_ids, data_ids_by_zone=data_ids_by_zone
     )
-    return get_neo4j_conn().query_read(
+    return graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {attr_filter}
@@ -203,7 +203,7 @@ def get_full_sql_attribute_by_id(
     disabled zones (with ``enabled: False``) so admins can see and manage
     them.
     """
-    conn = get_neo4j_conn()
+    conn = graph()
     rows = _query_sql_attributes(attr_id=attr_id, zone_ids=zone_ids)
     if not rows:
         return None
@@ -256,7 +256,7 @@ def fetch_sql_attributes_by_term_id(
 
 def find_attr_by_name(name: str, exclude_id: str | None) -> dict[str, str] | None:
     """Return ``{id, name}`` of a SqlAttribute using *name*, or None."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{name: $name}})
         WHERE $exclude_id IS NULL OR a.id <> $exclude_id
@@ -280,7 +280,7 @@ def find_attr_by_expression(
     collapsing whitespace before comparison.
     """
     normalized_expression = " ".join(expression.split()).lower()
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(:{LABEL_TERM} {{id: $term_id}})
         WHERE $exclude_id IS NULL OR attr.id <> $exclude_id
@@ -301,7 +301,7 @@ def find_attr_by_expression(
 
 def get_sql_attribute_by_id(attr_id: str) -> str | None:
     """Return the id of the SqlAttribute, or None if it doesn't exist."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         RETURN a.id AS id
@@ -319,7 +319,7 @@ def get_sql_attribute_by_id(attr_id: str) -> str | None:
 
 def detach_existing_sql_edges(attr_id: str) -> None:
     """Drop every HAS_SQL edge leaving the SqlAttribute."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
               -[r:{Edges.HAS_SQL}]->(:{Labels.SQL})
@@ -331,7 +331,7 @@ def detach_existing_sql_edges(attr_id: str) -> None:
 
 def link_to_term(attr_id: str, term_id: str) -> None:
     """Set the PROPERTY_OF edge from SqlAttribute to Term, replacing any prior link."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
         OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->(existing)
@@ -358,7 +358,7 @@ def update_sql_attribute(
 
     Omitted fields (``None``) are left unchanged.
     """
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         SET attr.name        = coalesce($name, attr.name),
@@ -383,7 +383,7 @@ def set_sql_attribute_description_suggestion(
     description_suggestion: str,
 ) -> None:
     """SET the cached LLM description suggestion on a SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         SET attr.description_suggestion = $description_suggestion
@@ -394,7 +394,7 @@ def set_sql_attribute_description_suggestion(
 
 def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
     """REMOVE the cached LLM description suggestion from a SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         REMOVE attr.description_suggestion
@@ -405,7 +405,7 @@ def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
 
 def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
     """REMOVE cached LLM suggestions from every SqlAttribute of a Term."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
               (term:{LABEL_TERM} {{id: $term_id}})
@@ -417,7 +417,7 @@ def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
 
 def delete_sql_attribute_node(attr_id: str) -> None:
     """DETACH DELETE the SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         DETACH DELETE attr
@@ -451,7 +451,7 @@ def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
            term.name AS term_name
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+        rows = graph().query_read(query, {"ids": attr_ids})
     except Exception:
         logger.warning(
             "fetch_sql_attributes_with_sql: Neo4j query failed",
@@ -498,7 +498,7 @@ def fetch_tables_from_sql_attributes(
            sch.name AS schema_name, cols
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+        rows = graph().query_read(query, {"ids": attr_ids})
     except Exception:
         logger.warning(
             "fetch_tables_from_sql_attributes: Neo4j query failed",
@@ -537,7 +537,7 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
     Returns a list of dicts with keys: text, name, label, id.
     Empty list when the attribute or its Sql node is missing.
     """
-    result = get_neo4j_conn().query_read(
+    result = graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
               -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})

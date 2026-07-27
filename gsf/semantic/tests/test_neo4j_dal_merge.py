@@ -20,14 +20,14 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     assert params["source"] == SEMANTIC_SOURCE
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_sample_values("table-1", {})
     mock_conn.return_value.query_write.assert_not_called()
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
     import json
 
@@ -42,14 +42,14 @@ def test_store_column_sample_values_writes_json(mock_conn: MagicMock) -> None:
     assert json.loads(entries[0]["sample_values"]) == [10, 20, 30]
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_store_column_uniqueness_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_uniqueness("table-1", {})
     mock_conn.return_value.query_write.assert_not_called()
 
 
-@patch("gsf.dal.datasources.get_neo4j_conn")
+@patch("gsf.dal.datasources.graph")
 def test_store_column_uniqueness_writes_flags(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_datasources.store_column_uniqueness("table-1", {"id": True, "status": False})
