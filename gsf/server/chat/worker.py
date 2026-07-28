@@ -16,10 +16,13 @@ retriever/connector singletons once, then loops on an input queue:
 again. The cold-start cost is paid at server boot and at each cancel
 (when we kill+respawn), not per request.
 
-Because the product spec is "one conversation at a time", the pool size
-is hard-coded to 1: a single warm worker ready to be acquired, plus
-async replenishment after acquire/cancel so the next question almost
-always finds the slot prewarmed.
+The router (see ``router.py``) now allows one in-flight stream *per
+conversation* rather than one globally, so any number of conversations may
+run concurrently. This pool still only keeps a single warm standby: the
+first conversation to ask finds it prewarmed, and any additional concurrent
+conversations simply pay a cold start (``acquire()`` spawns a fresh
+subprocess on demand) — there is no cap on how many can run at once, just
+no more than one pre-warmed spare at a time.
 """
 
 from __future__ import annotations

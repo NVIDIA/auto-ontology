@@ -36,3 +36,7 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+    # Scopes the in-progress slot (see router.py) to a single conversation.
+    # Callers that don't send one (e.g. direct API/NAT plugin usage) get a
+    # fresh, never-colliding key per request instead of a shared slot.
+    conversation_id: str | None = None

@@ -11,13 +11,17 @@ pool keeps the cold-start cost off the request path.
 
 Concurrency model
 -----------------
-The agent pipeline is not safe to run in parallel (shared retriever/connector
-state, single LLM rate budget), so only one stream is allowed at a time.
+Each conversation gets its own warm agent subprocess and may only have one
+in-flight stream at a time; different conversations run fully independently
+(each `WarmPool.acquire()` cold-starts a fresh subprocess if no standby is
+free, so there's no cap on how many conversations can run concurrently).
+Slots are keyed by ``request.conversation_id`` — callers that omit it (e.g.
+direct API/NAT plugin usage) get a fresh key per request and never collide.
 
-* If the slot is empty → request runs.
+* If the conversation's slot is empty → request runs.
 * If the slot is held by a stream whose **client is still connected**
-  (typical case: a second browser window/tab posting concurrently) →
-  the new request is rejected with HTTP 409.
+  (typical case: a second browser window/tab posting concurrently into the
+  same conversation) → the new request is rejected with HTTP 409.
 * If the slot is held by an **orphaned** stream (its client navigated away
   and the TCP connection died) → the new request preempts: the orphan
   worker is killed-and-replaced via the pool, and the new request takes
@@ -40,6 +44,7 @@ import asyncio
 import json
 import logging
 import threading
+import uuid
 from dataclasses import dataclass
 from typing import Generator
 
@@ -68,8 +73,9 @@ _DISCONNECT_POLL_S = 0.1
 
 @dataclass
 class _Slot:
-    """In-flight stream descriptor stored in ``_active_slot``."""
+    """In-flight stream descriptor stored in ``_active_slots``."""
 
+    key: str
     worker: PrewarmedWorker
     client_alive: threading.Event
     # Set if the watchdog detected a client disconnect. Tells the stream's
@@ -81,7 +87,9 @@ class _Slot:
     released: threading.Event
 
 
-_active_slot: _Slot | None = None
+# Keyed by conversation_id (or a generated per-request key when absent) so
+# distinct conversations never contend for the same slot.
+_active_slots: dict[str, _Slot] = {}
 _slot_lock = threading.Lock()
 
 
@@ -90,22 +98,21 @@ def _sse(event: dict) -> str:
 
 
 def _try_claim_slot(new_slot: _Slot) -> _Slot | None:
-    """Install ``new_slot`` if the previous one's client is gone.
+    """Install ``new_slot`` under its key if the previous holder is gone.
 
     Returns the displaced slot (caller must replace its worker via the pool)
-    on success. Raises HTTPException(409) if the previous slot still has a
-    live client.
+    on success. Raises HTTPException(409) if the previous slot for this key
+    still has a live client.
     """
 
-    global _active_slot
     with _slot_lock:
-        prev = _active_slot
+        prev = _active_slots.get(new_slot.key)
         if prev is not None and prev.client_alive.is_set():
             raise HTTPException(
                 status_code=409,
                 detail="Conversation in progress",
             )
-        _active_slot = new_slot
+        _active_slots[new_slot.key] = new_slot
         return prev
 
 
@@ -122,10 +129,9 @@ def _release(slot: _Slot) -> None:
     slot.released.set()
     slot.client_alive.clear()
 
-    global _active_slot
     with _slot_lock:
-        if _active_slot is slot:
-            _active_slot = None
+        if _active_slots.get(slot.key) is slot:
+            del _active_slots[slot.key]
 
     pool = get_pool()
     if slot.cancelled.is_set():
@@ -193,9 +199,15 @@ async def chat_completions(
     if not semantic_layer_calculated():
         raise HTTPException(status_code=409, detail=_SEMANTIC_MISSING_MSG)
 
+    # Callers without a conversation_id (direct API/NAT plugin usage) get a
+    # fresh key per request so they never contend with each other or with
+    # conversations that do send one.
+    key = request.conversation_id or str(uuid.uuid4())
+
     pool = get_pool()
     worker = pool.acquire()
     slot = _Slot(
+        key=key,
         worker=worker,
         client_alive=threading.Event(),
         cancelled=threading.Event(),
