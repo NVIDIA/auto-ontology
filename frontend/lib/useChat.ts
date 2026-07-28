@@ -34,12 +34,20 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
+	// Tracks whether `onStart` fired for the in-flight request, so `onError`
+	// can tell a pre-stream rejection (user turn never committed) apart from
+	// a mid-stream failure (user turn already committed and persisted).
+	const startedRef = useRef(false);
 
 	const appendAssistantMessage = useCallback(
 		(
 			conversationId: string | null,
 			content: string,
 			extras?: { sql?: string; sqlResponse?: string },
+			// False for a pre-stream failure (e.g. 409 "Conversation in progress"):
+			// the matching user turn was never persisted either, so persisting only
+			// this half would leave an orphan assistant row in the conversation.
+			persist = true,
 		) => {
 			const assistantMsg: ChatMessage = {
 				id: uid(),
@@ -51,7 +59,7 @@ export const useChat = () => {
 			};
 			setMessages((prev) => [...prev, assistantMsg]);
 
-			if (!conversationId) return;
+			if (!conversationId || !persist) return;
 
 			// Persist the assistant turn to the conversation history. Analytics
 			// is captured server-side in the chat proxy route, so there is no
@@ -93,11 +101,13 @@ export const useChat = () => {
 			// message is never persisted, keeping the chat history clean.
 			setSteps([]);
 			setIsLoading(true);
+			startedRef.current = false;
 
 			const controller = streamChat(
-				{ question: text },
+				{ question: text, conversationId },
 				{
 					onStart() {
+						startedRef.current = true;
 						setMessages((prev) => [...prev, userMsg]);
 						if (conversationId) {
 							conversationsApi
@@ -138,8 +148,14 @@ export const useChat = () => {
 						controllerRef.current = null;
 					},
 
-					onError() {
-						appendAssistantMessage(conversationId, GENERIC_ERROR_MESSAGE);
+					onError(event) {
+						const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+						appendAssistantMessage(
+							conversationId,
+							message,
+							undefined,
+							startedRef.current,
+						);
 						setSteps((prev) =>
 							prev.map((s) => ({ ...s, status: 'completed' as const })),
 						);
