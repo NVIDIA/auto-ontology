@@ -85,17 +85,20 @@ model ConversationAnalytics {
 
 // Auto generated from https://better-auth.com/docs/concepts/database#generating-schema
 model User {
-  id            String         @id
+  id            String                  @id
   name          String
   email         String
-  emailVerified Boolean        @default(false)
+  emailVerified Boolean                 @default(false)
   image         String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
   role          String?
-  banned        Boolean?       @default(false)
+  banned        Boolean?                @default(false)
   banReason     String?
   banExpires    DateTime?
+  // Auto-generate visualizations for SQL results (Settings > Agent Settings).
+  // Defaults to on for every user, existing and new.
+  visualization Boolean                 @default(true)
   sessions      Session[]
   accounts      Account[]
   ssoproviders  SsoProvider[]

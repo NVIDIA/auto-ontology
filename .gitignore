@@ -39,6 +39,7 @@ lancedb/*
 
 # Cursor debug logs
 .cursor/
+.cursorignore
 
 # Cache
 .cache/
