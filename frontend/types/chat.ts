@@ -13,6 +13,7 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
+	conversationId?: string | null;
 };
 
 export type StepEvent = {

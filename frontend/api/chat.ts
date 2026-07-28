@@ -49,6 +49,7 @@ export const streamChat = (
 
 	const body = JSON.stringify({
 		question: payload.question,
+		conversation_id: payload.conversationId ?? undefined,
 	});
 
 	(async () => {
