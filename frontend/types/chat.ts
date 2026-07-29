@@ -13,6 +13,8 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
+	/** When true (default), the agent may attach chart specs for ResultChart. */
+	visualization?: boolean;
 };
 
 export type StepEvent = {
@@ -31,6 +33,8 @@ export type ResultEvent = {
 			| {
 					[key: string]: string;
 			  }[];
+		/** ResultChart specs when visualization succeeded (illumex Message 2). */
+		charts?: Record<string, unknown>[];
 	};
 };
 

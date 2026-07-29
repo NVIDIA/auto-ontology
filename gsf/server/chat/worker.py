@@ -12,9 +12,10 @@ OS via process kill — same constraint as before.
 What's new vs. spawn-per-request: we keep **one** subprocess alive
 between requests. It imports ``nemo_retriever`` and builds the
 retriever/connector singletons once, then loops on an input queue:
-``("ask", question)`` → stream agent events on the output queue → idle
-again. The cold-start cost is paid at server boot and at each cancel
-(when we kill+respawn), not per request.
+``("ask", {"question": ..., "visualization": ...})`` → stream agent
+events on the output queue → idle again. The cold-start cost is paid
+at server boot and at each cancel (when we kill+respawn), not per
+request.
 
 Because the product spec is "one conversation at a time", the pool size
 is hard-coded to 1: a single warm worker ready to be acquired, plus
@@ -117,13 +118,25 @@ def _worker_loop(
             continue
 
         try:
+            # Payload is either a plain question string (legacy) or a dict with
+            # ``question`` + optional ``visualization`` flag from ChatRequest.
+            if isinstance(payload, dict):
+                question = payload.get("question", "")
+                visualization_enabled = bool(payload.get("visualization", True))
+            else:
+                question = payload
+                visualization_enabled = True
+
             agent_payload = {
-                "question": payload,
+                "question": question,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
+                "path_state": {
+                    "visualization_enabled": visualization_enabled,
+                },
             }
             for event in stream_agent_response(agent_payload):
                 out_q.put((_TAG_EVENT, event))
@@ -167,8 +180,18 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(
+        self,
+        question: str,
+        *,
+        visualization: bool = True,
+    ) -> None:
+        self._in_q.put(
+            (
+                _MSG_ASK,
+                {"question": question, "visualization": visualization},
+            )
+        )
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

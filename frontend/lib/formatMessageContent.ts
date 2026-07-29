@@ -8,6 +8,8 @@ export enum MessageType {
 	LINK = 'link',
 	LINK_BOLD = 'link_bold',
 	CODE = 'code',
+	CHART = 'chart',
+	CHART_CAROUSEL = 'chart_carousel',
 	NEW_LINE = 'new_line',
 }
 
@@ -17,12 +19,16 @@ export type ContentSegment =
 	| { type: MessageType.LINK; url: string; text: string }
 	| { type: MessageType.LINK_BOLD; url: string; text: string }
 	| { type: MessageType.CODE; text: string }
+	| { type: MessageType.CHART; text: string }
+	| { type: MessageType.CHART_CAROUSEL; text: string }
 	| { type: MessageType.NEW_LINE; text: string };
 
 /**
  * Parses a Slack-style mrkdwn string into a flat list of typed segments.
  *
  * Supported syntax:
+ *   ```chart ...```         → CHART (ResultChart JSON)
+ *   ```chart-carousel ...``` → CHART_CAROUSEL
  *   ```code block```       → CODE
  *   *bold*                 → BOLD
  *   <url|label>            → LINK
@@ -37,10 +43,23 @@ export const formatAndModifyContent = (input: string): ContentSegment[] => {
 
 	return segments.flatMap<ContentSegment>((segment) => {
 		if (/^```[\s\S]*```$/.test(segment)) {
+			const inner = segment.replace(/^```|```$/g, '');
+			const langMatch = inner.match(/^(\S*)\n?([\s\S]*)$/);
+			const lang = (langMatch?.[1] ?? '').trim().toLowerCase();
+			const body = (langMatch?.[2] ?? '').trimEnd();
+
+			if (lang === 'chart') {
+				return [{ type: MessageType.CHART, text: body }];
+			}
+			if (lang === 'chart-carousel') {
+				return [{ type: MessageType.CHART_CAROUSEL, text: body }];
+			}
+
 			return [
 				{
 					type: MessageType.CODE,
-					text: segment.replace(/^```|```$/g, ''),
+					// Preserve prior behaviour: CODE text is the fence body without fences.
+					text: inner,
 				},
 			];
 		}

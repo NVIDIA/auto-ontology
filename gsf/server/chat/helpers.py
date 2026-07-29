@@ -28,6 +28,7 @@ NODE_LABELS: dict[str, str] = {
     "validate_intent": "Validating intent",
     "execute_sql_query": "Executing SQL",
     "format_and_respond": "Formatting response",
+    "visualize": "Building charts",
     "unconstructable_sql_response": "SQL could not be constructed",
 }
 
@@ -36,6 +37,10 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+    visualization: bool = Field(
+        default=True,
+        description="When true, append ResultChart specs after formatting the answer.",
+    )
 
 
 class ChatRequestWithEvidence(BaseModel):
