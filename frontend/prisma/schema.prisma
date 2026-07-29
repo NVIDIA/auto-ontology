@@ -47,6 +47,12 @@ model Prompt {
 
 // Generic key/value application settings (e.g. feature flags). Read by the
 // Python ingestion service via psycopg to gate background jobs.
+//
+// Known keys:
+//   semantic_compilation_enabled — "true"/"false", Settings > Semantic Compilation
+//   visualization_enabled        — "true"/"false", Settings > Agent Settings
+//                                  (auto-generate visualizations for SQL results;
+//                                   a missing row means enabled)
 model Configuration {
   key       String   @id
   value     String
@@ -96,9 +102,6 @@ model User {
   banned        Boolean?                @default(false)
   banReason     String?
   banExpires    DateTime?
-  // Auto-generate visualizations for SQL results (Settings > Agent Settings).
-  // Defaults to on for every user, existing and new.
-  visualization Boolean                 @default(true)
   sessions      Session[]
   accounts      Account[]
   ssoproviders  SsoProvider[]

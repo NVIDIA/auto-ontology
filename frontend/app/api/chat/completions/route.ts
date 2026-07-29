@@ -12,6 +12,7 @@
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
 import { getPrisma } from '@/lib/prisma';
+import { isVisualizationEnabled } from '@/lib/configurations';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -19,12 +20,14 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const SOURCE_HEADER = 'x-gsf-source';
 
-const extractQuestion = (rawBody: string): string => {
+const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {
-		const parsed = JSON.parse(rawBody) as { question?: unknown };
-		return typeof parsed.question === 'string' ? parsed.question : '';
+		const parsed: unknown = JSON.parse(rawBody);
+		return typeof parsed === 'object' && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: {};
 	} catch {
-		return '';
+		return {};
 	}
 };
 
@@ -76,7 +79,15 @@ const readFinalAnswer = async (
 };
 
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
-	const body = await req.text();
+	const payload = parseBody(await req.text());
+
+	// The visualization toggle is an instance-wide setting, so it is resolved
+	// here rather than trusted from the caller — a stale browser tab or a
+	// direct API client cannot opt back into charts once admins turn them off.
+	const body = JSON.stringify({
+		...payload,
+		visualization: await isVisualizationEnabled(),
+	});
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -124,7 +135,7 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	// then tee the stream — one branch flows to the client untouched, the other
 	// is parsed after the response to backfill the final answer. `user` is the
 	// resolved GSF user (session or SSO bearer), injected by withPermission.
-	const question = extractQuestion(body);
+	const question = typeof payload.question === 'string' ? payload.question : '';
 
 	const prisma = getPrisma();
 	const row = await prisma.conversationAnalytics.create({

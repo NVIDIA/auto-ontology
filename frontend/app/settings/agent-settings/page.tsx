@@ -5,21 +5,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { usersApi } from '@/api/users';
+import { visualizationApi } from '@/api/settings';
 import { Toast } from '@/common/Toast';
 
 export default function AgentSettingsPage() {
-	// Defaults to on (matches the `visualization` column's default) until the
-	// server value is fetched, so the switch never flashes "off" first.
+	// Defaults to on (matches a missing `visualization_enabled` configuration)
+	// until the server value is fetched, so the switch never flashes "off" first.
 	const [visualization, setVisualization] = useState(true);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
 		let cancelled = false;
-		usersApi.getVisualization().then((res) => {
+		visualizationApi.get().then((res) => {
 			if (cancelled || res.error) return;
-			setVisualization(res.visualization);
+			setVisualization(res.enabled);
 		});
 		return () => {
 			cancelled = true;
@@ -33,7 +33,7 @@ export default function AgentSettingsPage() {
 		setError(null);
 		setVisualization(next);
 
-		const res = await usersApi.setVisualization(next);
+		const res = await visualizationApi.setEnabled(next);
 		setSaving(false);
 
 		if (res.error) {
@@ -56,7 +56,7 @@ export default function AgentSettingsPage() {
 								Visualize SQL Results
 							</h2>
 							<p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-								Auto-generate visualizations for SQL results
+								Auto-generate visualizations for SQL results, for all users
 							</p>
 						</div>
 						<button

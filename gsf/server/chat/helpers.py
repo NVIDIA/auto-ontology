@@ -39,5 +39,10 @@ class ChatRequest(BaseModel):
     question: str = Field(..., min_length=1)
     visualization: bool = Field(
         default=True,
-        description="When true, append ResultChart specs after formatting the answer.",
+        description=(
+            "When true, append ResultChart specs after formatting the answer. "
+            "The web app's proxy route sets this from the instance-wide "
+            "`visualization_enabled` configuration; direct API callers may "
+            "send it themselves and default to enabled."
+        ),
     )

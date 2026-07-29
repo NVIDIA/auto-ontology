@@ -47,10 +47,9 @@ export const streamChat = (
 ): AbortController => {
 	const controller = new AbortController();
 
-	const body = JSON.stringify({
-		question: payload.question,
-		visualization: payload.visualization ?? true,
-	});
+	// The visualization flag is resolved server-side from the instance-wide
+	// Agent Settings configuration, so it is deliberately not sent here.
+	const body = JSON.stringify({ question: payload.question });
 
 	(async () => {
 		try {

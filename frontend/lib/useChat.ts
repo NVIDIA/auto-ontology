@@ -7,7 +7,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { streamChat } from '@/api/chat';
 import { conversationsApi } from '@/api/conversations';
-import { usersApi } from '@/api/users';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 
 let nextId = 0;
@@ -45,19 +44,6 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
-	// Mirrors Settings → Agent Settings "Visualize SQL Results" (default on).
-	const visualizationRef = useRef(true);
-
-	useEffect(() => {
-		usersApi
-			.getVisualization()
-			.then((res) => {
-				if (!res.error && typeof res.visualization === 'boolean') {
-					visualizationRef.current = res.visualization;
-				}
-			})
-			.catch(() => {});
-	}, []);
 
 	const appendAssistantMessage = useCallback(
 		(
@@ -119,7 +105,7 @@ export const useChat = () => {
 			setIsLoading(true);
 
 			const controller = streamChat(
-				{ question: text, visualization: visualizationRef.current },
+				{ question: text },
 				{
 					onStart() {
 						setMessages((prev) => [...prev, userMsg]);

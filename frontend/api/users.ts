@@ -3,10 +3,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { authClient } from '@/auth/auth-client';
-import { requests } from './requests';
 import { Role } from '@/enums/auth';
 import type { User } from '@/types/auth';
-import type { ResponseWithError } from './types';
 
 type ListResult = { users: User[]; error: string | null };
 
@@ -28,13 +26,4 @@ export const usersApi = {
 	setRole: (userId: string, role: Role) => authClient.admin.setRole({ userId, role }),
 
 	remove: (userId: string) => authClient.admin.removeUser({ userId }),
-
-	// Current user's "Visualize SQL Results" preference (Settings > Agent Settings).
-	getVisualization: (): Promise<ResponseWithError<{ visualization: boolean }>> =>
-		requests.get('users/visualization'),
-
-	setVisualization: (
-		visualization: boolean,
-	): Promise<ResponseWithError<{ visualization: boolean }>> =>
-		requests.put('users/visualization', { visualization }),
 };
