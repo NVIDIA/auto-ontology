@@ -22,11 +22,17 @@ direct API/NAT plugin usage) get a fresh key per request and never collide.
 * If the slot is held by a stream whose **client is still connected**
   (typical case: a second browser window/tab posting concurrently into the
   same conversation) → the new request is rejected with HTTP 409.
-* If the slot is held by an **orphaned** stream (its client navigated away
-  and the TCP connection died) → the new request preempts: the orphan
-  worker is killed-and-replaced via the pool, and the new request takes
-  the standby. This is what makes "navigate away → come back → ask again"
-  work without a 409.
+* If the slot is held by an **orphaned** stream (its ASGI client disconnected
+  and ``client_alive`` was cleared) → the new request preempts: the orphan
+  worker is killed-and-replaced via the pool, and the new request takes the
+  standby.
+
+  **Web-app caveat:** the Next.js ``/api/chat/completions`` proxy tees the
+  upstream SSE stream and keeps the FastAPI connection alive until the run
+  finishes (so ``after()`` can persist the assistant turn). Browser
+  navigate-away therefore does **not** free the slot for web-app requests —
+  a second submit into the same conversation still gets 409 until the run
+  completes. Use ``/chat/watch`` to reattach instead.
 
 Disconnect detection
 --------------------

@@ -20,12 +20,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const GET = withPermission({ conversation: ['read'] })(async (req, { user }) => {
-	// `conversationId` (not `conversation_id`): `proxy.ts` rewrites any /api/*
-	// query key ending in `_id` into a path segment, which would 404 here since
-	// this route has no dynamic segment.
 	const conversationId = new URL(req.url).searchParams.get('conversationId');
 	if (!conversationId) {
-		return new Response('Missing conversation_id', { status: 400 });
+		return new Response('Missing conversationId', { status: 400 });
 	}
 
 	const conversation = await findOwnedConversation(user, conversationId);

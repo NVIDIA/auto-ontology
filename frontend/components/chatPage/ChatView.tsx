@@ -44,6 +44,7 @@ export const ChatView = () => {
 		isLoading,
 		sendMessage,
 		resumeIfRunning,
+		stopGeneration,
 		clearConversation,
 	} = useChat();
 
@@ -95,6 +96,8 @@ export const ChatView = () => {
 		}
 		if (loadedFocusRef.current === focusId) return;
 		loadedFocusRef.current = focusId;
+		clearConversation();
+
 		let active = true;
 		setMessageListLoading(true);
 		conversationsApi
@@ -117,7 +120,7 @@ export const ChatView = () => {
 		return () => {
 			active = false;
 		};
-	}, [focusId, setMessages, resumeIfRunning, updateFocusInUrl]);
+	}, [focusId, setMessages, resumeIfRunning, clearConversation, updateFocusInUrl]);
 
 	const handleNewChat = useCallback(async () => {
 		clearConversation();
@@ -135,6 +138,8 @@ export const ChatView = () => {
 				updateFocusInUrl(id);
 				return;
 			}
+
+			clearConversation();
 			setMessageListLoading(true);
 			try {
 				const detail: ConversationDetail = await conversationsApi.get(id);
@@ -151,7 +156,7 @@ export const ChatView = () => {
 				setMessageListLoading(false);
 			}
 		},
-		[activeConvId, setMessages, resumeIfRunning, updateFocusInUrl],
+		[activeConvId, setMessages, resumeIfRunning, clearConversation, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(
@@ -237,7 +242,7 @@ export const ChatView = () => {
 
 						<ChatInput
 							onSend={handleSend}
-							onStop={clearConversation}
+							onStop={stopGeneration}
 							isLoading={isLoading}
 						/>
 					</>

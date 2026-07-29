@@ -26,6 +26,7 @@ export type ChatEventCallbacks = {
 	onStep: (event: StepEvent) => void;
 	onResult: (event: ResultEvent) => void;
 	onError: (event: ErrorEvent) => void;
+	onDone?: () => void;
 };
 
 export type StreamChatCallbacks = ChatEventCallbacks & {
@@ -71,7 +72,7 @@ const consumeSseStream = async (res: Response, callbacks: ChatEventCallbacks): P
 			const data = trimmed.slice(6);
 			if (data === '[DONE]') {
 				streamCompleted = true;
-				return;
+				break;
 			}
 
 			try {
@@ -93,6 +94,7 @@ const consumeSseStream = async (res: Response, callbacks: ChatEventCallbacks): P
 				// skip malformed lines
 			}
 		}
+		if (streamCompleted) break;
 	}
 
 	// Stream closed without [DONE]/result/error — surface as an error so
@@ -102,7 +104,10 @@ const consumeSseStream = async (res: Response, callbacks: ChatEventCallbacks): P
 			type: 'error',
 			message: 'Connection closed before the agent finished.',
 		});
+		return;
 	}
+
+	callbacks.onDone?.();
 };
 
 /**
@@ -159,8 +164,8 @@ export const streamChat = (
  * tailing live updates the same way `streamChat` does.
  *
  * If nothing is running for this conversation, the connection closes
- * immediately with `[DONE]` and none of the callbacks fire — callers
- * should treat that as a silent no-op, not an error.
+ * immediately with `[DONE]` and `onDone` fires with no step/result/error
+ * events — callers should treat that as a silent no-op, not an error.
  */
 export const watchChat = (
 	conversationId: string,
@@ -178,7 +183,10 @@ export const watchChat = (
 				{ signal: controller.signal },
 			);
 
-			if (!res.ok || !res.body) return;
+			if (!res.ok || !res.body) {
+				callbacks.onDone?.();
+				return;
+			}
 
 			await consumeSseStream(res, callbacks);
 		} catch (err: unknown) {
