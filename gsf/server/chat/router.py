@@ -47,7 +47,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gsf.dal.terms import semantic_layer_calculated
-from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, ChatRequestWithEvidence
+from gsf.server.chat.helpers import NODE_LABELS, ChatRequest
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 
 logger = logging.getLogger(__name__)
@@ -228,38 +228,3 @@ async def chat_completions(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-@router.post("/chat/with-evidence")
-async def chat_with_evidence(request: ChatRequestWithEvidence) -> dict:
-    """Non-streaming chat endpoint with optional evidence and database scope.
-
-    Folds ``evidence`` into the question, calls the agent directly
-    (no warm-pool), and returns the result dict synchronously.
-    """
-    from gsf.connectors import get_connectors
-    from gsf.retrieval.text_to_sql.main import get_agent_response
-    from gsf.retrieval.text_to_sql.state import TextToSQLPayload
-    from gsf.server.chat.settings_dal import fetch_acronyms, fetch_custom_prompts
-    from gsf.utils import get_data_objects_retriever, get_semantic_objects_retriever
-
-    question = request.question
-    if request.evidence:
-        question = f"{question}\n\nEvidence: {request.evidence}"
-
-    payload: TextToSQLPayload = {
-        "question": question,
-        "data_retriever": get_data_objects_retriever(),
-        "semantic_retriever": get_semantic_objects_retriever(),
-        "connectors": get_connectors(),
-        "acronyms": fetch_acronyms(),
-        "custom_prompts": fetch_custom_prompts(),
-        "target_db": request.database,
-    }
-    result = get_agent_response(payload)
-    return {
-        "database": request.database,
-        "question": request.question,
-        "evidence": request.evidence,
-        **result,
-    }

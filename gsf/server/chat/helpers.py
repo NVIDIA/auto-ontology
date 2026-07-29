@@ -41,11 +41,3 @@ class ChatRequest(BaseModel):
         default=True,
         description="When true, append ResultChart specs after formatting the answer.",
     )
-
-
-class ChatRequestWithEvidence(BaseModel):
-    """Payload for chat requests that include an evidence hint."""
-
-    question: str = Field(..., min_length=1)
-    database: str = Field(..., min_length=1)
-    evidence: str = Field(default="")
