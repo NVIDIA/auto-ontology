@@ -5,7 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamChat, watchChat } from '@/api/chat';
+import { cancelChat, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
 import { stringifySqlResponse } from '@/lib/sqlResponse';
 import type { ChatMessage, GraphStep } from '@/types/chat';
@@ -35,6 +35,12 @@ export const useChat = () => {
 	// user's own in-flight send) so switching conversations or sending a new
 	// message never gets tangled up with a background resume attempt.
 	const resumeControllerRef = useRef<AbortController | null>(null);
+	// The conversation whose run this hook is currently attached to, so Stop
+	// can cancel it server-side without the caller having to pass it back in.
+	const activeRunConvIdRef = useRef<string | null>(null);
+	// In-flight cancel from Stop — the next send awaits this so it doesn't race
+	// the server still holding the conversation slot (and get a 409).
+	const cancelInFlightRef = useRef<Promise<void> | null>(null);
 	// Mirrors `messages` for the async watch callbacks, which need the current
 	// transcript without re-creating `resumeIfRunning` on every new message.
 	const messagesRef = useRef(messages);
@@ -94,11 +100,28 @@ export const useChat = () => {
 		[],
 	);
 
-	const stopGeneration = useCallback(() => {
+	// Detaches this tab from the run. `cancel` additionally aborts the run
+	// server-side, which is what the Stop button wants: the agent holds the
+	// conversation's slot until it finishes, so merely dropping the stream
+	// would leave the next question rejected with 409.
+	const stopGeneration = useCallback((cancel = true) => {
 		controllerRef.current?.abort();
 		controllerRef.current = null;
 		resumeControllerRef.current?.abort();
 		resumeControllerRef.current = null;
+
+		const conversationId = activeRunConvIdRef.current;
+		activeRunConvIdRef.current = null;
+		if (cancel && conversationId) {
+			const pending = cancelChat(conversationId).catch(() => {});
+			cancelInFlightRef.current = pending;
+			void pending.finally(() => {
+				if (cancelInFlightRef.current === pending) {
+					cancelInFlightRef.current = null;
+				}
+			});
+		}
+
 		setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 		setIsLoading(false);
 	}, []);
@@ -122,6 +145,7 @@ export const useChat = () => {
 			const controller = watchChat(conversationId, {
 				onStep(event) {
 					sawActivity = true;
+					activeRunConvIdRef.current = conversationId;
 					setIsLoading(true);
 					setSteps((prev) => {
 						const completed = prev.map((s) => ({
@@ -146,10 +170,12 @@ export const useChat = () => {
 					appendAssistantMessage(response, { sql: sqlCode, sqlResponse });
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
+					activeRunConvIdRef.current = null;
 					resumeControllerRef.current = null;
 				},
 
 				onError(event) {
+					activeRunConvIdRef.current = null;
 					if (!sawActivity) {
 						// The watch connection itself failed before we ever confirmed
 						// a run was in progress — likely a network blip while probing
@@ -166,6 +192,7 @@ export const useChat = () => {
 				},
 
 				onDone() {
+					activeRunConvIdRef.current = null;
 					if (sawActivity) {
 						resumeControllerRef.current = null;
 						return;
@@ -189,8 +216,11 @@ export const useChat = () => {
 		[appendAssistantMessage, pollForPersistedAssistant],
 	);
 
+	// Resolves true once the backend accepted the question, false if it was
+	// refused before the stream started — the caller uses that to decide
+	// whether the typed text can be discarded.
 	const sendMessage = useCallback(
-		(text: string, conversationId: string | null) => {
+		async (text: string, conversationId: string | null): Promise<boolean> => {
 			// A background resume may still be tailing this conversation (its
 			// `isLoading` only flips on the first step, so the input isn't locked).
 			// Drop it — this send supersedes it.
@@ -204,21 +234,31 @@ export const useChat = () => {
 				timestamp: Date.now(),
 			};
 
-			// Lock the input immediately so the Send button morphs into Stop and
-			// duplicate sends are ignored — but DO NOT add the user message to
-			// the conversation yet. We only show it once the backend accepts the
-			// request via the `onStart` callback below; on 409 "Conversation in
-			// progress" (or any other pre-stream error) it never appears, keeping
-			// the visible chat history in sync with what the proxy route actually
-			// persisted (or didn't).
+			// Show the user turn immediately — waiting for `onStart` made the
+			// bubble lag behind a post-cancel worker cold-start, so the input
+			// looked empty for a noticeable beat. On a pre-stream refusal we
+			// roll it back so the transcript still matches what was persisted.
+			setMessages((prev) => [...prev, userMsg]);
 			setSteps([]);
 			setIsLoading(true);
+			activeRunConvIdRef.current = conversationId;
+
+			// Wait out a Stop's cancel so we don't POST into a slot that's still
+			// held for a few hundred ms (which would 409 and leave the question
+			// looking like it never sent).
+			const pendingCancel = cancelInFlightRef.current;
+			if (pendingCancel) await pendingCancel;
+
+			let settle: (accepted: boolean) => void = () => {};
+			const accepted = new Promise<boolean>((resolve) => {
+				settle = resolve;
+			});
 
 			const controller = streamChat(
 				{ question: text, conversationId },
 				{
 					onStart() {
-						setMessages((prev) => [...prev, userMsg]);
+						settle(true);
 					},
 
 					onStep(event) {
@@ -250,39 +290,46 @@ export const useChat = () => {
 							prev.map((s) => ({ ...s, status: 'completed' as const })),
 						);
 						setIsLoading(false);
+						activeRunConvIdRef.current = null;
 						controllerRef.current = null;
 					},
 
 					onError(event) {
 						const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+						setSteps((prev) =>
+							prev.map((s) => ({ ...s, status: 'completed' as const })),
+						);
+						setIsLoading(false);
+						activeRunConvIdRef.current = null;
+						controllerRef.current = null;
 
+						// Another stream already owns this conversation (a second tab,
+						// or a run we stopped watching but couldn't cancel). Nothing
+						// was submitted, so roll back the optimistic user turn, keep
+						// the question in the input, and attach to the live run.
 						if (message === CONVERSATION_IN_PROGRESS && conversationId) {
-							setSteps((prev) =>
-								prev.map((s) => ({ ...s, status: 'completed' as const })),
-							);
-							setIsLoading(false);
-							controllerRef.current = null;
+							setMessages((prev) => prev.filter((m) => m.id !== userMsg.id));
+							settle(false);
 							resumeIfRunning(conversationId);
 							return;
 						}
 
 						appendAssistantMessage(message);
-						setSteps((prev) =>
-							prev.map((s) => ({ ...s, status: 'completed' as const })),
-						);
-						setIsLoading(false);
-						controllerRef.current = null;
+						settle(true);
 					},
 				},
 			);
 
 			controllerRef.current = controller;
+			return accepted;
 		},
 		[appendAssistantMessage, resumeIfRunning],
 	);
 
+	// Leaves the run alone server-side: it keeps streaming into the buffer and
+	// persists its answer, so reopening the conversation picks it back up.
 	const clearConversation = useCallback(() => {
-		stopGeneration();
+		stopGeneration(false);
 		setMessages([]);
 		setSteps([]);
 	}, [stopGeneration]);

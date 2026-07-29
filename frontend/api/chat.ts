@@ -200,3 +200,16 @@ export const watchChat = (
 
 	return controller;
 };
+
+/**
+ * Aborts the run in flight for `conversationId`, freeing the conversation
+ * so the next question isn't rejected with 409. Best-effort: aborting the
+ * browser's own stream is what the user sees, and a failed cancel only
+ * means the agent finishes on its own.
+ */
+export const cancelChat = async (conversationId: string): Promise<void> => {
+	// Query param is deliberately `conversationId` — see `watchChat`.
+	await fetch(`/api/chat/cancel?conversationId=${encodeURIComponent(conversationId)}`, {
+		method: 'POST',
+	});
+};

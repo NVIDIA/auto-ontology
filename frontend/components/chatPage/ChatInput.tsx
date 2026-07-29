@@ -8,7 +8,8 @@ import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } fro
 import { Icon, IconName } from '@/common/icons';
 
 type ChatInputProps = {
-	onSend: (text: string) => void;
+	/** Resolves false when the question was refused, so the text can be restored. */
+	onSend: (text: string) => Promise<boolean>;
 	onStop: () => void;
 	isLoading: boolean;
 };
@@ -34,16 +35,28 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 	}, []);
 
 	const handleSubmit = useCallback(
-		(e?: FormEvent) => {
+		async (e?: FormEvent) => {
 			e?.preventDefault();
 			const el = textareaRef.current;
 			if (!el) return;
 			const text = el.value.trim();
 			if (!text || isLoading) return;
-			onSend(text);
+
+			// Clear straight away so sending feels immediate, then put the text
+			// back if the backend refused it — a rejected question is never added
+			// to the transcript, so discarding it would lose it entirely.
 			el.value = '';
 			el.style.height = 'auto';
 			setHasText(false);
+
+			const accepted = await onSend(text);
+			if (accepted) return;
+
+			const target = textareaRef.current;
+			if (!target || target.value.trim()) return;
+			target.value = text;
+			resetHeight();
+			setHasText(true);
 		},
 		[onSend, isLoading],
 	);

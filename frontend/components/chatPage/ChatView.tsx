@@ -190,7 +190,7 @@ export const ChatView = () => {
 	);
 
 	const handleSend = useCallback(
-		async (text: string) => {
+		async (text: string): Promise<boolean> => {
 			let convId = activeConvId;
 			if (!convId) {
 				try {
@@ -202,10 +202,10 @@ export const ChatView = () => {
 					updateFocusInUrl(convId);
 					refreshConversations();
 				} catch {
-					return;
+					return false;
 				}
 			}
-			sendMessage(text, convId);
+			return sendMessage(text, convId);
 		},
 		[activeConvId, sendMessage, refreshConversations, updateFocusInUrl],
 	);

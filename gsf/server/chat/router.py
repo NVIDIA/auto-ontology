@@ -341,3 +341,29 @@ async def chat_watch(conversation_id: str) -> StreamingResponse:
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.post("/chat/cancel")
+async def chat_cancel(conversation_id: str) -> dict[str, bool]:
+    """Abort the in-flight run for ``conversation_id``, if any.
+
+    Backs the chat UI's Stop button. Without this, stopping only detached
+    the browser while the agent kept running and holding the slot, so the
+    very next question in the same conversation was rejected with 409.
+
+    Killing the worker makes ``PrewarmedWorker.events()`` return rather
+    than raise, so ``_pump`` appends no error event: the run's buffer ends
+    with whatever steps completed and the stream closes with ``[DONE]``.
+    Consumers therefore see a run that stopped without an answer, and the
+    completions proxy persists no assistant turn for it.
+    """
+
+    with _slot_lock:
+        slot = _active_slots.get(conversation_id)
+
+    if slot is None:
+        return {"cancelled": False}
+
+    slot.cancelled.set()
+    _release(slot)
+    return {"cancelled": True}
