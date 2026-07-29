@@ -122,10 +122,10 @@ def _worker_loop(
             # ``question`` + optional ``visualization`` flag from ChatRequest.
             if isinstance(payload, dict):
                 question = payload.get("question", "")
-                visualization_enabled = bool(payload.get("visualization", True))
+                visualization_enabled = bool(payload.get("visualization", False))
             else:
                 question = payload
-                visualization_enabled = True
+                visualization_enabled = False
 
             agent_payload = {
                 "question": question,
@@ -184,7 +184,7 @@ class PrewarmedWorker:
         self,
         question: str,
         *,
-        visualization: bool = True,
+        visualization: bool = False,
     ) -> None:
         self._in_q.put(
             (

@@ -9,9 +9,9 @@ import { visualizationApi } from '@/api/settings';
 import { Toast } from '@/common/Toast';
 
 export default function AgentSettingsPage() {
-	// Defaults to on (matches a missing `visualization_enabled` configuration)
-	// until the server value is fetched, so the switch never flashes "off" first.
-	const [visualization, setVisualization] = useState(true);
+	// Defaults to off (matches a missing `visualization_enabled` configuration)
+	// until the server value is fetched, so the switch never flashes "on" first.
+	const [visualization, setVisualization] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 

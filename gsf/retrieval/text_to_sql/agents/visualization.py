@@ -41,7 +41,7 @@ class VisualizationAgent(BaseAgent):
         if not isinstance(final_response, dict):
             return {}
 
-        if path_state.get("visualization_enabled", True) is False:
+        if not path_state.get("visualization_enabled", False):
             self.logger.info("Visualization disabled by user setting — skip")
             return {}
 
