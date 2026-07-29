@@ -20,6 +20,17 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     assert params["source"] == SEMANTIC_SOURCE
 
 
+@patch("gsf.dal.terms.get_neo4j_conn")
+def test_fetch_terms_with_sqls_excludes_owned_sql(mock_conn: MagicMock) -> None:
+    mock_conn.return_value.query_read.return_value = []
+
+    assert neo4j_terms.fetch_terms_with_sqls() == []
+
+    query, params = mock_conn.return_value.query_read.call_args.args
+    assert "WHERE NOT EXISTS { (sql)<-[:HAS_SQL]-() }" in query
+    assert params == {"source": SEMANTIC_SOURCE}
+
+
 @patch("gsf.dal.datasources.graph")
 def test_store_column_sample_values_skips_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()

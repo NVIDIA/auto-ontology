@@ -29,7 +29,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
 from gsf.dal.terms import fetch_table_schema_map, fetch_terms_with_sqls
-from gsf.semantic.constants import SEMANTIC_SOURCE, SQL_ATTR_SOURCE_SQL
+from gsf.semantic.constants import SQL_ATTR_SOURCE_SQL
 from gsf.server.sql_attributes.service import (
     SqlAttributeNameConflict,
     SqlAttributeSqlError,
@@ -559,7 +559,7 @@ def suggest_sql_attributes(database_name: str) -> int:
     Returns the total number of new SqlAttribute nodes written.
     """
     logger.info("Collecting SQL expressions per term…")
-    term_rows = fetch_terms_with_sqls(SEMANTIC_SOURCE)
+    term_rows = fetch_terms_with_sqls()
 
     if not term_rows:
         logger.info(
