@@ -44,8 +44,9 @@ import asyncio
 import json
 import logging
 import threading
+import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Generator
 
 from fastapi import APIRouter, HTTPException, Request
@@ -70,6 +71,10 @@ _SEMANTIC_MISSING_MSG = (
 # a navigate-away → come-back-and-ask flow always finds the slot free.
 _DISCONNECT_POLL_S = 0.1
 
+# How often `_stream_slot` re-checks `slot.buffer` for new events when it
+# has caught up to the live tail. Also the SSE heartbeat cadence.
+_BUFFER_POLL_S = 0.25
+
 
 @dataclass
 class _Slot:
@@ -82,9 +87,21 @@ class _Slot:
     # finally whether to ``replace`` the worker (cancel) or ``return_alive``
     # it to the warm pool (natural completion).
     cancelled: threading.Event
-    # Latches the moment any path (watchdog or stream finally) has called
-    # back into the pool, so the second path doesn't double-release.
+    # Latches the moment any path (watchdog or pump) has called back into
+    # the pool, so the second path doesn't double-release.
     released: threading.Event
+    # Append-only log of every SSE event this run has produced so far,
+    # filled by ``_pump`` independently of any HTTP connection. Any number
+    # of ``_stream_slot`` consumers (the original submitter, plus any
+    # ``/chat/watch`` reconnects) replay it from index 0 and then keep
+    # tailing it live — this is what lets a reloaded browser tab resume
+    # watching a run that started before the reload.
+    buffer: list[dict] = field(default_factory=list)
+    buffer_lock: threading.Lock = field(default_factory=threading.Lock)
+    # Set once the worker's event generator ends (naturally or via error),
+    # i.e. once ``buffer`` is complete and no more events will ever be
+    # appended.
+    finished: threading.Event = field(default_factory=threading.Event)
 
 
 # Keyed by conversation_id (or a generated per-request key when absent) so
@@ -162,32 +179,68 @@ async def _watch_disconnect(http_request: Request, slot: _Slot) -> None:
         await asyncio.sleep(_DISCONNECT_POLL_S)
 
 
-def _stream_chat(worker: PrewarmedWorker) -> Generator[str, None, None]:
+def _pump(slot: _Slot) -> None:
+    """Drain ``slot.worker``'s event queue into ``slot.buffer``.
+
+    Runs in its own thread, independent of any HTTP request/response — this
+    decoupling is what lets a reloaded/reopened browser tab "reconnect" via
+    ``/chat/watch`` and see every step of a run from the start, not just
+    whatever happens to arrive after it joins. Releases the slot back to
+    the pool once the run ends, naturally or via error, regardless of
+    whether anyone is currently watching.
+    """
+
     try:
-        for item in worker.events():
+        for item in slot.worker.events():
             if item is None:
-                # SSE comment — keeps the connection alive against any
-                # intermediary (proxy/load balancer) that drops idle
-                # streams. Clients ignore non-"data:" lines.
-                yield ": ping\n\n"
+                # Just a queue-poll heartbeat from the worker side; the
+                # heartbeat clients actually see is generated per-consumer
+                # in `_stream_slot` instead, so there's nothing to buffer.
                 continue
             event = item
             if event.get("type") == "step":
                 node_name = event.get("node", "")
                 event = {**event, "label": NODE_LABELS.get(node_name, node_name)}
-            yield _sse(event)
+            with slot.buffer_lock:
+                slot.buffer.append(event)
     except RuntimeError as exc:
         logger.exception("Agent stream failed")
-        yield _sse({"type": "error", "message": f"Agent stream failed: {exc}"})
+        with slot.buffer_lock:
+            slot.buffer.append(
+                {"type": "error", "message": f"Agent stream failed: {exc}"}
+            )
+    finally:
+        slot.finished.set()
+        _release(slot)
+
+
+def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
+    """Replay ``slot.buffer`` from the start, then tail it live.
+
+    Shared by the submitting request and any later ``/chat/watch``
+    reconnects — every consumer just reads the same growing buffer, so a
+    client that reconnects mid-run sees every step from the beginning
+    before catching up to the live tail.
+    """
+
+    index = 0
+    while True:
+        with slot.buffer_lock:
+            new_events = slot.buffer[index:]
+            index = len(slot.buffer)
+        for event in new_events:
+            yield _sse(event)
+        if new_events:
+            continue
+        if slot.finished.is_set():
+            break
+        # SSE comment — keeps the connection alive against any intermediary
+        # (proxy/load balancer) that drops idle streams. Clients ignore
+        # non-"data:" lines.
+        yield ": ping\n\n"
+        time.sleep(_BUFFER_POLL_S)
 
     yield "data: [DONE]\n\n"
-
-
-def _stream_with_slot(slot: _Slot) -> Generator[str, None, None]:
-    try:
-        yield from _stream_chat(slot.worker)
-    finally:
-        _release(slot)
 
 
 @router.post("/chat/completions")
@@ -230,10 +283,52 @@ async def chat_completions(
         _release(displaced)
 
     worker.submit(request.question)
+    threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))
 
     return StreamingResponse(
-        _stream_with_slot(slot),
+        _stream_slot(slot),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.get("/chat/watch")
+async def chat_watch(conversation_id: str) -> StreamingResponse:
+    """Reattach to an in-flight run for ``conversation_id``, if any.
+
+    Purely a passive observer: it never submits a question, never touches
+    ``client_alive``/``cancelled`` (so it can't trigger or block the 409
+    "Conversation in progress" logic in `_try_claim_slot`), and has no
+    effect on the run if it disconnects. This is what lets a reloaded or
+    reopened browser tab recover the live progress UI (and, once it lands,
+    the final answer) for a run it didn't itself start — replaying every
+    buffered step from the beginning, then tailing new ones as they arrive.
+
+    If nothing is running for this conversation, the stream ends
+    immediately with `[DONE]` and no events, which the frontend treats
+    identically to "nothing to resume" — no separate status endpoint
+    needed.
+    """
+
+    with _slot_lock:
+        slot = _active_slots.get(conversation_id)
+
+    if slot is None:
+        return StreamingResponse(
+            iter(["data: [DONE]\n\n"]),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    return StreamingResponse(
+        _stream_slot(slot),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
