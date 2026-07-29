@@ -37,7 +37,15 @@ export const ChatView = () => {
 	const [semanticReady, setSemanticReady] = useState<boolean | null>(null);
 	const loadedFocusRef = useRef<string | null>(null);
 
-	const { messages, setMessages, steps, isLoading, sendMessage, clearConversation } = useChat();
+	const {
+		messages,
+		setMessages,
+		steps,
+		isLoading,
+		sendMessage,
+		resumeIfRunning,
+		clearConversation,
+	} = useChat();
 
 	const updateFocusInUrl = useCallback(
 		(id: string | null) => {
@@ -70,44 +78,14 @@ export const ChatView = () => {
 	}, []);
 
 	useEffect(() => {
-		let active = true;
 		setSidebarLoading(true);
-		conversationsApi
-			.list()
-			.then((summaries: ConversationSummary[]) => {
-				if (!active) return;
-				setConversations(
-					summaries.map((s) => ({
-						id: s.id,
-						title: s.title || 'New conversation',
-						messages: [],
-						createdAt: new Date(s.createdAt).getTime(),
-					})),
-				);
-			})
-			.catch(() => {})
-			.finally(() => {
-				if (active) setSidebarLoading(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, []);
+		refreshConversations().finally(() => setSidebarLoading(false));
 
-	useEffect(() => {
-		let active = true;
 		semanticCompilationApi
 			.getStatus()
-			.then((res) => {
-				if (active) setSemanticReady(res.calculated);
-			})
-			.catch(() => {
-				if (active) setSemanticReady(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, []);
+			.then((res) => setSemanticReady(res.calculated))
+			.catch(() => setSemanticReady(false));
+	}, [refreshConversations]);
 
 	useEffect(() => {
 		if (!focusId) {
@@ -126,6 +104,7 @@ export const ChatView = () => {
 				const conv = toConversation(detail);
 				setActiveConvId(detail.id);
 				setMessages(conv.messages);
+				resumeIfRunning(detail.id);
 			})
 			.catch(() => {
 				if (!active) return;
@@ -138,7 +117,7 @@ export const ChatView = () => {
 		return () => {
 			active = false;
 		};
-	}, [focusId, setMessages, updateFocusInUrl]);
+	}, [focusId, setMessages, resumeIfRunning, updateFocusInUrl]);
 
 	const handleNewChat = useCallback(async () => {
 		clearConversation();
@@ -163,6 +142,7 @@ export const ChatView = () => {
 				loadedFocusRef.current = id;
 				setActiveConvId(id);
 				setMessages(conv.messages);
+				resumeIfRunning(id);
 				setSidebarOpen(false);
 				updateFocusInUrl(id);
 			} catch {
@@ -171,7 +151,7 @@ export const ChatView = () => {
 				setMessageListLoading(false);
 			}
 		},
-		[activeConvId, setMessages, updateFocusInUrl],
+		[activeConvId, setMessages, resumeIfRunning, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(

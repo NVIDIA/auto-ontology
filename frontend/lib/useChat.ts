@@ -5,7 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { streamChat } from '@/api/chat';
+import { streamChat, watchChat } from '@/api/chat';
 import { stringifySqlResponse } from '@/lib/sqlResponse';
 import type { ChatMessage, GraphStep } from '@/types/chat';
 
@@ -20,6 +20,10 @@ export const useChat = () => {
 	const [steps, setSteps] = useState<GraphStep[]>([]);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
+	// Tracks a `resumeIfRunning` watch, separately from `controllerRef` (the
+	// user's own in-flight send) so switching conversations or sending a new
+	// message never gets tangled up with a background resume attempt.
+	const resumeControllerRef = useRef<AbortController | null>(null);
 
 	// Purely local UI state — the chat proxy route persists both the user's
 	// and the assistant's turns to the conversation server-side (so history
@@ -44,6 +48,8 @@ export const useChat = () => {
 		() => () => {
 			controllerRef.current?.abort();
 			controllerRef.current = null;
+			resumeControllerRef.current?.abort();
+			resumeControllerRef.current = null;
 		},
 		[],
 	);
@@ -123,9 +129,79 @@ export const useChat = () => {
 		[appendAssistantMessage],
 	);
 
+	// Reattaches to a run already in progress for `conversationId`, if any —
+	// e.g. after a page reload or reopening the browser mid-response. The
+	// backend replays every step buffered since the run started, so this
+	// rebuilds `steps`/`isLoading` exactly as if this tab had been watching
+	// the whole time, then appends the final answer once it lands. If
+	// nothing is running, `watchChat` closes immediately with no events and
+	// this is a silent no-op — no loading flash, no stray messages.
+	const resumeIfRunning = useCallback(
+		(conversationId: string) => {
+			// Never disturb an active local send.
+			if (controllerRef.current) return;
+
+			resumeControllerRef.current?.abort();
+			setSteps([]);
+			let sawActivity = false;
+
+			const controller = watchChat(conversationId, {
+				onStep(event) {
+					sawActivity = true;
+					setIsLoading(true);
+					setSteps((prev) => {
+						const completed = prev.map((s) => ({
+							...s,
+							status: 'completed' as const,
+						}));
+						return [
+							...completed,
+							{ node: event.node, label: event.label, status: 'active' },
+						];
+					});
+				},
+
+				onResult(event) {
+					const {
+						response,
+						sql_code: sqlCode,
+						sql_response_from_db: sqlResponseFromDb,
+					} = event.answer;
+					const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
+
+					appendAssistantMessage(response, { sql: sqlCode, sqlResponse });
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
+					resumeControllerRef.current = null;
+				},
+
+				onError(event) {
+					if (!sawActivity) {
+						// The watch connection itself failed before we ever confirmed
+						// a run was in progress — likely a network blip while probing
+						// an idle conversation. Stay silent rather than injecting an
+						// error bubble for something that may never have been running.
+						resumeControllerRef.current = null;
+						return;
+					}
+					const message = event.message.trim() || GENERIC_ERROR_MESSAGE;
+					appendAssistantMessage(message);
+					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
+					setIsLoading(false);
+					resumeControllerRef.current = null;
+				},
+			});
+
+			resumeControllerRef.current = controller;
+		},
+		[appendAssistantMessage],
+	);
+
 	const clearConversation = useCallback(() => {
 		controllerRef.current?.abort();
 		controllerRef.current = null;
+		resumeControllerRef.current?.abort();
+		resumeControllerRef.current = null;
 		setMessages([]);
 		setSteps([]);
 		setIsLoading(false);
@@ -137,6 +213,7 @@ export const useChat = () => {
 		steps,
 		isLoading,
 		sendMessage,
+		resumeIfRunning,
 		clearConversation,
 	};
 };

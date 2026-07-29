@@ -22,7 +22,13 @@ const getResponseErrorMessage = async (res: Response): Promise<string> => {
 	return text;
 };
 
-export type StreamChatCallbacks = {
+export type ChatEventCallbacks = {
+	onStep: (event: StepEvent) => void;
+	onResult: (event: ResultEvent) => void;
+	onError: (event: ErrorEvent) => void;
+};
+
+export type StreamChatCallbacks = ChatEventCallbacks & {
 	/**
 	 * Fires once the backend has accepted the request (HTTP 200 + body ready
 	 * to stream). Useful for committing optimistic state — e.g. the user
@@ -31,9 +37,72 @@ export type StreamChatCallbacks = {
 	 * leave orphan messages in the conversation.
 	 */
 	onStart?: () => void;
-	onStep: (event: StepEvent) => void;
-	onResult: (event: ResultEvent) => void;
-	onError: (event: ErrorEvent) => void;
+};
+
+/**
+ * Reads an already-open SSE `Response` body, dispatching `step`/`result`/
+ * `error` events to `callbacks` as they arrive. Shared by `streamChat`
+ * (submitting a new question) and `watchChat` (reattaching to a run
+ * already in progress) since both consume the exact same wire format.
+ *
+ * Resolves once `[DONE]` is seen. If the underlying connection closes
+ * before `[DONE]` ever arrives — network drop, server restart, etc. — the
+ * caller has no way to know how the run ended, so this surfaces it via
+ * `onError` rather than leaving the UI stuck in a loading state forever.
+ */
+const consumeSseStream = async (res: Response, callbacks: ChatEventCallbacks): Promise<void> => {
+	const reader = res.body!.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+	let streamCompleted = false;
+
+	while (true) {
+		const { done, value } = await reader.read();
+		if (done) break;
+
+		buffer += decoder.decode(value, { stream: true });
+		const lines = buffer.split('\n');
+		buffer = lines.pop() ?? '';
+
+		for (const line of lines) {
+			const trimmed = line.trim();
+			if (!trimmed.startsWith('data: ')) continue;
+
+			const data = trimmed.slice(6);
+			if (data === '[DONE]') {
+				streamCompleted = true;
+				return;
+			}
+
+			try {
+				const event: ChatStreamEvent = JSON.parse(data);
+				switch (event.type) {
+					case 'step':
+						callbacks.onStep(event);
+						break;
+					case 'result':
+						streamCompleted = true;
+						callbacks.onResult(event);
+						break;
+					case 'error':
+						streamCompleted = true;
+						callbacks.onError(event);
+						break;
+				}
+			} catch {
+				// skip malformed lines
+			}
+		}
+	}
+
+	// Stream closed without [DONE]/result/error — surface as an error so
+	// the UI can drop out of loading instead of hanging forever.
+	if (!streamCompleted) {
+		callbacks.onError({
+			type: 'error',
+			message: 'Connection closed before the agent finished.',
+		});
+	}
 };
 
 /**
@@ -70,59 +139,48 @@ export const streamChat = (
 			}
 
 			callbacks.onStart?.();
+			await consumeSseStream(res, callbacks);
+		} catch (err: unknown) {
+			if (err instanceof DOMException && err.name === 'AbortError') return;
+			callbacks.onError({
+				type: 'error',
+				message: err instanceof Error ? err.message : 'Unknown error',
+			});
+		}
+	})();
 
-			const reader = res.body.getReader();
-			const decoder = new TextDecoder();
-			let buffer = '';
-			let streamCompleted = false;
+	return controller;
+};
 
-			while (true) {
-				const { done, value } = await reader.read();
-				if (done) break;
+/**
+ * Reattaches to a run already in progress for `conversationId`, if any —
+ * e.g. after a page reload or reopening the browser mid-response. Replays
+ * every step buffered server-side since the run started, then keeps
+ * tailing live updates the same way `streamChat` does.
+ *
+ * If nothing is running for this conversation, the connection closes
+ * immediately with `[DONE]` and none of the callbacks fire — callers
+ * should treat that as a silent no-op, not an error.
+ */
+export const watchChat = (
+	conversationId: string,
+	callbacks: ChatEventCallbacks,
+): AbortController => {
+	const controller = new AbortController();
 
-				buffer += decoder.decode(value, { stream: true });
-				const lines = buffer.split('\n');
-				buffer = lines.pop() ?? '';
+	(async () => {
+		try {
+			// Query param is deliberately `conversationId` (not `conversation_id`):
+			// `proxy.ts` auto-rewrites any `/api/*` query key ending in `_id` into a
+			// path segment (e.g. `?db_id=x` -> `/x`), which would 404 this route.
+			const res = await fetch(
+				`/api/chat/watch?conversationId=${encodeURIComponent(conversationId)}`,
+				{ signal: controller.signal },
+			);
 
-				for (const line of lines) {
-					const trimmed = line.trim();
-					if (!trimmed.startsWith('data: ')) continue;
+			if (!res.ok || !res.body) return;
 
-					const data = trimmed.slice(6);
-					if (data === '[DONE]') {
-						streamCompleted = true;
-						return;
-					}
-
-					try {
-						const event: ChatStreamEvent = JSON.parse(data);
-						switch (event.type) {
-							case 'step':
-								callbacks.onStep(event);
-								break;
-							case 'result':
-								streamCompleted = true;
-								callbacks.onResult(event);
-								break;
-							case 'error':
-								streamCompleted = true;
-								callbacks.onError(event);
-								break;
-						}
-					} catch {
-						// skip malformed lines
-					}
-				}
-			}
-
-			// Stream closed without [DONE]/result/error — surface as an error
-			// so the UI can drop out of loading instead of hanging forever.
-			if (!streamCompleted) {
-				callbacks.onError({
-					type: 'error',
-					message: 'Connection closed before the agent finished.',
-				});
-			}
+			await consumeSseStream(res, callbacks);
 		} catch (err: unknown) {
 			if (err instanceof DOMException && err.name === 'AbortError') return;
 			callbacks.onError({
