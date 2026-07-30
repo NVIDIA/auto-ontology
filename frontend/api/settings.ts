@@ -2,6 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { requests } from './requests';
+import type { ResponseWithError } from './types';
+
 export type Prompt = {
 	id: string;
 	content: string;
@@ -74,4 +77,13 @@ export const semanticCompilationApi = {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
 		}),
+};
+
+// Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
+export const visualizationApi = {
+	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.get('configurations/visualization'),
+
+	setEnabled: (enabled: boolean): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.put('configurations/visualization', { enabled }),
 };

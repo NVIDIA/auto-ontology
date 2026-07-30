@@ -47,6 +47,12 @@ model Prompt {
 
 // Generic key/value application settings (e.g. feature flags). Read by the
 // Python ingestion service via psycopg to gate background jobs.
+//
+// Known keys:
+//   semantic_compilation_enabled — "true"/"false", Settings > Semantic Compilation
+//   visualization_enabled        — "true"/"false", Settings > Agent Settings
+//                                  (auto-generate visualizations for SQL results;
+//                                   a missing row means disabled)
 model Configuration {
   key       String   @id
   value     String
@@ -85,15 +91,15 @@ model ConversationAnalytics {
 
 // Auto generated from https://better-auth.com/docs/concepts/database#generating-schema
 model User {
-  id            String         @id
+  id            String                  @id
   name          String
   email         String
-  emailVerified Boolean        @default(false)
+  emailVerified Boolean                 @default(false)
   image         String?
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
   role          String?
-  banned        Boolean?       @default(false)
+  banned        Boolean?                @default(false)
   banReason     String?
   banExpires    DateTime?
   sessions      Session[]

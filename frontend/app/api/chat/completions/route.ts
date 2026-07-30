@@ -24,7 +24,8 @@ import { userCan } from '@/auth/permissions';
 import type { ResolvedUser } from '@/auth/resolve-user';
 import { getPrisma } from '@/lib/prisma';
 import { findOwnedConversation } from '@/lib/chatConversations';
-import { stringifySqlResponse } from '@/lib/sqlResponse';
+import { buildAnswerMessages, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
+import { isVisualizationEnabled } from '@/lib/configurations';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -32,23 +33,14 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const SOURCE_HEADER = 'x-gsf-source';
 
-const extractQuestion = (rawBody: string): string => {
+const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {
-		const parsed = JSON.parse(rawBody) as { question?: unknown };
-		return typeof parsed.question === 'string' ? parsed.question : '';
+		const parsed: unknown = JSON.parse(rawBody);
+		return typeof parsed === 'object' && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: {};
 	} catch {
-		return '';
-	}
-};
-
-const extractConversationId = (rawBody: string): string | null => {
-	try {
-		const parsed = JSON.parse(rawBody) as { conversation_id?: unknown };
-		return typeof parsed.conversation_id === 'string' && parsed.conversation_id.trim()
-			? parsed.conversation_id
-			: null;
-	} catch {
-		return null;
+		return {};
 	}
 };
 
@@ -70,25 +62,21 @@ const resolveOwnedConversation = async (
 
 type ChatStreamResultEvent = {
 	type?: string;
-	answer?: {
-		response?: string;
-		sql_code?: string;
-		sql_response_from_db?: unknown;
-	};
+	answer?: AgentAnswer;
 	message?: string;
 };
 
-// Consume a teed copy of the SSE stream, returning the final answer's
-// response text, SQL, stringified SQL response rows, and — on a mid-stream
-// agent failure — the raw error message. Mirrors the parsing the browser
-// does in `frontend/api/chat.ts` (data: lines, `[DONE]` sentinel, JSON
-// `result`/`error` events).
+// Consume a teed copy of the SSE stream, returning the final answer (as the
+// assistant bubbles it renders into), the analytics fields, and — on a
+// mid-stream agent failure — the raw error message. Mirrors the parsing the
+// browser does in `frontend/api/chat.ts` (data: lines, `[DONE]` sentinel,
+// JSON `result`/`error` events).
 const readFinalAnswer = async (
 	stream: ReadableStream<Uint8Array>,
 ): Promise<{
 	response: string | null;
 	sql: string | null;
-	sqlResponse: string | null;
+	answerMessages: AnswerMessage[];
 	errorMessage: string | null;
 }> => {
 	const reader = stream.getReader();
@@ -96,7 +84,7 @@ const readFinalAnswer = async (
 	let buffer = '';
 	let response: string | null = null;
 	let sql: string | null = null;
-	let sqlResponse: string | null = null;
+	let answerMessages: AnswerMessage[] = [];
 	let errorMessage: string | null = null;
 
 	const handleData = (data: string): void => {
@@ -106,7 +94,7 @@ const readFinalAnswer = async (
 			if (event.type === 'result') {
 				response = event.answer?.response ?? null;
 				sql = event.answer?.sql_code ?? null;
-				sqlResponse = stringifySqlResponse(event.answer?.sql_response_from_db) ?? null;
+				answerMessages = event.answer ? buildAnswerMessages(event.answer) : [];
 			} else if (event.type === 'error') {
 				errorMessage = event.message ?? null;
 			}
@@ -131,11 +119,19 @@ const readFinalAnswer = async (
 		reader.releaseLock();
 	}
 
-	return { response, sql, sqlResponse, errorMessage };
+	return { response, sql, answerMessages, errorMessage };
 };
 
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
-	const body = await req.text();
+	const payload = parseBody(await req.text());
+
+	// The visualization toggle is an instance-wide setting, so it is resolved
+	// here rather than trusted from the caller — a stale browser tab or a
+	// direct API client cannot opt back into charts once admins turn them off.
+	const body = JSON.stringify({
+		...payload,
+		visualization: await isVisualizationEnabled(),
+	});
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
@@ -185,8 +181,11 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	// parsed after the response to backfill the final answer and persist the
 	// assistant's turn. `user` is the resolved GSF user (session or SSO
 	// bearer), injected by withPermission.
-	const question = extractQuestion(body);
-	const conversationId = extractConversationId(body);
+	const question = typeof payload.question === 'string' ? payload.question : '';
+	const conversationId =
+		typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
+			? payload.conversation_id
+			: null;
 
 	const prisma = getPrisma();
 	const [row, conversation] = await Promise.all([
@@ -206,27 +205,37 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 
 	after(async () => {
 		try {
-			const { response, sql, sqlResponse, errorMessage } = await readFinalAnswer(toCapture);
+			const { response, sql, answerMessages, errorMessage } =
+				await readFinalAnswer(toCapture);
 			await prisma.conversationAnalytics.update({
 				where: { id: row.id },
 				data: { response, sql, responseTimestamp: new Date() },
 			});
 
 			if (conversation) {
-				// A result persists the answer; a mid-stream agent failure persists
-				// the real error text instead, paired with the already-persisted
-				// user turn. A stream that closed with neither (e.g. the upstream
-				// connection itself dropped) has nothing meaningful to save.
-				const assistantContent = response ?? errorMessage;
-				if (assistantContent != null) {
-					await prisma.message.create({
-						data: {
+				// A result persists the same bubbles the browser rendered (prose +
+				// SQL, then charts or the result table) so reopening the
+				// conversation looks identical to watching it stream. A mid-stream
+				// agent failure persists the real error text instead, paired with
+				// the already-persisted user turn. A stream that closed with
+				// neither (e.g. the upstream connection dropped) has nothing
+				// meaningful to save.
+				const rows: AnswerMessage[] =
+					answerMessages.length > 0
+						? answerMessages
+						: errorMessage != null
+							? [{ content: errorMessage }]
+							: [];
+
+				if (rows.length > 0) {
+					await prisma.message.createMany({
+						data: rows.map((msg) => ({
 							conversationId: conversation.id,
 							role: 'assistant',
-							content: assistantContent,
-							sqlCode: sql,
-							sqlResponse,
-						},
+							content: msg.content,
+							sqlCode: msg.sql ?? null,
+							sqlResponse: msg.sqlResponse ?? null,
+						})),
 					});
 					await prisma.conversation.update({
 						where: { id: conversation.id },

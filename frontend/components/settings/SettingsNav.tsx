@@ -19,6 +19,10 @@ const SEMANTIC_COMPILATION_NAV_ITEM: NavItem = {
 	label: 'Semantic Compilation',
 	href: '/settings/semantic-compilation',
 };
+const AGENT_SETTINGS_NAV_ITEM: NavItem = {
+	label: 'Agent Settings',
+	href: '/settings/agent-settings',
+};
 
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 items-center rounded-lg px-3 text-sm no-underline transition-colors ${
@@ -51,7 +55,13 @@ export const SettingsNav = () => {
 
 	const items: NavItem[] = [];
 	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
-	items.push(ZONES_NAV_ITEM, USERS_NAV_ITEM, SSO_NAV_ITEM, SEMANTIC_COMPILATION_NAV_ITEM);
+	items.push(
+		ZONES_NAV_ITEM,
+		USERS_NAV_ITEM,
+		SSO_NAV_ITEM,
+		SEMANTIC_COMPILATION_NAV_ITEM,
+		AGENT_SETTINGS_NAV_ITEM,
+	);
 
 	return (
 		<nav

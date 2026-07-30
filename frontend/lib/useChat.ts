@@ -7,8 +7,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
-import { stringifySqlResponse } from '@/lib/sqlResponse';
-import type { ChatMessage, GraphStep } from '@/types/chat';
+import { buildAnswerMessages } from '@/lib/answerMessages';
+import type { ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
@@ -65,6 +65,21 @@ export const useChat = () => {
 			setMessages((prev) => [...prev, assistantMsg]);
 		},
 		[],
+	);
+
+	// Renders one agent answer the same way the completions proxy persists it,
+	// so a reloaded conversation matches what the user watched arrive. Shared
+	// by the live send and the resume watch.
+	const appendAnswer = useCallback(
+		(answer: ResultEvent['answer']) => {
+			buildAnswerMessages(answer).forEach((msg) => {
+				appendAssistantMessage(msg.content, {
+					sql: msg.sql,
+					sqlResponse: msg.sqlResponse,
+				});
+			});
+		},
+		[appendAssistantMessage],
 	);
 
 	const pollForPersistedAssistant = useCallback(
@@ -160,14 +175,7 @@ export const useChat = () => {
 				},
 
 				onResult(event) {
-					const {
-						response,
-						sql_code: sqlCode,
-						sql_response_from_db: sqlResponseFromDb,
-					} = event.answer;
-					const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
-
-					appendAssistantMessage(response, { sql: sqlCode, sqlResponse });
+					appendAnswer(event.answer);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
 					activeRunConvIdRef.current = null;
@@ -213,7 +221,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current = controller;
 		},
-		[appendAssistantMessage, pollForPersistedAssistant],
+		[appendAnswer, appendAssistantMessage, pollForPersistedAssistant],
 	);
 
 	// Resolves true once the backend accepted the question, false if it was
@@ -275,17 +283,7 @@ export const useChat = () => {
 					},
 
 					onResult(event) {
-						const {
-							response,
-							sql_code: sqlCode,
-							sql_response_from_db: sqlResponseFromDb,
-						} = event.answer;
-						const sqlResponse = stringifySqlResponse(sqlResponseFromDb);
-
-						appendAssistantMessage(response, {
-							sql: sqlCode,
-							sqlResponse,
-						});
+						appendAnswer(event.answer);
 						setSteps((prev) =>
 							prev.map((s) => ({ ...s, status: 'completed' as const })),
 						);
@@ -323,7 +321,7 @@ export const useChat = () => {
 			controllerRef.current = controller;
 			return accepted;
 		},
-		[appendAssistantMessage, resumeIfRunning],
+		[appendAnswer, appendAssistantMessage, resumeIfRunning],
 	);
 
 	// Leaves the run alone server-side: it keeps streaming into the buffer and

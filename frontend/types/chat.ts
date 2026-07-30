@@ -32,6 +32,8 @@ export type ResultEvent = {
 			| {
 					[key: string]: string;
 			  }[];
+		/** ResultChart specs when visualization succeeded (illumex Message 2). */
+		charts?: Record<string, unknown>[];
 	};
 };
 

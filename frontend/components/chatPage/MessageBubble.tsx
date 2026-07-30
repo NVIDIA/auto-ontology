@@ -39,14 +39,16 @@ type QueryResultsSectionProps = {
 	sqlResponse: string | undefined;
 	parsedTable: ParsedTable | null;
 	singleCell: SingleCellResult | null;
+	className?: string;
 };
 
 const QueryResultsSection = ({
 	sqlResponse,
 	parsedTable,
 	singleCell,
+	className,
 }: QueryResultsSectionProps) => (
-	<div className="mt-3">
+	<div className={className}>
 		<div className="mb-1 text-xs font-medium text-zinc-500 dark:text-zinc-400">
 			Query results
 		</div>
@@ -80,6 +82,10 @@ type MessageBubbleProps = {
 	message: ChatMessage;
 };
 
+/** True when the assistant message embeds a ResultChart fence (illumex Message 2). */
+const hasEmbeddedChart = (content: string): boolean =>
+	/(^|\n)```(?:chart|chart-carousel)\b/.test(content);
+
 export const MessageBubble = ({ message }: MessageBubbleProps) => {
 	const isUser = message.role === 'user';
 	const parsedTable = useMemo(() => parseSqlResponse(message.sqlResponse), [message.sqlResponse]);
@@ -91,26 +97,41 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 		return { column, value: parsedTable.rows[0][column] ?? '' };
 	}, [parsedTable]);
 
-	const showQueryResults = !isUser && (Boolean(message.sql) || Boolean(message.sqlResponse));
+	// Illumex layout:
+	// Message 1 — text + SQL (no table)
+	// Message 2 — charts only, OR table only
+	const showCharts = !isUser && hasEmbeddedChart(message.content);
+	const showSql = !isUser && Boolean(message.sql) && !showCharts;
+	const showQueryResults = !isUser && !showCharts && Boolean(message.sqlResponse);
+	const showText = Boolean(message.content.trim());
+
+	// Stretch assistant bubbles that carry SQL / charts / tables to the same
+	// width so Message 2 matches Message 1's SQL block.
+	const wideAssistant = !isUser && (showSql || showCharts || showQueryResults);
 
 	return (
 		<div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
 			<div
-				className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+				className={`max-w-[80%] rounded-2xl px-4 py-3 ${wideAssistant ? 'w-full' : ''} ${
 					isUser
 						? 'bg-[#76b900] text-white'
 						: 'bg-zinc-100 text-zinc-900 dark:bg-zinc-800 dark:text-zinc-100'
 				}`}
 			>
-				<FormattedContent content={message.content} className="text-sm leading-relaxed" />
+				{showText && (
+					<FormattedContent
+						content={message.content}
+						className="text-sm leading-relaxed"
+					/>
+				)}
 
-				{message.sql && (
+				{showSql && (
 					<SqlBlock
-						sql={message.sql}
+						sql={message.sql!}
 						label={
-							message.sql.trim().toUpperCase().startsWith('PREDICT') ? 'PQL' : 'SQL'
+							message.sql!.trim().toUpperCase().startsWith('PREDICT') ? 'PQL' : 'SQL'
 						}
-						className="mt-3"
+						className={showText ? 'mt-3' : undefined}
 					/>
 				)}
 
@@ -119,6 +140,7 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						sqlResponse={message.sqlResponse}
 						parsedTable={parsedTable}
 						singleCell={singleCellResult}
+						className={showText || showSql ? 'mt-3' : undefined}
 					/>
 				)}
 
