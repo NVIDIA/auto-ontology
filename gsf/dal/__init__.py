@@ -6,7 +6,6 @@ Each module is the single source of truth for a domain:
   attributes      — ColumnAttribute, SemanticFK, join path traversal
   custom_analyses — CustomAnalysis / Sql subgraph
   sql_attributes  — SqlAttribute / Sql subgraph
-  foreign_keys    — FK and join edge traversal
   connections     — UI-managed database connection metadata on DB nodes
   candidates      — Vector-hit graph enrichment at retrieval time
   users           — Zone-scope helpers for catalog queries. Users and
