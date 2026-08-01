@@ -199,7 +199,9 @@ def calculate_columns_profiling(
 
     Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
     ``is_unique`` flag (all non-null values distinct) and the 5 most-common
-    values.
+    values. For non-unique text columns whose sample yields fewer than 5
+    distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
+    values that the row prefix may have missed.
 
     Persists to Neo4j Column nodes: ``is_unique`` for every column, and
     ``sample_values`` for every column except those whose declared type is a
@@ -255,12 +257,19 @@ def calculate_columns_profiling(
 
         declared_type = type_by_column.get(col_name)
 
-        # For categorical text columns, prefer the full distinct value set over
-        # the most-common values from the first-N-row sample. Rare enum values
-        # (e.g. 'Banned') otherwise never make it into the embedded description
-        # when a dominant value fills the sampled row prefix.
+        # For categorical text columns that did not yield a full top-N set from
+        # the first-N-row sample, prefer the full distinct value set. Rare enum
+        # values (e.g. 'Banned') otherwise never make it into the embedded
+        # description when a dominant value fills the sampled row prefix.
+        # Skip the DISTINCT probe when the sample already produced _PROFILING_TOP_N
+        # values — that is enough for embedding and avoids a full-table scan
+        # per column on warehouses where DISTINCT + LIMIT does not early-stop.
         col_values = top5
-        if not is_unique and _is_text_sample_type(declared_type):
+        if (
+            not is_unique
+            and len(top5) < _PROFILING_TOP_N
+            and _is_text_sample_type(declared_type)
+        ):
             distinct_vals = _distinct_values_if_low_cardinality(
                 connector, qualified, col_name, _LOW_CARDINALITY_MAX
             )

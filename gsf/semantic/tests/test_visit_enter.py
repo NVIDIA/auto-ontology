@@ -56,8 +56,14 @@ def test_calculate_columns_profiling(
             "token": ["a" * 40, "b" * 40, "a" * 40, "c" * 40],
         }
     )
+    # status and token each have <5 distinct sample values, so each gets a
+    # DISTINCT probe. Return empty so the sample top-N values are kept as-is.
     connector = MagicMock()
-    connector.execute.return_value = df
+    connector.execute.side_effect = [
+        df,
+        pd.DataFrame({"status": []}),
+        pd.DataFrame({"token": []}),
+    ]
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
     columns = [
@@ -69,9 +75,10 @@ def test_calculate_columns_profiling(
 
     result = calculate_columns_profiling(table, columns, connector)
 
-    sql = connector.execute.call_args[0][0]
+    sql = connector.execute.call_args_list[0][0][0]
     assert "public.orders" in sql
     assert "LIMIT 1000" in sql
+    assert connector.execute.call_count == 3
 
     # Returned dict includes every column (dates, long strings included),
     # each with its top-5 sample values and is_unique flag.
@@ -97,6 +104,46 @@ def test_calculate_columns_profiling(
     assert "created_at" not in stored
     assert "token" not in stored
     assert stored["status"][0] == "open"
+
+
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_distinct_only_when_under_top_n(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+) -> None:
+    """DISTINCT probes run only for text columns with fewer than 5 sample values."""
+    sample_df = pd.DataFrame(
+        {
+            # 5+ distinct values in the sample → no DISTINCT probe.
+            "city": ["a", "b", "c", "d", "e", "a"],
+            # Fewer than 5 distinct values → DISTINCT probe for rare enums.
+            "status": ["open", "open", "closed", "open", "open", "open"],
+        }
+    )
+    status_distinct_df = pd.DataFrame({"status": ["open", "closed", "banned"]})
+
+    connector = MagicMock()
+    connector.execute.side_effect = [sample_df, status_distinct_df]
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "city", "data_type": "string"},
+        {"name": "status", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert connector.execute.call_count == 2
+    distinct_sql = connector.execute.call_args_list[1][0][0]
+    assert "SELECT DISTINCT" in distinct_sql
+    assert '"status"' in distinct_sql
+    assert '"city"' not in distinct_sql
+
+    assert result["city"]["sample_values"] == ["a", "b", "c", "d", "e"]
+    assert "banned" in result["status"]["sample_values"]
+    assert "open" in result["status"]["sample_values"]
+    assert "closed" in result["status"]["sample_values"]
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")
