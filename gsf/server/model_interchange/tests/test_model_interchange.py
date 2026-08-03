@@ -360,6 +360,7 @@ def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     assert write_params["props"]["name"] == "orders"
 
 
+@patch("gsf.dal.model_interchange._ensure_import_indexes")
 @patch("gsf.dal.model_interchange.write_transaction", _null_transaction)
 @patch("gsf.dal.model_interchange._import_custom_analyses")
 @patch("gsf.dal.model_interchange._import_sql_attributes")
@@ -392,6 +393,7 @@ def test_apply_import_model_creates_when_catalog_missing(
     assert "skipped" in summary
 
 
+@patch("gsf.dal.model_interchange._ensure_import_indexes")
 @patch("gsf.dal.model_interchange._import_terms", side_effect=RuntimeError("bad sql"))
 @patch("gsf.dal.model_interchange._import_joins")
 @patch("gsf.dal.model_interchange._import_foreign_keys")

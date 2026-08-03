@@ -463,6 +463,49 @@ def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
     return [str(col_id) for col_id in column_ids if col_id]
 
 
+_IMPORTED_ID_INDEX_LABELS = (
+    Labels.DB,
+    Labels.SCHEMA,
+    Labels.TABLE,
+    Labels.COLUMN,
+    Labels.CUSTOM_ANALYSIS,
+    LABEL_TERM,
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
+)
+
+
+def _ensure_import_indexes() -> None:
+    """Ensure ``id``/``imported_id`` are indexed for every label resolved by
+    :func:`_resolve_entities_batch`.
+
+    Without an index, ``MATCH (n:Label) WHERE n.imported_id = x OR n.id =
+    x`` falls back to a full label scan per lookup. That's invisible on a
+    handful of nodes but turns a several-thousand-column import into a
+    quadratic-time crawl. ``nemo_retriever`` already indexes ``id`` for its
+    own catalog labels but knows nothing about ``imported_id``, or about
+    GSF's semantic labels (Term/ColumnAttribute/SqlAttribute), so this fills
+    the gap. Statements are idempotent (``IF NOT EXISTS``) and near-instant
+    once the indexes exist, so it's cheap to call on every import. Schema
+    changes can't run inside a transaction that also writes data, so this
+    must be called before :func:`write_transaction` opens one.
+    """
+    conn = graph()
+    for label in _IMPORTED_ID_INDEX_LABELS:
+        conn.query_write(
+            f"""
+            CREATE CONSTRAINT constraint_on_{label.lower()}_id IF NOT EXISTS
+            FOR (n:{label}) REQUIRE (n.id) IS UNIQUE
+            """,
+        )
+        conn.query_write(
+            f"""
+            CREATE INDEX index_on_{label.lower()}_imported_id IF NOT EXISTS
+            FOR (n:{label}) ON (n.imported_id)
+            """,
+        )
+
+
 def apply_import_model(
     document: GsfModelDocument,
     *,
@@ -480,25 +523,19 @@ def apply_import_model(
     When *embed_buffer* is supplied, pre-embed rows for newly created nodes
     are appended for a later :func:`flush_import_embeddings` call.
 
-    The whole import is one transaction, so a failure part-way through (an
-    unparsable SQL attribute, say) leaves the graph untouched rather than
-    half-populated.
+    The catalog/semantic-graph portion (databases through semantic FKs) runs
+    in one transaction, so a failure part-way through leaves the graph
+    untouched rather than half-populated. SQL attributes and custom analyses
+    are applied afterwards, outside that transaction: persisting them calls
+    into ``nemo_retriever``'s :func:`add_query`, which opens its own
+    auto-commit Neo4j session. Running that from inside our transaction can
+    self-deadlock — our open transaction holds locks on Table/Column nodes
+    it just created, ``add_query()``'s separate session blocks waiting on
+    those same locks, and we're synchronously stuck waiting for it to
+    return.
     """
-    with write_transaction():
-        return _apply_import_model(
-            document,
-            replace=replace,
-            embed_buffer=embed_buffer,
-        )
+    _ensure_import_indexes()
 
-
-def _apply_import_model(
-    document: GsfModelDocument,
-    *,
-    replace: bool,
-    embed_buffer: ImportEmbedBuffer | None = None,
-) -> dict[str, Any]:
-    """Apply the document. Callers go through :func:`apply_import_model`."""
     id_map: dict[str, str] = {}
     column_meta: dict[str, ColumnCatalogMeta] = {}
     created: dict[str, int] = {
@@ -513,31 +550,34 @@ def _apply_import_model(
     }
     skipped: dict[str, int] = {key: 0 for key in created}
 
-    live_db_ids = _import_catalog(
-        document,
-        id_map,
-        created,
-        skipped,
-        embed_buffer,
-        column_meta,
-    )
+    with write_transaction():
+        live_db_ids = _import_catalog(
+            document,
+            id_map,
+            created,
+            skipped,
+            embed_buffer,
+            column_meta,
+        )
 
-    if replace:
-        _delete_scoped_semantics_not_in_payload(document, live_db_ids)
+        if replace:
+            _delete_scoped_semantics_not_in_payload(document, live_db_ids)
 
-    _import_foreign_keys(document, id_map)
-    _import_joins(document, id_map)
-    _import_terms(document, id_map, created, skipped, embed_buffer)
-    _import_column_attributes(
-        document,
-        id_map,
-        created,
-        skipped,
-        embed_buffer,
-        column_meta,
-    )
-    _import_semantic_fks(document, id_map)
+        _import_foreign_keys(document, id_map)
+        _import_joins(document, id_map)
+        _import_terms(document, id_map, created, skipped, embed_buffer)
+        _import_column_attributes(
+            document,
+            id_map,
+            created,
+            skipped,
+            embed_buffer,
+            column_meta,
+        )
+        _import_semantic_fks(document, id_map)
+
     term_names = {term.id: term.name for term in document.semantic_layer.terms}
+    schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
     _import_sql_attributes(
         document,
         id_map,
@@ -545,6 +585,7 @@ def _apply_import_model(
         skipped,
         embed_buffer,
         term_names,
+        schema_cache,
     )
     _import_custom_analyses(
         document,
@@ -552,6 +593,7 @@ def _apply_import_model(
         created,
         skipped,
         embed_buffer,
+        schema_cache,
     )
 
     summary: dict[str, Any] = {
@@ -626,6 +668,123 @@ def _resolve_entity(
     return str(rows[0]["id"]), True
 
 
+def _resolve_entities_batch(
+    label: str,
+    items: list[tuple[str, dict[str, Any]]],
+) -> dict[str, tuple[str, bool]]:
+    """Batched :func:`_resolve_entity`.
+
+    Large imports (thousands of columns) were previously doing two Neo4j
+    round trips *per entity*, which dominates import time. This resolves an
+    entire same-label batch of ``(imported_id, create_props)`` pairs in at
+    most three round trips total: one read to find existing nodes, one write
+    to touch their ``imported_id``, and one write to create the missing
+    ones. Semantics match :func:`_resolve_entity` exactly.
+    """
+    if not items:
+        return {}
+
+    # Guard against duplicate YAML ids within a batch: keep the first
+    # create_props seen, matching what repeated sequential calls would do
+    # (the first call creates the node, later calls just find it).
+    deduped: dict[str, dict[str, Any]] = {}
+    for imported_id, create_props in items:
+        deduped.setdefault(imported_id, create_props)
+
+    conn = graph()
+    imported_ids = list(deduped.keys())
+    existing_rows = conn.query_read(
+        f"""
+        UNWIND $imported_ids AS imported_id
+        MATCH (n:{label})
+        WHERE n.imported_id = imported_id OR n.id = imported_id
+        RETURN imported_id, n.id AS live_id
+        """,
+        {"imported_ids": imported_ids},
+    )
+    existing_map = {row["imported_id"]: str(row["live_id"]) for row in existing_rows}
+
+    result: dict[str, tuple[str, bool]] = {}
+    touch_rows: list[dict[str, Any]] = []
+    create_rows: list[dict[str, Any]] = []
+    for imported_id, create_props in deduped.items():
+        live_id = existing_map.get(imported_id)
+        if live_id is not None:
+            result[imported_id] = (live_id, False)
+            touch_rows.append({"id": live_id, "imported_id": imported_id})
+        else:
+            props = dict(create_props or {})
+            props["imported_id"] = imported_id
+            create_rows.append({"imported_id": imported_id, "props": props})
+
+    if touch_rows:
+        conn.query_write(
+            f"""
+            UNWIND $rows AS row
+            MATCH (n:{label} {{id: row.id}})
+            SET n.imported_id = coalesce(n.imported_id, row.imported_id)
+            """,
+            {"rows": touch_rows},
+        )
+
+    if create_rows:
+        created_rows = conn.query_write(
+            f"""
+            UNWIND $rows AS row
+            CREATE (n:{label})
+            SET n.id = randomUUID(),
+                n += row.props
+            RETURN row.imported_id AS imported_id, n.id AS live_id
+            """,
+            {"rows": create_rows},
+        )
+        for row in created_rows:
+            result[row["imported_id"]] = (str(row["live_id"]), True)
+
+    return result
+
+
+def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
+    """Batched lookup of a representative database name per term id."""
+    if not term_ids:
+        return {}
+    rows = graph().query_read(
+        f"""
+        UNWIND $term_ids AS term_id
+        MATCH (tbl:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{id: term_id}})
+        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
+              -[:{Edges.CONTAINS}]->(tbl)
+        RETURN term_id, collect(db.name)[0] AS database_name
+        """,
+        {"term_ids": term_ids},
+    )
+    return {
+        row["term_id"]: row["database_name"] for row in rows if row.get("database_name")
+    }
+
+
+def _database_names_for_columns(column_ids: list[str]) -> dict[str, str]:
+    """Batched lookup of a representative database name per column id."""
+    if not column_ids:
+        return {}
+    rows = graph().query_read(
+        f"""
+        UNWIND $column_ids AS column_id
+        MATCH (col:{Labels.COLUMN} {{id: column_id}})<-[:{Edges.CONTAINS}]-
+              (tbl:{Labels.TABLE})<-[:{Edges.CONTAINS}]-
+              (sch:{Labels.SCHEMA})<-[:{Edges.CONTAINS}]-
+              (db:{Labels.DB})
+        RETURN column_id, collect(db.name)[0] AS database_name
+        """,
+        {"column_ids": column_ids},
+    )
+    return {
+        row["column_id"]: row["database_name"]
+        for row in rows
+        if row.get("database_name")
+    }
+
+
 def _remap(id_map: dict[str, str], yaml_id: str, *, kind: str) -> str:
     live_id = id_map.get(yaml_id)
     if not live_id:
@@ -643,84 +802,134 @@ def _import_catalog(
     embed_buffer: ImportEmbedBuffer | None,
     column_meta: dict[str, ColumnCatalogMeta],
 ) -> list[str]:
-    live_db_ids: list[str] = []
-    for db in document.data_layer.databases:
+    """Import databases/schemas/tables/columns level by level.
+
+    Each level is resolved and wired up in a small, constant number of
+    Neo4j round trips via :func:`_resolve_entities_batch` and one batched
+    ``MERGE`` for the containment edges, instead of two round trips *per
+    entity*. This is what makes large catalogs (thousands of columns)
+    import in seconds rather than minutes.
+    """
+    databases = document.data_layer.databases
+
+    db_names: dict[str, str] = {}
+    for db in databases:
         db_name = ""
         if db.schemas:
             db_name = db.schemas[0].database_name or db.schemas[0].name or ""
-        live_db_id, was_created = _resolve_entity(
-            Labels.DB,
-            db.id,
-            create_props={"name": db_name} if db_name else {},
-        )
+        db_names[db.id] = db_name
+
+    db_results = _resolve_entities_batch(
+        Labels.DB,
+        [
+            (db.id, {"name": db_names[db.id]} if db_names[db.id] else {})
+            for db in databases
+        ],
+    )
+    live_db_ids: list[str] = []
+    for db in databases:
+        live_db_id, was_created = db_results[db.id]
         id_map[db.id] = live_db_id
         live_db_ids.append(live_db_id)
         if was_created:
             created["databases"] += 1
-            if db_name:
-                graph().query_write(
-                    f"""
-                    MATCH (db:{Labels.DB} {{id: $id}})
-                    SET db.name = $name
-                    """,
-                    {"id": live_db_id, "name": db_name},
-                )
         else:
             skipped["databases"] += 1
 
+    schema_parent_db: dict[str, str] = {}
+    schema_db_names: dict[str, str] = {}
+    schema_items: list[tuple[str, dict[str, Any]]] = []
+    for db in databases:
         for schema in db.schemas:
-            schema_db_name = schema.database_name or db_name
-            live_schema_id, sch_created = _resolve_entity(
-                Labels.SCHEMA,
-                schema.id,
-                create_props={"name": schema.name},
-            )
-            id_map[schema.id] = live_schema_id
-            if sch_created:
-                created["schemas"] += 1
-            else:
-                skipped["schemas"] += 1
-            graph().query_write(
-                f"""
-                MATCH (db:{Labels.DB} {{id: $db_id}})
-                MATCH (sch:{Labels.SCHEMA} {{id: $schema_id}})
-                MERGE (db)-[:{Edges.CONTAINS}]->(sch)
-                """,
-                {"db_id": live_db_id, "schema_id": live_schema_id},
-            )
+            schema_parent_db[schema.id] = db.id
+            schema_db_names[schema.id] = schema.database_name or db_names[db.id]
+            schema_items.append((schema.id, {"name": schema.name}))
 
+    schema_results = _resolve_entities_batch(Labels.SCHEMA, schema_items)
+    for schema_id, (live_schema_id, sch_created) in schema_results.items():
+        id_map[schema_id] = live_schema_id
+        if sch_created:
+            created["schemas"] += 1
+        else:
+            skipped["schemas"] += 1
+
+    if schema_items:
+        graph().query_write(
+            f"""
+            UNWIND $rows AS row
+            MATCH (db:{Labels.DB} {{id: row.db_id}})
+            MATCH (sch:{Labels.SCHEMA} {{id: row.schema_id}})
+            MERGE (db)-[:{Edges.CONTAINS}]->(sch)
+            """,
+            {
+                "rows": [
+                    {
+                        "db_id": id_map[schema_parent_db[schema_id]],
+                        "schema_id": id_map[schema_id],
+                    }
+                    for schema_id, _ in schema_items
+                ],
+            },
+        )
+
+    table_parent_schema: dict[str, str] = {}
+    table_items: list[tuple[str, dict[str, Any]]] = []
+    for db in databases:
+        for schema in db.schemas:
             for table in schema.tables:
-                live_table_id, tbl_created = _resolve_entity(
-                    Labels.TABLE,
-                    table.id,
-                    create_props={
-                        "name": table.name,
-                        "description": table.description,
-                        "pk": table.pk,
-                        "table_type": table.type,
-                    },
-                )
-                id_map[table.id] = live_table_id
-                if tbl_created:
-                    created["tables"] += 1
-                else:
-                    skipped["tables"] += 1
-                graph().query_write(
-                    f"""
-                    MATCH (sch:{Labels.SCHEMA} {{id: $schema_id}})
-                    MATCH (tbl:{Labels.TABLE} {{id: $table_id}})
-                    MERGE (sch)-[:{Edges.CONTAINS}]->(tbl)
-                    """,
-                    {"schema_id": live_schema_id, "table_id": live_table_id},
+                table_parent_schema[table.id] = schema.id
+                table_items.append(
+                    (
+                        table.id,
+                        {
+                            "name": table.name,
+                            "description": table.description,
+                            "pk": table.pk,
+                            "table_type": table.type,
+                        },
+                    ),
                 )
 
-                table_column_embed_specs: list[dict[str, Any]] = []
+    table_results = _resolve_entities_batch(Labels.TABLE, table_items)
+    for table_id, (live_table_id, tbl_created) in table_results.items():
+        id_map[table_id] = live_table_id
+        if tbl_created:
+            created["tables"] += 1
+        else:
+            skipped["tables"] += 1
+
+    if table_items:
+        graph().query_write(
+            f"""
+            UNWIND $rows AS row
+            MATCH (sch:{Labels.SCHEMA} {{id: row.schema_id}})
+            MATCH (tbl:{Labels.TABLE} {{id: row.table_id}})
+            MERGE (sch)-[:{Edges.CONTAINS}]->(tbl)
+            """,
+            {
+                "rows": [
+                    {
+                        "schema_id": id_map[table_parent_schema[table_id]],
+                        "table_id": id_map[table_id],
+                    }
+                    for table_id, _ in table_items
+                ],
+            },
+        )
+
+    column_parent_table: dict[str, str] = {}
+    column_items: list[tuple[str, dict[str, Any]]] = []
+    for db in databases:
+        for schema in db.schemas:
+            schema_db_name = schema_db_names.get(schema.id, "")
+            for table in schema.tables:
                 for ordinal, column in enumerate(table.columns, start=1):
-                    sample_values = (
+                    sample_values_json = (
                         json.dumps(column.sample_values)
                         if column.sample_values
                         else None
                     )
+                    column_parent_table[column.id] = table.id
                     column_meta[column.id] = ColumnCatalogMeta(
                         name=column.name,
                         description=column.description,
@@ -730,23 +939,58 @@ def _import_catalog(
                         schema_name=schema.name,
                         database_name=schema_db_name,
                     )
-                    live_col_id, col_created = _resolve_entity(
-                        Labels.COLUMN,
-                        column.id,
-                        create_props={
-                            "name": column.name,
-                            "description": column.description,
-                            "data_type": column.type,
-                            "sample_values": sample_values,
-                            "is_unique": column.is_unique,
-                            "is_nullable": column.is_nullable,
-                            "ordinal_position": ordinal,
-                        },
+                    column_items.append(
+                        (
+                            column.id,
+                            {
+                                "name": column.name,
+                                "description": column.description,
+                                "data_type": column.type,
+                                "sample_values": sample_values_json,
+                                "is_unique": column.is_unique,
+                                "is_nullable": column.is_nullable,
+                                "ordinal_position": ordinal,
+                            },
+                        ),
                     )
-                    id_map[column.id] = live_col_id
-                    if col_created:
-                        created["columns"] += 1
-                        if embed_buffer is not None:
+
+    column_results = _resolve_entities_batch(Labels.COLUMN, column_items)
+    for column_id, (live_col_id, col_created) in column_results.items():
+        id_map[column_id] = live_col_id
+        if col_created:
+            created["columns"] += 1
+        else:
+            skipped["columns"] += 1
+
+    if column_items:
+        graph().query_write(
+            f"""
+            UNWIND $rows AS row
+            MATCH (tbl:{Labels.TABLE} {{id: row.table_id}})
+            MATCH (col:{Labels.COLUMN} {{id: row.column_id}})
+            MERGE (tbl)-[:{Edges.CONTAINS}]->(col)
+            """,
+            {
+                "rows": [
+                    {
+                        "table_id": id_map[column_parent_table[column_id]],
+                        "column_id": id_map[column_id],
+                    }
+                    for column_id, _ in column_items
+                ],
+            },
+        )
+
+    if embed_buffer is not None:
+        for db in databases:
+            for schema in db.schemas:
+                schema_db_name = schema_db_names.get(schema.id, "")
+                for table in schema.tables:
+                    live_table_id, tbl_created = table_results[table.id]
+                    table_column_embed_specs: list[dict[str, Any]] = []
+                    for column in table.columns:
+                        live_col_id, col_created = column_results[column.id]
+                        if col_created:
                             embed_buffer.data_rows.append(
                                 build_column_data_row(
                                     live_id=live_col_id,
@@ -759,35 +1003,25 @@ def _import_catalog(
                                     database_name=schema_db_name,
                                 ),
                             )
-                    else:
-                        skipped["columns"] += 1
-                    graph().query_write(
-                        f"""
-                        MATCH (tbl:{Labels.TABLE} {{id: $table_id}})
-                        MATCH (col:{Labels.COLUMN} {{id: $column_id}})
-                        MERGE (tbl)-[:{Edges.CONTAINS}]->(col)
-                        """,
-                        {"table_id": live_table_id, "column_id": live_col_id},
-                    )
-                    table_column_embed_specs.append(
-                        {
-                            "column_name": column.name,
-                            "data_type": column.type,
-                            "description": column.description,
-                        },
-                    )
+                        table_column_embed_specs.append(
+                            {
+                                "column_name": column.name,
+                                "data_type": column.type,
+                                "description": column.description,
+                            },
+                        )
+                    if tbl_created:
+                        embed_buffer.data_rows.append(
+                            build_table_data_row(
+                                live_id=live_table_id,
+                                table_name=table.name,
+                                table_description=table.description,
+                                schema_name=schema.name,
+                                database_name=schema_db_name,
+                                columns=table_column_embed_specs,
+                            ),
+                        )
 
-                if tbl_created and embed_buffer is not None:
-                    embed_buffer.data_rows.append(
-                        build_table_data_row(
-                            live_id=live_table_id,
-                            table_name=table.name,
-                            table_description=table.description,
-                            schema_name=schema.name,
-                            database_name=schema_db_name,
-                            columns=table_column_embed_specs,
-                        ),
-                    )
     return live_db_ids
 
 
@@ -944,42 +1178,62 @@ def _import_terms(
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
 ) -> None:
-    for term in document.semantic_layer.terms:
-        live_term_id, was_created = _resolve_entity(
-            LABEL_TERM,
-            term.id,
-            create_props={
-                "name": term.name,
-                "description": term.description,
-                "source": SEMANTIC_SOURCE,
-            },
-        )
+    terms = document.semantic_layer.terms
+    term_results = _resolve_entities_batch(
+        LABEL_TERM,
+        [
+            (
+                term.id,
+                {
+                    "name": term.name,
+                    "description": term.description,
+                    "source": SEMANTIC_SOURCE,
+                },
+            )
+            for term in terms
+        ],
+    )
+
+    represents_rows: list[dict[str, Any]] = []
+    newly_created_term_ids: list[str] = []
+    for term in terms:
+        live_term_id, was_created = term_results[term.id]
         id_map[term.id] = live_term_id
         if was_created:
             created["terms"] += 1
+            newly_created_term_ids.append(live_term_id)
         else:
             skipped["terms"] += 1
         table_ids = [
             _remap(id_map, table_id, kind="term represents table")
             for table_id in term.represents
         ]
+        represents_rows.append({"term_id": live_term_id, "table_ids": table_ids})
+
+    if represents_rows:
         graph().query_write(
             f"""
-            MATCH (term:{LABEL_TERM} {{id: $term_id}})
+            UNWIND $rows AS row
+            MATCH (term:{LABEL_TERM} {{id: row.term_id}})
             OPTIONAL MATCH (:{Labels.TABLE})-[old:{REL_REPRESENTS}]->(term)
             DELETE old
-            WITH term
-            UNWIND $table_ids AS table_id
+            WITH term, row
+            UNWIND row.table_ids AS table_id
             MATCH (tbl:{Labels.TABLE} {{id: table_id}})
             MERGE (tbl)-[:{REL_REPRESENTS}]->(term)
             """,
-            {"term_id": live_term_id, "table_ids": table_ids},
+            {"rows": represents_rows},
         )
-        if was_created and embed_buffer is not None:
-            database_name = _database_name_for_term(live_term_id) or ""
+
+    if embed_buffer is not None and newly_created_term_ids:
+        db_names_by_term = _database_names_for_terms(newly_created_term_ids)
+        for term in terms:
+            live_term_id, was_created = term_results[term.id]
+            if not was_created:
+                continue
             embed_buffer.semantic_rows.extend(
                 build_term_semantic_rows(
-                    database_name=database_name,
+                    database_name=db_names_by_term.get(live_term_id, ""),
                     live_id=live_term_id,
                     name=term.name,
                     description=term.description,
@@ -995,6 +1249,9 @@ def _import_column_attributes(
     embed_buffer: ImportEmbedBuffer | None,
     column_meta: dict[str, ColumnCatalogMeta],
 ) -> None:
+    attr_items: list[tuple[str, dict[str, Any]]] = []
+    attr_context: dict[str, dict[str, Any]] = {}
+
     for term in document.semantic_layer.terms:
         live_term_id = _remap(id_map, term.id, kind="term")
         for attr in term.columns_attributes:
@@ -1004,51 +1261,73 @@ def _import_column_attributes(
                 if col_ctx
                 else ""
             )
-            live_attr_id, was_created = _resolve_entity(
-                LABEL_COLUMN_ATTRIBUTE,
-                attr.id,
-                create_props={
-                    "name": attr.name,
-                    "description": attr.description,
-                    "source": SEMANTIC_SOURCE,
-                    "term_name": term.name,
-                    "source_column": col_ctx.name if col_ctx else "",
-                    "table_id": live_table_id,
-                },
+            attr_items.append(
+                (
+                    attr.id,
+                    {
+                        "name": attr.name,
+                        "description": attr.description,
+                        "source": SEMANTIC_SOURCE,
+                        "term_name": term.name,
+                        "source_column": col_ctx.name if col_ctx else "",
+                        "table_id": live_table_id,
+                    },
+                ),
             )
-            id_map[attr.id] = live_attr_id
-            if was_created:
-                created["column_attributes"] += 1
-            else:
-                skipped["column_attributes"] += 1
-            live_col_id = _remap(id_map, attr.column_id, kind="column attribute column")
-            graph().query_write(
-                f"""
-                MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
-                MATCH (col:{Labels.COLUMN} {{id: $column_id}})
-                MATCH (term:{LABEL_TERM} {{id: $term_id}})
-                MERGE (col)-[:{REL_HAS_ATTRIBUTE}]->(attr)
-                MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
-                """,
-                {
-                    "attr_id": live_attr_id,
-                    "column_id": live_col_id,
-                    "term_id": live_term_id,
-                },
+            attr_context[attr.id] = {
+                "attr": attr,
+                "term": term,
+                "col_ctx": col_ctx,
+                "live_term_id": live_term_id,
+            }
+
+    attr_results = _resolve_entities_batch(LABEL_COLUMN_ATTRIBUTE, attr_items)
+
+    edge_rows: list[dict[str, Any]] = []
+    for attr_id, (live_attr_id, was_created) in attr_results.items():
+        ctx = attr_context[attr_id]
+        attr = ctx["attr"]
+        term = ctx["term"]
+        col_ctx = ctx["col_ctx"]
+        id_map[attr_id] = live_attr_id
+        if was_created:
+            created["column_attributes"] += 1
+        else:
+            skipped["column_attributes"] += 1
+        live_col_id = _remap(id_map, attr.column_id, kind="column attribute column")
+        edge_rows.append(
+            {
+                "attr_id": live_attr_id,
+                "column_id": live_col_id,
+                "term_id": ctx["live_term_id"],
+            },
+        )
+        if was_created and embed_buffer is not None and col_ctx is not None:
+            embed_buffer.semantic_rows.extend(
+                build_column_attribute_semantic_rows(
+                    database_name=col_ctx.database_name,
+                    live_id=live_attr_id,
+                    name=attr.name,
+                    description=attr.description,
+                    term_name=term.name,
+                    source_column=col_ctx.name,
+                    sample_values=col_ctx.sample_values,
+                    schema_name=col_ctx.schema_name,
+                ),
             )
-            if was_created and embed_buffer is not None and col_ctx is not None:
-                embed_buffer.semantic_rows.extend(
-                    build_column_attribute_semantic_rows(
-                        database_name=col_ctx.database_name,
-                        live_id=live_attr_id,
-                        name=attr.name,
-                        description=attr.description,
-                        term_name=term.name,
-                        source_column=col_ctx.name,
-                        sample_values=col_ctx.sample_values,
-                        schema_name=col_ctx.schema_name,
-                    ),
-                )
+
+    if edge_rows:
+        graph().query_write(
+            f"""
+            UNWIND $rows AS row
+            MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: row.attr_id}})
+            MATCH (col:{Labels.COLUMN} {{id: row.column_id}})
+            MATCH (term:{LABEL_TERM} {{id: row.term_id}})
+            MERGE (col)-[:{REL_HAS_ATTRIBUTE}]->(attr)
+            MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
+            """,
+            {"rows": edge_rows},
+        )
 
 
 def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> None:
@@ -1074,18 +1353,22 @@ def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> 
     )
 
 
-def _database_name_for_term(term_id: str) -> str | None:
-    rows = graph().query_read(
-        f"""
-        MATCH (tbl:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
-              -[:{Edges.CONTAINS}]->(tbl)
-        RETURN db.name AS database_name
-        LIMIT 1
-        """,
-        {"term_id": term_id},
-    )
-    return rows[0]["database_name"] if rows else None
+def _cached_dialects_and_schemas(
+    cache: dict[str | None, tuple[list[str], dict[str, Any]]],
+    database_name: str | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Memoized ``(dialects, schemas)`` lookup for one import call.
+
+    ``get_schemas`` rebuilds the whole catalog snapshot for a database on
+    every call, which is fine for a single ad-hoc SQL validation but adds up
+    fast across hundreds of sql_attributes/custom_analyses that usually
+    share the same handful of database names. The cache lives only for the
+    duration of one :func:`apply_import_model` call, so it can't serve
+    stale data across separate imports.
+    """
+    if database_name not in cache:
+        cache[database_name] = (get_dialects(database_name), get_schemas(database_name))
+    return cache[database_name]
 
 
 def _persist_sql_object(
@@ -1096,13 +1379,11 @@ def _persist_sql_object(
     description: str,
     sql: str,
     database_name: str | None,
+    schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
     extra_props: dict[str, Any] | None = None,
 ) -> None:
-    query_obj = validate_sql(
-        sql,
-        get_dialects(database_name),
-        get_schemas(database_name),
-    )
+    dialects, schemas = _cached_dialects_and_schemas(schema_cache, database_name)
+    query_obj = validate_sql(sql, dialects, schemas)
     props = {
         "name": name,
         "description": description,
@@ -1129,65 +1410,75 @@ def _import_sql_attributes(
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
     term_names: dict[str, str],
+    schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
 ) -> None:
-    for yaml_key in ("manual", "table", "sql", "bridge_table"):
-        source = _YAML_KEY_TO_SOURCE[yaml_key]
-        for attr in getattr(document.semantic_layer.sql_attributes, yaml_key):
-            live_attr_id, was_created = _resolve_entity(
-                LABEL_SQL_ATTRIBUTE,
+    grouped_attrs: list[tuple[str, ModelSqlAttribute]] = [
+        (_YAML_KEY_TO_SOURCE[yaml_key], attr)
+        for yaml_key in ("manual", "table", "sql", "bridge_table")
+        for attr in getattr(document.semantic_layer.sql_attributes, yaml_key)
+    ]
+
+    attr_results = _resolve_entities_batch(
+        LABEL_SQL_ATTRIBUTE,
+        [
+            (
                 attr.id,
-                create_props={
+                {
                     "name": attr.name,
                     "description": attr.description,
                     "expression": attr.sql,
                     "source": source,
                 },
             )
-            id_map[attr.id] = live_attr_id
-            if not was_created:
-                skipped["sql_attributes"] += 1
-                continue
-            created["sql_attributes"] += 1
-            live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
-            database_name = _database_name_for_term(live_term_id)
-            graph().query_write(
-                f"""
-                MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
-                SET attr.name = $name,
-                    attr.description = $description,
-                    attr.expression = $sql,
-                    attr.source = $source
-                """,
-                {
-                    "id": live_attr_id,
-                    "name": attr.name,
-                    "description": attr.description,
-                    "sql": attr.sql,
-                    "source": source,
-                },
+            for source, attr in grouped_attrs
+        ],
+    )
+    for _source, attr in grouped_attrs:
+        id_map[attr.id] = attr_results[attr.id][0]
+
+    # SQL parsing/graph linking (validate_sql, add_query) is inherently
+    # per-item, but the resolve step and the database-name lookups it needs
+    # are batched up front to cut round trips.
+    newly_created_term_ids = list(
+        {
+            _remap(id_map, attr.term_id, kind="sql attribute term")
+            for _source, attr in grouped_attrs
+            if attr_results[attr.id][1]
+        },
+    )
+    db_names_by_term = _database_names_for_terms(newly_created_term_ids)
+
+    for source, attr in grouped_attrs:
+        live_attr_id, was_created = attr_results[attr.id]
+        if not was_created:
+            skipped["sql_attributes"] += 1
+            continue
+        created["sql_attributes"] += 1
+        live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
+        database_name = db_names_by_term.get(live_term_id)
+        detach_existing_sql_edges(live_attr_id)
+        _persist_sql_object(
+            node_label=LABEL_SQL_ATTRIBUTE,
+            node_id=live_attr_id,
+            name=attr.name,
+            description=attr.description,
+            sql=attr.sql,
+            database_name=database_name,
+            schema_cache=schema_cache,
+            extra_props={"expression": attr.sql, "source": source},
+        )
+        link_to_term(live_attr_id, live_term_id)
+        if embed_buffer is not None:
+            embed_buffer.semantic_rows.append(
+                build_sql_attribute_semantic_row(
+                    live_id=live_attr_id,
+                    name=attr.name,
+                    description=attr.description,
+                    term_name=term_names.get(attr.term_id, ""),
+                    sql=attr.sql,
+                    database_name=database_name,
+                ),
             )
-            detach_existing_sql_edges(live_attr_id)
-            _persist_sql_object(
-                node_label=LABEL_SQL_ATTRIBUTE,
-                node_id=live_attr_id,
-                name=attr.name,
-                description=attr.description,
-                sql=attr.sql,
-                database_name=database_name,
-                extra_props={"expression": attr.sql, "source": source},
-            )
-            link_to_term(live_attr_id, live_term_id)
-            if embed_buffer is not None:
-                embed_buffer.semantic_rows.append(
-                    build_sql_attribute_semantic_row(
-                        live_id=live_attr_id,
-                        name=attr.name,
-                        description=attr.description,
-                        term_name=term_names.get(attr.term_id, ""),
-                        sql=attr.sql,
-                        database_name=database_name,
-                    ),
-                )
 
 
 def _import_custom_analyses(
@@ -1196,24 +1487,25 @@ def _import_custom_analyses(
     created: dict[str, int],
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
+    schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
 ) -> None:
-    for analysis in document.semantic_layer.custom_analyses:
-        live_ca_id, was_created = _resolve_entity(
-            Labels.CUSTOM_ANALYSIS,
-            analysis.id,
-            create_props={
-                "name": analysis.name,
-                "description": analysis.description,
-            },
-        )
-        id_map[analysis.id] = live_ca_id
-        if not was_created:
-            skipped["custom_analyses"] += 1
-            continue
-        created["custom_analyses"] += 1
+    analyses = document.semantic_layer.custom_analyses
+    ca_results = _resolve_entities_batch(
+        Labels.CUSTOM_ANALYSIS,
+        [
+            (analysis.id, {"name": analysis.name, "description": analysis.description})
+            for analysis in analyses
+        ],
+    )
+    for analysis in analyses:
+        id_map[analysis.id] = ca_results[analysis.id][0]
 
-        database_name = None
-        if analysis.sql_column_is:
+    live_col_by_analysis: dict[str, str | None] = {}
+    lookup_col_ids: list[str] = []
+    for analysis in analyses:
+        _live_id, was_created = ca_results[analysis.id]
+        live_col_id: str | None = None
+        if was_created and analysis.sql_column_is:
             try:
                 live_col_id = _remap(
                     id_map,
@@ -1222,33 +1514,20 @@ def _import_custom_analyses(
                 )
             except ModelImportValidationError:
                 live_col_id = None
-            if live_col_id:
-                rows = graph().query_read(
-                    f"""
-                    MATCH (col:{Labels.COLUMN} {{id: $column_id}})<-[:{Edges.CONTAINS}]-
-                          (tbl:{Labels.TABLE})<-[:{Edges.CONTAINS}]-
-                          (sch:{Labels.SCHEMA})<-[:{Edges.CONTAINS}]-
-                          (db:{Labels.DB})
-                    RETURN db.name AS database_name
-                    LIMIT 1
-                    """,
-                    {"column_id": live_col_id},
-                )
-                if rows:
-                    database_name = rows[0]["database_name"]
+        live_col_by_analysis[analysis.id] = live_col_id
+        if live_col_id:
+            lookup_col_ids.append(live_col_id)
 
-        graph().query_write(
-            f"""
-            MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $id}})
-            SET ca.name = $name,
-                ca.description = $description
-            """,
-            {
-                "id": live_ca_id,
-                "name": analysis.name,
-                "description": analysis.description,
-            },
-        )
+    db_names_by_column = _database_names_for_columns(lookup_col_ids)
+
+    for analysis in analyses:
+        live_ca_id, was_created = ca_results[analysis.id]
+        if not was_created:
+            skipped["custom_analyses"] += 1
+            continue
+        created["custom_analyses"] += 1
+        live_col_id = live_col_by_analysis.get(analysis.id)
+        database_name = db_names_by_column.get(live_col_id) if live_col_id else None
         detach_ca_sql_edges(live_ca_id)
         _persist_sql_object(
             node_label=Labels.CUSTOM_ANALYSIS,
@@ -1257,6 +1536,7 @@ def _import_custom_analyses(
             description=analysis.description,
             sql=analysis.sql,
             database_name=database_name,
+            schema_cache=schema_cache,
         )
         if embed_buffer is not None:
             embed_buffer.semantic_rows.append(
