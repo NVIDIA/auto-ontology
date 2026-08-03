@@ -23,6 +23,10 @@ const AGENT_SETTINGS_NAV_ITEM: NavItem = {
 	label: 'Agent Settings',
 	href: '/settings/agent-settings',
 };
+const IMPORT_EXPORT_NAV_ITEM: NavItem = {
+	label: 'Import / Export',
+	href: '/settings/import-export',
+};
 
 function rowClassName(selected: boolean) {
 	return `flex min-h-9 items-center rounded-lg px-3 text-sm no-underline transition-colors ${
@@ -61,6 +65,7 @@ export const SettingsNav = () => {
 		SSO_NAV_ITEM,
 		SEMANTIC_COMPILATION_NAV_ITEM,
 		AGENT_SETTINGS_NAV_ITEM,
+		IMPORT_EXPORT_NAV_ITEM,
 	);
 
 	return (

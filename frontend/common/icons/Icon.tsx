@@ -34,6 +34,8 @@ import ConnectionSvg from './svg/connection.svg';
 import CertificationSvg from './svg/certification.svg';
 import CloseSvg from './svg/close.svg';
 import PlusSvg from './svg/plus.svg';
+import DownloadSvg from './svg/download.svg';
+import UploadSvg from './svg/upload.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -66,6 +68,8 @@ export enum IconName {
 	ExternalLink = 'external-link',
 	Connection = 'connection',
 	Certification = 'certification',
+	Download = 'download',
+	Upload = 'upload',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -99,6 +103,8 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.ExternalLink]: ExternalLinkSvg,
 	[IconName.Connection]: ConnectionSvg,
 	[IconName.Certification]: CertificationSvg,
+	[IconName.Download]: DownloadSvg,
+	[IconName.Upload]: UploadSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {
