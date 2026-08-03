@@ -38,6 +38,9 @@ const statement = {
 	// other settings flags. The chat pipeline resolves it server-side, so
 	// viewers never need to read it.
 	visualization: ['read', 'manage'],
+	// Model import/export (settings): admin-only YAML backup/restore of the
+	// catalog + semantic layer.
+	modelInterchange: ['export', 'import'],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -58,6 +61,7 @@ export const roles = {
 		zone: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
 		visualization: ['read', 'manage'],
+		modelInterchange: ['export', 'import'],
 	}),
 	// Viewer: read-only on glossary/prompts, full control of their own
 	// conversations, may run chat, may view custom analyses (not add/edit them),

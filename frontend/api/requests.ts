@@ -33,6 +33,21 @@ const errorHandler = (err: AxiosError): ApiError => {
 	};
 };
 
+const errorHandlerBlob = async (err: AxiosError): Promise<ApiError> => {
+	const data = err.response?.data;
+	let message: string | undefined;
+	if (data instanceof Blob) {
+		try {
+			message = extractServerMessage(JSON.parse(await data.text()));
+		} catch {
+			message = undefined;
+		}
+	} else {
+		message = extractServerMessage(data);
+	}
+	return { message: message || err.message, error: true };
+};
+
 const normalizeQueryParams = (params: QueryParams): QueryParams => {
 	const newParams: QueryParams = {};
 	Object.entries(params).forEach(([paramKey, paramValue]) => {
@@ -68,6 +83,36 @@ export const requests = {
 	put: <OutputType>(url: string, data: unknown = {}, abortController?: AbortController) => {
 		return api
 			.put<OutputType>(url, data, {
+				signal: abortController?.signal,
+			})
+			.then(responseBody)
+			.catch(errorHandler) as Promise<ResponseWithError<OutputType>>;
+	},
+
+	/** Like `post`, but for endpoints that respond with a file (e.g. a YAML export) rather than JSON. */
+	postBlob: (url: string, data: unknown = {}, abortController?: AbortController) => {
+		return api
+			.post<Blob>(url, data, {
+				responseType: 'blob',
+				signal: abortController?.signal,
+			})
+			.then((res: AxiosResponse<Blob>): { blob: Blob } => ({ blob: res.data }))
+			.catch(errorHandlerBlob) as Promise<ResponseWithError<{ blob: Blob }>>;
+	},
+
+	/** Like `post`, but sends `FormData` (multipart) instead of a JSON body. */
+	postForm: <OutputType>(
+		url: string,
+		formData: FormData,
+		params: QueryParams = {},
+		abortController?: AbortController,
+	) => {
+		return api
+			.post<OutputType>(url, formData, {
+				params: normalizeQueryParams(params),
+				// Let axios/the browser compute the multipart boundary instead of
+				// using the instance's default JSON content type.
+				headers: { 'Content-Type': undefined },
 				signal: abortController?.signal,
 			})
 			.then(responseBody)
