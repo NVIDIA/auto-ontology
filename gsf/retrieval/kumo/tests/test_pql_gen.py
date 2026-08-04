@@ -1,5 +1,6 @@
 import pandas as pd
 
+from gsf.retrieval.kumo import pql_gen
 from gsf.retrieval.kumo.pql_gen import (
     _resolve_indices,
     canonicalize_pql_identifiers,
@@ -90,3 +91,29 @@ def test_resolve_indices_uses_ids_loaded_into_graph() -> None:
             "jobs": ["job-in-graph-1", "job-in-graph-2", "job-in-graph-3"]
         },
     ) == ["job-in-graph-1", "job-in-graph-2"]
+
+
+def test_row_limit_error_routes_to_neighbourhood_backoff() -> None:
+    message = (
+        "Request batch 0 table 'context.related_tables.GPU_ALLOCATIONS' contains "
+        "32,000 rows, exceeding the 10,000-row limit"
+    )
+    assert pql_gen._is_context_capacity_error(message)
+    assert pql_gen._is_context_size_limit_error(message)
+    assert not pql_gen._retry_at_full_neighbourhood(message)
+
+
+def test_row_limit_error_derives_a_fitting_neighbourhood() -> None:
+    message = "contains 32,000 rows, exceeding the 10,000-row limit"
+    assert pql_gen._neighbours_within_row_limit(message) == [8, 8]
+    assert pql_gen._neighbours_within_row_limit(message, current=[16, 16]) == [4, 4]
+
+
+def test_neighbourhood_shrinks_only_as_far_as_needed() -> None:
+    modest = "contains 12,000 rows, exceeding the 10,000-row limit"
+    assert pql_gen._neighbours_within_row_limit(modest) == [21, 21]
+
+    within = "contains 9,000 rows, exceeding the 10,000-row limit"
+    assert pql_gen._neighbours_within_row_limit(within) is None
+
+    assert pql_gen._neighbours_within_row_limit("some unrelated failure") is None

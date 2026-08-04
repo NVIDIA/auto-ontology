@@ -510,7 +510,15 @@ _CONTEXT_CAPACITY_MARKERS = (
     "illegal memory access",
     "out of memory",
     "context size exceeds",
+    "-row limit",
 )
+
+_ROW_LIMIT_RE = re.compile(
+    r"contains\s+([\d,]+)\s+rows,\s+exceeding\s+the\s+([\d,]+)-row limit",
+    re.IGNORECASE,
+)
+_DEFAULT_FIRST_HOP = 32
+_ROW_LIMIT_SAFETY = 0.8
 
 # A parse error at PREDICT time is spurious: the query already passed validate_pql (the cheap parse) moments
 # earlier, so a parse failure during predict is the KumoRFM server in a degraded state (observed right after a
@@ -538,10 +546,37 @@ def _is_context_capacity_error(message: str) -> bool:
 
 
 def _is_context_size_limit_error(message: str) -> bool:
-    """True for the DETERMINISTIC 'context size exceeds the limit' rejection. The SDK builds the context,
-    measures it, and rejects it for being over the ceiling, so the identical query yields the identical
-    oversize context every time — retrying the same neighbourhood cannot help, only a smaller one can."""
-    return "context size exceeds" in message.lower()
+    """True for a DETERMINISTIC context-too-large rejection: the 30MB 'context size exceeds' ceiling, or the
+    SDK's per-table row cap. Both are measured while the request is being built, so the identical query
+    yields the identical oversize context every time — retrying the same neighbourhood cannot help, only a
+    smaller one can."""
+    lowered = message.lower()
+    return "context size exceeds" in lowered or "-row limit" in lowered
+
+
+def _neighbours_within_row_limit(
+    message: str, *, current: list[int] | None = None
+) -> list[int] | None:
+    """Derive a neighbourhood whose sampled context fits the SDK's per-table row cap.
+
+    Sampled rows scale with the first-hop fan-out, so shrinking it by the ratio the error reports lands
+    under the cap in one step: 32,000 rows against a 10,000-row cap at a fan-out of 32 needs at most 10,
+    and the safety factor takes that to 8. Returns ``None`` when the message is not a row-cap rejection or
+    the numbers cannot be read, leaving the caller on the fixed ladder.
+    """
+    match = _ROW_LIMIT_RE.search(message)
+    if match is None:
+        return None
+    try:
+        rows = int(match.group(1).replace(",", ""))
+        limit = int(match.group(2).replace(",", ""))
+    except ValueError:
+        return None
+    if rows <= 0 or limit <= 0 or rows <= limit:
+        return None
+    first_hop = (current or [_DEFAULT_FIRST_HOP])[0]
+    fitted = max(1, int(first_hop * (limit / rows) * _ROW_LIMIT_SAFETY))
+    return [fitted, fitted] if fitted < first_hop else None
 
 
 # Markers for a TERMINAL backend failure: the generated *shape* is not serveable for this dataset, so neither
@@ -743,7 +778,11 @@ def _predict_resilient(
         return _retry_at_full_neighbourhood(message)
 
     last_exc: Exception | None = None
-    for num_neighbors in _CONTEXT_BACKOFF_NEIGHBORS:
+    ladder = list(_CONTEXT_BACKOFF_NEIGHBORS)
+    index = 0
+    while index < len(ladder):
+        num_neighbors = ladder[index]
+        index += 1
         retries = _FULL_NEIGHBORHOOD_RETRIES if num_neighbors is None else 0
         try:
             return _predict_with_retry(
@@ -758,6 +797,9 @@ def _predict_resilient(
                 raise
             if not (assert_err or _is_context_capacity_error(str(exc))):
                 raise
+            fitted = _neighbours_within_row_limit(str(exc), current=num_neighbors)
+            if fitted is not None and fitted not in ladder[index:]:
+                ladder.insert(index, fitted)
             if num_neighbors is None:
                 logger.warning(
                     "Full neighbourhood hit a KumoRFM capacity/assert error; falling back to a smaller "
