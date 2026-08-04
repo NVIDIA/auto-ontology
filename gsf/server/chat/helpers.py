@@ -39,6 +39,11 @@ class ChatRequest(BaseModel):
 
     question: str = Field(..., min_length=1)
     conversation_id: str | None = None
+    # Force the prediction/SQL branch instead of classifying the question:
+    # True  -> go straight to the KumoRFM prediction flow
+    # False -> go straight to the regular text-to-SQL flow
+    # None  -> classify as usual (default)
+    prediction: bool | None = None
 
 
 class VisualizeRequest(BaseModel):

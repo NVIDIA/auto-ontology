@@ -43,6 +43,9 @@ class TextToSQLPayload(TypedDict):
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
     target_db: NotRequired[str]
+    # Force the branch instead of classifying: True -> prediction, False -> SQL,
+    # None/absent -> classify.
+    prediction: NotRequired[bool | None]
 
 
 class AgentState(TypedDict):
@@ -53,6 +56,8 @@ class AgentState(TypedDict):
     initial_question: str
     messages: list[HumanMessage]
     decision: str
+    # Caller-supplied branch override; see TextToSQLPayload.prediction.
+    prediction_override: NotRequired[bool | None]
     connectors: list[SQLDatabase]
     path_state: dict
     data_retriever: Retriever

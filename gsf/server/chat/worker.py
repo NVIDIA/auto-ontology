@@ -120,8 +120,21 @@ def _worker_loop(
             continue
 
         try:
+            question, prediction = payload
+            # Connections are resolved from Neo4j once at worker init. If that
+            # lookup came back empty — Neo4j not yet reachable when this
+            # subprocess booted, or the first connection created afterwards —
+            # the snapshot would stay empty for the life of the process and
+            # every question would fail with "missing required 'connectors'"
+            # until the pod restarted. Re-resolve lazily so the worker heals
+            # itself; get_connectors() caches a non-empty result and only
+            # retries while there is nothing to cache, so this costs nothing
+            # on the normal path.
+            if not connectors:
+                connectors = get_connectors()
             agent_payload = {
-                "question": payload,
+                "question": question,
+                "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
                 "connectors": connectors,
@@ -170,8 +183,13 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(self, question: str, prediction: bool | None = None) -> None:
+        """Ask *question*, optionally forcing the prediction/SQL branch.
+
+        *prediction* mirrors the API parameter: True or False skips the
+        classification step, None classifies as usual.
+        """
+        self._in_q.put((_MSG_ASK, (question, prediction)))
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

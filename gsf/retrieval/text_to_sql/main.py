@@ -9,7 +9,10 @@ from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
+from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    _prediction_enabled,
+    create_graph,
+)
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
@@ -61,6 +64,17 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
     domain_rules = fetch_custom_analyses() + list(acronyms or [])
 
+    # ``prediction=True`` only means something when the KumoRFM branch was built
+    # into the graph at startup; without KUMO_RFM_API_KEY the classify node does
+    # not exist, so honouring the override is impossible. Fail loudly rather than
+    # silently answering with SQL.
+    prediction_override = payload.get("prediction")
+    if prediction_override is True and not _prediction_enabled():
+        raise ValueError(
+            "prediction=true was requested but the prediction flow is not "
+            "configured on this deployment (KUMO_RFM_API_KEY is unset)."
+        )
+
     initial_path_state = dict(payload.get("path_state") or {})
 
     target_db = payload.get("target_db")
@@ -90,6 +104,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "prediction_override": prediction_override,
     }
     if non_reasoning_llm_client is not None:
         state["non_reasoning_llm"] = non_reasoning_llm_client
