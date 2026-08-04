@@ -14,6 +14,8 @@ export type ChatMessage = {
 export type ChatRequest = {
 	question: string;
 	conversationId?: string | null;
+	/** Scope retrieval/SQL to one connected database when multiple are loaded. */
+	target_db?: string | null;
 };
 
 export type StepEvent = {

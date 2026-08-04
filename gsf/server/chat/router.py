@@ -307,7 +307,11 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
-    worker.submit(request.question, prediction=request.prediction)
+    worker.submit(
+        request.question,
+        prediction=request.prediction,
+        target_db=request.target_db,
+    )
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))
 

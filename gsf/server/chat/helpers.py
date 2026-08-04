@@ -44,6 +44,9 @@ class ChatRequest(BaseModel):
     # False -> go straight to the regular text-to-SQL flow
     # None  -> classify as usual (default)
     prediction: bool | None = None
+    # Scope retrieval/SQL to one connected database. When omitted (and more
+    # than one connector is loaded), the pipeline does not pin a database.
+    target_db: str | None = None
 
 
 class VisualizeRequest(BaseModel):

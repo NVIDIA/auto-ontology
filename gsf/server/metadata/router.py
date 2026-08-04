@@ -18,6 +18,8 @@ class TextRequest(BaseModel):
     """Payload for the text-to-data / text-to-pql routes."""
 
     question: str = Field(..., min_length=1)
+    # Scope retrieval to one connected database when multiple are loaded.
+    target_db: str | None = None
 
 
 @router.post("/text-to-data")
@@ -28,7 +30,7 @@ def text_to_data(body: TextRequest) -> dict:
     Returns 422 when the flow cannot produce a result for the question.
     """
     try:
-        result = dal.text_to_data(body.question)
+        result = dal.text_to_data(body.question, target_db=body.target_db)
     except dal.PredictionFlowError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}
@@ -41,7 +43,7 @@ def text_to_pql(body: TextRequest) -> dict:
     Returns 422 when the flow cannot produce a result for the question.
     """
     try:
-        result = dal.text_to_pql(body.question)
+        result = dal.text_to_pql(body.question, target_db=body.target_db)
     except dal.PredictionFlowError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": result}

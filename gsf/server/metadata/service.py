@@ -49,12 +49,15 @@ class PredictionFlowError(RuntimeError):
     """The prediction flow could not produce a result for the question."""
 
 
-def _build_payload(question: str) -> TextToSQLPayload:
+def _build_payload(
+    question: str,
+    target_db: str | None = None,
+) -> TextToSQLPayload:
     """Assemble the retriever/connector payload the pipeline needs (as chat does)."""
     connectors = get_connectors()
     if not connectors:
         raise PredictionFlowError("No database connection is configured.")
-    return {
+    payload: TextToSQLPayload = {
         "question": question,
         "data_retriever": get_data_objects_retriever(),
         "semantic_retriever": get_semantic_objects_retriever(),
@@ -62,6 +65,9 @@ def _build_payload(question: str) -> TextToSQLPayload:
         "acronyms": fetch_acronyms(),
         "custom_prompts": fetch_custom_prompts(),
     }
+    if target_db:
+        payload["target_db"] = target_db
+    return payload
 
 
 def _relevant_table_columns(
@@ -89,7 +95,7 @@ def _relevant_table_columns(
     return out
 
 
-def _prepare(question: str) -> dict:
+def _prepare(question: str, target_db: str | None = None) -> dict:
     """Run the shared front of the prediction flow (up to ``prepare_candidates``).
 
     Returns the accumulated ``AgentState``; ``state["path_state"]`` holds the
@@ -97,18 +103,18 @@ def _prepare(question: str) -> dict:
     """
     if llm_client is None:
         raise PredictionFlowError("LLM client is not configured.")
-    payload = _build_payload(question)
+    payload = _build_payload(question, target_db=target_db)
     return run_until_node(payload, _STOP_NODE)
 
 
-def text_to_data(question: str) -> dict:
+def text_to_data(question: str, target_db: str | None = None) -> dict:
     """Return the data objects gathered before PQL creation for ``question``:
     the relevant tables, their catalog join paths, and each table's column list.
 
     Raises :class:`PredictionFlowError` when the flow cannot produce a result.
     """
     with _run_lock:
-        state = _prepare(question)
+        state = _prepare(question, target_db=target_db)
         path_state = state.get("path_state", {})
         relevant_tables = path_state.get("relevant_tables") or []
         return {
@@ -119,7 +125,7 @@ def text_to_data(question: str) -> dict:
         }
 
 
-def text_to_pql(question: str) -> dict:
+def text_to_pql(question: str, target_db: str | None = None) -> dict:
     """Return the PQL generated for ``question`` (generation only, no prediction).
 
     Reuses the ``prepare_prediction_graph`` node to build the KumoRFM context
@@ -129,7 +135,7 @@ def text_to_pql(question: str) -> dict:
     Raises :class:`PredictionFlowError` when the flow cannot produce a result.
     """
     with _run_lock:
-        state = _prepare(question)
+        state = _prepare(question, target_db=target_db)
 
         prep = PredictionGraphAgent().execute(state)
         if prep.get("decision") != "predict_ready":
