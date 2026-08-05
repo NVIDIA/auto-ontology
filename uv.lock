@@ -1375,7 +1375,7 @@ wheels = [
 
 [[package]]
 name = "kumorfm"
-version = "2.24.0"
+version = "2.24.1"
 source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "antlr4-python3-runtime" },
@@ -1393,8 +1393,9 @@ dependencies = [
     { name = "urllib3" },
 ]
 wheels = [
-    { path = "kumorfm-2.24.0-cp312-cp312-macosx_11_0_arm64.whl" },
-    { path = "kumorfm-2.24.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
+    { path = "kumorfm-2.24.1-cp312-cp312-macosx_11_0_arm64.whl" },
+    { path = "kumorfm-2.24.1-cp312-cp312-manylinux_2_26_aarch64.manylinux_2_28_aarch64.whl" },
+    { path = "kumorfm-2.24.1-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl" },
 ]
 
 [[package]]
@@ -2004,7 +2005,7 @@ wheels = [
 
 [[package]]
 name = "nvidia-sdfm"
-version = "0.2.0"
+version = "0.2.1"
 source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "numpy" },
@@ -2013,7 +2014,7 @@ dependencies = [
     { name = "sdfm-connectors" },
 ]
 wheels = [
-    { path = "nvidia_sdfm-0.2.0-py3-none-any.whl" },
+    { path = "nvidia_sdfm-0.2.1-py3-none-any.whl" },
 ]
 
 [package.optional-dependencies]
@@ -3227,14 +3228,14 @@ wheels = [
 
 [[package]]
 name = "sdfm-connectors"
-version = "0.2.0"
+version = "0.3.0"
 source = { registry = "vendor/wheels" }
 dependencies = [
     { name = "pandas" },
     { name = "pyarrow" },
 ]
 wheels = [
-    { path = "sdfm_connectors-0.2.0-py3-none-any.whl" },
+    { path = "sdfm_connectors-0.3.0-py3-none-any.whl" },
 ]
 
 [[package]]
