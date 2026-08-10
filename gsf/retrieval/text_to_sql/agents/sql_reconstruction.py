@@ -362,11 +362,12 @@ class SQLReconstructionAgent(BaseAgent):
         prior_interpretation_section = ""
         if previous_thought:
             prior_interpretation_section = (
-                "\nINTERPRETATION ALREADY COMMITTED TO (from the reasoning "
-                "behind the SQL above — do NOT change any assumption stated "
-                "here, e.g. time window, 'top N', tie handling, unless the "
-                "error below explicitly requires it):\n"
+                "\nPRIOR INTERPRETATION (from the reasoning behind the SQL above):\n"
                 f"  {previous_thought}\n\n"
+                "Preserve user-intent assumptions when valid. Do not treat SQL "
+                "implementation choices—such as joins, columns, aliases, or "
+                "query structure—as fixed. Revise only parts contradicted by "
+                "the question, available schema, or validation error.\n\n"
             )
 
         error_prompt = (
@@ -377,12 +378,12 @@ class SQLReconstructionAgent(BaseAgent):
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
-            "Fix ONLY what the error requires. Keep every prior assumption "
-            "(time window, 'top N', tie handling, etc.) exactly as before — "
-            "do not silently reinterpret an ambiguous term just because "
-            "you're rewriting the query. Restate the same assumption(s) in "
-            "`thought`, adding a new one only if this fix required a "
-            "genuinely new judgment call.\n"
+            "Fix what the error requires while preserving every still-valid "
+            "user-intent assumption. Do not silently reinterpret an ambiguous "
+            "term merely because you're rewriting the query. In `thought`, "
+            "restate the assumptions that remain valid and clearly state any "
+            "assumption that had to change because it conflicted with the "
+            "user's question, the available schema, or the validation error.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"

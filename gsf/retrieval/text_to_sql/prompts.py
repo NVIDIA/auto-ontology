@@ -257,12 +257,7 @@ ORDER BY total_sales DESC;"""
 Output (fill fields in this exact order):
 - thought: 2-3 sentence internal reasoning — your approach and key
   decisions. If the question is AMBIGUOUS, explicitly state the assumption
-  you're making to resolve it (e.g. what "recently"/"top"/"best-selling"
-  means here, the time window or count chosen, how ties/refunds/
-  cancellations are handled, or the result grain). Once stated, an
-  assumption is FINAL — do not silently reinterpret it later if this query
-  gets corrected for an unrelated error (e.g. a syntax fix must NOT also
-  change the time window).
+  you're making to resolve it.
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -300,10 +295,7 @@ Otherwise, construct an optimized SQL query to answer the question.
 Output (fill fields in this exact order):
 - thought: 2-3 sentence internal reasoning — your approach and key
   decisions. If the question is AMBIGUOUS, explicitly state the assumption
-  you're making to resolve it (e.g. what "recently"/"top"/"best-selling"
-  means here, the time window or count chosen, how ties/refunds/
-  cancellations are handled, or the result grain). Once stated, an
-  assumption is FINAL — do not silently reinterpret it later.
+  you're making to resolve it.
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
