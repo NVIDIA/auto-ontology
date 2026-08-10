@@ -56,17 +56,8 @@ Run them in that order — the public spec reads the committed `backend.json`.
 
 ## Viewing
 
-GitHub has no OpenAPI renderer, so the spec is published as a Redoc site by
-`.github/workflows/publish-api-docs.yml` on every push to `main` that changes
-`gsf-api.json`. That workflow needs **Settings → Pages → Source: GitHub
-Actions**; until that is set it fails at the deploy step.
-
-Locally, without publishing anything:
-
-```sh
-npx @redocly/cli@1 preview-docs docs/openapi/gsf-api.json   # live-reloads
-npx @redocly/cli@1 build-docs docs/openapi/gsf-api.json -o /tmp/api.html
-```
+The spec is deployed to Github Page in the following line: <https://friendly-adventure-38857y4.pages.github.io/>
+Later will be part of GSF Docs on Nvidia website
 
 Or paste the file into <https://docs.scalar.com/swagger-editor> — bearing in
 mind that hands the full API surface to a third party.
