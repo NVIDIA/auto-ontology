@@ -40,6 +40,7 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SQL_ATTR_SOURCE_BRIDGE,
 )
+from gsf.utils.join_columns import parse_join_columns
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -461,8 +462,15 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
-    """Return all JOIN edges between tables."""
-    return graph().query_read(_FETCH_JOINS_QUERY)
+    """Return all JOIN edges between tables.
+
+    ``join_columns`` is stored as a JSON string (see
+    ``gsf.utils.join_columns``), so it is parsed back to a list here.
+    """
+    rows = graph().query_read(_FETCH_JOINS_QUERY)
+    for row in rows:
+        row["join_columns"] = parse_join_columns(row.get("join_columns"))
+    return rows
 
 
 # ---------------------------------------------------------------------------

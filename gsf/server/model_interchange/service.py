@@ -12,7 +12,7 @@ from collections.abc import Mapping
 from typing import Any
 
 import yaml
-from ossie_gsf import convert_gsf_to_ossie, convert_ossie_to_gsf
+from ossie_gsf import GSFConversionError, convert_gsf_to_ossie, convert_ossie_to_gsf
 
 from gsf.connectors import get_connectors
 from gsf.dal import model_interchange as dal
@@ -129,6 +129,21 @@ def _dump_yaml(document: GsfModelDocument) -> str:
     )
 
 
+def _validate_ossie_metric_names(document: GsfModelDocument) -> None:
+    """Reject custom analyses that Ossie's global metric namespace cannot hold."""
+    counts = Counter(
+        analysis.name for analysis in document.semantic_layer.custom_analyses
+    )
+    duplicates = [
+        f"{name!r} ({count})" for name, count in counts.items() if name and count > 1
+    ]
+    if duplicates:
+        raise GSFConversionError(
+            "Cannot export custom analyses with duplicate names as Apache Ossie "
+            f"metrics: {', '.join(duplicates)}"
+        )
+
+
 def export_model(request: ExportRequest) -> str:
     """Export the scoped model document as a YAML string in *request.format*."""
     database_ids = request.databases
@@ -140,6 +155,7 @@ def export_model(request: ExportRequest) -> str:
         sql_column_resolver=dal.resolve_sql_column_ids,
     )
     if request.format is ModelFormat.OSSIE:
+        _validate_ossie_metric_names(document)
         return convert_gsf_to_ossie(_dump_yaml(_project_terms_onto_one_table(document)))
     return _dump_yaml(document)
 

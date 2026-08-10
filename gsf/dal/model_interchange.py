@@ -64,6 +64,7 @@ from gsf.server.model_interchange.schemas import (
     ModelTerm,
 )
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
+from gsf.utils.join_columns import dump_join_columns, parse_join_columns
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -284,7 +285,7 @@ def assemble_export_document(
         ModelJoin(
             source_table_id=str(row["source_table_id"]),
             target_table_id=str(row["target_table_id"]),
-            join_columns=row.get("join_columns") or [],
+            join_columns=parse_join_columns(row.get("join_columns")),
         )
         for row in rows["joins"]
         if str(row.get("source_table_id") or "") in table_ids
@@ -793,6 +794,68 @@ def _resolve_entities_batch(
     return result
 
 
+def _ids_missing_has_sql(label: str, ids: list[str]) -> set[str]:
+    """Return the subset of *ids* for *label* nodes with no ``HAS_SQL`` edge.
+
+    SQL persistence for sql_attributes/custom_analyses runs after node
+    creation, outside the main transaction (see :func:`apply_import_model`).
+    If that step ever failed for an entity (bad SQL, transient error), the
+    entity node was already committed without its ``Sql`` node/edge — and
+    because :func:`_resolve_entities_batch` matches existing entities by
+    ``imported_id``/``id``, every later re-import would treat it as
+    "already exists" and skip attaching SQL forever. Callers use this to
+    retry SQL persistence for such orphaned nodes instead of leaving them
+    stuck (invisible in list views that inner-join on ``Sql``, and
+    undeletable by queries that match through the missing edge).
+    """
+    if not ids:
+        return set()
+    rows = graph().query_read(
+        f"""
+        UNWIND $ids AS entity_id
+        MATCH (n:{label} {{id: entity_id}})
+        WHERE NOT EXISTS {{ (n)-[:{Edges.HAS_SQL}]->(:{Labels.SQL}) }}
+        RETURN entity_id
+        """,
+        {"ids": ids},
+    )
+    return {row["entity_id"] for row in rows}
+
+
+def _existing_custom_analysis_ids_by_name(names: list[str]) -> dict[str, str]:
+    """Batched ``name -> live id`` lookup for existing CustomAnalysis nodes.
+
+    Bulk import dedupes purely by ``imported_id``/``id`` (see
+    :func:`_resolve_entities_batch`), which only recognizes a re-import of
+    the *same* export. A source that doesn't carry a stable id across runs
+    (a re-generated export, hand-authored YAML, an upstream tool that mints
+    a fresh id every time) would otherwise get a brand new CustomAnalysis
+    node — with its own random id — on every import, even though names are
+    meant to be unique for this label (see ``CustomAnalysisNameConflict``
+    in the single-item create/update API). Bulk import bypassed that
+    constraint entirely, which is how duplicate analyses accumulate.
+    Falling back to a name match here converges re-imports onto the
+    existing node instead.
+    """
+    if not names:
+        return {}
+    rows = graph().query_read(
+        f"""
+        UNWIND $names AS name
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{name: name}})
+        RETURN name, ca.id AS live_id
+        """,
+        {"names": list(dict.fromkeys(names))},
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        # If duplicates already exist from earlier buggy imports, keep the
+        # first (arbitrary but deterministic per query) so re-imports
+        # converge on one node instead of leaving the mess untouched.
+        result.setdefault(row["name"], str(row["live_id"]))
+    return result
+
+
 def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
     """Batched lookup of a representative database name per term id."""
     if not term_ids:
@@ -1108,7 +1171,7 @@ def _import_joins(document: GsfModelDocument, id_map: dict[str, str]) -> None:
             "target_table_id": _remap(
                 id_map, join.target_table_id, kind="join target table"
             ),
-            "join_columns": join.join_columns,
+            "join_columns": dump_join_columns(join.join_columns),
         }
         for join in document.data_layer.joins
     ]
@@ -1485,24 +1548,39 @@ def _import_sql_attributes(
     for _source, attr in grouped_attrs:
         id_map[attr.id] = attr_results[attr.id][0]
 
+    # Nodes that already existed but never got their Sql node/edge attached
+    # (see _ids_missing_has_sql) get SQL persistence retried alongside
+    # freshly created ones, instead of being skipped forever.
+    missing_sql_ids = _ids_missing_has_sql(
+        LABEL_SQL_ATTRIBUTE,
+        [attr_results[attr.id][0] for _source, attr in grouped_attrs],
+    )
+
+    def _attr_needs_sql(attr_id: str) -> bool:
+        live_id, was_created = attr_results[attr_id]
+        return was_created or live_id in missing_sql_ids
+
     # SQL parsing/graph linking (validate_sql, add_query) is inherently
     # per-item, but the resolve step and the database-name lookups it needs
     # are batched up front to cut round trips.
-    newly_created_term_ids = list(
+    term_ids_needing_lookup = list(
         {
             _remap(id_map, attr.term_id, kind="sql attribute term")
             for _source, attr in grouped_attrs
-            if attr_results[attr.id][1]
+            if _attr_needs_sql(attr.id)
         },
     )
-    db_names_by_term = _database_names_for_terms(newly_created_term_ids)
+    db_names_by_term = _database_names_for_terms(term_ids_needing_lookup)
 
     for source, attr in grouped_attrs:
         live_attr_id, was_created = attr_results[attr.id]
-        if not was_created:
+        if not _attr_needs_sql(attr.id):
             skipped["sql_attributes"] += 1
             continue
-        created["sql_attributes"] += 1
+        if was_created:
+            created["sql_attributes"] += 1
+        else:
+            skipped["sql_attributes"] += 1
         live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
         database_name = db_names_by_term.get(live_term_id)
         detach_existing_sql_edges(live_attr_id)
@@ -1539,22 +1617,52 @@ def _import_custom_analyses(
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
 ) -> None:
     analyses = document.semantic_layer.custom_analyses
+
+    # Prefer matching an existing CustomAnalysis by name over the YAML's own
+    # id when one already exists (see _existing_custom_analysis_ids_by_name):
+    # this is what makes re-imports from an id-unstable source converge
+    # instead of piling up duplicates.
+    existing_ids_by_name = _existing_custom_analysis_ids_by_name(
+        [analysis.name for analysis in analyses if analysis.name],
+    )
+
+    def _resolve_key(analysis: ModelCustomAnalysis) -> str:
+        return (
+            existing_ids_by_name.get(analysis.name, analysis.id)
+            if analysis.name
+            else analysis.id
+        )
+
     ca_results = _resolve_entities_batch(
         Labels.CUSTOM_ANALYSIS,
         [
-            (analysis.id, {"name": analysis.name, "description": analysis.description})
+            (
+                _resolve_key(analysis),
+                {"name": analysis.name, "description": analysis.description},
+            )
             for analysis in analyses
         ],
     )
     for analysis in analyses:
-        id_map[analysis.id] = ca_results[analysis.id][0]
+        id_map[analysis.id] = ca_results[_resolve_key(analysis)][0]
+
+    # Nodes that already existed but never got their Sql node/edge attached
+    # (see _ids_missing_has_sql) get SQL persistence retried alongside
+    # freshly created ones, instead of being skipped forever.
+    missing_sql_ids = _ids_missing_has_sql(
+        Labels.CUSTOM_ANALYSIS,
+        [ca_results[_resolve_key(analysis)][0] for analysis in analyses],
+    )
+
+    def _ca_needs_sql(analysis: ModelCustomAnalysis) -> bool:
+        live_id, was_created = ca_results[_resolve_key(analysis)]
+        return was_created or live_id in missing_sql_ids
 
     live_col_by_analysis: dict[str, str | None] = {}
     lookup_col_ids: list[str] = []
     for analysis in analyses:
-        _live_id, was_created = ca_results[analysis.id]
         live_col_id: str | None = None
-        if was_created and analysis.sql_column_is:
+        if _ca_needs_sql(analysis) and analysis.sql_column_is:
             try:
                 live_col_id = _remap(
                     id_map,
@@ -1569,12 +1677,23 @@ def _import_custom_analyses(
 
     db_names_by_column = _database_names_for_columns(lookup_col_ids)
 
+    # Several YAML entries can converge on the same live node (duplicate
+    # names, or several rows re-matched by _resolve_key); only persist SQL
+    # for it once instead of redundantly rewriting the same Sql node/edge.
+    handled_ids: set[str] = set()
+
     for analysis in analyses:
-        live_ca_id, was_created = ca_results[analysis.id]
-        if not was_created:
+        live_ca_id, was_created = ca_results[_resolve_key(analysis)]
+        if not _ca_needs_sql(analysis):
             skipped["custom_analyses"] += 1
             continue
-        created["custom_analyses"] += 1
+        if was_created:
+            created["custom_analyses"] += 1
+        else:
+            skipped["custom_analyses"] += 1
+        if live_ca_id in handled_ids:
+            continue
+        handled_ids.add(live_ca_id)
         live_col_id = live_col_by_analysis.get(analysis.id)
         database_name = db_names_by_column.get(live_col_id) if live_col_id else None
         detach_ca_sql_edges(live_ca_id)

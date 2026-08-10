@@ -6,12 +6,13 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_gsf import convert_gsf_to_ossie
+from ossie_gsf import GSFConversionError, convert_gsf_to_ossie
 
 from gsf.dal.model_interchange import (
     UnknownDatabaseIdsError,
@@ -322,6 +323,56 @@ def test_export_model_ossie_format_emits_ossie_document(
     assert model["datasets"][0]["source"] == "retail.main.orders"
 
 
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
+@patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
+@patch("gsf.server.model_interchange.service.dal.validate_database_ids")
+def test_export_model_ossie_reports_all_duplicate_custom_analysis_names(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    rows = _export_rows()
+    rows["custom_analyses"] = [
+        {
+            "id": "ca-1",
+            "name": "name25",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-2",
+            "name": "name25",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-3",
+            "name": "name3",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-4",
+            "name": "name3",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+    ]
+    mock_fetch.return_value = rows
+
+    with pytest.raises(
+        GSFConversionError,
+        match=r"duplicate names.*'name25' \(2\), 'name3' \(2\)",
+    ):
+        service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE))
+
+
 def _multi_table_term_rows() -> dict:
     """A term representing two tables, as a junction concept usually does."""
     rows = _export_rows()
@@ -604,6 +655,137 @@ def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     write_params = mock_conn.return_value.query_write.call_args[0][1]
     assert write_params["props"]["imported_id"] == "yaml-table"
     assert write_params["props"]["name"] == "orders"
+
+
+@patch("gsf.dal.model_interchange._database_names_for_columns")
+@patch("gsf.dal.model_interchange._persist_sql_object")
+@patch("gsf.dal.model_interchange.detach_ca_sql_edges")
+@patch("gsf.dal.model_interchange._ids_missing_has_sql")
+@patch("gsf.dal.model_interchange._resolve_entities_batch")
+@patch("gsf.dal.model_interchange._existing_custom_analysis_ids_by_name")
+def test_import_custom_analyses_converges_duplicate_names_on_existing_node(
+    mock_existing_by_name: MagicMock,
+    mock_resolve_batch: MagicMock,
+    mock_missing_sql: MagicMock,
+    mock_detach: MagicMock,
+    mock_persist_sql: MagicMock,
+    mock_db_names: MagicMock,
+) -> None:
+    """Re-importing an id-unstable source must not pile up duplicate analyses.
+
+    Two YAML rows share the same name (as happens when the upstream export
+    mints a fresh id every run) and an existing CustomAnalysis with that
+    name already exists in the graph but is missing its ``Sql`` node/edge
+    (a prior partial import). Both rows must resolve onto that one live
+    node, and SQL persistence must be attempted for it exactly once — not
+    skipped forever, and not duplicated per YAML row.
+    """
+    from gsf.dal.model_interchange import _import_custom_analyses
+
+    mock_existing_by_name.return_value = {"dup": "existing-live-id"}
+    mock_resolve_batch.return_value = {"existing-live-id": ("existing-live-id", False)}
+    mock_missing_sql.return_value = {"existing-live-id"}
+    mock_db_names.return_value = {}
+
+    document = GsfModelDocument.model_validate(
+        {
+            "semantic_layer": {
+                "custom_analyses": [
+                    {
+                        "id": "yaml-1",
+                        "name": "dup",
+                        "description": "d1",
+                        "sql": "SELECT 1",
+                    },
+                    {
+                        "id": "yaml-2",
+                        "name": "dup",
+                        "description": "d1",
+                        "sql": "SELECT 1",
+                    },
+                ],
+            },
+        },
+    )
+
+    id_map: dict[str, str] = {}
+    created = {"custom_analyses": 0}
+    skipped = {"custom_analyses": 0}
+
+    _import_custom_analyses(document, id_map, created, skipped, None, {})
+
+    assert id_map["yaml-1"] == "existing-live-id"
+    assert id_map["yaml-2"] == "existing-live-id"
+
+    # _resolve_entities_batch must see both rows keyed by the existing live
+    # id (the name match), not by their own distinct YAML ids.
+    batch_items = mock_resolve_batch.call_args[0][1]
+    assert [key for key, _props in batch_items] == [
+        "existing-live-id",
+        "existing-live-id",
+    ]
+
+    # Neither row created a new node, but SQL is attached exactly once.
+    assert created["custom_analyses"] == 0
+    assert skipped["custom_analyses"] == 2
+    mock_persist_sql.assert_called_once()
+    assert mock_persist_sql.call_args.kwargs["node_id"] == "existing-live-id"
+
+
+@patch("gsf.dal.model_interchange.graph")
+def test_import_joins_stores_join_columns_as_a_json_string(
+    mock_conn: MagicMock,
+) -> None:
+    """Neo4j properties can't be a list of maps; join_columns must be JSON-encoded.
+
+    Writing the raw ``list[dict]`` straight to a relationship property (as
+    the code used to) makes Neo4j reject the query with a CypherTypeError
+    the moment a model with a non-empty join gets imported.
+    """
+    from gsf.dal.model_interchange import _import_joins
+
+    document = GsfModelDocument.model_validate(
+        {
+            "data_layer": {
+                "joins": [
+                    {
+                        "source_table_id": "tbl-1",
+                        "target_table_id": "tbl-2",
+                        "join_columns": [{"source": "customer_id", "target": "id"}],
+                    },
+                ],
+            },
+        },
+    )
+
+    _import_joins(document, {"tbl-1": "live-tbl-1", "tbl-2": "live-tbl-2"})
+
+    write_params = mock_conn.return_value.query_write.call_args[0][1]
+    row = write_params["rows"][0]
+    assert isinstance(row["join_columns"], str)
+    assert json.loads(row["join_columns"]) == [
+        {"source": "customer_id", "target": "id"},
+    ]
+
+
+def test_assemble_export_document_parses_join_columns_json_string() -> None:
+    """The DAL must read back what it now writes: a JSON-encoded property."""
+    rows = _export_rows()
+    rows["catalog"] = [
+        *_catalog_rows(),
+        {**_catalog_rows()[0], "table_id": "tbl-2", "table_name": "customers"},
+    ]
+    rows["joins"][0]["join_columns"] = '[{"source": "customer_id", "target": "id"}]'
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    assert document.data_layer.joins[0].join_columns == [
+        {"source": "customer_id", "target": "id"},
+    ]
 
 
 @patch("gsf.dal.model_interchange._ensure_import_indexes")
