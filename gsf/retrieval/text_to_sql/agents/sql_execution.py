@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
+from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from gsf.retrieval.text_to_sql.state import AgentState
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
@@ -48,7 +49,7 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
     try:
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
-        df = connector.execute(sql)
+        df = execute_chat_sql(connector, sql)
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e))

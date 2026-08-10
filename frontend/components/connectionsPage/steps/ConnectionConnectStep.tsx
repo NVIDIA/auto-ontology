@@ -57,6 +57,32 @@ export const ConnectionConnectStep = ({
 					const onChange = ({ target }: ChangeEvent<HTMLInputElement>) =>
 						onFieldChange(field.key, target.value);
 
+					// Boolean fields render as a checkbox; the modal stores every
+					// value as a string, so 'true'/'' is the on/off representation.
+					if (field.boolean) {
+						return (
+							<label key={field.key} className="flex flex-col gap-1.5">
+								<span className="flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+									<input
+										type="checkbox"
+										checked={values[field.key] === 'true'}
+										onChange={({ target }) =>
+											onFieldChange(field.key, target.checked ? 'true' : '')
+										}
+										data-testid={`connection-field-${field.key}`}
+										className="h-4 w-4 rounded border-zinc-300 accent-[#76b900] dark:border-zinc-600"
+									/>
+									{field.label}
+								</span>
+								{field.hint != null && (
+									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+										{field.hint}
+									</span>
+								)}
+							</label>
+						);
+					}
+
 					return (
 						<label key={field.key} className="flex flex-col gap-1.5">
 							<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">

@@ -89,6 +89,28 @@ def create_connection(body: ConnectionBody) -> dict:
     return {"data": _serialize_connection(row)}
 
 
+class SsoFederationBody(BaseModel):
+    enabled: bool
+
+
+@router.patch("/connections/{database_name}/sso-federation")
+def set_sso_federation(database_name: str, body: SsoFederationBody) -> dict:
+    """Toggle whether chat runs this connection's SQL as the signed-in user."""
+    try:
+        row = service.set_sso_federation(
+            database_name=database_name, enabled=body.enabled
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to update connection: {exc}",
+        ) from exc
+
+    return {"data": row}
+
+
 @router.delete("/connections/{database_name}")
 def delete_connection(database_name: str) -> dict:
     try:
