@@ -156,8 +156,14 @@ class SQLGenerationModel(StrictModel):
     thought: str = Field(
         ...,
         description=(
-            "Brief reasoning (1-2 sentences) explaining the SQL "
-            "approach and key decisions."
+            "Brief reasoning (2-3 sentences) explaining the SQL approach and "
+            "key decisions. If the question was AMBIGUOUS, explicitly state "
+            "the assumption made to resolve it (e.g. what 'recently'/'top'/"
+            "'best-selling' was taken to mean, which time window or "
+            "aggregation was chosen, how ties/refunds/cancellations are "
+            "handled, or the grain of the result) — once stated, that "
+            "assumption is FINAL and must not be silently reinterpreted "
+            "later."
         ),
     )
     sql_code: NonEmptyStr = Field(

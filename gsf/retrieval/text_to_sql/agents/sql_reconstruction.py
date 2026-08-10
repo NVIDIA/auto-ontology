@@ -287,6 +287,7 @@ class SQLReconstructionAgent(BaseAgent):
         relevant_tables = list(path_state.get("relevant_tables") or [])
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
+        previous_thought = (getattr(incorrect_response, "thought", "") or "").strip()
 
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
@@ -354,13 +355,34 @@ class SQLReconstructionAgent(BaseAgent):
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
+        # Anchor ambiguous-term interpretation across repair attempts: without
+        # this, each reconstruction call independently re-derives things like
+        # "recently" from scratch and silently drifts (e.g. 5 months -> 4
+        # months) even when the time window was never the flagged problem.
+        prior_interpretation_section = ""
+        if previous_thought:
+            prior_interpretation_section = (
+                "\nINTERPRETATION ALREADY COMMITTED TO (from the reasoning "
+                "behind the SQL above — do NOT change any assumption stated "
+                "here, e.g. time window, 'top N', tie handling, unless the "
+                "error below explicitly requires it):\n"
+                f"  {previous_thought}\n\n"
+            )
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
             f"{history_section}"
+            f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
+            "Fix ONLY what the error requires. Keep every prior assumption "
+            "(time window, 'top N', tie handling, etc.) exactly as before — "
+            "do not silently reinterpret an ambiguous term just because "
+            "you're rewriting the query. Restate the same assumption(s) in "
+            "`thought`, adding a new one only if this fix required a "
+            "genuinely new judgment call.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
