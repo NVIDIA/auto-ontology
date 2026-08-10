@@ -239,6 +239,33 @@ def _pump(slot: _Slot) -> None:
         _release(slot)
 
 
+def _subject_token(http_request: Request) -> str | None:
+    """Return the caller's SSO JWT when a connection authenticates as the user.
+
+    The frontend forwards the browser user's SSO token (or a service caller's
+    own bearer token) as ``Authorization: Bearer``. Fail closed: when any
+    connection has "Authenticate as signed-in user" enabled, a request without a
+    token is rejected rather than allowed to run under that connection's PAT.
+    """
+    from gsf.connectors.databricks_oauth import any_connection_uses_sso_federation
+
+    if not any_connection_uses_sso_federation():
+        return None
+
+    header = http_request.headers.get("authorization") or ""
+    scheme, _, token = header.partition(" ")
+    token = token.strip()
+    if scheme.lower() != "bearer" or not token:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "A connection is configured to authenticate as the signed-in "
+                "user, but the request carried no SSO bearer token."
+            ),
+        )
+    return token
+
+
 def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
     """Replay ``slot.buffer`` from the start, then tail it live.
 
@@ -282,6 +309,8 @@ async def chat_completions(
     # conversations that do send one.
     key = request.conversation_id or str(uuid.uuid4())
 
+    subject_token = _subject_token(http_request)
+
     pool = get_pool()
     worker = pool.acquire()
     slot = _Slot(
@@ -311,6 +340,7 @@ async def chat_completions(
         request.question,
         prediction=request.prediction,
         target_db=request.target_db,
+        subject_token=subject_token,
     )
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))

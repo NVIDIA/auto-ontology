@@ -15,12 +15,17 @@ type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
 	onDelete?: (databaseName: string) => void;
+	onSsoFederationChange?: (databaseName: string, enabled: boolean) => void;
+	/** Database name whose SSO-federation request is currently in flight. */
+	ssoFederationPending?: string | null;
 };
 
 export const ConnectionsInfoCardView = ({
 	connections,
 	loading = false,
 	onDelete,
+	onSsoFederationChange,
+	ssoFederationPending = null,
 }: ConnectionsInfoCardViewProps) => {
 	if (loading) {
 		return (
@@ -49,6 +54,8 @@ export const ConnectionsInfoCardView = ({
 					key={connection.database_name}
 					connection={connection}
 					onDelete={onDelete}
+					onSsoFederationChange={onSsoFederationChange}
+					ssoFederationPending={ssoFederationPending === connection.database_name}
 				/>
 			))}
 		</div>

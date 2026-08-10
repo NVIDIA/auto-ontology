@@ -38,6 +38,8 @@ from gsf.retrieval.text_to_sql.db_probe.config import (
     DB_PROBE_MAX_ROWS,
 )
 
+from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
+
 logger = logging.getLogger(__name__)
 
 # Statement keywords that must never appear in a probe (mutations / side effects).
@@ -151,7 +153,7 @@ class ProbeExecutor:
 
         start = time.perf_counter()
         try:
-            df = self.connector.execute(bounded_sql)
+            df = execute_chat_sql(self.connector, bounded_sql, kind="probe SQL")
         except Exception as exc:  # noqa: BLE001 — probes must never break the pipeline
             entry["error"] = str(exc)
             entry["elapsed_ms"] = int((time.perf_counter() - start) * 1000)

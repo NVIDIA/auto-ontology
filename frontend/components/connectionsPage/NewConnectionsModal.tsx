@@ -42,9 +42,16 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	const supportsSchemaSelection =
 		connectionType === ConnectionType.DATABRICKS || connectionType === ConnectionType.SNOWFLAKE;
 
+	// Naming a schema on the form replaces picking one from a list: the test has
+	// already confirmed it exists, so there is nothing left to choose.
+	const explicitSchema = (values.schema ?? '').trim();
+
 	const steps = useMemo(
-		() => (supportsSchemaSelection ? [...BASE_STEPS, SCHEMA_STEP] : [...BASE_STEPS]),
-		[supportsSchemaSelection],
+		() =>
+			supportsSchemaSelection && !explicitSchema
+				? [...BASE_STEPS, SCHEMA_STEP]
+				: [...BASE_STEPS],
+		[supportsSchemaSelection, explicitSchema],
 	);
 
 	// `testOnly` fields (the Databricks schema filter) shape the connection test
@@ -55,14 +62,25 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 			const fields = CONNECTION_FIELDS[connectionType].filter(
 				(field) => forTest || !field.testOnly,
 			);
-			const entries = fields.map((field) => [field.key, (values[field.key] ?? '').trim()]);
+			const entries = fields.map((field) => [
+				field.key,
+				// Checkbox fields go over the wire as real booleans; the form
+				// stores them as 'true'/'' like every other value.
+				field.boolean ? values[field.key] === 'true' : (values[field.key] ?? '').trim(),
+			]);
 			const base = { type: connectionType, ...Object.fromEntries(entries) };
-			if (supportsSchemaSelection && selectedSchemas.length > 0) {
-				return { ...base, schemas: selectedSchemas } as ConnectionInput;
+			if (supportsSchemaSelection) {
+				// A named schema is the allowlist; otherwise use whatever was picked.
+				if (explicitSchema) {
+					return { ...base, schemas: [explicitSchema] } as ConnectionInput;
+				}
+				if (selectedSchemas.length > 0) {
+					return { ...base, schemas: selectedSchemas } as ConnectionInput;
+				}
 			}
 			return base as ConnectionInput;
 		},
-		[connectionType, values, supportsSchemaSelection, selectedSchemas],
+		[connectionType, values, supportsSchemaSelection, selectedSchemas, explicitSchema],
 	);
 
 	const fieldsComplete = useMemo(

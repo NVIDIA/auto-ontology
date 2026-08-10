@@ -61,16 +61,22 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         if host.startswith(("https://", "http://")):
             host = host.split("://", 1)[1]
         http_path = _require(connection, "http_path")
-        access_token = _require(connection, "password")
+        # ``access_token_override`` carries a Databricks token exchanged from the
+        # caller's SSO identity, so the query runs with that user's privileges
+        # instead of the connection's stored PAT.
+        access_token = str(connection.get("access_token_override") or "").strip()
+        federated = bool(access_token)
+        if not access_token:
+            access_token = _require(connection, "password")
         catalog = _require(connection, "database")
         url = (
             f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
             f"?http_path={_enc(http_path)}"
         )
-        # Test-only substring filter for the schema picker; not persisted.
-        schema_contains = str(connection.get("schema_contains") or "").strip()
-        if schema_contains:
-            url += f"&schema_contains={_enc(schema_contains)}"
+        # The token itself is opaque, so record which credential it is. The
+        # connector logs this alongside every statement it runs.
+        if federated:
+            url += "&auth=sso"
         return url
 
     if conn_type == "heavydb":

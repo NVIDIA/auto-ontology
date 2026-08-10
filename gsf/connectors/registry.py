@@ -35,6 +35,18 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
 _connectors: list[SQLDatabase] | None = None
 
 
+def _redact(connection_string: str) -> str:
+    """Mask the password/token in a connection string before logging it.
+
+    Connection strings carry a PAT (or, with per-user auth, a caller's exchanged
+    Databricks token), so the raw value must never reach the logs.
+    """
+    parsed = urlparse(connection_string)
+    if not parsed.password:
+        return connection_string
+    return connection_string.replace(parsed.password, "***", 1)
+
+
 def _schema_filter(connection: dict) -> list[str] | None:
     """Clean optional ``schemas`` ingestion allowlist off a connection dict.
 
@@ -93,9 +105,72 @@ def create_connector(
     except Exception:
         logger.exception(
             "Failed to initialize connector for connection string: %s",
-            connection_string,
+            _redact(connection_string),
         )
         raise
+
+
+def get_connectors_for_subject_token(
+    subject_token: str | None,
+) -> list[SQLDatabase]:
+    """Build connectors, authenticating federated connections as the caller.
+
+    Connections with "Authenticate as signed-in user" enabled get their stored
+    PAT replaced by a token exchanged from *subject_token* (the caller's SSO
+    JWT), so SQL runs under that user's Unity Catalog grants. Every other
+    connection is untouched and reuses the shared cache.
+
+    Fail-closed: a federated connection with no usable subject token raises
+    rather than falling back to the stored PAT — otherwise the query would
+    silently run with the PAT's broader privileges.
+
+    Raises:
+        DatabricksOAuthError: no subject token, or the exchange was rejected.
+    """
+    from gsf.connectors.databricks_oauth import (
+        DatabricksOAuthError,
+        exchange_subject_token,
+        uses_sso_federation,
+    )
+    from gsf.dal.connections import list_connections
+
+    try:
+        connections = list_connections()
+    except Exception:
+        logger.exception("Failed to load connections for per-user Databricks auth")
+        raise
+
+    federated = [conn for conn in connections if uses_sso_federation(conn)]
+    if not federated:
+        return get_connectors()
+
+    if not subject_token:
+        raise DatabricksOAuthError(
+            "This connection authenticates as the signed-in user, but the "
+            "request carried no SSO token"
+        )
+
+    loaded: list[SQLDatabase] = []
+    federated_names: set[str] = set()
+    for conn in federated:
+        access_token = exchange_subject_token(
+            str(conn.get("host") or ""), subject_token
+        )
+        connection_string = build_connection_string(
+            {**conn, "access_token_override": access_token}
+        )
+        connector = create_connector(connection_string, schemas=_schema_filter(conn))
+        federated_names.add(connector.database_name)
+        loaded.append(connector)
+
+    # Non-federated connections keep their own credentials; reuse the shared
+    # cache rather than rebuilding them per request.
+    loaded.extend(
+        connector
+        for connector in get_connectors()
+        if connector.database_name not in federated_names
+    )
+    return loaded
 
 
 def get_connectors() -> list[SQLDatabase]:
