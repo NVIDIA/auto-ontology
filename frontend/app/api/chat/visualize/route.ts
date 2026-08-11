@@ -9,8 +9,8 @@
 //
 // This route also persists the assistant bubble it produces (charts, or the
 // result table when there are none), because that bubble only exists once the
-// chart step resolves — the completions proxy has long since written Message 1
-// and cannot know how this one turns out.
+// chart step resolves — FastAPI has already written Message 1 and cannot know
+// how this separate request turns out.
 //
 // Only the client that submitted the question calls this, so one turn produces
 // exactly one request and one Message 2 — no dedupe needed here. A tab watching

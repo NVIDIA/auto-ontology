@@ -29,6 +29,7 @@ export const openapi: OpenApiRoute = {
 					),
 				conversation_id: z
 					.string()
+					.uuid()
 					.optional()
 					.describe(
 						'When given and owned by the caller, the result and any chart are ' +

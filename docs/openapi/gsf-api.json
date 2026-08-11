@@ -533,7 +533,9 @@
             "required": true,
             "description": "Conversation whose in-flight run to abort. Must belong to the caller.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           }
         ],
@@ -591,7 +593,7 @@
         "x-gsf-upstream": "/api/chat/completions",
         "requestBody": {
           "required": true,
-          "description": "Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate `POST /api/chat/visualize` call. An unknown or unowned `conversation_id` is treated as absent and a new conversation is created for the caller.",
+          "description": "Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate `POST /api/chat/visualize` call. Reuse one `conversation_id` for follow-up turns; an unknown UUID creates a conversation, while an ID owned by another user returns 404.",
           "content": {
             "application/json": {
               "schema": {
@@ -604,7 +606,9 @@
                   "conversation_id": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "format": "uuid",
+                        "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                       },
                       {
                         "type": "null"
@@ -716,7 +720,9 @@
                   },
                   "conversation_id": {
                     "description": "When given and owned by the caller, the result and any chart are appended to that conversation as an assistant message. Ignored by the backend; consumed by this handler only.",
-                    "type": "string"
+                    "type": "string",
+                    "format": "uuid",
+                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
                   }
                 },
                 "required": ["question", "result"]
@@ -771,7 +777,9 @@
             "required": true,
             "description": "Conversation whose in-flight run to observe. Must belong to the caller.",
             "schema": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid",
+              "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
             }
           }
         ],

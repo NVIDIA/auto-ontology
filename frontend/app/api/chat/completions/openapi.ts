@@ -7,20 +7,19 @@ import type { OpenApiRoute } from '@/types/openapi';
 
 // The handler forwards the parsed body to FastAPI verbatim, so the shape is the
 // backend's `ChatRequest`. It is restated here rather than merged from
-// `docs/openapi/backend.json` because the proxy reads two of the fields itself
-// (`question` for the conversation title and the analytics row,
-// `conversation_id` to resolve or create the caller's conversation), and
-// because the generator only borrows *responses* from a hand-rolled proxy.
+// `docs/openapi/backend.json` because this hand-rolled streaming proxy also
+// enforces conversation permissions before forwarding the body.
 export const openapi: OpenApiRoute = {
 	post: {
 		body: {
 			description:
 				'Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate ' +
-				'`POST /api/chat/visualize` call. An unknown or unowned `conversation_id` is ' +
-				'treated as absent and a new conversation is created for the caller.',
+				'`POST /api/chat/visualize` call. Reuse one `conversation_id` for follow-up ' +
+				'turns; an unknown UUID creates a conversation, while an ID owned by another ' +
+				'user returns 404.',
 			schema: z.object({
 				question: z.string().min(1),
-				conversation_id: z.string().nullish(),
+				conversation_id: z.string().uuid().nullish(),
 				target_db: z.string().nullish(),
 				prediction: z.boolean().nullish(),
 			}),

@@ -14,6 +14,7 @@ export const openapi: OpenApiRoute = {
 		query: z.object({
 			conversation_id: z
 				.string()
+				.uuid()
 				.describe(
 					'Conversation whose in-flight run to observe. Must belong to the caller.',
 				),
