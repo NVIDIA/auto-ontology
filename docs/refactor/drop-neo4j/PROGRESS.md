@@ -323,3 +323,85 @@ correct.
 (was 201/2/2 at the end of Phase 0). Runtime also fell from 224s to 60s — the
 two skipped `test_export_model_*` tests were spending ~3 minutes retrying Neo4j
 connections on every run.
+
+---
+
+## 2026-08-11 — Phase 2 — golden capture — **Phase 2 complete**
+
+**What landed:** the fidelity oracle for Phases 5–10. **122 DAL reads** recorded
+from the live Neo4j graph, replayed by `gsf/dal/tests/test_golden.py`
+(128 tests: 122 comparisons + 6 structural/invariant checks).
+
+- `dev_tools/seed_graph_fixture.py` — builds the canonical graph: both catalogs
+  plus a hand-authored semantic layer (5 terms with varied certification flags,
+  8 column attributes, 3 semantic FKs, 4 SQL attributes across all four `source`
+  values, 2 custom analyses, 1 PQL analysis, 3 zones — one schema-scoped, one
+  spanning both databases, one disabled).
+- `dev_tools/capture_dal_golden.py` — captures and normalises.
+- `gsf/dal/tests/golden/dal_reads.json` — 183 KB, 0 captures raising.
+
+Resulting graph: 12 node labels (including `disableZone`, the label-swap case)
+and 10 relationship types — every type the DAL uses except `IS_A`/`ROLE`/`UNION`,
+which are declared but unused in GSF.
+
+**Semantic layer is hand-authored, not compiled.** `/semantic/compile` drives an
+LLM: it needs credentials and returns something slightly different every run,
+neither of which is acceptable for an oracle. Writing the same artifacts through
+`gsf.dal` is reproducible and exercises the same write paths the port must
+preserve. Embedding is stubbed to a no-op so building the fixture needs no
+embedding endpoint.
+
+**Determinism was the hard part.** Verified by tearing the graph down and
+rebuilding it: **0 of 122 captures differ.** Four separate sources of noise had
+to be handled, three of which were bugs in the capture rather than the DAL:
+
+1. *Ids as dict keys.* `normalise` rewrote values but not keys, and several
+   reads return maps keyed by node id.
+2. *Sets.* Some reads return `set`; `default=str` stringified them at
+   serialisation — *after* normalisation — leaving raw uuids inside a string.
+3. *DataFrames.* A few reads return them, and `default=str` captured a truncated
+   repr with `...` eliding most columns and raw uuids in what remained.
+4. *Ingest timestamps* (`created`), redacted rather than dropped so a port that
+   stops populating them still fails.
+
+**A genuine finding, not a capture bug:** exploration edge direction flips
+between rebuilds. Both `fetch_data_exploration_edges`
+(`WHERE source.id < target.id`) and `fetch_semantic_exploration_graph`
+(`tuple(sorted((a, b)))`) canonicalise undirected edges by comparing **uuids**,
+which are random — so the direction is stable for a given database but arbitrary
+across rebuilds. The capture re-orients by token instead, swapping the paired
+`source_column`/`target_column` fields in tandem, since swapping ends without
+them would describe an edge that doesn't exist.
+
+**Second finding:** `fetch_sorted_tables` orders only by `query_count DESC`, and
+nearly every table ties at 0 — so a function whose name promises sorting returns
+rows in arbitrary order. Not fixed: it is `gsf/dal/datasources.py`, which Phase 6
+ports, and adding a tiebreaker is a behaviour change that should be deliberate.
+**Phase 6 should decide.**
+
+**Third finding, out of scope:** `parse_query_single` resolves tables only via
+column references, so `SELECT count(*) FROM film` is rejected as "doesn't
+reference any table known to the catalog" even when `film` is catalogued — a
+misleading message for a user authoring a custom analysis. It lives in the
+NeMo-Retriever parser; noted, not fixed.
+
+**Known limitation, deliberate:** list order is **not** covered. Captures sort
+lists canonically, because most DAL queries lack a total `ORDER BY` and freezing
+an arbitrary observed order would fail the port for behaviour Neo4j never
+guaranteed. Ordering that *is* contractual — paging stability across
+`skip`/`limit` — needs its own tests in the invariants suite.
+
+**Tests added:** 128. Beyond the per-read comparisons: the golden file must be
+non-empty (so a missing file fails loudly rather than making every comparison
+vacuous), every DAL module must be represented, no capture may raise, no read
+may be captured-but-unrecorded or recorded-but-uncaptured, **scoped access must
+return strictly less than admin access** (a port that silently drops the zone
+filter would still match most goldens while handing every user the admin view),
+and a disabled zone must stay visible to admins.
+
+**Phase 2 Done criteria — met.** Fixture databases landed, semantic layer
+seeded, every `fetch_*`/`get_*`/`list_*` snapshotted under all three zone modes.
+
+**Next:** Phase 1 (fork the write path) and Phase 3 (Postgres foundations), which
+are independent of each other. Phase 1's fork-equivalence check can now run,
+since it compares against exactly this fixture.
