@@ -19,7 +19,6 @@ After the semantic FK pass this module runs once per compilation:
 from __future__ import annotations
 
 import logging
-import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -44,7 +43,6 @@ logger = logging.getLogger(__name__)
 
 _TOP_N = 10
 _TERM_WORKERS = 4
-_COUNTER_RE = re.compile(r"^count_monthly_(\d{4})_(\d{2})$")
 
 
 # ---------------------------------------------------------------------------
@@ -67,18 +65,27 @@ class _Suggestions(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _latest_3month_score(props: dict[str, Any]) -> float:
-    """Return the sum of the three most recent monthly counters in *props*."""
-    monthly: list[tuple[tuple[int, int], float]] = []
-    for key, val in props.items():
-        m = _COUNTER_RE.match(key)
-        if m and val is not None:
-            try:
-                monthly.append(((int(m.group(1)), int(m.group(2))), float(val)))
-            except (TypeError, ValueError):
-                pass
-    monthly.sort(key=lambda x: x[0], reverse=True)
-    return sum(v for _, v in monthly[:3])
+def _usage_score(props: dict[str, Any]) -> float:
+    """How often this query has been seen, from ``total_counter``.
+
+    Replaces a "sum of the three most recent monthly counters" score that had
+    never worked. It matched keys against ``^count_monthly_(\\d{4})_(\\d{2})$``,
+    while the writer (``Query.__init__``) produces ``count_{month}_{year}`` —
+    ``count_8_2026``. Nothing has ever written a name that regex accepts, so the
+    score was 0.0 for every query, every expression tied, and the ranking was
+    whatever order the dict happened to be in.
+
+    ``total_counter`` is maintained on the same paths and is a real number, so
+    this is a fix rather than a simplification. It does trade recency for
+    all-time usage: an expression heavily used a year ago now outranks one
+    popular this month. If that matters, the recency signal to reach for is
+    ``last_query_timestamp`` — a single column that already exists — not a
+    per-month counter table.
+    """
+    try:
+        return float(props.get("total_counter") or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +431,7 @@ def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float, list
     for item in sqls:
         sql_text = item.get("sql_text") or ""
         sql_id = item.get("sql_id") or ""
-        sql_score = _latest_3month_score(item.get("props") or {})
+        sql_score = _usage_score(item.get("props") or {})
         if not sql_text:
             continue
         for expr in _extract_expressions(sql_text):

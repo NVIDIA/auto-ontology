@@ -33,6 +33,7 @@ must be restated in the PR description of the change that introduces it.
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
+| B7 | **SqlAttribute suggestions are now ranked by usage.** They were previously unranked: every expression scored 0.0, so ordering was dict insertion order. Ranking is by all-time `total_counter` rather than recent usage | Phase 4 ([007](#007--the-sqlattribute-suggester-was-never-actually-ranking)) |
 
 Any further behaviour change discovered mid-port gets added to this table
 **and** its own numbered record below. Absorbing one silently is the single
@@ -376,3 +377,71 @@ true no-op (compared on node counts, since a duplicate-creating bug preserves
 every name), table add/drop, column add/drop, rename as drop+add, type change
 in place with the column keeping its id, add-then-drop leaving no trace, new
 schema picked up, and foreign keys surviving a re-ingest.
+
+---
+
+## 007 — The SqlAttribute suggester was never actually ranking
+
+**Date:** 2026-08-11  **Phase:** 4  **Supersedes:** nothing
+
+**Context** — Porting `store/pg/queries.py` required deciding how to store the
+per-month query counters (`count_8_2026`, one property per month a query was
+seen), since dynamically-named properties have no relational equivalent. The
+options were a child table or a `jsonb` blob, and the question was raised
+whether they are used at all.
+
+Tracing the consumer chain:
+
+```
+Query.__init__                    writes count_{month}_{year}
+update_counters_...               increments it
+fetch_terms_with_sqls             returns all Sql properties
+  └─ sql_attribute_suggester:562
+       └─ _rank_expressions       :427
+            └─ _latest_3month_score
+```
+
+So they are read — the suggester ranks candidate SQL expressions by them, which
+decides what the semantic layer proposes as SqlAttributes.
+
+Except the read never worked. `_latest_3month_score` matched keys against
+`^count_monthly_(\d{4})_(\d{2})$`, while `Query.__init__` writes
+`count_{month}_{year}` — `count_8_2026`. **Nothing has ever written a name that
+regex accepts.** Verified directly: the scorer returns `0.0` for a real property
+bag from the fixture, and `42.0` only for a hand-made key nothing produces.
+
+Every expression therefore scored 0.0, `sorted(..., reverse=True)` on equal
+values is a no-op, and the ranking has always been dict insertion order.
+
+Two further faults were latent behind it, and are worth recording because they
+would have been inherited by any faithful port:
+
+- The sort key was `(int(m.group(1)), int(m.group(2)))` — the regex's groups are
+  `(year, month)` but the writer's format is `month_year`, so had the names ever
+  matched, the ordering would still have been wrong.
+- `fetch_terms_with_sqls`'s docstring documents the property as
+  `count_monthly_YYYY_MM`, matching the broken regex rather than the writer.
+  The docstring is where the mistake most likely started.
+
+**Decision** — Rank by `total_counter`, and drop per-month counters entirely.
+
+`total_counter` is maintained on the same write paths, is a real non-zero
+number, and is one integer column. This removes the schema question that
+prompted the investigation: no child table, no `jsonb`, no dynamic property
+names.
+
+**Consequences** — Behaviour change **B7**, and it is an improvement in the
+sense that ranking now happens at all. But it is a genuine semantic change:
+scoring is by *all-time* usage rather than *recent* usage, so an expression
+heavily used a year ago now outranks one popular this month. The old code
+*intended* recency; it never delivered it.
+
+If recency turns out to matter, the signal to reach for is
+`last_query_timestamp` — already a single column on the Sql node — used as a
+filter or tiebreaker. Reintroducing per-month counters would mean bringing back
+the dynamic-property pattern this refactor exists to remove.
+
+Covered by `gsf/semantic/tests/test_usage_score.py`, which asserts against a
+**real property bag** — the shape `Query.__init__` actually writes. Nothing
+caught this for the life of the feature because no test ever used real key
+names; the one test that could have would have had to assert a non-zero score.

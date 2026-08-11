@@ -1078,3 +1078,48 @@ Remaining: `store/pg/queries.py` behind the decision above, then the fixture
 ingest and the 12 incremental tests under `GSF_STORE=postgres` — which is the
 real Done criterion. Everything so far is tested against the Postgres schema
 directly, not through the ingest pipeline end to end.
+
+---
+
+## 2026-08-11 — Phase 4 — the suggester was never ranking anything
+
+Deciding how to store the per-month query counters turned into finding a fourth
+bug. Full reasoning in [DECISION-007](DECISIONS.md); summary here.
+
+The counters *are* read — `sql_attribute_suggester` ranks candidate SQL
+expressions by them, which decides what the semantic layer proposes as
+SqlAttributes. But the read has never worked: `_latest_3month_score` matched
+keys against `^count_monthly_(\d{4})_(\d{2})$`, while `Query.__init__` writes
+`count_{month}_{year}` — `count_8_2026`. Nothing has ever written a name that
+regex accepts.
+
+Verified directly: the scorer returns `0.0` for a real property bag from the
+fixture and `42.0` only for a hand-made key nothing produces. So every
+expression scored 0.0, sorting equal values changed nothing, and the ranking has
+always been dict insertion order.
+
+Two faults were latent behind it, and a faithful port would have inherited both:
+the sort key was `(month, year)` read as `(year, month)`, so December 2025 would
+have outranked January 2026 had the names ever matched; and
+`fetch_terms_with_sqls`'s docstring documents the broken name rather than the
+written one, which is probably where the mistake started.
+
+**Now ranked by `total_counter`** — maintained on the same paths, a real
+non-zero number, one integer column. Recorded as **B7**. It trades recency for
+all-time usage, which the old code *intended* but never delivered; if recency
+matters, `last_query_timestamp` is already a column and does not require
+bringing back dynamic property names.
+
+**This settles the schema question that started it:** no child table, no
+`jsonb`, no per-month counters. `sql_query` needs five scalar columns and
+nothing more.
+
+**Tests added:** 5 in `gsf/semantic/tests/test_usage_score.py`, asserting
+against a **real property bag**. Nothing caught this for the life of the feature
+because no test used real key names — the test that would have caught it is the
+one that asserts a non-zero score.
+
+**PLAN.md** now carries a "Bugs this refactor has surfaced" table, since four is
+no longer incidental. Three of the four are silent — no error, no log, no
+failing test — which is the pattern: a schemaless store lets a name mismatch sit
+undetected indefinitely, because nothing declares what a name is supposed to be.

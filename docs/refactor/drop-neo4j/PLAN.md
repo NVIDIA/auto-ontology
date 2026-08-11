@@ -39,6 +39,31 @@ deleted, and the catalog write path becomes GSF-owned code under
 
 ---
 
+## Bugs this refactor has surfaced
+
+Not sought out — every one turned up while measuring what the system does in
+order to reproduce it. They are listed here because they are the strongest
+argument for the approach, and because each one is a thing the product was
+getting wrong in production.
+
+| # | Bug | Found by | Status |
+|---|---|---|---|
+| 1 | **Partitioned tables and materialized views were missing from every Postgres catalog.** `relkind` excluded `'p'`, so a partitioned parent appeared nowhere; and `information_schema` lists no matviews, making `TableTypes.MATERIALIZED_VIEW` unreachable dead code | ingesting the Pagila fixture | fixed, **B3** ([003](DECISIONS.md)) |
+| 2 | **No column change ever survived a re-ingest.** The column diff merged on keys neither frame had, raising `KeyError` every time — and `executor.map`'s result was never consumed, so the exception was discarded in silence. Added columns never appeared; dropped columns left ghosts the SQL generator kept querying | writing the incremental-diff tests | fixed, **B6** ([006](DECISIONS.md)) |
+| 3 | **Every column exports as nullable.** `model_interchange` reads `is_nullable` with `bool(...)`, but the graph stores the strings `'YES'`/`'NO'` — and `bool('NO')` is `True` | measuring stored property types | **open**, for Phase 10 |
+| 4 | **The SqlAttribute suggester never ranked anything.** Its scorer matched `count_monthly_YYYY_MM` while the writer produced `count_{month}_{year}`, so every expression scored 0.0 and ordering was dict insertion order | deciding how to store monthly counters | fixed, **B7** ([007](DECISIONS.md)) |
+
+Three of the four are silent: no error, no log, no failing test. That is the
+pattern worth noting — a schemaless store lets a name mismatch sit undetected
+indefinitely, because nothing declares what a name is supposed to be. Two of
+them (2 and 4) were a regex or a merge key disagreeing with a writer that no
+schema constrained.
+
+**Bug 3 is still open** and belongs to Phase 10, which must fix it and un-skip
+the two `test_export_model_*` tests together.
+
+---
+
 ## This plan lives in the repo
 
 This document is the source of truth for the refactor. It was drafted outside
