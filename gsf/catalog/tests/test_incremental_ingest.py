@@ -4,24 +4,24 @@
 
 """Incremental re-ingest: what changes in the catalog when the source changes.
 
-``update_diff_from_existing_schema`` is the most consequential untested code in
-the write path. It decides which tables and columns are added, dropped and
-updated on every scheduled re-ingest, so a wrong answer either loses catalog
-entries users were querying or leaves ghosts pointing at columns that no longer
-exist. The end-to-end fixture ingest exercises only the *empty database* case,
-where diffing has nothing to do.
+``update_diff_from_existing_schema`` decides which tables and columns are added,
+dropped and updated on every scheduled re-ingest, so a wrong answer either loses
+catalog entries users were querying or leaves ghosts pointing at columns that no
+longer exist. The end-to-end fixture ingest exercises only the *empty database*
+case, where diffing has nothing to do — and re-ingest is where the bugs were.
 
-These tests exist **before** the Postgres rewrite deliberately: they are the
-specification the Postgres implementation has to satisfy, written against the
-Neo4j behaviour that is being preserved. Written afterwards they would only
-describe whatever the new code happened to do.
+**These run against whichever backend the process was started with.** Assertions
+go through :mod:`gsf.catalog.tests.catalog_inspector`, which asks the same
+question of both stores, so the file is one specification rather than two. The
+switch is read once at import, so covering both means two processes::
+
+    GSF_STORE=neo4j    uv run pytest gsf/catalog/tests/test_incremental_ingest.py
+    GSF_STORE=postgres uv run pytest gsf/catalog/tests/test_incremental_ingest.py
+
+CI has to run both. One passing does not imply the other.
 
 Each test owns a throwaway source database, so it can add and drop tables
-without disturbing the Pagila fixture.
-
-Needs both stores and skips without them::
-
-    docker compose up -d postgres neo4j
+without disturbing the Pagila fixture. Skips when its stores are unreachable.
 """
 
 from __future__ import annotations
@@ -34,6 +34,9 @@ import pytest
 pytest.importorskip("psycopg")
 import psycopg  # noqa: E402
 
+from gsf.catalog.tests import catalog_inspector as catalog  # noqa: E402
+from gsf.infra.store import STORE, USE_PG  # noqa: E402
+
 
 def _pg_dsn(dbname: str) -> str:
     user = os.environ["POSTGRES_USER"]
@@ -43,20 +46,38 @@ def _pg_dsn(dbname: str) -> str:
     return f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
 
 
-@pytest.fixture(scope="module")
-def _require_stores():
-    if not (os.environ.get("POSTGRES_USER") and os.environ.get("NEO4J_URI")):
-        pytest.skip("POSTGRES_* and NEO4J_URI must both be set")
-    try:
-        from gsf.catalog.store.neo4j.connection import get_neo4j_conn
+@pytest.fixture(scope="module", autouse=True)
+def require_store():
+    """Skip unless the *configured* store is actually reachable."""
+    if not os.environ.get("POSTGRES_USER"):
+        pytest.skip("POSTGRES_* not set (needed for the source database)")
 
-        get_neo4j_conn().query_read("RETURN 1 AS ok")
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"neo4j unavailable: {exc}")
+    if USE_PG:
+        try:
+            from gsf.dal.pg import schema as s
+            from gsf.dal.pg.session import store
+
+            store().query_read(f"SELECT 1 FROM {s.SCHEMA}.catalog_database LIMIT 1")
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
+    else:
+        if not os.environ.get("NEO4J_URI"):
+            pytest.skip("NEO4J_URI not set")
+        try:
+            from gsf.catalog.store.neo4j.connection import get_neo4j_conn
+
+            get_neo4j_conn().query_read("RETURN 1 AS ok")
+        except Exception as exc:  # noqa: BLE001
+            pytest.skip(f"neo4j unavailable: {exc}")
+
+
+def test_the_configured_backend_is_the_one_under_test() -> None:
+    """Guard against a run that silently exercised the default twice."""
+    assert STORE in {"neo4j", "postgres"}
 
 
 @pytest.fixture
-def source_db(_require_stores):
+def source_db():
     """A throwaway source database this test may freely mutate."""
     name = f"difftest_{uuid.uuid4().hex[:12]}"
     admin = psycopg.connect(_pg_dsn("postgres"), autocommit=True, connect_timeout=5)
@@ -84,7 +105,7 @@ def source_db(_require_stores):
 
     yield name
 
-    _wipe_graph(name)
+    catalog.wipe(name)
     admin = psycopg.connect(_pg_dsn("postgres"), autocommit=True, connect_timeout=5)
     try:
         admin.execute(
@@ -95,17 +116,6 @@ def source_db(_require_stores):
         admin.execute(f'DROP DATABASE IF EXISTS "{name}"')
     finally:
         admin.close()
-
-
-def _wipe_graph(database_name: str) -> None:
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-    get_neo4j_conn().query_write(
-        "MATCH (d:Database {name:$name}) "
-        "CALL apoc.path.subgraphNodes(d, {}) YIELD node "
-        "DETACH DELETE node",
-        {"name": database_name},
-    )
 
 
 def _ingest(database_name: str) -> None:
@@ -125,75 +135,32 @@ def _mutate(database_name: str, *statements: str) -> None:
             conn.execute(statement)
 
 
-def _tables(database_name: str) -> set[str]:
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-    rows = get_neo4j_conn().query_read(
-        "MATCH (:Database {name:$name})-[:CONTAINS]->(:Schema)"
-        "-[:CONTAINS]->(t:Table) RETURN t.name AS name",
-        {"name": database_name},
-    )
-    return {r["name"] for r in rows}
-
-
-def _columns(database_name: str, table: str) -> set[str]:
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-    rows = get_neo4j_conn().query_read(
-        "MATCH (:Database {name:$name})-[:CONTAINS]->(:Schema)"
-        "-[:CONTAINS]->(t:Table {name:$table})-[:CONTAINS]->(c:Column) "
-        "RETURN c.name AS name",
-        {"name": database_name, "table": table},
-    )
-    return {r["name"] for r in rows}
-
-
-def _column_prop(database_name: str, table: str, column: str, prop: str):
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-    rows = get_neo4j_conn().query_read(
-        f"MATCH (:Database {{name:$name}})-[:CONTAINS]->(:Schema)"
-        f"-[:CONTAINS]->(:Table {{name:$table}})-[:CONTAINS]->(c:Column {{name:$column}}) "
-        f"RETURN c.`{prop}` AS value",
-        {"name": database_name, "table": table, "column": column},
-    )
-    return rows[0]["value"] if rows else None
-
-
-def _counts(database_name: str) -> dict[str, int]:
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-    rows = get_neo4j_conn().query_read(
-        "MATCH (d:Database {name:$name}) "
-        "CALL apoc.path.subgraphNodes(d, {}) YIELD node "
-        "RETURN labels(node)[0] AS label, count(*) AS n",
-        {"name": database_name},
-    )
-    return {r["label"]: r["n"] for r in rows}
-
-
 # ---------------------------------------------------------------------------
 
 
 def test_first_ingest_creates_the_catalog(source_db: str) -> None:
     _ingest(source_db)
-    assert _tables(source_db) == {"customer", "orders"}
-    assert _columns(source_db, "customer") == {"customer_id", "name", "email"}
+    assert catalog.tables(source_db) == {"customer", "orders"}
+    assert catalog.columns(source_db, "customer") == {
+        "customer_id",
+        "name",
+        "email",
+    }
 
 
 def test_reingest_without_changes_is_a_no_op(source_db: str) -> None:
     """The scheduler re-ingests every 24h; an unchanged source must not churn.
 
-    Node counts are compared rather than just names, because a duplicate-
-    creating bug keeps every name and simply doubles the graph.
+    Compared on counts, not names: a duplicate-creating bug keeps every name
+    and simply doubles the catalog.
     """
     _ingest(source_db)
-    before = _counts(source_db)
+    before = catalog.entity_counts(source_db)
 
     _ingest(source_db)
-    after = _counts(source_db)
+    after = catalog.entity_counts(source_db)
 
-    assert after == before, f"re-ingest changed the graph: {before} -> {after}"
+    assert after == before, f"re-ingest changed the catalog: {before} -> {after}"
 
 
 def test_added_table_appears_with_its_columns(source_db: str) -> None:
@@ -204,8 +171,8 @@ def test_added_table_appears_with_its_columns(source_db: str) -> None:
     )
     _ingest(source_db)
 
-    assert "invoice" in _tables(source_db)
-    assert _columns(source_db, "invoice") == {"invoice_id", "amount"}
+    assert "invoice" in catalog.tables(source_db)
+    assert catalog.columns(source_db, "invoice") == {"invoice_id", "amount"}
 
 
 def test_dropped_table_is_removed(source_db: str) -> None:
@@ -215,7 +182,7 @@ def test_dropped_table_is_removed(source_db: str) -> None:
     _mutate(source_db, "DROP TABLE shop.orders")
     _ingest(source_db)
 
-    assert _tables(source_db) == {"customer"}
+    assert catalog.tables(source_db) == {"customer"}
 
 
 def test_dropped_table_takes_its_columns_with_it(source_db: str) -> None:
@@ -223,7 +190,7 @@ def test_dropped_table_takes_its_columns_with_it(source_db: str) -> None:
     _mutate(source_db, "DROP TABLE shop.orders")
     _ingest(source_db)
 
-    assert _columns(source_db, "orders") == set()
+    assert catalog.columns(source_db, "orders") == set()
 
 
 def test_added_column_appears(source_db: str) -> None:
@@ -231,7 +198,7 @@ def test_added_column_appears(source_db: str) -> None:
     _mutate(source_db, "ALTER TABLE shop.customer ADD COLUMN phone varchar(40)")
     _ingest(source_db)
 
-    assert "phone" in _columns(source_db, "customer")
+    assert "phone" in catalog.columns(source_db, "customer")
 
 
 def test_dropped_column_is_removed(source_db: str) -> None:
@@ -239,7 +206,7 @@ def test_dropped_column_is_removed(source_db: str) -> None:
     _mutate(source_db, "ALTER TABLE shop.customer DROP COLUMN email")
     _ingest(source_db)
 
-    assert _columns(source_db, "customer") == {"customer_id", "name"}
+    assert catalog.columns(source_db, "customer") == {"customer_id", "name"}
 
 
 def test_renamed_column_is_add_plus_drop(source_db: str) -> None:
@@ -252,24 +219,25 @@ def test_renamed_column_is_add_plus_drop(source_db: str) -> None:
     _mutate(source_db, "ALTER TABLE shop.customer RENAME COLUMN email TO contact")
     _ingest(source_db)
 
-    columns = _columns(source_db, "customer")
-    assert "contact" in columns
-    assert "email" not in columns
+    names = catalog.columns(source_db, "customer")
+    assert "contact" in names
+    assert "email" not in names
 
 
 def test_changed_column_type_is_updated_in_place(source_db: str) -> None:
     """The column keeps its identity; only data_type changes."""
     _ingest(source_db)
-    before_id = _column_prop(source_db, "customer", "name", "id")
-    assert _column_prop(source_db, "customer", "name", "data_type") == (
-        "character varying"
+    before_id = catalog.column_property(source_db, "customer", "name", "id")
+    assert (
+        catalog.column_property(source_db, "customer", "name", "data_type")
+        == "character varying"
     )
 
     _mutate(source_db, "ALTER TABLE shop.customer ALTER COLUMN name TYPE text")
     _ingest(source_db)
 
-    assert _column_prop(source_db, "customer", "name", "data_type") == "text"
-    assert _column_prop(source_db, "customer", "name", "id") == before_id, (
+    assert catalog.column_property(source_db, "customer", "name", "data_type") == "text"
+    assert catalog.column_property(source_db, "customer", "name", "id") == before_id, (
         "the column was recreated rather than updated; anything referencing its "
         "id would now dangle"
     )
@@ -277,17 +245,17 @@ def test_changed_column_type_is_updated_in_place(source_db: str) -> None:
 
 def test_added_then_dropped_table_leaves_no_trace(source_db: str) -> None:
     _ingest(source_db)
-    baseline = _counts(source_db)
+    baseline = catalog.entity_counts(source_db)
 
     _mutate(source_db, "CREATE TABLE shop.temp_thing (id integer PRIMARY KEY)")
     _ingest(source_db)
-    assert "temp_thing" in _tables(source_db)
+    assert "temp_thing" in catalog.tables(source_db)
 
     _mutate(source_db, "DROP TABLE shop.temp_thing")
     _ingest(source_db)
 
-    assert "temp_thing" not in _tables(source_db)
-    assert _counts(source_db) == baseline
+    assert "temp_thing" not in catalog.tables(source_db)
+    assert catalog.entity_counts(source_db) == baseline
 
 
 def test_new_schema_is_picked_up(source_db: str) -> None:
@@ -299,19 +267,11 @@ def test_new_schema_is_picked_up(source_db: str) -> None:
     )
     _ingest(source_db)
 
-    assert "stock" in _tables(source_db)
+    assert "stock" in catalog.tables(source_db)
 
 
 def test_foreign_key_survives_reingest(source_db: str) -> None:
-    from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
     _ingest(source_db)
     _ingest(source_db)
 
-    rows = get_neo4j_conn().query_read(
-        "MATCH (:Database {name:$name})-[:CONTAINS]->(:Schema)-[:CONTAINS]->"
-        "(:Table)-[:CONTAINS]->(c:Column)-[:FOREIGN_KEY]->(t:Column) "
-        "RETURN c.name AS src, t.name AS dst",
-        {"name": source_db},
-    )
-    assert {(r["src"], r["dst"]) for r in rows} == {("customer_id", "customer_id")}
+    assert catalog.foreign_keys(source_db) == {("customer_id", "customer_id")}

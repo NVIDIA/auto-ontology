@@ -1231,3 +1231,56 @@ The 12 incremental-diff tests run against Neo4j only — they assert by querying
 the graph directly. Re-running them under `GSF_STORE=postgres` needs them
 parameterised over the backend, and that is the remaining gap between "a first
 ingest is correct" and "re-ingest is correct", which is where the bugs were.
+
+---
+
+## 2026-08-11 — Phase 4 — **the gap is closed: re-ingest verified on both backends**
+
+The 12 incremental-diff tests now run against **whichever backend the process
+was started with**, and pass on both:
+
+```
+== GSF_STORE=neo4j ==      13 passed
+== GSF_STORE=postgres ==   13 passed
+```
+
+That closes the distance between "a first ingest is correct" and "re-ingest is
+correct" — and re-ingest is where every bug in this phase was.
+
+**How.** Assertions go through `gsf/catalog/tests/catalog_inspector.py`, which
+answers the same question of either store — *what does the catalog contain* —
+in the vocabulary of the catalog rather than in labels-and-nodes or rows-and-
+joins. The test file is therefore one specification, not two that could drift.
+
+**Why it needs two processes.** `GSF_STORE` is read once at import, deliberately:
+a value that could change mid-process would let one request read Neo4j and the
+next read Postgres. So one process exercises one backend, and covering both
+means running twice. `make test-stores` does it, and the test module says so in
+its docstring: **CI has to run both — one passing does not imply the other.**
+
+A 13th test asserts the configured backend is a known one, so a run that
+silently exercised the default twice fails rather than reporting false
+coverage.
+
+### Phase 4 Done criteria — met
+
+- `/ingest` of both fixture databases populates `gsf.*` ✅ (2 databases, 3
+  schemas, 37 tables, 209 columns, 30 foreign keys — identical to Neo4j)
+- row counts match the Phase-2 node counts per label ✅
+- views and the materialized view carry the right `table_type` ✅ (28 / 8 / 1)
+- re-ingest is idempotent ✅ (asserted on counts, both backends)
+- added / renamed / dropped table and column are diffed correctly ✅ (both
+  backends)
+- delete cleans up one database via cascade without touching the other ✅
+
+**Suite:** 431 passed, 4 skipped.
+
+### What Phase 4 leaves for later, explicitly
+
+- `dispose_engine()` is still not wired into `gsf.dal.close_store()`. It was
+  deferred in Phase 3 to avoid conflicting with the Phase 1 fork; there is no
+  longer a conflict.
+- The **reads** are untouched — `gsf/dal/*` still queries Neo4j under both
+  settings. `GSF_STORE=postgres` currently means "write the catalog to
+  Postgres", not "run on Postgres". Phases 5–10 close that, and the goldens are
+  the oracle for it.
