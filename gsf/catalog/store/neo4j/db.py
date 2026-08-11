@@ -134,6 +134,17 @@ def accumulate_updated_column(
     )
 
 
+# Keys shared by both sides of the column diff.
+#
+# Upstream merged on ["database", "schema", "table_name", "column_name"].
+# Neither frame has a "schema" column -- both call it "table_schema" -- and
+# "database" exists only on the graph side, so every merge raised KeyError and
+# the column diff never ran. See DECISION-006.
+#
+# "database" is redundant anyway: a Schema belongs to exactly one database.
+_COLUMN_MERGE_KEYS = ["table_schema", "table_name", "column_name"]
+
+
 def update_diff_from_existing_schema(new_schema, latest_timestamp):
     try:
         # load existing schema
@@ -189,7 +200,7 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
         columns_merge = pd.merge(
             existing_schema.columns_df,
             new_schema.columns_df,
-            on=["database", "schema", "table_name", "column_name"],
+            on=_COLUMN_MERGE_KEYS,
             how="left",
             suffixes=("_graph", "_files"),
         )
@@ -205,7 +216,7 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
         columns_merge = pd.merge(
             existing_schema.columns_df,
             new_schema.columns_df,
-            on=["database", "schema", "table_name", "column_name"],
+            on=_COLUMN_MERGE_KEYS,
             how="right",
             suffixes=("_graph", "_files"),
         )
@@ -223,7 +234,7 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
         columns_merge = pd.merge(
             existing_schema.columns_df,
             new_schema.columns_df,
-            on=["database", "schema", "table_name", "column_name"],
+            on=_COLUMN_MERGE_KEYS,
             how="inner",
             suffixes=("_graph", "_files"),
         )

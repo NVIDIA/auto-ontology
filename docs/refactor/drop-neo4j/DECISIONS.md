@@ -32,6 +32,7 @@ must be restated in the PR description of the change that introduces it.
 | B3 | Postgres catalogs gain partitioned parent tables and materialized views, which were silently dropped before; 5 columns per Pagila report their declared type (`mpaa_rating`, `text[]`, `year`) instead of `USER-DEFINED`/`ARRAY` | Phase 2 ([003](#003--fix-partitioned-tables-and-materialized-views-missing-from-postgres-catalogs)) |
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
+| B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
 
 Any further behaviour change discovered mid-port gets added to this table
 **and** its own numbered record below. Absorbing one silently is the single
@@ -310,3 +311,68 @@ nothing to migrate *from*.
 **Worth carrying forward:** this is the ERD gate working exactly as PLAN.md
 intended. Both corrections were cheap here and would have been expensive after
 Phase 7 wrote queries against the wrong shape.
+
+---
+
+## 006 — Column diffs never ran, and the error was swallowed
+
+**Date:** 2026-08-11  **Phase:** 4  **Supersedes:** nothing
+
+**Context** — Phase 1 flagged that `write.py`'s incremental diffing had no
+coverage beyond the end-to-end fixture ingest, and asked for tests *before* the
+Postgres rewrite. Writing them surfaced two stacked bugs that together mean
+**no column-level change has ever been applied on a re-ingest**.
+
+1. `update_diff_from_existing_schema` merges the existing and new `columns_df`
+   on `["database", "schema", "table_name", "column_name"]`. Measured, the two
+   frames share twelve columns — but **neither has `schema`** (both call it
+   `table_schema`), and **only the graph side has `database`**. Every one of the
+   three merges therefore raised `KeyError: 'database'`, and the function's
+   `except` wrapped and re-raised it.
+2. `populate_db` runs those updates through `executor.map(...)` and **never
+   consumes the returned iterator**. `ThreadPoolExecutor.map` stores a worker's
+   exception in its future and re-raises only on consumption, so the error was
+   discarded in silence. `with ThreadPoolExecutor(...)` waits for completion but
+   does not re-raise.
+
+The visible symptom is that table add/delete worked (it happens *before* the
+raise) while nothing column-level did. A column added to an existing table
+never reached the catalog; a dropped column left a ghost the SQL generator
+would still write queries against; a changed type stayed stale — with no log
+line, no error, and a scheduler cheerfully reporting success every 24 hours.
+
+Both bugs are upstream NeMo-Retriever's; the fork is verbatim.
+
+**Decision** — Fix both, in the Neo4j implementation, now.
+
+Reproducing this in the Postgres implementation for the sake of "behaviour
+preservation" would be the wrong reading of that principle. Preserving
+behaviour means preserving what the system is *meant* to do where the two
+agree; it does not mean porting silent data loss so the two stores can be
+wrong identically. Fixing it in the Neo4j path first also means the goldens and
+the incremental tests describe one behaviour rather than two.
+
+- `_COLUMN_MERGE_KEYS = ["table_schema", "table_name", "column_name"]` — the
+  three keys both frames actually share. `database` is redundant: a `Schema`
+  belongs to exactly one database.
+- `list(executor.map(...))` in `populate_db`, so a failing schema update raises
+  rather than vanishing.
+
+**Consequences** — Behaviour change **B6**. On the next re-ingest of any
+existing database, column additions, deletions and type changes that have
+accumulated since the catalog was first built will all apply at once. For a
+database whose schema has moved since ingestion, that is a large one-time diff —
+correct, but worth expecting rather than being surprised by.
+
+Consuming the executor's results also means a schema that fails to update now
+**fails the ingest** instead of being skipped. That is the point, but it does
+convert a silent partial success into a loud failure, and a source database with
+one pathological schema will now surface it.
+
+Both files leave the verbatim-fork set and are declared in `DIVERGED` with a
+pointer here. Covered by `gsf/catalog/tests/test_incremental_ingest.py` — 12
+tests over a throwaway source database: first ingest, unchanged re-ingest is a
+true no-op (compared on node counts, since a duplicate-creating bug preserves
+every name), table add/drop, column add/drop, rename as drop+add, type change
+in place with the column keeping its id, add-then-drop leaving no trace, new
+schema picked up, and foreign keys surviving a re-ingest.

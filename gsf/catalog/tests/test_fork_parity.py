@@ -33,7 +33,6 @@ import pytest
 # forked module -> library module it was forked from.
 FORKED = {
     "gsf.catalog.normalize": "nemo_retriever.tabular_data.ingestion.utils",
-    "gsf.catalog.write": "nemo_retriever.tabular_data.ingestion.write_to_graph",
     "gsf.catalog.sql_parse": "nemo_retriever.tabular_data.ingestion.services.queries",
     "gsf.catalog.model.node": "nemo_retriever.tabular_data.ingestion.model.neo4j_node",
     "gsf.catalog.model.schema": "nemo_retriever.tabular_data.ingestion.model.schema",
@@ -48,7 +47,6 @@ FORKED = {
         "nemo_retriever.tabular_data.ingestion.parsers.schemas_parser"
     ),
     "gsf.catalog.services.schema": "nemo_retriever.tabular_data.ingestion.services.schema",
-    "gsf.catalog.store.neo4j.db": "nemo_retriever.tabular_data.ingestion.dal.db_dal",
     "gsf.catalog.store.neo4j.schemas": "nemo_retriever.tabular_data.ingestion.dal.schemas_dal",
     "gsf.catalog.store.neo4j.queries": "nemo_retriever.tabular_data.ingestion.dal.queries_dal",
     "gsf.catalog.store.neo4j.edges": "nemo_retriever.tabular_data.ingestion.dal.utils_dal",
@@ -70,6 +68,15 @@ DIVERGED = {
     "gsf.catalog.store.queries": "Phase 4 backend selector; not a fork",
     "gsf.catalog.store.edges": "Phase 4 backend selector; not a fork",
     "gsf.catalog.store.indexes": "Phase 4 backend selector; not a fork",
+    "gsf.catalog.store.neo4j.db": (
+        "column-diff merge keys corrected — upstream merges on a 'schema' column "
+        "neither frame has and a 'database' column only one has, so the column "
+        "diff raised KeyError on every re-ingest — DECISION-006"
+    ),
+    "gsf.catalog.write": (
+        "executor.map result is consumed, so a failing schema update raises "
+        "instead of being discarded with its future — DECISION-006"
+    ),
     "gsf.catalog.constants": "forked in Phase 0; covered by test_constants.py",
 }
 

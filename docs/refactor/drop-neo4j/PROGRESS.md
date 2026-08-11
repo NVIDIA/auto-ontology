@@ -705,3 +705,75 @@ Phase 1). Ruff clean.
 **Still open from Phase 3:** `dispose_engine()` is not yet called from
 `gsf.dal.close_store()`. Now that both phases have landed there is no longer a
 conflict risk — fold it in with Phase 4.
+
+---
+
+## 2026-08-11 — Phase 4 — write path behind a selector, and a silent data-loss bug
+
+**Merge:** `origin/main` at `0a3ed24`, branch 0 behind. Nothing to merge.
+
+### The write path is now backend-selected
+
+Rewriting `store/` in place would have broken `GSF_STORE=neo4j` the moment
+ingestion started writing to Postgres while the DAL still read Neo4j. So the
+write path gets the same treatment the plan specifies for the DAL: `store/neo4j/`
+holds the unchanged implementation, `store/<mod>.py` is a selector with an
+explicit import list, and `store/pg/` lands alongside it.
+
+- `gsf/infra/store.py` holds the `GSF_STORE` switch — not `gsf/dal/_store.py` as
+  the plan sketched, because `gsf.catalog.store` selects on it too and
+  `gsf.catalog` must not depend on `gsf.dal`.
+- `store/connection.py` is **deleted** rather than made a selector: there is no
+  Postgres counterpart to select between, that role belonging to
+  `gsf/dal/pg/session.py`, whose pooled engine is a different shape. Its eleven
+  importers name the Neo4j package directly now.
+- Two implementation modules were importing siblings *through the selector*,
+  which under `GSF_STORE=postgres` would have made the Neo4j path call the
+  Postgres one. Fixed to direct sibling imports; the parity check normalises the
+  two now-legitimate paths.
+
+### The bug: no column change has ever survived a re-ingest
+
+Phase 1 asked for incremental-diff tests before the rewrite. Writing them found
+two stacked bugs — full reasoning in [DECISION-006](DECISIONS.md):
+
+1. The column diff merges on `["database", "schema", "table_name", "column_name"]`.
+   Measured: **neither** frame has `schema` (both call it `table_schema`) and
+   **only** the graph side has `database`. Every merge raised `KeyError`.
+2. `populate_db` runs schema updates through `executor.map(...)` and never
+   consumes the iterator, so the exception sat in its future and was discarded.
+
+Together: a column added to an existing table never reached the catalog, a
+dropped column left a ghost the SQL generator would keep writing queries
+against, a changed type stayed stale — silently, on a 24-hour schedule
+reporting success. Table add/delete appeared to work only because it happens
+*before* the raise.
+
+Both bugs are upstream NeMo-Retriever's; the fork is verbatim.
+
+**Fixed in the Neo4j implementation rather than reproduced in Postgres.**
+Preserving behaviour means preserving what the system is meant to do, not
+porting silent data loss so both stores can be wrong identically. Recorded as
+**B6**: the next re-ingest of an existing database will apply every column
+change accumulated since it was first catalogued, which for a long-lived
+database is a large one-time diff. Consuming the executor's results also turns a
+silent partial success into a loud failure — intended, but it will surface
+sources that were quietly failing.
+
+`gsf/catalog/store/neo4j/db.py` and `gsf/catalog/write.py` leave the
+verbatim-fork set and are declared in `DIVERGED`.
+
+**Tests added:** 12 in `gsf/catalog/tests/test_incremental_ingest.py`, each over
+a throwaway source database it may freely mutate. Unchanged re-ingest is
+compared on **node counts**, not names, because a duplicate-creating bug
+preserves every name. Type change asserts the column keeps its **id**, since
+recreating it would dangle anything referencing it.
+
+**Suite:** 407 passed, 4 skipped (was 397). Goldens still replay clean —
+the fix does not touch first-ingest behaviour, which is what they capture.
+
+**Phase 4 is not complete.** What remains is the actual Postgres implementation
+of `store/pg/*`. The scaffolding, the spec tests, and the ERD it will target are
+in place; `edges.py` is the hard part, since its node/edge helpers are
+label-generic and need a label→table mapping to work against a relational
+schema.

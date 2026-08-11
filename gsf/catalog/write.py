@@ -113,9 +113,17 @@ def populate_db(tables_df, columns_df, database, num_workers):
     for schema in schemas_to_update:
         schema.get_db_node().replace_id(existing_db_id)
     with ThreadPoolExecutor(num_workers) as executor:
-        executor.map(
-            lambda schema: _update_schema(schema, latest_timestamp),
-            schemas_to_update,
+        # list() is load-bearing: executor.map returns a lazy iterator, and an
+        # exception raised in a worker is stored in its future and re-raised
+        # only when that future is consumed. Left unconsumed, every failure to
+        # update a schema was discarded in silence -- which is how the column
+        # diff could raise on every single re-ingest without anyone noticing.
+        # See DECISION-006.
+        list(
+            executor.map(
+                lambda schema: _update_schema(schema, latest_timestamp),
+                schemas_to_update,
+            )
         )
 
     # delete existing - new
