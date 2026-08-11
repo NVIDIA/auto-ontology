@@ -2,18 +2,26 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Postgres implementation of the generic node/edge helpers.
+"""Compatibility surface for callers that still speak in nodes and edges.
 
-Public surface matches ``gsf.catalog.store.neo4j.edges`` function for function —
-that equivalence is what lets the selector swap one for the other without any
-caller noticing.
+**This module keeps the graph vocabulary on purpose, and it is the only one in
+``store/pg/`` that does.** ``write.py``, ``queries.py`` and ``schemas_parser.py``
+call ``add_edges`` / ``prepare_edge`` / ``prepare_node``, and the selector in
+``store/edges.py`` only works because both implementations expose the same
+names. Renaming here would mean renaming the callers, which is Phase 11's job —
+once the Neo4j implementation is deleted, the whole surface can move to
+relational names in one change instead of being half-renamed now.
 
-The interesting part is :func:`add_edges`. It receives edges generically, but
-``CONTAINS`` is not stored as an edge at all: it is the child's parent foreign
-key, so writing one is an ``UPDATE`` of the child row while every other
-relationship type is an ``INSERT``. That asymmetry is the price of the schema
-decision that turned ``reset.py``'s APOC subgraph cascade into
-``ON DELETE CASCADE``, and it is paid here, once.
+Everything behind this module — :mod:`gsf.catalog.store.pg.registry` and
+:mod:`gsf.catalog.store.pg.rows` — speaks only of tables, rows, columns and
+links. The translation happens here and nowhere else.
+
+The substance is :func:`add_edges`. It takes relationships generically, but
+``CONTAINS`` is a foreign key column rather than an association table, so
+writing one is an ``UPDATE`` of the child row while every other relationship is
+an ``INSERT``. That asymmetry is the price of the schema decision that turned
+``reset.py``'s APOC subgraph cascade into ``ON DELETE CASCADE``, and it is paid
+here, once.
 """
 
 from __future__ import annotations
@@ -27,7 +35,7 @@ from sqlalchemy.dialects.postgresql import insert
 from gsf.catalog.constants import Edges, Labels, Props
 from gsf.catalog.model.node import CatalogNode
 from gsf.catalog.store.pg import registry
-from gsf.catalog.store.pg.nodes import upsert_node
+from gsf.catalog.store.pg.rows import upsert_row
 from gsf.dal.pg.session import store
 
 logger = logging.getLogger(__name__)
@@ -126,24 +134,24 @@ def prepare_edge(edge):
 
 
 def add_edges(edges_data):
-    """Upsert both endpoints and the relationship between them."""
+    """Upsert both endpoint rows and the link between them."""
     for data in edges_data:
         from_label = data["v1_label"][0]
         to_label = data["v2_label"][0]
         edge_label = data["edge_label"]
 
-        spec = registry.edge_spec(edge_label, from_label, to_label)
+        spec = registry.link_spec(edge_label, from_label, to_label)
 
-        source_id = upsert_node(
+        source_id = upsert_row(
             from_label,
             data["v1_identity_props"],
             data["v1_on_create_props"],
             on_match=data["v1_on_match_props"],
         )
 
-        # For a parent link the child's row *is* the edge, so the parent id goes
-        # in as part of upserting the child rather than as a separate write.
-        target_id = upsert_node(
+        # For a foreign key link the child's row *carries* the relationship, so
+        # the parent id goes in with the child rather than as a separate write.
+        target_id = upsert_row(
             to_label,
             data["v2_identity_props"],
             data["v2_on_create_props"],
@@ -158,7 +166,7 @@ def add_edges(edges_data):
 
 
 def _upsert_edge_row(
-    spec: registry.EdgeSpec, source_id: str, target_id: str, edge_props: dict
+    spec: registry.LinkSpec, source_id: str, target_id: str, edge_props: dict
 ) -> None:
     values = {spec.source_column: source_id, spec.target_column: target_id}
     payload = {k: v for k, v in edge_props.items() if k in spec.property_columns}
@@ -175,16 +183,17 @@ def _upsert_edge_row(
 
 
 def get_node_properties_by_id(id, label: str | list[str]):
-    """Return one node's columns plus its label, or None.
+    """Return one row's columns plus the label it came from, or None.
 
     The Cypher returned ``properties(n)`` with a ``label`` key bolted on, and
     could search several labels at once because a lookup by id needed no table.
-    Relationally each candidate label is a separate table, so this tries them in
-    turn and returns the first hit.
+    Each label is a separate table here, so this tries them in turn and returns
+    the first hit. The ``label`` key stays in the result because callers read
+    it.
     """
     labels = label if isinstance(label, list) else [label]
     for candidate in labels:
-        spec = registry.label_spec(candidate)
+        spec = registry.entity_spec(candidate)
         rows = store().query_read(select(spec.table).where(spec.table.c.id == id))
         if rows:
             props = dict(rows[0])
@@ -194,16 +203,16 @@ def get_node_properties_by_id(id, label: str | list[str]):
 
 
 def delete_bulk_of_nodes(ids, labels):
-    """Delete by id across several labels.
+    """Delete rows by id across several tables.
 
-    No ``DETACH`` step: every relationship is either a foreign key with
-    ``ON DELETE CASCADE`` or a parent column on a row that cascades with it, so
-    the edges go when the row does.
+    No ``DETACH`` step: every relationship is either an association row with
+    ``ON DELETE CASCADE`` or a foreign key on a row that cascades with it, so
+    the links go when the row does.
     """
     if not ids:
         return
     for label in labels:
-        spec = registry.label_spec(label)
+        spec = registry.entity_spec(label)
         store().query_write(spec.table.delete().where(spec.table.c.id.in_(list(ids))))
 
 
@@ -220,6 +229,6 @@ def detach_bulk_of_nodes(ids):
 
 
 def get_node_id_by_name_and_label(name: str, label: Labels):
-    spec = registry.label_spec(str(label))
+    spec = registry.entity_spec(str(label))
     rows = store().query_read(select(spec.table.c.id).where(spec.table.c.name == name))
     return rows[0]["id"] if rows else None

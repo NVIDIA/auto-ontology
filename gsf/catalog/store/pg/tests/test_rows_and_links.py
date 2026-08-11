@@ -32,7 +32,7 @@ from gsf.catalog.constants import Edges, Labels, Props  # noqa: E402
 from gsf.catalog.model.node import CatalogNode  # noqa: E402
 from gsf.catalog.store.pg import edges as pg_edges  # noqa: E402
 from gsf.catalog.store.pg import registry  # noqa: E402
-from gsf.catalog.store.pg.nodes import resolve_id, upsert_node  # noqa: E402
+from gsf.catalog.store.pg.rows import resolve_id, upsert_row  # noqa: E402
 from gsf.dal.pg import schema as s  # noqa: E402
 from gsf.dal.pg.session import store  # noqa: E402
 
@@ -73,8 +73,8 @@ def _node(label, props, match):
 
 def test_insert_then_match_returns_the_same_row() -> None:
     name = _db_name()
-    first = upsert_node(Labels.DB, {"name": name}, {"name": name})
-    second = upsert_node(Labels.DB, {"name": name}, {"name": name})
+    first = upsert_row(Labels.DB, {"name": name}, {"name": name})
+    second = upsert_row(Labels.DB, {"name": name}, {"name": name})
     assert first == second
 
     rows = store().query_read(
@@ -84,7 +84,7 @@ def test_insert_then_match_returns_the_same_row() -> None:
 
 
 def test_stored_id_survives_a_match_with_a_different_incoming_id() -> None:
-    """Deliberately *not* the Cypher behaviour — see nodes.upsert_node.
+    """Deliberately *not* the Cypher behaviour — see nodes.upsert_row.
 
     ``apoc.merge.node.eager(..., {id: $props.id})`` overwrites the matched
     node's id with the parser's. Harmless in a property graph, where
@@ -95,9 +95,9 @@ def test_stored_id_survives_a_match_with_a_different_incoming_id() -> None:
     so for Table and Column the incoming id already *is* the stored one.
     """
     name = _db_name()
-    original = upsert_node(Labels.DB, {"name": name}, {"name": name})
+    original = upsert_row(Labels.DB, {"name": name}, {"name": name})
 
-    returned = upsert_node(
+    returned = upsert_row(
         Labels.DB, {"name": name}, {"name": name, "id": str(uuid.uuid4())}
     )
 
@@ -136,7 +136,7 @@ def test_referencing_rows_survive_a_reingest() -> None:
 def test_unknown_properties_are_dropped_not_rejected() -> None:
     """The Cypher accepted any property; refusing them would fail live ingests."""
     name = _db_name()
-    node_id = upsert_node(
+    node_id = upsert_row(
         Labels.DB,
         {"name": name},
         {"name": name, "not_a_column": "ignored", "another": 5},
@@ -147,7 +147,7 @@ def test_unknown_properties_are_dropped_not_rejected() -> None:
 def test_unknown_label_raises_rather_than_silently_dropping() -> None:
     """A dropped node is a missing catalog entry discovered much later."""
     with pytest.raises(registry.UnknownLabel):
-        upsert_node("NotALabel", {"name": "x"}, {"name": "x"})
+        upsert_row("NotALabel", {"name": "x"}, {"name": "x"})
 
 
 def test_resolve_id_returns_none_for_absent_node() -> None:
@@ -157,7 +157,7 @@ def test_resolve_id_returns_none_for_absent_node() -> None:
 # --------------------------------------------------------------------------
 # CONTAINS is a parent column, not a row
 #
-# Exercised through upsert_node's parent_id, which is the primitive the
+# Exercised through upsert_row's parent_id, which is the primitive the
 # hierarchy writers use. CONTAINS never reaches prepare_edge: add_schemas_edge
 # and merge_schema_edges hardcode it, because in the graph it was the one
 # relationship with no properties to inspect.
@@ -165,11 +165,11 @@ def test_resolve_id_returns_none_for_absent_node() -> None:
 
 
 def _database(name: str) -> str:
-    return upsert_node(Labels.DB, {"name": name}, {"name": name})
+    return upsert_row(Labels.DB, {"name": name}, {"name": name})
 
 
 def _schema(db_name: str, db_id: str, schema_name: str) -> str:
-    return upsert_node(
+    return upsert_row(
         Labels.SCHEMA,
         {"database_name": db_name, "name": schema_name},
         {"name": schema_name},
@@ -222,14 +222,14 @@ def _column(db_name: str, table_name: str, column_name: str) -> tuple[str, str]:
     db_id = _database(db_name)
     schema_id = _schema(db_name, db_id, "shop")
     table_id = str(uuid.uuid4())
-    upsert_node(
+    upsert_row(
         Labels.TABLE,
         {"id": table_id},
         {"name": table_name, "id": table_id},
         parent_id=schema_id,
     )
     column_id = str(uuid.uuid4())
-    upsert_node(
+    upsert_row(
         Labels.COLUMN,
         {"id": column_id},
         {"name": column_name, "id": column_id},
@@ -299,8 +299,8 @@ def test_repeated_sql_edge_does_not_duplicate() -> None:
 
 
 def test_unknown_edge_shape_raises() -> None:
-    with pytest.raises(registry.UnknownEdge):
-        registry.edge_spec(Edges.FOREIGN_KEY, Labels.DB, Labels.SCHEMA)
+    with pytest.raises(registry.UnknownLink):
+        registry.link_spec(Edges.FOREIGN_KEY, Labels.DB, Labels.SCHEMA)
 
 
 # --------------------------------------------------------------------------

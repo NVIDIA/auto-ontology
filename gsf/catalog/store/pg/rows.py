@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Node upserts — the relational stand-in for ``apoc.merge.node.eager``.
+"""Row upserts — the relational stand-in for ``apoc.merge.node.eager``.
 
 The Cypher writers lean on one primitive throughout: *find a node by its match
 properties, create it with these properties if absent, and overwrite its id with
@@ -11,7 +11,7 @@ mine if present*.
 The upsert is keyed on the **natural** key, not on ``id`` — two runs of the
 parser against the same source must converge on one row, and only the natural
 key can decide that. ``Schema``, ``Table`` and ``Column`` are unique *within
-their parent*, which is why :func:`upsert_node` takes ``parent_id``.
+their parent*, which is why :func:`upsert_row` takes ``parent_id``.
 
 **One deliberate divergence: the stored id is never overwritten.** In a property
 graph, ``id`` is an ordinary property and relationships bind to internal nodes,
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 def _natural_key_predicate(
-    spec: registry.LabelSpec, values: dict[str, Any], parent_id: str | None
+    spec: registry.EntitySpec, values: dict[str, Any], parent_id: str | None
 ):
     """Build the WHERE that decides whether this row already exists."""
     clauses = []
@@ -62,14 +62,14 @@ def resolve_id(
     *,
     parent_id: str | None = None,
 ) -> str | None:
-    """Find an existing row's id from whatever the parser matched on.
+    """Find an existing row's id from whatever the caller matched on.
 
     ``match_props`` is not uniform across labels — ``Table`` and ``Column``
     carry a pre-generated ``id``, ``Schema`` carries ``(database_name, name)``
     where ``database_name`` is not a column on the row at all, and ``Database``
     carries ``name``. Each shape is handled explicitly rather than guessed at.
     """
-    spec = registry.label_spec(label)
+    spec = registry.entity_spec(label)
 
     if "id" in match_props and match_props["id"]:
         rows = store().query_read(
@@ -99,7 +99,7 @@ def resolve_id(
     return rows[0]["id"] if rows else None
 
 
-def upsert_node(
+def upsert_row(
     label: str,
     match_props: dict[str, Any],
     properties: dict[str, Any],
@@ -107,14 +107,14 @@ def upsert_node(
     parent_id: str | None = None,
     on_match: dict[str, Any] | None = None,
 ) -> str:
-    """Create or update one node, returning its id.
+    """Create or update one row, returning its id.
 
     Mirrors ``apoc.merge.node.eager(label, identity, on_create, on_match)``:
     properties are written on insert, and *on_match* is applied when the row
     already existed — except for ``id``, which is never overwritten. See the
     module docstring for why that divergence is both necessary and free.
     """
-    spec = registry.label_spec(label)
+    spec = registry.entity_spec(label)
     values = registry.projected(label, properties)
 
     if spec.parent_column and parent_id is not None:
@@ -178,7 +178,7 @@ def upsert_node(
     return existing_id
 
 
-def _conflict_target(spec: registry.LabelSpec) -> list:
+def _conflict_target(spec: registry.EntitySpec) -> list:
     """What ``ON CONFLICT`` should name for this label.
 
     Usually the natural key's columns, but ``sql_query`` is unique on

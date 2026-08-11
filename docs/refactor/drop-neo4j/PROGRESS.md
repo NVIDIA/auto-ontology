@@ -885,3 +885,44 @@ raises. The registry now carries an optional expression conflict target.
 running the 12 incremental-diff tests and the fixture ingest under
 `GSF_STORE=postgres`. The registry answers *where things go*; those modules are
 the diffing and bulk-write logic on top of it.
+
+---
+
+## 2026-08-11 — Phase 4 — the Postgres store stops talking about nodes and edges
+
+Review point: the Postgres implementation was carrying graph vocabulary into a
+relational store. Correct, and worth separating into the part that was a choice
+and the part that is a constraint.
+
+**A choice, and the wrong one — now fixed.** `nodes.py`, `upsert_node`,
+`LabelSpec`, `EdgeSpec`, `EDGES` were all internal to `store/pg/` with no caller
+depending on them. Renamed:
+
+| was | now |
+|---|---|
+| `store/pg/nodes.py` | `store/pg/rows.py` |
+| `upsert_node` | `upsert_row` |
+| `LabelSpec` / `LABELS` | `EntitySpec` / `ENTITIES` |
+| `EdgeSpec` / `EDGES` | `LinkSpec` / `LINKS` |
+| `label_spec` / `edge_spec` | `entity_spec` / `link_spec` |
+
+**"Link", not "relation"** — in relational vocabulary a *relation* is a table,
+so `RelationSpec` for an association would have meant the opposite of what it
+described.
+
+**A constraint, deliberately left.** `store/pg/edges.py` keeps `add_edges`,
+`prepare_edge`, `prepare_node` and `get_node_properties_by_id`, because
+`write.py`, `queries.py` and `schemas_parser.py` call them by those names and
+the selector only works while both implementations match. Renaming half of a
+two-sided contract is worse than either end of it. **Phase 11 renames the whole
+surface in one change**, once the Neo4j side is deleted and the callers can move
+with it.
+
+The boundary is now explicit rather than incidental: graph words stop at
+`store/pg/edges.py`, which says so in its docstring; `registry.py` and `rows.py`
+behind it speak only of tables, rows, columns and links. The graph words that do
+remain in the registry are the *keys* of the translation — the labels arriving
+from callers — not descriptions of how anything is stored.
+
+**Suite:** 427 passed, 4 skipped. No behaviour change; renames and docstrings
+only.

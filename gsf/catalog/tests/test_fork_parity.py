@@ -69,7 +69,7 @@ DIVERGED = {
     "gsf.catalog.store.edges": "Phase 4 backend selector; not a fork",
     "gsf.catalog.store.indexes": "Phase 4 backend selector; not a fork",
     "gsf.catalog.store.pg.registry": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.nodes": "Phase 4 Postgres implementation; not a fork",
+    "gsf.catalog.store.pg.rows": "Phase 4 Postgres implementation; not a fork",
     "gsf.catalog.store.pg.edges": "Phase 4 Postgres implementation; not a fork",
     "gsf.catalog.store.neo4j.db": (
         "column-diff merge keys corrected — upstream merges on a 'schema' column "
