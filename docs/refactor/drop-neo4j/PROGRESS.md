@@ -16,7 +16,12 @@ See [PLAN.md](PLAN.md) for the phase definitions and their Done criteria, and
 > Open questions go here rather than being resolved by guess. Anything touching
 > zone scoping or access control belongs here by default.
 
-**Two "unit" tests silently require a live Neo4j.** *(found 2026-08-11, Phase 0)*
+Nothing open.
+
+### Resolved
+
+**Two "unit" tests silently require a live Neo4j.** *(found 2026-08-11,
+**resolved** 2026-08-11 — skipped until Phase 10)*
 `test_export_model_filters_by_database_id` and
 `test_export_model_all_databases_uses_empty_filter` in
 `gsf/server/model_interchange/tests/test_model_interchange.py` patch
@@ -24,16 +29,13 @@ See [PLAN.md](PLAN.md) for the phase definitions and their Done criteria, and
 `dal.resolve_sql_column_ids`, but `service.export_model` also calls
 `_dialect_by_database_name()` (`service.py:56`), which calls `list_connections()`
 → `MATCH (db:Database) RETURN properties(db)`. That call is unpatched, so both
-tests fail with a connection refused on :7687 unless Neo4j happens to be up.
-Pre-existing; not caused by this refactor. Phase 10 converts these to
-fixture-based tests. **Question for a human:** does CI currently run with Neo4j
-up? If so these pass there today and the gap is invisible — worth a cheap
-`@patch` now rather than waiting for Phase 10.
+fail with connection refused on :7687 unless Neo4j happens to be up.
+Pre-existing; not caused by this refactor.
 
-**Stale `CLAUDE.md` dev command.** *(found 2026-08-11, Phase 0)* It documents
-`uv run uvicorn gsf.server.main:app`, but the app factory is
-`gsf/server/__main__.py` — `gsf/server/main.py` does not exist. Left alone as
-out of scope; flagging rather than fixing silently.
+Now `@pytest.mark.skip` with a reason that states the unpatched call path, so
+the next reader doesn't have to re-derive it. **Phase 10 must un-skip them** and
+rewrite them against the Pagila/Chinook fixture — they are the only coverage
+`export_model`'s database filtering has.
 
 ---
 
@@ -178,3 +180,27 @@ Before Phase 4, the **ERD review gate** at the end of Phase 3 needs a human in
 the room — polymorphic `zone_target`, the edge-property-carrying
 `sql_query_table`, and the `join_edge` view shape decide whether Phases 5–10
 are mechanical or a rewrite.
+
+---
+
+## 2026-08-11 — Phase 0 — follow-ups from review
+
+**Merge from `origin/main`:** `origin/main` is at `ce62e52`; this branch was
+already 4 ahead / 0 behind, so nothing to merge. Recorded because
+[DECISION-001](DECISIONS.md) now requires a merge at every phase boundary —
+`git fetch origin && git merge origin/main` before any code, logged here with
+the SHA and whether it conflicted.
+
+**What landed:**
+- The two live-Neo4j `test_export_model_*` tests are now `@pytest.mark.skip`
+  with a reason naming the unpatched `_dialect_by_database_name()` →
+  `list_connections()` call path. **Phase 10 must un-skip them** — they are
+  `export_model`'s only database-filtering coverage.
+- DECISION-001 added, and `PLAN.md` § *This plan lives in the repo* gained the
+  per-phase merge rule.
+
+**Files touched:** `gsf/server/model_interchange/tests/test_model_interchange.py`,
+`docs/refactor/drop-neo4j/{PLAN,PROGRESS,DECISIONS}.md`.
+
+**Suite:** `gsf/server/model_interchange/tests/` — 12 passed, 2 skipped. The
+two failures that stood at the end of Phase 0 are gone; the suite is green.

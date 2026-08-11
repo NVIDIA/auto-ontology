@@ -38,4 +38,33 @@ highest risk of unattended execution.
 
 ## Records
 
-_None yet._
+## 001 — Merge `origin/main` at every phase boundary
+
+**Date:** 2026-08-11  **Phase:** 0  **Supersedes:** nothing (adds to PLAN.md § This plan lives in the repo)
+
+**Context** — The plan set out git conventions but said nothing about staying
+current with `main`. The refactor runs 8–11 weeks against an actively developed
+branch and concentrates on `gsf/dal/`, which most feature work also touches. A
+long-lived branch that only merges at the end would face conflict resolution
+between ported SQL and upstream Cypher edits in files whose two versions no
+longer resemble each other — and the failure mode is silent: resolving with
+"ours" drops upstream behaviour that was never ported.
+
+**Decision** — Every phase starts with `git fetch origin && git merge
+origin/main`, before any code is written. The merge is logged in `PROGRESS.md`
+as the phase's first entry, recording the merged SHA and whether it conflicted.
+Upstream Cypher arriving in an already-ported module requires its own decision
+record describing how the behaviour was carried into the Postgres
+implementation.
+
+**Consequences** — Conflicts stay small and land at the one moment when nothing
+is half-ported. Costs a few minutes per phase and occasionally forces a port to
+be redone against changed upstream behaviour, which is the point: that work is
+real either way, and it is far cheaper discovered at a phase boundary than at
+the Phase 11 flip.
+
+**Two-way ambiguity worth naming:** during Phases 5–10 an upstream change to a
+DAL function's *signature* will fail `test_dal_surface.py` on the merge, not on
+the port. That is intended — it is the freeze doing its job — but the fix is to
+regenerate the snapshot and carry the change into both implementations, never
+to revert the upstream change.

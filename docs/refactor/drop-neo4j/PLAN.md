@@ -88,6 +88,28 @@ rule is that **the documentation is part of the change, not a follow-up**:
 Git conventions follow `CLAUDE.md`: branch from `main`, concise imperative
 commit messages, no `Co-Authored-By` trailers.
 
+### Merge from `origin/main` before every phase
+
+**Start each phase by fetching and merging `origin/main`**, before writing any
+code:
+
+```bash
+git fetch origin && git merge origin/main
+```
+
+This refactor runs 8–11 weeks against an actively developed `main`, and it
+touches `gsf/dal/` — which nearly every feature branch also touches. Deferring
+the merge means conflict-resolving a phase's worth of ported SQL against
+someone else's Cypher edits, in a file whose two versions no longer resemble
+each other. Merging at a phase boundary keeps each conflict small and puts it
+at the one moment when nothing is half-ported.
+
+Record the merge in `PROGRESS.md` as the phase's first entry: the
+`origin/main` SHA merged, and whether it conflicted. If a merge brings in new
+Cypher in a module already ported, that's a `DECISIONS.md` entry — the new
+behaviour has to be carried into the Postgres implementation, not silently
+dropped by taking "ours".
+
 ---
 
 ## Scope
