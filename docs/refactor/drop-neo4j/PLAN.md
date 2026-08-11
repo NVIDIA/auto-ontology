@@ -273,9 +273,15 @@ import statements. No shim — a re-export keeps a live import edge to the
 package being dropped.
 
 Add `gsf.dal.close_store()` and call it from `gsf/server/__main__.py:58`
-instead of reaching into `neo4j_connection._conn`. This also drops the heavy
-`nemo_retriever` import from the API entrypoint, which
-`gsf/server/ingestion/proxy.py` was already trying to avoid.
+instead of reaching into `neo4j_connection._conn`, so shutdown goes through a
+public hook that Phase 3 can repoint at the SQLAlchemy engine.
+
+> **Correction (2026-08-11).** An earlier draft of this plan claimed this also
+> drops the heavy `nemo_retriever` import from the API entrypoint. It does not:
+> `nemo_retriever.tabular_data.neo4j` still loads transitively through the ten
+> `get_neo4j_conn` imports in `gsf/dal/*.py`. Only the *direct* import at
+> `__main__.py:13` goes away. The entrypoint stops depending on driver
+> internals; the import weight is unchanged until Phase 11.
 
 Add `gsf/dal/tests/test_dal_surface.py` — snapshot every public name +
 `inspect.signature` per module. This is the machine-checkable form of the

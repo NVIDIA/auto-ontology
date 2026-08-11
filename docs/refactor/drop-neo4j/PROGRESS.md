@@ -90,3 +90,38 @@ above — unrelated to this change, confirmed by reading the unpatched call path
 
 **Next:** `gsf.dal.close_store()` lifecycle hook, then the DAL surface snapshot
 test.
+
+---
+
+## 2026-08-11 — Phase 0 — `close_store()` lifecycle hook
+
+**What landed:** `gsf.dal.close_store()`, called from the `__main__.py` lifespan
+in place of poking `neo4j_connection._conn`. Imports inside it are deferred so
+`import gsf.dal` stays cheap and carries no import-time driver dependency.
+Phase 3 repoints this at the SQLAlchemy engine; nothing in `__main__.py` has to
+change again.
+
+**Bug fixed along the way:** `gsf/dal/neo4j_tx.py` opens its *own* driver
+(`_driver`) for explicit write transactions, and nothing ever closed it — the
+old shutdown path only closed the library's singleton. `close_store()` closes
+both, and closes the second even if the first raises, since leaking the driver
+because the singleton misbehaved is strictly worse than logging.
+
+**Files touched:** `gsf/dal/__init__.py`, `gsf/server/__main__.py`,
+`gsf/dal/tests/test_close_store.py` (new).
+
+**Tests added:** 4 — both connections closed and globals cleared; idempotent
+across repeat calls; the driver still closes when the shared connection raises;
+a driver opened without the singleton is still closed. Verified `create_app()`
+builds (61 routes) and the entrypoint no longer references
+`neo4j_connection`.
+
+**Correction to PLAN.md.** The plan claimed this drops the heavy
+`nemo_retriever` import from the API entrypoint. Measured: it does not.
+`nemo_retriever.tabular_data.neo4j` still loads transitively via the ten
+`get_neo4j_conn` imports in `gsf/dal/*.py`; only the direct import at
+`__main__.py:13` goes away. `PLAN.md` § Phase 0 has been amended with the
+correction in this same commit. The real benefit is the public seam, not import
+weight — import weight only improves in Phase 11.
+
+**Next:** the DAL surface snapshot test, which closes out Phase 0.
