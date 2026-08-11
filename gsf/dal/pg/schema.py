@@ -160,7 +160,19 @@ catalog_column = Table(
     # preserving; promoting it is a deliberate follow-up, not a porting detail.
     Column("sample_values", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
-    Column("is_nullable", Boolean, nullable=True),
+    # Text, not Boolean, because the graph stores the *strings* 'YES' and 'NO'
+    # -- measured on the fixture: 99 YES, 110 NO -- and the DAL returns the
+    # value raw. A boolean column here would hand callers True/False where they
+    # have always received 'YES'/'NO', which is a read-contract change wearing
+    # the costume of a type fix.
+    #
+    # It should become a boolean, but as a deliberate change with its consumers
+    # updated, not as a side effect of the port. See the is_nullable finding in
+    # PROGRESS.md: `model_interchange` already reads this with `bool(...)`, and
+    # `bool('NO')` is True, so every column currently exports as nullable.
+    Column("is_nullable", Text, nullable=True),
+    # INTEGER in the graph (verified: 209 of 209 columns), despite the parser
+    # handing the write path a string -- something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),

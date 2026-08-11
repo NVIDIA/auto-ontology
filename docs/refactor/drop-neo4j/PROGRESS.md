@@ -777,3 +777,53 @@ of `store/pg/*`. The scaffolding, the spec tests, and the ERD it will target are
 in place; `edges.py` is the hard part, since its node/edge helpers are
 label-generic and need a label→table mapping to work against a relational
 schema.
+
+---
+
+## 2026-08-11 — Phase 4 — node shapes measured, schema corrected
+
+Before writing `store/pg/*`, measured what the write path actually produces —
+node labels, match properties and property bags — rather than inferring it from
+the Cypher. Three findings, one of which corrects the Phase 3 schema.
+
+**`is_nullable` is a string, not a boolean.** The graph stores `'YES'`/`'NO'`
+(measured on the fixture: 99 / 110), and the DAL returns it raw.
+`catalog_column.is_nullable` was declared `Boolean` in Phase 3; it is now
+`Text`. A boolean column would hand callers `True`/`False` where they have
+always received `'YES'`/`'NO'` — a read-contract change wearing the costume of a
+type fix. It *should* become a boolean, but as a deliberate change with its
+consumers updated, not as a side effect of the port. Migration regenerated as
+`731be6d6d249`.
+
+**`ordinal_position` is a genuine INTEGER** in the graph (209 of 209 columns),
+even though the parser hands the write path the string `"3"` — something
+coerces on the way in. The Phase 3 declaration was already right.
+
+### Finding for Phase 10: every column exports as nullable
+
+`gsf/dal/model_interchange.py:391` reads that string with
+`is_nullable=bool(row.get("is_nullable", True))`. **`bool("NO")` is `True`**, so
+the model export reports every column as nullable — `NOT NULL` columns
+included — and an import of that document would then assert the wrong
+constraint.
+
+Not fixed here. It belongs to `model_interchange`, which Phase 10 ports, and
+fixing it now would change export output with no export test to catch a
+mistake — the two tests that cover `export_model` are the ones skipped since
+Phase 0. **Phase 10 must fix this and un-skip those tests together.**
+
+This is the third bug this refactor has surfaced without looking for bugs: the
+first two were partitioned tables and matviews missing from Postgres catalogs
+(B3) and column diffs never running (B6). All three were found by measuring
+what the system does rather than reading what it says it does.
+
+**Suite:** 407 passed, 4 skipped. `alembic check` clean; upgrade/downgrade/
+re-upgrade verified against the corrected schema.
+
+**Phase 4 remains incomplete** — `store/pg/*` is still to be written. The
+foundations are in place: the selector scaffolding, the 12 incremental-diff
+spec tests, the corrected ERD, and now the measured node shapes the registry
+has to map. The next step is the label→table registry and the generic
+`edges.py` upsert layer, which is where the `CONTAINS`-as-FK-column decision
+stops being a schema detail and becomes code: `add_edges` must *update a child's
+parent column* for `CONTAINS` while *inserting a row* for every other edge type.
