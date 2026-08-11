@@ -2,10 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Seed the local docker-compose Postgres with the demo catalog.
+"""Seed the local docker-compose Postgres with the demo catalogs.
 
-Creates the four demo databases if they don't exist, then applies each
-database's DDL from ``dev_tools/sql/<db>.sql``. Idempotent — safe to re-run.
+Creates each demo database if it doesn't exist, then applies its SQL from
+``dev_tools/sql/``. Idempotent — safe to re-run.
+
+``testdb`` is a 2-table smoke fixture. ``pagila`` is the real one: two schemas,
+views, a materialized view, a partitioned table, arrays, an enum and a tsvector
+column — see ``dev_tools/sql/README.md`` for why each of those matters.
+
+The SQLite fixture (Chinook) is built by ``dev_tools.build_sqlite_fixtures``;
+run both, or just ``dev_tools.seed_fixtures`` which calls each in turn.
 
 Usage::
 
@@ -17,6 +24,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import psycopg
@@ -29,7 +37,38 @@ DEFAULT_POSTGRES_ADMIN_DB = "postgres"
 
 SQL_DIR = Path(__file__).resolve().parent / "sql"
 
-DATABASES: tuple[str, ...] = ("testdb",)
+
+@dataclass(frozen=True)
+class Fixture:
+    """A demo database and the SQL that builds it.
+
+    ``sentinel`` is a table whose presence means the fixture is already loaded.
+    Needed because ``pagila.sql`` is ``pg_dump`` output, which is not
+    re-runnable — replaying it against a populated database fails on the first
+    ``CREATE TABLE``. Checking a sentinel keeps the script re-runnable without
+    dropping data someone may have already ingested against.
+    """
+
+    name: str
+    sentinel: str
+    files: tuple[str, ...] = field(default=())
+
+    @property
+    def sql_files(self) -> tuple[Path, ...]:
+        return tuple(SQL_DIR / f for f in (self.files or (f"{self.name}.sql",)))
+
+
+FIXTURES: tuple[Fixture, ...] = (
+    Fixture(name="testdb", sentinel="customers"),
+    Fixture(
+        name="pagila",
+        sentinel="film",
+        files=("pagila.sql", "pagila_analytics.sql"),
+    ),
+)
+
+# Kept for callers that only want the names.
+DATABASES: tuple[str, ...] = tuple(f.name for f in FIXTURES)
 
 
 def _conn_params(db: str) -> dict[str, str]:
@@ -52,16 +91,43 @@ def _ensure_database(admin_conn: psycopg.Connection, db: str) -> None:
         cur.execute(f'CREATE DATABASE "{db}"')
 
 
-def _apply_ddl(db: str) -> None:
-    ddl_path = SQL_DIR / f"{db}.sql"
-    if not ddl_path.is_file():
-        raise FileNotFoundError(f"DDL file missing: {ddl_path}")
+def _already_seeded(conn: psycopg.Connection, sentinel: str) -> bool:
+    """Whether *sentinel* already exists in any user schema of *conn*."""
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            SELECT 1
+            FROM information_schema.tables
+            WHERE table_name = %s
+              AND table_schema NOT IN ('pg_catalog', 'information_schema')
+            LIMIT 1
+            """,
+            (sentinel,),
+        )
+        return cur.fetchone() is not None
 
-    sql = ddl_path.read_text()
-    logger.info("Applying DDL to %s from %s", db, ddl_path.name)
-    with psycopg.connect(**_conn_params(db)) as conn:
-        with conn.cursor() as cur:
-            cur.execute(sql)
+
+def _apply_sql(fixture: Fixture) -> None:
+    """Apply *fixture*'s SQL files in order, unless it is already loaded."""
+    for path in fixture.sql_files:
+        if not path.is_file():
+            raise FileNotFoundError(f"Fixture SQL missing: {path}")
+
+    with psycopg.connect(**_conn_params(fixture.name)) as conn:
+        if _already_seeded(conn, fixture.sentinel):
+            logger.info(
+                "Database %s already has %s; skipping (drop the database to "
+                "re-seed from scratch).",
+                fixture.name,
+                fixture.sentinel,
+            )
+            return
+
+        for path in fixture.sql_files:
+            logger.info("Applying %s to %s", path.name, fixture.name)
+            with conn.cursor() as cur:
+                cur.execute(path.read_text())
+        conn.commit()
 
 
 def seed() -> None:
@@ -71,15 +137,15 @@ def seed() -> None:
     admin_conn = psycopg.connect(**admin_params)
     admin_conn.autocommit = True
     try:
-        for db in DATABASES:
-            _ensure_database(admin_conn, db)
+        for fixture in FIXTURES:
+            _ensure_database(admin_conn, fixture.name)
     finally:
         admin_conn.close()
 
-    for db in DATABASES:
-        _apply_ddl(db)
+    for fixture in FIXTURES:
+        _apply_sql(fixture)
 
-    logger.info("Seed complete.")
+    logger.info("Seed complete: %s", ", ".join(f.name for f in FIXTURES))
 
 
 if __name__ == "__main__":

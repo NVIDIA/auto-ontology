@@ -205,6 +205,62 @@ the SHA and whether it conflicted.
 **Suite:** `gsf/server/model_interchange/tests/` — 12 passed, 2 skipped. The
 two failures that stood at the end of Phase 0 are gone; the suite is green.
 
+---
+
+## 2026-08-11 — Phase 2 — fixture databases
+
+**Merge:** `origin/main` at `ce62e52`; branch 6 ahead / 0 behind. Nothing to
+merge, no conflicts.
+
+**What landed:** Pagila (Postgres) and Chinook (SQLite) replace a 16-line,
+2-table `testdb.sql` as the fixture the whole refactor is graded against.
+
+- `dev_tools/sql/pagila.sql` — 1.2 MB, from upstream `pagila-v3.1.0`, trimmed.
+- `dev_tools/sql/pagila_analytics.sql` — GSF-authored second schema.
+- `dev_tools/sql/chinook.sql` — upstream, unmodified; the `.sqlite` is
+  generated and gitignored.
+- `dev_tools/sql/build_pagila.sh` — regenerates the dump reproducibly.
+- `dev_tools/sql/README.md` — provenance and rationale.
+- `dev_tools/{seed_fixtures,build_sqlite_fixtures}.py`, and
+  `seed_local_postgres.py` reworked around a `Fixture` dataclass with a
+  sentinel-table check so re-seeding is genuinely idempotent (the old
+  docstring claimed idempotence but `pg_dump` output is not re-runnable).
+- `THIRD_PARTY_NOTICES.md` — both fixtures, both MIT.
+
+**Four things that were not anticipated**, all now in
+`dev_tools/sql/README.md` and [DECISION-002](DECISIONS.md):
+upstream Pagila master needs PG18 (`uuidv7()`, `VIRTUAL` columns) and GSF runs
+pg17, so it is pinned to v3.1.0 rather than patched; master's data is 13 MB not
+~3 MB, hence the trim; `pg_dump`'s `COPY ... FROM stdin` cannot run through
+psycopg's `execute()`, hence `--inserts`; and `pg_dump` 17.6+ emits
+`\restrict`/`\unrestrict` psql meta-commands that had to be stripped.
+
+**Three plan claims were wrong and are corrected in `PLAN.md`:** Pagila has no
+self-referencing FK (no `staff.reports_to` — that's Sakila/Northwind); it is
+single-schema, so the second schema is GSF-authored; and it is 22 base tables,
+not 15, because `payment` is partitioned. Pagila is MIT, not BSD.
+
+**Tests added:** `dev_tools/tests/test_fixtures.py` — 12 tests asserting every
+shape claim (views, matview, partitions, two schemas, cross-schema FKs,
+self-reference, array/enum/tsvector columns, the multi-hop join chain, zero
+orphans after the trim, row counts). 12 pass against a live Postgres; without
+one it degrades to 3 passed / 9 skipped. Verified the seeder end-to-end from a
+clean database and confirmed a second run skips everything.
+
+**Deviation from the plan's letter:** the plan said to extend
+`seed_local_postgres.py`'s loop. SQLite shares nothing with Postgres seeding, so
+Chinook got its own module and `seed_fixtures.py` runs both — recorded in
+DECISION-002.
+
+**Flagged for Phase 4:** partitioned `payment` means ingestion will discover 22
+base tables where a reader expects 1. Whether partition children belong in the
+catalog is a product question, not a porting detail; Phase 4 must decide it
+deliberately rather than inherit whatever the current code happens to do.
+
+**Not yet done in Phase 2:** the golden capture itself. It needs a live Neo4j
+plus ingestion and `/semantic/compile` (which needs model credentials), so it
+is the next piece of work.
+
 **Also fixed the stale `CLAUDE.md` dev command** (the second item that had been
 under *Blocked*). It documented `uv run uvicorn gsf.server.main:app`, but
 `gsf/server/main.py` does not exist — the factory is `create_app()` in

@@ -50,3 +50,7 @@ dev_tools/evaluation/
 # Local OpenMetadata evaluation environment (Docker volume + rendered configs
 # with secrets); local scratch state, never commit.
 openmetadata-eval/
+
+# Generated SQLite fixture DBs — built from the vendored .sql by
+# dev_tools.build_sqlite_fixtures; text is the source of truth, not the blob.
+dev_tools/sql/*.sqlite

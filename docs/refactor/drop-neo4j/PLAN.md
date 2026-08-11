@@ -506,19 +506,30 @@ Today: `dev_tools/sql/testdb.sql`, 16 lines, 2 tables, 1 FK, 0 views. Every
 claim this refactor makes about catalog fidelity would be validated against
 that. Replace it.
 
-**Primary — Pagila (Postgres).** The Postgres port of Sakila: 15 base tables,
-~20 FKs, 7 views, a materialized view, and real data volume. It's the right
-choice because it hits the exact features this codebase has special handling
-for:
+**Primary — Pagila (Postgres).** The Postgres port of Sakila, pinned to
+`pagila-v3.1.0` and trimmed. **Landed 2026-08-11** — actual measured shape, with
+three of this section's original claims corrected (see below and
+`dev_tools/sql/README.md`):
 
 | Pagila feature | What it exercises |
 |---|---|
-| views + a materialized view | `TableTypes` / `table_type` (`base table` / `view` / `materialized view`) — currently untested for anything but base tables |
-| `film.special_features text[]`, `mpaa_rating` enum, `fulltext tsvector` | `check_properties_compatibility_with_neo4j` → its Postgres replacement; column `data_type` handling |
+| 7 views + 1 materialized view | `TableTypes` / `table_type` (`base table` / `view` / `materialized view`) — previously untested for anything but base tables |
+| `payment` partitioned into 22 monthly children | partitions surface as tables in `information_schema`; whether the catalog should show them is a real question this forces us to answer |
+| `film.special_features text[]`, `mpaa_rating` enum, `fulltext tsvector`, 2 domains incl. `bıgınt` | column `data_type` handling beyond scalars; non-ASCII identifiers |
 | `film_actor`, `film_category` junction tables | bridge-table detection (`gsf/semantic/bridge_tables.py`), `fetch_bridge_table_candidates` |
-| self-referencing `staff.reports_to`, `city→country→address` chains | `find_join_path` recursive CTE, multi-hop `CONTAINS*0..2` walks |
-| ~600 films / 16k rentals | `store_column_sample_values`, `store_column_uniqueness` — meaningless on 16 lines |
-| two schemas | `Schema` tier is currently single-schema in every test |
+| `customer→address→city→country` | multi-hop `find_join_path` traversal |
+| 1000 films / 4581 inventory rows | `store_column_sample_values`, `store_column_uniqueness` — meaningless on 16 lines |
+| two schemas (`public` + GSF-authored `analytics`), 2 cross-schema FKs | `Schema` tier, schema-scoped zones, and the `-Schema` exclusion in `find_join_path` |
+
+> **Corrections (2026-08-11).** Three claims above were asserted before being
+> checked and were wrong. Pagila has **no self-referencing FK** — there is no
+> `staff.reports_to`; that's Sakila/Northwind. Upstream Pagila is
+> **single-schema**, so the second schema is `dev_tools/sql/pagila_analytics.sql`,
+> authored here. And it is **22 base tables, not 15** (the `payment` partitions).
+> The self-reference case is covered by Chinook's `Employee.ReportsTo` and, in a
+> non-public schema, by `analytics.category_rollup.parent_rollup_id`. All of
+> these are now asserted by `dev_tools/tests/test_fixtures.py` rather than
+> described in prose and trusted.
 
 **Second — Chinook (SQLite).** Exists purely to make the fixture set
 *multi-database and multi-dialect*: 11 tables, clean FKs, and it drives
@@ -528,11 +539,31 @@ Without a second database, these are untestable: cross-database rejection in
 `delete_all_data(database_name)` scoping, per-database pgvector collection
 resets, and zones spanning databases.
 
-**Mechanics.** Vendor both under `dev_tools/sql/` (Pagila ≈3MB, Chinook ≈1MB —
-vendoring beats a download for CI reproducibility). Extend
-`dev_tools/seed_local_postgres.py`'s existing `DATABASES` tuple and idempotent
-apply loop rather than writing a new seeder. Both are permissively licensed
-(Pagila BSD, Chinook MIT) — add them to `THIRD_PARTY_NOTICES.md`.
+**Mechanics (as landed).** `dev_tools/sql/pagila.sql` (1.2 MB) and
+`chinook.sql` (0.6 MB) are vendored; the Chinook `.sqlite` is *generated* from
+the vendored SQL by `dev_tools/build_sqlite_fixtures.py` and gitignored, so git
+stores diffable text rather than a 1 MB blob. `dev_tools/seed_fixtures.py` runs
+both halves in one command. `dev_tools/sql/build_pagila.sh` regenerates the
+Pagila dump so the pin is a one-command bump rather than a mystery blob.
+Both are **MIT** (the plan said Pagila was BSD — it isn't), recorded in
+`THIRD_PARTY_NOTICES.md`.
+
+Four non-obvious things this ran into, all documented in
+`dev_tools/sql/README.md`:
+
+- **Pinned to `pagila-v3.1.0`, not `master`.** Master targets PG18 (`uuidv7()`
+  defaults, `VIRTUAL` generated columns); GSF runs `pgvector/pgvector:pg17`.
+  v3.1.0 is the newest tag that loads on PG17 *unmodified* and still has the
+  partitioned table, both domains, the enum and all 8 views — pinning beats
+  patching a third-party fixture.
+- **Trimmed** `payment` then `rental` to 600 rentals, in that order so the FK
+  never breaks: ~13 MB → 1.2 MB with every table, view, type and constraint
+  intact, and zero orphans (asserted in the fixture tests).
+- **Dumped as `INSERT`s** (`--rows-per-insert=200`), because the seed script
+  executes through psycopg's `cur.execute()`, which cannot run `COPY ... FROM
+  stdin`.
+- **`\restrict`/`\unrestrict` stripped** — `pg_dump` 17.6+ emits psql
+  meta-commands that are not SQL.
 
 Keep `testdb.sql` as a fast smoke fixture for tests that don't need breadth.
 

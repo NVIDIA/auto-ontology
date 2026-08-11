@@ -34,6 +34,21 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | pytest | >=9.0.3 | MIT | https://github.com/pytest-dev/pytest |
 | Ruff | >=0.15.9 | MIT | https://github.com/astral-sh/ruff |
 
+### Sample databases (test fixtures, not redistributed in any build artifact)
+
+Vendored under `dev_tools/sql/` and used only to seed local development and
+test databases. See `dev_tools/sql/README.md` for provenance and for the
+modifications made to Pagila.
+
+| Component | Version | License | Project URL |
+| --- | --- | --- | --- |
+| Pagila | pagila-v3.1.0 (trimmed; see `dev_tools/sql/README.md`) | MIT | https://github.com/devrimgunduz/pagila |
+| Chinook Database | master (unmodified) | MIT | https://github.com/lerocha/chinook-database |
+
+Pagila is Copyright (c) Devrim Gündüz. Chinook is Copyright (c) 2008-2024 Luis
+Rocha. Both are distributed under the MIT licence; the full licence text
+accompanies each upstream project at the URLs above.
+
 ---
 
 ## Frontend (Node.js — `frontend/package.json`)
