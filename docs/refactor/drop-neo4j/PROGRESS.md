@@ -204,3 +204,11 @@ the SHA and whether it conflicted.
 
 **Suite:** `gsf/server/model_interchange/tests/` — 12 passed, 2 skipped. The
 two failures that stood at the end of Phase 0 are gone; the suite is green.
+
+**Also fixed the stale `CLAUDE.md` dev command** (the second item that had been
+under *Blocked*). It documented `uv run uvicorn gsf.server.main:app`, but
+`gsf/server/main.py` does not exist — the factory is `create_app()` in
+`gsf/server/__main__.py`. Corrected to the `--factory` form, and added the two
+commands that were missing entirely: `python -m gsf.server` (what the
+Dockerfile runs) and `python -m gsf.ingestion_service`. All three verified to
+resolve, and `gsf/server/main.py` confirmed absent.
