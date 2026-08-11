@@ -318,3 +318,8 @@ fixture; skip without it.
 
 **Next:** the golden capture itself, now that the catalog it captures is
 correct.
+
+**Full suite after the connector fix:** **221 passed, 4 skipped, 0 failed**
+(was 201/2/2 at the end of Phase 0). Runtime also fell from 224s to 60s — the
+two skipped `test_export_model_*` tests were spending ~3 minutes retrying Neo4j
+connections on every run.
