@@ -34,6 +34,15 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 | Neo4j | Graph Database | Ontology graph | 7474 / 7687 |
 | HashiCorp Vault | Optional | Secure storage of connection credentials | — |
 
+> **In-flight refactor — Neo4j is being removed.** The ontology graph is
+> migrating to Postgres, and the catalog write path is moving out of
+> NeMo-Retriever into this repo under `gsf/catalog/`. Read
+> [`docs/refactor/drop-neo4j/PLAN.md`](./docs/refactor/drop-neo4j/PLAN.md)
+> before changing anything under `gsf/dal/` or `gsf/catalog/`;
+> [`PROGRESS.md`](./docs/refactor/drop-neo4j/PROGRESS.md) tracks what has
+> landed and [`DECISIONS.md`](./docs/refactor/drop-neo4j/DECISIONS.md) records
+> deviations and deliberate behaviour changes.
+
 ### NVIDIA NIM
 
 GSF uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA

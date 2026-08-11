@@ -42,6 +42,7 @@ To install dependencies:
 
 ## Backend Rules
 
+- **In-flight refactor — dropping Neo4j.** Read `docs/refactor/drop-neo4j/PLAN.md` before changing anything under `gsf/dal/` or `gsf/catalog/`. Log what you land in `PROGRESS.md` **in the same commit**, and record any deviation from the plan in `DECISIONS.md` *before* the code lands. Do not silently absorb behaviour changes — surface them.
 - **Formatting/Linting**: Ruff (line-length: 88). Run `uv run ruff check gsf/` and `uv run ruff format gsf/` from repo root before committing.
 - **Dependencies**: Managed with `uv`. Add dependencies via `uv add`, not pip. Do not edit `pyproject.toml` manually for deps.
 - **API prefix**: All routes under `/api/`. Routes live in `gsf/server/datasources/router.py`, orchestration in `gsf/server/datasources/service.py`.
