@@ -125,3 +125,56 @@ correction in this same commit. The real benefit is the public seam, not import
 weight — import weight only improves in Phase 11.
 
 **Next:** the DAL surface snapshot test, which closes out Phase 0.
+
+---
+
+## 2026-08-11 — Phase 0 — DAL surface frozen — **Phase 0 complete**
+
+**What landed:** `gsf/dal/tests/test_dal_surface.py` plus the generated
+`dal_surface.json` snapshot — **15 modules, 143 public callables**, each with
+its signature. Regenerate deliberately with
+`uv run python -m gsf.dal.tests.test_dal_surface`.
+
+Two design calls worth recording:
+
+- **Functions only, not constants.** Several DAL module constants
+  (`TABLE_COUNTS_SUBQUERY`, the `cypher_fragments` output) are Cypher, which is
+  precisely what this refactor deletes. Freezing them would fight the work.
+- **Classes recorded by their bases**, not a signature — the public classes are
+  exceptions and a dataclass, and what callers depend on is
+  `except UnknownDatabaseIdsError` still catching the same thing. Several
+  exceptions have no introspectable signature at all, which is what forced the
+  distinction.
+
+`test_postgres_and_neo4j_surfaces_match` is written and **skips** until
+`gsf/dal/pg/` and `gsf/dal/neo4j/` exist side by side. From Phase 3 it is the
+check that makes the `GSF_STORE` flip safe.
+
+**Files touched:** `gsf/dal/tests/test_dal_surface.py`,
+`gsf/dal/tests/dal_surface.json` (both new).
+
+**Tests added:** 18 (15 parametrised per-module + 3 guards). Verified
+non-vacuous by renaming `delete_data_layer`'s `database_name` keyword to
+`db_name` — the suite failed with the exact diff — then reverting.
+
+**Done criteria — all three met:**
+- `docs/refactor/drop-neo4j/` exists, linked from `README.md` and `CLAUDE.md` ✅
+- `grep -rn reserved_words gsf` returns only the docstring reference in
+  `gsf/catalog/constants.py` ✅
+- surface test green ✅
+
+**Phase 0 totals:** 3 commits, **27 tests added** (5 vocabulary + 4
+`close_store` + 18 surface), 1 of which skips until Phase 3. Full suite:
+**201 passed, 2 failed, 2 skipped** — the 2 failures are the pre-existing
+live-Neo4j dependency recorded under *Blocked / needs a human*, unchanged from
+before this phase. `ruff check` and `ruff format` clean.
+
+**Next:** Phases 1, 2 and 3 run in parallel and touch disjoint files. The
+sequencing constraint is that Phase 2's fixture seed script (Pagila + Chinook)
+must land before Phase 1 can verify its fork-equivalence criterion, so start
+there.
+
+Before Phase 4, the **ERD review gate** at the end of Phase 3 needs a human in
+the room — polymorphic `zone_target`, the edge-property-carrying
+`sql_query_table`, and the `join_edge` view shape decide whether Phases 5–10
+are mechanical or a rewrite.
