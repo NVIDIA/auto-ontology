@@ -827,3 +827,61 @@ has to map. The next step is the label→table registry and the generic
 `edges.py` upsert layer, which is where the `CONTAINS`-as-FK-column decision
 stops being a schema detail and becomes code: `add_edges` must *update a child's
 parent column* for `CONTAINS` while *inserting a row* for every other edge type.
+
+---
+
+## 2026-08-11 — Phase 4 — the generic write layer on Postgres
+
+`store/pg/` now has its foundation: the label→table registry and the node/edge
+upsert primitives everything else in the write path sits on. `db.py`,
+`schemas.py`, `queries.py` and `indexes.py` are still to come.
+
+- `store/pg/registry.py` — which table a label lives in, how identity is
+  decided per label, and which relationships are rows versus parent columns.
+- `store/pg/nodes.py` — `upsert_node` / `resolve_id`, the stand-in for
+  `apoc.merge.node.eager`.
+- `store/pg/edges.py` — the public surface `store/neo4j/edges.py` exposes,
+  function for function, asserted by a parity test in the same file.
+
+**20 tests**, run directly against the migrated schema rather than through the
+selector, since the other modules have no Postgres side yet.
+
+### Three things the property-graph assumption cost
+
+**`CONTAINS` is not an edge.** It is the child's parent foreign key, so writing
+one is an `UPDATE` of the child while every other relationship is an `INSERT`.
+`add_edges` receives edges generically and has to branch on it. This is the bill
+for the schema decision that turned `reset.py`'s APOC cascade into
+`ON DELETE CASCADE`, and it comes due in exactly one place.
+
+**Identity is not uniform.** `Table` and `Column` match on a pre-generated
+`id`, `Schema` matches on `(database_name, name)` where `database_name` is not a
+column on the row at all, and `Database` matches on `name`. Each shape is
+handled explicitly. The natural keys are *parent-scoped* — a key that forgot the
+parent would collapse `public` from every connected database into one row, which
+is now a test.
+
+**The stored id cannot be overwritten** — a deliberate divergence, and the one
+worth reading twice. The Cypher replaces a matched node's id with the parser's
+(`apoc.merge.node.eager(..., {id: $props.id})`). Harmless in a property graph,
+where `id` is an ordinary property and relationships bind to internal nodes.
+Here `id` is the primary key with other rows referencing it, and overwriting it
+raises a foreign-key `IntegrityError` — found by a test, not by reasoning.
+
+Nothing is lost by not reproducing it: the parser resolves ids out of the store
+before writing, so for `Table` and `Column` the incoming id already *is* the
+stored one. Only a `Sql`, matched by statement text, arrives with a fresh id —
+and there keeping the stored one is correct rather than merely safe. Both
+behaviours are pinned by tests.
+
+**One Phase 3 decision came back:** `sql_query` is unique on
+`md5(sql_full_query)`, not on the column, because statement text can exceed the
+btree row limit. `ON CONFLICT (sql_full_query)` therefore matches no index and
+raises. The registry now carries an optional expression conflict target.
+
+**Suite:** 427 passed, 4 skipped.
+
+**Still to do in Phase 4:** `store/pg/{db,schemas,queries,indexes}.py`, then
+running the 12 incremental-diff tests and the fixture ingest under
+`GSF_STORE=postgres`. The registry answers *where things go*; those modules are
+the diffing and bulk-write logic on top of it.
