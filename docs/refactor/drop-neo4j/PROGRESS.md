@@ -425,3 +425,92 @@ check whether it builds its connection through `gsf/infra/postgres.py` or opens
 its own, and whether it should share the pooled engine this phase introduces —
 a second connection-management pattern landing while we build the first one is
 exactly the kind of drift that is cheap to fix now and annoying later.
+
+---
+
+## 2026-08-11 — Phase 3 — Postgres foundations
+
+**What landed:** the schema and connection machinery Phases 4–10 build on.
+**23 tables + 1 view**, created by Alembic revision `75bdf1cdf36d`. Nothing
+writes to them yet — Phase 4 ports the catalog write path onto this.
+
+- `gsf/dal/pg/session.py` — pooled SQLAlchemy engine, plus `store()` and
+  `write_transaction()` mirroring `gsf/dal/neo4j_tx.py`'s contract exactly, so
+  the ~180 call sites and every `with write_transaction():` block port without
+  changing shape.
+- `gsf/dal/pg/schema.py` — the full `MetaData(schema="gsf")`. Single source of
+  truth; Alembic autogenerates from it.
+- `alembic/` + `alembic.ini`, `make migrate` / `migrate-check` /
+  `migrate-revision`, a `gsf-migrate` compose service, and
+  `helm/gsf/templates/backend-migrate-job.yaml`.
+- New deps: `sqlalchemy>=2.0`, `alembic`.
+- `docs/refactor/drop-neo4j/SCHEMA.md` regenerated from what actually landed.
+
+**Three things that needed solving, none of them anticipated:**
+
+1. **SQLAlchemy resolves `postgresql://` to psycopg2**, which this repo does not
+   install. Added `sqlalchemy_url()`, which pins the psycopg 3 driver — the same
+   rewrite `gsf/vdb/postgres.py` already does for asyncpg.
+2. **`alembic check` reported drift on all 14 id columns** of a perfectly
+   up-to-date database. Postgres stores `gen_random_uuid()::text` as
+   `(gen_random_uuid())::text`, and `compare_server_default` compares the text.
+   Fixed by writing the default in its normalised form rather than by turning
+   the comparison off — a drift check that has to be disabled is not a check.
+3. **The image could not run migrations at all.** The Dockerfile's dispatcher
+   entrypoint only accepted `server` and `ingestion_service`, and neither
+   `alembic/` nor `alembic.ini` was copied into the image. Added a `migrate`
+   mode and the COPY lines.
+
+**The destructive failure mode is tested, not assumed.** Alembic's autogenerate
+sees any table not in its metadata as removable, so without the `include_object`
+filter in `alembic/env.py` it would emit `DROP TABLE public."user"`. Verified by
+planting Prisma-shaped tables in `public` plus a `vdb` schema, then running
+`alembic check` (no drift), autogenerating a revision (body is `pass`), and
+cycling `downgrade base` → `upgrade head`: both schemas and their rows survive
+intact.
+
+**Tests added:** 10 in `gsf/dal/pg/tests/test_session.py`, against a **real
+database** rather than a `MagicMock` — mocking would prove only that
+`.execute()` was called, where what has to hold is that a failed block leaves no
+rows. Ports all five Neo4j transaction cases (commit, rollback, nesting reuses
+the outermost, autocommit outside a scope, contextvar cleared after failure) and
+adds four the pool makes newly possible to get wrong: concurrent threads get
+genuinely separate transactions (a sibling's rollback must not discard committed
+work), 48 concurrent reads do not exhaust the pool, `dispose_engine` is
+idempotent and the engine rebuilds after it, and the URL is pinned to psycopg 3.
+
+**Verified:** `upgrade head` on a blank database → 23 tables + `join_edge`;
+`alembic check` clean; `downgrade base` leaves only `alembic_version` (the
+schema is deliberately *not* dropped — the version table lives in it);
+`upgrade head` again → 23; `join_edge` queryable; version table in `gsf`, not
+`public`; `helm template` renders the new Job.
+
+**Done criteria — met**, with one carried forward: the plan also asks that
+`prisma db push` still succeed afterwards. Verified structurally (Alembic
+provably cannot touch `public`, tested above) but **not** by running Prisma
+itself, which needs the frontend toolchain. Worth doing once during the Phase 11
+end-to-end pass.
+
+**Not done here:** wiring `dispose_engine()` into `gsf.dal.close_store()`.
+`gsf/dal/__init__.py` is being edited concurrently by the Phase 1 fork, and
+touching it from two directions would conflict for no benefit. Fold it in when
+Phase 1 merges.
+
+> **ERD review gate.** PLAN.md marks this the highest-leverage checkpoint in the
+> refactor: the three shapes below decide whether Phases 5–10 are mechanical or
+> a rewrite. They are recorded here rather than left implicit, so disagreeing
+> with one is cheap now and expensive later.
+>
+> - **`zone_target` polymorphism** — three nullable FKs +
+>   `CHECK (num_nonnulls(...) = 1)`, not a `(kind, id)` pair. A pair cannot
+>   carry a foreign key, so deleting a table would leave a dangling grant
+>   behind: an access-control bug, not untidiness.
+> - **`column_attribute_link`** — `HAS_ATTRIBUTE` and `SEMANTIC_FK` in one table
+>   discriminated by `kind`, not two tables. `find_join_path` traverses them
+>   together, and the `join_edge` view is far simpler over one table.
+> - **`join_edge` view** — `SEMANTIC_FK` emitted in one direction only. That
+>   asymmetry is why the Cypher needed `apoc.path.expandConfig`; here it is
+>   simply a row that is not emitted.
+
+**Next:** Phase 4 (catalog writes on Postgres) is the gate for all read phases,
+but it depends on Phase 1's fork landing first.

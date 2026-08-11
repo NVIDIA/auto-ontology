@@ -129,6 +129,28 @@ services:
       neo4j:
         condition: service_healthy
 
+  # One-shot Job: apply the backend's Alembic migrations, which own the `gsf`
+  # schema (catalog + semantic tier). Separate from frontend-migrate because
+  # the two own different schemas: Prisma owns `public`, this owns `gsf`, and
+  # Alembic's autogenerate is filtered so it can never propose changes to
+  # Prisma's tables. Ordering between the two does not matter.
+  gsf-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gsf:latest
+    container_name: gsf-migrate
+    env_file:
+      - .env
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: "5432"
+    command: ["migrate"]
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # One-shot Job: sync the Postgres schema from prisma/schema.prisma via
   # prisma/migrate.sh (mirrors the Helm `frontend-migrate` hook). The wrapper
   # empties conversation_analytics IFF it predates the required user_id column,

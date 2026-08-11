@@ -22,6 +22,8 @@ dependencies = [
     "nvidia-sdfm[kumorfm]>=0.1.0",
     "databricks-sql-connector>=4.3.0",
     "pyyaml>=6.0.3",
+    "sqlalchemy>=2.0",
+    "alembic>=1.19.1",
 ]
 
 [build-system]

@@ -91,9 +91,13 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=gsf:gsf gsf/ ./gsf/
 COPY --chown=gsf:gsf pyproject.toml ./
+# Schema migrations for the `gsf` schema, run by the `migrate` mode below.
+COPY --chown=gsf:gsf alembic/ ./alembic/
+COPY --chown=gsf:gsf alembic.ini ./
 
-# Dispatcher entrypoint: selects between the FastAPI server and the
-# ingestion service based on the first arg. Defaults to gsf.server.
+# Dispatcher entrypoint: selects between the FastAPI server, the ingestion
+# service, and the one-shot schema migration based on the first arg.
+# Defaults to gsf.server.
 COPY --chmod=0755 <<'EOF' /usr/local/bin/entrypoint.sh
 #!/bin/sh
 set -e
@@ -105,9 +109,14 @@ case "$mode" in
   ingestion_service)
     exec python -m gsf.ingestion_service
     ;;
+  migrate)
+    # Owns the `gsf` schema only. Prisma owns `public` and migrates
+    # separately; the two are independent and may run in either order.
+    exec alembic upgrade head
+    ;;
   *)
     echo "Unknown mode: $mode" >&2
-    echo "Usage: docker run <image> [server|ingestion_service]" >&2
+    echo "Usage: docker run <image> [server|ingestion_service|migrate]" >&2
     exit 2
     ;;
 esac
