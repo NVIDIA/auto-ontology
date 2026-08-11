@@ -185,3 +185,54 @@ faithfully reproduce a catalog with missing tables.
 
 Covered by `gsf/connectors/tests/test_postgres.py` (8 tests), which needs the
 Pagila fixture and skips without it.
+
+---
+
+## 005 — Split the column↔attribute link table, and rename the traversal view
+
+**Date:** 2026-08-11  **Phase:** 3  **Supersedes:** the ERD as first landed in Phase 3 (revision `75bdf1cdf36d`, replaced by `96b629fa2ae5`)
+
+**Context** — Raised at the ERD review gate. Two objections to the schema as
+first written, both correct:
+
+1. `HAS_ATTRIBUTE` and `SEMANTIC_FK` were one table, `column_attribute_link`,
+   discriminated by `kind`.
+2. The `join_edge` view documentation described `SEMANTIC_FK` as "outgoing
+   only" as though that were a property of the edge.
+
+The second was the more serious error. Checking the code:
+`gsf/dal/attributes.py:151` (`fetch_attr_column_contexts`) binds a
+`ColumnAttribute` and then matches
+`(col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)` — a **reverse** lookup,
+finding the columns that reference a given attribute. So `SEMANTIC_FK` is
+*stored* in one direction but *read* in both. The outgoing-only restriction
+belongs to `find_join_path`'s traversal alone, and stating it as a property of
+the edge would have led whoever reused that view for another traversal to
+silently lose half the edges.
+
+**Decision** —
+- Split into `column_has_attribute` and `column_semantic_fk`. They assert
+  different things (*is an instance of* vs *references*), their cardinality
+  already differs — `resolve_semantic_fks` treats a column as unlinked when it
+  has no `SEMANTIC_FK`, so at most one is expected, whereas a column can carry
+  several attributes — and a discriminator inside the primary key makes any
+  constraint that applies to only one of them impossible to express.
+- Rename `join_edge` → `join_path_edge`, named for the single function it
+  serves, and document that its one-way `SEMANTIC_FK` is a path-finding rule
+  rather than a fact about the edge, with an explicit pointer to
+  `column_semantic_fk` for reverse traversal.
+- Index `attribute_id` on both link tables. The composite primary key already
+  covers the `column_id` direction; the reverse direction is what
+  `fetch_attr_column_contexts` needs.
+
+**Consequences** — 24 tables instead of 23. The view gains one `UNION ALL`
+branch and loses two `WHERE kind = ...` filters, so it is marginally simpler.
+Phases 5–10 write against two narrow tables instead of one wide one, which is
+what makes a future constraint on either side possible. Migration `75bdf1cdf36d`
+was deleted and regenerated as `96b629fa2ae5` rather than superseded by a second
+revision — it had never been applied outside a throwaway database, so there was
+nothing to migrate *from*.
+
+**Worth carrying forward:** this is the ERD gate working exactly as PLAN.md
+intended. Both corrections were cheap here and would have been expensive after
+Phase 7 wrote queries against the wrong shape.

@@ -8,7 +8,7 @@ Design rationale lives in [PLAN.md § Schema design](PLAN.md#schema-design) —
 this file describes what *is*, not why. The metadata itself is
 `gsf/dal/pg/schema.py`, which Alembic autogenerates from.
 
-**Status: landed in Phase 3** (revision `75bdf1cdf36d`). 23 tables + the
+**Status: landed in Phase 3** (revision `96b629fa2ae5`). 24 tables + the
 `alembic_version` bookkeeping table, and one view. Not yet written to — Phase 4
 ports the catalog write path onto it.
 
@@ -56,7 +56,8 @@ make migrate-check   # fail if the database has drifted from schema.py
 | `table_term` | 2 | `:REPRESENTS` | Table → Term |
 | `column_attribute` | 11 | `:ColumnAttribute` | the 5-part merge key is a unique constraint; **`table_id` is plain `text` with no FK** — the importer legitimately writes `''` |
 | `column_attribute_term` | 2 | `:PROPERTY_OF` | ColumnAttribute → Term |
-| `column_attribute_link` | 3 | `:HAS_ATTRIBUTE` ∪ `:SEMANTIC_FK` | discriminated by `kind`, CHECK-constrained. One table because `find_join_path` traverses both together |
+| `column_has_attribute` | 2 | `:HAS_ATTRIBUTE` | this column *is* an instance of the attribute |
+| `column_semantic_fk` | 2 | `:SEMANTIC_FK` | this column *references* an attribute describing a column on another table |
 | `sql_attribute` | 8 | `:SqlAttribute` | `source` CHECK-constrained to manual/sql/table/bridgeTable |
 | `sql_attribute_term` | 2 | `:PROPERTY_OF` | SqlAttribute → Term |
 | `sql_attribute_sql` | 2 | `:HAS_SQL` | SqlAttribute → Sql |
@@ -82,14 +83,19 @@ behind — an access-control bug, not untidiness.
 
 | View | Purpose |
 |---|---|
-| `join_edge` | the traversal surface `find_join_path` walks: `CONTAINS` and `HAS_ATTRIBUTE` in both directions, `SEMANTIC_FK` **outgoing only** |
+| `join_path_edge` | edge set for `find_join_path` **only**: `CONTAINS` and `HAS_ATTRIBUTE` both ways, `SEMANTIC_FK` outgoing only |
 
-That asymmetry is load-bearing and is why the Cypher needed
-`apoc.path.expandConfig` rather than a plain variable-length pattern. Traversed
-undirected, a path would hop from one FK column up to a shared target attribute
-and back down a *different* FK column, inventing a join between two columns
-that merely reference the same thing. Here it is simply a row that is not
-emitted.
+Named for the one function it serves, because its contents are shaped by that
+traversal's rules and are wrong for anything else.
+
+**`SEMANTIC_FK` is stored in one direction and read in both.** The view emits it
+one way because *path-finding* must not walk it backwards — allowed to, a path
+would hop from one FK column up to a shared target attribute and back down a
+*different* FK column, inventing a join between two columns that merely
+reference the same thing (two `customer_id` columns joined to each other). That
+restriction belongs to `find_join_path`, not to the edge: `fetch_attr_column_contexts`
+binds a ColumnAttribute and finds the columns referencing it, which is the
+reverse traversal. Anything needing that queries `column_semantic_fk` directly.
 
 ## Not yet modelled
 

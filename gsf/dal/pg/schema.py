@@ -323,12 +323,20 @@ column_attribute_term = Table(
     ),
 )
 
-# HAS_ATTRIBUTE and SEMANTIC_FK both run Column -> ColumnAttribute and are
-# discriminated by `kind`. One table because `find_join_path` traverses them
-# together (HAS_ATTRIBUTE undirected, SEMANTIC_FK outgoing-only), and the
-# join_edge view below is far simpler over one table than a union of two.
-column_attribute_link = Table(
-    "column_attribute_link",
+# HAS_ATTRIBUTE and SEMANTIC_FK both run Column -> ColumnAttribute, but they
+# assert different things and get their own tables rather than one table with a
+# `kind` discriminator:
+#
+#   HAS_ATTRIBUTE  this column *is* an instance of the attribute
+#   SEMANTIC_FK    this column *references* the attribute, which describes a
+#                  column on another table
+#
+# Their cardinality already differs -- `resolve_semantic_fks` treats a column as
+# unlinked when it has no SEMANTIC_FK, so at most one is expected, whereas a
+# column can carry several attributes -- and a discriminator in the primary key
+# makes any constraint that applies to only one of them impossible to express.
+column_has_attribute = Table(
+    "column_has_attribute",
     METADATA,
     Column(
         "column_id",
@@ -342,8 +350,23 @@ column_attribute_link = Table(
         ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
         primary_key=True,
     ),
-    Column("kind", Text, primary_key=True),
-    CheckConstraint("kind IN ('HAS_ATTRIBUTE', 'SEMANTIC_FK')", name="link_kind"),
+)
+
+column_semantic_fk = Table(
+    "column_semantic_fk",
+    METADATA,
+    Column(
+        "column_id",
+        Text,
+        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "attribute_id",
+        Text,
+        ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
 )
 
 sql_attribute = Table(
@@ -528,18 +551,12 @@ Index("ix_column_attribute_table_id", column_attribute.c.table_id)
 Index("ix_column_attribute_term_term_id", column_attribute_term.c.term_id)
 Index("ix_sql_attribute_term_term_id", sql_attribute_term.c.term_id)
 
-# find_join_path walks these in both directions; both orders are indexed so
-# neither leg of the traversal falls back to a sequential scan.
-Index(
-    "ix_column_attribute_link_column_kind",
-    column_attribute_link.c.column_id,
-    column_attribute_link.c.kind,
-)
-Index(
-    "ix_column_attribute_link_attribute_kind",
-    column_attribute_link.c.attribute_id,
-    column_attribute_link.c.kind,
-)
+# Both link tables are read in both directions -- from a column to its
+# attributes, and from an attribute back to the columns that reference it
+# (`fetch_attr_column_contexts` binds the attribute first). The composite
+# primary key already indexes the column_id order; these cover the reverse.
+Index("ix_column_has_attribute_attribute_id", column_has_attribute.c.attribute_id)
+Index("ix_column_semantic_fk_attribute_id", column_semantic_fk.c.attribute_id)
 
 Index("ix_zone_target_zone_id", zone_target.c.zone_id)
 Index("ix_zone_target_database_id", zone_target.c.database_id)
@@ -560,21 +577,32 @@ for _table in (
     Index(f"ix_{_table.name}_imported_id", _table.c.imported_id)
 
 # ---------------------------------------------------------------------------
-# join_edge view -- the traversal surface for find_join_path
+# join_path_edge view -- the traversal surface for find_join_path ONLY
 # ---------------------------------------------------------------------------
 
-#: Undirected CONTAINS (Table <-> Column) and HAS_ATTRIBUTE
-#: (Column <-> ColumnAttribute), plus SEMANTIC_FK in the outgoing direction
-#: **only**.
+#: Edge set for :func:`gsf.dal.attributes.find_join_path`, and **nothing else**.
+#: Named for that function rather than generically, because its contents are
+#: shaped by that one traversal's rules and are wrong for any other:
 #:
-#: That asymmetry is load-bearing and is the whole reason the Cypher needed
-#: ``apoc.path.expandConfig`` instead of a plain variable-length pattern:
-#: traversed undirected, a path would hop from one FK column up to a shared
-#: target attribute and back down a *different* FK column, inventing a join
-#: between two columns that merely reference the same thing (two customer_id
-#: columns joined to each other). Here it is simply a row that is not emitted.
-JOIN_EDGE_VIEW_SQL = f"""
-CREATE OR REPLACE VIEW {SCHEMA}.join_edge AS
+#: * ``CONTAINS`` (Table <-> Column) and ``HAS_ATTRIBUTE``
+#:   (Column <-> ColumnAttribute) appear in both directions.
+#: * ``SEMANTIC_FK`` appears **outgoing only** (Column -> ColumnAttribute).
+#:
+#: Note carefully what that last line does *not* say. ``SEMANTIC_FK`` is
+#: **stored** in one direction, but the codebase reads it in both:
+#: ``fetch_attr_column_contexts`` binds a ColumnAttribute and finds the columns
+#: referencing it, which is the reverse traversal. Anything needing that must
+#: query :data:`column_semantic_fk` directly rather than this view.
+#:
+#: The restriction is specific to path-finding, and it is the whole reason the
+#: Cypher needed ``apoc.path.expandConfig`` rather than a plain variable-length
+#: pattern: allowed to traverse SEMANTIC_FK backwards, a path would hop from one
+#: FK column up to a shared target attribute and back down a *different* FK
+#: column, inventing a join between two columns that merely reference the same
+#: thing -- two ``customer_id`` columns joined to each other. Here that is
+#: simply a row the view does not emit.
+JOIN_PATH_EDGE_VIEW_SQL = f"""
+CREATE OR REPLACE VIEW {SCHEMA}.join_path_edge AS
     SELECT 'column'::text AS src_kind, c.id       AS src_id,
            'table'::text  AS dst_kind, c.table_id AS dst_id
       FROM {SCHEMA}.catalog_column c
@@ -582,30 +610,31 @@ CREATE OR REPLACE VIEW {SCHEMA}.join_edge AS
     SELECT 'table', c.table_id, 'column', c.id
       FROM {SCHEMA}.catalog_column c
     UNION ALL
-    SELECT 'column', l.column_id, 'column_attribute', l.attribute_id
-      FROM {SCHEMA}.column_attribute_link l WHERE l.kind = 'HAS_ATTRIBUTE'
+    SELECT 'column', h.column_id, 'column_attribute', h.attribute_id
+      FROM {SCHEMA}.column_has_attribute h
     UNION ALL
-    SELECT 'column_attribute', l.attribute_id, 'column', l.column_id
-      FROM {SCHEMA}.column_attribute_link l WHERE l.kind = 'HAS_ATTRIBUTE'
+    SELECT 'column_attribute', h.attribute_id, 'column', h.column_id
+      FROM {SCHEMA}.column_has_attribute h
     UNION ALL
-    SELECT 'column', l.column_id, 'column_attribute', l.attribute_id
-      FROM {SCHEMA}.column_attribute_link l WHERE l.kind = 'SEMANTIC_FK'
+    SELECT 'column', f.column_id, 'column_attribute', f.attribute_id
+      FROM {SCHEMA}.column_semantic_fk f
 """
 
-DROP_JOIN_EDGE_VIEW_SQL = f"DROP VIEW IF EXISTS {SCHEMA}.join_edge"
+DROP_JOIN_PATH_EDGE_VIEW_SQL = f"DROP VIEW IF EXISTS {SCHEMA}.join_path_edge"
 
 __all__ = [
     "METADATA",
     "SCHEMA",
-    "JOIN_EDGE_VIEW_SQL",
-    "DROP_JOIN_EDGE_VIEW_SQL",
+    "JOIN_PATH_EDGE_VIEW_SQL",
+    "DROP_JOIN_PATH_EDGE_VIEW_SQL",
     "analysis",
     "catalog_column",
     "catalog_database",
     "catalog_schema",
     "catalog_table",
     "column_attribute",
-    "column_attribute_link",
+    "column_has_attribute",
+    "column_semantic_fk",
     "column_attribute_term",
     "column_foreign_key",
     "custom_analysis",

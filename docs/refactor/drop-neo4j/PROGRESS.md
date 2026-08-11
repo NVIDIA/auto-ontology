@@ -514,3 +514,35 @@ Phase 1 merges.
 
 **Next:** Phase 4 (catalog writes on Postgres) is the gate for all read phases,
 but it depends on Phase 1's fork landing first.
+
+---
+
+## 2026-08-11 — Phase 3 — ERD review corrections
+
+Two objections at the ERD gate, both upheld. See [DECISION-005](DECISIONS.md).
+
+**1. `HAS_ATTRIBUTE` and `SEMANTIC_FK` are now separate tables** —
+`column_has_attribute` and `column_semantic_fk` — rather than one table
+discriminated by `kind`. They assert different things, their cardinality already
+differs, and a discriminator inside the primary key blocks any constraint that
+applies to only one of them.
+
+**2. The claim that `SEMANTIC_FK` is "one direction only" was wrong**, and this
+was the more serious of the two. It is *stored* one way (Column →
+ColumnAttribute) but *read* both ways: `fetch_attr_column_contexts`
+(`gsf/dal/attributes.py:151`) binds a ColumnAttribute and finds the columns
+referencing it. The outgoing-only rule belongs to `find_join_path`'s traversal,
+not to the edge. Left as written, anyone reusing that view for another
+traversal would have silently lost half the edges.
+
+The view is renamed `join_edge` → **`join_path_edge`**, after the single
+function it serves, and its docstring now separates the storage direction from
+the traversal restriction and points at `column_semantic_fk` for reverse reads.
+
+**Migration regenerated** as `96b629fa2ae5` (replacing `75bdf1cdf36d`, deleted).
+Regenerated rather than superseded by a follow-up revision because it had never
+been applied outside a throwaway database — there was nothing to migrate from.
+
+**Re-verified:** 24 tables + `join_path_edge`; `alembic check` clean;
+`downgrade base` → 1 table; `upgrade head` → 24; view queryable; `public`
+untouched.
