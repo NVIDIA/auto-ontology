@@ -44,6 +44,20 @@ import gsf.dal
 
 SNAPSHOT = Path(__file__).with_name("dal_surface.json")
 
+#: Functions whose *annotations* legitimately differ between backends, with the
+#: reason. Parameter **names** are still required to match — those are what
+#: callers pass — so this permits a changed type, never a changed call shape.
+#:
+#: Anything added here needs a DECISIONS.md record first.
+BACKEND_SPECIFIC: dict[tuple[str, str], str] = {
+    ("users", "resolve_table_filter"): (
+        "returns a SQLAlchemy predicate where Neo4j returns a Cypher WHERE "
+        "string, and takes a Column rather than a column-name string. Every "
+        "caller is inside gsf/dal and is ported with its own phase, so the two "
+        "shapes never meet -- DECISION-008"
+    ),
+}
+
 
 def _dal_modules() -> list[str]:
     """Every domain module directly under ``gsf.dal``.
@@ -81,12 +95,20 @@ def _public_surface(module: Any) -> dict[str, str]:
     ``get_neo4j_conn`` and friends are imported into most DAL modules and are
     not part of any module's own contract.
     """
+    exported = set(getattr(module, "__all__", ()) or ())
     return {
         name: _describe(obj)
         for name, obj in vars(module).items()
         if not name.startswith("_")
         and callable(obj)
-        and getattr(obj, "__module__", None) == module.__name__
+        and (
+            getattr(obj, "__module__", None) == module.__name__
+            # Backend selectors re-export their implementation's functions, so
+            # __module__ points at gsf.dal.neo4j.X or gsf.dal.pg.X. Without this
+            # a selector would appear to have no public surface at all, and the
+            # freeze would silently stop guarding the module it was written for.
+            or name in exported
+        )
     }
 
 
@@ -158,12 +180,36 @@ def test_postgres_and_neo4j_surfaces_match() -> None:
     if not (pg_root.is_dir() and neo4j_root.is_dir()):
         pytest.skip("split implementations do not exist yet (lands in Phase 3)")
 
+    # Only modules with both implementations. A domain reaches pg/ one phase at
+    # a time, and session.py / schema.py have no Neo4j counterpart by design.
+    both = sorted(
+        path.stem
+        for path in pg_root.glob("*.py")
+        if not path.stem.startswith("_") and (neo4j_root / path.name).is_file()
+    )
+    assert both, "no domain has been ported yet; this test is vacuous"
+
     mismatches: dict[str, str] = {}
-    for path in sorted(pg_root.glob("*.py")):
-        if path.stem.startswith("_"):
-            continue
-        pg = _public_surface(importlib.import_module(f"gsf.dal.pg.{path.stem}"))
-        neo = _public_surface(importlib.import_module(f"gsf.dal.neo4j.{path.stem}"))
+    for stem in both:
+        path = pg_root / f"{stem}.py"
+        pg_module = importlib.import_module(f"gsf.dal.pg.{path.stem}")
+        neo_module = importlib.import_module(f"gsf.dal.neo4j.{path.stem}")
+        pg = _public_surface(pg_module)
+        neo = _public_surface(neo_module)
+
+        # An allowed divergence still has to keep its parameter names: a caller
+        # passes those, and a renamed keyword breaks it whatever the types say.
+        for name in set(pg) & set(neo):
+            if (path.stem, name) not in BACKEND_SPECIFIC:
+                continue
+            pg_params = list(inspect.signature(getattr(pg_module, name)).parameters)
+            neo_params = list(inspect.signature(getattr(neo_module, name)).parameters)
+            assert pg_params == neo_params, (
+                f"{path.stem}.{name} is allowed to differ in types, not in "
+                f"parameters: {pg_params} vs {neo_params}"
+            )
+            pg[name] = neo[name] = "<backend-specific>"
+
         if pg != neo:
             only_pg = {n: pg[n] for n in set(pg) - set(neo)}
             only_neo = {n: neo[n] for n in set(neo) - set(pg)}

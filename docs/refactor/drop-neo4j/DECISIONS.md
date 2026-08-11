@@ -455,3 +455,50 @@ recorded in PLAN.md's bug table alongside the `is_nullable` export fault.
 is visible rather than silent — and says explicitly that every assertion there
 inverts when the fix lands. Nothing caught this for the life of the feature
 because no test asserted anything at all about the score.
+
+---
+
+## 008 — The zone-filter contract: a predicate, not a WHERE string
+
+**Date:** 2026-08-11  **Phase:** 5  **Supersedes:** nothing (settles a question PLAN.md § Phase 5 raises)
+
+**Context** — `resolve_table_filter` is how nearly every read in the DAL narrows
+itself to what a user may see. The Neo4j version returns
+`(where_clause_string, params)` for callers to interpolate into an f-string
+query. PLAN.md flags deciding its Postgres shape as the thing every later read
+phase depends on: "decide once here or every later phase re-litigates it."
+
+The obstacle is the surface freeze, which requires both implementations to
+present identical signatures — and a SQLAlchemy predicate is not a string.
+
+What settles it is who calls it. Measured: `resolve_table_filter` is used in
+`terms`, `exploration`, `sql_attributes`, `datasources`, `custom_analyses` and
+`cypher_fragments` — **all inside `gsf/dal`**, each ported with its own phase.
+No caller outside the DAL exists, so the two shapes never meet. By contrast
+`resolve_accessible_catalog_ids` *is* called from `gsf/server/terms/service.py`,
+and returns plain id sets, which are backend-neutral.
+
+**Decision** — The Postgres `resolve_table_filter` takes a SQLAlchemy column and
+returns `(predicate | None, params)`. `params` is kept and passed through
+unchanged for signature compatibility; Core binds its own parameters, so nothing
+is added to it.
+
+Returning a SQL string instead would have preserved the signature exactly, but
+it would also have discarded the reason Core was chosen over raw SQL — safe
+composition of conditional filters, which is precisely what this function is for.
+
+`test_dal_surface.py` gains a `BACKEND_SPECIFIC` allowlist: annotations may
+differ where declared, **parameter names may not**, because those are what
+callers pass and a renamed keyword breaks a caller whatever the types say.
+Adding to that list requires a record here first.
+
+**Consequences** — Phases 6–10 write `.where(predicate)` rather than
+interpolating a clause, which is the shape the rest of the port wants anyway.
+The allowlist is a hole in the freeze and is deliberately narrow: one entry, one
+reason, and parameter names still enforced.
+
+**Named explicitly, because it is an access-control trap:** `zone_ids=None`
+means *unscoped* — an admin seeing the whole catalog — while `[]` means *nothing
+is granted*. Conflating them turns a locked-down user into an administrator.
+Both implementations are covered by tests that assert the two produce different
+answers.

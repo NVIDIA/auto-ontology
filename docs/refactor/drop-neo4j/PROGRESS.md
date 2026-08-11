@@ -1284,3 +1284,70 @@ coverage.
   settings. `GSF_STORE=postgres` currently means "write the catalog to
   Postgres", not "run on Postgres". Phases 5–10 close that, and the goldens are
   the oracle for it.
+
+---
+
+## 2026-08-11 — Phase 5 — zone scoping ported, and the filter contract settled
+
+**Merge:** `origin/main` at `0a3ed24`, branch 0 behind. Nothing to merge.
+
+`gsf/dal/users.py` and `gsf/dal/zones.py` move to `gsf/dal/neo4j/`, and
+`gsf/dal/<domain>.py` becomes a selector with an explicit import list — the
+structure the plan specifies, now applied to the first two domains.
+`gsf/dal/pg/users.py` is implemented; **`gsf/dal/pg/zones.py` is not yet.**
+
+### The filter contract
+
+Settled as [DECISION-008](DECISIONS.md): the Postgres `resolve_table_filter`
+takes a SQLAlchemy column and returns a predicate, where Neo4j returns a Cypher
+`WHERE` string. What made that safe to decide was measuring the callers — all
+six are inside `gsf/dal` and are ported per-phase, so the two shapes never meet.
+`resolve_accessible_catalog_ids`, which *is* called from the service layer,
+returns plain id sets and is unchanged.
+
+Returning a SQL string would have preserved the signature exactly and thrown
+away the reason Core was chosen over raw SQL.
+
+### Four round trips become one query
+
+`get_accessible_catalog_ids_for_zones` was four sequential Neo4j reads —
+direct grants, then expand down from databases, then from schemas, then up from
+tables. It is now one statement with three CTEs.
+
+**The expansion is one level from each direct grant, and not transitive**, which
+is the part worth getting right: granting a table admits its schema so the tree
+can be drawn, but must *not* then admit that schema's other tables. Every CTE
+branch reads from `granted` rather than from another CTE, which is what keeps it
+non-recursive — and there is a test whose failure message says a sibling table
+leaked.
+
+### Tests
+
+13 in `gsf/dal/pg/tests/test_users.py`, over a fixture of two databases × two
+schemas × two tables — enough shape that "everything" and "the right subset" are
+different answers, where a single-table fixture would pass a filter that matched
+everything. Each expansion rule is asserted separately rather than in aggregate,
+because this is the access-control boundary: a mistake here is not a wrong
+answer, it is one user seeing another's data.
+
+Two of them pin the trap named in DECISION-008: `zone_ids=None` is *unscoped*
+and `[]` is *nothing granted*, and conflating them turns a locked-down user into
+an administrator.
+
+### Two fixes to the surface freeze
+
+- **Selectors appeared to have no public surface.** `_public_surface` filtered
+  on `__module__`, which for a re-exported function points at the implementation
+  — so the freeze silently stopped guarding every module it was written for the
+  moment that module got a selector. Now `__all__` counts too.
+- **`test_postgres_and_neo4j_surfaces_match` went live** for the first time and
+  immediately caught DECISION-008's divergence, which is the test doing its job.
+  It now compares only domains present in *both* backends, and carries a
+  narrow `BACKEND_SPECIFIC` allowlist where annotations may differ but
+  **parameter names may not**.
+
+**Suite:** 445 passed, 3 skipped — up from 431/4, the difference being that the
+backend-parity test now runs instead of skipping.
+
+**Next:** `gsf/dal/pg/zones.py`, then a cross-backend equivalence check for both
+against the same fixture.
