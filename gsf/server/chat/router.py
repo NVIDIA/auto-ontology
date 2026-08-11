@@ -374,6 +374,8 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
+    logger.info("Chat completions request: %s", request.model_dump())
+
     # Block chat when the semantic layer hasn't been built — no connectors/graph
     # run happens. The chat page gates on the status API; this is the backstop.
     if not semantic_layer_calculated():
