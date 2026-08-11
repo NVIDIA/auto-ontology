@@ -232,6 +232,18 @@ sql_query = Table(
     Column("query_count", Integer, nullable=False, server_default=text("0")),
     Column("created", DateTime(timezone=True), server_default=func.now()),
     Column("last_seen", DateTime(timezone=True), nullable=True),
+    # How many times this statement has been observed, all time. The graph also
+    # carried a `count_{month}_{year}` property per month, which is not
+    # reproduced: no reader has ever been able to parse those names (they are
+    # matched against `count_monthly_YYYY_MM`), so they hold no information
+    # anything can use. See DECISIONS.md record 007.
+    Column("total_counter", Integer, nullable=False, server_default=text("0")),
+    Column("last_query_timestamp", DateTime(timezone=True), nullable=True),
+    # Structural fingerprint, used to pre-filter candidates before the
+    # expensive sqlglot comparison in query deduplication.
+    Column("nodes_count", Integer, nullable=True),
+    Column("join_count", Integer, nullable=False, server_default=text("0")),
+    Column("union_count", Integer, nullable=False, server_default=text("0")),
     # model_interchange matches a Sql node by its *text*
     # (match_props={"sql_full_query": sql}). Statement text can exceed the btree
     # row limit, so the uniqueness is enforced on a hash rather than the column.
@@ -242,8 +254,8 @@ sql_query = Table(
     ),
 )
 
-# SQL: Sql -> Table. An edge, because one statement references many tables and
-# one table is referenced by many statements.
+# SQL: Sql -> Table. An association, because one statement references many
+# tables and one table is referenced by many statements.
 sql_query_table = Table(
     "sql_query_table",
     METADATA,
@@ -257,6 +269,28 @@ sql_query_table = Table(
         "table_id",
         Text,
         ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+)
+
+# SQL: Sql -> Column. The same relationship type, pointing at the leaf columns a
+# statement selects. Two tables rather than one polymorphic association, because
+# the two are always read separately -- `load_sqls_to_tables` returns tables and
+# columns as distinct lists, and query deduplication compares them as distinct
+# sets.
+sql_query_column = Table(
+    "sql_query_column",
+    METADATA,
+    Column(
+        "sql_query_id",
+        Text,
+        ForeignKey(sql_query.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "column_id",
+        Text,
+        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
         primary_key=True,
     ),
 )
@@ -560,6 +594,7 @@ Index("ix_catalog_column_name", catalog_column.c.name)
 Index("ix_column_foreign_key_target", column_foreign_key.c.target_column_id)
 Index("ix_table_join_target", table_join.c.target_table_id)
 Index("ix_sql_query_table_table_id", sql_query_table.c.table_id)
+Index("ix_sql_query_column_column_id", sql_query_column.c.column_id)
 
 Index("ix_term_name", term.c.name)
 Index("ix_table_term_term_id", table_term.c.term_id)
@@ -662,6 +697,7 @@ __all__ = [
     "sql_attribute_term",
     "sql_query",
     "sql_query_table",
+    "sql_query_column",
     "table_join",
     "table_term",
     "term",

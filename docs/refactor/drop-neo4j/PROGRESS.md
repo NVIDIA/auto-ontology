@@ -1157,3 +1157,77 @@ column a fix would use — is already there. `sql_query` needs five scalar
 columns, no child table, no `jsonb`.
 
 **Suite:** 431 passed, 4 skipped.
+
+---
+
+## 2026-08-11 — Phase 4 — **the catalog now ingests into Postgres**
+
+`store/pg/queries.py` lands, and with it the whole write path runs under
+`GSF_STORE=postgres`. A full ingest of both fixture databases produces a catalog
+whose counts match the Neo4j graph exactly:
+
+| | Neo4j | Postgres |
+|---|---|---|
+| databases | 2 | 2 |
+| schemas | 3 | 3 |
+| tables | 37 | 37 |
+| columns | 209 | 209 |
+| foreign keys | 30 | 30 |
+| `base table` / `view` / `materialized view` | 28 / 8 / 1 | 28 / 8 / 1 |
+
+Zero orphans at every tier. `film.pk` is `['film_id']`, `film.rating` is
+`mpaa_rating` (the B3 fix), `ordinal_position` is an integer.
+
+### Three structural mismatches the ingest exposed
+
+None was visible from reading the code; all three only appeared under a real
+ingest.
+
+**Labels arrive as lists.** `merge_schema_nodes` passes `["Table"]`, not
+`"Table"` — `apoc.merge.node.eager` takes a list because a node can carry
+several labels. `entity_spec` now accepts either and takes the first, matching
+`labels(n)[0]` as used everywhere else.
+
+**Rows were being created before their parents existed.** `add_schema` creates
+every Table and Column node first and links them afterwards, because a property
+graph lets a node exist with no relationships. Relationally it cannot:
+`schema_id` and `table_id` are `NOT NULL`, so a table with no schema is not a
+row that can be written at all.
+
+Rather than make the parent columns nullable — trading a real integrity
+guarantee for the convenience of matching the old call order —
+`merge_schema_nodes` now *holds* each row's properties and `merge_schema_edges`,
+where the parent id finally appears, does the insert. Stateful, and documented
+as such: the properties genuinely arrive before the parent does, and something
+has to bridge that.
+
+**`Sql` points at columns as well as tables.** 16 `Sql -[:SQL]-> Column` edges
+against 9 to tables, so `sql_query_column` joins `sql_query_table`. Two
+association tables rather than one polymorphic one, because the two are always
+read separately — `load_sqls_to_tables` returns them as distinct lists and
+deduplication compares them as distinct sets.
+
+### Two things deliberately not reproduced
+
+**Per-month counters.** Nothing can read them (DECISION-007), so writing them
+would mean reviving dynamic property names in a relational store to hold data no
+reader can parse. `total_counter` is kept and is what a fix would use.
+
+**The `deleted` filter.** Both Cypher reads guard with
+`coalesce(node.deleted, false) = false`, and nothing in GSF writes `deleted` —
+verified across the codebase. The guard is always true, so dropping it preserves
+behaviour, where carrying a column no writer sets would leave a permanent
+puzzle.
+
+**Also shared, not duplicated:** `get_sql_counters` and `get_candidate_sql_ids`
+are pure, so they moved to `gsf/catalog/query_stats.py` alongside the same
+treatment given to the diff.
+
+**Suite:** 430 passed, 4 skipped.
+
+### What Phase 4 still owes
+
+The 12 incremental-diff tests run against Neo4j only — they assert by querying
+the graph directly. Re-running them under `GSF_STORE=postgres` needs them
+parameterised over the backend, and that is the remaining gap between "a first
+ingest is correct" and "re-ingest is correct", which is where the bugs were.

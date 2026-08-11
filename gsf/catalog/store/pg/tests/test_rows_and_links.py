@@ -199,8 +199,20 @@ def test_same_schema_name_in_two_databases_stays_separate() -> None:
         name = _db_name()
         _schema(name, _database(name), "public")
 
+    # Scoped to this test's own databases: a real ingest into the same database
+    # also creates a `public` schema, and a global count would pick it up.
     rows = store().query_read(
-        s.catalog_schema.select().where(s.catalog_schema.c.name == "public")
+        select(s.catalog_schema.c.id)
+        .select_from(
+            s.catalog_schema.join(
+                s.catalog_database,
+                s.catalog_schema.c.database_id == s.catalog_database.c.id,
+            )
+        )
+        .where(
+            s.catalog_schema.c.name == "public",
+            s.catalog_database.c.name.like("t-%"),
+        )
     )
     assert len(rows) == 2, "schemas from different databases were merged"
 

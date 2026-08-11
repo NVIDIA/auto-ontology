@@ -48,7 +48,6 @@ FORKED = {
     ),
     "gsf.catalog.services.schema": "nemo_retriever.tabular_data.ingestion.services.schema",
     "gsf.catalog.store.neo4j.schemas": "nemo_retriever.tabular_data.ingestion.dal.schemas_dal",
-    "gsf.catalog.store.neo4j.queries": "nemo_retriever.tabular_data.ingestion.dal.queries_dal",
     "gsf.catalog.store.neo4j.edges": "nemo_retriever.tabular_data.ingestion.dal.utils_dal",
     "gsf.catalog.store.neo4j.indexes": "nemo_retriever.tabular_data.ingestion.indexes",
     "gsf.catalog.store.neo4j.connection": "nemo_retriever.tabular_data.neo4j.neo4j_connection",
@@ -74,9 +73,18 @@ DIVERGED = {
     "gsf.catalog.store.pg.schemas": "Phase 4 Postgres implementation; not a fork",
     "gsf.catalog.store.pg.indexes": "Phase 4 Postgres implementation; not a fork",
     "gsf.catalog.store.pg.db": "Phase 4 Postgres implementation; not a fork",
+    "gsf.catalog.store.pg.queries": "Phase 4 Postgres implementation; not a fork",
+    "gsf.catalog.query_stats": (
+        "Phase 4: get_sql_counters and get_candidate_sql_ids are pure, so they "
+        "moved out of store/neo4j/queries.py to be shared -- DECISION-007"
+    ),
     "gsf.catalog.diff": (
         "Phase 4: the storage-agnostic re-ingest diff, lifted out of "
         "store/neo4j/db.py so both backends share one copy -- DECISION-006"
+    ),
+    "gsf.catalog.store.neo4j.queries": (
+        "get_sql_counters and get_candidate_sql_ids moved to "
+        "gsf.catalog.query_stats so both backends share one copy -- DECISION-007"
     ),
     "gsf.catalog.store.neo4j.db": (
         "column-diff merge keys corrected — upstream merges on a 'schema' column "

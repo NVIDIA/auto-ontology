@@ -169,6 +169,11 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
     (Edges.SQL, Labels.SQL, Labels.TABLE): LinkSpec(
         Edges.SQL, s.sql_query_table, "sql_query_id", "table_id"
     ),
+    # Same relationship type, different target: a statement points at both the
+    # tables it reads and the leaf columns it selects.
+    (Edges.SQL, Labels.SQL, Labels.COLUMN): LinkSpec(
+        Edges.SQL, s.sql_query_column, "sql_query_id", "column_id"
+    ),
     (Edges.HAS_SQL, Labels.CUSTOM_ANALYSIS, Labels.SQL): LinkSpec(
         Edges.HAS_SQL, s.custom_analysis_sql, "analysis_id", "sql_query_id"
     ),
@@ -187,7 +192,19 @@ class UnknownLink(KeyError):
     """A relationship shape the schema has nowhere to put."""
 
 
-def entity_spec(label: str) -> EntitySpec:
+def entity_spec(label: str | list[str]) -> EntitySpec:
+    """Resolve a label to its table.
+
+    Accepts a list as well as a string: a node in a property graph can carry
+    several labels, so ``apoc.merge.node.eager`` takes a list and callers such
+    as ``merge_schema_nodes`` pass one through unchanged. The first is used,
+    matching ``labels(n)[0]`` everywhere else in the codebase — GSF never puts
+    more than one label on a catalog node.
+    """
+    if isinstance(label, (list, tuple)):
+        if not label:
+            raise UnknownLabel("empty label list")
+        label = label[0]
     try:
         return ENTITIES[label]
     except KeyError:

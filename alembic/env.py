@@ -42,16 +42,26 @@ target_metadata = METADATA
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
     """Consider only objects in the ``gsf`` schema.
 
-    ``reflected`` objects carry the schema they were found in; objects from our
-    own metadata carry ``SCHEMA`` because ``MetaData(schema=...)`` sets it. Both
-    paths are checked, so neither a stray reflected table nor a mis-declared one
-    slips through.
+    Alembic passes a wide range of objects through here — tables, columns,
+    indexes, constraints — and they do not agree on how to reach their schema.
+    Some carry ``.schema`` directly; some carry a ``.table`` that is itself a
+    ``Table``; and some carry a ``.table`` that is only its *name*, as a string.
+    Assuming the second shape raises ``'str' object has no attribute 'schema'``
+    on the third.
+
+    The default is to *exclude*: an object whose schema cannot be established is
+    not ours, and letting it through risks autogenerate proposing a drop against
+    Prisma's tables — the one outcome this filter exists to prevent.
     """
-    if type_ == "table":
-        return obj.schema == SCHEMA
-    if hasattr(obj, "table"):
-        return obj.table.schema == SCHEMA
-    return True
+    schema = getattr(obj, "schema", None)
+    if schema is None:
+        parent = getattr(obj, "table", None)
+        schema = getattr(parent, "schema", None)
+    if schema is None:
+        # Constraints and indexes reached before their parent is resolved fall
+        # here. Keep them only if the migration context is already scoped to us.
+        return type_ not in {"table", "column"}
+    return schema == SCHEMA
 
 
 def _configure(**kwargs) -> None:

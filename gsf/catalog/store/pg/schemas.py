@@ -16,6 +16,7 @@ already found once (DECISION-006).
 from __future__ import annotations
 
 import logging
+from threading import Lock
 
 import pandas as pd
 from sqlalchemy import ARRAY, Text, and_, cast, delete, func, select, update
@@ -216,27 +217,69 @@ def add_schemas_edge(edge, created):
         raise Exception(f'Error in "add_schemas_edge" when adding edge: {edge}')
 
 
+# Rows whose properties have arrived but whose parent has not. See
+# merge_schema_nodes.
+_pending: dict[str, dict] = {}
+_pending_lock = Lock()
+
+
 def merge_schema_nodes(nodes, created):
-    """Bulk upsert. *created* is ignored — the column has a server default."""
-    for node in nodes:
-        upsert_row(node["label"], node["match_props"], node["props"])
+    """Hold each row's properties until its parent is known.
+
+    ``add_schema`` creates all the Table and Column nodes first and *then* links
+    them, because a property graph lets a node exist before any relationship
+    does. Relationally it cannot: ``schema_id`` and ``table_id`` are
+    ``NOT NULL``, so a table with no schema is not a row that can be written.
+
+    So this records the properties, and :func:`merge_schema_edges` — which is
+    where the parent id finally shows up — does the insert. The alternative was
+    to make the parent columns nullable, which would trade a real integrity
+    guarantee for the convenience of matching the old call order.
+
+    *created* is ignored: the column has a server default.
+    """
+    with _pending_lock:
+        for node in nodes:
+            node_id = node["props"].get("id") or node["match_props"].get("id")
+            if node_id is None:
+                # Nothing to key it by, so it cannot be claimed by an edge
+                # later. Write it now and let the parent column complain if it
+                # was actually required.
+                upsert_row(node["label"], node["match_props"], node["props"])
+                continue
+            _pending[node_id] = node
 
 
 def merge_schema_edges(edges, from_label, to_label):
-    """Point each child row at its parent.
+    """Write each child row, now that its parent id is known.
 
-    The Cypher merged a ``CONTAINS`` relationship between two nodes matched by
-    id; here the same fact is the child's foreign key, so this is an ``UPDATE``.
+    The Cypher merged a ``CONTAINS`` relationship between two already-existing
+    nodes. Here the relationship *is* the child's foreign key, so this is where
+    the child row gets written — or updated, if it already existed.
     """
     child = entity_spec(to_label)
     if child.parent_column is None:
         raise ValueError(f"{to_label} has no parent column")
 
     for edge in edges:
+        child_id, parent_id = edge["uid"], edge["vid"]
+        with _pending_lock:
+            node = _pending.pop(child_id, None)
+
+        if node is not None:
+            upsert_row(
+                node["label"],
+                node["match_props"],
+                node["props"],
+                parent_id=parent_id,
+            )
+            continue
+
+        # Already written by an earlier pass; just re-point it.
         store().query_write(
             update(child.table)
-            .where(child.table.c.id == edge["uid"])
-            .values(**{child.parent_column: edge["vid"]})
+            .where(child.table.c.id == child_id)
+            .values(**{child.parent_column: parent_id})
         )
 
 

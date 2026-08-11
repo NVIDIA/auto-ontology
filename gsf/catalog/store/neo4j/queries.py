@@ -16,6 +16,12 @@ Forked verbatim in Phase 1 of the drop-Neo4j refactor
 import pandas as pd
 
 from gsf.catalog.normalize import chunks
+
+# Pure, so shared with the Postgres backend rather than duplicated.
+from gsf.catalog.query_stats import (  # noqa: F401
+    get_candidate_sql_ids,
+    get_sql_counters,
+)
 from gsf.catalog.store.neo4j.edges import prepare_edge, add_edges
 from gsf.catalog.constants import Labels
 from gsf.catalog.store.neo4j.connection import get_neo4j_conn
@@ -40,15 +46,6 @@ def get_sql_by_full_query(sql_full_query: str):
     if result:
         return result[0]["id"]
     return None
-
-
-def get_sql_counters(sql_node):
-    total_counter = sql_node.get_properties()["total_counter"]
-    count_per_month = {}
-    for prop_key, prop_val in sql_node.get_properties().items():
-        if prop_key.startswith("count_"):
-            count_per_month.update({prop_key: prop_val})
-    return total_counter, count_per_month
 
 
 def update_counters_and_timestamps_for_query_and_affected_data(
@@ -147,32 +144,3 @@ def load_sqls_to_tables() -> pd.DataFrame:
             ]
         )
     return pd.DataFrame(result[0]["sqls_tbls"])
-
-
-def get_candidate_sql_ids(
-    tbl_ids: list[str],
-    col_ids: list[str],
-    nodes_count: int,
-    sqls_tbls_df: pd.DataFrame,
-    join_count: int = 0,
-    union_count: int = 0,
-) -> pd.DataFrame:
-    """Pre-filter graph SQLs by table set, column set (leaves), AST node count, join count, and union count.
-
-    Mirrors the old ``get_sqls_connected_to_tables`` heuristic: same tables,
-    same leaf columns, same structural size, same number of joins and unions.
-    Only candidates passing all gates need the expensive sqlglot structural comparison.
-    """
-    if sqls_tbls_df.empty:
-        return sqls_tbls_df.iloc[0:0]
-
-    tbl_set = set(tbl_ids)
-    col_set = set(col_ids)
-    mask = (
-        (sqls_tbls_df["nodes_count"] == nodes_count)
-        & (sqls_tbls_df["join_count"] == join_count)
-        & (sqls_tbls_df["union_count"] == union_count)
-        & sqls_tbls_df["tbls"].apply(lambda t: set(t) == tbl_set)
-        & sqls_tbls_df["cols"].apply(lambda c: set(c) == col_set)
-    )
-    return sqls_tbls_df.loc[mask]
