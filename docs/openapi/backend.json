@@ -1,0 +1,6295 @@
+{
+  "components": {
+    "schemas": {
+      "Body_import_model_api_model_import_post": {
+        "properties": {
+          "file": {
+            "anyOf": [
+              {
+                "contentMediaType": "application/octet-stream",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          }
+        },
+        "title": "Body_import_model_api_model_import_post",
+        "type": "object"
+      },
+      "ChartsResponse": {
+        "additionalProperties": true,
+        "description": "``charts`` is null when the model declined to propose a chart.",
+        "properties": {
+          "charts": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charts"
+          }
+        },
+        "required": [
+          "charts"
+        ],
+        "title": "ChartsResponse",
+        "type": "object"
+      },
+      "ChatCancelResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "cancelled": {
+            "title": "Cancelled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "cancelled"
+        ],
+        "title": "ChatCancelResponse",
+        "type": "object"
+      },
+      "ChatRequest": {
+        "description": "Payload sent by the frontend to start a chat completion.",
+        "properties": {
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "prediction": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prediction"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "target_db": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Db"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "ChatRequest",
+        "type": "object"
+      },
+      "ColumnAttribute": {
+        "additionalProperties": true,
+        "description": "A ColumnAttribute of a Term.\n\n``primary_column`` is the HAS_ATTRIBUTE owner and ``referenced_columns``\nthe SEMANTIC_FK sources; both are absent from the patch response, which\nechoes only the fields it wrote.",
+        "properties": {
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "datatype": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Datatype"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "primary_column": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnRef"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "referenced_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ColumnRef"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Referenced Columns"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "term_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Name"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ColumnAttribute",
+        "type": "object"
+      },
+      "ColumnAttributePatchResponse": {
+        "additionalProperties": true,
+        "description": "``term_certification`` is the owning Term's badge, recomputed on write.\n\nThe patch returns it alongside ``data`` so the Terms list can update the\nbadge without a second request, which is why this needs its own model\nrather than the plain ``DataResponse`` envelope.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ColumnAttribute"
+          },
+          "term_certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Certification"
+          }
+        },
+        "required": [
+          "data",
+          "term_certification"
+        ],
+        "title": "ColumnAttributePatchResponse",
+        "type": "object"
+      },
+      "ColumnAttributeUpdate": {
+        "properties": {
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          }
+        },
+        "title": "ColumnAttributeUpdate",
+        "type": "object"
+      },
+      "ColumnRef": {
+        "additionalProperties": true,
+        "description": "A column with the catalog path ids needed to navigate to it.",
+        "properties": {
+          "column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Name"
+          },
+          "db_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ColumnRef",
+        "type": "object"
+      },
+      "ColumnSummary": {
+        "additionalProperties": true,
+        "description": "One column of a table, ordered by ``ordinal_position``.",
+        "properties": {
+          "column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Name"
+          },
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ordinal_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ordinal Position"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ColumnSummary",
+        "type": "object"
+      },
+      "ConnectionBody": {
+        "properties": {
+          "connection": {
+            "additionalProperties": true,
+            "title": "Connection",
+            "type": "object"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "title": "ConnectionBody",
+        "type": "object"
+      },
+      "ConnectionTestResponse": {
+        "additionalProperties": true,
+        "description": "``schemas`` is empty for connectors that cannot enumerate schemas.",
+        "properties": {
+          "schemas": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Schemas",
+            "type": "array"
+          },
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "success",
+          "schemas"
+        ],
+        "title": "ConnectionTestResponse",
+        "type": "object"
+      },
+      "CustomAnalysis": {
+        "additionalProperties": true,
+        "description": "A verified SQL example, joined with the text of its ``Sql`` node.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "CustomAnalysis",
+        "type": "object"
+      },
+      "CustomAnalysisCreate": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "sql": {
+            "minLength": 1,
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "sql"
+        ],
+        "title": "CustomAnalysisCreate",
+        "type": "object"
+      },
+      "CustomAnalysisValidate": {
+        "properties": {
+          "sql": {
+            "minLength": 1,
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sql"
+        ],
+        "title": "CustomAnalysisValidate",
+        "type": "object"
+      },
+      "DataExplorationGraph": {
+        "additionalProperties": true,
+        "description": "``{nodes, links}`` for the data layer, in one response.",
+        "properties": {
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorationEdge"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/DataGraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "title": "DataExplorationGraph",
+        "type": "object"
+      },
+      "DataGraphNode": {
+        "additionalProperties": true,
+        "description": "A table on the data-layer exploration graph.\n\n``relationship_count`` is the table's degree over the whole accessible\nedge set, so it does not shrink when ``limit`` truncates the payload.",
+        "properties": {
+          "columns_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns Count"
+          },
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Count"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "sql_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Count"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          },
+          "terms_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Count"
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/ZoneChip"
+            },
+            "title": "Zones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DataGraphNode",
+        "type": "object"
+      },
+      "DataResponse_CustomAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CustomAnalysis"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[CustomAnalysis]",
+        "type": "object"
+      },
+      "DataResponse_DataExplorationGraph_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/DataExplorationGraph"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[DataExplorationGraph]",
+        "type": "object"
+      },
+      "DataResponse_EntityCoverageResult_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/EntityCoverageResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[EntityCoverageResult]",
+        "type": "object"
+      },
+      "DataResponse_ExplorationRelatedNodes_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExplorationRelatedNodes"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[ExplorationRelatedNodes]",
+        "type": "object"
+      },
+      "DataResponse_IdRef_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/IdRef"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[IdRef]",
+        "type": "object"
+      },
+      "DataResponse_PqlAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PqlAnalysis"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[PqlAnalysis]",
+        "type": "object"
+      },
+      "DataResponse_PublicConnection_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PublicConnection"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[PublicConnection]",
+        "type": "object"
+      },
+      "DataResponse_SemanticExplorationGraph_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SemanticExplorationGraph"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[SemanticExplorationGraph]",
+        "type": "object"
+      },
+      "DataResponse_SqlAttribute_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlAttribute"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "DataResponse_SqlExpressionValidationResult_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlExpressionValidationResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[SqlExpressionValidationResult]",
+        "type": "object"
+      },
+      "DataResponse_SqlValidationResult_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlValidationResult"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[SqlValidationResult]",
+        "type": "object"
+      },
+      "DataResponse_SsoFederationState_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SsoFederationState"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[SsoFederationState]",
+        "type": "object"
+      },
+      "DataResponse_TableExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TableExplorationDetails"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[TableExplorationDetails]",
+        "type": "object"
+      },
+      "DataResponse_TermDetail_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TermDetail"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[TermDetail]",
+        "type": "object"
+      },
+      "DataResponse_Term_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Term"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Term]",
+        "type": "object"
+      },
+      "DataResponse_Zone_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Zone"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Zone]",
+        "type": "object"
+      },
+      "DataResponse_dict_str__list_ZoneChip___": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "items": {
+                "$ref": "#/components/schemas/ZoneChip"
+              },
+              "type": "array"
+            },
+            "title": "Data",
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[dict[str, list[ZoneChip]]]",
+        "type": "object"
+      },
+      "DatabaseSummary": {
+        "additionalProperties": true,
+        "description": "One catalog database. ``schemas`` is always empty \u2014 the tree is lazy.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "num_of_schemas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Of Schemas"
+          },
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummary"
+            },
+            "title": "Schemas",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "DatabaseSummary",
+        "type": "object"
+      },
+      "DescriptionSuggestionResponse": {
+        "additionalProperties": true,
+        "description": "``data`` is null when no description could be suggested.",
+        "properties": {
+          "data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DescriptionSuggestionResponse",
+        "type": "object"
+      },
+      "EntityCoverageCandidate": {
+        "additionalProperties": true,
+        "description": "One retrieved semantic candidate, ranked by vector distance.",
+        "properties": {
+          "attribute": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "term": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term"
+          }
+        },
+        "title": "EntityCoverageCandidate",
+        "type": "object"
+      },
+      "EntityCoverageRequest": {
+        "description": "Payload for the entity-coverage route.",
+        "properties": {
+          "max_distance": {
+            "default": 0.75,
+            "description": "Maximum L2 vector distance for a candidate to count (lower score = closer match).",
+            "exclusiveMinimum": 0.0,
+            "title": "Max Distance",
+            "type": "number"
+          },
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "EntityCoverageRequest",
+        "type": "object"
+      },
+      "EntityCoverageResult": {
+        "additionalProperties": true,
+        "description": "A 0\u20131 coverage grade with the candidates it was graded from.\n\n``uncovered_entities`` is only present when the flow was asked for it.",
+        "properties": {
+          "candidates": {
+            "items": {
+              "$ref": "#/components/schemas/EntityCoverageCandidate"
+            },
+            "title": "Candidates",
+            "type": "array"
+          },
+          "coverage": {
+            "title": "Coverage",
+            "type": "number"
+          },
+          "uncovered_entities": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uncovered Entities"
+          }
+        },
+        "required": [
+          "coverage"
+        ],
+        "title": "EntityCoverageResult",
+        "type": "object"
+      },
+      "ExplorationEdge": {
+        "additionalProperties": true,
+        "description": "Two tables connected by a shared SQL query and/or a foreign key.\n\n``queries`` is empty for an edge that exists only because of a foreign\nkey; ``foreign_keys`` is empty for a SQL-only edge.",
+        "properties": {
+          "foreign_keys": {
+            "items": {
+              "$ref": "#/components/schemas/ForeignKeyRef"
+            },
+            "title": "Foreign Keys",
+            "type": "array"
+          },
+          "queries": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "via_foreign_key": {
+            "default": false,
+            "title": "Via Foreign Key",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "ExplorationEdge",
+        "type": "object"
+      },
+      "ExplorationRelatedNode": {
+        "additionalProperties": true,
+        "description": "One related node. The catalog path fields are data-layer only.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Count"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ExplorationRelatedNode",
+        "type": "object"
+      },
+      "ExplorationRelatedNodes": {
+        "additionalProperties": true,
+        "description": "One page of related nodes; ``total`` counts every related node.",
+        "properties": {
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorationRelatedNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          }
+        },
+        "title": "ExplorationRelatedNodes",
+        "type": "object"
+      },
+      "ExportRequest": {
+        "description": "Export scope: empty ``databases`` exports every catalog database.",
+        "properties": {
+          "databases": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Databases",
+            "type": "array"
+          }
+        },
+        "title": "ExportRequest",
+        "type": "object"
+      },
+      "ForeignKeyRef": {
+        "additionalProperties": true,
+        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values come straight off the Column node, unparsed \u2014 profiling\nstores them as a JSON string, a catalog PATCH stores a list.",
+        "properties": {
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column"
+          },
+          "source_sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Sample Values"
+          },
+          "target_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Column"
+          },
+          "target_sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Sample Values"
+          }
+        },
+        "title": "ForeignKeyRef",
+        "type": "object"
+      },
+      "GraphLink": {
+        "additionalProperties": true,
+        "description": "An undirected term\u2194term link (two terms sharing at least one table).",
+        "properties": {
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "GraphLink",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "additionalProperties": true,
+        "description": "Liveness/readiness body \u2014 200 when healthy, 503 when degraded.",
+        "properties": {
+          "neo4j": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Neo4J",
+            "type": "object"
+          },
+          "postgres": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Postgres",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "neo4j",
+          "postgres"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "IdRef": {
+        "additionalProperties": true,
+        "description": "``{\"id\": ...}`` \u2014 echoed by the delete endpoints to confirm the target.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "IdRef",
+        "type": "object"
+      },
+      "ListResponse_CustomAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CustomAnalysis"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[CustomAnalysis]",
+        "type": "object"
+      },
+      "ListResponse_DatabaseSummary_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DatabaseSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[DatabaseSummary]",
+        "type": "object"
+      },
+      "ListResponse_ExplorationEdge_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorationEdge"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[ExplorationEdge]",
+        "type": "object"
+      },
+      "ListResponse_PqlAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PqlAnalysis"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[PqlAnalysis]",
+        "type": "object"
+      },
+      "ListResponse_PublicConnection_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PublicConnection"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[PublicConnection]",
+        "type": "object"
+      },
+      "ListResponse_SqlAttribute_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SqlAttribute"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "ListResponse_TableSummary_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TableSummary"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[TableSummary]",
+        "type": "object"
+      },
+      "ListResponse_Zone_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Zone"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Zone]",
+        "type": "object"
+      },
+      "ModelImportResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "success": {
+            "title": "Success",
+            "type": "boolean"
+          },
+          "summary": {
+            "additionalProperties": true,
+            "title": "Summary",
+            "type": "object"
+          }
+        },
+        "required": [
+          "success",
+          "summary"
+        ],
+        "title": "ModelImportResponse",
+        "type": "object"
+      },
+      "NodeUpdate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          }
+        },
+        "title": "NodeUpdate",
+        "type": "object"
+      },
+      "NodeUpdateResult": {
+        "additionalProperties": true,
+        "description": "Echo of a catalog node patch: ``{id, ...the properties you sent}``.\n\n``update_node_properties`` builds the body as ``{\"id\": ..., **{k: props[k]\nfor k in patch}}``, so only the keys the request actually patched come\nback \u2014 every one of them is optional here for that reason, and each may be\nnull when the node has no value for it. The route as a whole answers null\nwhen the patch was empty or the node does not exist.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sample_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sample Values"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "NodeUpdateResult",
+        "type": "object"
+      },
+      "ObjectPageResponse_TableColumns_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TableColumns"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "ObjectPageResponse[TableColumns]",
+        "type": "object"
+      },
+      "PagedListResponse_ColumnAttribute_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnAttribute"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "PagedListResponse[ColumnAttribute]",
+        "type": "object"
+      },
+      "PagedListResponse_SqlAttribute_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/SqlAttribute"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "count",
+          "total"
+        ],
+        "title": "PagedListResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "PqlAnalysis": {
+        "additionalProperties": true,
+        "description": "A verified PQL few-shot. The PQL text is a property, not a child node.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pql"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "PqlAnalysis",
+        "type": "object"
+      },
+      "PqlAnalysisCreate": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pql": {
+            "minLength": 1,
+            "title": "Pql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "pql"
+        ],
+        "title": "PqlAnalysisCreate",
+        "type": "object"
+      },
+      "PublicConnection": {
+        "additionalProperties": true,
+        "description": "A UI-managed connection with its credentials stripped.\n\n``connection`` is absent from the delete response, which echoes only the\ndatabase name it tore down; the list and create reads carry the full\ncredential-free config.",
+        "properties": {
+          "connection": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connection"
+          },
+          "database_name": {
+            "title": "Database Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "database_name"
+        ],
+        "title": "PublicConnection",
+        "type": "object"
+      },
+      "SchemaSummary": {
+        "additionalProperties": true,
+        "description": "One schema of a database, with how many tables it holds.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "tables_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tables Count"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SchemaSummary",
+        "type": "object"
+      },
+      "SchemasPayload": {
+        "additionalProperties": true,
+        "description": "``/schemas/{db_id}`` \u2014 unenveloped; null when the database is missing.",
+        "properties": {
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummary"
+            },
+            "title": "Schemas",
+            "type": "array"
+          },
+          "schemas_count": {
+            "title": "Schemas Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "schemas_count",
+          "schemas"
+        ],
+        "title": "SchemasPayload",
+        "type": "object"
+      },
+      "SemanticExplorationGraph": {
+        "additionalProperties": true,
+        "description": "``{nodes, links}`` for the semantic layer, in one response.",
+        "properties": {
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/GraphLink"
+            },
+            "title": "Links",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/SemanticGraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          }
+        },
+        "title": "SemanticExplorationGraph",
+        "type": "object"
+      },
+      "SemanticGraphNode": {
+        "additionalProperties": true,
+        "description": "A term on the semantic-layer exploration graph.",
+        "properties": {
+          "column_attributes_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Attributes Count"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Count"
+          },
+          "sql_attributes_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Attributes Count"
+          },
+          "synonyms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Synonyms",
+            "type": "array"
+          },
+          "zones": {
+            "items": {
+              "$ref": "#/components/schemas/ZoneChip"
+            },
+            "title": "Zones",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SemanticGraphNode",
+        "type": "object"
+      },
+      "SemanticStatusResponse": {
+        "additionalProperties": true,
+        "properties": {
+          "calculated": {
+            "title": "Calculated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "calculated"
+        ],
+        "title": "SemanticStatusResponse",
+        "type": "object"
+      },
+      "SqlAttribute": {
+        "additionalProperties": true,
+        "description": "A SqlAttribute with its owning Term and the SQL text behind it.\n\n``zones`` is resolved only by the single-attribute read; ``sql_id`` and\n``database_name`` only by the create/update writes.",
+        "properties": {
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_suggestion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Suggestion"
+          },
+          "expression": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expression"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          },
+          "sql_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Id"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          },
+          "term_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Name"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "SqlAttribute",
+        "type": "object"
+      },
+      "SqlAttributeCreate": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expression": {
+            "minLength": 1,
+            "title": "Expression",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          },
+          "term_id": {
+            "title": "Term Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "expression",
+          "term_id"
+        ],
+        "title": "SqlAttributeCreate",
+        "type": "object"
+      },
+      "SqlAttributeMetadataPatch": {
+        "properties": {
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "SqlAttributeMetadataPatch",
+        "type": "object"
+      },
+      "SqlAttributePatchResponse": {
+        "additionalProperties": true,
+        "description": "``term_certification`` is recomputed only when the patch names a term.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlAttribute"
+          },
+          "term_certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Certification"
+          }
+        },
+        "required": [
+          "data",
+          "term_certification"
+        ],
+        "title": "SqlAttributePatchResponse",
+        "type": "object"
+      },
+      "SqlAttributeUpdate": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "expression": {
+            "minLength": 1,
+            "title": "Expression",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "source": {
+            "default": "manual",
+            "title": "Source",
+            "type": "string"
+          },
+          "term_id": {
+            "title": "Term Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "description",
+          "expression",
+          "term_id"
+        ],
+        "title": "SqlAttributeUpdate",
+        "type": "object"
+      },
+      "SqlAttributeValidate": {
+        "properties": {
+          "attribute_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute Id"
+          },
+          "expression": {
+            "minLength": 1,
+            "title": "Expression",
+            "type": "string"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          }
+        },
+        "required": [
+          "expression"
+        ],
+        "title": "SqlAttributeValidate",
+        "type": "object"
+      },
+      "SqlExpressionValidationResult": {
+        "additionalProperties": true,
+        "description": "``/sql-attributes/validate`` \u2014 a parse failure is a 422, not ``valid: false``.",
+        "properties": {
+          "expression": {
+            "title": "Expression",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "expression"
+        ],
+        "title": "SqlExpressionValidationResult",
+        "type": "object"
+      },
+      "SqlValidationResult": {
+        "additionalProperties": true,
+        "description": "``/custom-analyses/validate`` \u2014 a parse failure is a 422, not ``valid: false``.",
+        "properties": {
+          "sql": {
+            "title": "Sql",
+            "type": "string"
+          },
+          "valid": {
+            "title": "Valid",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "valid",
+          "sql"
+        ],
+        "title": "SqlValidationResult",
+        "type": "object"
+      },
+      "SsoFederationBody": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "SsoFederationBody",
+        "type": "object"
+      },
+      "SsoFederationState": {
+        "additionalProperties": true,
+        "description": "The one flag ``PATCH /connections/{database_name}/sso-federation`` sets.\n\nThe route deliberately echoes just the flag rather than the connection, so\na caller never has to re-send credentials to toggle it.",
+        "properties": {
+          "database_name": {
+            "title": "Database Name",
+            "type": "string"
+          },
+          "sso_federation": {
+            "title": "Sso Federation",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "database_name",
+          "sso_federation"
+        ],
+        "title": "SsoFederationState",
+        "type": "object"
+      },
+      "StatusResponse": {
+        "additionalProperties": true,
+        "description": "``{\"status\": \"ok\"}`` or ``{\"status\": \"accepted\"}`` for async triggers.",
+        "properties": {
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "StatusResponse",
+        "type": "object"
+      },
+      "TableColumns": {
+        "additionalProperties": true,
+        "description": "A table with one page of its columns.\n\nEvery field but ``columns`` is absent from the empty fallback the route\nreturns when the table (or its schema/database path) is missing.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnSummary"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "columns_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns Count"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          }
+        },
+        "title": "TableColumns",
+        "type": "object"
+      },
+      "TableExplorationDetails": {
+        "additionalProperties": true,
+        "description": "The table-detail modal: its SQL queries and one page of its Terms.",
+        "properties": {
+          "queries": {
+            "items": {
+              "$ref": "#/components/schemas/TableSqlQuery"
+            },
+            "title": "Queries",
+            "type": "array"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermSummary"
+            },
+            "title": "Terms",
+            "type": "array"
+          },
+          "terms_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Total"
+          }
+        },
+        "title": "TableExplorationDetails",
+        "type": "object"
+      },
+      "TableSqlQuery": {
+        "additionalProperties": true,
+        "description": "A stored SQL query that references the table.\n\n``sql`` is nullable: unlike the other Sql reads in ``gsf/dal/exploration``\nthis query has no ``_NON_EMPTY_SQL`` filter, so a Sql node with a null or\nblank ``sql_full_query`` reaches the response. Declaring it required would\nturn that row into a 500 for the whole table-detail modal.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TableSqlQuery",
+        "type": "object"
+      },
+      "TableSummary": {
+        "additionalProperties": true,
+        "description": "One table of a schema, with its column / SQL / Term counts.",
+        "properties": {
+          "columns_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns Count"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "sql_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql Count"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          },
+          "terms_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terms Count"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TableSummary",
+        "type": "object"
+      },
+      "Term": {
+        "additionalProperties": true,
+        "description": "A Term with its certification rollup and resolved zone chips.",
+        "properties": {
+          "certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certification"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "name_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Certified"
+          },
+          "synonyms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synonyms"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "Term",
+        "type": "object"
+      },
+      "TermCountEntry": {
+        "additionalProperties": true,
+        "description": "``{term_id, count}`` \u2014 one per-term breakdown row. Zeroes are omitted.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "term_id": {
+            "title": "Term Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "term_id",
+          "count"
+        ],
+        "title": "TermCountEntry",
+        "type": "object"
+      },
+      "TermDetail": {
+        "additionalProperties": true,
+        "description": "One Term with the tables that represent it and its related terms.",
+        "properties": {
+          "certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certification"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "name_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Certified"
+          },
+          "related_terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermSummary"
+            },
+            "title": "Related Terms",
+            "type": "array"
+          },
+          "synonyms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synonyms"
+          },
+          "table_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Count"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TermTable"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TermDetail",
+        "type": "object"
+      },
+      "TermListItem": {
+        "additionalProperties": true,
+        "description": "A Term as it appears in the paged ``/terms`` list.",
+        "properties": {
+          "certification": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certification"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "name_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Certified"
+          },
+          "schema_names": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Names"
+          },
+          "synonyms": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Synonyms"
+          },
+          "zones": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ZoneChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Zones"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TermListItem",
+        "type": "object"
+      },
+      "TermSummary": {
+        "additionalProperties": true,
+        "description": "The three fields every Term projection carries.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TermSummary",
+        "type": "object"
+      },
+      "TermTable": {
+        "additionalProperties": true,
+        "description": "A table that REPRESENTS a Term, with its catalog path ids.",
+        "properties": {
+          "db_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Db Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "TermTable",
+        "type": "object"
+      },
+      "TermUpdate": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "description_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Certified"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "name_certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name Certified"
+          }
+        },
+        "title": "TermUpdate",
+        "type": "object"
+      },
+      "TermsPageResponse": {
+        "additionalProperties": true,
+        "description": "One page of the Terms list with its per-term count breakdowns.\n\n``total`` counts every matching term; the count lists cover only the\nterms on this page when a limit was given.",
+        "properties": {
+          "column_attribute_counts": {
+            "items": {
+              "$ref": "#/components/schemas/TermCountEntry"
+            },
+            "title": "Column Attribute Counts",
+            "type": "array"
+          },
+          "related_counts": {
+            "items": {
+              "$ref": "#/components/schemas/TermCountEntry"
+            },
+            "title": "Related Counts",
+            "type": "array"
+          },
+          "sql_attribute_counts": {
+            "items": {
+              "$ref": "#/components/schemas/TermCountEntry"
+            },
+            "title": "Sql Attribute Counts",
+            "type": "array"
+          },
+          "terms": {
+            "items": {
+              "$ref": "#/components/schemas/TermListItem"
+            },
+            "title": "Terms",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "terms",
+          "total",
+          "column_attribute_counts",
+          "sql_attribute_counts",
+          "related_counts"
+        ],
+        "title": "TermsPageResponse",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "VisualizeRequest": {
+        "description": "Payload for the second step: chart generation.\n\nSent by the client once it already has the SQL and its executed result\nfrom step 1 (``ChatRequest`` / ``/chat/completions``).",
+        "properties": {
+          "question": {
+            "minLength": 1,
+            "title": "Question",
+            "type": "string"
+          },
+          "result": {
+            "description": "The executed SQL result, i.e. the `sql_response_from_db` from the step 1 answer \u2014 either a one-item list containing a JSON-records string, or a list of row dicts.",
+            "title": "Result"
+          },
+          "sql": {
+            "default": "",
+            "title": "Sql",
+            "type": "string"
+          }
+        },
+        "required": [
+          "question"
+        ],
+        "title": "VisualizeRequest",
+        "type": "object"
+      },
+      "Zone": {
+        "additionalProperties": true,
+        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ZoneItem"
+                    },
+                    {
+                      "type": "string"
+                    }
+                  ]
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "Zone",
+        "type": "object"
+      },
+      "ZoneChip": {
+        "additionalProperties": true,
+        "description": "A zone as rendered next to something else it grants access to.\n\n``enabled`` is false for a zone whose ``Zone`` label was swapped for\n``disableZone``; those are returned to admins only.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ZoneChip",
+        "type": "object"
+      },
+      "ZoneCreate": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "color",
+          "items",
+          "created_by"
+        ],
+        "title": "ZoneCreate",
+        "type": "object"
+      },
+      "ZoneItem": {
+        "additionalProperties": true,
+        "description": "A catalog node a zone grants access to (a database, schema or table).",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "title": "ZoneItem",
+        "type": "object"
+      },
+      "ZoneStatusUpdate": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "ZoneStatusUpdate",
+        "type": "object"
+      },
+      "ZoneUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "items": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Items"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "ZoneUpdate",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "GSF API",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/chat/cancel": {
+      "post": {
+        "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\ncompletions proxy persists no assistant turn for it.",
+        "operationId": "chat_cancel_api_chat_cancel_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChatCancelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Cancel",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/chat/completions": {
+      "post": {
+        "operationId": "chat_completions_api_chat_completions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Server-sent events; the stream ends with `data: [DONE]`"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Completions",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/chat/visualize": {
+      "post": {
+        "description": "Second step: recommend a chart for an already-executed SQL result.\n\nRuns outside the ``WarmPool`` subprocess \u2014 unlike the main agent\npipeline, this is one or two short LLM calls with no DB/retriever\ndependency, so it doesn't need process-level cancellation isolation.\nThe blocking LLM calls are offloaded to a thread so they don't block\nthe event loop.",
+        "operationId": "chat_visualize_api_chat_visualize_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VisualizeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChartsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Visualize",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/chat/watch": {
+      "get": {
+        "description": "Reattach to an in-flight run for ``conversation_id``, if any.\n\nPurely a passive observer: it never submits a question, never touches\n``client_alive``/``cancelled`` (so it can't trigger or block the 409\n\"Conversation in progress\" logic in `_try_claim_slot`), and has no\neffect on the run if it disconnects. This is what lets a reloaded or\nreopened browser tab recover the live progress UI (and, once it lands,\nthe final answer) for a run it didn't itself start \u2014 replaying every\nbuffered step from the beginning, then tailing new ones as they arrive.\n\nIf nothing is running for this conversation, the stream ends\nimmediately with `[DONE]` and no events, which the frontend treats\nidentically to \"nothing to resume\" \u2014 no separate status endpoint\nneeded.",
+        "operationId": "chat_watch_api_chat_watch_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Server-sent events; the stream ends with `data: [DONE]`"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Chat Watch",
+        "tags": [
+          "chat"
+        ]
+      }
+    },
+    "/api/columns/{table_id}": {
+      "get": {
+        "description": "Columns for a table.\n\nColumns come back ordered by ordinal position, and *skip*/*limit* select\none page of that order; ``total`` reports how many the table has in full,\nso a pager knows when to stop asking. Omitting *limit* returns every\ncolumn, which is what the lazy catalog tree loads.",
+        "operationId": "list_columns_by_table_api_columns__table_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectPageResponse_TableColumns_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Columns By Table",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/connections": {
+      "get": {
+        "operationId": "list_connections_api_connections_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_PublicConnection_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Connections",
+        "tags": [
+          "connections"
+        ]
+      },
+      "post": {
+        "operationId": "create_connection_api_connections_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/connections/source": {
+      "get": {
+        "description": "Report whether connections are managed via the ``CONNECTION_STRINGS`` env.",
+        "operationId": "is_env_source_api_connections_source_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Is Env Source Api Connections Source Get",
+                  "type": "boolean"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Is Env Source",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/connections/test": {
+      "post": {
+        "description": "Validate a connection and return its schemas (for the schema picker).",
+        "operationId": "test_connection_api_connections_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConnectionTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/connections/{database_name}": {
+      "delete": {
+        "operationId": "delete_connection_api_connections__database_name__delete",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/connections/{database_name}/sso-federation": {
+      "patch": {
+        "description": "Toggle whether chat runs this connection's SQL as the signed-in user.",
+        "operationId": "set_sso_federation_api_connections__database_name__sso_federation_patch",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SsoFederationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SsoFederationState_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Sso Federation",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/custom-analyses": {
+      "get": {
+        "description": "CustomAnalysis nodes joined with their HAS_SQL neighbour.",
+        "operationId": "list_custom_analyses_api_custom_analyses_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_CustomAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Custom Analyses",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      },
+      "post": {
+        "description": "Create a new CustomAnalysis with its Sql node.\n\nStrict insert: input shape is enforced by :class:`CustomAnalysisCreate`\nand the frontend is responsible for trimming and rejecting blank\nvalues before sending. Updating an existing analysis goes through\n``PUT /custom-analyses/{analysis_id}``.\n\nReturns 409 when ``name`` or ``sql`` is already used by another\nCustomAnalysis (both are unique natural keys), and 422 when the SQL\ncan't be parsed against the current catalog (no recognised tables) \u2014\nwithout those references the analysis would be invisible to\nretrieval.",
+        "operationId": "create_custom_analysis_api_custom_analyses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomAnalysisCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_CustomAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Custom Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/custom-analyses/validate": {
+      "post": {
+        "description": "Validate a SQL expression against the full catalog.\n\nDoes not create a CustomAnalysis. Returns 422 when the SQL can't be\nparsed or doesn't resolve to a known table.",
+        "operationId": "validate_custom_analysis_sql_api_custom_analyses_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomAnalysisValidate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlValidationResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Custom Analysis Sql",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/custom-analyses/{analysis_id}": {
+      "delete": {
+        "description": "Delete a CustomAnalysis (with its Sql node and VDB embedding).\n\nReturns 404 when no CustomAnalysis with ``analysis_id`` exists.\nOn success the deleted ``{\"id\": ...}`` is echoed so the UI can\nconfirm the targeted record was removed.",
+        "operationId": "delete_custom_analysis_api_custom_analyses__analysis_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Custom Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      },
+      "put": {
+        "description": "Replace a CustomAnalysis (matched by id) and re-link its Sql node.\n\nReturns 404 when no CustomAnalysis with ``analysis_id`` exists, 409\nwhen ``name`` or ``sql`` is already taken by a different\nCustomAnalysis, and 422 when the SQL can't be parsed against the\ncurrent catalog \u2014 all surface the failure to the UI without\nproducing an inconsistent graph.",
+        "operationId": "update_custom_analysis_api_custom_analyses__analysis_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CustomAnalysisCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_CustomAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Custom Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/datasources/dbs": {
+      "get": {
+        "description": "Databases in the catalog.",
+        "operationId": "list_databases_api_datasources_dbs_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_DatabaseSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Databases",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/exploration/edges": {
+      "get": {
+        "description": "Table connections backed by a shared SQL query or a foreign key.",
+        "operationId": "list_data_exploration_edges_api_exploration_edges_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_ExplorationEdge_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Data Exploration Edges",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/exploration/graph": {
+      "get": {
+        "description": "Return the full data-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the data graph from one request instead of\nwalking the catalog tree (databases \u2192 schemas \u2192 tables) with a request\nper level. Node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``\nregardless of *limit*.",
+        "operationId": "get_data_exploration_graph_api_exploration_graph_get",
+        "parameters": [
+          {
+            "description": "Max nodes returned; always capped at 500 server-side.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "Max nodes returned; always capped at 500 server-side.",
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_DataExplorationGraph_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Data Exploration Graph",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/exploration/nodes/{node_id}/relationships": {
+      "get": {
+        "description": "Return one ordered page of nodes related to ``node_id``.",
+        "operationId": "get_exploration_node_relationships_api_exploration_nodes__node_id__relationships_get",
+        "parameters": [
+          {
+            "description": "Table id when *layer* is ``data``, Term id when it is ``semantic``.",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "description": "Table id when *layer* is ``data``, Term id when it is ``semantic``.",
+              "title": "Node Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Which graph to walk: ``data`` relates tables sharing a SQL query or a foreign key, ``semantic`` relates terms sharing a table.",
+            "in": "query",
+            "name": "layer",
+            "required": true,
+            "schema": {
+              "description": "Which graph to walk: ``data`` relates tables sharing a SQL query or a foreign key, ``semantic`` relates terms sharing a table.",
+              "enum": [
+                "data",
+                "semantic"
+              ],
+              "title": "Layer",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ExplorationRelatedNodes_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Exploration Node Relationships",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/exploration/semantic-graph": {
+      "get": {
+        "description": "Return the full semantic-layer Exploration graph (``{nodes, links}``).\n\nLets the client render the semantic graph from one request instead of\nfetching related terms once per term (an N+1). Node count is capped at\n``MAX_EXPLORATION_GRAPH_NODES`` regardless of *limit*.",
+        "operationId": "get_semantic_exploration_graph_api_exploration_semantic_graph_get",
+        "parameters": [
+          {
+            "description": "Max nodes returned; always capped at 500 server-side.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 500,
+              "description": "Max nodes returned; always capped at 500 server-side.",
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SemanticExplorationGraph_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Semantic Exploration Graph",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/exploration/tables/zones": {
+      "get": {
+        "description": "Return ``{table_id: [zone, ...]}`` for every Table.\n\nUsed by the Exploration graph to render Zone chips on every data node\nwithout a per-node request.",
+        "operationId": "list_table_zones_api_exploration_tables_zones_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_dict_str__list_ZoneChip___"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Table Zones",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/exploration/tables/{table_id}/details": {
+      "get": {
+        "description": "Columns-adjacent SQL and one ordered page of Term details for an Exploration modal.",
+        "operationId": "get_table_exploration_details_api_exploration_tables__table_id__details_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "table_id",
+            "required": true,
+            "schema": {
+              "title": "Table Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_TableExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Table Exploration Details",
+        "tags": [
+          "exploration"
+        ]
+      }
+    },
+    "/api/health": {
+      "get": {
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "All dependencies reachable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Neo4j or Postgres unreachable"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/model/export": {
+      "post": {
+        "description": "Export the scoped catalog + semantic model as a YAML attachment.",
+        "operationId": "export_model_api_model_export_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/x-yaml": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "GSF model YAML, sent as a file attachment"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Export Model",
+        "tags": [
+          "model-interchange"
+        ]
+      }
+    },
+    "/api/model/import": {
+      "post": {
+        "description": "Import a GSF model YAML file or raw YAML body.",
+        "operationId": "import_model_api_model_import_post",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "replace",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Replace",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "embed",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Embed",
+              "type": "boolean"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_import_model_api_model_import_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Import Model",
+        "tags": [
+          "model-interchange"
+        ]
+      }
+    },
+    "/api/nodes/{node_id}": {
+      "patch": {
+        "description": "Update mutable properties of any catalog node.",
+        "operationId": "update_node_api_nodes__node_id__patch",
+        "parameters": [
+          {
+            "description": "Id of any catalog node \u2014 a Database, Schema, Table or Column.",
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "description": "Id of any catalog node \u2014 a Database, Schema, Table or Column.",
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NodeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/NodeUpdateResult"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response Update Node Api Nodes  Node Id  Patch"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Node",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/pql-analyses": {
+      "get": {
+        "description": "All PqlAnalysis nodes ``{id, name, description, pql}``.",
+        "operationId": "list_pql_analyses_api_pql_analyses_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_PqlAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Pql Analyses",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      },
+      "post": {
+        "description": "Create a new PqlAnalysis (verified PQL example) and embed it.\n\nReturns 409 when ``name`` or ``pql`` is already used by another PqlAnalysis.\nThe PQL text is stored as-is \u2014 it is validated against the prediction graph at\npredict time, not here.",
+        "operationId": "create_pql_analysis_api_pql_analyses_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PqlAnalysisCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PqlAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Pql Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/pql-analyses/{analysis_id}": {
+      "delete": {
+        "description": "Delete a PqlAnalysis (with its VDB embedding).\n\nReturns 404 when no PqlAnalysis with ``analysis_id`` exists.",
+        "operationId": "delete_pql_analysis_api_pql_analyses__analysis_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Pql Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      },
+      "put": {
+        "description": "Replace a PqlAnalysis (matched by id) and re-embed it.\n\nReturns 404 when no PqlAnalysis with ``analysis_id`` exists, and 409 when\n``name`` or ``pql`` is already taken by a different PqlAnalysis.",
+        "operationId": "update_pql_analysis_api_pql_analyses__analysis_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PqlAnalysisCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PqlAnalysis_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Pql Analysis",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/question-entity-coverage": {
+      "post": {
+        "description": "Return ranked semantic candidates and a 0\u20131 entity coverage grade.\n\nExtracts entities from the question, retrieves semantic candidates, filters\nby vector distance, enriches via Neo4j, and grades how many entities have\nat least one covering ColumnAttribute candidate.\n\nReturns 422 when the flow cannot produce a result for the question.",
+        "operationId": "entity_coverage_api_question_entity_coverage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EntityCoverageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_EntityCoverageResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Entity Coverage",
+        "tags": [
+          "metadata"
+        ]
+      }
+    },
+    "/api/schemas/{db_id}": {
+      "get": {
+        "description": "Schemas for a database.",
+        "operationId": "list_schemas_by_database_api_schemas__db_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "db_id",
+            "required": true,
+            "schema": {
+              "title": "Db Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/SchemasPayload"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "title": "Response List Schemas By Database Api Schemas  Db Id  Get"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Schemas By Database",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/semantic-compilation/reset": {
+      "post": {
+        "description": "Ask the ingestion service to rebuild every database's semantic layer.\n\nThe service deletes the semantic nodes and embeddings and compiles them\nagain, so the layer is rebuilt without waiting for the next scheduled run.",
+        "operationId": "reset_api_semantic_compilation_reset_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Reset",
+        "tags": [
+          "semantic-compilation"
+        ]
+      }
+    },
+    "/api/semantic-compilation/status": {
+      "get": {
+        "description": "Report whether the semantic layer has been calculated (any Term exists).",
+        "operationId": "semantic_status_api_semantic_compilation_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Semantic Status",
+        "tags": [
+          "semantic-compilation"
+        ]
+      }
+    },
+    "/api/semantic-compilation/trigger": {
+      "post": {
+        "description": "Ask the ingestion service to run (and schedule) semantic compilation.",
+        "operationId": "trigger_api_semantic_compilation_trigger_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Trigger",
+        "tags": [
+          "semantic-compilation"
+        ]
+      }
+    },
+    "/api/sql-attributes": {
+      "get": {
+        "description": "All SqlAttribute nodes with their linked Term.",
+        "operationId": "list_sql_attributes_api_sql_attributes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_SqlAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Sql Attributes",
+        "tags": [
+          "sql-attributes"
+        ]
+      },
+      "post": {
+        "description": "Create a SqlAttribute with its Sql node, linked to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``gsf/connectors/registry.py``). Returns 409 when the name is\nalready taken, 422 when the target Term does not exist or the SQL\ncan't be parsed.",
+        "operationId": "create_sql_attribute_api_sql_attributes_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SqlAttributeCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      }
+    },
+    "/api/sql-attributes/validate": {
+      "post": {
+        "description": "Validate a SQL expression against the catalog.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``gsf/connectors/registry.py``). Does not create a SqlAttribute.\nReturns 422 when the SQL can't be parsed or doesn't resolve to a\nknown table.",
+        "operationId": "validate_sql_attribute_api_sql_attributes_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SqlAttributeValidate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlExpressionValidationResult_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Validate Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      }
+    },
+    "/api/sql-attributes/{attr_id}": {
+      "delete": {
+        "description": "Delete a SqlAttribute and its edges.",
+        "operationId": "delete_sql_attribute_api_sql_attributes__attr_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      },
+      "get": {
+        "description": "One SqlAttribute by id, including its resolved zones.",
+        "operationId": "get_sql_attribute_api_sql_attributes__attr_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      },
+      "patch": {
+        "description": "Patch SqlAttribute name/description without touching SQL expression.",
+        "operationId": "patch_sql_attribute_api_sql_attributes__attr_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SqlAttributeMetadataPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SqlAttributePatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      },
+      "put": {
+        "description": "Replace a SqlAttribute, re-parse SQL, and re-link to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``gsf/connectors/registry.py``). Returns 404 when no SqlAttribute\nwith that id exists, 409 on name conflict, 422 when the Term doesn't\nexist or SQL can't be parsed.",
+        "operationId": "update_sql_attribute_api_sql_attributes__attr_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SqlAttributeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Sql Attribute",
+        "tags": [
+          "sql-attributes"
+        ]
+      }
+    },
+    "/api/sql-attributes/{attr_id}/description-suggestion": {
+      "get": {
+        "description": "LLM-generated (or cached) description suggestion for a SqlAttribute.\n\nReturns 404 when no SqlAttribute with that id exists. ``data`` is\n``null`` when a suggestion could not be produced (e.g. the LLM call\nfailed) \u2014 that is not treated as an error.",
+        "operationId": "get_sql_attribute_description_suggestion_api_sql_attributes__attr_id__description_suggestion_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DescriptionSuggestionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sql Attribute Description Suggestion",
+        "tags": [
+          "sql-attributes"
+        ]
+      }
+    },
+    "/api/tables/{schema_id}": {
+      "get": {
+        "description": "Tables under a schema (lazy tree).",
+        "operationId": "list_tables_by_schema_api_tables__schema_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "schema_id",
+            "required": true,
+            "schema": {
+              "title": "Schema Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Accepted for API compatibility and ignored \u2014 schema ids are globally unique, so the database is already implied.",
+            "in": "query",
+            "name": "database_name",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Accepted for API compatibility and ignored \u2014 schema ids are globally unique, so the database is already implied.",
+              "title": "Database Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TableSummary_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Tables By Schema",
+        "tags": [
+          "datasources",
+          "connectors"
+        ]
+      }
+    },
+    "/api/terms": {
+      "get": {
+        "description": "Return Term nodes.\n\n*q*, when given, filters to terms whose name contains it\n(case-insensitive).\n\nTerms come back ordered by name, and *skip*/*limit* select one page of\nthat order; ``total`` reports how many match in full, so a caller knows\nwhen to stop asking. Omitting *limit* returns every matching term.\n\nEach returned term carries its resolved ``zones``, so the Terms list\nand the Exploration graph can render Zone chips from this single\nresponse without a separate per-page zones request.\n\n``column_attribute_counts``, ``sql_attribute_counts`` and\n``related_counts`` are per-term breakdowns (``[{term_id, count}, ...]``)\nthat let the Terms list render per-card badges without an N+1 fetch, and\ncover the terms on this page (see ``service.list_terms_page``). The\nunderlying ColumnAttribute/SqlAttribute nodes are fetched separately, only\nfor the focused Term, via ``/terms/{term_id}/column-attributes`` and\n``/terms/{term_id}/sql-attributes`` below \u2014 this endpoint stays\ncounts-only so the Terms list never pulls attribute nodes it won't show.",
+        "operationId": "list_terms_api_terms_get",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the term name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the term name.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TermsPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Terms",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/terms/{term_id}": {
+      "get": {
+        "description": "Return a single Term node by id, including zones and related terms.",
+        "operationId": "get_term_api_terms__term_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_TermDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Term",
+        "tags": [
+          "terms"
+        ]
+      },
+      "patch": {
+        "description": "Update a Term and invalidate dependent SqlAttribute suggestions.",
+        "operationId": "update_term_api_terms__term_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TermUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Term_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Term",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/terms/{term_id}/column-attributes": {
+      "get": {
+        "description": "Return ColumnAttribute nodes for a single Term.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.\n\nEach attribute includes ``primary_column`` and ``referenced_columns``\n(catalog path ids + names) for navigation from the detail page.",
+        "operationId": "list_term_column_attributes_by_id_api_terms__term_id__column_attributes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_ColumnAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Term Column Attributes By Id",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/terms/{term_id}/column-attributes/{attr_id}": {
+      "patch": {
+        "description": "Update ColumnAttribute name/description/sample_values and refresh embeddings.\n\n``sample_values`` are persisted on the owning Column and also refresh that\nColumn's data-VDB embedding (same behaviour as catalog column edit).",
+        "operationId": "update_column_attribute_api_terms__term_id__column_attributes__attr_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "ColumnAttribute id, not a SqlAttribute id.",
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "description": "ColumnAttribute id, not a SqlAttribute id.",
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ColumnAttributeUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnAttributePatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Column Attribute",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/terms/{term_id}/sql-attributes": {
+      "get": {
+        "description": "Return SqlAttribute nodes for a single Term.\n\nAttributes come back ordered by name, and *skip*/*limit* select one page\nof that order. ``count`` is the length of ``data`` (this page), ``total``\nthe number of attributes the term has in full.",
+        "operationId": "list_term_sql_attributes_by_id_api_terms__term_id__sql_attributes_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_SqlAttribute_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Term Sql Attributes By Id",
+        "tags": [
+          "terms"
+        ]
+      }
+    },
+    "/api/zones": {
+      "get": {
+        "description": "Return every zone to the requesting user.",
+        "operationId": "list_zones_api_zones_get",
+        "parameters": [
+          {
+            "description": "Requesting user id",
+            "in": "query",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "Requesting user id",
+              "title": "Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Zone_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Zones",
+        "tags": [
+          "zones"
+        ]
+      },
+      "post": {
+        "description": "Create a zone and attach catalog items.  Requires admin role.",
+        "operationId": "create_zone_api_zones_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoneCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Zone_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Zone",
+        "tags": [
+          "zones"
+        ]
+      }
+    },
+    "/api/zones/{zone_id}": {
+      "delete": {
+        "description": "Delete one zone by id.",
+        "operationId": "delete_zone_api_zones__zone_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Zone",
+        "tags": [
+          "zones"
+        ]
+      },
+      "get": {
+        "description": "Return one zone with its catalog data items.",
+        "operationId": "get_zone_api_zones__zone_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Requesting user id",
+            "in": "query",
+            "name": "uid",
+            "required": true,
+            "schema": {
+              "description": "Requesting user id",
+              "title": "Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Zone_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Zone",
+        "tags": [
+          "zones"
+        ]
+      },
+      "patch": {
+        "description": "Update zone fields and optionally replace catalog data items.",
+        "operationId": "update_zone_api_zones__zone_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoneUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Zone_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Zone",
+        "tags": [
+          "zones"
+        ]
+      }
+    },
+    "/api/zones/{zone_id}/status": {
+      "patch": {
+        "description": "Enable or disable a zone.  Requires admin role.\n\nDisabling swaps the zone's Neo4j label from ``Zone`` to ``disableZone``\n(re-enabling reverses it), which immediately revokes the catalog access\nthe zone granted without deleting it.",
+        "operationId": "set_zone_status_api_zones__zone_id__status_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "zone_id",
+            "required": true,
+            "schema": {
+              "title": "Zone Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Admin user id performing the request",
+            "in": "query",
+            "name": "admin_uid",
+            "required": true,
+            "schema": {
+              "description": "Admin user id performing the request",
+              "title": "Admin Uid",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ZoneStatusUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Zone_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Zone Status",
+        "tags": [
+          "zones"
+        ]
+      }
+    }
+  }
+}

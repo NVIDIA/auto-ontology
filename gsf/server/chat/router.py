@@ -63,10 +63,27 @@ from gsf.retrieval.text_to_sql.visualization import analyze_and_visualize
 from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, VisualizeRequest
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
+from gsf.server.responses import ChartsResponse, ChatCancelResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class EventStreamResponse(StreamingResponse):
+    """Declares the SSE media type so the spec doesn't also claim JSON."""
+
+    media_type = "text/event-stream"
+
+
+# The two streaming routes emit OpenAI-style SSE frames rather than a JSON
+# body, so they document a media type instead of a response_model.
+SSE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        "description": "Server-sent events; the stream ends with `data: [DONE]`",
+    }
+}
 
 # Built once at import time, same fallback order as the main agent pipeline
 # (gsf.retrieval.text_to_sql.main): prefer the cheaper non-reasoning model,
@@ -295,7 +312,11 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
     yield "data: [DONE]\n\n"
 
 
-@router.post("/chat/completions")
+@router.post(
+    "/chat/completions",
+    response_class=EventStreamResponse,
+    responses=SSE_RESPONSES,
+)
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
@@ -355,7 +376,11 @@ async def chat_completions(
     )
 
 
-@router.get("/chat/watch")
+@router.get(
+    "/chat/watch",
+    response_class=EventStreamResponse,
+    responses=SSE_RESPONSES,
+)
 async def chat_watch(conversation_id: str) -> StreamingResponse:
     """Reattach to an in-flight run for ``conversation_id``, if any.
 
@@ -396,7 +421,7 @@ async def chat_watch(conversation_id: str) -> StreamingResponse:
     )
 
 
-@router.post("/chat/cancel")
+@router.post("/chat/cancel", response_model=ChatCancelResponse)
 async def chat_cancel(conversation_id: str) -> dict[str, bool]:
     """Abort the in-flight run for ``conversation_id``, if any.
 
@@ -422,7 +447,7 @@ async def chat_cancel(conversation_id: str) -> dict[str, bool]:
     return {"cancelled": True}
 
 
-@router.post("/chat/visualize")
+@router.post("/chat/visualize", response_model=ChartsResponse)
 async def chat_visualize(request: VisualizeRequest) -> dict[str, Any]:
     """Second step: recommend a chart for an already-executed SQL result.
 

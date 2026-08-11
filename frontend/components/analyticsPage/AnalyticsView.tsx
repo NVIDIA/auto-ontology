@@ -24,12 +24,12 @@ const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 	{
-		key: 'questionTimestamp',
+		key: 'question_timestamp',
 		header: 'Timestamp',
 		width: 'w-44',
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
-		cell: (row) => formatDate(row.questionTimestamp),
+		cell: (row) => formatDate(row.question_timestamp),
 	},
 	{
 		key: 'user',
@@ -116,7 +116,7 @@ export const AnalyticsView = () => {
 			CSV_HEADERS.join(','),
 			...analytics.map((row) =>
 				[
-					formatDate(row.questionTimestamp),
+					formatDate(row.question_timestamp),
 					row.user.name || row.user.email,
 					row.source ?? '',
 					row.question ?? '',

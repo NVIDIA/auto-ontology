@@ -6,6 +6,7 @@ import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
 import { Role } from '@/enums/auth';
+import { analyticsSelect } from '@/lib/apiSelects';
 
 // Analytics always cover a fixed trailing window; not configurable per-request.
 const ANALYTICS_DAYS = 30;
@@ -26,16 +27,16 @@ export const GET = withPermission({ analytics: ['read'] })(async (request) => {
 	const limit = limitParam != null ? parseIntParam(limitParam, 0) : null;
 
 	const cutoff = new Date(Date.now() - ANALYTICS_DAYS * 24 * 60 * 60 * 1000);
-	const where = { questionTimestamp: { gte: cutoff } };
+	const where = { question_timestamp: { gte: cutoff } };
 
 	const total = await prisma.conversationAnalytics.count({ where });
 	// The row stores only `userId`; join the User to resolve the display name.
 	const rows = await prisma.conversationAnalytics.findMany({
 		where,
-		orderBy: { questionTimestamp: 'desc' },
+		orderBy: { question_timestamp: 'desc' },
 		skip,
 		...(limit != null ? { take: limit } : {}),
-		include: { user: { select: { id: true, name: true, email: true, role: true } } },
+		select: analyticsSelect,
 	});
 
 	const data = rows.map((row) => ({

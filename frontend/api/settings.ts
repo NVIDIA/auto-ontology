@@ -14,8 +14,8 @@ export type Acronym = {
 	id: string;
 	name: string;
 	description: string;
-	createdAt: string;
-	updatedAt: string;
+	created_at: string;
+	updated_at: string;
 };
 
 async function json<T>(input: RequestInfo, init?: RequestInit): Promise<T> {

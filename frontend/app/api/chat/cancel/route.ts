@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const POST = withPermission({ conversation: ['write'] })(async (req, { user }) => {
-	const conversationId = new URL(req.url).searchParams.get('conversationId');
+	const conversationId = new URL(req.url).searchParams.get('conversation_id');
 	const conversation = conversationId ? await findOwnedConversation(user, conversationId) : null;
 
 	if (!conversation) {

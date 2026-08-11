@@ -20,9 +20,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const GET = withPermission({ conversation: ['read'] })(async (req, { user }) => {
-	const conversationId = new URL(req.url).searchParams.get('conversationId');
+	const conversationId = new URL(req.url).searchParams.get('conversation_id');
 	if (!conversationId) {
-		return new Response('Missing conversationId', { status: 400 });
+		return new Response('Missing conversation_id', { status: 400 });
 	}
 
 	const conversation = await findOwnedConversation(user, conversationId);

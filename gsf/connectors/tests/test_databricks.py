@@ -270,12 +270,26 @@ def test_schema_condition_escapes_quotes() -> None:
 
 
 def test_single_schema_lists_tables_with_show_tables() -> None:
-    """SHOW TABLES is scoped to one schema; information_schema spans the catalog."""
+    """SHOW TABLES is scoped to one schema; information_schema spans the catalog.
+
+    SHOW TABLES lists views alongside tables and carries no type column, so a
+    second SHOW VIEWS supplies the names to classify — otherwise a view would be
+    ingested as a base table.
+    """
     db = DatabricksDatabase(_connection_string(), schemas=["nbu_dmt_explorer"])
     issued: list[str] = []
 
     def fake_execute(sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
-        issued.append(" ".join(sql_text.split()))
+        normalised = " ".join(sql_text.split())
+        issued.append(normalised)
+        if normalised.startswith("SHOW VIEWS"):
+            return pd.DataFrame(
+                {
+                    "namespace": ["nbu_dmt_explorer"],
+                    "viewname": ["customers"],
+                    "istemporary": [False],
+                }
+            )
         return pd.DataFrame(
             {
                 "database": ["nbu_dmt_explorer", "nbu_dmt_explorer"],
@@ -287,12 +301,15 @@ def test_single_schema_lists_tables_with_show_tables() -> None:
     db.execute = fake_execute  # type: ignore[method-assign]
     tables = db.get_tables()
 
-    assert issued == ["SHOW TABLES IN `main`.`nbu_dmt_explorer`"]
+    assert issued == [
+        "SHOW TABLES IN `main`.`nbu_dmt_explorer`",
+        "SHOW VIEWS IN `main`.`nbu_dmt_explorer`",
+    ]
     assert not any("information_schema" in q for q in issued)
     assert list(tables["table_name"]) == ["orders", "customers"]
     assert list(tables["table_schema"]) == ["nbu_dmt_explorer"] * 2
-    # SHOW TABLES carries no type, so everything is reported as a base table.
-    assert set(tables["table_type"]) == {TableTypes.BASE_TABLE}
+    # `customers` is in the SHOW VIEWS result, so only `orders` is a base table.
+    assert list(tables["table_type"]) == [TableTypes.BASE_TABLE, TableTypes.VIEW]
 
 
 def test_single_schema_describes_each_table_on_one_connection() -> None:

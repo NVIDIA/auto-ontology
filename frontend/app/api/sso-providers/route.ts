@@ -11,8 +11,14 @@ import { withPublic } from '@/auth/with-auth';
  * decide whether to show the "Sign in with SSO" option.
  */
 export const GET = withPublic(async () => {
-	const providers = await getPrisma().ssoProvider.findMany({
+	const rows = await getPrisma().ssoProvider.findMany({
 		select: { providerId: true, issuer: true, domain: true },
 	});
+	// `providerId` is Better Auth's column name; the API publishes snake_case.
+	const providers = rows.map(({ providerId, issuer, domain }) => ({
+		provider_id: providerId,
+		issuer,
+		domain,
+	}));
 	return NextResponse.json({ providers });
 });

@@ -6,13 +6,26 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from gsf.server.custom_analyses import service as custom_analyses_dal
 from gsf.server.datasources import service as dal
 from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.pql_analyses import service as pql_analyses_dal
+from gsf.server.models import NodeUpdateResult
+from gsf.server.responses import (
+    CustomAnalysisListResponse,
+    CustomAnalysisResponse,
+    DatabaseListResponse,
+    IdResponse,
+    PqlAnalysisListResponse,
+    PqlAnalysisResponse,
+    SchemasPayload,
+    SqlValidationResponse,
+    TableColumnsPageResponse,
+    TableListResponse,
+)
 
 
 class NodeUpdate(BaseModel):
@@ -56,30 +69,32 @@ def _count_payload(data: object) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/schemas/{db_id}")
-def list_schemas_by_database(
-    db_id: str,
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Schemas for a database, zone-scoped when zone_ids are provided."""
-    result = dal.fetch_schemas_for_database(db_id, zone_ids=zone_ids)
+@router.get("/schemas/{db_id}", response_model=SchemasPayload | None)
+def list_schemas_by_database(db_id: str) -> dict:
+    """Schemas for a database."""
+    result = dal.fetch_schemas_for_database(db_id, zone_ids=None)
     return result
 
 
-@router.get("/tables/{schema_id}")
+@router.get("/tables/{schema_id}", response_model=TableListResponse)
 def list_tables_by_schema(
     schema_id: str,
-    database_name: str | None = None,
-    zone_ids: list[str] | None = Query(default=None),
+    database_name: str | None = Query(
+        default=None,
+        description=(
+            "Accepted for API compatibility and ignored — schema ids are "
+            "globally unique, so the database is already implied."
+        ),
+    ),
 ) -> dict:
-    """Tables under a schema (lazy tree), zone-scoped when zone_ids are provided."""
+    """Tables under a schema (lazy tree)."""
     rows = dal.fetch_tables_for_schema(
-        schema_id, database_name=database_name, zone_ids=zone_ids
+        schema_id, database_name=database_name, zone_ids=None
     )
     return _count_payload(rows)
 
 
-@router.get("/columns/{table_id}")
+@router.get("/columns/{table_id}", response_model=TableColumnsPageResponse)
 def list_columns_by_table(
     table_id: str,
     skip: int = SKIP_QUERY,
@@ -121,10 +136,10 @@ def list_columns_by_table(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/datasources/dbs")
-def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
-    """Databases visible via the given zones (all when zone_ids is absent)."""
-    rows = dal.fetch_databases(zone_ids=zone_ids)
+@router.get("/datasources/dbs", response_model=DatabaseListResponse)
+def list_databases() -> dict:
+    """Databases in the catalog."""
+    rows = dal.fetch_databases(zone_ids=None)
     return _count_payload(rows)
 
 
@@ -133,14 +148,14 @@ def list_databases(zone_ids: list[str] | None = Query(default=None)) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/custom-analyses")
-def list_custom_analyses(zone_ids: list[str] | None = Query(default=None)) -> dict:
-    """CustomAnalysis nodes joined with their HAS_SQL neighbour, zone-scoped when zone_ids are provided."""
-    rows = custom_analyses_dal.list_custom_analyses(zone_ids=zone_ids)
+@router.get("/custom-analyses", response_model=CustomAnalysisListResponse)
+def list_custom_analyses() -> dict:
+    """CustomAnalysis nodes joined with their HAS_SQL neighbour."""
+    rows = custom_analyses_dal.list_custom_analyses(zone_ids=None)
     return _count_payload(rows)
 
 
-@router.post("/custom-analyses/validate")
+@router.post("/custom-analyses/validate", response_model=SqlValidationResponse)
 def validate_custom_analysis_sql(body: CustomAnalysisValidate) -> dict:
     """Validate a SQL expression against the full catalog.
 
@@ -154,7 +169,7 @@ def validate_custom_analysis_sql(body: CustomAnalysisValidate) -> dict:
     return {"data": result}
 
 
-@router.post("/custom-analyses", status_code=201)
+@router.post("/custom-analyses", status_code=201, response_model=CustomAnalysisResponse)
 def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
     """Create a new CustomAnalysis with its Sql node.
 
@@ -185,7 +200,7 @@ def create_custom_analysis(body: CustomAnalysisCreate) -> dict:
     return {"data": row}
 
 
-@router.put("/custom-analyses/{analysis_id}")
+@router.put("/custom-analyses/{analysis_id}", response_model=CustomAnalysisResponse)
 def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict:
     """Replace a CustomAnalysis (matched by id) and re-link its Sql node.
 
@@ -218,7 +233,7 @@ def update_custom_analysis(analysis_id: str, body: CustomAnalysisCreate) -> dict
     return {"data": row}
 
 
-@router.delete("/custom-analyses/{analysis_id}")
+@router.delete("/custom-analyses/{analysis_id}", response_model=IdResponse)
 def delete_custom_analysis(analysis_id: str) -> dict:
     """Delete a CustomAnalysis (with its Sql node and VDB embedding).
 
@@ -240,13 +255,13 @@ def delete_custom_analysis(analysis_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/pql-analyses")
+@router.get("/pql-analyses", response_model=PqlAnalysisListResponse)
 def list_pql_analyses() -> dict:
     """All PqlAnalysis nodes ``{id, name, description, pql}``."""
     return _count_payload(pql_analyses_dal.list_pql_analyses())
 
 
-@router.post("/pql-analyses", status_code=201)
+@router.post("/pql-analyses", status_code=201, response_model=PqlAnalysisResponse)
 def create_pql_analysis(body: PqlAnalysisCreate) -> dict:
     """Create a new PqlAnalysis (verified PQL example) and embed it.
 
@@ -268,7 +283,7 @@ def create_pql_analysis(body: PqlAnalysisCreate) -> dict:
     return {"data": row}
 
 
-@router.put("/pql-analyses/{analysis_id}")
+@router.put("/pql-analyses/{analysis_id}", response_model=PqlAnalysisResponse)
 def update_pql_analysis(analysis_id: str, body: PqlAnalysisCreate) -> dict:
     """Replace a PqlAnalysis (matched by id) and re-embed it.
 
@@ -296,7 +311,7 @@ def update_pql_analysis(analysis_id: str, body: PqlAnalysisCreate) -> dict:
     return {"data": row}
 
 
-@router.delete("/pql-analyses/{analysis_id}")
+@router.delete("/pql-analyses/{analysis_id}", response_model=IdResponse)
 def delete_pql_analysis(analysis_id: str) -> dict:
     """Delete a PqlAnalysis (with its VDB embedding).
 
@@ -316,8 +331,21 @@ def delete_pql_analysis(analysis_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.patch("/nodes/{node_id}")
-def update_node(node_id: str, body: NodeUpdate) -> dict:
+@router.patch(
+    "/nodes/{node_id}",
+    response_model=NodeUpdateResult | None,
+    # The body echoes only the properties the patch actually sent, so the
+    # model's other fields must not be filled in with nulls that the handler
+    # never returned — this keeps the response byte-identical to before it was
+    # typed.
+    response_model_exclude_unset=True,
+)
+def update_node(
+    node_id: str = Path(
+        description="Id of any catalog node — a Database, Schema, Table or Column."
+    ),
+    body: NodeUpdate = ...,
+) -> dict:
     """Update mutable properties of any catalog node."""
     props = body.model_dump(exclude_none=True)
     result = dal.update_node_properties(node_id, props)

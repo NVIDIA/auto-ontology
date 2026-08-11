@@ -9,8 +9,8 @@ export type ConversationAnalytics = {
 	user: User;
 	source: string;
 	question: string;
-	questionTimestamp: string;
+	question_timestamp: string;
 	response: string | null;
-	responseTimestamp: string | null;
+	response_timestamp: string | null;
 	sql: string | null;
 };

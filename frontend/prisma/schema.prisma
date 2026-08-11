@@ -9,30 +9,30 @@ generator client {
 }
 
 model Conversation {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id")
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String    @default("")
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  messages  Message[]
+  id         String    @id @default(uuid()) @db.Uuid
+  user_id    String    @map("user_id")
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  title      String    @default("")
+  created_at DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updated_at DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  messages   Message[]
 
-  @@index([userId])
+  @@index([user_id])
   @@map("conversations")
   @@schema("public")
 }
 
 model Message {
-  id             String       @id @default(uuid()) @db.Uuid
-  conversationId String       @map("conversation_id") @db.Uuid
-  role           String
-  content        String       @default("")
-  sqlCode        String?      @map("sql_code")
-  sqlResponse    String?      @map("sql_response")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id              String       @id @default(uuid()) @db.Uuid
+  conversation_id String       @map("conversation_id") @db.Uuid
+  role            String
+  content         String       @default("")
+  sql_code        String?      @map("sql_code")
+  sql_response    String?      @map("sql_response")
+  created_at      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
 
-  @@index([conversationId, createdAt])
+  @@index([conversation_id, created_at])
   @@map("messages")
   @@schema("public")
 }
@@ -54,9 +54,9 @@ model Prompt {
 //                                  (auto-generate visualizations for SQL results;
 //                                   a missing row means enabled)
 model Configuration {
-  key       String   @id
-  value     String
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  key        String   @id
+  value      String
+  updated_at DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("configurations")
   @@schema("public")
@@ -66,25 +66,25 @@ model Acronym {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @unique
   description String   @default("")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updated_at  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("acronyms")
   @@schema("public")
 }
 
 model ConversationAnalytics {
-  id                String    @id @default(uuid()) @db.Uuid
-  userId            String    @map("user_id")
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  source            String    @default("app") @map("source")
-  question          String    @default("")
-  questionTimestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
-  response          String?
-  responseTimestamp DateTime? @map("response_timestamp") @db.Timestamptz
-  sql               String?
+  id                 String    @id @default(uuid()) @db.Uuid
+  user_id            String    @map("user_id")
+  user               User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  source             String    @default("app") @map("source")
+  question           String    @default("")
+  question_timestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
+  response           String?
+  response_timestamp DateTime? @map("response_timestamp") @db.Timestamptz
+  sql                String?
 
-  @@index([userId])
+  @@index([user_id])
   @@map("conversation_analytics")
   @@schema("public")
 }

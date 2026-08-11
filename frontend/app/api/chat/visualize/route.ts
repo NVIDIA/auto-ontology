@@ -75,16 +75,16 @@ const persistResultMessage = async (
 	const prisma = getPrisma();
 	await prisma.message.create({
 		data: {
-			conversationId,
+			conversation_id: conversationId,
 			role: 'assistant',
 			content: message.content,
-			sqlCode: null,
-			sqlResponse: message.sqlResponse ?? null,
+			sql_code: null,
+			sql_response: message.sqlResponse ?? null,
 		},
 	});
 	await prisma.conversation.update({
 		where: { id: conversationId },
-		data: { updatedAt: new Date() },
+		data: { updated_at: new Date() },
 	});
 };
 

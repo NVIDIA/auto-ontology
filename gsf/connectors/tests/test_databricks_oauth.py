@@ -18,6 +18,9 @@ from gsf.connectors.databricks_oauth import (
 @pytest.fixture(autouse=True)
 def _clear_cache() -> None:
     databricks_oauth.clear_cache()
+    # `any_connection_uses_sso_federation` memoises for a TTL, so without this a
+    # result cached by one test decides the answer in the next.
+    databricks_oauth.invalidate_sso_federation_cache()
 
 
 def _response(status: int, payload: dict[str, Any]) -> httpx.Response:
@@ -158,6 +161,10 @@ def test_any_connection_uses_sso_federation(monkeypatch: MonkeyPatch) -> None:
             {"type": "databricks", "sso_federation": True},
         ],
     )
+    # The answer is cached for a TTL, so changing the stored connections only
+    # takes effect after an invalidation — which is exactly what
+    # `service.set_sso_federation` does when the flag is toggled.
+    databricks_oauth.invalidate_sso_federation_cache()
     assert databricks_oauth.any_connection_uses_sso_federation() is True
 
 

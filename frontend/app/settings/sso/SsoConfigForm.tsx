@@ -166,10 +166,10 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 								theme={ButtonTheme.DangerSubtle}
 								size={Size.REGULAR}
 								type="button"
-								onClick={() => handleDelete(provider.providerId)}
-								disabled={deletingId === provider.providerId}
+								onClick={() => handleDelete(provider.provider_id)}
+								disabled={deletingId === provider.provider_id}
 							>
-								{deletingId === provider.providerId
+								{deletingId === provider.provider_id
 									? 'Deleting…'
 									: 'Delete provider'}
 							</Button>

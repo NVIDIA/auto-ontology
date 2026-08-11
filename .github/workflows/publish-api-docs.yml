@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Renders docs/openapi/gsf-api.json as a Redoc site and publishes it to GitHub
+# Pages, because GitHub itself has no OpenAPI viewer — the committed JSON is
+# readable by tooling, not by people.
+#
+# BEFORE THIS CAN RUN: Settings → Pages → Source must be set to "GitHub
+# Actions". Until then this job fails; the deploy step is what needs it.
+#
+# ON VISIBILITY: this repository is private, but a Pages site is only private
+# on GitHub Enterprise Cloud with private Pages enabled. Anywhere else the
+# published site — the whole API surface, including which permission each
+# operation requires — is world-readable. Confirm the Pages visibility setting
+# before merging.
+
+name: Publish API docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/openapi/gsf-api.json"
+      - ".github/workflows/publish-api-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never let two publishes race; drop queued runs rather than deploying stale
+# docs, but let an in-flight one finish so Pages is not left half-updated.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and deploy Redoc
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the Redoc site
+        env:
+          REDOCLY_TELEMETRY: off
+        # Pinned to v1: `build-docs` was removed in v2.
+        run: npx --yes @redocly/cli@1 build-docs docs/openapi/gsf-api.json -o site/index.html
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

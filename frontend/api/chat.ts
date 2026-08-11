@@ -220,11 +220,8 @@ export const watchChat = (
 
 	(async () => {
 		try {
-			// Query param is deliberately `conversationId` (not `conversation_id`):
-			// `proxy.ts` auto-rewrites any `/api/*` query key ending in `_id` into a
-			// path segment (e.g. `?db_id=x` -> `/x`), which would 404 this route.
 			const res = await fetch(
-				`/api/chat/watch?conversationId=${encodeURIComponent(conversationId)}`,
+				`/api/chat/watch?conversation_id=${encodeURIComponent(conversationId)}`,
 				{ signal: controller.signal },
 			);
 
@@ -253,8 +250,7 @@ export const watchChat = (
  * means the agent finishes on its own.
  */
 export const cancelChat = async (conversationId: string): Promise<void> => {
-	// Query param is deliberately `conversationId` — see `watchChat`.
-	await fetch(`/api/chat/cancel?conversationId=${encodeURIComponent(conversationId)}`, {
+	await fetch(`/api/chat/cancel?conversation_id=${encodeURIComponent(conversationId)}`, {
 		method: 'POST',
 	});
 };

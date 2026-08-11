@@ -17,7 +17,7 @@ export const findOwnedConversation = async (
 ): Promise<{ id: string } | null> => {
 	const prisma = getPrisma();
 	return prisma.conversation.findFirst({
-		where: { id: conversationId, userId: user.id },
+		where: { id: conversationId, user_id: user.id },
 		select: { id: true },
 	});
 };
@@ -50,7 +50,7 @@ export const resolveOrCreateOwnedConversation = async (
 		if (clash) return null;
 
 		return await prisma.conversation.create({
-			data: { id: conversationId, userId: user.id, title },
+			data: { id: conversationId, user_id: user.id, title },
 			select: { id: true },
 		});
 	} catch {

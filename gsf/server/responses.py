@@ -1,0 +1,286 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""Response envelopes shared by the API routers.
+
+Every route declares a ``response_model`` so the generated OpenAPI spec
+describes what callers actually receive, not just ``{}``. This module owns
+the envelope (``data``/``count``/``total``); ``gsf/server/models.py`` owns
+the item models that go inside it, and the aliases at the bottom of this file
+bind the two together — a router imports one name per route.
+
+Every model allows extra keys (see :class:`gsf.server.models.ApiModel`).
+FastAPI would otherwise *drop* any field a handler returns that the model
+does not declare, which would turn a documentation change into a breaking
+API change.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Generic, TypeVar
+
+from gsf.server.models import (
+    ApiModel as _Payload,  # extra="allow" base — see the module docstring
+)
+from gsf.server.models import (
+    ColumnAttribute,
+    CustomAnalysis,
+    DataExplorationGraph,
+    DatabaseSummary,
+    EntityCoverageResult,
+    ExplorationEdge,
+    ExplorationRelatedNodes,
+    IdRef,
+    PqlAnalysis,
+    PublicConnection,
+    SchemaSummary,
+    SemanticExplorationGraph,
+    SqlAttribute,
+    SsoFederationState,
+    SqlExpressionValidationResult,
+    SqlValidationResult,
+    TableColumns,
+    TableExplorationDetails,
+    TableSummary,
+    Term,
+    TermCountEntry,
+    TermDetail,
+    TermListItem,
+    Zone,
+    ZoneChip,
+)
+
+T = TypeVar("T")
+
+JsonObject = dict[str, Any]
+
+__all__ = [
+    "ChartsResponse",
+    "ChatCancelResponse",
+    "ColumnAttributePageResponse",
+    "ColumnAttributePatchResponse",
+    "ColumnAttributeResponse",
+    "ConnectionListResponse",
+    "ConnectionResponse",
+    "ConnectionTestResponse",
+    "CustomAnalysisListResponse",
+    "CustomAnalysisResponse",
+    "DataExplorationGraphResponse",
+    "DataResponse",
+    "DatabaseListResponse",
+    "DescriptionSuggestionResponse",
+    "EntityCoverageResponse",
+    "ExplorationEdgeListResponse",
+    "ExplorationRelatedNodesResponse",
+    "HealthResponse",
+    "IdResponse",
+    "JsonObject",
+    "ListResponse",
+    "ModelImportResponse",
+    "ObjectPageResponse",
+    "PagedListResponse",
+    "PqlAnalysisListResponse",
+    "PqlAnalysisResponse",
+    "SchemasPayload",
+    "SemanticExplorationGraphResponse",
+    "SemanticStatusResponse",
+    "SqlAttributeListResponse",
+    "SqlAttributePageResponse",
+    "SqlAttributePatchResponse",
+    "SqlAttributeResponse",
+    "SqlExpressionValidationResponse",
+    "SqlValidationResponse",
+    "SsoFederationResponse",
+    "StatusResponse",
+    "TableColumnsPageResponse",
+    "TableExplorationDetailsResponse",
+    "TableListResponse",
+    "TableZonesResponse",
+    "TermDetailResponse",
+    "TermResponse",
+    "TermsPageResponse",
+    "ZoneListResponse",
+    "ZoneResponse",
+]
+
+
+# ---------------------------------------------------------------------------
+# Generic envelopes
+# ---------------------------------------------------------------------------
+
+
+class DataResponse(_Payload, Generic[T]):
+    """``{"data": <item>}`` — the single-item envelope."""
+
+    data: T
+
+
+class ListResponse(_Payload, Generic[T]):
+    """``{"data": [...], "count": n}`` — ``count`` is the length of ``data``."""
+
+    data: list[T]
+    count: int
+
+
+class PagedListResponse(ListResponse[T], Generic[T]):
+    """A list envelope whose ``total`` counts every match, not just this page."""
+
+    total: int
+
+
+class ObjectPageResponse(_Payload, Generic[T]):
+    """A paged envelope whose ``data`` is an object rather than a list.
+
+    ``/columns/{table_id}`` wraps ``{columns: [...]}``, so ``count`` is
+    always 1 and ``total`` counts the table's columns.
+    """
+
+    data: T
+    count: int
+    total: int
+
+
+# ---------------------------------------------------------------------------
+# Status / acknowledgement responses
+# ---------------------------------------------------------------------------
+
+
+class StatusResponse(_Payload):
+    """``{"status": "ok"}`` or ``{"status": "accepted"}`` for async triggers."""
+
+    status: str
+
+
+class HealthResponse(_Payload):
+    """Liveness/readiness body — 200 when healthy, 503 when degraded."""
+
+    status: str
+    neo4j: dict[str, str]
+    postgres: dict[str, str]
+
+
+class SemanticStatusResponse(_Payload):
+    calculated: bool
+
+
+class ChatCancelResponse(_Payload):
+    cancelled: bool
+
+
+# ---------------------------------------------------------------------------
+# Route-specific shapes
+# ---------------------------------------------------------------------------
+
+
+class ChartsResponse(_Payload):
+    """``charts`` is null when the model declined to propose a chart."""
+
+    charts: list[JsonObject] | None
+
+
+class ConnectionTestResponse(_Payload):
+    """``schemas`` is empty for connectors that cannot enumerate schemas."""
+
+    success: bool
+    schemas: list[str]
+
+
+class ModelImportResponse(_Payload):
+    success: bool
+    summary: JsonObject
+
+
+class SchemasPayload(_Payload):
+    """``/schemas/{db_id}`` — unenveloped; null when the database is missing."""
+
+    schemas_count: int
+    schemas: list[SchemaSummary]
+
+
+class DescriptionSuggestionResponse(_Payload):
+    """``data`` is null when no description could be suggested."""
+
+    data: str | None
+
+
+class ColumnAttributePatchResponse(_Payload):
+    """``term_certification`` is the owning Term's badge, recomputed on write.
+
+    The patch returns it alongside ``data`` so the Terms list can update the
+    badge without a second request, which is why this needs its own model
+    rather than the plain ``DataResponse`` envelope.
+    """
+
+    data: ColumnAttribute
+    term_certification: str | None
+
+
+class SqlAttributePatchResponse(_Payload):
+    """``term_certification`` is recomputed only when the patch names a term."""
+
+    data: SqlAttribute
+    term_certification: str | None
+
+
+class TermsPageResponse(_Payload):
+    """One page of the Terms list with its per-term count breakdowns.
+
+    ``total`` counts every matching term; the count lists cover only the
+    terms on this page when a limit was given.
+    """
+
+    terms: list[TermListItem]
+    total: int
+    column_attribute_counts: list[TermCountEntry]
+    sql_attribute_counts: list[TermCountEntry]
+    related_counts: list[TermCountEntry]
+
+
+# ---------------------------------------------------------------------------
+# Concrete envelopes — one alias per route
+# ---------------------------------------------------------------------------
+
+IdResponse = DataResponse[IdRef]
+
+# Zones
+ZoneResponse = DataResponse[Zone]
+ZoneListResponse = ListResponse[Zone]
+
+# Catalog
+DatabaseListResponse = ListResponse[DatabaseSummary]
+TableListResponse = ListResponse[TableSummary]
+TableColumnsPageResponse = ObjectPageResponse[TableColumns]
+
+# Analyses
+CustomAnalysisResponse = DataResponse[CustomAnalysis]
+CustomAnalysisListResponse = ListResponse[CustomAnalysis]
+SqlValidationResponse = DataResponse[SqlValidationResult]
+PqlAnalysisResponse = DataResponse[PqlAnalysis]
+PqlAnalysisListResponse = ListResponse[PqlAnalysis]
+
+# Terms and attributes
+TermResponse = DataResponse[Term]
+TermDetailResponse = DataResponse[TermDetail]
+ColumnAttributeResponse = DataResponse[ColumnAttribute]
+ColumnAttributePageResponse = PagedListResponse[ColumnAttribute]
+SqlAttributeResponse = DataResponse[SqlAttribute]
+SqlAttributeListResponse = ListResponse[SqlAttribute]
+SqlAttributePageResponse = PagedListResponse[SqlAttribute]
+SqlExpressionValidationResponse = DataResponse[SqlExpressionValidationResult]
+
+# Exploration
+ExplorationEdgeListResponse = ListResponse[ExplorationEdge]
+DataExplorationGraphResponse = DataResponse[DataExplorationGraph]
+SemanticExplorationGraphResponse = DataResponse[SemanticExplorationGraph]
+TableExplorationDetailsResponse = DataResponse[TableExplorationDetails]
+ExplorationRelatedNodesResponse = DataResponse[ExplorationRelatedNodes]
+TableZonesResponse = DataResponse[dict[str, list[ZoneChip]]]
+
+# Connections
+ConnectionResponse = DataResponse[PublicConnection]
+ConnectionListResponse = ListResponse[PublicConnection]
+SsoFederationResponse = DataResponse[SsoFederationState]
+
+# Metadata
+EntityCoverageResponse = DataResponse[EntityCoverageResult]

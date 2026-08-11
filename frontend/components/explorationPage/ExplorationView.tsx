@@ -56,8 +56,6 @@ export const ExplorationView = () => {
 	const [semanticError, setSemanticError] = useState<string | null>(null);
 	const [dataError, setDataError] = useState<string | null>(null);
 	const [dataLoaded, setDataLoaded] = useState(false);
-	const [semanticNoZoneAccess, setSemanticNoZoneAccess] = useState(false);
-	const [dataNoZoneAccess, setDataNoZoneAccess] = useState(false);
 	const [search, setSearch] = useState('');
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 	const [hoveredNodePosition, setHoveredNodePosition] = useState<HoveredNode | null>(null);
@@ -86,7 +84,6 @@ export const ExplorationView = () => {
 			const nextGraph = buildSemanticGraph(response.data ?? { nodes: [], links: [] });
 			if (cancelled) return;
 			setSemanticGraph(nextGraph);
-			setSemanticNoZoneAccess(response.meta?.noZoneAccess ?? false);
 			setSemanticError(null);
 			setSemanticLoading(false);
 		};
@@ -112,7 +109,6 @@ export const ExplorationView = () => {
 				const nextGraph = buildDataGraph(response.data ?? { nodes: [], links: [] });
 				if (cancelled) return;
 				setDataGraph(nextGraph);
-				setDataNoZoneAccess(response.meta?.noZoneAccess ?? false);
 				setDataError(null);
 				setDataLoaded(true);
 			} catch (loadError) {
@@ -192,8 +188,6 @@ export const ExplorationView = () => {
 	const graph = layer === ExplorationLayer.Semantic ? semanticGraph : dataGraph;
 	const loading = layer === ExplorationLayer.Semantic ? semanticLoading : dataLoading;
 	const error = layer === ExplorationLayer.Semantic ? semanticError : dataError;
-	const noZoneAccess =
-		layer === ExplorationLayer.Semantic ? semanticNoZoneAccess : dataNoZoneAccess;
 
 	const filteredNodes = useMemo(() => {
 		const query = search.trim().toLowerCase();
@@ -323,14 +317,9 @@ export const ExplorationView = () => {
 					variant={EmptyStateVariant.Borderless}
 					icon={IconName.Exploration}
 					title={
-						noZoneAccess
-							? 'You do not have access to any data'
-							: layer === ExplorationLayer.Semantic
-								? 'No Terms Created Yet'
-								: 'No Data Objects Found'
-					}
-					description={
-						noZoneAccess ? 'Contact an administrator to request access.' : undefined
+						layer === ExplorationLayer.Semantic
+							? 'No Terms Created Yet'
+							: 'No Data Objects Found'
 					}
 				/>
 			)}
