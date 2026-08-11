@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from gsf.catalog.store import connection
+from gsf.catalog.store.neo4j import connection
 
 from gsf.dal import close_store, neo4j_tx
 

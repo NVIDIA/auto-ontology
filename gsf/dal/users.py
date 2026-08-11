@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from gsf.catalog.constants import Edges, Labels
-from gsf.catalog.store.connection import get_neo4j_conn
+from gsf.catalog.store.neo4j.connection import get_neo4j_conn
 
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
 

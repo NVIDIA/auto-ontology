@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any
 
-from gsf.catalog.store.connection import get_neo4j_conn
+from gsf.catalog.store.neo4j.connection import get_neo4j_conn
 from neo4j import GraphDatabase, Transaction
 
 _DATABASE = "neo4j"

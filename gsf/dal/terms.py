@@ -13,7 +13,7 @@ import logging
 from typing import Any
 
 from gsf.catalog.constants import Edges, Labels
-from gsf.catalog.store.connection import get_neo4j_conn
+from gsf.catalog.store.neo4j.connection import get_neo4j_conn
 
 from gsf.dal.attributes import fetch_column_attribute_columns_map
 from gsf.dal.cypher_fragments import and_condition, paging_clause

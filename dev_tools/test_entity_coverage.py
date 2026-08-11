@@ -46,7 +46,7 @@ def _cleanup() -> None:
     close_retrievers()
     invalidate_connectors_cache()
     try:
-        from gsf.catalog.store import connection
+        from gsf.catalog.store.neo4j import connection
 
         if connection._conn is not None:
             connection._conn.close()

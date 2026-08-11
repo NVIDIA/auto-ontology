@@ -48,12 +48,12 @@ FORKED = {
         "nemo_retriever.tabular_data.ingestion.parsers.schemas_parser"
     ),
     "gsf.catalog.services.schema": "nemo_retriever.tabular_data.ingestion.services.schema",
-    "gsf.catalog.store.db": "nemo_retriever.tabular_data.ingestion.dal.db_dal",
-    "gsf.catalog.store.schemas": "nemo_retriever.tabular_data.ingestion.dal.schemas_dal",
-    "gsf.catalog.store.queries": "nemo_retriever.tabular_data.ingestion.dal.queries_dal",
-    "gsf.catalog.store.edges": "nemo_retriever.tabular_data.ingestion.dal.utils_dal",
-    "gsf.catalog.store.indexes": "nemo_retriever.tabular_data.ingestion.indexes",
-    "gsf.catalog.store.connection": "nemo_retriever.tabular_data.neo4j.neo4j_connection",
+    "gsf.catalog.store.neo4j.db": "nemo_retriever.tabular_data.ingestion.dal.db_dal",
+    "gsf.catalog.store.neo4j.schemas": "nemo_retriever.tabular_data.ingestion.dal.schemas_dal",
+    "gsf.catalog.store.neo4j.queries": "nemo_retriever.tabular_data.ingestion.dal.queries_dal",
+    "gsf.catalog.store.neo4j.edges": "nemo_retriever.tabular_data.ingestion.dal.utils_dal",
+    "gsf.catalog.store.neo4j.indexes": "nemo_retriever.tabular_data.ingestion.indexes",
+    "gsf.catalog.store.neo4j.connection": "nemo_retriever.tabular_data.neo4j.neo4j_connection",
 }
 
 # Deliberately **not** verbatim, each with a reason. Anything added here needs a
@@ -65,6 +65,11 @@ DIVERGED = {
         "calls directly) — DECISION-004"
     ),
     "gsf.catalog.ingest": "new in Phase 1; replaces the library's TabularSchemaExtractOp",
+    "gsf.catalog.store.db": "Phase 4 backend selector; not a fork",
+    "gsf.catalog.store.schemas": "Phase 4 backend selector; not a fork",
+    "gsf.catalog.store.queries": "Phase 4 backend selector; not a fork",
+    "gsf.catalog.store.edges": "Phase 4 backend selector; not a fork",
+    "gsf.catalog.store.indexes": "Phase 4 backend selector; not a fork",
     "gsf.catalog.constants": "forked in Phase 0; covered by test_constants.py",
 }
 
@@ -85,16 +90,16 @@ MODULE_MAP = {
     "nemo_retriever.tabular_data.ingestion.parsers": "gsf.catalog.parsers",
     "nemo_retriever.tabular_data.ingestion.services.schema": "gsf.catalog.services.schema",
     "nemo_retriever.tabular_data.ingestion.services.queries": "gsf.catalog.sql_parse",
-    "nemo_retriever.tabular_data.ingestion.dal.db_dal": "gsf.catalog.store.db",
-    "nemo_retriever.tabular_data.ingestion.dal.schemas_dal": "gsf.catalog.store.schemas",
-    "nemo_retriever.tabular_data.ingestion.dal.queries_dal": "gsf.catalog.store.queries",
-    "nemo_retriever.tabular_data.ingestion.dal.utils_dal": "gsf.catalog.store.edges",
-    "nemo_retriever.tabular_data.ingestion.indexes": "gsf.catalog.store.indexes",
+    "nemo_retriever.tabular_data.ingestion.dal.db_dal": "gsf.catalog.store.neo4j.db",
+    "nemo_retriever.tabular_data.ingestion.dal.schemas_dal": "gsf.catalog.store.neo4j.schemas",
+    "nemo_retriever.tabular_data.ingestion.dal.queries_dal": "gsf.catalog.store.neo4j.queries",
+    "nemo_retriever.tabular_data.ingestion.dal.utils_dal": "gsf.catalog.store.neo4j.edges",
+    "nemo_retriever.tabular_data.ingestion.indexes": "gsf.catalog.store.neo4j.indexes",
     "nemo_retriever.tabular_data.ingestion.utils": "gsf.catalog.normalize",
     "nemo_retriever.tabular_data.ingestion.extract_data": "gsf.catalog.extract",
     "nemo_retriever.tabular_data.ingestion.write_to_graph": "gsf.catalog.write",
-    "nemo_retriever.tabular_data.neo4j.neo4j_connection": "gsf.catalog.store.connection",
-    "nemo_retriever.tabular_data.neo4j": "gsf.catalog.store.connection",
+    "nemo_retriever.tabular_data.neo4j.neo4j_connection": "gsf.catalog.store.neo4j.connection",
+    "nemo_retriever.tabular_data.neo4j": "gsf.catalog.store.neo4j.connection",
 }
 
 CATALOG_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -114,12 +119,30 @@ def _rewrite(text: str) -> str:
     return re.sub(r"\bNeo4jNode\b", "CatalogNode", text)
 
 
+def _canonical_store_paths(text: str) -> str:
+    """Collapse ``gsf.catalog.store.neo4j.X`` and ``gsf.catalog.store.X``.
+
+    Phase 4 put the Neo4j implementation behind a backend selector, which split
+    one import path into two legitimate ones: storage-agnostic modules above
+    ``store/`` import the selector (``gsf.catalog.store.db``), while modules
+    *inside* ``store/neo4j/`` import their siblings directly
+    (``gsf.catalog.store.neo4j.db``) — going through their own selector would
+    make the Neo4j implementation call the Postgres one under
+    ``GSF_STORE=postgres``.
+
+    Both are correct rewrites of the same upstream module, so the comparison
+    normalises them rather than the map having to know which caller is which.
+    """
+    return text.replace("gsf.catalog.store.neo4j.", "gsf.catalog.store.")
+
+
 def _normalised_ast(text: str) -> str:
     """AST dump with the module docstring dropped.
 
     Formatting, comments and the provenance docstring are not behaviour, so
     comparing dumps keeps the test about the code and nothing else.
     """
+    text = _canonical_store_paths(text)
     tree = ast.parse(text)
     body = tree.body
     if (
