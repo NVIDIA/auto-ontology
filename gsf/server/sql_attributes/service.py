@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
 from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
+from gsf.catalog.constants import Props
 
 from gsf.connectors import get_connectors
 from gsf.dal import sql_attributes as sql_attr_dal

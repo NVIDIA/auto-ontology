@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 from gsf.dal.custom_analyses import fetch_custom_analyses
 

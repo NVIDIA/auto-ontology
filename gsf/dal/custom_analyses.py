@@ -17,7 +17,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.catalog.constants import Edges, Labels
 
 from gsf.dal.cypher_fragments import column_description_expr
 from gsf.dal.neo4j_tx import graph

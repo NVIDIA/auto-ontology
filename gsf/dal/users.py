@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.catalog.constants import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF

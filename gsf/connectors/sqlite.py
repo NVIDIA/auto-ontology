@@ -15,7 +15,7 @@ from urllib.parse import unquote, urlparse
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
+from gsf.catalog.constants import TableTypes
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)

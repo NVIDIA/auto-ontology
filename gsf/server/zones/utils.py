@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.catalog.constants import Edges, Labels
 
 from gsf.server.zones.constants import LABEL_ZONE
 

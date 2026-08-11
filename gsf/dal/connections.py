@@ -17,7 +17,7 @@ import json
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.connectors.vault import read_secret

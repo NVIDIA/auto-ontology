@@ -14,7 +14,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.semantic.constants import (

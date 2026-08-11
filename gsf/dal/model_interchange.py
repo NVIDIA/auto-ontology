@@ -12,7 +12,7 @@ from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
 from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import (
+from gsf.catalog.constants import (
     Edges,
     Labels,
     Props,

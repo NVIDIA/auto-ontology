@@ -21,7 +21,7 @@ import logging
 from typing import Any
 
 import pandas as pd
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.catalog.constants import Edges, Labels
 
 from gsf.dal.cypher_fragments import (
     column_description_expr,
@@ -429,7 +429,7 @@ def fetch_all_tables_without_term(
     the ``database_name`` its embeddings are tagged with — isolated to a single
     database. When omitted, every term-less table in the graph is returned.
     """
-    from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
+    from gsf.catalog.constants import Edges
 
     if database_name is not None:
         return graph().query_read(

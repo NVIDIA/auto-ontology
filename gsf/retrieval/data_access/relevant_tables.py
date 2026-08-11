@@ -20,7 +20,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from gsf.retrieval.data_access.semantic_search import (
     search_semantic_index,
 )

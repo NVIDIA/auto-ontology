@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from gsf.catalog.constants import Edges, Labels
 
 from gsf.dal.cypher_fragments import (
     and_condition,

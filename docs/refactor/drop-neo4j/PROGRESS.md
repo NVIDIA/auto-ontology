@@ -13,10 +13,27 @@ See [PLAN.md](PLAN.md) for the phase definitions and their Done criteria, and
 
 ## Blocked / needs a human
 
-Nothing yet.
-
 > Open questions go here rather than being resolved by guess. Anything touching
 > zone scoping or access control belongs here by default.
+
+**Two "unit" tests silently require a live Neo4j.** *(found 2026-08-11, Phase 0)*
+`test_export_model_filters_by_database_id` and
+`test_export_model_all_databases_uses_empty_filter` in
+`gsf/server/model_interchange/tests/test_model_interchange.py` patch
+`dal.validate_database_ids`, `dal.fetch_export_rows` and
+`dal.resolve_sql_column_ids`, but `service.export_model` also calls
+`_dialect_by_database_name()` (`service.py:56`), which calls `list_connections()`
+→ `MATCH (db:Database) RETURN properties(db)`. That call is unpatched, so both
+tests fail with a connection refused on :7687 unless Neo4j happens to be up.
+Pre-existing; not caused by this refactor. Phase 10 converts these to
+fixture-based tests. **Question for a human:** does CI currently run with Neo4j
+up? If so these pass there today and the gap is invisible — worth a cheap
+`@patch` now rather than waiting for Phase 10.
+
+**Stale `CLAUDE.md` dev command.** *(found 2026-08-11, Phase 0)* It documents
+`uv run uvicorn gsf.server.main:app`, but the app factory is
+`gsf/server/__main__.py` — `gsf/server/main.py` does not exist. Left alone as
+out of scope; flagging rather than fixing silently.
 
 ---
 
@@ -40,3 +57,36 @@ the remaining Phase 0 work.
 
 **Next:** create `gsf/catalog/constants.py` and repoint the ~29
 `reserved_words` imports.
+
+---
+
+## 2026-08-11 — Phase 0 — `reserved_words` severed
+
+**What landed:** new `gsf/catalog/` package with `constants.py` holding
+GSF-owned `Labels` / `TableTypes` / `Edges` / `Props`, forked verbatim from
+`nemo_retriever.tabular_data.ingestion.model.reserved_words`. All 30 import
+sites across 29 modules repointed to `gsf.catalog.constants`. No shim and no
+re-export — a re-export would have kept a live import edge to the package being
+dropped.
+
+**Files touched:** `gsf/catalog/{__init__,constants}.py` (new),
+`gsf/catalog/tests/test_constants.py` (new), and the import line in 29 modules
+under `gsf/{dal,server,retrieval,connectors}/` (mechanical `sed`, no other
+content change).
+
+**Tests added:** `gsf/catalog/tests/test_constants.py` — 5 tests asserting the
+fork is attribute-for-attribute identical to the library, plus a guard that no
+vocabulary class was missed. Verified 21 attributes across the 4 classes match
+exactly. **This test is deleted in Phase 11** once nothing imports the library's
+ingestion package.
+
+**Done criteria:** `grep -rn reserved_words gsf` returns only the docstring
+reference in `gsf/catalog/constants.py` — **met**. `ruff check` and
+`ruff format` clean.
+
+**Full suite:** 180 passed, 2 failed, 1 skipped. Both failures are the
+pre-existing live-Neo4j dependency recorded under *Blocked / needs a human*
+above — unrelated to this change, confirmed by reading the unpatched call path.
+
+**Next:** `gsf.dal.close_store()` lifecycle hook, then the DAL surface snapshot
+test.

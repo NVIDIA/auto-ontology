@@ -16,7 +16,7 @@ from gsf.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 logger = logging.getLogger(__name__)
 

@@ -14,7 +14,7 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
+from gsf.catalog.constants import TableTypes
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 

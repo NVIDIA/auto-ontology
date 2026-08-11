@@ -16,7 +16,7 @@ from nemo_retriever.models.inference.main_text_embed import (
     create_text_embeddings_for_df,
 )
 from nemo_retriever.operators.vdb import IngestVdbOperator
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     _create_column_text,
     _create_row,
