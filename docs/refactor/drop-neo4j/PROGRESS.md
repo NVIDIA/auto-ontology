@@ -973,3 +973,52 @@ duplicating on re-ingest; a later stamp removes stale keys;
 most consequential of the modules, now specified by the 12 tests written before
 the rewrite — and `store/pg/queries.py`. Then the whole thing runs under
 `GSF_STORE=postgres` against the fixture.
+
+---
+
+## 2026-08-11 — Phase 4 — the re-ingest diff is now shared, not duplicated
+
+`store/pg/db.py` lands. Only `store/pg/queries.py` remains before the whole path
+can run under `GSF_STORE=postgres`.
+
+**The diff was extracted rather than reimplemented.**
+`update_diff_from_existing_schema` and the two `accumulate_*` helpers are pandas
+over two frames plus calls back into the store — storage-agnostic, and now in
+`gsf/catalog/diff.py`, with both backends re-exporting them. Its store calls go
+through the selector, imported inside the function because the selector imports
+the implementations which import the diff, and a top-level import would close
+that circle.
+
+Duplicating it was the obvious alternative and the wrong one: it is the subtlest
+code in the write path, it was already silently broken for every re-ingest
+(DECISION-006), and a second copy means the next fix has to be made twice or the
+two drift. `store/neo4j/db.py` loses ~140 lines and keeps only its primitives.
+
+Verified the extraction changed nothing: the 12 incremental-diff tests pass and
+the fixture goldens still replay.
+
+**Three places the schema shows through in the primitives:**
+
+- `delete_table` and `delete_schema` no longer name their children. The Cypher
+  had to `DETACH DELETE table, col`; here columns cascade.
+- `db_exists` returns "has anything hanging off it". The Cypher counted
+  *relationships* on the node; relationally the only thing that can hang off a
+  database is a schema, so that is what is counted.
+- `update_properties_in_graph_batch` keeps its `coalesce` on `description`, and
+  that is the point rather than an incidental detail: a curated description has
+  to survive a re-ingest that would otherwise overwrite it with whatever the
+  source reports, which is usually nothing.
+
+**One rough edge, handled explicitly:** `write.py` calls `update_node_property`
+with the literal string `"db"`, not `Labels.DB`. The registry is keyed by label,
+so `_spec_for` resolves case-insensitively with an alias — an unmapped label
+would have silently skipped the `pulled` timestamp that marks an ingest
+complete, and silence is the failure mode this phase has already been bitten by
+twice.
+
+**Suite:** 427 passed, 4 skipped.
+
+**Left in Phase 4:** `store/pg/queries.py` (6 functions), then the fixture
+ingest and the 12 incremental tests re-run under `GSF_STORE=postgres`. That last
+step is the actual Done criterion — everything so far is tested against the
+Postgres schema directly, not through the ingest pipeline end to end.
