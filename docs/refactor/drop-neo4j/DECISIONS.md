@@ -29,6 +29,7 @@ must be restated in the PR description of the change that introduces it.
 |---|---|---|
 | B1 | Reset deletes become **narrower** than `apoc.path.subgraphNodes`, which today bleeds across databases through shared `Term`/`Sql` nodes | Phase 8 |
 | B2 | `_delete_semantic_nodes`' scoped branch does **not** collect `PqlAnalysis` — current behaviour, deliberately preserved rather than "fixed" | Phase 8 |
+| B3 | Postgres catalogs gain partitioned parent tables and materialized views, which were silently dropped before; 5 columns per Pagila report their declared type (`mpaa_rating`, `text[]`, `year`) instead of `USER-DEFINED`/`ARRAY` | Phase 2 ([003](#003--fix-partitioned-tables-and-materialized-views-missing-from-postgres-catalogs)) |
 
 Any further behaviour change discovered mid-port gets added to this table
 **and** its own numbered record below. Absorbing one silently is the single
@@ -119,8 +120,68 @@ a fresh checkout must run the seeder before SQLite-backed tests will pass —
 `dev_tools/tests/test_fixtures.py` builds it on demand, so this is invisible in
 practice.
 
-**Behaviour-change watch:** partitioned `payment` means ingestion will discover
-22 base tables where a reader might expect 1. Whether partition children belong
-in the catalog is a genuine product question, not a porting detail. Phase 4
-must decide it deliberately and record the answer — silently inheriting
-whatever the current code happens to do would bake in an unexamined choice.
+**Behaviour-change watch — resolved same day by [003](#003--fix-partitioned-tables-and-materialized-views-missing-from-postgres-catalogs).**
+This record originally flagged partitioned `payment` as a question for Phase 4:
+do partition children belong in the catalog? Ingesting the fixture answered it
+immediately and differently than expected — the children were already excluded
+*and so was the parent*, so the table was absent altogether. That is a bug, not
+a policy, and 003 fixes it: parent in, children out.
+
+---
+
+## 003 — Fix partitioned tables and materialized views missing from Postgres catalogs
+
+**Date:** 2026-08-11  **Phase:** 2  **Supersedes:** nothing
+
+**Context** — The Pagila fixture landed in Phase 2 specifically to surface
+catalog shapes nothing previously tested. It did so immediately: ingesting
+Pagila wrote 21 of the 30 relations in `public` to the graph. Missing were the
+partitioned table `payment`, its 7 partition children, and the materialized
+view `rental_by_category`. Two independent causes in
+`gsf/connectors/postgres.py`:
+
+1. `get_tables` allowed `relkind IN ('r','v','m','f')`. `relispartition = false`
+   correctly hides partition *children*, but the parent is `relkind = 'p'`,
+   which was not allowed through — so **neither** parent nor children appeared
+   and an entire queryable table was invisible. The comment said the intent was
+   to "filter tables that are part of partitioned tables", so this reads as an
+   oversight rather than a decision.
+2. Both `get_tables` and `get_columns` drove from `information_schema`, which
+   does not list materialized views or their columns at all. The
+   `relkind = 'm'` branch and `TableTypes.MATERIALIZED_VIEW` were therefore
+   unreachable — dead code since they were written.
+
+Both are pre-existing product bugs, not refactor artifacts.
+
+**Decision** — Fix now, in Phase 2, rather than deferring. Drive both methods
+from `pg_catalog` instead of `information_schema`, add `'p'` to the allowed
+`relkind` set, and keep `relispartition = false` so children stay hidden.
+
+Fixing now is safe *because the connector is not part of the port*.
+`gsf/connectors/` sits above the DAL and is untouched by the Neo4j-to-Postgres
+swap, so this changes both paths identically and cannot complicate Phases 5–10.
+Deferring would have been worse: the golden captures are taken from the current
+Neo4j behaviour and become the fidelity oracle for the entire refactor. Capture
+them first and the bug is frozen into the oracle, and every later phase would
+faithfully reproduce a catalog with missing tables.
+
+**Consequences** — Behaviour change **B3**. On any Postgres source:
+
+- Partitioned parent tables now appear in the catalog. They will be ingested,
+  described and embedded, which is the point — they were unqueryable before.
+- Materialized views now appear, typed `materialized view`. This is the first
+  time that `TableTypes` value is ever produced, so any consumer that assumed
+  only `base table`/`view` now sees a third value. None was found, but this is
+  the risk worth naming.
+- `data_type` changes for enum, array and domain columns: `USER-DEFINED` →
+  `mpaa_rating`, `ARRAY` → `text[]`, `integer` → `year`. Strictly more useful
+  to a SQL-generating model, but descriptions and embeddings for those columns
+  will differ from what is currently stored, so they change on next ingest.
+  Measured on Pagila: 5 of 143 previously-ingested columns.
+- `format_type(atttypid, NULL)` was chosen precisely because it reproduces
+  `information_schema.columns.data_type`'s unqualified spelling
+  (`character varying`, not `character varying(255)`), so the other 138 columns
+  are byte-identical. Verified, not assumed.
+
+Covered by `gsf/connectors/tests/test_postgres.py` (8 tests), which needs the
+Pagila fixture and skips without it.

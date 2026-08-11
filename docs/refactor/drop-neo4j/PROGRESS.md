@@ -268,3 +268,53 @@ under *Blocked*). It documented `uv run uvicorn gsf.server.main:app`, but
 commands that were missing entirely: `python -m gsf.server` (what the
 Dockerfile runs) and `python -m gsf.ingestion_service`. All three verified to
 resolve, and `gsf/server/main.py` confirmed absent.
+
+---
+
+## 2026-08-11 — Phase 2 — connector bug found by the fixture, and fixed
+
+**What happened:** ingesting Pagila into Neo4j for the golden capture wrote
+**21 of the 30 relations** in `public`. Missing: the partitioned table
+`payment`, its 7 partition children, and the materialized view
+`rental_by_category`. Two independent pre-existing bugs in
+`gsf/connectors/postgres.py`, both fixed here — see
+[DECISION-003](DECISIONS.md) for the full reasoning:
+
+- `get_tables` allowed `relkind IN ('r','v','m','f')`. Partition *children* were
+  correctly hidden by `relispartition = false`, but the parent is `'p'` and was
+  not allowed through, so an entire queryable table was invisible.
+- Both `get_tables` and `get_columns` drove from `information_schema`, which
+  does not list materialized views **or their columns**. `TableTypes.MATERIALIZED_VIEW`
+  had been unreachable dead code since it was written.
+
+**Why fix it now rather than defer:** `gsf/connectors/` sits above the DAL and
+is not part of the port, so this changes the Neo4j and Postgres paths
+identically and cannot complicate Phases 5–10. Deferring was the worse option —
+the goldens are captured from current behaviour and become the oracle for the
+whole refactor, so capturing first would have frozen the bug into the oracle and
+every later phase would faithfully reproduce a catalog with missing tables.
+
+**Third finding, unplanned:** driving from `pg_catalog` also changed `data_type`
+for 5 of 143 previously-ingested Pagila columns — `USER-DEFINED` →
+`mpaa_rating`, `ARRAY` → `text[]`, `integer` → `year`. Strictly better for
+SQL generation, but it is a real change: those columns' descriptions and
+embeddings differ on next ingest. `format_type(atttypid, NULL)` was chosen
+specifically because it reproduces `information_schema`'s unqualified spelling,
+so the other 138 columns are byte-identical — verified, not assumed.
+
+Recorded as behaviour change **B3**.
+
+**Files touched:** `gsf/connectors/postgres.py`,
+`gsf/connectors/tests/test_postgres.py` (new), `docs/refactor/drop-neo4j/DECISIONS.md`.
+
+**Tests added:** 8, covering partitioned parent present, children absent,
+matview present and correctly typed, all three `TableTypes` values reachable,
+every catalogued relation has columns, declared types not placeholders, system
+schemas excluded, `is_nullable` spelling preserved. All pass against the
+fixture; skip without it.
+
+**Verified after the fix:** `public` catalogues 23 relations — 15 base tables
+(incl. `payment`), 7 views, 1 materialized view — and 0 partition children.
+
+**Next:** the golden capture itself, now that the catalog it captures is
+correct.
