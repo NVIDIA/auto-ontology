@@ -16,6 +16,7 @@
 		"format:check": "prettier --check ."
 	},
 	"dependencies": {
+		"@better-auth/api-key": "^1.6.20",
 		"@better-auth/sso": "^1.6.20",
 		"@nvidia/foundations-react-core": "^0.604.1",
 		"@prisma/adapter-pg": "^7.7.0",

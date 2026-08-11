@@ -21,7 +21,8 @@ internal surface nobody outside the cluster can call. They exist because
 
 - `x-gsf-permissions` — the permission a caller needs, read from each route's
   `withPermission({...})` wrapper (or `"public"` for `withPublic`), plus the
-  401/403 responses that implies.
+  401/403 responses that implies. The same wrapper decides each operation's
+  `security`: the `ApiToken` scheme, or `[]` for a `withPublic` route.
 - `x-gsf-source` — the `route.ts` that serves the operation.
 - `x-gsf-proxied` — whether the handler forwards to FastAPI or answers itself.
 - `x-gsf-upstream` — for the chat routes, the backend path whose response is
@@ -87,8 +88,8 @@ that exports no HTTP method it recognises, so nothing is dropped silently.
 
 ## Known limitations
 
-- No `securitySchemes` or `servers` block yet: the spec says which permission an
-  operation needs, but not how to authenticate or against which host.
+- No `servers` block yet: the spec says how to authenticate, but not against
+  which host.
 - Most schemas carry `additionalProperties: true`. Backend response models are
   deliberately permissive — FastAPI _drops_ undeclared fields when a
   `response_model` is set, so a strict model would silently break responses

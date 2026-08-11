@@ -171,8 +171,8 @@ export const streamChat = (
  * caller can always fall back to a plain table.
  *
  * `conversationId` lets the route persist the bubble this step produces —
- * the chart, or the table it falls back to — since the completions proxy
- * already wrote the prose bubble and cannot know how this resolves.
+ * the chart, or the table it falls back to — since FastAPI already persisted
+ * the prose + SQL bubble and cannot know how this separate step resolves.
  */
 export const fetchCharts = async (
 	question: string,

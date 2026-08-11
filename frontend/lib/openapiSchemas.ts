@@ -60,5 +60,19 @@ export const acronymSchema = z.object({
 	updated_at: timestamp(),
 });
 
+/**
+ * An API token as the management routes return it. The secret itself is absent
+ * by construction — only its leading characters survive creation.
+ */
+export const apiTokenSchema = z.object({
+	id: z.string(),
+	name: z.string().nullable(),
+	start: z.string().nullable().describe('First characters of the token, e.g. `gsf_a1b2c3`.'),
+	enabled: z.boolean(),
+	created_at: timestamp(),
+	expires_at: timestamp().nullable().describe('`null` when the token never expires.'),
+	last_request: timestamp().nullable().describe('`null` until the token is first used.'),
+});
+
 /** The instance-wide on/off settings under `/api/configurations/*`. */
 export const enabledFlagSchema = z.object({ enabled: z.boolean() });

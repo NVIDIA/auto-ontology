@@ -7,6 +7,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
 import { sso } from '@better-auth/sso';
+import { apiKey } from '@better-auth/api-key';
 import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/auth/auth-access';
 import { Role } from '@/enums/auth';
@@ -48,6 +49,30 @@ export const auth = betterAuth({
 		// This resolves to /api/auth/sso/callback
 		// the `ssoProvider` table — there are no SSO env vars.
 		sso({ redirectURI: '/sso/callback' }),
+		// Machine-to-machine credentials: long-lived API tokens users mint for
+		// scripts. The plugin owns hashing (SHA-256), expiry, and revocation; we
+		// only pin the ergonomics. Tokens are verified explicitly in
+		// auth/api-token.ts rather than via `enableSessionForAPIKeys` (left off,
+		// its default), so a token never silently becomes a browser session.
+		apiKey({
+			// `gsf_` makes a leaked token greppable in logs and recognisable to
+			// secret scanners; `start` keeps the first few characters so the UI can
+			// identify a token it can no longer read.
+			defaultPrefix: 'gsf_',
+			defaultKeyLength: 48,
+			startingCharactersConfig: { shouldStore: true, charactersLength: 10 },
+			// A token without a name is unidentifiable in the revoke list.
+			requireName: true,
+			minimumNameLength: 1,
+			maximumNameLength: 64,
+			// The plugin's default is 10 requests per day, which would break any
+			// real script. Throttling is the app-wide rateLimit's job, not the
+			// token's.
+			rateLimit: { enabled: false },
+			// Non-expiring by default (a script's credential should not silently
+			// die), but callers may opt into an expiry up to a year out.
+			keyExpiration: { defaultExpiresIn: null, maxExpiresIn: 365 },
+		}),
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],

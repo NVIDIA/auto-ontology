@@ -107,6 +107,7 @@ model User {
   ssoproviders  SsoProvider[]
   conversations Conversation[]
   analytics     ConversationAnalytics[]
+  apiKeys       Apikey[]
 
   @@unique([email])
   @@map("user")
@@ -178,5 +179,52 @@ model SsoProvider {
 
   @@unique([providerId])
   @@map("ssoProvider")
+  @@schema("public")
+}
+
+// API tokens for machine-to-machine access (scripts, CI, notebooks). Owned and
+// managed by the Better Auth `apiKey` plugin — field names/types must match the
+// plugin's schema exactly, so this model breaks the snake_case convention the
+// GSF-owned tables use, like the other Better Auth tables above.
+//
+// `key` holds a SHA-256 hash of the token, never the token itself: the plaintext
+// is returned once at creation and is unrecoverable afterwards. `referenceId` is
+// the owning user's id (the plugin is configured with references: "user"); the
+// relation is declared here so revoking a user cascades to their tokens.
+//
+// The model is `Apikey`, not the more natural `ApiKey`, because the Better Auth
+// Prisma adapter looks the model up as `prisma[<its model name>]` and the plugin
+// names it `apikey` (all lowercase). Prisma derives the delegate from the model
+// name, so `ApiKey` would generate `prisma.apiKey` and every call would fail at
+// runtime with "Model apikey does not exist in the database".
+model Apikey {
+  id                  String    @id
+  configId            String    @default("default")
+  name                String?
+  start               String?
+  prefix              String?
+  key                 String
+  referenceId         String
+  user                User      @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+  refillInterval      Int?
+  refillAmount        Int?
+  lastRefillAt        DateTime?
+  enabled             Boolean   @default(true)
+  rateLimitEnabled    Boolean   @default(true)
+  rateLimitTimeWindow Int?
+  rateLimitMax        Int?
+  requestCount        Int       @default(0)
+  remaining           Int?
+  lastRequest         DateTime?
+  expiresAt           DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  permissions         String?
+  metadata            String?
+
+  @@index([configId])
+  @@index([referenceId])
+  @@index([key])
+  @@map("apikey")
   @@schema("public")
 }

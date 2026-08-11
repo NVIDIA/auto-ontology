@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
@@ -25,7 +26,13 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
-    conversation_id: str | None = None
+    conversation_id: UUID | None = Field(
+        default=None,
+        description=(
+            "Stable thread UUID. When supplied through the authenticated gateway, "
+            "prior completed turns are loaded and the new turn is persisted."
+        ),
+    )
     # Force the prediction/SQL branch instead of classifying the question:
     # True  -> go straight to the KumoRFM prediction flow
     # False -> go straight to the regular text-to-SQL flow

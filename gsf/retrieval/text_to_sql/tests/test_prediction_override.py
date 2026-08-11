@@ -78,6 +78,21 @@ def test_chat_request_defaults_to_none() -> None:
     assert ChatRequest(question="hi", prediction=False).prediction is False
 
 
+def test_chat_request_validates_conversation_uuid() -> None:
+    from pydantic import ValidationError
+
+    from gsf.server.chat.helpers import ChatRequest
+
+    request = ChatRequest(
+        question="hi",
+        conversation_id="d61d8aa3-d496-4fa7-97ce-4f831c162e7f",
+    )
+    assert str(request.conversation_id) == "d61d8aa3-d496-4fa7-97ce-4f831c162e7f"
+
+    with pytest.raises(ValidationError):
+        ChatRequest(question="hi", conversation_id="not-a-uuid")
+
+
 def test_worker_submit_passes_prediction_through() -> None:
     """The worker protocol carries the flag alongside the question.
 
@@ -94,12 +109,12 @@ def test_worker_submit_passes_prediction_through() -> None:
     worker.submit("q", prediction=True)
     worker.submit("q2")
 
-    assert sent[0][1] == ("q", True, None, None)
-    assert sent[1][1] == ("q2", None, None, None)
+    assert sent[0][1] == ("q", True, None, None, [])
+    assert sent[1][1] == ("q2", None, None, None, [])
 
 
 def test_worker_submit_accepts_every_field_by_keyword() -> None:
-    """The router passes all four by keyword; passing one positionally would collide
+    """The router passes optional fields by keyword; passing one positionally would collide
     with ``prediction`` and raise 'got multiple values for argument'."""
     from gsf.server.chat.worker import PrewarmedWorker
 
@@ -114,7 +129,7 @@ def test_worker_submit_accepts_every_field_by_keyword() -> None:
         subject_token="jwt",
     )
 
-    assert sent[0][1] == ("q", False, "analytics", "jwt")
+    assert sent[0][1] == ("q", False, "analytics", "jwt", [])
 
 
 def test_worker_payload_unpacks_as_the_loop_expects() -> None:
@@ -127,5 +142,6 @@ def test_worker_payload_unpacks_as_the_loop_expects() -> None:
 
     worker.submit("q", prediction=True, target_db="db", subject_token="tok")
 
-    question, prediction, target_db, subject_token = sent[0][1]
+    question, prediction, target_db, subject_token, history = sent[0][1]
     assert (question, prediction, target_db, subject_token) == ("q", True, "db", "tok")
+    assert history == []

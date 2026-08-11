@@ -60,6 +60,14 @@ export type OpenApiOperation = {
 	 * handler can never actually return.
 	 */
 	responses?: Record<string, OpenApiResponse | null>;
+	/**
+	 * Set when the handler additionally requires a browser session, so an API
+	 * token is not accepted even though the route is permission-gated (see
+	 * `requireSessionCaller`). Publishes the `SessionCookie` scheme instead of
+	 * `ApiToken`, so a generated client is not told to send a credential the
+	 * route will reject.
+	 */
+	sessionOnly?: boolean;
 };
 
 export type OpenApiHttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete' | 'head' | 'options';
