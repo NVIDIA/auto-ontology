@@ -27,7 +27,6 @@ export type ImportEmbedResult = ImportEmbedCounts & {
 };
 
 export type ImportSummary = {
-	/** Format the backend read the uploaded file as. */
 	format: ModelFormat;
 	database_ids: string[];
 	created: ImportEntityCounts;

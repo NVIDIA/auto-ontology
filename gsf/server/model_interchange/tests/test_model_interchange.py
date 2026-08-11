@@ -15,8 +15,17 @@ import yaml
 from ossie_gsf import GSFConversionError, convert_gsf_to_ossie
 
 from gsf.dal.model_interchange import (
+    _EXPORT_CATALOG_QUERY,
+    _EXPORT_CUSTOM_ANALYSES_QUERY,
+    _EXPORT_FKS_QUERY,
+    _EXPORT_JOINS_QUERY,
+    _EXPORT_SEMANTIC_FKS_QUERY,
+    _EXPORT_SQL_ATTRIBUTES_QUERY,
+    _EXPORT_TERMS_QUERY,
     UnknownDatabaseIdsError,
+    _changed_entity_ids,
     _resolve_entity,
+    _resolve_entities_batch,
     assemble_export_document,
     resolve_sql_column_ids,
     validate_database_ids,
@@ -280,6 +289,10 @@ def test_export_model_filters_by_database_id(
     mock_validate.assert_called_once_with(["db-2"])
     mock_fetch.assert_called_once_with(["db-2"])
     assert payload["data_layer"]["databases"][0]["id"] == "db-2"
+    assert (
+        payload["data_layer"]["databases"][0]["schemas"][0]["database_name"]
+        == "inventory"
+    )
 
 
 @patch(
@@ -657,50 +670,100 @@ def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     assert write_params["props"]["name"] == "orders"
 
 
+def test_export_queries_use_portable_ids() -> None:
+    assert "coalesce(db.imported_id, db.id) AS db_id" in _EXPORT_CATALOG_QUERY
+    assert "coalesce(sch.imported_id, sch.id) AS schema_id" in _EXPORT_CATALOG_QUERY
+    assert "coalesce(tbl.imported_id, tbl.id) AS table_id" in _EXPORT_CATALOG_QUERY
+    assert "coalesce(col.imported_id, col.id) AS column_id" in _EXPORT_CATALOG_QUERY
+    assert "coalesce(src.imported_id, src.id)" in _EXPORT_FKS_QUERY
+    assert "coalesce(t1.imported_id, t1.id)" in _EXPORT_JOINS_QUERY
+    assert "coalesce(term.imported_id, term.id) AS id" in _EXPORT_TERMS_QUERY
+    assert "coalesce(attr.imported_id, attr.id)" in _EXPORT_SEMANTIC_FKS_QUERY
+    assert "coalesce(attr.imported_id, attr.id) AS id" in _EXPORT_SQL_ATTRIBUTES_QUERY
+    assert "coalesce(ca.imported_id, ca.id) AS id" in _EXPORT_CUSTOM_ANALYSES_QUERY
+
+
+@patch("gsf.dal.model_interchange.graph")
+def test_changed_entity_ids_returns_only_modified_payloads(
+    mock_conn: MagicMock,
+) -> None:
+    mock_conn.return_value.query_read.return_value = [
+        {
+            "id": "unchanged",
+            "props": {"name": "Orders", "description": "", "source": "GSF"},
+        },
+        {
+            "id": "changed",
+            "props": {"name": "Orders", "description": "old", "source": "GSF"},
+        },
+    ]
+
+    changed = _changed_entity_ids(
+        "Term",
+        {
+            "unchanged": {"name": "Orders", "description": "", "source": "GSF"},
+            "changed": {"name": "Orders", "description": "new", "source": "GSF"},
+        },
+    )
+
+    assert changed == {"changed"}
+
+
+@patch("gsf.dal.model_interchange.graph")
+def test_resolve_entities_batch_migrates_database_by_name(
+    mock_conn: MagicMock,
+) -> None:
+    mock_conn.return_value.query_read.side_effect = [
+        [],
+        [{"imported_id": "portable-db-id", "live_ids": ["legacy-live-id"]}],
+    ]
+
+    result = _resolve_entities_batch(
+        "Database",
+        [("portable-db-id", {"name": "dor_prod"})],
+        match_by_name=True,
+    )
+
+    assert result == {"portable-db-id": ("legacy-live-id", False)}
+    write_params = mock_conn.return_value.query_write.call_args[0][1]
+    assert write_params["rows"] == [
+        {
+            "id": "legacy-live-id",
+            "imported_id": "portable-db-id",
+            "replace_imported_id": True,
+        }
+    ]
+
+
 @patch("gsf.dal.model_interchange._database_names_for_columns")
 @patch("gsf.dal.model_interchange._persist_sql_object")
 @patch("gsf.dal.model_interchange.detach_ca_sql_edges")
 @patch("gsf.dal.model_interchange._ids_missing_has_sql")
+@patch("gsf.dal.model_interchange._custom_analysis_ids_with_changed_payload")
 @patch("gsf.dal.model_interchange._resolve_entities_batch")
-@patch("gsf.dal.model_interchange._existing_custom_analysis_ids_by_name")
-def test_import_custom_analyses_converges_duplicate_names_on_existing_node(
-    mock_existing_by_name: MagicMock,
+def test_import_custom_analyses_replace_restores_changed_name(
     mock_resolve_batch: MagicMock,
+    mock_changed_payload: MagicMock,
     mock_missing_sql: MagicMock,
     mock_detach: MagicMock,
     mock_persist_sql: MagicMock,
     mock_db_names: MagicMock,
 ) -> None:
-    """Re-importing an id-unstable source must not pile up duplicate analyses.
-
-    Two YAML rows share the same name (as happens when the upstream export
-    mints a fresh id every run) and an existing CustomAnalysis with that
-    name already exists in the graph but is missing its ``Sql`` node/edge
-    (a prior partial import). Both rows must resolve onto that one live
-    node, and SQL persistence must be attempted for it exactly once — not
-    skipped forever, and not duplicated per YAML row.
-    """
+    """A replace import restores the exported name instead of silently skipping it."""
     from gsf.dal.model_interchange import _import_custom_analyses
 
-    mock_existing_by_name.return_value = {"dup": "existing-live-id"}
-    mock_resolve_batch.return_value = {"existing-live-id": ("existing-live-id", False)}
-    mock_missing_sql.return_value = {"existing-live-id"}
+    mock_resolve_batch.return_value = {"yaml-analysis": ("live-analysis", False)}
+    mock_missing_sql.return_value = set()
+    mock_changed_payload.return_value = {"live-analysis"}
     mock_db_names.return_value = {}
-
     document = GsfModelDocument.model_validate(
         {
             "semantic_layer": {
                 "custom_analyses": [
                     {
-                        "id": "yaml-1",
-                        "name": "dup",
-                        "description": "d1",
-                        "sql": "SELECT 1",
-                    },
-                    {
-                        "id": "yaml-2",
-                        "name": "dup",
-                        "description": "d1",
+                        "id": "yaml-analysis",
+                        "name": "exported name",
+                        "description": "description",
                         "sql": "SELECT 1",
                     },
                 ],
@@ -708,28 +771,105 @@ def test_import_custom_analyses_converges_duplicate_names_on_existing_node(
         },
     )
 
-    id_map: dict[str, str] = {}
-    created = {"custom_analyses": 0}
-    skipped = {"custom_analyses": 0}
+    buffer = ImportEmbedBuffer()
+    _import_custom_analyses(
+        document,
+        {},
+        {"custom_analyses": 0},
+        {"custom_analyses": 0},
+        buffer,
+        {},
+        replace=True,
+    )
 
-    _import_custom_analyses(document, id_map, created, skipped, None, {})
+    mock_changed_payload.assert_called_once_with(
+        document.semantic_layer.custom_analyses,
+        {"yaml-analysis": "live-analysis"},
+    )
+    mock_detach.assert_called_once_with("live-analysis")
+    assert mock_persist_sql.call_args.kwargs["name"] == "exported name"
+    assert len(buffer.semantic_rows) == 1
 
-    assert id_map["yaml-1"] == "existing-live-id"
-    assert id_map["yaml-2"] == "existing-live-id"
 
-    # _resolve_entities_batch must see both rows keyed by the existing live
-    # id (the name match), not by their own distinct YAML ids.
+@patch("gsf.dal.model_interchange._database_names_for_columns")
+@patch("gsf.dal.model_interchange._persist_sql_object")
+@patch("gsf.dal.model_interchange.detach_ca_sql_edges")
+@patch("gsf.dal.model_interchange._ids_missing_has_sql")
+@patch("gsf.dal.model_interchange._custom_analysis_ids_with_changed_payload")
+@patch("gsf.dal.model_interchange._resolve_entities_batch")
+def test_import_custom_analyses_uses_stable_id(
+    mock_resolve_batch: MagicMock,
+    mock_changed_payload: MagicMock,
+    mock_missing_sql: MagicMock,
+    _mock_detach: MagicMock,
+    _mock_persist_sql: MagicMock,
+    mock_db_names: MagicMock,
+) -> None:
+    """Only a matching stable id can select an existing analysis."""
+    from gsf.dal.model_interchange import _import_custom_analyses
+
+    mock_resolve_batch.return_value = {"yaml-analysis": ("stable-match", False)}
+    mock_changed_payload.return_value = set()
+    mock_missing_sql.return_value = set()
+    mock_db_names.return_value = {}
+    document = GsfModelDocument.model_validate(
+        {
+            "semantic_layer": {
+                "custom_analyses": [
+                    {
+                        "id": "yaml-analysis",
+                        "name": "exported name",
+                        "description": "description",
+                        "sql": "SELECT 1",
+                    },
+                ],
+            },
+        },
+    )
+
+    _import_custom_analyses(
+        document,
+        {},
+        {"custom_analyses": 0},
+        {"custom_analyses": 0},
+        None,
+        {},
+        replace=True,
+    )
+
     batch_items = mock_resolve_batch.call_args[0][1]
-    assert [key for key, _props in batch_items] == [
-        "existing-live-id",
-        "existing-live-id",
-    ]
+    assert [key for key, _props in batch_items] == ["yaml-analysis"]
 
-    # Neither row created a new node, but SQL is attached exactly once.
-    assert created["custom_analyses"] == 0
-    assert skipped["custom_analyses"] == 2
-    mock_persist_sql.assert_called_once()
-    assert mock_persist_sql.call_args.kwargs["node_id"] == "existing-live-id"
+
+@patch("gsf.dal.model_interchange.add_query")
+@patch("gsf.dal.model_interchange.Neo4jNode")
+@patch("gsf.dal.model_interchange.validate_sql")
+def test_persist_sql_object_overwrites_existing_node_properties(
+    mock_validate_sql: MagicMock,
+    mock_neo4j_node: MagicMock,
+    _mock_add_query: MagicMock,
+) -> None:
+    """A replace import must overwrite, not merely find, an existing analysis."""
+    from gsf.dal.model_interchange import _persist_sql_object
+
+    query_obj = MagicMock()
+    query_obj.edges = []
+    mock_validate_sql.return_value = query_obj
+
+    _persist_sql_object(
+        node_label="CustomAnalysis",
+        node_id="live-analysis",
+        name="exported name",
+        description="exported description",
+        sql="SELECT 1",
+        database_name=None,
+        schema_cache={None: (["sqlite"], {})},
+    )
+
+    assert mock_neo4j_node.call_args.kwargs["override_existing_props"] == {
+        "name": "exported name",
+        "description": "exported description",
+    }
 
 
 @patch("gsf.dal.model_interchange.graph")
