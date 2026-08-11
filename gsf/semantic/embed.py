@@ -6,12 +6,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import pandas as pd
-from nemo_retriever.graph import Graph
 from nemo_retriever.common.params.models import EmbedParams
-from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.utils.embedding import batch_embed
 from gsf.utils.model_config import resolve
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
@@ -26,11 +24,9 @@ class SemanticEmbedder:
     database_name: str
     embed_params: EmbedParams
     vdb: PostgresVDB
-    embed_graph: Graph = field(init=False)
     ingest_op: IngestVdbOperator = field(init=False)
 
     def __post_init__(self) -> None:
-        self.embed_graph = Graph() >> _BatchEmbedActor(params=self.embed_params)
         self.ingest_op = IngestVdbOperator(vdb=self.vdb)
 
     _SIMILARITY_THRESHOLD = 0.7
@@ -91,8 +87,7 @@ class SemanticEmbedder:
         if not rows:
             return 0
 
-        results = self.embed_graph.execute(pd.DataFrame(rows))
-        embedded_df = results[0] if results else None
+        embedded_df = batch_embed(rows, self.embed_params)
         if embedded_df is None or embedded_df.empty:
             logger.warning(
                 "Inline embed produced no rows for Term %s", term.get("name")
@@ -195,8 +190,7 @@ def embed_all_semantic_nodes(
         logger.info("embed_all_semantic_nodes: no rows to embed")
         return 0
 
-    results = embedder.embed_graph.execute(pd.DataFrame(all_rows))
-    embedded_df = results[0] if results else None
+    embedded_df = batch_embed(all_rows, embedder.embed_params)
     if embedded_df is None or embedded_df.empty:
         logger.warning("embed_all_semantic_nodes: embed produced no rows")
         return 0

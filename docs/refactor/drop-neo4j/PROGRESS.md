@@ -428,6 +428,134 @@ exactly the kind of drift that is cheap to fix now and annoying later.
 
 ---
 
+## 2026-08-11 — Phase 1 — the catalog write path is GSF-owned — **Phase 1 complete**
+
+**Merge:** logged in the previous entry — `origin/main` `ce62e52` → `0a3ed24`,
+no conflicts. Nothing further landed upstream during this phase.
+
+**What landed:** ~2,500 lines forked out of
+`nemo_retriever.tabular_data.ingestion` into `gsf/catalog/`, still writing to
+Neo4j. Phase 4 rewrites `gsf/catalog/store/` for Postgres; **everything above
+`store/` forks once and is done.**
+
+| New module | Forked from |
+|---|---|
+| `extract.py` | `ingestion/extract_data.py` |
+| `normalize.py` | `ingestion/utils.py` |
+| `write.py` | `ingestion/write_to_graph.py` |
+| `sql_parse.py` | `ingestion/services/queries.py` |
+| `services/schema.py` | `ingestion/services/schema.py` |
+| `model/{node,schema,query}.py` | `ingestion/model/{neo4j_node,schema,query}.py` |
+| `parsers/{sqlglot_extractor,query_comparator,schemas_parser}.py` | `ingestion/parsers/*` |
+| `store/{db,schemas,queries,edges}.py` | `ingestion/dal/{db,schemas,queries,utils}_dal.py` |
+| `store/indexes.py` | `ingestion/indexes.py` |
+| `store/connection.py` | `neo4j/neo4j_connection.py` |
+| `ingest.py` | **new** — replaces `TabularSchemaExtractOp` |
+
+`Neo4jNode` → `CatalogNode` throughout. Public surface is the four entry points
+the plan specified: `gsf.catalog.ingest_catalog`,
+`gsf.catalog.sql_parse.parse_query_single`, `gsf.catalog.store.queries.add_query`,
+`gsf.catalog.model.Schema` / `CatalogNode`.
+
+**Rewired off the library** — 17 GSF modules plus 3 dev tools. `get_neo4j_conn`
+in all 11 `gsf/dal/*.py`, `add_query` and `CatalogNode` in
+`model_interchange.py` / `sql_attributes/service.py` /
+`custom_analyses/service.py`, `parse_query_single` in `sql_utils.py` /
+`sql_parse_validation.py`, `CatalogNode` + `Schema` in `graph_schemas.py`,
+`close_store()`, and `ingestion_service/ingest.py`. `grep -rnE
+"^\s*(from|import)\s+nemo_retriever\.tabular_data\.(ingestion|neo4j)" gsf
+dev_tools` now returns exactly one line — `test_constants.py`, the Phase-0 pin
+test that imports the library on purpose to compare against. The remaining
+textual hits are provenance docstrings inside `gsf/catalog/` and the two pin
+tests.
+
+**`TabularSchemaExtractOp` deleted, not moved**, as the plan required.
+`gsf/ingestion_service/ingest.py` is now three straight-line calls:
+`ingest_catalog(connector)` → `TabularFetchEmbeddingsOp(...)(pair)` →
+`batch_embed(rows, params)`. The middle two stay on the library and are called
+directly, which is exactly what `Graph` did — it calls `operator.run(data)` and
+`AbstractOperator.__call__` *is* `run`. That equivalence does **not** hold for
+`_BatchEmbedActor`: it is an *archetype* operator resolved to a CPU or GPU
+variant only during graph execution, so `gsf.utils.embedding.batch_embed` keeps
+a one-node `Graph()` inside it. That is the one place in GSF that names the
+private symbol, and a test enforces it.
+
+**Fork equivalence — the Done criterion — met, byte-identically.** Procedure:
+capture a baseline, fork, re-seed from scratch, re-capture.
+
+- **Golden:** `dev_tools.seed_graph_fixture --reset` +
+  `dev_tools.capture_dal_golden` reproduce `gsf/dal/tests/golden/dal_reads.json`
+  with **zero diff** — all 122 DAL reads, across a full teardown and rebuild.
+- **Node counts per label:** identical, all 12 labels (209 Column, 37 Table,
+  8 ColumnAttribute, 6 Sql, 5 Term, 4 SqlAttribute, 3 Schema, 2 Database,
+  2 CustomAnalysis, 2 Zone, 1 PqlAnalysis, 1 disableZone).
+- **Relationship counts per type:** identical, all 10 types (249 CONTAINS,
+  30 FOREIGN_KEY, 25 SQL, 12 PROPERTY_OF, 8 HAS_ATTRIBUTE, 6 HAS_SQL,
+  6 ZONE_OF, 5 REPRESENTS, 3 JOIN, 3 SEMANTIC_FK).
+- **Sorted property dump** of every node and every edge, natural-keyed and with
+  random uuids and per-run timestamps normalised: identical.
+- **Incremental re-ingest:** running `run_ingest` again over Chinook through the
+  forked path left the graph and the golden unchanged, so `write.py`'s diffing
+  survived the move intact.
+
+**Tests added: 26.**
+- `gsf/catalog/tests/test_fork_parity.py` (18) — the fork is compared to the
+  library **AST-for-AST**, per module, after applying exactly the mechanical
+  rewrite (import paths + `Neo4jNode` → `CatalogNode`). It catches an accidental
+  edit during the move *and* upstream drift the fork would otherwise miss.
+  Formatting and the provenance docstring are excluded because neither is
+  behaviour. Plus a guard that no module can be added to `gsf/catalog/` without
+  declaring provenance, and one that nothing above `store/` imports `neo4j` —
+  the invariant that keeps Phase 4 contained. Verified non-vacuous by editing a
+  forked function body and watching the right module fail.
+- `gsf/catalog/tests/test_ingest.py` (5) — the three empty paths and the
+  cross-schema concat that was `TabularSchemaExtractOp`'s real contract.
+- `gsf/utils/tests/test_embedding.py` (3) — empty short-circuit, plus the two
+  that matter: no other GSF file mentions `_BatchEmbedActor`, and the wrapper
+  confines it to one import statement.
+
+**Full suite: 387 passed, 4 skipped** (was 361/4). `ruff check` and
+`ruff format` clean.
+
+**Three behaviour changes, all in [DECISION-004](DECISIONS.md):**
+- **B4** — `_shared_connection` now wraps extraction only, not extraction plus
+  the embed HTTP round trip. Strictly narrower and strictly better on Databricks
+  (where opening a connection is the slowest and flakiest step), but it changes
+  when the source database sees a disconnect, so it is named rather than
+  absorbed.
+- **B5** — `SemanticEmbedder.embed_graph` is gone; the one-node graph is built
+  per call. Microseconds, next to an HTTP call in the same function.
+- `extract_tabular_db_data` takes a **connector** instead of a library
+  `TabularExtractParams`, and `store_relational_db_in_neo4j` is deleted. Both
+  keep library types out of code that is meant to survive Phase 4 untouched.
+  `extract.py` is therefore the one module `test_fork_parity.py` lists as
+  deliberately diverged rather than pinning.
+
+**Deliberately not renamed:** `gsf/catalog/store/connection.py` keeps
+`get_neo4j_conn` and its `_conn` singleton. Renaming would touch 11 modules for
+a name Phase 11 deletes, and `gsf.dal.close_store()` is already the seam Phase 3
+repoints.
+
+**Phase 1 Done criteria:**
+- Forked path produces an identical Neo4j graph to the pre-fork path — node
+  counts per label, relationship counts per type, sorted property dump ✅
+- Golden captured (Phase 2 had already captured it; this phase proved the fork
+  reproduces it byte for byte) ✅
+- `uv run pytest` green ✅
+- No live import edge to `nemo_retriever.tabular_data.{ingestion,neo4j}` outside
+  the two deliberate pin tests ✅
+
+**Next:** Phase 3 (Postgres foundations) is unblocked and independent. Phase 4
+then rewrites `gsf/catalog/store/*.py` and nothing else — `test_fork_parity.py`
+should be deleted or narrowed at that point, since `store/` stops being a copy.
+
+Two things Phase 4 should know:
+- `store/indexes.py` disappears entirely (Alembic owns indexes), as planned.
+- `write.py`'s incremental diffing — existing-DB detection, schema
+  add/update/delete, the `pulled` timestamp — is the part with no test coverage
+  beyond the end-to-end re-ingest above. It deserves its own tests before it is
+  rewritten, not after.
+
 ## 2026-08-11 — Phase 3 — Postgres foundations
 
 **What landed:** the schema and connection machinery Phases 4–10 build on.
@@ -546,3 +674,34 @@ been applied outside a throwaway database — there was nothing to migrate from.
 **Re-verified:** 24 tables + `join_path_edge`; `alembic check` clean;
 `downgrade base` → 1 table; `upgrade head` → 24; view queryable; `public`
 untouched.
+
+---
+
+## 2026-08-11 — Phases 1 + 3 merged
+
+Phase 1 was executed in a separate worktree, in parallel with Phase 3, and
+merged here. Conflicts were confined to `PROGRESS.md` and `DECISIONS.md` — both
+append-only logs where each side had appended — and were resolved by keeping
+both, Phase 1's entries first. No code conflicts: the two phases touched
+disjoint files, which is why `dispose_engine()` was deliberately left unwired
+from `close_store()` in Phase 3.
+
+**Phase 1's claims verified independently after the merge**, not taken on
+report:
+- `grep -rnE "^\s*(from|import)\s+nemo_retriever\.tabular_data\.(ingestion|neo4j)" gsf dev_tools`
+  returns exactly one line: the Phase-0 `test_constants.py` pin test, which
+  imports the library on purpose.
+- `TabularSchemaExtractOp` survives only in docstrings; no code references it.
+- `_BatchEmbedActor` is named in exactly two files — `gsf/utils/embedding.py`
+  and its test.
+- The `gsf/catalog/` layout matches PLAN.md § Phase 1 exactly.
+- **Fork equivalence holds:** rebuilding the fixture graph through the forked
+  write path and replaying the goldens gives **128 passed** — all 122 recorded
+  DAL reads reproduce byte-identically.
+
+**Full suite: 397 passed, 4 skipped** (was 371 before the merge; +26 from
+Phase 1). Ruff clean.
+
+**Still open from Phase 3:** `dispose_engine()` is not yet called from
+`gsf.dal.close_store()`. Now that both phases have landed there is no longer a
+conflict risk — fold it in with Phase 4.

@@ -17,7 +17,7 @@ import logging
 from itertools import groupby
 
 from gsf.catalog.constants import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from gsf.catalog.store.connection import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
 from gsf.semantic.constants import (

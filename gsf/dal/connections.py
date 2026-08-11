@@ -18,7 +18,7 @@ import logging
 from typing import Any
 
 from gsf.catalog.constants import Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from gsf.catalog.store.connection import get_neo4j_conn
 
 from gsf.connectors.vault import read_secret
 

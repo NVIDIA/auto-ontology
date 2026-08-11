@@ -10,8 +10,8 @@ import json
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
+from gsf.catalog.store.queries import add_query
+from gsf.catalog.model import CatalogNode
 from gsf.catalog.constants import (
     Edges,
     Labels,
@@ -1390,7 +1390,7 @@ def _persist_sql_object(
     }
     if extra_props:
         props.update(extra_props)
-    node = Neo4jNode(
+    node = CatalogNode(
         name=name,
         label=node_label,
         props=props,

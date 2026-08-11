@@ -10,18 +10,14 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from gsf.utils import get_embed_params
-from nemo_retriever.graph import Graph
-from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
-    TabularSchemaExtractOp,
-)
+from gsf.utils.embedding import batch_embed
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
-from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
-from nemo_retriever.common.params.models import TabularExtractParams
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.catalog import ingest_catalog
 from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
 from gsf.dal.reset import delete_all_data, delete_semantic_layer
@@ -54,25 +50,25 @@ def run_ingest(connector: SQLDatabase) -> None:
     The connector's lifecycle is owned by the caller — ``run_ingest`` does not
     close it, since scheduled runs reuse cached connectors from
     :func:`gsf.connectors.registry.get_connectors`.
-    """
-    TABULAR_PARAMS = TabularExtractParams(connector=connector)
 
-    if not TABULAR_PARAMS.connector:
+    Three straight-line steps, formerly a ``Graph()`` chain of three operators.
+    Only the middle one is still a library operator; the catalog write is
+    GSF-owned (:func:`gsf.catalog.ingest_catalog`) and the embed step goes
+    through :func:`gsf.utils.embedding.batch_embed`.
+    """
+    if connector is None:
         raise ValueError("Connector is not set")
 
     database_name = connector.database_name
     embed_params = get_embed_params()
 
-    graph = (
-        Graph()
-        >> TabularSchemaExtractOp(tabular_params=TABULAR_PARAMS)
-        >> TabularFetchEmbeddingsOp(database_name=database_name)
-        >> _BatchEmbedActor(params=embed_params)
-    )
-
     with _shared_connection(connector):
-        results = graph.execute(None)
-    result_df = results[0] if results else None
+        tables_df, columns_df = ingest_catalog(connector)
+
+    embed_rows = TabularFetchEmbeddingsOp(database_name=database_name)(
+        (tables_df, columns_df)
+    )
+    result_df = batch_embed(embed_rows, embed_params)
 
     if result_df is not None and not result_df.empty:
         data_vdb = get_data_vdb(database_name=database_name, reset=True)

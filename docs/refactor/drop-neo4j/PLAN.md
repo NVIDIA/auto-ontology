@@ -336,6 +336,16 @@ a library ABC. Restructure `gsf/ingestion_service/ingest.py:51` from the
 import in a single `gsf/utils/embedding.batch_embed()` so the private-symbol
 dependency lives in one line in one file.
 
+> **Amendment (2026-08-11), [DECISION-004](DECISIONS.md).** "Verbatim" holds for
+> 16 of the 17 forked modules — pinned AST-for-AST by
+> `gsf/catalog/tests/test_fork_parity.py`. `extract.py` is the exception: it
+> takes the **connector** rather than a library `TabularExtractParams`, and
+> `store_relational_db_in_neo4j` is deleted rather than moved (a two-line
+> forwarder that `ingest_catalog` now calls through). Two behaviour changes fell
+> out: **B4**, `_shared_connection` no longer spans the embed step, and **B5**,
+> `SemanticEmbedder` builds its embed graph per call. `store/connection.py`
+> keeps the name `get_neo4j_conn` until Phase 11.
+
 **Done:** a full `/ingest` of Pagila **and** Chinook through the forked path
 produces an identical Neo4j graph to the pre-fork path — node counts per label,
 relationship counts per type, sorted property dump. **This is the last moment

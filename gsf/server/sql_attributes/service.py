@@ -14,8 +14,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
+from gsf.catalog.store.queries import add_query
+from gsf.catalog.model import CatalogNode
 from gsf.catalog.constants import Props
 
 from gsf.connectors import get_connectors
@@ -105,7 +105,7 @@ def _resolve_database_name(connector: str | None) -> str | None:
 
 
 def _persist_attr_with_sql(
-    attr_node: Neo4jNode,
+    attr_node: CatalogNode,
     sql: str,
     query_obj: Any,
 ) -> dict[str, Any]:
@@ -252,7 +252,7 @@ def create_sql_attribute(
         get_schemas(database_name),
     )
 
-    attr_node = Neo4jNode(
+    attr_node = CatalogNode(
         name=name,
         label=LABEL_SQL_ATTRIBUTE,
         props={
@@ -357,7 +357,7 @@ def update_sql_attribute(
             source=source,
         )
 
-        attr_node = Neo4jNode(
+        attr_node = CatalogNode(
             name=next_name,
             label=LABEL_SQL_ATTRIBUTE,
             props={

@@ -14,6 +14,8 @@ from nemo_retriever.common.params.models import EmbedParams
 from gsf.utils.model_config import resolve
 
 if TYPE_CHECKING:
+    import pandas as pd
+
     from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
@@ -42,6 +44,41 @@ def get_embed_params() -> EmbedParams:
         api_key=_EMBED_API_KEY,
         embed_modality="text",
     )
+
+
+def batch_embed(
+    rows: "list[dict] | pd.DataFrame",
+    params: EmbedParams,
+) -> "pd.DataFrame":
+    """Embed *rows* in one batch and return the DataFrame with embeddings.
+
+    **This is the only place GSF touches ``_BatchEmbedActor``.** It is a private
+    library symbol, so the dependency is deliberately confined to the two lines
+    below rather than repeated at every call site — see
+    ``docs/refactor/drop-neo4j/PLAN.md`` § Phase 1.
+
+    ``_BatchEmbedActor`` is an *archetype* operator: it resolves to a CPU or GPU
+    variant only when a :class:`~nemo_retriever.graph.Graph` executes it, so it
+    cannot be called directly the way ``TabularFetchEmbeddingsOp`` and
+    ``IngestVdbOperator`` can. Hence the one-node graph.
+
+    Returns an empty DataFrame when *rows* is empty or the embed step yields
+    nothing; the caller decides whether that is an error.
+    """
+    import pandas as pd
+
+    from nemo_retriever.graph import Graph
+    from nemo_retriever.operators.embed.operators import _BatchEmbedActor
+
+    frame = rows if isinstance(rows, pd.DataFrame) else pd.DataFrame(rows)
+    if frame.empty:
+        return pd.DataFrame()
+
+    results = (Graph() >> _BatchEmbedActor(params=params)).execute(frame)
+    embedded = results[0] if results else None
+    if embedded is None:
+        return pd.DataFrame()
+    return embedded
 
 
 def embed_docs_into_vdb(

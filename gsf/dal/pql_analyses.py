@@ -22,7 +22,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from gsf.catalog.store.connection import get_neo4j_conn
 
 from gsf.semantic.constants import LABEL_PQL_ANALYSIS
 

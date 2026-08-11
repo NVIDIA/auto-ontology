@@ -27,8 +27,9 @@ def close_store() -> None:
     driver internals. There are two connections to release, and the shutdown
     path used to close neither cleanly:
 
-    * the auto-commit singleton owned by ``nemo_retriever``, which callers
-      previously closed by poking its private module global, and
+    * the auto-commit singleton in :mod:`gsf.catalog.store.connection` (owned by
+      ``nemo_retriever`` until Phase 1 forked it), which callers previously
+      closed by poking its private module global, and
     * the driver :mod:`gsf.dal.neo4j_tx` opens for explicit write transactions,
       which nothing closed at all.
 
@@ -38,19 +39,19 @@ def close_store() -> None:
     When the Postgres backend lands this also disposes the SQLAlchemy engine —
     the point of the indirection is that ``__main__`` never has to know which.
     """
-    from nemo_retriever.tabular_data.neo4j import neo4j_connection
+    from gsf.catalog.store import connection
 
     from gsf.dal import neo4j_tx
 
-    if neo4j_connection._conn is not None:
+    if connection._conn is not None:
         try:
-            neo4j_connection._conn.close()
+            connection._conn.close()
         except Exception:
             logger.warning(
                 "close_store: shared connection failed to close", exc_info=True
             )
         finally:
-            neo4j_connection._conn = None
+            connection._conn = None
 
     if neo4j_tx._driver is not None:
         try:
