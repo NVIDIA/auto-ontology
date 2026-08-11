@@ -65,12 +65,14 @@
           "conversation_id": {
             "anyOf": [
               {
+                "format": "uuid",
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
+            "description": "Stable thread UUID. When supplied through the authenticated gateway, prior completed turns are loaded and the new turn is persisted.",
             "title": "Conversation Id"
           },
           "prediction": {
@@ -3685,7 +3687,7 @@
   "paths": {
     "/api/chat/cancel": {
       "post": {
-        "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\ncompletions proxy persists no assistant turn for it.",
+        "description": "Abort the in-flight run for ``conversation_id``, if any.\n\nBacks the chat UI's Stop button. Without this, stopping only detached\nthe browser while the agent kept running and holding the slot, so the\nvery next question in the same conversation was rejected with 409.\n\nKilling the worker makes ``PrewarmedWorker.events()`` return rather\nthan raise, so ``_pump`` appends no error event: the run's buffer ends\nwith whatever steps completed and the stream closes with ``[DONE]``.\nConsumers therefore see a run that stopped without an answer, and the\nconversation keeps its user turn with no assistant reply.",
         "operationId": "chat_cancel_api_chat_cancel_post",
         "parameters": [
           {
@@ -3693,6 +3695,7 @@
             "name": "conversation_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Conversation Id",
               "type": "string"
             }
@@ -3819,6 +3822,7 @@
             "name": "conversation_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Conversation Id",
               "type": "string"
             }

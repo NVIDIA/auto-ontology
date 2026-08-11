@@ -64,7 +64,7 @@ def _run_loop(monkeypatch: MonkeyPatch, connector_batches: list[list[str]]) -> d
         "gsf.retrieval.text_to_sql.main.stream_agent_response", fake_stream
     )
 
-    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None))])
+    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, []))])
     worker_module._worker_loop(in_q, _FakeQueue())
     return captured
 
