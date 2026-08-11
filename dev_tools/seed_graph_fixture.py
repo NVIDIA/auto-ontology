@@ -46,12 +46,8 @@ logger = logging.getLogger("dev_tools.seed_graph_fixture")
 
 def ingest_catalog() -> None:
     """Write both fixture databases' catalogs into the graph."""
+    from gsf.catalog import ingest_catalog as write_catalog
     from gsf.connectors.registry import create_connector
-    from nemo_retriever.common.params.models import TabularExtractParams
-    from nemo_retriever.tabular_data.ingestion.extract_data import (
-        extract_tabular_db_data,
-        store_relational_db_in_neo4j,
-    )
 
     raw = os.environ.get("CONNECTION_STRINGS", "")
     connection_strings = [cs.strip() for cs in raw.split(",") if cs.strip()]
@@ -62,10 +58,7 @@ def ingest_catalog() -> None:
         connector = create_connector(connection_string)
         try:
             logger.info("ingesting %s (%s)", connector.database_name, connector.dialect)
-            data = extract_tabular_db_data(
-                params=TabularExtractParams(connector=connector)
-            )
-            store_relational_db_in_neo4j(data=data, dialect=connector.dialect)
+            write_catalog(connector)
         finally:
             connector.close()
 

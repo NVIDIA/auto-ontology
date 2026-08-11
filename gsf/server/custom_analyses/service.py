@@ -15,8 +15,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
+from gsf.catalog.store.queries import add_query
+from gsf.catalog.model import CatalogNode
 from gsf.catalog.constants import (
     Labels,
     Props,
@@ -75,7 +75,7 @@ def validate_custom_analysis_sql(sql: str) -> dict[str, Any]:
 
 
 def _persist_analysis_with_sql(
-    analysis_node: Neo4jNode,
+    analysis_node: CatalogNode,
     sql: str,
     query_obj: Any,
 ) -> dict[str, Any]:
@@ -128,7 +128,7 @@ def create_custom_analysis(
         )
 
     query_obj = validate_sql(sql, get_dialects(), get_schemas())
-    analysis_node = Neo4jNode(
+    analysis_node = CatalogNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
         props={"name": name, "description": description},
@@ -185,7 +185,7 @@ def update_custom_analysis(
 
     detach_existing_sql_edges(analysis_id)
 
-    analysis_node = Neo4jNode(
+    analysis_node = CatalogNode(
         name=name,
         label=Labels.CUSTOM_ANALYSIS,
         props={"name": name, "description": description},

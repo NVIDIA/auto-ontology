@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+from gsf.catalog.sql_parse import parse_query_single
 from sqlglot.dialects import DIALECTS
 
 from gsf.connectors import get_connectors

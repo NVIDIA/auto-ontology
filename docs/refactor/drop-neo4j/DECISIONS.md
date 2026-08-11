@@ -30,6 +30,8 @@ must be restated in the PR description of the change that introduces it.
 | B1 | Reset deletes become **narrower** than `apoc.path.subgraphNodes`, which today bleeds across databases through shared `Term`/`Sql` nodes | Phase 8 |
 | B2 | `_delete_semantic_nodes`' scoped branch does **not** collect `PqlAnalysis` — current behaviour, deliberately preserved rather than "fixed" | Phase 8 |
 | B3 | Postgres catalogs gain partitioned parent tables and materialized views, which were silently dropped before; 5 columns per Pagila report their declared type (`mpaa_rating`, `text[]`, `year`) instead of `USER-DEFINED`/`ARRAY` | Phase 2 ([003](#003--fix-partitioned-tables-and-materialized-views-missing-from-postgres-catalogs)) |
+| B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
+| B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 
 Any further behaviour change discovered mid-port gets added to this table
 **and** its own numbered record below. Absorbing one silently is the single
@@ -185,3 +187,77 @@ faithfully reproduce a catalog with missing tables.
 
 Covered by `gsf/connectors/tests/test_postgres.py` (8 tests), which needs the
 Pagila fixture and skips without it.
+
+---
+
+## 004 — The shape of the fork boundary
+
+**Date:** 2026-08-11  **Phase:** 1  **Supersedes:** PLAN.md § Phase 1 (amended in the same commit)
+
+**Context** — PLAN.md § Phase 1 says "verbatim fork first, rewrite in Phase 4",
+and lists the file layout. Four things it did not settle came up while doing it,
+each of which is a place where "verbatim" and "GSF-owned" pull in opposite
+directions.
+
+1. **`extract_tabular_db_data(params)` took a `TabularExtractParams`** — a
+   library type — and read exactly one attribute off it, `.connector`. Copying
+   that signature verbatim would put a library import in `gsf/catalog/`, in a
+   module that is otherwise storage- **and** library-agnostic and is meant to
+   survive Phase 4 untouched.
+2. **`store_relational_db_in_neo4j(data, dialect, num_workers)`** was a
+   two-line forwarder to `populate_tabular_data`, plus a Neo4j-specific name on
+   a function that Phase 4 makes write Postgres.
+3. **The `_shared_connection` window.** `run_ingest` held the source database
+   connection open for the whole `Graph()` chain, because all three operators
+   ran inside `graph.execute(None)`. Straight-line calls make the window
+   explicit, and there is nothing to hold it open *for* past extraction.
+4. **`SemanticEmbedder.embed_graph`.** PLAN.md asks for the `_BatchEmbedActor`
+   dependency to live in "one line in one file". `gsf/semantic/embed.py` was a
+   second importer, and it cached the one-node graph on the dataclass.
+
+**Decision** —
+
+1. `extract_tabular_db_data` takes the **connector**. `TabularExtractParams`
+   stays on the library and out of `gsf/catalog/` entirely.
+2. `store_relational_db_in_neo4j` is **deleted**;
+   `gsf.catalog.ingest.ingest_catalog` calls
+   `gsf.catalog.write.populate_tabular_data` directly. This is the same call
+   `TabularSchemaExtractOp` made, one indirection shorter.
+3. `_shared_connection` wraps **`ingest_catalog` only**. Behaviour change
+   **B4**.
+4. `gsf/semantic/embed.py` goes through `gsf.utils.embedding.batch_embed` and
+   the `embed_graph` field is dropped, so the graph is constructed per call.
+   Behaviour change **B5**.
+
+`gsf/catalog/store/connection.py` deliberately keeps the name
+`get_neo4j_conn` and the module-level `_conn` singleton. Renaming it would have
+touched 11 modules for a name Phase 11 deletes, and `gsf.dal.close_store()`
+already exists as the seam Phase 3 repoints.
+
+**Consequences** — 1 and 2 make `gsf/catalog/` importable without
+`nemo_retriever` on the path for everything except the `SQLDatabase` type hint,
+which is under `TYPE_CHECKING`. They also mean `gsf/catalog/extract.py` is *not*
+byte-comparable to upstream, so `gsf/catalog/tests/test_fork_parity.py` lists it
+under `DIVERGED` with this record's number rather than pinning it — every other
+forked module is pinned, AST-for-AST.
+
+3 is strictly narrower and strictly better: the connection is released before
+the embed HTTP round trip rather than after, which on Databricks (where opening
+one is the slowest and flakiest step, per `_shared_connection`'s docstring) is
+the difference between holding a fragile connection for seconds and holding it
+for minutes. It is still a change in when the source database sees a
+disconnect, so it is named rather than absorbed.
+
+4 constructs a `Graph` and an operator per `embed_term` call — measured at
+microseconds, against an HTTP embed call in the same function, so the cost is
+not observable. `SemanticEmbedder.embed_graph` is gone; `embed_all_semantic_nodes`
+was the one external reader and now calls `batch_embed` itself.
+
+**Not changed, deliberately:** `TabularFetchEmbeddingsOp`, `IngestVdbOperator`,
+`SQLDatabase`, `EmbedParams` and `TabularExtractParams` all stay on the library,
+exactly as PLAN.md § Scope requires. `TabularFetchEmbeddingsOp` is now *called*
+directly instead of run through a `Graph()`, which is equivalent — `Graph`
+invokes `operator.run(data)` and `AbstractOperator.__call__` is `run`. That
+equivalence does **not** hold for `_BatchEmbedActor`, which is an archetype
+operator resolved to a CPU or GPU variant only during graph execution; hence
+`batch_embed` keeps the one-node graph.

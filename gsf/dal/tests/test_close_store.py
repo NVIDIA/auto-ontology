@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
-from nemo_retriever.tabular_data.neo4j import neo4j_connection
+from gsf.catalog.store import connection
 
 from gsf.dal import close_store, neo4j_tx
 
@@ -17,23 +17,23 @@ from gsf.dal import close_store, neo4j_tx
 @pytest.fixture(autouse=True)
 def _restore_globals():
     """Leave both module globals as they were found."""
-    shared, driver = neo4j_connection._conn, neo4j_tx._driver
-    neo4j_connection._conn = None
+    shared, driver = connection._conn, neo4j_tx._driver
+    connection._conn = None
     neo4j_tx._driver = None
     yield
-    neo4j_connection._conn, neo4j_tx._driver = shared, driver
+    connection._conn, neo4j_tx._driver = shared, driver
 
 
 def test_closes_both_connections() -> None:
     """The shared auto-commit connection *and* the transaction driver."""
     shared, driver = MagicMock(), MagicMock()
-    neo4j_connection._conn, neo4j_tx._driver = shared, driver
+    connection._conn, neo4j_tx._driver = shared, driver
 
     close_store()
 
     shared.close.assert_called_once_with()
     driver.close.assert_called_once_with()
-    assert neo4j_connection._conn is None
+    assert connection._conn is None
     assert neo4j_tx._driver is None
 
 
@@ -52,12 +52,12 @@ def test_closes_driver_even_if_shared_connection_raises() -> None:
     """
     shared, driver = MagicMock(), MagicMock()
     shared.close.side_effect = RuntimeError("bolt already gone")
-    neo4j_connection._conn, neo4j_tx._driver = shared, driver
+    connection._conn, neo4j_tx._driver = shared, driver
 
     close_store()
 
     driver.close.assert_called_once_with()
-    assert neo4j_connection._conn is None
+    assert connection._conn is None
     assert neo4j_tx._driver is None
 
 

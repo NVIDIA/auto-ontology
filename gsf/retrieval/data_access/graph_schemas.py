@@ -19,9 +19,9 @@ import time
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
+from gsf.catalog.model import CatalogNode
 from gsf.catalog.constants import Labels
-from nemo_retriever.tabular_data.ingestion.model.schema import Schema
+from gsf.catalog.model import Schema
 
 from gsf.dal.datasources import (
     fetch_all_schema_ids,
@@ -57,7 +57,7 @@ def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
     schema_dfs = {}
     dbs_nodes = {}
     for database_name in dbs:
-        database_node = Neo4jNode(
+        database_node = CatalogNode(
             name=database_name, label=Labels.DB, props={"name": database_name}
         )
         dbs_nodes[database_name] = database_node

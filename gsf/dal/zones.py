@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from gsf.catalog.store.connection import get_neo4j_conn
 
 from gsf.server.zones.constants import (
     LABEL_ZONE_DISABLED,

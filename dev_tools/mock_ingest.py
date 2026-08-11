@@ -23,18 +23,15 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from nemo_retriever.graph import Graph
 from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
     TabularFetchEmbeddingsOp,
 )
-from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
-    TabularSchemaExtractOp,
-)
-from nemo_retriever.common.params.models import EmbedParams, TabularExtractParams
+from nemo_retriever.common.params.models import EmbedParams
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
-from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.catalog import ingest_catalog
+from gsf.utils.embedding import batch_embed
 from gsf.utils.model_config import resolve
 from gsf.vdb import get_data_vdb
 
@@ -198,27 +195,14 @@ class MockDatabase(SQLDatabase):
 def run_mock_ingest() -> None:
     """Push the mock 4-table schema through the real ingest + embed pipeline."""
     connector = MockDatabase()
-    tabular_params = TabularExtractParams(connector=connector)
     database_name = connector.database_name
 
     logger.info("Extracting schema for %r (mock)", database_name)
-    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=tabular_params)
-    extract_results = extract_graph.execute(None)
-    schema_data = extract_results[0] if extract_results else None
-    if not (isinstance(schema_data, tuple) and len(schema_data) == 2):
-        raise RuntimeError(
-            "TabularSchemaExtractOp did not return (tables_df, columns_df); "
-            f"got {type(schema_data).__name__}."
-        )
+    schema_data = ingest_catalog(connector)
 
     logger.info("Embedding %r schema rows", database_name)
-    embed_graph = (
-        Graph()
-        >> TabularFetchEmbeddingsOp(database_name=database_name)
-        >> _BatchEmbedActor(params=EMBED_PARAMS)
-    )
-    results = embed_graph.execute(schema_data)
-    result_df = results[0] if results else None
+    embed_rows = TabularFetchEmbeddingsOp(database_name=database_name)(schema_data)
+    result_df = batch_embed(embed_rows, EMBED_PARAMS)
 
     vdb = get_data_vdb(database_name=database_name, reset=True)
 
