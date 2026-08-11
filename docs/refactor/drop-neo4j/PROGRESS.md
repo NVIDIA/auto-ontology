@@ -926,3 +926,50 @@ from callers — not descriptions of how anything is stored.
 
 **Suite:** 427 passed, 4 skipped. No behaviour change; renames and docstrings
 only.
+
+---
+
+## 2026-08-11 — Phase 4 — schema reads and writes on Postgres
+
+`store/pg/schemas.py` and `store/pg/indexes.py` land. `db.py` (the incremental
+diff) and `queries.py` remain.
+
+**`indexes.py` is a no-op**, and that is the whole point of moving to a schema'd
+store: the Neo4j version creates a uniqueness constraint and two indexes per
+label on *every ingest*, because there is nowhere else to put them. Here they
+come from a migration. Kept as a function only because `write.py` calls it
+unconditionally and that call site is storage-agnostic code the fork does not
+edit; Phase 11 removes both.
+
+**`schemas.py` is where the frames have to match exactly.** Its readers feed
+`update_diff_from_existing_schema`, which merges them against freshly parsed
+frames — so the column names must line up, including the `database` column only
+the stored side carries. Getting that wrong is not a type error, it is the diff
+silently doing nothing, which is precisely the bug found earlier this phase
+(DECISION-006). Verified: `columns_df` comes back with `database`,
+`table_schema`, `table_name`, `column_name`, `id`, `data_type`, `is_nullable`
+plus what `normalize_columns` adds — the same shape the Cypher produced.
+
+**Schema change: `column_foreign_key` gains `last_seen`.** The Neo4j FK edge
+carries it, and `delete_old_fks` uses it to remove keys an ingest did not see —
+without it there is no way to distinguish a foreign key the source dropped from
+one simply not re-asserted, and stale keys accumulate forever. Migration
+regenerated as `fdafddfc335a`.
+
+**`delete_old_fks` is scoped to the database being ingested.** The Cypher
+matched from the `Database` node down, so a global delete would have dropped
+another database's keys whenever two ingests overlap. Easy to miss when the
+Cypher's scoping is implicit in the pattern rather than in a `WHERE`.
+
+**Verified end to end** against the migrated schema: primary keys append (a
+composite key arrives as several rows, so `add_pks` appends and `reset_pks`
+clears first, matching `t.pk + [col.name]`); foreign keys upsert without
+duplicating on re-ingest; a later stamp removes stale keys;
+`load_schema_from_graph` round-trips.
+
+**Suite:** 427 passed, 4 skipped.
+
+**Left in Phase 4:** `store/pg/db.py` — the incremental diff, the largest and
+most consequential of the modules, now specified by the 12 tests written before
+the rewrite — and `store/pg/queries.py`. Then the whole thing runs under
+`GSF_STORE=postgres` against the fixture.

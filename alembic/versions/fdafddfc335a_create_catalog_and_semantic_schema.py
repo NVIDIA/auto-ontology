@@ -11,9 +11,9 @@ The relational replacement for the Neo4j graph. See
 Everything lives in the ``gsf`` schema -- never ``public`` (Prisma's) and never
 ``vdb`` (langchain_postgres').
 
-Revision ID: 731be6d6d249
+Revision ID: fdafddfc335a
 Revises: 
-Create Date: 2026-08-11 19:33:13.142508
+Create Date: 2026-08-11 19:55:56.197030
 
 """
 from typing import Sequence, Union
@@ -29,7 +29,7 @@ from gsf.dal.pg.schema import (
 )
 
 # revision identifiers, used by Alembic.
-revision: str = '731be6d6d249'
+revision: str = 'fdafddfc335a'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -290,6 +290,7 @@ def upgrade() -> None:
     op.create_table('column_foreign_key',
     sa.Column('source_column_id', sa.Text(), nullable=False),
     sa.Column('target_column_id', sa.Text(), nullable=False),
+    sa.Column('last_seen', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['source_column_id'], ['gsf.catalog_column.id'], name=op.f('fk_column_foreign_key_source_column_id_catalog_column'), ondelete='CASCADE'),
     sa.ForeignKeyConstraint(['target_column_id'], ['gsf.catalog_column.id'], name=op.f('fk_column_foreign_key_target_column_id_catalog_column'), ondelete='CASCADE'),
     sa.PrimaryKeyConstraint('source_column_id', 'target_column_id', name=op.f('pk_column_foreign_key')),

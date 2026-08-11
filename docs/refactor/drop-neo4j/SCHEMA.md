@@ -8,7 +8,7 @@ Design rationale lives in [PLAN.md § Schema design](PLAN.md#schema-design) —
 this file describes what *is*, not why. The metadata itself is
 `gsf/dal/pg/schema.py`, which Alembic autogenerates from.
 
-**Status: landed in Phase 3** (revision `731be6d6d249`). 24 tables + the
+**Status: landed in Phase 3** (revision `fdafddfc335a`). 24 tables + the
 `alembic_version` bookkeeping table, and one view. Not yet written to — Phase 4
 ports the catalog write path onto it.
 
@@ -43,7 +43,7 @@ make migrate-check   # fail if the database has drifted from schema.py
 | `catalog_schema` | 4 | `:Schema` | FK → `catalog_database`; unique on (database, name) |
 | `catalog_table` | 7 | `:Table` | FK → `catalog_schema`; `pk text[]`, `table_type` |
 | `catalog_column` | 10 | `:Column` | FK → `catalog_table`; `sample_values` and **`is_nullable`** kept as `text` — the graph stores `is_nullable` as the strings `'YES'`/`'NO'`, and a boolean column would change what callers receive. `ordinal_position` is a genuine integer |
-| `column_foreign_key` | 2 | `:FOREIGN_KEY` | Column → Column |
+| `column_foreign_key` | 3 | `:FOREIGN_KEY` | Column → Column; `last_seen` is stamped each ingest so keys the source has dropped can be found and removed |
 | `table_join` | 3 | `:JOIN` | Table → Table, carries `join_columns jsonb` |
 | `sql_query` | 5 | `:Sql` | unique on `md5(sql_full_query)` — statement text can exceed the btree row limit, so the hash carries the constraint |
 | `sql_query_table` | 2 | `:SQL` | Sql → Table |

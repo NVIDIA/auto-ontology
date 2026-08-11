@@ -194,6 +194,11 @@ column_foreign_key = Table(
         ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
         primary_key=True,
     ),
+    # Stamped by every ingest, then used to delete the keys this run did not
+    # see -- the source database may have dropped a constraint. Without it
+    # there is no way to tell a removed foreign key from one simply not
+    # re-asserted, and stale keys would accumulate forever.
+    Column("last_seen", DateTime(timezone=True), nullable=True),
 )
 
 # JOIN: Table -> Table, carrying the columns that join them.
