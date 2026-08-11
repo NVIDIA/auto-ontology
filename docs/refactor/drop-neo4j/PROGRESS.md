@@ -1022,3 +1022,59 @@ twice.
 ingest and the 12 incremental tests re-run under `GSF_STORE=postgres`. That last
 step is the actual Done criterion — everything so far is tested against the
 Postgres schema directly, not through the ingest pipeline end to end.
+
+---
+
+## 2026-08-11 — Phase 4 — `queries.py` needs a schema decision first
+
+Reading `store/neo4j/queries.py` to port it surfaced a gap that is a design
+question, not a translation. Stopping here rather than guessing at it.
+
+**`sql_query` is missing five columns and one whole concept.** The module reads
+and writes `nodes_count`, `join_count`, `union_count`, `total_counter`,
+`last_query_timestamp` and `deleted`; the table has none of them. Those five are
+ordinary additions.
+
+**The concept is monthly counters.** `update_counters_and_timestamps_for_query_and_affected_data`
+increments *dynamically named* properties — `count_2026_01`, `count_2026_02`,
+one per month a query was seen — and `get_sql_counters` finds them by scanning
+for the `count_` prefix. That is a schemaless pattern with no direct relational
+form, and it needs a deliberate choice:
+
+- **A child table** `sql_query_month_count(sql_query_id, month, count)`. Properly
+  relational, queryable ("usage since March"), and the shape someone would pick
+  from scratch. Changes the read shape, so `get_sql_counters` returns rows
+  rather than a `count_*` dict — and its caller has to move with it.
+- **A `jsonb` column.** Preserves the `{month: count}` shape exactly, so nothing
+  above the store changes. But it reproduces the schemaless pattern inside the
+  relational store, which is most of what this refactor exists to stop.
+
+I would take the child table, with `get_sql_counters` returning the same dict it
+does today so the change stays inside the store. But it is a schema decision
+with a consumer-visible edge, so it belongs in a DECISIONS record made
+deliberately rather than at the end of a long session.
+
+**Two functions should not be ported at all** — they are storage-agnostic and
+belong beside the diff in `gsf/catalog/diff.py` or a sibling:
+`get_candidate_sql_ids` is pure pandas filtering, and `get_sql_counters` only
+reads a node object. Duplicating them repeats the mistake the diff extraction
+just corrected.
+
+**Also worth flagging:** `update_counters_...` walks `apoc.path.subgraphNodes`
+from a `Sql` node to stamp `last_query_timestamp` on every Table and Column it
+touches, skipping any marked `deleted`. Nothing in the GSF schema writes
+`deleted`, so that filter may be dead — worth confirming before carrying it
+over, since a dead filter copied faithfully becomes a permanent puzzle.
+
+### State at this stopping point
+
+Working tree clean, everything committed, **427 passed / 4 skipped**.
+
+Landed in Phase 4: the backend selector, `registry.py`, `rows.py`, `edges.py`,
+`schemas.py`, `indexes.py`, `db.py`, and the shared `diff.py`. Plus two
+pre-existing bugs found and fixed (DECISION-006) and one recorded for Phase 10.
+
+Remaining: `store/pg/queries.py` behind the decision above, then the fixture
+ingest and the 12 incremental tests under `GSF_STORE=postgres` — which is the
+real Done criterion. Everything so far is tested against the Postgres schema
+directly, not through the ingest pipeline end to end.
