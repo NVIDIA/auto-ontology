@@ -33,7 +33,7 @@ must be restated in the PR description of the change that introduces it.
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
-| B7 | **SqlAttribute suggestions are now ranked by usage.** They were previously unranked: every expression scored 0.0, so ordering was dict insertion order. Ranking is by all-time `total_counter` rather than recent usage | Phase 4 ([007](#007--the-sqlattribute-suggester-was-never-actually-ranking)) |
+| ~~B7~~ | **Withdrawn.** Ranking the suggester *would* have been a behaviour change, so it is not being made here — the bug is documented in place and the inert behaviour preserved. See [007](#007--the-sqlattribute-suggester-was-never-actually-ranking) |
 
 Any further behaviour change discovered mid-port gets added to this table
 **and** its own numbered record below. Absorbing one silently is the single
@@ -423,25 +423,35 @@ would have been inherited by any faithful port:
   `count_monthly_YYYY_MM`, matching the broken regex rather than the writer.
   The docstring is where the mistake most likely started.
 
-**Decision** — Rank by `total_counter`, and drop per-month counters entirely.
+**Decision** — Two parts, and the second was a correction.
 
-`total_counter` is maintained on the same write paths, is a real non-zero
-number, and is one integer column. This removes the schema question that
-prompted the investigation: no child table, no `jsonb`, no dynamic property
-names.
+**Drop per-month counters from the schema.** Nothing can read them, and the
+`total_counter` that would replace them is already a single integer column. This
+settles the question that prompted the investigation: `sql_query` needs five
+scalar columns, no child table, no `jsonb`, no dynamic property names.
 
-**Consequences** — Behaviour change **B7**, and it is an improvement in the
-sense that ranking now happens at all. But it is a genuine semantic change:
-scoring is by *all-time* usage rather than *recent* usage, so an expression
-heavily used a year ago now outranks one popular this month. The old code
-*intended* recency; it never delivered it.
+**Do not turn ranking on. Preserve the inert behaviour, documented in place.**
+The fix was written and then deliberately withdrawn. Ranking the suggester
+changes which SqlAttributes the semantic layer proposes — a product behaviour
+change, in a component whose output this refactor is meant to leave untouched.
+It belongs in its own change with its own tests, not smuggled in as a side
+effect of a port.
 
-If recency turns out to matter, the signal to reach for is
-`last_query_timestamp` — already a single column on the Sql node — used as a
-filter or tiebreaker. Reintroducing per-month counters would mean bringing back
-the dynamic-property pattern this refactor exists to remove.
+`_usage_score` therefore returns a literal `0.0`, with the cause, the two latent
+faults behind it, and the one-line fix in its docstring. A constant is honest
+where a plausible-looking scorer that silently does nothing is not.
 
-Covered by `gsf/semantic/tests/test_usage_score.py`, which asserts against a
-**real property bag** — the shape `Query.__init__` actually writes. Nothing
-caught this for the life of the feature because no test ever used real key
-names; the one test that could have would have had to assert a non-zero score.
+**This is the opposite call to [006](#006--column-diffs-never-ran-and-the-error-was-swallowed),
+and the distinction is the point.** That bug silently *lost data* — columns
+vanished from the catalog — so reproducing it faithfully would have meant
+porting data loss. This one produces an arbitrary ordering of suggestions.
+Wrong, but not destructive, and safe to leave until it can be changed on
+purpose.
+
+**Consequences** — No behaviour change; **B7 is withdrawn**. The bug stays open,
+recorded in PLAN.md's bug table alongside the `is_nullable` export fault.
+
+`gsf/semantic/tests/test_usage_score.py` pins the inertness, so a change to it
+is visible rather than silent — and says explicitly that every assertion there
+inverts when the fix lands. Nothing caught this for the life of the feature
+because no test asserted anything at all about the score.

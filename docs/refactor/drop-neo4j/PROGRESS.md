@@ -1123,3 +1123,37 @@ one that asserts a non-zero score.
 no longer incidental. Three of the four are silent — no error, no log, no
 failing test — which is the pattern: a schemaless store lets a name mismatch sit
 undetected indefinitely, because nothing declares what a name is supposed to be.
+
+---
+
+## 2026-08-11 — Phase 4 — correction: the suggester fix is withdrawn
+
+The previous entry recorded ranking by `total_counter` as landed behaviour
+change **B7**. **That is withdrawn.** The fix was written, then deliberately
+reverted on review: turning ranking on changes which SqlAttributes the semantic
+layer proposes, and that is a product behaviour change in a component this
+refactor is meant to leave untouched. It belongs in its own change with its own
+tests, not as a side effect of a port.
+
+`_usage_score` now returns a literal `0.0` — today's behaviour exactly — with
+the cause, the two latent faults behind it, and the one-line fix written out in
+its docstring. A constant is honest where a plausible-looking scorer that
+silently does nothing is not.
+
+**This is the opposite call to DECISION-006, and the distinction is the point.**
+That bug silently lost data: columns vanished from the catalog, so reproducing it
+faithfully would have meant porting data loss. This one produces an arbitrary
+ordering of suggestions — wrong, but not destructive, and safe to leave until it
+can be changed on purpose. The test for whether to fix a bug mid-port is whether
+preserving it destroys something.
+
+`gsf/semantic/tests/test_usage_score.py` pins the inert behaviour rather than
+the fix, and says so: every assertion in it inverts when ranking is turned on,
+which is the signal it worked rather than a regression.
+
+**What still stands from the investigation:** per-month counters are dropped
+from the schema entirely. Nothing can read them, and `total_counter` — the
+column a fix would use — is already there. `sql_query` needs five scalar
+columns, no child table, no `jsonb`.
+
+**Suite:** 431 passed, 4 skipped.

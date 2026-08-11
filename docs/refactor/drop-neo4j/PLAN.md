@@ -51,7 +51,7 @@ getting wrong in production.
 | 1 | **Partitioned tables and materialized views were missing from every Postgres catalog.** `relkind` excluded `'p'`, so a partitioned parent appeared nowhere; and `information_schema` lists no matviews, making `TableTypes.MATERIALIZED_VIEW` unreachable dead code | ingesting the Pagila fixture | fixed, **B3** ([003](DECISIONS.md)) |
 | 2 | **No column change ever survived a re-ingest.** The column diff merged on keys neither frame had, raising `KeyError` every time — and `executor.map`'s result was never consumed, so the exception was discarded in silence. Added columns never appeared; dropped columns left ghosts the SQL generator kept querying | writing the incremental-diff tests | fixed, **B6** ([006](DECISIONS.md)) |
 | 3 | **Every column exports as nullable.** `model_interchange` reads `is_nullable` with `bool(...)`, but the graph stores the strings `'YES'`/`'NO'` — and `bool('NO')` is `True` | measuring stored property types | **open**, for Phase 10 |
-| 4 | **The SqlAttribute suggester never ranked anything.** Its scorer matched `count_monthly_YYYY_MM` while the writer produced `count_{month}_{year}`, so every expression scored 0.0 and ordering was dict insertion order | deciding how to store monthly counters | fixed, **B7** ([007](DECISIONS.md)) |
+| 4 | **The SqlAttribute suggester never ranked anything.** Its scorer matched `count_monthly_YYYY_MM` while the writer produced `count_{month}_{year}`, so every expression scored 0.0 and ordering was dict insertion order | deciding how to store monthly counters | **open** — documented in place, behaviour preserved ([007](DECISIONS.md)) |
 
 Three of the four are silent: no error, no log, no failing test. That is the
 pattern worth noting — a schemaless store lets a name mismatch sit undetected
@@ -59,8 +59,17 @@ indefinitely, because nothing declares what a name is supposed to be. Two of
 them (2 and 4) were a regex or a merge key disagreeing with a writer that no
 schema constrained.
 
-**Bug 3 is still open** and belongs to Phase 10, which must fix it and un-skip
-the two `test_export_model_*` tests together.
+**Bugs 3 and 4 are still open, deliberately.** Both change product output —
+what a model export claims about nullability, and which SqlAttributes get
+suggested — so both belong in their own change with their own tests rather than
+inside a port. Bug 3 is Phase 10's, which must fix it and un-skip the two
+`test_export_model_*` tests together. Bug 4 has its fix written out in
+`_usage_score`'s docstring, ready to apply.
+
+The line between fixing and preserving is whether the bug destroys something.
+Bugs 1 and 2 lost catalog entries, so reproducing them faithfully would have
+meant porting data loss. Bugs 3 and 4 produce wrong-but-harmless output, and
+preserving them keeps the port honest about what it changed.
 
 ---
 
