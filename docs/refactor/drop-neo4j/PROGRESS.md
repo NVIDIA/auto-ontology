@@ -405,3 +405,23 @@ seeded, every `fetch_*`/`get_*`/`list_*` snapshotted under all three zone modes.
 **Next:** Phase 1 (fork the write path) and Phase 3 (Postgres foundations), which
 are independent of each other. Phase 1's fork-equivalence check can now run,
 since it compares against exactly this fixture.
+
+---
+
+## 2026-08-11 — Phases 1 + 3 — merge from `origin/main`
+
+**Merge:** `origin/main` `ce62e52` → **`0a3ed24`**, 4 commits, **no conflicts**.
+Brings in API tokens for machine-to-machine access (#176) and conversation
+follow-up (#177). 55 files, +2691/−288.
+
+**DAL surface unchanged** — `test_dal_surface.py` green, so nothing upstream
+touched a `gsf/dal` signature. Goldens still replay clean (159 passed in
+`gsf/dal/tests` + `gsf/catalog/tests`). Full suite **361 passed, 4 skipped**,
+up from 349 as upstream added 12 tests.
+
+**Worth noting for Phase 3:** upstream added `gsf/server/chat/conversation_dal.py`,
+a new *Postgres* data-access module living outside `gsf/dal/`. Phase 3 should
+check whether it builds its connection through `gsf/infra/postgres.py` or opens
+its own, and whether it should share the pooled engine this phase introduces —
+a second connection-management pattern landing while we build the first one is
+exactly the kind of drift that is cheap to fix now and annoying later.
