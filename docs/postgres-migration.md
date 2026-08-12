@@ -46,7 +46,7 @@ bug of the set.
 
 ### Preserved deliberately, and pinned by tests
 
-These are wrong, or at least surprising, but changing them is a product
+These two are wrong, or at least surprising, but changing them is a product
 decision rather than a migration one. They behave exactly as they did before;
 tests now assert the current behaviour so a future fix is a deliberate act.
 
@@ -58,9 +58,12 @@ arbitrary order. `total_counter` is stored and is what a ranking would use —
 statement vanishes from the result entirely; a `CustomAnalysis` with no
 statement comes back with `sql: ""`. Two shapes for the same condition.
 
-**6. A cross-database Term makes an export unimportable.** The export scopes by
-database, but a Term may be attached to tables in more than one, so the emitted
-document can reference ids outside its own scope.
+(A third entry here — a cross-database Term making an export unimportable —
+was **fixed** in review rather than preserved. The export still records every
+table representing a term, in scope or not, because that is honest about a term
+it only partly owns; the *import* now skips references the document does not
+carry, instead of aborting. Structural references, such as a foreign key's
+endpoints, are still a hard error.)
 
 ---
 
@@ -169,10 +172,12 @@ object queries can `select()` from, while the DDL string
 that string by hand — **autogenerate will never emit it**, so a squash or
 regeneration that forgets it silently breaks join-path finding.
 
-The chain has since been **squashed to one baseline migration**
-(`b91c6167562e`). Nothing was deployed with the old revisions applied, so there
-was no upgrade path to preserve. A database built by the old four-migration
-chain is structurally identical and can be adopted with:
+There is exactly **one baseline migration**, and it is re-squashed rather than
+extended whenever migrations accumulate. Nothing is deployed with an earlier
+revision applied, so there is no upgrade path to preserve, and one file that
+matches `schema.py` beats a chain that has to be replayed mentally to know the
+current shape. A database built by an earlier chain is structurally identical
+and can be adopted with:
 
 ```
 uv run alembic stamp --purge head
@@ -180,6 +185,12 @@ uv run alembic stamp --purge head
 
 Plain `stamp head` fails on such a database — Alembic cannot reason about a
 stored revision that no longer exists in the version directory.
+
+The revision id changes on every squash, and `backend.alembicRevision` in
+`helm/gsf/values.yaml` must track it: the backend's `wait-for-catalog-schema`
+init container blocks until `gsf.alembic_version` matches that value, so a
+stale pin leaves every Pod waiting forever. `gsf/dal/tests/test_migration_revision.py`
+fails if the two drift, and if there is ever more than one head.
 
 ### Join paths
 
