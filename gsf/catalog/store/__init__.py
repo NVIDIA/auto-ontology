@@ -2,9 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The catalog's persistence layer — **the only subtree Phase 4 rewrites**.
+"""The catalog's persistence layer.
 
-Everything above this package is storage-agnostic and forks once, permanently.
-Keep it that way: no Cypher, no driver types, and no ``neo4j`` import above
-``gsf/catalog/store/``.
+Everything above this package is storage-agnostic — extraction, parsing, the
+diff. Keep it that way: SQL and storage types belong here and nowhere above.
 """

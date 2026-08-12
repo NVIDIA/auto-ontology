@@ -22,7 +22,7 @@ Full stack (infrastructure + Next.js + FastAPI):
 ./dev_tools/setup_env.sh
 ```
 
-Or infrastructure only (Postgres, pgAdmin, Neo4j):
+Or infrastructure only (Postgres, pgAdmin):
 
 ```bash
 ./dev_tools/setup_env.sh --dev
@@ -47,11 +47,10 @@ Brings up the GSF environment via `docker compose`.
 
 | Command | What it starts |
 |---|---|
-| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin, Neo4j) **and** the `gsf` + `gsf-frontend` images (built with `--build`). |
-| `bash ./dev_tools/setup_env.sh --dev` | Infra only (Postgres, pgAdmin, Neo4j). You run `gsf` / `gsf-frontend` locally yourself. |
+| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin) **and** the `gsf` + `gsf-frontend` images (built with `--build`). |
+| `bash ./dev_tools/setup_env.sh --dev` | Infra only (Postgres, pgAdmin). You run `gsf` / `gsf-frontend` locally yourself. |
 | `bash ./dev_tools/setup_env.sh --ds` | Infra **+** `gsf-frontend` in docker. You run `gsf` locally on `:3001`; the containerised frontend reaches it via `host.docker.internal:3001`. |
 
-If a `neo4j` container is already running on the host, it is reused and not restarted.
 
 ### Endpoints
 
@@ -59,7 +58,6 @@ If a `neo4j` container is already running on the host, it is reused and not rest
 |---|---|
 | Postgres | `localhost:5432` |
 | pgAdmin | <http://localhost:5050> |
-| Neo4j | <http://localhost:7474> |
 | GSF frontend (full stack only) | <http://localhost:3000> |
 | GSF backend (full stack only) | <http://localhost:3001> |
 
@@ -100,7 +98,7 @@ Service ports and credentials come from `.env` at the repo root (read by `docker
 
 ```bash
 docker compose down       # stop everything
-docker compose down -v    # stop + wipe volumes (Postgres, Neo4j, pgAdmin data)
+docker compose down -v    # stop + wipe volumes (Postgres, pgAdmin data)
 ```
 
 ## Container & Kubernetes deployment
@@ -112,4 +110,4 @@ Kubernetes:
   BuildKit named context, defaulting to a small committed stub.
 - `frontend/Dockerfile` — frontend (Next.js standalone)
 - `helm/gsf/` — Helm chart with deployments, services, optional Ingress,
-  HPA, PDB and a sample Postgres+Neo4j manifest
+  HPA, PDB and a sample Postgres manifest

@@ -4,13 +4,11 @@
 
 """Connection and transaction scope for the Postgres DAL.
 
-Deliberately mirrors :mod:`gsf.dal.neo4j_tx`'s contract, name for name, so the
-~180 call sites that read ``store().query_read(...)`` and the routines wrapped
-in ``with write_transaction():`` port without touching their structure:
+Two entry points, used by every read and write in the DAL:
 
 * :func:`store` returns the active transaction if there is one, otherwise a
   handle that runs each statement in its own autocommitted transaction — the
-  same split ``graph()`` makes today.
+  same split the DAL relies on for single-statement writes.
 * :func:`write_transaction` makes every statement in the block one unit of
   work. Nesting reuses the outermost scope, so a routine that calls another
   transactional routine still commits once.
@@ -108,18 +106,17 @@ def dispose_engine() -> None:
 
 
 def _rows(result: Any) -> list[dict[str, Any]]:
-    """Normalise a result to ``list[dict]``, matching the Neo4j driver's shape."""
+    """Normalise a result to ``list[dict]``."""
     if result.returns_rows:
         return [dict(row) for row in result.mappings()]
     return []
 
 
 class StoreConn:
-    """``Neo4jConnection``-shaped handle over a SQLAlchemy connection.
+    """A thin handle over a SQLAlchemy connection.
 
-    Keeps ``query`` / ``query_read`` / ``query_write`` so DAL call sites read
-    the same in both implementations. The read/write split is naming only —
-    Postgres needs no routing hint, unlike Neo4j's ``RoutingControl``.
+    The ``query_read`` / ``query_write`` split is naming only: it documents
+    intent at the call site, and Postgres needs no routing hint.
     """
 
     def __init__(self, connection: Connection | None = None) -> None:
@@ -132,9 +129,8 @@ class StoreConn:
         if self._connection is not None:
             return _rows(self._connection.execute(compiled, parameters or {}))
         # No open transaction: one autocommitted statement, connection returned
-        # to the pool immediately. This is the analogue of Neo4j's auto-commit
-        # singleton, and it is why a multi-statement write that must be
-        # all-or-nothing has to go through write_transaction().
+        # to the pool immediately. This is why a multi-statement write that
+        # must be all-or-nothing has to go through write_transaction().
         with (
             get_engine()
             .connect()
@@ -165,8 +161,7 @@ def write_transaction() -> Iterator[None]:
 
     Commits on clean exit, rolls back on any exception. Nesting reuses the
     outermost transaction so the whole block stays a single unit of work —
-    ``model_interchange``'s import depends on this, and it is the reason the
-    Neo4j version exists at all.
+    ``model_interchange``'s import depends on this.
     """
     if _active.get() is not None:
         yield

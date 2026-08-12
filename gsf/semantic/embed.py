@@ -79,7 +79,7 @@ class SemanticEmbedder:
 
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries: ``{"name", "term_name", "source_column", "description", "id"}``.
-        ``id`` is the Neo4j node ``id`` property (UUID) and, when present, lands
+        ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
         """
@@ -146,7 +146,7 @@ def build_semantic_embedder(
 def embed_all_semantic_nodes(
     embedder: SemanticEmbedder,
 ) -> int:
-    """Embed every Term + ColumnAttribute currently in Neo4j in a single batch.
+    """Embed every Term + ColumnAttribute currently in the store in a single batch.
 
     Fetches all semantic nodes, builds one combined DataFrame, makes a single
     HTTP call to the embed endpoint, and writes all results to the VDB in one

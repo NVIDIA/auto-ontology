@@ -2,25 +2,14 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Reusable SQL expressions — the Postgres counterpart to ``cypher_fragments``.
+"""Reusable SQL expressions shared across the catalog and semantic reads.
 
-Small, but disproportionately load-bearing: the description fallback here is
-what five of the seven functions Phase 6 handed to Phase 7 were waiting for
-(DECISION-009), and it decides what the UI and the SQL generator actually see as
-a column's description.
+Small, but disproportionately load-bearing: the description fallback here
+decides what the UI and the SQL generator see as a column's description.
 
-Two of ``cypher_fragments``' four helpers have no counterpart and are gone
-rather than translated:
-
-* ``and_condition`` existed because the Cypher builders returned either ``""``
-  or a complete ``WHERE ...`` clause, so a caller narrowing a query further
-  could not simply concatenate. SQLAlchemy composes predicates natively —
-  ``.where(a).where(b)`` — so the problem it solved does not arise.
-* ``paging_clause`` becomes ``.offset()`` / ``.limit()``. Its docstring warned
-  that Neo4j may return rows in any order without a total ``ORDER BY``, so
-  consecutive pages both repeat and drop rows. That hazard is identical in SQL
-  and is *not* solved by this module — it belongs to each paged query, which
-  must order by something unique.
+A paging note that belongs to callers rather than here: without a total
+``ORDER BY``, consecutive pages can both repeat and drop rows. Every paged
+query must order by something unique.
 """
 
 from __future__ import annotations
@@ -35,8 +24,8 @@ def _non_blank(column: ColumnElement) -> ColumnElement:
 
     Blank is treated as missing throughout the fallback, so an empty string
     stored on a column does not mask a real description on the attribute behind
-    it. That is the Cypher's ``trim(x) <> ""`` guard, and dropping it would make
-    the fallback silently useless for every row someone had saved and cleared.
+    it. Dropping the guard would make the fallback silently useless for every
+    row someone had saved and cleared.
     """
     return func.nullif(func.trim(func.coalesce(column, "")), "")
 
@@ -53,10 +42,9 @@ def _attribute_description(column_id: ColumnElement, link_table) -> ColumnElemen
             link_table.c.column_id == column_id,
             _non_blank(attribute.c.description).isnot(None),
         )
-        # The Cypher's `head([...])` took whichever element came first, from a
-        # list with no defined order. Ordering by id keeps the answer the same
-        # between calls; which attribute wins when a column has several is still
-        # arbitrary, but it is at least stably arbitrary.
+        # Ordering by id keeps the answer the same between calls. Which
+        # attribute wins when a column has several is still arbitrary, but it
+        # is at least stably arbitrary.
         .order_by(attribute.c.id)
         .limit(1)
         .scalar_subquery()

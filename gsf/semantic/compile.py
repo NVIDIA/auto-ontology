@@ -29,7 +29,7 @@ def run_semantic_compilation(
 
     logger.info("=" * 60)
     logger.info(
-        "Semantic compilation — full Neo4j graph (database=%r)",
+        "Semantic compilation (database=%r)",
         database_name,
     )
     logger.info("=" * 60)

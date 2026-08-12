@@ -2,26 +2,20 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Compatibility surface for callers that still speak in nodes and edges.
+"""The write surface the ingestion pipeline calls: nodes and edges in, rows out.
 
-**This module keeps the graph vocabulary on purpose, and it is the only one in
-``store/pg/`` that does.** ``write.py``, ``queries.py`` and ``schemas_parser.py``
-call ``add_edges`` / ``prepare_edge`` / ``prepare_node``, and the selector in
-``store/edges.py`` only works because both implementations expose the same
-names. Renaming here would mean renaming the callers, which is Phase 11's job —
-once the Neo4j implementation is deleted, the whole surface can move to
-relational names in one change instead of being half-renamed now.
-
-Everything behind this module — :mod:`gsf.catalog.store.registry` and
-:mod:`gsf.catalog.store.rows` — speaks only of tables, rows, columns and
-links. The translation happens here and nowhere else.
+``write.py``, ``queries.py`` and ``schemas_parser.py`` build entities and the
+relationships between them and hand them here as ``add_edges`` /
+``prepare_edge`` / ``prepare_node``. Everything behind this module —
+:mod:`gsf.catalog.store.registry` and :mod:`gsf.catalog.store.rows` — speaks
+only of tables, rows, columns and links. The translation happens here and
+nowhere else.
 
 The substance is :func:`add_edges`. It takes relationships generically, but
 ``CONTAINS`` is a foreign key column rather than an association table, so
 writing one is an ``UPDATE`` of the child row while every other relationship is
-an ``INSERT``. That asymmetry is the price of the schema decision that turned
-``reset.py``'s APOC subgraph cascade into ``ON DELETE CASCADE``, and it is paid
-here, once.
+an ``INSERT``. That asymmetry is the price of the schema shape that makes
+``reset.py``'s delete a single statement, and it is paid here, once.
 """
 
 from __future__ import annotations
@@ -44,10 +38,9 @@ logger = logging.getLogger(__name__)
 def is_flat_dict(properties: dict):
     """Reject nested property values.
 
-    Kept identical to the Neo4j implementation even though Postgres would
-    happily take nested JSON: callers rely on the *rejection*, and quietly
-    accepting a shape one backend refuses would make the two stores disagree
-    about what a valid write is.
+    Postgres would happily take nested JSON in a jsonb column, but these values
+    become scalar columns. Rejecting here gives a far better message than the
+    insert would.
     """
     for key, value in properties.items():
         if isinstance(value, list):
@@ -67,11 +60,8 @@ def check_properties_are_flat(
 ):
     """Reject nested property values on either endpoint or the edge.
 
-    Renamed in Phase 11 from ``check_properties_compatibility_with_neo4j``,
-    which is what it was called when a node property genuinely could not hold a
-    nested structure. The constraint outlived the reason: these values become
-    table columns, and a dict arriving where a scalar is expected fails at the
-    insert with a far less useful message than this one.
+    These values become table columns, and a dict arriving where a scalar is
+    expected fails at the insert with a far less useful message than this one.
     """
     is_flat_dict(node_from.get_properties())
     if node_from.get_override_existing_props():
@@ -95,7 +85,7 @@ def _edge_label(edge) -> str:
 
 
 def prepare_node(node: CatalogNode):
-    """Unchanged from the Neo4j implementation: it only reshapes the node."""
+    """Reshape a node into the identity/create/match property triple."""
     label = node.get_label()
     props = node.get_properties()
     identity_props = node.get_match_props()
@@ -170,11 +160,10 @@ def add_edges(edges_data):
 
 #: Edge properties that **accumulate** on conflict instead of overwriting.
 #:
-#: The Cypher was explicit about this — ``coalesce(rel.join_refs, []) +
-#: data.edge_props.join_refs`` — and it is the whole point of the column: each
-#: statement that joins two columns adds its own reference, so the edge records
-#: *how often and where* the join was observed. Overwriting would leave only the
-#: most recent statement and make the history meaningless.
+#: This is the whole point of the column: each statement that joins two columns
+#: adds its own reference, so the edge records *how often and where* the join
+#: was observed. Overwriting would leave only the most recent statement and make
+#: the history meaningless.
 _ACCUMULATING = frozenset({"refs"})
 
 
@@ -219,11 +208,8 @@ def _dedupe(array):
 def get_node_properties_by_id(id, label: str | list[str]):
     """Return one row's columns plus the label it came from, or None.
 
-    The Cypher returned ``properties(n)`` with a ``label`` key bolted on, and
-    could search several labels at once because a lookup by id needed no table.
-    Each label is a separate table here, so this tries them in turn and returns
-    the first hit. The ``label`` key stays in the result because callers read
-    it.
+    Each label is a separate table, so this tries them in turn and returns the
+    first hit. The ``label`` key is in the result because callers read it.
     """
     labels = label if isinstance(label, list) else [label]
     for candidate in labels:
@@ -253,11 +239,9 @@ def delete_bulk_of_nodes(ids, labels):
 def detach_bulk_of_nodes(ids):
     """No-op.
 
-    The Neo4j version deletes ``depends_on`` relationships between ``field``
-    nodes — a label and relationship type that exist nowhere in GSF's schema or
-    vocabulary. It is dead code inherited from the library, kept only so the
-    two implementations expose the same surface, and does nothing here rather
-    than pretending to.
+    Deletes ``depends_on`` relationships between ``field`` nodes — a label and
+    relationship type that exist nowhere in GSF's schema. Dead code inherited
+    from the ingestion library, kept because callers still reference it.
     """
     logger.debug("detach_bulk_of_nodes is a no-op on Postgres (dead upstream code)")
 

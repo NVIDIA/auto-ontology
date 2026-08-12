@@ -18,7 +18,7 @@ Three things it has to encode, because none survives the move on its own:
 
 **Which table an incoming label maps to**, and which of the supplied properties
 are real columns. A property with no column is dropped rather than erroring: the
-Cypher accepted arbitrary keys, and refusing them here would fail ingests that
+Callers set properties opportunistically, and refusing them would fail ingests that
 work today.
 
 **How identity is decided**, which differs per entity. ``Table`` and ``Column``
@@ -30,9 +30,9 @@ keys are parent-scoped — ``public`` exists once per database, not once.
 **Which relationships are association tables and which are foreign key
 columns.** ``CONTAINS`` is the latter: it is the child's parent FK, so writing
 one is an ``UPDATE`` of the child rather than an ``INSERT``. This is where the
-schema decision that collapsed ``reset.py``'s APOC cascade into
-``ON DELETE CASCADE`` gets paid for, and getting it wrong would silently orphan
-every table in the catalog.
+``ON DELETE CASCADE`` chain that makes ``reset.py``'s delete a single statement
+is set up — and getting it wrong would silently orphan every table in the
+catalog.
 
 Note on naming: "link" rather than "relation" for an association, because in
 relational vocabulary a *relation* is a table — the opposite of what is meant.
@@ -128,8 +128,6 @@ ENTITIES: dict[str, EntitySpec] = {
     # persists its statement with `add_query`, exactly as an ingest does, so
     # the attribute lands with the same table and column links -- which is what
     # makes it appear in the exploration graph and pass the zone checks.
-    # Registered late (Phase 11): Phase 4 built this registry from the ingest
-    # path alone, where a SqlAttribute never appears.
     LABEL_SQL_ATTRIBUTE: EntitySpec(
         label=LABEL_SQL_ATTRIBUTE,
         table=s.sql_attribute,
@@ -228,7 +226,7 @@ def entity_spec(label: str | list[str]) -> EntitySpec:
     """Resolve a label to its table.
 
     Accepts a list as well as a string: a node in a property graph can carry
-    several labels, so ``apoc.merge.node.eager`` takes a list and callers such
+    several labels, so the write primitive takes a list and callers such
     as ``merge_schema_nodes`` pass one through unchanged. The first is used,
     matching ``labels(n)[0]`` everywhere else in the codebase — GSF never puts
     more than one label on a catalog node.
@@ -258,10 +256,9 @@ def link_spec(edge_label: str, from_label: str, to_label: str) -> LinkSpec:
 def projected(label: str, properties: dict) -> dict:
     """Keep only the supplied properties that are real columns.
 
-    Dropping unknown keys rather than raising is deliberate. The Cypher accepted
-    any property, and several are set opportunistically by callers that do not
-    know or care what the schema holds; rejecting them would fail ingests that
-    work today, for no gain.
+    Dropping unknown keys rather than raising is deliberate: several are set
+    opportunistically by callers that do not know or care what the schema holds,
+    and rejecting them would fail ingests that work today, for no gain.
     """
     spec = entity_spec(label)
     return {k: v for k, v in properties.items() if k in spec.columns}

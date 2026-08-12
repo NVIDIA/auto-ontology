@@ -1,6 +1,6 @@
 {{/*
 Applies the backend's Alembic migrations, which own the `gsf` Postgres schema
-(catalog + semantic tier) — the relational replacement for the Neo4j graph.
+(catalog + semantic tier).
 
 Separate from frontend-migrate because the two own different schemas and
 neither may touch the other's: Prisma owns `public`, langchain_postgres owns

@@ -58,10 +58,10 @@ SqlAttributeSqlError = SqlParseError
 def _out_of_zone(table_ids: list[str]):
     """True for an attribute whose SQL touches a table outside *table_ids*.
 
-    The all-or-nothing check, phrased the way the Cypher phrased it: not "does
-    it touch an allowed table" but "does it touch a disallowed one". The
-    difference matters for an attribute joining an in-zone table to an
-    out-of-zone one, which the positive form would happily show.
+    The all-or-nothing check, phrased in the negative on purpose: not "does it
+    touch an allowed table" but "does it touch a disallowed one". The difference
+    matters for an attribute joining an in-zone table to an out-of-zone one,
+    which the positive form would happily show.
     """
     return (
         select(literal(1))
@@ -93,11 +93,10 @@ def _zone_scope(
 
 #: The SQL text of an attribute, taken from its lowest-id statement.
 #:
-#: An attribute can carry several HAS_SQL edges. The Cypher collapsed them with
-#: ``head(collect(sql))`` after ``ORDER BY sql.id`` so a read returned one row
-#: per attribute; a scalar subquery does the same here. Without the collapse the
-#: rows outnumber the ``count(DISTINCT attr)`` the pager is given, and the last
-#: attributes of a term become unreachable — the page ends before they do.
+#: An attribute can be linked to several statements, so this collapses them to
+#: one. Without the collapse the rows outnumber the count the pager is given,
+#: and the last attributes of a term become unreachable — the page ends before
+#: they do.
 _SQL_TEXT = (
     select(s.sql_query.c.sql_full_query)
     .select_from(
@@ -116,9 +115,9 @@ _SQL_TEXT = (
 def _has_sql():
     """An attribute with no statement is invisible to every read here.
 
-    The Cypher's ``MATCH (attr)-[:HAS_SQL]->(sql)`` was not optional, so such an
-    attribute never appeared in a list — and the counts repeat the condition so
-    a badge cannot promise more rows than the list can show.
+    The statement join is inner, so such an attribute never appears in a list —
+    and the counts repeat the condition, so a badge cannot promise more rows
+    than the list can show.
     """
     return (
         select(literal(1))
@@ -261,8 +260,8 @@ def get_full_sql_attribute_by_id(
     result = rows[0]
 
     # Zone -> the tables it covers, at any of the three grain levels a zone
-    # target can name. The Cypher walked `CONTAINS*1..2` from the zone's item;
-    # here the containment is FK columns, so it is three explicit branches.
+    # target can name -- table, schema or database -- as three explicit
+    # branches over the containment keys.
     covered = or_(
         s.zone_target.c.table_id == s.sql_query_table.c.table_id,
         s.zone_target.c.schema_id == s.catalog_table.c.schema_id,
@@ -490,7 +489,7 @@ def set_sql_attribute_description_suggestion(
 
 
 def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
-    """Drop the cached suggestion. ``REMOVE`` in Cypher, ``NULL`` here."""
+    """Drop the cached suggestion."""
     store().query_write(
         update(s.sql_attribute)
         .where(s.sql_attribute.c.id == attr_id)
@@ -516,8 +515,8 @@ def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
 def delete_sql_attribute_node(attr_id: str) -> None:
     """Delete the attribute. Its links go with it, by ``ON DELETE CASCADE``.
 
-    This is what ``DETACH DELETE`` bought in Cypher, moved into the schema — so
-    a new link table cannot be added later and forgotten here.
+    Cascading in the schema rather than deleting links here means a new link
+    table cannot be added later and forgotten.
     """
     store().query_write(delete(s.sql_attribute).where(s.sql_attribute.c.id == attr_id))
 
@@ -530,9 +529,8 @@ def delete_sql_attribute_node(attr_id: str) -> None:
 def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
     """``id, name, description, expression, sql, term_name`` per attribute.
 
-    One row per attribute even when several statements or terms match: the
-    Cypher returned a row per combination and kept the first of each id.
-    Ordered here so "first" is reproducible.
+    One row per attribute even when several statements or terms match — the
+    first of each id wins, ordered so "first" is reproducible.
 
     Returns ``[]`` on failure — this feeds retrieval context, where losing the
     context beats losing the answer.

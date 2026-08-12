@@ -4,28 +4,15 @@
 
 """GSF model YAML export and import.
 
-Conceptually the simplest of the large modules — CRUD over entities that all
-exist by now — and the plan asked for the simplifications to be **banked rather
-than ported**. Three were:
-
-* **``_ensure_import_indexes`` is gone.** It created uniqueness constraints and
-  ``imported_id`` indexes on every import, because a schemaless store had no
-  other way to guarantee them and an unindexed ``imported_id`` turned a
-  several-thousand-column import into a quadratic crawl. The schema declares
-  them once; there is nothing to ensure.
-* **The split transaction collapses into one.** SQL attributes and custom
-  analyses used to be applied *outside* the main transaction: persisting them
-  calls ``add_query``, which in the Neo4j build opened its own auto-commit
-  session and would deadlock against locks the outer transaction held. The
-  Postgres ``add_query`` runs on the same connection, so the whole import is one
-  atomic unit — a failure part-way now leaves nothing behind, where before it
-  could leave a catalog with no semantics on top.
-* **Bug 3 is fixed** (see :func:`_is_nullable`).
+CRUD over the catalog and semantic entities, driven by a YAML document.
 
 ``imported_id`` is the mechanism the whole import turns on: entities are matched
 by the YAML ``id`` against ``imported_id`` *or* the live ``id``, so re-importing
 a document is a no-op and importing onto an existing catalog adopts it rather
 than duplicating it.
+
+The whole import is **one transaction**, so a failure part-way leaves nothing
+behind rather than a catalog with half its semantics on top.
 """
 
 from __future__ import annotations
@@ -161,8 +148,7 @@ def _nullable_to_stored(value: bool | None) -> str:
 def _database_scope(database_ids: list[str]):
     """An empty id list means **every** database, not none.
 
-    The Cypher's ``size($database_ids) = 0 OR ...``. Reading it the other way
-    would silently export an empty document.
+    Reading it the other way would silently export an empty document.
     """
     if not database_ids:
         return literal(True)
@@ -250,9 +236,9 @@ def _export_foreign_keys(database_ids: list[str]) -> list[dict[str, Any]]:
 def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
     """Joins whose **both** ends are in scope.
 
-    The Cypher required the target table to belong to a scoped database too, or
-    an export would carry a join pointing at a table the document does not
-    contain — which the importer then cannot resolve.
+    The target table has to belong to a scoped database too, or the export
+    carries a join pointing at a table the document does not contain — which
+    the importer then cannot resolve.
     """
     target_table = s.catalog_table.alias("join_target")
     target_schema = s.catalog_schema.alias("join_target_schema")
@@ -286,9 +272,8 @@ def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
 def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
     """Terms represented by an in-scope table, with **all** their represents.
 
-    A term reached through one scoped table exports every table representing it,
-    scoped or not — that is what the Cypher's second, unscoped ``OPTIONAL
-    MATCH`` did, and it keeps a partial export honest about a term it only
+    A term reached through one scoped table exports every table representing
+    it, scoped or not, which keeps a partial export honest about a term it only
     partly owns.
     """
     in_scope = (
@@ -681,9 +666,8 @@ def _resolve_entities_batch(
     A row found this way has its ``imported_id`` stamped if it had none, so the
     *next* import matches it the fast way.
 
-    Three statements regardless of batch size. The Neo4j version needed the same
-    batching to avoid two round trips per entity; here it also means one
-    ``INSERT ... RETURNING`` rather than a create per row.
+    Three statements regardless of batch size — one ``INSERT ... RETURNING``
+    rather than a create per row.
     """
     if not items:
         return {}
@@ -838,12 +822,9 @@ def apply_import_model(
     Catalog rows are created when missing, so an import works against an empty
     store.
 
-    **The whole import is one transaction.** The Neo4j version had to apply SQL
-    attributes and custom analyses outside it — ``add_query`` opened its own
-    auto-commit session there and would deadlock against locks the outer
-    transaction held on rows it had just created. The Postgres ``add_query``
-    runs on this connection, so that carve-out is gone and a failure part-way
-    leaves nothing behind, rather than a catalog with half its semantics.
+    **The whole import is one transaction**, SQL attributes and analyses
+    included, so a failure part-way leaves nothing behind rather than a catalog
+    with half its semantics on top.
     """
     id_map: dict[str, str] = {}
     column_meta: dict[str, ColumnCatalogMeta] = {}
@@ -915,9 +896,8 @@ def _import_catalog(
 ) -> list[str]:
     """Import databases, schemas, tables and columns, a level at a time.
 
-    Containment is a parent FK column here, so each level is created *with* its
-    parent rather than created and then wired up — the Cypher needed a second
-    batched ``MERGE`` per level for the ``CONTAINS`` edges.
+    Containment is a parent foreign key, so each level is created *with* its
+    parent rather than created and then wired up.
     """
     databases = document.data_layer.databases
 

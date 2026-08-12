@@ -6,25 +6,20 @@
 
 The single source of truth for wiping one database's ingested data.
 
-**This module is where the schema pays for itself.** The Cypher walked
-``apoc.path.subgraphNodes`` from the ``Database`` node and deleted whatever it
-reached, in ``apoc.periodic.iterate`` batches so a large graph did not exhaust
-transaction memory. Here, ``CONTAINS`` is a parent FK column, so deleting one
-row removes the whole catalog tier by ``ON DELETE CASCADE`` — no traversal, no
-batching, and no way for a newly added child table to be missed.
+**This module is where the schema pays for itself.** Containment is a parent
+foreign key, so deleting one database row removes the whole catalog tier by
+``ON DELETE CASCADE`` — no traversal, no batching, and no way for a newly added
+child table to be missed.
 
-Two behaviour changes come with that, both deliberate and both recorded in
-DECISIONS.md:
+Two consequences worth knowing:
 
-* **B1 — the deletes are narrower.** ``subgraphNodes`` followed *any*
-  relationship, so from a ``Database`` it reached that database's Terms, and
-  from a shared Term it reached a *different* database's tables. Resetting one
-  database could therefore delete another's data. A cascade follows foreign
-  keys, which only ever point downward within one database.
-* **B2 — the scoped semantic reset still does not reach ``PqlAnalysis``.** It
-  is never attached to a database, so the traversal never found it. Preserved
-  rather than fixed: a scoped reset silently deleting every predictive analysis
-  in the deployment would be a worse surprise than the current gap.
+* **Deletes never cross a database.** Foreign keys point downward within one
+  database, so resetting one cannot reach another's data — including through a
+  Term the two share, which survives.
+* **A scoped semantic reset does not reach ``PqlAnalysis``.** Nothing connects
+  one to a database, so there is no scope to match it by. A scoped reset
+  silently deleting every predictive analysis in the deployment would be a
+  worse surprise than the gap.
 """
 
 from __future__ import annotations
@@ -83,8 +78,8 @@ def _delete_scoped_semantic(database_name: str) -> int:
     database's data too, and a reset of this one must not take it.
 
     ``PqlAnalysis``, ``TextAttribute`` and ``Analysis`` are absent here on
-    purpose (B2): nothing connects them to a database, so the Cypher traversal
-    never reached them either.
+    purpose: nothing connects them to a database, so there is no scope that
+    would select them.
     """
     tables = _table_ids(database_name)
     deleted = 0
@@ -170,8 +165,8 @@ def _delete_all_semantic() -> int:
     """Delete every semantic row, in every database.
 
     Unscoped, so ``PqlAnalysis``, ``TextAttribute`` and ``Analysis`` *are*
-    included — the Cypher matched on label alone here, which reached nodes
-    orphaned from every ``Database``.
+    included — nothing has to connect them to a database for this to reach
+    them.
     """
     deleted = 0
     for table in (
@@ -257,8 +252,7 @@ def delete_data_layer(database_name: str | None = None) -> int:
 def delete_all_data(database_name: str | None = None) -> ResetResult:
     """Delete every trace of a database, both layers included.
 
-    **Order matters, and for the same reason it did in Cypher**: the semantic
-    rows are identified *through* the catalog — a Term by the tables that
+    **Order matters**: the semantic rows are identified *through* the catalog — a Term by the tables that
     represent it, a SqlAttribute by the tables its SQL hits. Delete the catalog
     first and those links are already gone, so the semantic pass would find
     nothing to scope and leave every Term behind.

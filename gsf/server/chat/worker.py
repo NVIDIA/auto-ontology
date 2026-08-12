@@ -136,8 +136,8 @@ def _worker_loop(
 
         question, prediction, target_db, subject_token, conversation_history = payload
         try:
-            # Connections are resolved from Neo4j once at worker init. If that
-            # lookup came back empty — Neo4j not yet reachable when this
+            # Connections are resolved once at worker init. If that
+            # lookup came back empty — the store not yet reachable when this
             # subprocess booted, or the first connection created afterwards —
             # the snapshot would stay empty for the life of the process and
             # every question would fail with "missing required 'connectors'"

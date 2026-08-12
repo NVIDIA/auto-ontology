@@ -11,13 +11,12 @@ much passes any "is it gone?" assertion.
 Two behaviour changes get their own tests, because both are the kind that would
 otherwise be discovered by a user:
 
-* **B1 — the deletes are narrower.** ``apoc.path.subgraphNodes`` followed any
-  relationship, so a reset of one database could reach a shared Term and, from
-  there, delete a *different* database's data. Foreign keys only point downward
-  within one database, so that cannot happen now.
-* **B2 — a scoped reset still misses ``PqlAnalysis``.** Preserved, not fixed: a
-  scoped reset silently wiping every predictive analysis in the deployment is a
-  worse surprise than the current gap.
+* **Deletes never cross a database.** Foreign keys point downward within one
+  database, so a reset cannot reach another's data -- including through a Term
+  the two share.
+* **A scoped reset misses ``PqlAnalysis``.** Nothing connects one to a
+  database, so there is no scope to match it by -- and a scoped reset silently
+  wiping every predictive analysis in the deployment would be worse.
 
 The pgvector side is stubbed. These tests are about which rows the store keeps,
 and a real embedding round trip would only add a way for them to fail for an
@@ -208,7 +207,7 @@ def test_deleting_one_database_leaves_the_other_alone(world) -> None:
 
 
 # --------------------------------------------------------------------------
-# B1 — the deletes are narrower than the traversal was
+# the deletes are narrower than the traversal was
 # --------------------------------------------------------------------------
 
 
@@ -297,15 +296,14 @@ def test_a_column_attribute_goes_with_its_table(world) -> None:
 
 
 # --------------------------------------------------------------------------
-# B2 — the scoped gap, preserved
+# the scoped gap, preserved
 # --------------------------------------------------------------------------
 
 
 def test_a_scoped_reset_does_not_touch_pql_analyses(world) -> None:
     """B2. Preserved deliberately, and asserted so it cannot change by accident.
 
-    A PqlAnalysis is never attached to a database, so the Cypher traversal never
-    reached it. Deleting every predictive analysis in the deployment during a
+    A PqlAnalysis is never attached to a database, so no scope selects it. Deleting every predictive analysis in the deployment during a
     *scoped* reset would be a worse surprise than leaving them.
     """
     prefix, make = world

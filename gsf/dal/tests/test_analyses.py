@@ -159,7 +159,7 @@ def test_an_analysis_with_no_sql_is_invisible_to_the_list(world) -> None:
 
 
 def test_but_fetch_with_sql_still_returns_it(world) -> None:
-    """The one place the Cypher used OPTIONAL MATCH. Preserved.
+    """The one place the statement join is optional.
 
     The caller asked for specific ids, and a silently absent entry is harder to
     notice than one with an empty ``sql``.

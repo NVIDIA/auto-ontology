@@ -130,7 +130,7 @@ def set_zone_status(
 ) -> dict:
     """Enable or disable a zone.  Requires admin role.
 
-    Disabling swaps the zone's Neo4j label from ``Zone`` to ``disableZone``
+    Disabling clears the zone's ``enabled`` flag
     (re-enabling reverses it), which immediately revokes the catalog access
     the zone granted without deleting it.
     """

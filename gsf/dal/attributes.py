@@ -4,12 +4,10 @@
 
 """ColumnAttribute and SEMANTIC_FK reads and writes, plus ``find_join_path``.
 
-``find_join_path`` is the one query in the port with no mechanical translation,
-and the reasoning behind its shape is in PLAN.md § "find_join_path". The short
-version: it is level-at-a-time BFS driven from Python over the
-:data:`~gsf.dal.schema.JOIN_PATH_EDGE_VIEW_SQL` view, not a recursive CTE,
-because a CTE's visited set is per-path where APOC's ``NODE_GLOBAL`` is shared.
-The recursive CTE lives in the tests as an oracle.
+``find_join_path`` is level-at-a-time BFS driven from Python over the
+:data:`~gsf.dal.schema.JOIN_PATH_EDGE_VIEW_SQL` view, deliberately not a
+recursive CTE — see its docstring for why. The CTE version lives in the tests as
+a cross-check.
 """
 
 from __future__ import annotations
@@ -27,11 +25,10 @@ from gsf.semantic.constants import SEMANTIC_SOURCE
 
 logger = logging.getLogger(__name__)
 
-#: Path length ceiling, in **edges** -- the same 30 the Cypher's ``maxLevel``
-#: used, deliberately unchanged.
+#: Path length ceiling, in **edges**.
 #:
 #: It is tempting to lower this on the grounds that real join paths are 2-4
-#: hops. That reasoning is wrong, and the depth-bound test caught it: a *hop*
+#: hops. That reasoning is wrong, and the depth-bound test catches it: a *hop*
 #: here is four edges, not one. Getting from one FK column to the next runs
 #: Column -SEMANTIC_FK-> ColumnAttribute -HAS_ATTRIBUTE-> Column -CONTAINS->
 #: Table -CONTAINS-> Column, so an n-hop join path is ``4n - 2`` edges. A
@@ -56,10 +53,8 @@ def merge_column_attribute(
 ) -> str | None:
     """Upsert a ColumnAttribute and link it to its column and Term.
 
-    Returns ``None`` when the column or the Term does not exist. The Cypher
-    opened with two ``MATCH`` clauses, so a missing either produced no rows and
-    wrote nothing; the guards below reproduce that rather than creating an
-    attribute that dangles.
+    Returns ``None`` when the column or the Term does not exist — the guards
+    below refuse rather than create an attribute that dangles.
 
     ``description`` is coalesced, not assigned: a merge that has nothing to say
     about the description must not erase a curated one. ``datatype`` *is*
@@ -136,14 +131,11 @@ def update_column_attribute(
     Every field is coalesced, so omitting one leaves it alone rather than
     nulling it — this is a PATCH, not a PUT.
 
-    **A rename can now fail where the graph allowed it.** ``name`` is part of
-    the 5-part merge key, which is a real unique constraint here and was only a
-    ``MERGE`` pattern in Cypher — the graph happily let a later ``SET`` produce
-    two attributes identical on all five properties, which the next merge would
-    then match arbitrarily. Renaming onto an existing key raises
-    ``IntegrityError`` rather than creating that duplicate. Left to surface: the
-    constraint is describing a genuine conflict, and swallowing it here would
-    put the ambiguity back.
+    **A rename can fail.** ``name`` is part of the five-part merge key, which
+    is a unique constraint, so renaming onto an existing key raises
+    ``IntegrityError``. Left to surface rather than caught: the constraint is
+    describing a genuine conflict between two attributes, and swallowing it
+    would leave a duplicate no read can choose between.
     """
     owned = (
         select(literal(1))
@@ -166,10 +158,8 @@ def update_column_attribute(
     if not updated:
         return None
 
-    # `head(collect(DISTINCT db.name))` in the Cypher: an attribute reaches at
-    # most one column here, but the aggregate was unordered, so it picked
-    # arbitrarily among databases. Ordering by column id keeps repeated calls
-    # agreeing with each other.
+    # An attribute reaches at most one column, but order the pick anyway so
+    # repeated calls agree with each other.
     rows = store().query_read(
         select(
             s.column_attribute.c.id,
@@ -257,26 +247,22 @@ def fetch_attr_column_contexts(
     losing the decoration beats losing the result.
 
     One entry per attribute even though an attribute may be referenced by many
-    columns. The Cypher returned a row per column and kept whichever came last,
-    which was arbitrary; here **the owning column wins** — the one linked by
-    ``HAS_ATTRIBUTE`` rather than one merely pointing at the attribute through
-    ``SEMANTIC_FK``.
+    columns: **the owning column wins** — the one linked by ``HAS_ATTRIBUTE``
+    rather than one merely pointing at the attribute through ``SEMANTIC_FK``.
 
-    That is a real improvement, not a tidy-up: the attribute *describes* its
-    owning column, so returning a referencing column's name and table as the
-    attribute's context was simply wrong whenever the arbitrary order landed
-    there. The golden recorded on Neo4j happens to agree, which is how the
-    difference was found.
+    That distinction matters. The attribute *describes* its owning column, so
+    returning a referencing column's name and table as the attribute's context
+    is simply wrong.
     """
     if not attr_ids:
         return {}
 
     # The database filter lives in the JOIN condition, not the WHERE. In the
     # WHERE it would delete the attribute's row outright when its column belongs
-    # to another database; the Cypher put it on an OPTIONAL MATCH, so the
-    # attribute survived with a null database and the empty-string defaults
-    # below took over. Callers read these keys directly, so the difference shows
-    # up as a missing entry rather than an error.
+    # to another database. On the join it leaves the attribute in place with a
+    # null database, and the empty-string defaults below take over. Callers read
+    # these keys directly, so the difference would show up as a missing entry
+    # rather than an error.
     database_join = s.catalog_database.c.id == s.catalog_schema.c.database_id
     if database_name is not None:
         database_join = and_(database_join, s.catalog_database.c.name == database_name)
@@ -473,9 +459,8 @@ def fetch_column_attribute_columns_map(
     Every requested id gets an entry, defaulted rather than omitted, so callers
     need no ``.get`` dance.
 
-    ``primary_column`` keeps the **first** row and ignores later ones, matching
-    the Cypher's behaviour on an attribute reachable from more than one column.
-    Ordered by column id so "first" is the same first each time.
+    ``primary_column`` keeps the **first** row and ignores later ones, ordered
+    by column id so "first" is the same first each time.
     """
     if not attr_ids:
         return {}
@@ -532,13 +517,12 @@ _EXPAND_LEVEL = (
 def _bfs_path(anchor_col_id: str, dest_col_id: str) -> list[dict[str, Any]] | None:
     """Shortest path as a node list, or ``None`` when there is none.
 
-    Level-at-a-time BFS with the visited set held here rather than in SQL. That
-    is not a stylistic choice: it reproduces APOC's ``uniqueness: 'NODE_GLOBAL'``
-    exactly. A recursive CTE tracks visited nodes *per path*, so every distinct
-    route to a node is expanded separately — fine on a fixture, exponential on a
-    catalog where a hub attribute like ``customer id`` fans out across hundreds
-    of columns. The cost here is bounded by the size of the reachable component
-    no matter how many paths run through it.
+    Level-at-a-time BFS with the visited set held here rather than in SQL, and
+    that is not a stylistic choice. A recursive CTE tracks visited nodes *per
+    path*, so every distinct route to a node is expanded separately — fine on a
+    fixture, exponential on a catalog where a hub attribute like ``customer id``
+    fans out across hundreds of columns. A shared visited set bounds the cost by
+    the size of the reachable component, however many paths run through it.
 
     Real paths are 2-4 hops, so this is typically 3-5 indexed queries.
     """
@@ -616,11 +600,10 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     other. That is a wrong answer that looks entirely reasonable, which is why
     it gets a test of its own.
 
-    Everything after the traversal is unchanged from the Cypher version: keep
-    the Column nodes, pair them ``(0,1), (2,3), ...``, and reject the path if it
-    spans more than one database. The pairing is subtle — the intermediate
-    Table and ColumnAttribute nodes are dropped first, leaving columns in
-    join-partner order — and is deliberately left alone.
+    After the traversal: keep the column nodes, pair them ``(0,1), (2,3), …``,
+    and reject the path if it spans more than one database. The pairing is
+    subtle — the intermediate table and attribute nodes are dropped first,
+    leaving columns in join-partner order.
     """
     if anchor_col_id == dest_col_id:
         return []
@@ -683,13 +666,13 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     return hops
 
 
-#: BFS reference oracle: the recursive CTE the tests compare against.
+#: The same traversal as a recursive CTE, used by the tests as a cross-check.
 #:
-#: Correct, and *not* what production uses -- its ``path`` array is a per-path
-#: visited set, so it re-expands every distinct route to a node rather than
-#: visiting each node once. See PLAN.md § "find_join_path" step 2. Kept here
-#: rather than in the test file so the two implementations sit side by side and
-#: any change to the edge rules is obviously a change to both.
+#: Correct, and *not* what :func:`_bfs_path` does -- its ``path`` array is a
+#: per-path visited set, so it re-expands every distinct route to a node rather
+#: than visiting each once, which is the scaling problem described there. Kept
+#: beside the BFS rather than in the test file so the two sit together and a
+#: change to the edge rules is obviously a change to both.
 JOIN_PATH_CTE_SQL = f"""
 WITH RECURSIVE walk(node_id, node_kind, path, depth) AS (
     SELECT CAST(:anchor AS text), 'column'::text, ARRAY[CAST(:anchor AS text)], 0

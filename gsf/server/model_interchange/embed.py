@@ -218,7 +218,7 @@ def _doc_to_embed_row(
     database_name: str | None,
 ) -> dict[str, Any]:
     node_id = item.get("id")
-    path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+    path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
     tabular_fields = {
         "id": node_id,
         "label": item.get("label", ""),

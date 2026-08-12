@@ -197,7 +197,7 @@ def get_connectors() -> list[SQLDatabase]:
                 for conn in list_connections()
             ]
         except Exception:
-            logger.exception("Failed to load connection strings from Neo4j DB nodes")
+            logger.exception("Failed to load connection strings from the catalog")
             specs = []
         if not specs:
             raw = os.environ.get("CONNECTION_STRINGS", "")

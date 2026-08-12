@@ -4,12 +4,12 @@
 
 """Transaction semantics for the Postgres DAL.
 
-Ports the cases in ``gsf/dal/tests/test_neo4j_tx.py``, but against a **real
+Runs against a **real
 database** rather than a ``MagicMock``. Mocking here would prove only that
 ``.execute()`` was called; what has to hold is that a failed block leaves no
 rows behind, which only a real transaction can demonstrate.
 
-Two cases go beyond the Neo4j tests because the pool makes them possible to get
+Two cases exist because the pool makes them possible to get
 wrong: concurrent threads must get genuinely separate transactions (ingestion
 fans out over a ``ThreadPoolExecutor``), and a spawned subprocess must not
 inherit pooled sockets (the chat worker is a separate process).

@@ -8,10 +8,10 @@
 `_usage_score` returns 0.0 for everything, so candidate expressions are never
 ranked; ordering is whatever the dict happened to be. The cause and the one-line
 fix are in that function's docstring and in
-``docs/refactor/drop-neo4j/DECISIONS.md`` record 007.
+the note on ``_usage_score``.
 
 Pinning it is deliberate. Turning ranking on changes which SqlAttributes the
-semantic layer suggests, and the drop-Neo4j refactor is supposed to leave that
+semantic layer suggests, and these tests are supposed to leave that
 component's output untouched — so the fix lands on its own, with its own tests,
 not as a side effect of a port. Until then these tests exist to make the
 inertness *explicit and load-bearing*: nothing caught this for the life of the
@@ -39,7 +39,7 @@ REAL_PROPS = {
 
 
 def test_score_is_currently_always_zero() -> None:
-    """Known bug (DECISION-007), pinned so a change to it is visible.
+    """Known bug, pinned so a change to it is visible.
 
     If this starts failing, ranking has been turned on — check that was
     intended and update this module rather than reverting the change.
@@ -79,7 +79,7 @@ def test_every_expression_currently_ties() -> None:
     scores = {score for _, score, _ in ranked}
     assert scores == {0.0}, (
         "scores are no longer uniformly zero, so ranking is live — see "
-        "DECISION-007 and update this module"
+        "the bug note in _usage_score and update this module"
     )
 
 

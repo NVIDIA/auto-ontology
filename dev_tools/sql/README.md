@@ -23,10 +23,9 @@ fixture from scratch, drop the database first; for SQLite, delete the
 
 ## Why these, and not a small hand-written schema
 
-The Neo4j-to-Postgres refactor (`docs/refactor/drop-neo4j/PLAN.md`) is graded
-almost entirely on catalog fidelity: did the ported code find the same tables,
-columns, types, and foreign keys? `testdb.sql` — 2 tables, 1 FK, no views —
-cannot answer that. Pagila can, because it has the shapes the code special-cases:
+The catalog tests are graded almost entirely on fidelity: does the code find
+the same tables, columns, types, and foreign keys? `testdb.sql` — 2 tables,
+1 FK, no views — cannot answer that. Pagila can, because it has the shapes the code special-cases:
 
 | Feature | What it exercises |
 |---|---|

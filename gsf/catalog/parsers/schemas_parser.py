@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Turn tables/columns DataFrames into Schema aggregates.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.parsers.schemas_parser
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""Turn tables/columns DataFrames into Schema aggregates."""
 
 from datetime import datetime, timezone
 
@@ -30,7 +21,7 @@ def parse_df(tables_df, columns_df, database_name: str, database_node=None):
     :param tables_df: DataFrame with columns: table_schema, table_name
     :param columns_df: DataFrame with columns: table_schema, table_name, column_name, ...
     :param database_name: name of the database, taken from the connector
-    :param database_node: optional existing Neo4j database node
+    :param database_node: optional existing database node
     Assumption: the file contains schemas of a single database
     :return:
     """

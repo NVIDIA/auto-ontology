@@ -4,9 +4,6 @@
 
 """GSF-owned catalog layer — the data catalog's vocabulary and write path.
 
-Forked out of ``nemo_retriever.tabular_data.ingestion`` in Phase 1 of the
-drop-Neo4j refactor (``docs/refactor/drop-neo4j/PLAN.md``).
-
 The public surface is deliberately four entry points:
 
 * :func:`gsf.catalog.ingest_catalog` — extract a connector's catalog and write it
@@ -15,9 +12,8 @@ The public surface is deliberately four entry points:
 * :func:`gsf.catalog.store.queries.add_query` — persist a parsed query
 * :class:`gsf.catalog.model.Schema` / :class:`gsf.catalog.model.CatalogNode`
 
-Everything above :mod:`gsf.catalog.store` is storage-agnostic. ``store/`` is the
-only subtree Phase 4 rewrites for Postgres — keep Cypher and driver types out of
-everything else.
+Everything above :mod:`gsf.catalog.store` is storage-agnostic — keep SQL and
+storage types confined to ``store/``.
 
 ``ingest_catalog`` is imported lazily: it pulls in pandas, sqlglot and the store
 driver, and several modules import :mod:`gsf.catalog.constants` for nothing but

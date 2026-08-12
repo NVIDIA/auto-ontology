@@ -2,12 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j-backed schema / node lookups.
+"""Catalog-backed schema and node lookups.
 
 Builds the :class:`Schema` objects consumed by the SQL parser plus generic
 ``fetch_item_by_id`` helpers.
 
-All direct Neo4j calls live in gsf/dal/datasources.py.
+All direct store access lives in gsf/dal/datasources.py.
 This module only keeps the pure-Python ``get_schemas_by_ids`` that assembles
 pandas DataFrames into :class:`Schema` objects.
 """
@@ -39,7 +39,7 @@ __all__ = [
 
 
 def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
-    """Assemble :class:`Schema` objects from Neo4j catalog data.
+    """Assemble :class:`Schema` objects from catalog data.
 
     Fetches raw column/table rows via :func:`gsf.dal.datasources.fetch_schemas_by_ids`
     then builds the in-memory :class:`Schema` map consumed by the SQL parser.

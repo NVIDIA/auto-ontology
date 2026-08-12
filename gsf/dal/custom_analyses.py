@@ -76,7 +76,7 @@ def _sql_text():
 def _has_sql():
     """An analysis with no statement is invisible to every read here.
 
-    The Cypher's ``HAS_SQL`` match was not optional except in
+    The SQL's ``HAS_SQL`` match was not optional except in
     ``fetch_custom_analyses_with_sql``, which used ``OPTIONAL MATCH`` — that
     difference is real and preserved.
     """
@@ -237,7 +237,7 @@ def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, st
     """``{id, name, description, sql}`` per analysis, values stripped.
 
     Unlike the reads above, an analysis with **no** statement still comes back
-    with an empty ``sql`` — the Cypher used ``OPTIONAL MATCH`` here alone.
+    with an empty ``sql`` — the SQL used ``OPTIONAL MATCH`` here alone.
     Preserved: the caller asked for specific ids and a silently missing entry is
     harder to notice than an empty one.
     """
@@ -357,7 +357,7 @@ def detach_existing_sql_edges(analysis_id: str) -> None:
 def delete_custom_analysis_node(analysis_id: str) -> None:
     """Delete the analysis **and the statements it owns**.
 
-    The Cypher's ``DETACH DELETE ca, sql`` deleted both, and that is preserved
+    The SQL's ``DETACH DELETE ca, sql`` deleted both, and that is preserved
     rather than left to the cascade — which would only remove the link row. An
     analysis's statement is not shared: it is parsed from text the user typed
     into this analysis, so leaving it behind accumulates unreachable rows that
@@ -444,7 +444,7 @@ def embed_custom_analyses(
         node_id = item.get("id")
         # A stored row key, not a reference to the store -- see the note in
         # pg/pql_analyses.py.
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": item.get("label", ""),

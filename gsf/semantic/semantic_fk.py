@@ -12,7 +12,7 @@ Algorithm
       context, search the *semantic* VDB for the top-5 most similar
       ColumnAttribute records, ask the LLM to pick the best match, and create
       SEMANTIC_FK when a match is found.  The hit's ``metadata["id"]`` is the
-      ColumnAttribute Neo4j UUID directly — no additional graph lookup needed.
+      ColumnAttribute id directly — no additional graph lookup needed.
 """
 
 from __future__ import annotations
@@ -213,7 +213,7 @@ def _resolve_via_vdb(
     - name + description query (top 3): captures semantic context
     - name-only query (top 3): catches cases where description is noisy or absent
 
-    The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j UUID directly —
+    The hit's ``metadata["id"]`` is the ColumnAttribute id directly —
     no additional graph lookup is required.
 
     Returns the ColumnAttribute id if a confident LLM match is found, else None.
@@ -253,11 +253,9 @@ def _llm_pick_hit(
     Returns the ``column_id`` from the chosen hit's metadata, or ``None`` when
     the LLM is not confident enough to pick any candidate.
 
-    **The label in the prompt was ``neo4j_id`` until Phase 11.** Renaming it is
-    a prompt change, not a cosmetic one — but leaving a store's name in a prompt
-    after deleting that store is worse than the small risk of a differently
-    worded instruction, and the label only has to be internally consistent
-    between the candidate list and the instruction that references it.
+    The ``column_id`` label only has to be internally consistent between the
+    candidate list and the instruction that references it — but it *is* part of
+    the prompt, so changing it changes model behaviour.
     """
     col_ctx = (
         f"Foreign-key column: {col.get('name', '')} "

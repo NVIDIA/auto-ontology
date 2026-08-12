@@ -227,10 +227,10 @@ def embed_pql_analyses(
     rows = []
     for item in docs:
         node_id = item.get("id")
-        # The `neo4j:` prefix is a stored row key, not a reference to the store.
-        # Changing it would orphan every embedding already written, so it stays
-        # until a deliberate re-embed migrates them -- see PROGRESS.md.
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        # An opaque provenance key. Nothing matches on it -- deletes go
+        # through `metadata["id"]` -- but changing it leaves rows already
+        # written carrying the old value.
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": _LABEL,

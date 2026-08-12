@@ -11,7 +11,7 @@ export enum DataModels {
 	COLUMN = 'column',
 }
 
-/** Postgres ``table_type`` values stamped on Neo4j ``Table`` nodes. */
+/** Postgres ``table_type`` values stored on catalog tables. */
 export enum TableType {
 	BASE_TABLE = 'base table',
 	VIEW = 'view',

@@ -29,7 +29,6 @@ if [[ " $* " =~ \ --dev\  ]]; then
 	echo "Services:"
 	echo "  Postgres:      http://localhost:5432"
 	echo "  pgAdmin:       http://localhost:5050"
-	echo "  Neo4j:         http://localhost:7474"
 	echo "  GSF ingestion: http://localhost:3002"
 
 	echo ""
@@ -53,7 +52,6 @@ if [[ " $* " =~ \ --ds\  ]]; then
 	echo "Services:"
 	echo "  Postgres:      http://localhost:5432"
 	echo "  pgAdmin:       http://localhost:5050"
-	echo "  Neo4j:         http://localhost:7474"
 	echo "  GSF frontend:  http://localhost:3000"
 	echo "  GSF ingestion: http://localhost:3002"
 
@@ -74,7 +72,6 @@ echo ""
 echo "Services:"
 echo "  Postgres:      http://localhost:5432"
 echo "  pgAdmin:       http://localhost:5050"
-echo "  Neo4j:         http://localhost:7474"
 echo "  GSF frontend:  http://localhost:3000"
 echo "  GSF backend:   http://localhost:3001"
 echo "  GSF ingestion: http://localhost:3002"

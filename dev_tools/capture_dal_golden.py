@@ -4,7 +4,7 @@
 
 """Snapshot every DAL read against the graph fixture, for the Postgres port.
 
-The refactor replaces ~5,000 lines of Cypher with SQL while keeping every
+The refactor replaces ~5,000 lines of SQL with SQL while keeping every
 ``gsf.dal`` signature identical. Greenfield cutover means there is no production
 data to diff against, so these captures are the **only** fidelity oracle: Phases
 5-10 are graded by replaying them against the Postgres implementation and
@@ -49,7 +49,7 @@ def build_id_map() -> dict[str, str]:
     """Map every id to a stable token describing what it names.
 
     Read through the DAL, not the store — like ``_fixture_ids``, this was
-    hardcoded Cypher and is why the replay could not grade Postgres. A token has
+    hardcoded SQL and is why the replay could not grade Postgres. A token has
     to describe the *same* entity on both backends or the normalised goldens
     compare nothing.
     """
@@ -184,9 +184,9 @@ def normalise(value: Any, id_map: dict[str, str]) -> Any:
        is deliberate: most DAL queries lack a total ``ORDER BY`` (see
        ``fetch_sorted_tables``, which orders only by ``query_count DESC`` while
        nearly every table ties at 0), so freezing an arbitrary observed order
-       would fail the Postgres port for behaviour Neo4j never guaranteed.
+       would fail the Postgres port for behaviour the store never guaranteed.
        Ordering that *is* contractual — paging stability across ``skip``/
-       ``limit`` — needs its own tests, per PLAN.md's invariants suite.
+       ``limit`` — needs its own tests.
     """
     # DataFrames must be unpacked before anything else. A few reads return them,
     # and falling through to ``default=str`` at serialisation would capture a
@@ -254,7 +254,7 @@ class Capture:
 # What to capture
 # ---------------------------------------------------------------------------
 
-# Zero-argument reads. ``reset.delete_*`` and ``neo4j_tx.*`` are deliberately
+# Zero-argument reads. ``reset.delete_*`` is deliberately
 # absent: the first three would wipe the fixture mid-capture, and the last two
 # are plumbing rather than reads.
 ZERO_ARG_READS: tuple[tuple[str, str], ...] = (
@@ -304,9 +304,9 @@ def _zone_modes(ids: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
 def _fixture_ids() -> dict[str, Any]:
     """Resolve the fixture's entities by name, through the DAL.
 
-    **Backend-agnostic on purpose.** This used to be hardcoded Cypher, which is
+    **Backend-agnostic on purpose.** This used to be hardcoded SQL, which is
     why the replay could not grade Postgres at all: under ``GSF_STORE=postgres``
-    it handed Neo4j ids to the Postgres DAL and almost every read came back
+    it handed the store ids to the Postgres DAL and almost every read came back
     empty, so 49 of 128 comparisons failed for a reason that had nothing to do
     with the DAL. Resolving by name through the same facade the captures use
     means the two backends are asked the same questions about the same fixture.
@@ -508,7 +508,7 @@ def capture_arg_reads(cap: Capture, ids: dict[str, Any]) -> None:
             [film, ids["col_film_title"]]
         ),
     )
-    # Unknown ids must stay empty rather than raise -- Neo4j returned [] where
+    # Unknown ids must stay empty rather than raise -- the store returned [] where
     # a careless SQL port might return None or blow up.
     run(
         "datasources.fetch_table_by_id__unknown",

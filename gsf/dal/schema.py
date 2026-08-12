@@ -2,24 +2,23 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Relational schema replacing the Neo4j graph.
+"""The relational schema: SQLAlchemy Core table metadata, no ORM.
 
-SQLAlchemy Core table metadata — no ORM. Alembic autogenerates migrations by
-diffing against :data:`METADATA`, so this file is the single source of truth for
-the schema and ``docs/refactor/drop-neo4j/SCHEMA.md`` is its prose companion.
+Alembic autogenerates migrations by diffing against :data:`METADATA`, so this
+file is the single source of truth for the schema — never hand-edit a migration
+that has already been applied.
 
-Design rationale lives in ``docs/refactor/drop-neo4j/PLAN.md`` § "Schema
-design". The decisions that shape everything downstream:
+Three decisions shape everything downstream:
 
-* **``CONTAINS`` is a parent FK column, not an edge table.** This is what
-  collapses ``reset.py``'s ``apoc.periodic.iterate`` + ``apoc.path.subgraphNodes``
-  cascade into ``ON DELETE CASCADE``.
+* **Containment is a parent foreign key, not an edge table.** A database owns
+  its schemas, a schema its tables, a table its columns. That is what makes
+  deleting a database one statement, with ``ON DELETE CASCADE`` doing the rest.
 * **Ids are ``text`` uuids**, defaulted by ``gen_random_uuid()::text``. Not
   ``uuid``: every DAL signature is ``id: str``, and a malformed id arriving from
-  a URL should yield an empty result as it does today, not a ``22P02`` 500.
-  Not integers: ids are consumed as opaque strings by the pgvector row key
-  (``f"neo4j:{node_id}"``), the frontend's pipe-separated focus param, and
-  ``model_interchange``'s ``imported_id OR id`` match.
+  a URL should yield an empty result rather than a ``22P02`` 500. Not integers:
+  ids are consumed as opaque strings by the vector-store row key, the frontend's
+  pipe-separated focus param, and ``model_interchange``'s ``imported_id OR id``
+  match.
 * **The catalog tier is prefixed ``catalog_``** — one rule that sidesteps
   ``table`` and ``column`` being reserved words and ``schema`` colliding with
   ``information_schema``, instead of three separate exceptions.
@@ -61,7 +60,6 @@ NAMING_CONVENTION = {
 METADATA = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
 
 #: ``gen_random_uuid()`` is built into Postgres from 13; no pgcrypto needed.
-#: Replaces Cypher's ``ON CREATE SET n.id = randomUUID()`` exactly.
 #:
 #: Parenthesised to match how Postgres *stores* the expression. Written as
 #: ``gen_random_uuid()::text`` it produces identical DDL, but the catalog reads
@@ -91,9 +89,8 @@ def _certified(name: str) -> Column:
     """A human-set certification flag.
 
     ``NOT NULL DEFAULT false`` rather than nullable, because every read of these
-    in the Cypher was ``coalesce(x.<flag>, false)`` — absent has always meant
-    false. Making that the column's job removes the coalesce from each caller
-    and, more usefully, removes the chance of one caller forgetting it.
+    absent means false, and making that the column's job removes the coalesce
+    from each caller — and, more usefully, the chance of one forgetting it.
     """
     return Column(name, Boolean, nullable=False, server_default=text("false"))
 
@@ -145,7 +142,7 @@ catalog_table = Table(
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
     # Set from the UI's certification checkbox, via patch_catalog_node. Easy to
-    # miss when reading the graph, because nothing in the ingest ever writes it
+    # miss, because nothing in the ingest ever writes it
     # -- it only appears once a human certifies a description. Without the
     # column the PATCH still returns 200 and the checkbox still ticks; the flag
     # is simply dropped on the way in and reads back false forever.
@@ -174,24 +171,21 @@ catalog_column = Table(
     # As on catalog_table: written only by the UI's certification checkbox.
     _certified("description_certified"),
     Column("data_type", Text, nullable=True),
-    # JSON string on the node today, and read back as a string by callers.
-    # Kept as text rather than promoted to jsonb so the port stays behaviour
-    # preserving; promoting it is a deliberate follow-up, not a porting detail.
+    # A JSON string, read back as a string by callers. Promoting it to jsonb is
+    # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
-    # Text, not Boolean, because the graph stores the *strings* 'YES' and 'NO'
-    # -- measured on the fixture: 99 YES, 110 NO -- and the DAL returns the
-    # value raw. A boolean column here would hand callers True/False where they
-    # have always received 'YES'/'NO', which is a read-contract change wearing
-    # the costume of a type fix.
+    # Text, not Boolean: this holds the *strings* `information_schema` reports,
+    # 'YES' and 'NO', and the DAL returns the value raw. A boolean column would
+    # hand callers True/False where they receive 'YES'/'NO' today, which is a
+    # read-contract change wearing the costume of a type fix.
     #
     # It should become a boolean, but as a deliberate change with its consumers
-    # updated, not as a side effect of the port. See the is_nullable finding in
-    # PROGRESS.md: `model_interchange` already reads this with `bool(...)`, and
-    # `bool('NO')` is True, so every column currently exports as nullable.
+    # updated -- `model_interchange` parses these strings explicitly, because a
+    # naive `bool('NO')` is True.
     Column("is_nullable", Text, nullable=True),
-    # INTEGER in the graph (verified: 209 of 209 columns), despite the parser
-    # handing the write path a string -- something coerces on the way in.
+    # A genuine integer, despite the parser handing the write path a string --
+    # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
@@ -230,8 +224,7 @@ column_foreign_key = Table(
 # carries the join's *columns*; nothing writes both.
 #
 # `refs` is an array that grows rather than a row per reference, because that is
-# what the graph did (`coalesce(rel.join_refs, []) + new`) and what the readers
-# expect. A row per ref would be the better model and is a deliberate follow-up,
+# what the readers expect. A row per ref would be the better model and is a deliberate follow-up,
 # not a porting decision.
 def _column_pair_edge(name: str) -> Table:
     return Table(
@@ -551,8 +544,8 @@ custom_analysis_sql = Table(
     ),
 )
 
-# Never attached to a Database -- which is why the scoped semantic reset does
-# not reach it today, a behaviour DECISION-002/B2 preserves rather than fixes.
+# Never attached to a database, which is why a *scoped* semantic reset does not
+# reach these -- see `reset.delete_semantic_layer`.
 pql_analysis = Table(
     "pql_analysis",
     METADATA,
@@ -609,9 +602,9 @@ zone = Table(
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
     Column("color", Text, nullable=True),
-    # Replaces the Zone/disableZone *label swap*. A boolean says the same thing
-    # without the relabelling, which has no relational equivalent and which the
-    # Cypher had to spell as `:Zone|disableZone` at every read site.
+    # A disabled zone still exists and is still administrable; it just grants
+    # nothing. A boolean rather than a separate table so every read says
+    # `enabled` once instead of unioning two sources.
     Column("enabled", Boolean, nullable=False, server_default=text("true")),
 )
 
@@ -716,13 +709,11 @@ for _table in (
 #: referencing it, which is the reverse traversal. Anything needing that must
 #: query :data:`column_semantic_fk` directly rather than this view.
 #:
-#: The restriction is specific to path-finding, and it is the whole reason the
-#: Cypher needed ``apoc.path.expandConfig`` rather than a plain variable-length
-#: pattern: allowed to traverse SEMANTIC_FK backwards, a path would hop from one
-#: FK column up to a shared target attribute and back down a *different* FK
-#: column, inventing a join between two columns that merely reference the same
-#: thing -- two ``customer_id`` columns joined to each other. Here that is
-#: simply a row the view does not emit.
+#: The restriction is specific to path-finding. Allowed to traverse SEMANTIC_FK
+#: backwards, a path would hop from one FK column up to a shared target
+#: attribute and back down a *different* FK column, inventing a join between two
+#: columns that merely reference the same thing -- two ``customer_id`` columns
+#: joined to each other. Here that is simply a row the view does not emit.
 JOIN_PATH_EDGE_VIEW_SQL = f"""
 CREATE OR REPLACE VIEW {SCHEMA}.join_path_edge AS
     SELECT 'column'::text AS src_kind, c.id       AS src_id,

@@ -4,29 +4,19 @@
 
 """Freeze the DAL's public function surface.
 
-The Neo4j-to-Postgres cutover works by keeping every ``gsf.dal`` function
-signature identical and swapping the bodies, so consumers — ``gsf.semantic``,
-``gsf.retrieval``, eleven routers, the frontend — never learn which store is
-underneath. That decision is only worth anything if it's enforced: the likeliest
-way to break the cutover is not a broken query but a function quietly ported
-with a renamed keyword or a dropped pass-through argument, which type checks
-fine and fails at runtime for one caller.
+``gsf.dal`` is consumed by ``gsf.semantic``, ``gsf.retrieval``, eleven routers
+and the frontend. The likeliest way to break one of them is not a broken query
+but a function quietly changed with a renamed keyword or a dropped pass-through
+argument — which type checks fine and fails at runtime for one caller.
 
 This snapshots every public callable each DAL module defines, with its
 signature, and fails when the two disagree.
-
-Through Phases 3-10 it also compared the Postgres and Neo4j implementations
-against each other, which is what made the ``GSF_STORE`` flip safe. Phase 11
-removed the Neo4j side, so only the freeze remains — and it is still the thing
-that catches a renamed keyword.
 
 **Functions only, deliberately.** Module-level constants are not frozen.
 
 Regenerate after an *intentional* signature change::
 
     uv run python -m gsf.dal.tests.test_dal_surface
-
-and say why in ``docs/refactor/drop-neo4j/PROGRESS.md``.
 """
 
 from __future__ import annotations
@@ -126,7 +116,7 @@ def test_module_surface_is_unchanged(module_name: str) -> None:
     expected = _load_snapshot()
     assert module_name in expected, (
         f"gsf.dal.{module_name} is new. Regenerate the snapshot and record why "
-        f"in PROGRESS.md: uv run python -m gsf.dal.tests.test_dal_surface"
+        f"uv run python -m gsf.dal.tests.test_dal_surface"
     )
 
     actual = _public_surface(importlib.import_module(f"gsf.dal.{module_name}"))

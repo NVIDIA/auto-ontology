@@ -3,14 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """Compare two SQL queries for structural equivalence.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.parsers.query_comparator
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
 The comparison is **insensitive to SELECT-column order** in the main SELECT,
 CTEs, and nested subqueries.  An optional ``ignore_literals`` flag neutralises
 all constant values (strings, numbers, booleans) so that two queries differing

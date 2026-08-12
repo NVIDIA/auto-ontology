@@ -4,14 +4,6 @@
 
 """Extract tables, columns and joins from SQL via sqlglot.
 
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.parsers.sqlglot_extractor
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-
 Extract tables and columns referenced in a SQL query.
 
 Strategy
@@ -25,7 +17,7 @@ A pre-pass builds an alias→table map so that table aliases
 ``col.table`` from the qualified AST.
 
 Columns that remain unresolved after qualification are looked up in
-``all_schemas`` (Neo4j metadata) and attributed when the match is
+``all_schemas`` (catalog metadata) and attributed when the match is
 unambiguous within the query's source tables.
 
 Pass ``all_schemas={}`` (the default) to skip schema-assisted resolution
@@ -61,7 +53,7 @@ class TableMatch:
     columns:
         Set of column names referenced in the SQL for this table.
     schema_name:
-        The ``all_schemas`` key (Neo4j schema name) that owns this table,
+        The ``all_schemas`` key (schema name) that owns this table,
         or ``None`` when the owning schema could not be determined.
     """
 
@@ -539,7 +531,7 @@ def extract_tables_and_columns(
         At least one dialect must be supplied; an empty list raises
         :class:`SQLSyntaxError` for any input.
     all_schemas:
-        ``{schema_name: Schema}`` dict from Neo4j.  Pass ``{}`` (default) to
+        ``{schema_name: Schema}`` dict from the catalog.  Pass ``{}`` (default) to
         skip schema-assisted resolution and rely solely on ``qualify()``.
 
     Returns

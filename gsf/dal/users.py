@@ -10,13 +10,9 @@ show up as a wrong answer — it shows up as one user seeing another's data.
 Treated accordingly: the expansion rules are spelled out, and the tests cover
 each one separately rather than in aggregate.
 
-**The filter contract changes here**, and PLAN.md flags this as the decision
-every later read phase depends on. The Neo4j version returns a Cypher ``WHERE``
-string for callers to interpolate into an f-string. This returns a SQLAlchemy
-predicate to be passed to ``.where()``. Every caller of ``resolve_table_filter``
-lives inside ``gsf/dal`` and is itself ported per-phase, so the two never meet;
-``resolve_accessible_catalog_ids``, which *is* called from the service layer,
-keeps its shape exactly because it returns plain id sets.
+Two entry points: :func:`resolve_accessible_catalog_ids` returns the id sets a
+caller can see, and :func:`resolve_table_filter` turns those into a predicate to
+hand to ``.where()``.
 """
 
 from __future__ import annotations
@@ -30,10 +26,9 @@ from gsf.dal.session import SCHEMA, store
 #: One query in place of four round trips.
 #:
 #: Expansion runs **one level from each direct grant**, and not transitively —
-#: granting a table admits its schema, but not that schema's other tables. Each
-#: branch below corresponds to one of the Neo4j implementation's four passes,
-#: and every branch reads from ``granted`` rather than from another CTE, which
-#: is what keeps it non-recursive.
+#: granting a table admits its schema, but not that schema's other tables.
+#: Every branch reads from ``granted`` rather than from another CTE, which is
+#: what keeps it non-recursive.
 _ACCESSIBLE_SQL = f"""
 WITH granted AS (
     SELECT database_id, schema_id, table_id
@@ -133,29 +128,19 @@ def resolve_table_filter(
     zone_ids: list[str] | None,
     column_ref: Any,
     *,
-    extra_params: dict[str, Any] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
-) -> tuple[Any, dict[str, Any]]:
-    """Return ``(predicate, params)`` restricting *column_ref* to visible tables.
+) -> Any:
+    """A predicate restricting *column_ref* to the tables *zone_ids* can see.
 
     *column_ref* is a SQLAlchemy column — ``catalog_table.c.id``,
-    ``column_attribute.c.table_id`` — not the string expression the Cypher
-    version took. The predicate goes to ``.where()``; ``None`` means no
-    restriction.
+    ``column_attribute.c.table_id`` — and the result goes to ``.where()``.
 
-    *params* is carried through unchanged for signature compatibility with the
-    Neo4j implementation. Core binds its own parameters, so nothing is added to
-    it here; it exists so a caller that threads *extra_params* around does not
-    have to care which backend it is talking to.
-
-    ``zone_ids is None`` yields ``None`` — no filter, full catalog. An **empty
+    ``zone_ids is None`` yields ``None``: no filter, full catalog. An **empty
     list** yields a predicate matching nothing, because "scoped to no zones" has
-    to deny rather than permit. The Neo4j version reaches the same place via an
-    empty ``table_ids`` list.
+    to deny rather than permit. Conflating the two is how an access-control bug
+    gets written.
     """
-    params = dict(extra_params or {})
     if zone_ids is None:
-        return None, params
-
+        return None
     resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    return column_ref.in_(list(resolved["table_ids"])), params
+    return column_ref.in_(list(resolved["table_ids"]))

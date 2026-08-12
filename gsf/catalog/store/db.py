@@ -4,14 +4,11 @@
 
 """Database-level writes and the incremental re-ingest diff.
 
-Public surface matches ``gsf.catalog.store.neo4j.db`` function for function.
-
 The diff itself — ``update_diff_from_existing_schema`` and the two
 ``accumulate_*`` helpers — is **not** reimplemented here. It is pandas over two
 frames plus calls back into the store, so it is storage-agnostic, and it lives
 in :mod:`gsf.catalog.diff` with both backends re-exporting it. Duplicating it
-would mean maintaining two copies of the subtlest code in the write path — the
-code that was already silently broken for every re-ingest (DECISION-006) — and
+would mean maintaining two copies of the subtlest code in the write path, and
 a future fix would have to be made twice or drift.
 
 What *is* here is the set of primitives that diff calls, and they are where the
@@ -27,8 +24,7 @@ from sqlalchemy import func, select, update
 
 from gsf.catalog.constants import Labels
 
-# Re-exported so this module presents the same surface as its Neo4j
-# counterpart. The diff is shared; only the primitives below differ.
+# Re-exported: the diff is shared, only the storage primitives below differ.
 from gsf.catalog.diff import (  # noqa: F401
     accumulate_added_column_props,
     accumulate_updated_column,
@@ -46,8 +42,7 @@ def db_exists(db_node):
     """Return ``(id, loaded)`` for a database, or ``(None, None)``.
 
     ``loaded`` answers "does this database have anything hanging off it", which
-    decides whether ``populate_db`` does a first-time load or a diff. The Cypher
-    counted *relationships* on the node; the relational equivalent is whether it
+    decides whether ``populate_db`` does a first-time load or a diff — whether it
     has any schemas, since that is the only thing that can hang off a database.
     """
     rows = store().query_read(
@@ -101,7 +96,7 @@ def delete_schema(schema_node_id):
 
 
 def delete_table(table_id):
-    """Delete a table. Its columns cascade; the Cypher had to name them."""
+    """Delete a table. Its columns cascade."""
     store().query_write(
         s.catalog_table.delete().where(s.catalog_table.c.id == table_id)
     )
@@ -124,8 +119,7 @@ def delete_columns_batch(column_ids):
 def add_schemas_edge_batch(edges, created):
     """Upsert parent/child pairs, linking each child to its parent.
 
-    *created* is ignored: the column carries a server default, where the Cypher
-    had to set it explicitly with ``coalesce``.
+    *created* is ignored: the column carries a server default.
     """
     for edge in edges:
         try:

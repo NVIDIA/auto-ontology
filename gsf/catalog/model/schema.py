@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The Schema aggregate: one schema's tables, columns and edges.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.model.schema
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""The Schema aggregate: one schema's tables, columns and edges."""
 
 import logging
 import uuid

@@ -5,7 +5,7 @@
 """Storage-agnostic catalog value types.
 
 Nothing here knows what the catalog is stored in — that is
-:mod:`gsf.catalog.store`, the only subtree Phase 4 rewrites.
+:mod:`gsf.catalog.store`.
 """
 
 from gsf.catalog.model.node import CatalogNode, CatalogNodeEncoder

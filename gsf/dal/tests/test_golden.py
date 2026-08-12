@@ -4,22 +4,19 @@
 
 """Replay the recorded DAL reads and require identical output.
 
-This is the fidelity oracle for the Neo4j-to-Postgres port. The cutover is
-greenfield, so there is no production data to diff against: these 122 recorded
-reads are the only evidence that a rewritten ``gsf.dal`` still answers the same
-questions the same way. Phases 5-10 are graded by this file.
+Every read the DAL exposes, captured against the fixture and compared byte for
+byte after normalisation. This is what catches a read that still returns *a*
+plausible answer after a change, rather than the right one.
 
-**These goldens were recorded against Neo4j.** They are kept as-is, and the
-Postgres implementation is graded against them — that is the whole point, and it
-is why re-recording them is a last resort rather than a fix::
+**Re-recording is a last resort, not a fix.** A golden that changes because the
+code changed is the test doing its job::
 
     docker compose up -d postgres
     uv run --no-sync python -m dev_tools.seed_fixtures
     uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
     uv run --no-sync pytest gsf/dal/tests/test_golden.py
 
-Re-record only when a change to DAL output is *intended*, and say why in
-``docs/refactor/drop-neo4j/PROGRESS.md``::
+Re-record only when a change to DAL output is *intended*::
 
     uv run --no-sync python -m dev_tools.capture_dal_golden
 
@@ -46,10 +43,8 @@ GOLDEN = capture_dal_golden.load_golden()
 def _require_fixture():
     """Skip when there is no reachable fixture.
 
-    Keyed on ``NEO4J_URI`` until Phase 11, which meant it skipped every
-    comparison the moment the store changed — reporting "all green" while
-    grading nothing. Worth remembering as a shape: a skip guard naming the
-    wrong dependency turns a suite off silently.
+    Worth remembering as a shape: a skip guard naming the wrong dependency
+    turns a whole suite off silently, and still reports green.
     """
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_USER not set; the golden fixture is unavailable")

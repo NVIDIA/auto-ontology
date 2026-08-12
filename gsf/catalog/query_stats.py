@@ -21,7 +21,7 @@ def get_sql_counters(sql_node):
     The per-month counters are collected because the write path still carries
     them, but **nothing can read them**: every reader matches
     ``count_monthly_YYYY_MM`` while the writer produces ``count_{month}_{year}``.
-    See ``docs/refactor/drop-neo4j/DECISIONS.md`` record 007. The Postgres store
+    The store
     ignores the second element for that reason; it is returned so the two
     backends keep the same signature.
     """

@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Normalise raw connector DataFrames into the shapes the writer expects.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.utils
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""Normalise raw connector DataFrames into the shapes the writer expects."""
 
 import regex
 from datetime import timezone
@@ -73,7 +64,7 @@ def chunks(lst, n):
 def normalize_tables(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a tables DataFrame.
 
-    Accepts rows from either a SQL connector (``information_schema``) or Neo4j
+    Accepts rows from either a SQL connector (``information_schema``) or the stored
     graph reload (``get_schema_tables``). Connector-specific columns such as
     ``owner`` are dropped; graph-only columns such as ``id`` and ``database``
     are preserved.

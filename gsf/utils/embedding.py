@@ -55,7 +55,6 @@ def batch_embed(
     **This is the only place GSF touches ``_BatchEmbedActor``.** It is a private
     library symbol, so the dependency is deliberately confined to the two lines
     below rather than repeated at every call site — see
-    ``docs/refactor/drop-neo4j/PLAN.md`` § Phase 1.
 
     ``_BatchEmbedActor`` is an *archetype* operator: it resolves to a CPU or GPU
     variant only when a :class:`~nemo_retriever.graph.Graph` executes it, so it
@@ -110,7 +109,7 @@ def embed_docs_into_vdb(
     rows = []
     for item in docs:
         node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": item.get("label", ""),

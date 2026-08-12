@@ -4,21 +4,20 @@
 
 """Storing parsed SQL statements and what they reference.
 
-Public surface matches ``gsf.catalog.store.neo4j.queries`` function for
-function. ``get_sql_counters`` and ``get_candidate_sql_ids`` are pure and live
-in :mod:`gsf.catalog.query_stats`, re-exported here.
+``get_sql_counters`` and ``get_candidate_sql_ids`` are pure and live in
+:mod:`gsf.catalog.query_stats`, re-exported here.
 
-Two things the Cypher did that this deliberately does not:
+Two things this deliberately does not do:
 
-**Per-month counters are not written.** The graph carried a
-``count_{month}_{year}`` property per month a statement was seen. No reader has
-ever been able to parse those names — every one matches
+**Per-month counters are not written.** A ``count_{month}_{year}`` value used
+to be stored per month a statement was seen. No reader has ever been able to
+parse those names — every one matches
 ``count_monthly_YYYY_MM`` — so they hold no information anything can use, and
 reproducing them would mean reviving dynamic property names in a relational
 store to store data nothing reads. ``total_counter`` is kept and is what a fix
-would use. See DECISIONS.md record 007.
+would use — see ``sql_attribute_suggester._usage_score``.
 
-**The ``deleted`` filter is dropped.** Both Cypher reads guard with
+**The ``deleted`` filter is dropped.** Both reads used to guard with
 ``coalesce(node.deleted, false) = false``, but nothing in GSF writes ``deleted``
 — verified across the codebase. The guard is always true, so omitting it
 preserves behaviour exactly, and carrying a column no writer sets would leave a
@@ -35,7 +34,7 @@ from sqlalchemy import select, update
 from gsf.catalog.model.node import CatalogNode
 from gsf.catalog.normalize import chunks
 
-# Pure, so shared with the Neo4j backend rather than reimplemented.
+# Pure, so it lives outside this module rather than being reimplemented.
 from gsf.catalog.query_stats import (  # noqa: F401
     get_candidate_sql_ids,
     get_sql_counters,
@@ -96,16 +95,15 @@ def update_counters_and_timestamps_for_query_and_affected_data(
     if not update_data_last_query_timestamp:
         return
 
-    # The Cypher walked SQL> from the statement to every Table and Column it
-    # touches. Those are two association tables here, so it is two updates.
+    # A statement references both tables and columns, through two association
+    # tables -- so two updates.
     for association, target, key in (
         (s.sql_query_table, s.catalog_table, "table_id"),
         (s.sql_query_column, s.catalog_column, "column_id"),
     ):
         if "last_query_timestamp" not in target.c:
-            # Only Sql carries this today; the catalog tier does not. The Cypher
-            # set it on Table and Column nodes regardless, because a property
-            # graph needs no column to exist first. Nothing reads it there.
+            # Only statements carry a last-query timestamp; the catalog tier
+            # has no column for one, and nothing reads it there.
             continue
         store().query_write(
             update(target)

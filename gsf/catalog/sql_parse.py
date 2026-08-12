@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Parse SQL against the catalog and persist the resulting Sql nodes.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.services.queries
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""Parse SQL against the catalog and persist the resulting Sql nodes."""
 
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed

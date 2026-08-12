@@ -8,7 +8,7 @@ Read-only operations on the ``CustomAnalysis`` / ``Sql`` subgraph plus the
 small selection / rendering helpers used by the text-to-SQL agents to
 filter classified analyses and turn them into markdown.
 
-All direct Neo4j calls live in gsf/dal/custom_analyses.py.
+All direct store access lives in gsf/dal/custom_analyses.py.
 This module only keeps the pure-Python helpers.
 """
 

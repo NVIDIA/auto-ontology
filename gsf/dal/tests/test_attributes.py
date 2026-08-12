@@ -6,9 +6,7 @@
 
 The traversal gets most of the attention here, and one case in it gets more than
 the rest: **two columns that both point at the same attribute must not be joined
-to each other.** That is the whole reason the Cypher needed
-``apoc.path.expandConfig`` instead of a variable-length pattern, and it is a
-wrong answer that looks completely reasonable — a join between two
+to each other.** It is a wrong answer that looks completely reasonable — a join between two
 ``customer_id`` columns is exactly the sort of thing a reviewer nods at.
 
 Every path result is also checked against the recursive-CTE oracle in
@@ -273,7 +271,7 @@ def test_a_missing_column_yields_no_path(joined) -> None:
 
 
 def test_two_schemas_are_not_connected_through_their_schema(world) -> None:
-    """The Cypher's `labelFilter: '-Schema'`, as a row the view never emits.
+    """Schemas are not nodes in the view, so no path can route through one.
 
     `CONTAINS` is traversed undirected, so a Schema node in the graph would let
     a path walk up from one table and out to every other table in the database.
@@ -647,7 +645,7 @@ def test_an_attribute_with_no_columns_still_gets_an_entry(world) -> None:
 
 
 def test_a_database_filter_does_not_drop_the_attribute(joined) -> None:
-    """The Cypher put this on an OPTIONAL MATCH, so the attribute survived.
+    """The attribute survives with blank context rather than disappearing.
 
     Filtering in a plain WHERE over an outer join would delete the row entirely
     instead of blanking its context — a silent difference, since the caller's

@@ -165,7 +165,7 @@
   "users": {
     "get_accessible_catalog_ids_for_zones": "(zone_ids: 'list[str]') -> 'dict[str, set[str]]'",
     "resolve_accessible_catalog_ids": "(zone_ids: 'list[str] | None', data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'dict[str, set[str]] | None'",
-    "resolve_table_filter": "(zone_ids: 'list[str] | None', column_ref: 'Any', *, extra_params: 'dict[str, Any] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'tuple[Any, dict[str, Any]]'"
+    "resolve_table_filter": "(zone_ids: 'list[str] | None', column_ref: 'Any', *, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'Any'"
   },
   "zones": {
     "create_zone": "(*, name: 'str', description: 'str | None', color: 'str', item_ids: 'list[str]') -> 'dict[str, Any]'",

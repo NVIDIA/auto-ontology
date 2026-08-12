@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Liveness/readiness endpoint — probes Neo4j and Postgres connectivity."""
+"""Liveness/readiness endpoint — probes Postgres connectivity."""
 
 from __future__ import annotations
 

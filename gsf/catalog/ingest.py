@@ -4,11 +4,9 @@
 
 """The catalog write path's single entry point.
 
-New in Phase 1 of the drop-Neo4j refactor. It replaces the library's
-``TabularSchemaExtractOp``, which was a 70-line ``AbstractOperator`` wrapper
-around exactly these two function calls plus the DataFrame concat below —
-keeping it would have forced this fork to implement a library ABC for no gain.
-See ``docs/refactor/drop-neo4j/PLAN.md`` § Phase 1.
+Extraction and the write, plus the DataFrame concat below — deliberately a
+plain function rather than an operator class, so nothing here has to implement
+a library ABC.
 """
 
 from __future__ import annotations

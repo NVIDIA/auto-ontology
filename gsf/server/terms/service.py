@@ -30,7 +30,7 @@ def list_terms_page(
 ) -> dict[str, Any]:
     """Assemble one page of the Terms list with its per-card count breakdowns.
 
-    Resolving *zone_ids* to accessible catalog ids costs several Neo4j round
+    Resolving *zone_ids* to accessible catalog ids costs several store round
     trips, so it happens once here and is threaded through the reads that
     accept it (see ``resolve_accessible_catalog_ids``).
 

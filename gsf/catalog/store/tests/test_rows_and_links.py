@@ -84,9 +84,9 @@ def test_insert_then_match_returns_the_same_row() -> None:
 
 
 def test_stored_id_survives_a_match_with_a_different_incoming_id() -> None:
-    """Deliberately *not* the Cypher behaviour — see nodes.upsert_row.
+    """Deliberately never overwrites a stored id — see rows.upsert_row.
 
-    ``apoc.merge.node.eager(..., {id: $props.id})`` overwrites the matched
+    An incoming id must not overwrite the matched
     node's id with the parser's. Harmless in a property graph, where
     relationships bind to internal nodes; here ``id`` is the primary key and
     other rows reference it, so overwriting violates their foreign keys.
@@ -134,7 +134,7 @@ def test_referencing_rows_survive_a_reingest() -> None:
 
 
 def test_unknown_properties_are_dropped_not_rejected() -> None:
-    """The Cypher accepted any property; refusing them would fail live ingests."""
+    """Unknown keys are dropped; refusing them would fail live ingests."""
     name = _db_name()
     node_id = upsert_row(
         Labels.DB,
@@ -330,7 +330,7 @@ def test_get_node_properties_by_id_reports_its_label() -> None:
 
 
 def test_get_node_properties_by_id_searches_several_labels() -> None:
-    """The Cypher could match several labels at once; each is a table here."""
+    """A lookup may name several labels; each is a separate table here."""
     name = _db_name()
     node_id = _database(name)
 

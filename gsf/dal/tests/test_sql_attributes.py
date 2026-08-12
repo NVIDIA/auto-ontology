@@ -246,7 +246,7 @@ def test_zone_chips_come_from_the_sql_not_the_term(world) -> None:
 
 
 def test_a_zone_on_the_schema_covers_its_tables(world) -> None:
-    """Cypher walked `CONTAINS*1..2`; a zone can name any of the three grains."""
+    """A zone can name any of the three grains."""
     world.table("orders")
     world.term("Revenue")
     attr = world.attribute("revenue", "Revenue", sql="SELECT 1", tables=("orders",))

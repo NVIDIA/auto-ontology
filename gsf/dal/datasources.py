@@ -4,21 +4,14 @@
 
 """Catalog reads and writes: databases, schemas, tables, columns.
 
-All 26 functions. Seven of them reach the semantic tier and landed a phase later
-than the rest ([DECISION-009]) — nothing wrote terms or attributes until Phase 7,
-and against no data a wrong join is indistinguishable from a correct one. They
-are grouped at the bottom of the file, because that is where the joins get
-interesting, not because they are still pending.
+The functions at the bottom of the file reach the semantic tier — terms and
+attributes — and their joins are where the interesting cases live.
 
-Re-check that split with ``python -m dev_tools.classify_dal_dependencies``
-rather than by eye; three hand-analyses got it wrong.
-
-Two shapes recur and are easy to lose in translation:
+Two shapes recur and are easy to break:
 
 * **A database with no schemas, or a schema with no tables, does not appear.**
-  The Cypher's ``MATCH (db)-[:CONTAINS]->(s)`` is an inner join, so an empty
-  database is invisible rather than present-with-zero. Reproduced with inner
-  joins for the same reason.
+  These are inner joins, so an empty database is invisible rather than
+  present-with-zero. Callers treat absence as "nothing here".
 * **Zone scoping filters the counted rows, not just the returned ones**, so a
   scoped user sees a schema count covering only the tables they can see.
 """
@@ -109,9 +102,8 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
         {
             "id": r["id"],
             "name": r["name"],
-            # The Cypher read `db.description`, a property nothing writes, so
-            # this was always None. Kept in the shape because callers read the
-            # key; there is no column to read it from.
+            # Nothing writes a database description, so this is always None.
+            # Kept in the shape because callers read the key.
             "description": None,
             "num_of_schemas": int(r["schema_count"]),
             "schemas": [],
@@ -131,9 +123,9 @@ def fetch_schemas_for_database(
 ) -> dict[str, Any] | None:
     """``{schemas_count, schemas}`` for a database, or ``None`` if it has none.
 
-    ``None`` rather than an empty result is the Cypher's behaviour: its match
-    required at least one table, so a database with no tables produced no rows
-    at all and the caller was expected to treat that as absent.
+    ``None`` rather than an empty result: the join requires at least one table,
+    so a database with no tables produces no rows at all and the caller treats
+    that as absent.
     """
     scoped = resolve_accessible_catalog_ids(zone_ids)
 
@@ -207,9 +199,8 @@ def fetch_schemas_by_ids(
 ) -> list[dict[str, str]]:
     """Flat column rows for the catalog map SQL validation is built from.
 
-    An empty or absent id list means *every* schema, not none — the Cypher's
-    ``WHERE size($schema_ids) = 0 OR ...``. Reading that as "none" would leave
-    every query unresolvable rather than raising.
+    An empty or absent id list means *every* schema, not none. Reading it the
+    other way would leave every query unresolvable rather than raising.
     """
     schema_ids = relevant_schemas_ids or []
 
@@ -261,11 +252,10 @@ def _table_select():
 def fetch_sorted_tables() -> list[dict[str, Any]]:
     """Every table, busiest first.
 
-    ``name`` breaks ties. The Cypher ordered by ``query_count DESC`` alone, and
-    nearly every table has a count of zero — so a function whose name promises
-    an order returned rows in whatever order the store felt like, differing
-    between calls. Adding a tiebreaker cannot break a caller that was already
-    receiving an arbitrary order, and makes the result reproducible.
+    ``name`` breaks ties. Nearly every table has a query count of zero, so
+    ordering by count alone would return rows in whatever order the store felt
+    like, differing between calls — a function whose name promises an order has
+    to impose a total one.
     """
     query_count = (
         select(func.count(s.sql_query_table.c.sql_query_id))
@@ -310,9 +300,9 @@ def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
 def fetch_table_by_name(name: str) -> dict[str, Any] | None:
     """The first table of that name, in *any* schema or database.
 
-    Ambiguous by construction — the Cypher took ``LIMIT 1`` with no ordering.
-    Ordered by id here so repeated calls agree with each other; which row wins
-    is still arbitrary, but it is at least the same arbitrary row.
+    Ambiguous by construction: a name is not unique across schemas or
+    databases. Ordered by id so repeated calls agree with each other — which row
+    wins is still arbitrary, but it is the same arbitrary row each time.
     """
     rows = store().query_read(
         _table_select()
@@ -326,8 +316,8 @@ def fetch_table_by_name(name: str) -> dict[str, Any] | None:
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
     """Tables joined to this one, in either direction.
 
-    The Cypher pattern was undirected (``-[:JOIN]-``), so both ends of the
-    relationship count; here that is a union of the two columns.
+    A join is undirected, so both ends count — hence the union of the two
+    columns rather than a single direction.
     """
     other = s.catalog_table.alias("other")
     outgoing = (
@@ -392,9 +382,8 @@ def fetch_parent_table_id_for_column(column_id: str) -> str | None:
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
     """Column id → its database/schema/table names.
 
-    Returns ``{}`` on failure rather than raising, matching the Cypher: callers
-    use this to decorate results, and losing the decoration is better than
-    losing the result.
+    Returns ``{}`` on failure rather than raising: callers use this to decorate
+    results, and losing the decoration beats losing the result.
     """
     if not col_ids:
         return {}
@@ -427,8 +416,8 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
 def _set_column_property(table_id: str, values: dict[str, Any], column: str) -> None:
     """Set one property across several of a table's columns, in one statement.
 
-    ``CASE name WHEN 'a' THEN … END`` rather than a statement per column: the
-    Cypher did it in one write, and a table can have hundreds of columns.
+    ``CASE name WHEN 'a' THEN … END`` rather than a statement per column — a
+    table can have hundreds of them.
     """
     if not values:
         return
@@ -491,8 +480,8 @@ def apply_metadata_batch(
 ) -> None:
     """Write descriptions and sample values, **without overwriting existing ones**.
 
-    ``coalesce(new, existing)`` in the Cypher, and the direction matters: a
-    curated description survives a batch that has nothing to say about it.
+    ``coalesce(new, existing)``, and the direction matters: a curated
+    description survives a batch that has nothing to say about it.
     """
     for row in table_rows or []:
         store().query_write(
@@ -560,10 +549,10 @@ def patch_catalog_node(
 ) -> dict[str, Any] | None:
     """Write properties onto whichever catalog row carries *node_id*.
 
-    The Cypher matched four labels at once and let the id pick the node. Each is
-    a separate table here, so they are tried in turn. Properties with no column
-    are dropped, as the graph accepted anything and refusing would fail writes
-    that work today.
+    An id can name a database, schema, table or column, so the four tables are
+    tried in turn. Properties with no matching column are dropped rather than
+    rejected: callers set properties opportunistically, and refusing would fail
+    writes that work today.
     """
     for label, table in _NODE_TABLES.items():
         columns = {c.name for c in table.columns}
@@ -583,8 +572,8 @@ def patch_catalog_node(
 def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
     """All of a node's properties plus its label, or ``None``.
 
-    Unknown labels are rejected with a warning rather than an exception, which
-    is what the Cypher did — the label often arrives from a URL.
+    Unknown labels are rejected with a warning rather than an exception — the
+    label often arrives straight from a URL.
     """
     labels = label if isinstance(label, list) else [label]
     for candidate in labels:
@@ -613,14 +602,14 @@ def fetch_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
 
 
 # ---------------------------------------------------------------------------
-# The seven that reach the semantic tier (DECISION-009)
+# Reads that reach the semantic tier
 # ---------------------------------------------------------------------------
 
 
 def _terms_count(table_id: ColumnElement) -> ColumnElement:
     """How many distinct Terms a table is associated with.
 
-    Two routes, and the Cypher counted the deduplicated union of both:
+    Two routes, and the count is the deduplicated union of both:
 
     * **directly** — ``REPRESENTS``, the table *is* that business concept;
     * **through its columns** — a column carries a ColumnAttribute (by
@@ -772,12 +761,11 @@ def fetch_columns_for_table(
     read can report. Omit *limit* for every column, which is what the catalog
     tree and the text-to-SQL context want.
 
-    **``None`` means the table is missing, never that the page is empty.** The
-    Cypher guaranteed that by paging inside a subquery scoped to the table; two
-    queries do it here, and the header query is the one that decides. A single
-    join with ``OFFSET`` would lose the table's own fields as soon as *skip*
-    ran past the last column, turning "page 3 of a 2-page table" into "no such
-    table".
+    **``None`` means the table is missing, never that the page is empty.** That
+    is why this runs two queries: the header decides existence, the page decides
+    contents. A single join with ``OFFSET`` would lose the table's own fields as
+    soon as *skip* ran past the last column, turning "page 3 of a 2-page table"
+    into "no such table".
     """
     header = store().query_read(
         select(
@@ -825,14 +813,12 @@ def fetch_columns_for_table(
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Tables with a name/type/description summary of each column.
 
-    Returns ``[]`` rather than raising if the query fails, which is what the
-    Cypher did: this decorates retrieval results, and losing the decoration
-    beats losing the results.
+    Returns ``[]`` rather than raising if the query fails: this decorates
+    retrieval results, and losing the decoration beats losing the results.
 
-    A table with no columns does not appear at all — the Cypher's second
-    ``MATCH`` was an inner join. Preserved rather than fixed; a column-less
-    table in the catalog is a symptom worth seeing elsewhere, not something to
-    paper over here.
+    A table with no columns does not appear at all — the column join is inner.
+    Left that way deliberately: a column-less table in the catalog is a symptom
+    worth seeing where it originates, not something to paper over here.
     """
     if not table_ids:
         return []
@@ -875,9 +861,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "columns": [],
             },
         )
-        # The Cypher dropped unnamed columns from the nested list after
-        # collecting them. `name` is NOT NULL here, so this cannot fire -- kept
-        # so the shape stays identical if that ever changes.
+        # `name` is NOT NULL, so this cannot fire today -- kept so the shape
+        # stays the same if that ever changes.
         if row["column_name"]:
             table["columns"].append(
                 {
@@ -982,12 +967,11 @@ def fetch_tables_and_columns_by_node_ids(
                     s.catalog_table.c.name.label("table_name"),
                     s.catalog_schema.c.name.label("table_schema"),
                     s.catalog_table.c.table_type,
-                    # The table's own description, not the fallback: the Cypher
-                    # read `t.description` here even though it used the fallback
-                    # for columns three lines earlier. Asymmetric, and preserved
-                    # -- these frames feed embeddings, and quietly widening what
-                    # gets embedded would change retrieval results without any
-                    # test noticing.
+                    # The table's own description, not the fallback -- unlike
+                    # the columns three lines earlier. Asymmetric on purpose:
+                    # these frames feed embeddings, and widening what gets
+                    # embedded would shift retrieval results with no test
+                    # noticing.
                     s.catalog_table.c.description,
                     s.catalog_database.c.name.label("database_name"),
                 )
@@ -1014,12 +998,11 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     bridge SqlAttribute references it yet. Self-referential bridges count:
     ``also_buy(product_id, also_buy_product_id)`` targets one table twice.
 
-    The Cypher expressed "every column resolves" twice over — once as
-    ``ALL(c IN cols WHERE ...)`` and again as ``size(fk_pairs) = size(cols)``.
-    The two are not redundant: the first checks each column has an outgoing
-    edge, the second that each edge actually lands on a column inside a table
-    (an FK pointing at a column whose table was never ingested passes the first
-    and fails the second). Both are kept.
+    "Every column resolves" is checked twice, and the two are not redundant:
+    one asks whether each column has an outgoing key at all, the other whether
+    each key actually lands on a column inside a table. A key pointing at a
+    column whose table was never ingested passes the first and fails the
+    second.
     """
     fk_target = s.catalog_column.alias("fk_target")
     fk_table = s.catalog_table.alias("fk_table")
@@ -1030,9 +1013,8 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
 
     # Column -> the table/schema/column its FK lands on, by either route.
     # `resolved_count` below counts these rows, so a column with no resolvable
-    # target contributes nothing and the size comparison fails -- which is the
-    # Cypher's second check, the one that catches an FK pointing at a column
-    # whose table was never ingested.
+    # target contributes nothing and the size comparison fails -- the second of
+    # the two checks described above.
     #
     # The SEMANTIC_FK route is Column -> ColumnAttribute <- Column: the
     # attribute this column references is *owned* by some other column, and that

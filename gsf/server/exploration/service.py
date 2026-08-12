@@ -4,7 +4,7 @@
 
 """Exploration service layer.
 
-Keeps the HTTP router independent from the Neo4j DAL and provides the
+Keeps the HTTP router independent from the DAL and provides the
 domain boundary for future Exploration-specific orchestration.
 """
 

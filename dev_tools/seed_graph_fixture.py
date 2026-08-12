@@ -4,10 +4,9 @@
 
 """Build the canonical fixture: catalog + a hand-authored semantic layer.
 
-This is the input to the golden capture that grades the Neo4j-to-Postgres
-refactor (``docs/refactor/drop-neo4j/PLAN.md``). It must be **deterministic** —
-same fixture databases in, same graph out — because the goldens are compared
-byte for byte after id normalisation.
+This is the input to the golden capture in ``gsf/dal/tests/test_golden.py``. It
+must be **deterministic** — same fixture databases in, same catalog out —
+because the goldens are compared byte for byte after id normalisation.
 
 Two deliberate choices:
 
@@ -66,10 +65,8 @@ def ingest_catalog() -> None:
 # Catalog lookups
 # ---------------------------------------------------------------------------
 #
-# Resolved through the DAL rather than by querying a store directly, so this
-# module builds the fixture on whichever backend ``GSF_STORE`` selects. The
-# Cypher these replaced is why the golden replay could not grade Postgres at
-# all — see PLAN.md, Phase 11's prerequisite.
+# Resolved through the DAL rather than by querying the store directly, so the
+# fixture is built the same way the application reads it.
 
 
 def _catalog_index() -> dict[str, dict[tuple[str, ...], str]]:
@@ -460,7 +457,7 @@ def reset_graph() -> None:
     ``delete_all_data(None)`` is the DAL's own definition of a full wipe, so the
     fixture is built from the same empty state a reset produces — **plus the
     zones, which that reset does not touch.** Zones are not part of either
-    layer: the Cypher's semantic labels never included them, so
+    layer: the SQL's semantic labels never included them, so
     ``delete_all_data`` left them standing on both backends. The old
     ``MATCH (n) DETACH DELETE n`` swept them up incidentally, and a fixture
     built on top of leftover zones is not reproducible.

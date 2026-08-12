@@ -4,8 +4,6 @@
 
 """Zone CRUD.
 
-Public surface matches ``gsf.dal.neo4j.zones`` function for function.
-
 Two things are less obvious than they look, and both are load-bearing:
 
 **Zone targets are polymorphic.** A zone can point at a database, a schema or a
@@ -16,9 +14,9 @@ be written to the right column of ``zone_target``, so
 
 **Zone names are unique in a way no column constraint expresses**:
 case-insensitively on the trimmed name, and only among zones sharing a database
-with the zone's own items. Enforced here in application code, exactly as the
-Cypher does, because a ``UNIQUE`` column would be wrong in both directions at
-once — see the comment on ``zone.name`` in ``gsf/dal/pg/schema.py``.
+with the zone's own items. Enforced in application code because a ``UNIQUE``
+column would be wrong in both directions at once — see the comment on
+``zone.name`` in ``gsf/dal/schema.py``.
 """
 
 from __future__ import annotations
@@ -34,15 +32,14 @@ from gsf.server.zones.utils import format_zone
 
 logger = logging.getLogger(__name__)
 
-#: API label for each tier, matching what the Cypher resolved from node labels.
+#: API label for each tier, as callers expect to receive it.
 _API_LABEL = {"database": "database", "schema": "schema", "table": "table"}
 
 
 def _classify_items(item_ids: list[str]) -> dict[str, list[str]]:
     """Sort a flat list of ids into the tier each belongs to.
 
-    Ids that match nothing are dropped, which is what the Cypher's ``MATCH``
-    did: linking a zone to something that no longer exists is a no-op, not an
+    Ids that match nothing are dropped: linking a zone to something that no longer exists is a no-op, not an
     error.
     """
     if not item_ids:
@@ -309,8 +306,8 @@ def update_zone(
             s.zone.update().where(s.zone.c.id == zone_id).values(**fields)
         )
 
-    # None leaves membership alone; an empty list clears it. The Cypher draws
-    # the same distinction, and collapsing the two would silently strip a zone's
+    # None leaves membership alone; an empty list clears it. The distinction
+    # is deliberate, and collapsing the two would silently strip a zone's
     # items on any metadata-only edit.
     if item_ids is not None:
         store().query_write(
@@ -332,7 +329,6 @@ def delete_zone(zone_id: str) -> bool:
 def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
     """Enable or disable a zone.
 
-    The Cypher swapped the node's label between ``Zone`` and ``disableZone``.
     Here it is a boolean column, which is the same fact without the relabelling
     that every read site had to spell as ``:Zone|disableZone``.
     """
@@ -355,9 +351,8 @@ def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
 def zone_covers_table():
     """A zone target covering a table, at any of the three grains it can name.
 
-    The Cypher walked ``(item)-[:CONTAINS*0..2]->(t)`` — zero hops meaning the
-    zone names the table itself, one its schema, two its database. Containment
-    is FK columns here, so the walk becomes three explicit branches.
+    A zone may name the table itself, its schema, or its database — three
+    explicit branches, one per grain.
 
     Expects ``catalog_table`` and ``catalog_schema`` in the enclosing query, so
     a caller joining differently still gets one definition of "covered".
@@ -376,10 +371,9 @@ def fetch_table_zones_map(
 ) -> dict[str, list[dict[str, Any]]]:
     """``{table_id: [zone, ...]}`` for every visible table.
 
-    Lives here rather than in ``exploration`` — where the Cypher version does —
-    because the semantic reads need it a phase earlier and two copies of a
-    zone-resolution rule is exactly how a viewer ends up seeing a chip on one
-    screen and not another. Phase 9 should re-export it, not rewrite it.
+    Lives here rather than in ``exploration``, which also needs it: two copies
+    of a zone-resolution rule is exactly how a viewer ends up seeing a chip on
+    one screen and not another. ``exploration`` re-exports this one.
 
     **A viewer never sees a disabled zone's chip**, even when its id is in
     *zone_ids* — access may have been granted before the zone was retired.

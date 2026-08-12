@@ -4,17 +4,15 @@
 
 """The seven `datasources` functions that reach the semantic tier.
 
-These landed a phase after the other 19 (DECISION-009) precisely because they
-could not be checked without terms and attributes to join to. So they get a
-hand-built fixture rather than the Pagila ingest: a catalog with exactly the
+These need terms and attributes to join to, so they get a hand-built fixture
+rather than the Pagila ingest: a catalog with exactly the
 semantic shapes that make each join distinguishable from a wrong one.
 
 Pagila is not enough on its own for the case that matters most.
 ``fetch_bridge_table_candidates`` returns **nothing** on Pagila — its junction
 tables (``film_actor``, ``film_category``) each carry a ``last_update`` column,
-so no table has an FK on every column. The golden capture agrees: Neo4j returned
-``[]`` too. Two empty lists agreeing tells you nothing about the query, which is
-why the bridge fixture below is built by hand.
+so no table has an FK on every column -- the query returns nothing, which tells
+you nothing about whether it works. Hence the hand-built bridge fixture below.
 """
 
 from __future__ import annotations
@@ -377,7 +375,7 @@ def test_tables_by_ids_is_empty_for_an_empty_list() -> None:
 
 
 def test_tables_by_ids_drops_a_table_with_no_columns(world) -> None:
-    """Preserved from the Cypher, whose second MATCH was an inner join.
+    """The column join is inner, deliberately.
 
     Not fixed here: a column-less table in the catalog is a symptom worth seeing
     where it originates, not something to paper over in a read.
@@ -458,7 +456,7 @@ def test_no_ids_yields_empty_frames_and_no_database() -> None:
 
 
 def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
-    """Asymmetric in the Cypher, and preserved.
+    """Asymmetric, deliberately.
 
     These frames feed embeddings. Widening what gets embedded — by applying the
     table fallback here too — would shift retrieval results with no test
@@ -629,7 +627,7 @@ def test_a_single_column_table_is_not_a_bridge(world) -> None:
 
 
 def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
-    """The second of the Cypher's two size checks, and the reason both exist.
+    """The second of the two size checks, and the reason both exist.
 
     A column with a `column_foreign_key` row whose target column is gone passes
     "every column has an outgoing edge" and fails "every edge lands somewhere".

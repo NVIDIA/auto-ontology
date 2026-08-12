@@ -4,8 +4,8 @@
 
 """Unit tests for GSF model YAML export/import.
 
-Scope note (Phase 11): the tests that mocked ``apply_import_model``'s internals
-and ``_resolve_entity`` went with the Neo4j implementation they patched. Their
+Scope note: the tests that mocked ``apply_import_model``'s internals
+and ``_resolve_entity`` were removed with the implementation they patched. Their
 coverage did not — ``gsf/dal/tests/test_model_interchange.py`` asserts the same
 behaviours against a live store, which is a better test of "the import is one
 transaction" than a mocked ``write_transaction`` ever was.
@@ -40,7 +40,7 @@ from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
 # each export test patches, and once through `_dialect_by_database_name()`,
 # which asks the connector registry and `list_connections()` what dialect each
 # database speaks. That second call is what kept the two export tests skipped
-# until Phase 10; both now patch it, since neither is about dialect resolution.
+# for a while; both now patch it, since neither is about dialect resolution.
 
 
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:

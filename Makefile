@@ -139,18 +139,5 @@ migrate-revision:
 
 .PHONY: migrate migrate-check migrate-revision
 
-# --- Backend coverage ------------------------------------------------------
-# GSF_STORE is read once at import, so a single process can only exercise one
-# backend. Covering both means two runs, and one passing does not imply the
-# other -- CI has to do this, not just the suite.
-
-test-stores:
-	@echo "== GSF_STORE=neo4j =="
-	GSF_STORE=neo4j $(MAKE) --no-print-directory _test-store
-	@echo "== GSF_STORE=postgres =="
-	GSF_STORE=postgres $(MAKE) --no-print-directory _test-store
-
-_test-store:
-	uv run pytest gsf/catalog/tests/test_incremental_ingest.py -q
 
 .PHONY: test-stores _test-store

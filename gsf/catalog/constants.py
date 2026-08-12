@@ -4,12 +4,6 @@
 
 """Catalog vocabulary — node labels, edge types, and property keys.
 
-GSF-owned copy of what used to live in
-``nemo_retriever.tabular_data.ingestion.model.reserved_words``. Forked verbatim
-so the catalog vocabulary stops being defined by a third-party library that GSF
-cannot change; the values are unchanged, so the graph these names describe is
-byte-identical either way.
-
 The semantic-tier counterparts live in :mod:`gsf.semantic.constants`.
 """
 

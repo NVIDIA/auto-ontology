@@ -1441,13 +1441,6 @@
         "additionalProperties": true,
         "description": "Liveness/readiness body \u2014 200 when healthy, 503 when degraded.",
         "properties": {
-          "neo4j": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Neo4J",
-            "type": "object"
-          },
           "postgres": {
             "additionalProperties": {
               "type": "string"
@@ -1462,7 +1455,6 @@
         },
         "required": [
           "status",
-          "neo4j",
           "postgres"
         ],
         "title": "HealthResponse",
@@ -4712,7 +4704,7 @@
                 }
               }
             },
-            "description": "Neo4j or Postgres unreachable"
+            "description": "Postgres unreachable"
           }
         },
         "summary": "Health",
@@ -5052,7 +5044,7 @@
     },
     "/api/question-entity-coverage": {
       "post": {
-        "description": "Return ranked semantic candidates and a 0\u20131 entity coverage grade.\n\nExtracts entities from the question, retrieves semantic candidates, filters\nby vector distance, enriches via Neo4j, and grades how many entities have\nat least one covering ColumnAttribute candidate.\n\nReturns 422 when the flow cannot produce a result for the question.",
+        "description": "Return ranked semantic candidates and a 0\u20131 entity coverage grade.\n\nExtracts entities from the question, retrieves semantic candidates, filters\nby vector distance, enriches from the catalog, and grades how many entities have\nat least one covering ColumnAttribute candidate.\n\nReturns 422 when the flow cannot produce a result for the question.",
         "operationId": "entity_coverage_api_question_entity_coverage_post",
         "requestBody": {
           "content": {
@@ -6233,7 +6225,7 @@
     },
     "/api/zones/{zone_id}/status": {
       "patch": {
-        "description": "Enable or disable a zone.  Requires admin role.\n\nDisabling swaps the zone's Neo4j label from ``Zone`` to ``disableZone``\n(re-enabling reverses it), which immediately revokes the catalog access\nthe zone granted without deleting it.",
+        "description": "Enable or disable a zone.  Requires admin role.\n\nDisabling clears the zone's ``enabled`` flag\n(re-enabling reverses it), which immediately revokes the catalog access\nthe zone granted without deleting it.",
         "operationId": "set_zone_status_api_zones__zone_id__status_patch",
         "parameters": [
           {

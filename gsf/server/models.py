@@ -8,12 +8,12 @@
 module owns what goes *inside* them, so the generated OpenAPI spec names the
 fields a caller actually receives instead of an opaque object.
 
-The shapes are derived from the ``RETURN`` clauses of the Cypher queries in
+The shapes mirror what the DAL reads return from
 ``gsf/dal/`` plus whatever the DAL/service layer adds in Python afterwards.
-Cypher names fields but does not type them, so the rule here is: a field is
+The DAL returns plain dicts, so the rule here is: a field is
 required only when the row is anchored on it (an ``id`` matched by the query,
 or a value the Python layer writes unconditionally). Everything else is
-optional and nullable — a missing Neo4j property comes back as ``null``, and a
+optional and nullable — a missing value comes back as ``null``, and a
 required-but-null field would turn a documentation change into a 500.
 
 Item shapes are shared across routers on purpose: a Zone chip is rendered by

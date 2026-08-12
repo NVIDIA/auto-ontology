@@ -10,8 +10,8 @@ a test reads as a statement about the catalog rather than about the schema that
 happens to hold it.
 
 It existed to ask the same question of two backends while the port was in
-flight. Phase 11 left only one, and the indirection is still worth keeping for
-the reason above.
+flight. Only one remains, and the indirection is still worth keeping for the
+reason above.
 """
 
 from __future__ import annotations

@@ -8,7 +8,7 @@ Two things carry the weight here.
 
 **The round trip must be idempotent.** Export a catalog, import it back, import
 it again — the second import must create nothing. That is the plan's Done
-criterion for Phase 10, and it exercises the `imported_id` matching that the
+criterion, and it exercises the `imported_id` matching that the
 whole import turns on: an entity is found by the YAML id against `imported_id`
 *or* the live id, so a document lands once however many times it is applied.
 
@@ -303,7 +303,7 @@ def test_export_carries_keys_joins_and_semantics(world) -> None:
 
 
 def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
-    """The Cypher's `size($database_ids) = 0 OR ...`.
+    """
 
     Reading it the other way would silently produce an empty document, which
     looks like a successful export of a catalog with nothing in it.
@@ -379,7 +379,7 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
 
 
 def test_the_round_trip_is_idempotent(world) -> None:
-    """Phase 10's Done criterion.
+    """Idempotence.
 
     A second import of the same document must create nothing. This is what
     `imported_id` buys, and it is the difference between a re-import being a
@@ -468,9 +468,8 @@ def test_an_unresolvable_reference_is_rejected(world) -> None:
 def test_a_failed_import_leaves_nothing_behind(world) -> None:
     """The whole import is one transaction — the simplification Phase 10 banked.
 
-    The Neo4j version applied SQL attributes and custom analyses *outside* the
-    transaction to avoid a self-deadlock, so a failure there left a catalog with
-    no semantics on top. Here a failure anywhere rolls back everything.
+    A failure anywhere rolls back everything, so an import cannot leave a
+    catalog with half its semantics on top.
     """
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)
@@ -517,15 +516,14 @@ def test_a_cross_database_term_makes_the_export_unimportable(world) -> None:
     """A hazard in the original, preserved because it fails loudly.
 
     `_export_terms` returns **all** the tables representing a term, including
-    ones outside the exported databases — that is the Cypher's second, unscoped
-    `OPTIONAL MATCH`, and it keeps a partial export honest about a term it only
-    partly owns. But the importer resolves every `represents` entry against the
+    ones outside the exported databases, which keeps a partial export honest
+    about a term it only partly owns. But the importer resolves every `represents` entry against the
     document, so such an export cannot be imported anywhere: it names a table it
     does not carry.
 
     Preserved rather than papered over. Silently dropping the unresolvable entry
     would import the term as if it belonged wholly to this database, which is a
-    quieter and worse outcome than the error. Recorded in PLAN.md.
+    quieter and worse outcome than the error.
     """
     other_prefix = f"{world.prefix}-other"
     other_db = _add(s.catalog_database, name=other_prefix)
@@ -587,14 +585,12 @@ def test_replace_leaves_the_catalog_alone(world) -> None:
 def test_an_import_cannot_duplicate_a_term_name(world) -> None:
     """A constraint the graph did not have, and a behaviour change.
 
-    `term` is `UNIQUE(name, source)`. Neo4j had no such rule, so importing a
-    document whose term shares a name with an existing one created a **second**
-    Term node — and `merge_term` matched on `{name, source}`, so which of the
-    two any later write found was arbitrary.
+    `term` is `UNIQUE(name, source)`, so importing a document whose term shares
+    a name with an existing one raises rather than creating a duplicate.
 
-    Here it raises. Left to surface: the constraint is describing a genuine
-    ambiguity, and swallowing it would put the duplicate back. The message names
-    the colliding term, which is more than the graph ever offered.
+    Left to surface: the constraint describes a genuine ambiguity between two
+    terms, and swallowing it would leave a duplicate no read can choose
+    between.
     """
     document = _reid(_document(world), f"{world.prefix}-copy")
     document.data_layer.databases[0].schemas[0].database_name = f"{world.prefix}-copy"

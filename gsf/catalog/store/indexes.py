@@ -4,14 +4,9 @@
 
 """Index creation — a no-op, because Alembic owns the schema.
 
-The Neo4j implementation creates a uniqueness constraint and two indexes per
-label on **every ingest**, because a schemaless store has nowhere else to put
-them. Here they are declared in ``gsf/dal/pg/schema.py`` and created once by a
-migration, so there is nothing for an ingest to do.
-
-Kept as a function rather than deleted because ``write.py`` calls it
-unconditionally at the top of ``populate_tabular_data``, and that call site is
-storage-agnostic code the fork does not edit. Phase 11 removes both.
+Indexes and constraints are declared in ``gsf/dal/schema.py`` and created once
+by a migration, so there is nothing for an ingest to do. Kept as a function
+because ``write.populate_tabular_data`` calls it unconditionally.
 """
 
 from __future__ import annotations

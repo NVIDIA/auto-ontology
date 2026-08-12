@@ -8,9 +8,7 @@ Small, and worth keeping: it is the shutdown hook the app's lifespan calls, and
 the failure it guards against is one nothing else would notice — a process that
 exits holding pooled sockets open.
 
-Before Phase 11 this closed three things and had a test per failure mode. One
-remains, so the suite is correspondingly smaller rather than elaborately
-preserved.
+It closes one thing, so the suite is correspondingly small.
 """
 
 from __future__ import annotations

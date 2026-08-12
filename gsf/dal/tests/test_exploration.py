@@ -5,7 +5,7 @@
 """The Exploration graphs.
 
 **The degree invariant is this file's reason to exist**, and the plan names it
-as Phase 9's Done criterion: a table's ``relationship_count`` in the graph
+in the module docstring: a table's ``relationship_count`` in the graph
 payload must equal the ``total`` its related-nodes page reports. The two numbers
 come from different code — one counts edges, the other counts neighbours — so
 they agree only if "related" means exactly the same thing in both. When they
@@ -159,7 +159,7 @@ def _mine(edges, world):
 
 
 def test_graph_degree_equals_the_related_page_total(graph) -> None:
-    """Phase 9's Done criterion, asserted for every table in the fixture.
+    """The invariant, asserted for every table in the fixture.
 
     The graph counts edges; the page counts neighbours. They are different code
     reading one definition of "related", and this is the test that says so.
@@ -516,7 +516,7 @@ def test_an_unknown_layer_raises(world) -> None:
 
 
 def test_the_zones_map_is_the_one_from_pg_zones() -> None:
-    """DECISION-011: re-exported, not reimplemented.
+    """Re-exported, not reimplemented.
 
     Two spellings of the zone-resolution rule is how a viewer sees a chip on one
     screen and not another, so this asserts they are literally one function.

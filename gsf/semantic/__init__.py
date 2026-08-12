@@ -1,1 +1,1 @@
-"""Semantic layer compilation — BFS from seed over Neo4j metadata."""
+"""Semantic layer compilation — BFS from seed over the store metadata."""

@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A parsed SQL query and the catalog nodes it references.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.model.query
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""A parsed SQL query and the catalog nodes it references."""
 
 from gsf.catalog.model.node import CatalogNode
 from gsf.catalog.constants import Labels

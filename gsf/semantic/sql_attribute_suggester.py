@@ -12,7 +12,7 @@ After the semantic FK pass this module runs once per compilation:
    it appears in.
 4. Send the top 10 expressions per term to an LLM that judges whether any
    should become named SqlAttributes.
-5. Persist new suggestions in Neo4j (skipping existing semantic SqlAttributes)
+5. Persist new suggestions in the store (skipping existing semantic SqlAttributes)
    and embed only the newly written nodes into the semantic VDB.
 """
 
@@ -85,8 +85,7 @@ def _usage_score(props: dict[str, Any]) -> float:
     No name that regex accepts has ever been written. Every query therefore
     scored ``0.0``, every expression tied, and ``sorted(..., reverse=True)`` over
     equal values left them in dict insertion order. Verified against a real
-    property bag from the fixture; see ``docs/refactor/drop-neo4j/DECISIONS.md``
-    record 007.
+    property bag from the fixture; see the note on ``total_counter``.
 
     Two further faults sit behind it, so simply repairing the regex would not be
     enough:
@@ -110,7 +109,7 @@ def _usage_score(props: dict[str, Any]) -> float:
 
     **Why it is not fixed here.** Turning ranking on changes which SqlAttributes
     the semantic layer suggests — a product behaviour change, in a component
-    whose output the drop-Neo4j refactor is supposed to leave untouched. It gets
+    whose output the drop-the store refactor is supposed to leave untouched. It gets
     made on its own, against its own tests, not as a side effect of a port.
     Returning a constant keeps today's behaviour exactly, rather than leaving a
     plausible-looking scorer that silently does nothing.
@@ -452,7 +451,7 @@ def _build_valid_sql(
 def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float, list[str]]]:
     """Return ``(expression, score, sql_ids)`` triples sorted by score descending.
 
-    *sql_ids* lists the Neo4j Sql node ids of every query the expression
+    *sql_ids* lists the statement ids of every query the expression
     appeared in — used later to link the created SqlAttribute back to its
     source queries.
     """

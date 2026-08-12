@@ -75,7 +75,7 @@ def _fit_description_suggestion(description: str) -> str:
 def suggest_sql_attribute_description(attr_id: str) -> str | None:
     """Return a cached or freshly-generated description suggestion for a SqlAttribute.
 
-    Reads the attribute's name, parent Term, and SQL from Neo4j via
+    Reads the attribute's name, parent Term, and SQL from the store via
     :func:`get_full_sql_attribute_by_id`. When a ``description_suggestion``
     is already stored on the node, it is returned as-is (no LLM call).
     Otherwise the LLM drafts one, it is persisted on the node via

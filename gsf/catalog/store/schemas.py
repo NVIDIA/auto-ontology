@@ -4,13 +4,11 @@
 
 """Reading and writing one schema's tables and columns.
 
-Public surface matches ``gsf.catalog.store.neo4j.schemas`` function for
-function. The frames returned by the readers are consumed by
+The frames returned by the readers are consumed by
 ``update_diff_from_existing_schema``, which merges them against freshly parsed
 ones — so their **column names have to match exactly**, including the ``database``
 column that only the stored side carries. Getting that wrong is not a type
-error; it is the diff silently doing nothing, which is the bug this refactor
-already found once (DECISION-006).
+error; it is the diff silently doing nothing.
 """
 
 from __future__ import annotations
@@ -99,7 +97,7 @@ def get_schema_tables(database_name, schema_name):
         )
     )
     frame = pd.DataFrame(rows)
-    # The Cypher returned `tostring(t.created)`. Nothing reads it, but the
+    # Nothing reads this, but the
     # column has to exist or normalize_tables sees a different frame shape.
     if not frame.empty and "created" not in frame.columns:
         frame["created"] = None
@@ -253,8 +251,7 @@ def merge_schema_nodes(nodes, created):
 def merge_schema_edges(edges, from_label, to_label):
     """Write each child row, now that its parent id is known.
 
-    The Cypher merged a ``CONTAINS`` relationship between two already-existing
-    nodes. Here the relationship *is* the child's foreign key, so this is where
+    Links two rows that already exist. Here the relationship *is* the child's foreign key, so this is where
     the child row gets written — or updated, if it already existed.
     """
     child = entity_spec(to_label)
@@ -299,7 +296,7 @@ def add_fks(fks_df, last_seen, database_name: str):
             row["referenced_column"],
         )
         if source is None or target is None:
-            # The Cypher's MATCH simply found nothing and moved on. Same here:
+            # Nothing to link, so move on:
             # a foreign key onto a table outside the ingested set is normal.
             continue
         statement = insert(s.column_foreign_key).values(
@@ -366,7 +363,7 @@ def reset_pks(database_name: str):
 def add_pks(pks_df, database_name: str):
     """Append each primary-key column name to its table's ``pk`` array.
 
-    Appending rather than assigning, because the Cypher did
+    Appending rather than assigning
     (``t.pk + [col.name]``) and a composite key arrives as several rows.
     ``reset_pks`` runs first, so the array starts empty each ingest.
     """

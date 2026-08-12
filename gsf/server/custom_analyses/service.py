@@ -4,8 +4,8 @@
 
 """Data Access Layer — CustomAnalysis write orchestration.
 
-All direct Neo4j calls live in gsf/dal/custom_analyses.py.
-This module only keeps orchestration: SQL validation, Neo4j node
+All direct store access lives in gsf/dal/custom_analyses.py.
+This module only keeps orchestration: SQL validation, node
 persistence, and VDB embedding — the three concerns that can't be
 cleanly separated into a pure-graph layer.
 """

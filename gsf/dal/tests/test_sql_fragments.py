@@ -6,8 +6,7 @@
 
 Small enough to look obvious and consequential enough to be worth pinning: it
 decides what the UI and the SQL generator see as a column's description, and
-five of the seven functions Phase 6 deferred to Phase 7 depend on it
-(DECISION-009).
+several of the semantic reads depend on it.
 
 Three things it has to get right, each of which fails silently if wrong:
 

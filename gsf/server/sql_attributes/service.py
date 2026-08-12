@@ -4,9 +4,9 @@
 
 """SqlAttribute write orchestration.
 
-All direct Neo4j calls live in gsf/dal/sql_attributes.py.
+All direct store access lives in gsf/dal/sql_attributes.py.
 This module keeps orchestration: connector resolution, SQL validation,
-Neo4j node persistence via add_query, and VDB embedding lifecycle.
+node persistence via add_query, and VDB embedding lifecycle.
 """
 
 from __future__ import annotations
@@ -136,7 +136,7 @@ def _embed_sql_attribute(
     attr_id: str,
     database_name: str | None = None,
 ) -> None:
-    """Fetch docs from Neo4j, embed them, and upsert into *vdb*."""
+    """Fetch docs from the store, embed them, and upsert into *vdb*."""
     docs = fetch_sql_attribute_docs(attr_id)
     if not docs:
         logger.info(

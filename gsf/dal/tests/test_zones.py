@@ -125,7 +125,7 @@ def test_each_target_lands_in_its_own_column(catalog) -> None:
 
 
 def test_unknown_item_ids_are_dropped_not_rejected(catalog) -> None:
-    """The Cypher's MATCH found nothing and moved on; so does this."""
+    """Nothing to link, and that is not an error."""
     zone = create_zone(
         name=_name(catalog),
         description=None,

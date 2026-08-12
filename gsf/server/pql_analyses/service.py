@@ -4,8 +4,8 @@
 
 """PqlAnalysis write orchestration (the predictive twin of custom_analyses/service.py).
 
-All direct Neo4j calls live in ``gsf/dal/pql_analyses.py``. This module keeps the
-orchestration: uniqueness checks, Neo4j node persistence, and VDB embedding. Unlike
+All direct store access lives in ``gsf/dal/pql_analyses.py``. This module keeps the
+orchestration: uniqueness checks, node persistence, and VDB embedding. Unlike
 the SQL variant there is no SQL parse/validate step — a PQL query resolves its tables
 against the prediction graph at predict time, so it is stored as-is.
 """

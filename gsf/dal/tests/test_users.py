@@ -178,12 +178,12 @@ def test_none_means_unscoped_not_empty(catalog) -> None:
     """``None`` is the whole catalog; ``[]`` is nothing. Conflating them is a bug."""
     assert resolve_accessible_catalog_ids(None) is None
 
-    predicate, _ = resolve_table_filter(None, s.catalog_table.c.id)
+    predicate = resolve_table_filter(None, s.catalog_table.c.id)
     assert predicate is None, "None must mean no restriction at all"
 
 
 def test_empty_zone_list_denies_everything(catalog) -> None:
-    predicate, _ = resolve_table_filter([], s.catalog_table.c.id)
+    predicate = resolve_table_filter([], s.catalog_table.c.id)
     assert predicate is not None, "an empty zone list must deny, not permit"
 
     rows = store().query_read(s.catalog_table.select().where(predicate))
@@ -192,7 +192,7 @@ def test_empty_zone_list_denies_everything(catalog) -> None:
 
 def test_filter_admits_exactly_the_granted_tables(catalog) -> None:
     zone = _zone_over(catalog["prefix"], schema_id=catalog["db1.sch1"])
-    predicate, _ = resolve_table_filter([zone], s.catalog_table.c.id)
+    predicate = resolve_table_filter([zone], s.catalog_table.c.id)
 
     rows = store().query_read(s.catalog_table.select().where(predicate))
     assert {r["id"] for r in rows} == {
@@ -208,20 +208,14 @@ def test_filter_works_on_a_plain_id_column_too(catalog) -> None:
     how the semantic tier is scoped.
     """
     zone = _zone_over(catalog["prefix"], table_id=catalog["db1.sch1.t1"])
-    predicate, _ = resolve_table_filter([zone], s.column_attribute.c.table_id)
+    predicate = resolve_table_filter([zone], s.column_attribute.c.table_id)
     assert predicate is not None
-
-
-def test_extra_params_pass_through(catalog) -> None:
-    """Kept for signature compatibility; Core binds its own parameters."""
-    _, params = resolve_table_filter(None, s.catalog_table.c.id, extra_params={"a": 1})
-    assert params == {"a": 1}
 
 
 def test_prefetched_ids_are_reused_not_requeried(catalog) -> None:
     """Threading a resolved result through must not re-resolve it."""
     prefetched = {"db_ids": set(), "schema_ids": set(), "table_ids": {"sentinel"}}
-    predicate, _ = resolve_table_filter(
+    predicate = resolve_table_filter(
         ["ignored"], s.catalog_table.c.id, data_ids_by_zone=prefetched
     )
     compiled = str(predicate.compile(compile_kwargs={"literal_binds": True}))

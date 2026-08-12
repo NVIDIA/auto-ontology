@@ -8,18 +8,16 @@ Retrieval returns ``(label, id)`` pairs and nothing else. This resolves each one
 into the properties and surrounding context the generator actually reads —
 notably ``relevant_tables``, the tables and columns a candidate implies.
 
-The Cypher was one ``apoc.case`` with three inlined sub-queries. Here each label
-gets its own function, dispatched by a dict, which is the same shape without the
-string nesting. The **output** is what matters and is unchanged: a mapping of id
-to a properties dict, with the per-label extras merged in.
+Each label gets its own function, dispatched by a dict. The output is a mapping
+of id to a properties dict, with per-label extras merged in.
 
-**The branches disagree with each other, and that is preserved.** A candidate
-with no statement behind it vanishes if it is a SqlAttribute and comes back
-blank if it is a CustomAnalysis — one branch matched, the other used ``OPTIONAL
-MATCH``. Which arm is right is a product question, not a porting one; it is
-recorded as bug 5 in ``docs/refactor/drop-neo4j/PLAN.md`` and both arms are
-pinned by tests, so settling it later is a deliberate change that fails a test
-rather than a silent one.
+**The branches disagree with each other, deliberately.** A candidate with no
+statement behind it vanishes if it is a SqlAttribute and comes back blank if it
+is a CustomAnalysis. Which is right is a product question — an attribute with
+nothing to say contributes nothing to a prompt, but a caller that asked about a
+specific id is better served by a visibly blank entry than an absent one. Both
+arms are pinned by tests, so settling it is a deliberate change that fails a
+test rather than a silent one.
 """
 
 from __future__ import annotations
@@ -37,8 +35,7 @@ from gsf.dal.sql_fragments import column_description_expr
 logger = logging.getLogger(__name__)
 
 #: Labels that resolve to a table here. The others in ``Labels.LIST_OF_ALL``
-#: are accepted and fall through to the plain-properties branch, exactly as the
-#: Cypher's ``apoc.case`` default did.
+#: are accepted and fall through to the plain-properties branch.
 _NODE_TABLES = {
     Labels.DB: s.catalog_database,
     Labels.SCHEMA: s.catalog_schema,
@@ -56,10 +53,9 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
     candidate in this batch needs rather than per candidate — several hits
     routinely land on the same table.
 
-    ``sample_values`` is emitted only when non-empty. The Cypher was explicit
-    about that (``CASE WHEN ... size(...) > 0``) and it matters: an empty list
-    rendered into a prompt reads as "this column has no values", which is a
-    different claim from "we did not profile it".
+    ``sample_values`` is emitted only when non-empty, and that matters: an
+    empty list rendered into a prompt reads as "this column has no values",
+    which is a different claim from "we did not profile it".
     """
     if not table_ids:
         return {}
@@ -150,9 +146,8 @@ def _sql_text(link_table, owner_column, owner_ids: list[str]) -> dict[str, str]:
 def _expand_custom_analyses(ids: list[str]) -> dict[str, dict[str, Any]]:
     """Analysis properties plus its SQL and the tables that SQL references.
 
-    Both are optional here — the Cypher used ``OPTIONAL MATCH`` for this label
-    — so an analysis with no statement still comes back, with ``sql: ""`` and
-    an empty ``relevant_tables``.
+    Both are optional here, so an analysis with no statement still comes back,
+    with ``sql: ""`` and an empty ``relevant_tables``.
     """
     rows = store().query_read(
         select(s.custom_analysis).where(s.custom_analysis.c.id.in_(ids))

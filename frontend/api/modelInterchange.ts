@@ -12,11 +12,11 @@ export type ImportModelOptions = {
 };
 
 export const modelInterchangeApi = {
-	/** Export the scoped GSF model (Neo4j catalog + semantic layer) as a YAML file blob. */
+	/** Export the scoped GSF model (catalog + semantic layer) as a YAML file blob. */
 	exportModel: (databaseIds: string[]): Promise<ResponseWithError<{ blob: Blob }>> =>
 		requests.postBlob('model/export', { databases: databaseIds }),
 
-	/** Import a GSF model YAML file, applying it to Neo4j and optionally refreshing VDB embeddings. */
+	/** Import a GSF model YAML file, applying it and optionally refreshing VDB embeddings. */
 	importModel: (
 		file: File,
 		{ replace, embed }: ImportModelOptions,

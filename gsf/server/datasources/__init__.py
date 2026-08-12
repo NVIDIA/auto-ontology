@@ -2,4 +2,4 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Datasource catalog API (Neo4j) — routes and DAL."""
+"""Datasource catalog API — routes and DAL."""

@@ -33,16 +33,6 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 | Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
 | HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
 
-> **Neo4j has been removed.** The ontology graph now lives in Postgres, and
-> the catalog write path lives in this repo under `gsf/catalog/` rather than in
-> NeMo-Retriever. The migration is recorded in
-> [`docs/refactor/drop-neo4j/`](./docs/refactor/drop-neo4j/) —
-> [`PLAN.md`](./docs/refactor/drop-neo4j/PLAN.md) for the schema design and the
-> reasoning, [`DECISIONS.md`](./docs/refactor/drop-neo4j/DECISIONS.md) for the
-> deliberate behaviour changes, and
-> [`SCHEMA.md`](./docs/refactor/drop-neo4j/SCHEMA.md) for the tables. Schema
-> changes go through Alembic: `uv run alembic revision --autogenerate`.
-
 ### NVIDIA NIM
 
 GSF uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA

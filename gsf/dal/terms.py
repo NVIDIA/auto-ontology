@@ -357,9 +357,9 @@ def merge_term(
     """Upsert a Term and link the table to it. ``None`` if the table is missing.
 
     Unlike ``merge_column_attribute``, ``description`` is **assigned** rather
-    than coalesced — that is what the Cypher did, and it means a re-run of the
-    semantic build overwrites a hand-edited description. Preserved rather than
-    fixed: changing it would silently alter what a rebuild does.
+    than coalesced, so a re-run of the semantic build overwrites a hand-edited
+    description. Deliberate, and worth knowing before changing it: a rebuild is
+    meant to be authoritative.
     """
     if not store().query_read(
         select(s.catalog_table.c.id).where(s.catalog_table.c.id == table_id)
@@ -762,10 +762,8 @@ def fetch_terms_with_sqls() -> list[dict[str, Any]]:
 
     Terms with no ingestion query are omitted.
 
-    ``props`` carried every property of the Sql node in Cypher, including the
-    ``count_monthly_YYYY_MM`` counters. Here it is the row itself: the columns
-    are fixed, and the monthly counters do not exist as columns — they were
-    measured as unread (see PROGRESS.md, Phase 6) and the schema does not carry
+    ``props`` is the statement row itself. There are no per-month counters —
+    they were measured as unread by anything, and the schema does not carry
     them.
     """
     owned = (
@@ -913,8 +911,8 @@ def fetch_term_and_column_attributes_for_embedding(
             )
         )
         .where(s.term.c.id == term_id)
-        # `head(collect(DISTINCT db.name))` in the Cypher, unordered. Ordered
-        # here so a term spanning two databases reports the same one twice.
+        # Ordered so a term spanning two databases reports the same one on
+        # every call.
         .order_by(s.catalog_database.c.id)
         .limit(1)
     )
@@ -1170,9 +1168,8 @@ def count_column_attributes_by_term_id(
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
     """The semantic ColumnAttribute a column carries.
 
-    Duplicated from :mod:`gsf.dal.attributes` because both modules export it
-    — the same duplication the Cypher had, kept so the two module surfaces stay
-    what their callers import.
+    Re-exported from :mod:`gsf.dal.attributes`: callers import it from both
+    modules, so both keep it.
     """
     from gsf.dal.attributes import find_column_attribute_by_column_id as delegate
 

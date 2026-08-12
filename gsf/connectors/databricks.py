@@ -382,7 +382,7 @@ class DatabricksDatabase(SQLDatabase):
 
         ``SHOW TABLES`` returns both tables and views with no type column. We run
         ``SHOW VIEWS`` in the same schema to build a view-name set, then classify
-        each row correctly. This avoids storing views as ``BASE_TABLE`` in Neo4j,
+        each row correctly. This avoids storing views as ``BASE_TABLE``,
         which would break any downstream consumer that discriminates on node type.
         """
         catalog = _quoted_identifier(self._database_name)

@@ -8,7 +8,7 @@ Storage-agnostic: pandas over two frames — one read back from the store, one
 freshly parsed from the source — plus calls back into the store to apply the
 result. Both backends share it, because two copies of the subtlest code in the
 write path would have to be fixed twice or drift apart. It was already silently
-broken for every re-ingest once (DECISION-006); once is enough.
+broken for every re-ingest once; once is enough.
 
 The store calls go through ``gsf.catalog.store.*``, the selector, so this
 resolves to whichever backend is active. They are imported inside the functions
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Upstream merged on ["database", "schema", "table_name", "column_name"].
 # Neither frame has a "schema" column -- both call it "table_schema" -- and
 # "database" exists only on the graph side, so every merge raised KeyError and
-# the column diff never ran. See DECISION-006.
+# the column diff never ran.
 #
 # "database" is redundant anyway: a Schema belongs to exactly one database.
 _COLUMN_MERGE_KEYS = ["table_schema", "table_name", "column_name"]

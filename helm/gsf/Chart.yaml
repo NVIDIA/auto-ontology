@@ -1,6 +1,6 @@
 apiVersion: v2
 name: gsf
-description: Generative Semantic Fabric - FastAPI backend, ingestion worker, Next.js frontend, Postgres (pgvector), Neo4j and pgAdmin.
+description: Generative Semantic Fabric - FastAPI backend, ingestion worker, Next.js frontend, Postgres (pgvector) and pgAdmin.
 type: application
 version: 0.0.1
 appVersion: "0.0.1"

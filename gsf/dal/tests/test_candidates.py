@@ -237,7 +237,7 @@ def test_an_analysis_carries_its_sql_and_tables(world) -> None:
 
 
 def test_an_analysis_without_a_statement_still_appears(world) -> None:
-    """The Cypher used OPTIONAL MATCH here, unlike the SqlAttribute branch."""
+    """Optional here, unlike the SqlAttribute branch."""
     analysis = _add(s.custom_analysis, name=f"{world.prefix}-orphan")
 
     entry = c.expand_info([{"id": analysis, "label": Labels.CUSTOM_ANALYSIS}])[analysis]
@@ -252,7 +252,7 @@ def test_an_analysis_without_a_statement_still_appears(world) -> None:
 
 
 def test_a_table_returns_its_plain_properties(world) -> None:
-    """No special branch: properties and nothing else, as `apoc.case` defaulted."""
+    """No special branch: properties and nothing else."""
     entry = c.expand_info([{"id": world.table, "label": Labels.TABLE}])[world.table]
     assert entry["name"] == "orders"
     assert "relevant_tables" not in entry

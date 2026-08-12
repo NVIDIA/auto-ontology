@@ -76,7 +76,7 @@ def create_connection(
     *,
     connection: dict[str, Any],
 ) -> dict[str, Any]:
-    """Create a UI-managed connection stored in Neo4j."""
+    """Create a UI-managed connection stored on the catalog database row."""
 
     # ``schema`` is the form's shorthand for a single-schema allowlist; the caller
     # turns it into ``schemas``. Storing the raw field too would leave two sources of
@@ -91,7 +91,7 @@ def create_connection(
         raise ValueError(f"A connection for database {database_name!r} already exists")
 
     # With Vault configured, store credentials in Vault and keep them off the
-    # Neo4j node; otherwise fall back to persisting the JSON on the node.
+    # catalog row; otherwise fall back to persisting the JSON on the row.
     vault_configured = is_vault_configured()
     if vault_configured:
         write_secret(database_name, connection)

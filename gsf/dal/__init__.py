@@ -35,10 +35,9 @@ def close_store() -> None:
     Deferred import keeps importing :mod:`gsf.dal` cheap and leaves this module
     with no import-time dependency on SQLAlchemy.
 
-    One connection to release now — the pooled engine — where there were three
-    before Phase 11 dropped Neo4j. ``dispose_engine`` is already idempotent and
-    already swallows its own failures, so there is nothing left for this
-    function to add beyond being the name callers know.
+    One connection to release: the pooled engine. ``dispose_engine`` is already
+    idempotent and already swallows its own failures, so there is nothing left
+    for this function to add beyond being the name callers know.
     """
     from gsf.dal.session import dispose_engine
 

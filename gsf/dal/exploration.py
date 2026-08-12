@@ -31,7 +31,7 @@ from sqlalchemy import func, select
 from gsf.dal import schema as s
 
 # Private on purpose, and imported across modules on purpose: these are the one
-# definition of a table's column/sql/term counts, and the Cypher shared them the
+# definition of a table's column/sql/term counts, and the SQL shared them the
 # same way -- `TABLE_COUNTS_SUBQUERY`, imported across modules. A second
 # copy here is how the graph's badge and the schema tree's badge start
 # disagreeing about the same table.
@@ -51,10 +51,9 @@ from gsf.dal.terms import (
 )
 from gsf.dal.users import resolve_accessible_catalog_ids
 
-# Re-exported, not reimplemented -- DECISION-011. The Term reads needed this a
-# phase before `exploration` was ported, so it lives in `pg/zones.py`. Two
-# spellings of the zone-resolution rule is how a viewer ends up seeing a chip on
-# one screen and not another.
+# Re-exported, not reimplemented: the Term reads need it too, and two spellings
+# of the zone-resolution rule is how a viewer ends up seeing a chip on one
+# screen and not another.
 from gsf.dal.zones import fetch_table_zones_map  # noqa: F401
 
 logger = logging.getLogger(__name__)
@@ -703,11 +702,9 @@ def fetch_semantic_exploration_graph(
 
 
 #: Spelled out because ``fetch_table_zones_map`` is **re-exported** from
-#: ``pg/zones`` rather than defined here ([DECISION-011]), and the surface
-#: freeze resolves a module's contract by ``__module__`` — which for a
-#: re-export points at the definition, not at this file. Without this the two
-#: backends' ``exploration`` surfaces appear to diverge on a function both of
-#: them provide.
+#: ``zones`` rather than defined here, and the surface freeze resolves a
+#: module's contract by ``__module__`` — which for a re-export points at the
+#: definition, not at this file.
 __all__ = [
     "MAX_EXPLORATION_GRAPH_NODES",
     "fetch_data_exploration_edges",

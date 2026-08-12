@@ -423,8 +423,7 @@ def test_merge_term_overwrites_the_description(world) -> None:
     """Unlike merge_column_attribute, which coalesces. Preserved, not fixed.
 
     It means a semantic rebuild overwrites a hand-edited description — which is
-    what the Cypher did, and changing it here would silently alter what a
-    rebuild does.
+    deliberate: a rebuild is meant to be authoritative.
     """
     world.table("orders")
     term = t.merge_term(f"{world.prefix}-Order", "original", world.tables["orders"])

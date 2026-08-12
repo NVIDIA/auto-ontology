@@ -2,16 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Write an extracted catalog into the store, diffing against what is there.
-
-Forked verbatim in Phase 1 of the drop-Neo4j refactor
-(``docs/refactor/drop-neo4j/PLAN.md``) from::
-
-    nemo_retriever.tabular_data.ingestion.write_to_graph
-
-(NeMo-Retriever, Apache-2.0). Behaviour is unchanged; only imports and the
-``Neo4jNode`` -> ``CatalogNode`` rename differ.
-"""
+"""Write an extracted catalog into the store, diffing against what is there."""
 
 from datetime import datetime, timezone
 import logging
@@ -118,7 +109,6 @@ def populate_db(tables_df, columns_df, database, num_workers):
         # only when that future is consumed. Left unconsumed, every failure to
         # update a schema was discarded in silence -- which is how the column
         # diff could raise on every single re-ingest without anyone noticing.
-        # See DECISION-006.
         list(
             executor.map(
                 lambda schema: _update_schema(schema, latest_timestamp),

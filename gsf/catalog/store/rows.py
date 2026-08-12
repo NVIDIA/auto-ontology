@@ -2,11 +2,10 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Row upserts — the relational stand-in for ``apoc.merge.node.eager``.
+"""Row upserts — the one write primitive the catalog pipeline uses.
 
-The Cypher writers lean on one primitive throughout: *find a node by its match
-properties, create it with these properties if absent, and overwrite its id with
-mine if present*.
+Every writer needs the same thing: *find a row by its identity columns, create
+it with these values if absent, update it if present*.
 
 The upsert is keyed on the **natural** key, not on ``id`` — two runs of the
 parser against the same source must converge on one row, and only the natural
@@ -109,7 +108,7 @@ def upsert_row(
 ) -> str:
     """Create or update one row, returning its id.
 
-    Mirrors ``apoc.merge.node.eager(label, identity, on_create, on_match)``:
+    Find-or-create, then update:
     properties are written on insert, and *on_match* is applied when the row
     already existed — except for ``id``, which is never overwritten. See the
     module docstring for why that divergence is both necessary and free.
@@ -146,8 +145,7 @@ def upsert_row(
 
     incoming_id = properties.get("id")
     if incoming_id and incoming_id != existing_id:
-        # The Cypher overwrites the matched node's id with the parser's
-        # (`apoc.merge.node.eager(..., {id: $props.id})`). That is safe in a
+        # An incoming id is never written over an existing row's. That is safe in a
         # property graph, where relationships bind to internal nodes and `id` is
         # just a property — but here `id` is the primary key and other rows
         # reference it, so overwriting it violates their foreign keys.

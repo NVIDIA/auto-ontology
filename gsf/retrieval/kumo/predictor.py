@@ -333,7 +333,7 @@ def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
 
     ``entry["path"]`` is a list of hop dicts ``{source_table, source_column,
     target_table, target_column, ...}`` that ``find_join_path`` produced by pairing
-    consecutive columns of a Neo4j traversal. Flattening the hops back to
+    consecutive columns of a join-path traversal. Flattening the hops back to
     ``[h0.source, h0.target, h1.source, h1.target, ...]`` restores that column
     sequence, so consecutive columns in DIFFERENT tables are the cross-table
     semantic foreign-key joins (columns within the same table are attribute hops).

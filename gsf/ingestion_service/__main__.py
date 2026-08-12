@@ -13,7 +13,7 @@ background schedulers via the app lifespan:
   ``POST /semantic/compile``.
 
 Each runs once at startup, then every 24h measured from the previous run —
-independent of how long each run takes. Connections are reloaded from Neo4j on
+independent of how long each run takes. Connections are reloaded from the catalog on
 every pass so newly added connections are picked up without restarting.
 
 Usage::

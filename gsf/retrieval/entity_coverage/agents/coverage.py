@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic coverage grade: distance filter, Neo4j enrich, 1/n entity coverage."""
+"""Deterministic coverage grade: distance filter, the store enrich, 1/n entity coverage."""
 
 from __future__ import annotations
 
@@ -161,7 +161,7 @@ def _to_response_candidate(hit: dict[str, Any]) -> dict[str, Any]:
 
 
 class CoverageGradeAgent(BaseAgent):
-    """Filter by distance, enrich via Neo4j, compute 0–1 entity coverage grade."""
+    """Filter by distance, enrich via the store, compute 0–1 entity coverage grade."""
 
     def __init__(self) -> None:
         super().__init__("coverage_grade")
