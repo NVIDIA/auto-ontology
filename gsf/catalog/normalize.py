@@ -4,7 +4,6 @@
 
 """Normalise raw connector DataFrames into the shapes the writer expects."""
 
-import regex
 from datetime import timezone
 
 import numpy as np
@@ -23,37 +22,6 @@ def flat_list_recursive(nested_list):
         else:
             output.append(i)
     return output
-
-
-def remove_redundant_parentheses(text):
-    r = r"s/(\(|^)\K(\((((?2)|[^()])*)\))(?=\)|$)//"
-    if r[0] != "s":
-        raise SyntaxError('Missing "s"')
-    d = r[1]
-    r = r.split(d)
-    if len(r) != 4:
-        raise SyntaxError("Wrong number of delimiters")
-    flags = 0
-    count = 1
-    for f in r[3]:
-        if f == "g":
-            count = 0
-        else:
-            flags |= {
-                "i": regex.IGNORECASE,
-                "m": regex.MULTILINE,
-                "s": regex.DOTALL,
-                "x": regex.VERBOSE,
-            }[f]
-    s = r[2]
-    r = r[1]
-    while 1:
-        m = regex.subn(r, s, text, count, flags)
-        text = m[0]
-        if m[1] == 0:
-            break
-
-    return text
 
 
 def chunks(lst, n):

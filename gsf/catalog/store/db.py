@@ -102,12 +102,6 @@ def delete_table(table_id):
     )
 
 
-def delete_column(column_id):
-    store().query_write(
-        s.catalog_column.delete().where(s.catalog_column.c.id == column_id)
-    )
-
-
 def delete_columns_batch(column_ids):
     if not column_ids:
         return

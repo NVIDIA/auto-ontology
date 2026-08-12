@@ -54,14 +54,8 @@ class CatalogNode:
     def get_override_existing_props(self) -> dict:
         return self.override_existing_props
 
-    def set_override_existing_props(self, override_props: dict) -> dict:
-        self.override_existing_props = override_props
-
     def add_property(self, prop_name, prop_val):
         self.props.update({prop_name: prop_val})
-
-    def add_properties(self, properties: dict):
-        self.props.update(properties)
 
     def get_id(self):
         return self.id

@@ -159,32 +159,12 @@ class Schema:
             return self.columns_df.to_dict(orient="records")
         return []
 
-    def get_column_nodes_by_table_name(self, table_name: str):
-        if self.columns_df is not None:
-            columns_names = list(self.get_table_columns_by_table_name(table_name))
-            columns_nodes = [
-                self.get_column_node(column_name, table_name)
-                for column_name in columns_names
-            ]
-            return columns_nodes
-        return []
-
     def get_table_columns_by_table_name(self, table_name):
         table_name_lower = table_name.lower()
         columns_df = self.columns_df.loc[
             self.columns_df["table_name_lower"] == table_name_lower
         ].replace(np.nan, None)
         return columns_df.column_name.unique()
-
-    def get_table_columns(self, table_node):
-        table_name_lower = table_node.name.lower()
-        if self.columns_df is not None:
-            columns_df = self.columns_df.loc[
-                self.columns_df["table_name_lower"] == table_name_lower
-            ].replace(np.nan, None)
-            if not columns_df.empty:
-                return columns_df.column_name.unique()
-        return self.tables_to_columns[table_node]
 
     def add_column_to_table(self, table_node, column_node, ordinal_position=None):
         column_name_lower = column_node.get_name().lower()
@@ -283,34 +263,6 @@ class Schema:
                     ): f"{self.schema_name}.{table_name}.{column_name}"
                 }
             )
-
-    def get_column_node_props(self, column_name, table_name):
-        column_name_lower = column_name.lower()
-        table_name_lower = table_name.lower()
-        column_df = self.columns_df.loc[
-            (self.columns_df["table_name_lower"] == table_name_lower)
-            & (self.columns_df["column_name_lower"] == column_name_lower)
-        ].replace(np.nan, None)
-
-        if column_df.empty:
-            raise Exception(f"Column {column_name} is not in table {table_name}.")
-
-        column = column_df.to_dict(orient="records")[0]
-        return column["props"]
-
-    def get_column_node_match_props(self, column_name, table_name):
-        column_name_lower = column_name.lower()
-        table_name_lower = table_name.lower()
-        column_df = self.columns_df.loc[
-            (self.columns_df["table_name_lower"] == table_name_lower)
-            & (self.columns_df["column_name_lower"] == column_name_lower)
-        ].replace(np.nan, None)
-
-        if column_df.empty:
-            raise Exception(f"Column {column_name} is not in table {table_name}.")
-
-        column = column_df.to_dict(orient="records")[0]
-        return column["match_props"]
 
     def get_column_node(self, column_name, table_name):
         column_name_lower = column_name.lower()
@@ -522,11 +474,6 @@ class Schema:
             column_props = column.iloc[0]["props"]
             column_props["id"] = new_id
             self.columns_df.replace(old_id, new_id, inplace=True)
-
-    def get_node_by_id(self, id):
-        if id in self.id_to_node.keys():
-            return self.id_to_node[id]
-        return None
 
     def update_table_props_by_arguments(
         self,
