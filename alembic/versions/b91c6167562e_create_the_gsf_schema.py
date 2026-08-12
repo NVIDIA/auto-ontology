@@ -2,16 +2,23 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Create catalog and semantic schema
+"""Create the gsf schema
+
+The single baseline migration. It replaces the original four -- the initial
+create plus three follow-ups (``description_certified``, the column-level join
+and union tables, and ``is_nullable`` as a boolean) -- which were squashed
+while GSF was still greenfield and no deployment had them applied. There is no
+upgrade path from the old revision ids; a database built by the old chain has
+the same structure and can simply be stamped with this revision.
 
 See ``gsf/dal/schema.py`` for the metadata this was generated from.
 
 Everything lives in the ``gsf`` schema -- never ``public`` (Prisma's) and never
 ``vdb`` (langchain_postgres').
 
-Revision ID: 9ceb971cfdcb
+Revision ID: b91c6167562e
 Revises:
-Create Date: 2026-08-12 08:25:28.211290
+Create Date: 2026-08-12 14:55:44.503519
 
 """
 
@@ -28,7 +35,7 @@ from gsf.dal.schema import (
 )
 
 # revision identifiers, used by Alembic.
-revision: str = "9ceb971cfdcb"
+revision: str = "b91c6167562e"
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -468,6 +475,12 @@ def upgrade() -> None:
         sa.Column("schema_id", sa.Text(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column(
+            "description_certified",
+            sa.Boolean(),
+            server_default=sa.text("false"),
+            nullable=False,
+        ),
         sa.Column("pk", sa.ARRAY(sa.Text()), nullable=True),
         sa.Column("table_type", sa.Text(), nullable=True),
         sa.Column("imported_id", sa.Text(), nullable=True),
@@ -509,10 +522,16 @@ def upgrade() -> None:
         sa.Column("table_id", sa.Text(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column(
+            "description_certified",
+            sa.Boolean(),
+            server_default=sa.text("false"),
+            nullable=False,
+        ),
         sa.Column("data_type", sa.Text(), nullable=True),
         sa.Column("sample_values", sa.Text(), nullable=True),
         sa.Column("is_unique", sa.Boolean(), nullable=True),
-        sa.Column("is_nullable", sa.Text(), nullable=True),
+        sa.Column("is_nullable", sa.Boolean(), nullable=True),
         sa.Column("ordinal_position", sa.Integer(), nullable=True),
         sa.Column("imported_id", sa.Text(), nullable=True),
         sa.ForeignKeyConstraint(
@@ -748,6 +767,30 @@ def upgrade() -> None:
         schema="gsf",
     )
     op.create_table(
+        "column_join",
+        sa.Column("source_column_id", sa.Text(), nullable=False),
+        sa.Column("target_column_id", sa.Text(), nullable=False),
+        sa.Column(
+            "refs", sa.ARRAY(sa.Text()), server_default=sa.text("'{}'"), nullable=False
+        ),
+        sa.ForeignKeyConstraint(
+            ["source_column_id"],
+            ["gsf.catalog_column.id"],
+            name=op.f("fk_column_join_source_column_id_catalog_column"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["target_column_id"],
+            ["gsf.catalog_column.id"],
+            name=op.f("fk_column_join_target_column_id_catalog_column"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint(
+            "source_column_id", "target_column_id", name=op.f("pk_column_join")
+        ),
+        schema="gsf",
+    )
+    op.create_table(
         "column_semantic_fk",
         sa.Column("column_id", sa.Text(), nullable=False),
         sa.Column("attribute_id", sa.Text(), nullable=False),
@@ -773,6 +816,30 @@ def upgrade() -> None:
         "column_semantic_fk",
         ["attribute_id"],
         unique=False,
+        schema="gsf",
+    )
+    op.create_table(
+        "column_union",
+        sa.Column("source_column_id", sa.Text(), nullable=False),
+        sa.Column("target_column_id", sa.Text(), nullable=False),
+        sa.Column(
+            "refs", sa.ARRAY(sa.Text()), server_default=sa.text("'{}'"), nullable=False
+        ),
+        sa.ForeignKeyConstraint(
+            ["source_column_id"],
+            ["gsf.catalog_column.id"],
+            name=op.f("fk_column_union_source_column_id_catalog_column"),
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["target_column_id"],
+            ["gsf.catalog_column.id"],
+            name=op.f("fk_column_union_target_column_id_catalog_column"),
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint(
+            "source_column_id", "target_column_id", name=op.f("pk_column_union")
+        ),
         schema="gsf",
     )
     op.create_table(
@@ -821,12 +888,14 @@ def downgrade() -> None:
         "ix_sql_query_column_column_id", table_name="sql_query_column", schema="gsf"
     )
     op.drop_table("sql_query_column", schema="gsf")
+    op.drop_table("column_union", schema="gsf")
     op.drop_index(
         "ix_column_semantic_fk_attribute_id",
         table_name="column_semantic_fk",
         schema="gsf",
     )
     op.drop_table("column_semantic_fk", schema="gsf")
+    op.drop_table("column_join", schema="gsf")
     op.drop_index(
         "ix_column_has_attribute_attribute_id",
         table_name="column_has_attribute",
@@ -918,7 +987,3 @@ def downgrade() -> None:
     op.drop_table("catalog_database", schema="gsf")
     op.drop_table("analysis", schema="gsf")
     # ### end Alembic commands ###
-
-    # The schema itself is left in place: alembic_version lives in it, and
-    # dropping it would leave the database unable to say what revision
-    # it is on.
