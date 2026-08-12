@@ -368,12 +368,13 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
           -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
           -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-    MATCH (tbl)<-[:CONTAINS]-(sch:Schema)
+    MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+          -[:{Edges.CONTAINS}]->(tbl)
     MATCH (tbl)-[:CONTAINS]->(col:Column)
-    WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+    WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           sch.name AS schema_name, cols
+           db.name AS database_name, sch.name AS schema_name, cols
     """
     try:
         rows = graph().query_read(query, {"ids": analysis_ids})
@@ -395,6 +396,7 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                 "id": tid,
                 "name": row.get("name") or "",
                 "description": row.get("description") or "",
+                "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": Labels.TABLE,
                 "columns": cols,

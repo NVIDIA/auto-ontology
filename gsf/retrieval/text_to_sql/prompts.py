@@ -626,3 +626,34 @@ Candidate tables:
 
 Provide brief reasoning (1-2 sentences) then return the names of tables that can be safely REMOVED.
 Only remove a table if you are confident it is not needed. When in doubt, do NOT remove."""
+
+
+def create_follow_up_resolution_prompt(
+    *, question: str, conversation_history: str
+) -> str:
+    """Build the prompt that turns a contextual follow-up into a standalone query."""
+
+    return f"""
+You resolve conversational follow-up questions for a text-to-SQL agent.
+
+Use only the completed conversation turns below. Never invent a table, filter,
+entity, metric, date range, or other constraint that is not present in the
+current question or the history.
+
+Return:
+- is_follow_up=true only when the current question depends on prior context,
+  such as pronouns, omitted subjects, "same", "also", "instead", "what about",
+  or a modification to the preceding request.
+- standalone_question as a complete, natural-language question containing all
+  context needed to answer the current request.
+- For an independent question, set is_follow_up=false and copy the current
+  question unchanged into standalone_question.
+
+Do not answer the question and do not generate SQL.
+
+COMPLETED CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT QUESTION:
+{question}
+""".strip()

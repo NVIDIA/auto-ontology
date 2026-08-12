@@ -18,6 +18,7 @@ Responsibilities:
 
 import logging
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -108,6 +109,79 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         result,
         key=lambda h: float(h.get("score") or float("inf")),
     )
+
+
+def _database_name(hit: dict) -> str | None:
+    """Return a normalized database name from a semantic hit."""
+    database_name = str(hit.get("database_name") or "").strip()
+    return database_name or None
+
+
+def _score(hit: dict) -> float:
+    """Return a sortable semantic distance, treating missing scores as worst."""
+    score = hit.get("score")
+    return float(score) if score is not None else float("inf")
+
+
+def _select_candidate_database(
+    column_hits: list[dict],
+    custom_hits: list[dict],
+    sql_attribute_hits: list[dict],
+) -> tuple[str | None, dict[str, dict[str, Any]]]:
+    """Select the database that covers the most searched entities.
+
+    Databases are ranked by distinct ColumnAttribute ``query_entity`` coverage,
+    then total hits across all candidate types, aggregate semantic distance,
+    and finally database name for deterministic ties.
+    """
+    stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"entities": set(), "hit_count": 0, "score_total": 0.0}
+    )
+
+    for hit in column_hits:
+        database_name = _database_name(hit)
+        if database_name is None:
+            continue
+        entity = str(hit.get("query_entity") or "").strip()
+        if entity:
+            stats[database_name]["entities"].add(entity)
+        stats[database_name]["hit_count"] += 1
+        stats[database_name]["score_total"] += _score(hit)
+
+    for hit in [*custom_hits, *sql_attribute_hits]:
+        database_name = _database_name(hit)
+        if database_name is None:
+            continue
+        stats[database_name]["hit_count"] += 1
+        stats[database_name]["score_total"] += _score(hit)
+
+    if not stats:
+        return None, {}
+
+    selected_database = min(
+        stats,
+        key=lambda database_name: (
+            -len(stats[database_name]["entities"]),
+            -stats[database_name]["hit_count"],
+            stats[database_name]["score_total"],
+            database_name,
+        ),
+    )
+    return selected_database, dict(stats)
+
+
+def _filter_hits_to_database(hits: list[dict], database_name: str) -> list[dict]:
+    """Keep only semantic hits belonging to *database_name*."""
+    return [hit for hit in hits if _database_name(hit) == database_name]
+
+
+def _covered_entities(column_hits: list[dict]) -> set[str]:
+    """Return entities represented by the retained ColumnAttribute hits."""
+    return {
+        str(hit.get("query_entity")).strip()
+        for hit in column_hits
+        if str(hit.get("query_entity") or "").strip()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +433,7 @@ class CandidateRetrievalAgent(BaseAgent):
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
+        retrieval_database = target_db
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -439,6 +514,96 @@ class CandidateRetrievalAgent(BaseAgent):
                             tagged["query_entity"] = entity
                             all_col_attr_hits.append(tagged)
 
+            if target_db is None:
+                selected_database, database_stats = _select_candidate_database(
+                    all_col_attr_hits,
+                    all_custom_hits,
+                    all_sql_attr_hits,
+                )
+                if selected_database is None:
+                    self.logger.warning(
+                        "No database-scoped semantic hits found; dropping %d "
+                        "hits without database_name",
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits),
+                    )
+                    all_col_attr_hits = []
+                    all_custom_hits = []
+                    all_sql_attr_hits = []
+                else:
+                    retrieval_database = selected_database
+                    initial_hit_count = (
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits)
+                    )
+                    selected_stats = database_stats[selected_database]
+                    self.logger.info(
+                        "Selected candidate database %r: %d entities covered, "
+                        "%d hits, aggregate score %.4f",
+                        selected_database,
+                        len(selected_stats["entities"]),
+                        selected_stats["hit_count"],
+                        selected_stats["score_total"],
+                    )
+
+                    all_col_attr_hits = _filter_hits_to_database(
+                        all_col_attr_hits, selected_database
+                    )
+                    all_custom_hits = _filter_hits_to_database(
+                        all_custom_hits, selected_database
+                    )
+                    all_sql_attr_hits = _filter_hits_to_database(
+                        all_sql_attr_hits, selected_database
+                    )
+                    retained_hit_count = (
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits)
+                    )
+                    self.logger.info(
+                        "Dropped %d semantic hits outside candidate database %r",
+                        initial_hit_count - retained_hit_count,
+                        selected_database,
+                    )
+
+                    covered_entities = _covered_entities(all_col_attr_hits)
+                    uncovered_entities = [
+                        entity
+                        for entity in clean_entities
+                        if entity not in covered_entities
+                    ]
+                    if uncovered_entities:
+                        self.logger.info(
+                            "Backfilling %d uncovered entities in database %r: %s",
+                            len(uncovered_entities),
+                            selected_database,
+                            uncovered_entities,
+                        )
+                        with ThreadPoolExecutor(
+                            max_workers=len(uncovered_entities)
+                        ) as pool:
+                            futures = {
+                                pool.submit(
+                                    _search_by_label,
+                                    semantic_retriever,
+                                    entity,
+                                    LABEL_COLUMN_ATTRIBUTE,
+                                    2,
+                                    selected_database,
+                                ): entity
+                                for entity in uncovered_entities
+                            }
+                            for future in as_completed(futures):
+                                entity = futures[future]
+                                for hit in _filter_hits_to_database(
+                                    future.result(), selected_database
+                                ):
+                                    tagged = dict(hit)
+                                    tagged["query_entity"] = entity
+                                    all_col_attr_hits.append(tagged)
+
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits
         )
@@ -452,6 +617,11 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
         path_state["retrieved_subject_term"] = subject_term
+        if retrieval_database:
+            path_state["retrieval_database"] = retrieval_database
+        else:
+            path_state.pop("retrieval_database", None)
+
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "

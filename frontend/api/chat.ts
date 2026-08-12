@@ -171,8 +171,8 @@ export const streamChat = (
  * caller can always fall back to a plain table.
  *
  * `conversationId` lets the route persist the bubble this step produces —
- * the chart, or the table it falls back to — since the completions proxy
- * already wrote the prose bubble and cannot know how this resolves.
+ * the chart, or the table it falls back to — since FastAPI already persisted
+ * the prose + SQL bubble and cannot know how this separate step resolves.
  */
 export const fetchCharts = async (
 	question: string,
@@ -220,11 +220,8 @@ export const watchChat = (
 
 	(async () => {
 		try {
-			// Query param is deliberately `conversationId` (not `conversation_id`):
-			// `proxy.ts` auto-rewrites any `/api/*` query key ending in `_id` into a
-			// path segment (e.g. `?db_id=x` -> `/x`), which would 404 this route.
 			const res = await fetch(
-				`/api/chat/watch?conversationId=${encodeURIComponent(conversationId)}`,
+				`/api/chat/watch?conversation_id=${encodeURIComponent(conversationId)}`,
 				{ signal: controller.signal },
 			);
 
@@ -253,8 +250,7 @@ export const watchChat = (
  * means the agent finishes on its own.
  */
 export const cancelChat = async (conversationId: string): Promise<void> => {
-	// Query param is deliberately `conversationId` — see `watchChat`.
-	await fetch(`/api/chat/cancel?conversationId=${encodeURIComponent(conversationId)}`, {
+	await fetch(`/api/chat/cancel?conversation_id=${encodeURIComponent(conversationId)}`, {
 		method: 'POST',
 	});
 };

@@ -22,6 +22,7 @@ dependencies = [
     "nvidia-sdfm[kumorfm]>=0.1.0",
     "databricks-sql-connector>=4.3.0",
     "pyyaml>=6.0.3",
+    "apache-ossie-gsf",
 ]
 
 [build-system]
@@ -44,6 +45,10 @@ package = true
 name = "vendored-sdfm"
 url = "vendor/wheels"
 format = "flat"
+
+[tool.uv.sources]
+apache-ossie-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/gsf" }
+# apache-ossie-gsf = { path = "../ossie/converters/gsf", editable = true }
 
 [dependency-groups]
 dev = [

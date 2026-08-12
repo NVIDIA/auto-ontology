@@ -120,7 +120,7 @@ def resolve_semantic_fks(database_name: str) -> int:
 
     def _resolve_one(col: dict[str, Any]) -> bool:
         try:
-            attr_id = _resolve_via_vdb(col, retriever)
+            attr_id = _resolve_via_vdb(col, retriever, database_name)
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
                 logger.debug(
@@ -202,7 +202,11 @@ def _format_sample_values(raw: str | None) -> str:
         return ""
 
 
-def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
+def _resolve_via_vdb(
+    col: dict[str, Any],
+    retriever: Retriever,
+    database_name: str,
+) -> str | None:
     """Search the semantic VDB for a matching ColumnAttribute and return its id.
 
     Runs two queries and merges up to 6 unique hits:
@@ -214,7 +218,12 @@ def _resolve_via_vdb(col: dict[str, Any], retriever: Retriever) -> str | None:
 
     Returns the ColumnAttribute id if a confident LLM match is found, else None.
     """
-    vdb_kwargs = {"where": {"label": "ColumnAttribute"}}
+    vdb_kwargs = {
+        "where": {
+            "label": "ColumnAttribute",
+            "database_name": database_name,
+        }
+    }
     full_query = _build_query_text(col)
     name_query = f"column_name: {col.get('name', '')}"
 

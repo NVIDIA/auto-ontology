@@ -133,11 +133,15 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
-def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
+def fetch_attr_column_contexts(
+    attr_ids: list[str],
+    *,
+    database_name: str | None,
+) -> dict[str, dict]:
     """Fetch Column + Table + Schema context for ColumnAttribute IDs.
 
     Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name, term_name}.
+    col_name, table_id, table_name, schema_name, database_name, term_name}.
     """
     if not attr_ids:
         return {}
@@ -146,15 +150,20 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
     MATCH (attr:ColumnAttribute {id: attr_id})
     OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
     OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
+    OPTIONAL MATCH (sch)<-[:CONTAINS]-(db:Database)
+    WHERE $database_name IS NULL OR db.name = $database_name
     OPTIONAL MATCH (attr)-[:PROPERTY_OF]->(term:Term)
     RETURN attr.id AS attr_id, attr.name AS attr_name,
            attr.description AS attr_description,
            col.id AS col_id, col.name AS col_name,
            tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name,
-           term.name AS term_name
+           db.name AS database_name, term.name AS term_name
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
+        rows = get_neo4j_conn().query_read(
+            query,
+            {"attr_ids": attr_ids, "database_name": database_name},
+        )
     except Exception:
         logger.warning("fetch_attr_column_contexts: Neo4j query failed", exc_info=True)
         return {}
@@ -171,6 +180,7 @@ def fetch_attr_column_contexts(attr_ids: list[str]) -> dict[str, dict]:
             "table_id": row.get("table_id"),
             "table_name": row.get("table_name") or "",
             "schema_name": row.get("schema_name") or "",
+            "database_name": row.get("database_name") or "",
             "term_name": row.get("term_name") or "",
         }
     return result
@@ -388,6 +398,19 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
 
     col_ids = [n["id"] for n in col_nodes if n.get("id")]
     col_ctx = fetch_col_table_contexts(col_ids)
+    database_names = {
+        context.get("database_name")
+        for context in col_ctx.values()
+        if context.get("database_name")
+    }
+    if len(database_names) > 1:
+        logger.warning(
+            "find_join_path: rejected cross-database path %s -> %s (%s)",
+            anchor_col_id,
+            dest_col_id,
+            ", ".join(sorted(database_names)),
+        )
+        return []
 
     hops: list[dict] = []
     for i in range(0, len(col_nodes) - 1, 2):
@@ -397,9 +420,11 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
         hops.append(
             {
+                "source_database": src_ctx.get("database_name", ""),
                 "source_schema": src_ctx.get("schema_name", ""),
                 "source_table": src_ctx.get("table_name", ""),
                 "source_column": src.get("name", ""),
+                "target_database": tgt_ctx.get("database_name", ""),
                 "target_schema": tgt_ctx.get("schema_name", ""),
                 "target_table": tgt_ctx.get("table_name", ""),
                 "target_column": tgt.get("name", ""),

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
@@ -63,6 +64,7 @@ from gsf.server.model_interchange.schemas import (
     ModelTerm,
 )
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
+from gsf.utils.join_columns import dump_join_columns, parse_join_columns
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -99,16 +101,16 @@ WHERE size($database_ids) = 0 OR db.id IN $database_ids
 MATCH (db)-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE})
       -[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-RETURN db.id AS db_id,
+RETURN coalesce(db.imported_id, db.id) AS db_id,
        db.name AS db_name,
-       sch.id AS schema_id,
+       coalesce(sch.imported_id, sch.id) AS schema_id,
        sch.name AS schema_name,
-       tbl.id AS table_id,
+       coalesce(tbl.imported_id, tbl.id) AS table_id,
        tbl.name AS table_name,
        tbl.description AS table_description,
        tbl.pk AS pk,
        tbl.table_type AS table_type,
-       col.id AS column_id,
+       coalesce(col.imported_id, col.id) AS column_id,
        col.name AS column_name,
        col.description AS column_description,
        col.data_type AS column_type,
@@ -126,8 +128,8 @@ MATCH (db)-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(:{Labels.TABLE})
       -[:{Edges.CONTAINS}]->(src:{Labels.COLUMN})
       -[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-RETURN DISTINCT src.id AS source_column_id,
-                tgt.id AS target_column_id
+RETURN DISTINCT coalesce(src.imported_id, src.id) AS source_column_id,
+                coalesce(tgt.imported_id, tgt.id) AS target_column_id
 """
 
 _EXPORT_JOINS_QUERY = f"""
@@ -142,8 +144,8 @@ WHERE size($database_ids) = 0
               -[:{Edges.CONTAINS}]->(t2)
         WHERE db2.id IN $database_ids
    }}
-RETURN DISTINCT t1.id AS source_table_id,
-                t2.id AS target_table_id,
+RETURN DISTINCT coalesce(t1.imported_id, t1.id) AS source_table_id,
+                coalesce(t2.imported_id, t2.id) AS target_table_id,
                 j.join_columns AS join_columns
 """
 
@@ -156,17 +158,17 @@ OPTIONAL MATCH (tbl)-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}}
 WITH DISTINCT term
 WHERE term IS NOT NULL
 OPTIONAL MATCH (tbl2:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
-WITH term, collect(DISTINCT tbl2.id) AS represents
+WITH term, collect(DISTINCT coalesce(tbl2.imported_id, tbl2.id)) AS represents
 OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
 WITH term, represents,
      collect(DISTINCT {{
-         id: attr.id,
+         id: coalesce(attr.imported_id, attr.id),
          name: attr.name,
          description: coalesce(attr.description, ''),
-         column_id: col.id
+         column_id: coalesce(col.imported_id, col.id)
      }}) AS column_attributes
-RETURN term.id AS id,
+RETURN coalesce(term.imported_id, term.id) AS id,
        term.name AS name,
        coalesce(term.description, '') AS description,
        [x IN represents WHERE x IS NOT NULL] AS represents,
@@ -181,8 +183,8 @@ MATCH (db)-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(:{Labels.TABLE})
       -[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
       -[:{REL_SEMANTIC_FK}]->(attr:{LABEL_COLUMN_ATTRIBUTE})
-RETURN DISTINCT col.id AS column_id,
-                attr.id AS column_attribute_id
+RETURN DISTINCT coalesce(col.imported_id, col.id) AS column_id,
+                coalesce(attr.imported_id, attr.id) AS column_attribute_id
 """
 
 _EXPORT_SQL_ATTRIBUTES_QUERY = f"""
@@ -193,13 +195,13 @@ MATCH (db)-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
       (sql:{Labels.SQL})<-[:{Edges.HAS_SQL}]-
       (attr:{LABEL_SQL_ATTRIBUTE})
 MATCH (attr)-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-RETURN DISTINCT attr.id AS id,
+RETURN DISTINCT coalesce(attr.imported_id, attr.id) AS id,
                 attr.name AS name,
                 coalesce(attr.description, '') AS description,
                 coalesce(attr.expression, '') AS expression,
                 coalesce(attr.source, $default_source) AS source,
                 sql.sql_full_query AS sql,
-                term.id AS term_id,
+                coalesce(term.imported_id, term.id) AS term_id,
                 db.name AS database_name
 ORDER BY attr.name
 """
@@ -211,7 +213,7 @@ MATCH (db)-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
       -[:{Edges.CONTAINS}]->(:{Labels.TABLE})<-[:{Edges.SQL}]-
       (sql:{Labels.SQL})<-[:{Edges.HAS_SQL}]-
       (ca:{Labels.CUSTOM_ANALYSIS})
-RETURN DISTINCT ca.id AS id,
+RETURN DISTINCT coalesce(ca.imported_id, ca.id) AS id,
                 ca.name AS name,
                 coalesce(ca.description, '') AS description,
                 sql.sql_full_query AS sql,
@@ -260,55 +262,71 @@ def assemble_export_document(
     dialect_by_db_name: dict[str, str],
     sql_column_resolver: Any,
 ) -> GsfModelDocument:
-    """Build a validated document from raw Neo4j export rows."""
+    """Build a validated document from raw Neo4j export rows.
+
+    A scoped export has to stand on its own. The semantic layer freely crosses
+    database boundaries — a term can represent tables in two databases — so the
+    export queries see objects the selected catalog does not contain. Every
+    reference is therefore pruned against the catalog assembled here: a
+    dangling id would make the importer reject the very file it produced.
+    """
     databases = _assemble_databases(rows["catalog"], dialect_by_db_name)
+    table_ids, column_ids = _catalog_ids(databases)
     foreign_keys = [
         ModelForeignKey(
             source_column_id=str(row["source_column_id"]),
             target_column_id=str(row["target_column_id"]),
         )
         for row in rows["foreign_keys"]
-        if row.get("source_column_id") and row.get("target_column_id")
+        if str(row.get("source_column_id") or "") in column_ids
+        and str(row.get("target_column_id") or "") in column_ids
     ]
     joins = [
         ModelJoin(
             source_table_id=str(row["source_table_id"]),
             target_table_id=str(row["target_table_id"]),
-            join_columns=row.get("join_columns") or [],
+            join_columns=parse_join_columns(row.get("join_columns")),
         )
         for row in rows["joins"]
-        if row.get("source_table_id") and row.get("target_table_id")
+        if str(row.get("source_table_id") or "") in table_ids
+        and str(row.get("target_table_id") or "") in table_ids
     ]
     terms = [
         ModelTerm(
             id=str(row["id"]),
             name=row.get("name") or "",
             description=row.get("description") or "",
-            represents=[str(x) for x in (row.get("represents") or []) if x],
+            represents=_scoped_ids(row.get("represents") or [], table_ids),
             columns_attributes=[
                 ModelColumnAttribute(
                     id=str(attr["id"]),
                     name=attr.get("name") or "",
                     description=attr.get("description") or "",
-                    column_id=str(attr.get("column_id") or ""),
+                    column_id=str(attr["column_id"]),
                 )
                 for attr in (row.get("columns_attributes") or [])
-                if attr.get("id")
+                if attr.get("id") and str(attr.get("column_id") or "") in column_ids
             ],
         )
         for row in rows["terms"]
         if row.get("id")
     ]
+    term_ids = {term.id for term in terms}
+    attribute_ids = {attr.id for term in terms for attr in term.columns_attributes}
     semantic_fks = [
         ModelSemanticFk(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
         )
         for row in rows["semantic_fks"]
-        if row.get("column_attribute_id") and row.get("column_id")
+        if str(row.get("column_attribute_id") or "") in attribute_ids
+        and str(row.get("column_id") or "") in column_ids
     ]
     sql_attributes = _assemble_sql_attributes(
-        rows["sql_attributes"], sql_column_resolver
+        rows["sql_attributes"],
+        sql_column_resolver,
+        term_ids=term_ids,
+        column_ids=column_ids,
     )
     custom_analyses = [
         ModelCustomAnalysis(
@@ -316,9 +334,12 @@ def assemble_export_document(
             name=row.get("name") or "",
             description=row.get("description") or "",
             sql=row.get("sql") or "",
-            sql_column_is=sql_column_resolver(
-                row.get("sql") or "",
-                row.get("database_name"),
+            sql_column_is=_scoped_ids(
+                sql_column_resolver(
+                    row.get("sql") or "",
+                    row.get("database_name"),
+                ),
+                column_ids,
             ),
         )
         for row in rows["custom_analyses"]
@@ -338,6 +359,25 @@ def assemble_export_document(
         ),
         zones=[],
     )
+
+
+def _catalog_ids(databases: list[ModelDatabase]) -> tuple[set[str], set[str]]:
+    """Return the table and column ids the exported catalog actually carries."""
+    tables = [
+        table
+        for database in databases
+        for schema in database.schemas
+        for table in schema.tables
+    ]
+    return (
+        {table.id for table in tables},
+        {column.id for table in tables for column in table.columns},
+    )
+
+
+def _scoped_ids(values: Iterable[Any], known: set[str]) -> list[str]:
+    """Keep the ids present in the exported catalog, in their original order."""
+    return [str(value) for value in values if str(value) in known]
 
 
 def _assemble_databases(
@@ -423,6 +463,9 @@ def _assemble_databases(
 def _assemble_sql_attributes(
     rows: list[dict[str, Any]],
     sql_column_resolver: Any,
+    *,
+    term_ids: set[str],
+    column_ids: set[str],
 ) -> ModelSqlAttributesBySource:
     grouped: dict[str, list[ModelSqlAttribute]] = {
         "manual": [],
@@ -431,6 +474,10 @@ def _assemble_sql_attributes(
         "bridge_table": [],
     }
     for row in rows:
+        term_id = str(row.get("term_id") or "")
+        if term_id not in term_ids:
+            # The attribute hangs off a term the export scope leaves out.
+            continue
         yaml_key = _SOURCE_TO_YAML_KEY.get(row.get("source") or "", "manual")
         sql_text = row.get("sql") or row.get("expression") or ""
         grouped[yaml_key].append(
@@ -439,8 +486,11 @@ def _assemble_sql_attributes(
                 name=row.get("name") or "",
                 description=row.get("description") or "",
                 sql=sql_text,
-                sql_column_is=sql_column_resolver(sql_text, row.get("database_name")),
-                term_id=str(row.get("term_id") or ""),
+                sql_column_is=_scoped_ids(
+                    sql_column_resolver(sql_text, row.get("database_name")),
+                    column_ids,
+                ),
+                term_id=term_id,
             ),
         )
     return ModelSqlAttributesBySource(**grouped)
@@ -594,6 +644,7 @@ def apply_import_model(
         skipped,
         embed_buffer,
         schema_cache,
+        replace=replace,
     )
 
     summary: dict[str, Any] = {
@@ -671,6 +722,8 @@ def _resolve_entity(
 def _resolve_entities_batch(
     label: str,
     items: list[tuple[str, dict[str, Any]]],
+    *,
+    match_by_name: bool = False,
 ) -> dict[str, tuple[str, bool]]:
     """Batched :func:`_resolve_entity`.
 
@@ -679,7 +732,9 @@ def _resolve_entities_batch(
     entire same-label batch of ``(imported_id, create_props)`` pairs in at
     most three round trips total: one read to find existing nodes, one write
     to touch their ``imported_id``, and one write to create the missing
-    ones. Semantics match :func:`_resolve_entity` exactly.
+    ones. When ``match_by_name`` is enabled, an item whose ID is unknown is
+    matched by its unique name before creation; that supports migration from
+    graph-local database IDs to portable model IDs.
     """
     if not items:
         return {}
@@ -703,6 +758,33 @@ def _resolve_entities_batch(
         {"imported_ids": imported_ids},
     )
     existing_map = {row["imported_id"]: str(row["live_id"]) for row in existing_rows}
+    name_matched_ids: set[str] = set()
+
+    if match_by_name:
+        unresolved_items = [
+            {"imported_id": imported_id, "name": props.get("name")}
+            for imported_id, props in deduped.items()
+            if imported_id not in existing_map and props.get("name")
+        ]
+        if unresolved_items:
+            name_rows = conn.query_read(
+                f"""
+                UNWIND $items AS item
+                MATCH (n:{label} {{name: item.name}})
+                RETURN item.imported_id AS imported_id, collect(n.id) AS live_ids
+                """,
+                {"items": unresolved_items},
+            )
+            for row in name_rows:
+                live_ids = [str(live_id) for live_id in row["live_ids"]]
+                if len(live_ids) != 1:
+                    raise ModelImportValidationError(
+                        f"Cannot import database {row['imported_id']!r}: "
+                        f"found {len(live_ids)} existing databases with that name"
+                    )
+                imported_id = str(row["imported_id"])
+                existing_map[imported_id] = live_ids[0]
+                name_matched_ids.add(imported_id)
 
     result: dict[str, tuple[str, bool]] = {}
     touch_rows: list[dict[str, Any]] = []
@@ -711,7 +793,13 @@ def _resolve_entities_batch(
         live_id = existing_map.get(imported_id)
         if live_id is not None:
             result[imported_id] = (live_id, False)
-            touch_rows.append({"id": live_id, "imported_id": imported_id})
+            touch_rows.append(
+                {
+                    "id": live_id,
+                    "imported_id": imported_id,
+                    "replace_imported_id": imported_id in name_matched_ids,
+                },
+            )
         else:
             props = dict(create_props or {})
             props["imported_id"] = imported_id
@@ -722,7 +810,10 @@ def _resolve_entities_batch(
             f"""
             UNWIND $rows AS row
             MATCH (n:{label} {{id: row.id}})
-            SET n.imported_id = coalesce(n.imported_id, row.imported_id)
+            SET n.imported_id = CASE
+                WHEN row.replace_imported_id THEN row.imported_id
+                ELSE coalesce(n.imported_id, row.imported_id)
+            END
             """,
             {"rows": touch_rows},
         )
@@ -742,6 +833,116 @@ def _resolve_entities_batch(
             result[row["imported_id"]] = (str(row["live_id"]), True)
 
     return result
+
+
+def _changed_entity_ids(label: str, items: dict[str, dict[str, Any]]) -> set[str]:
+    """Return live IDs whose stored properties differ from the import payload."""
+    if not items:
+        return set()
+    rows = graph().query_read(
+        f"""
+        UNWIND $ids AS entity_id
+        MATCH (n:{label} {{id: entity_id}})
+        RETURN n.id AS id, properties(n) AS props
+        """,
+        {"ids": list(items)},
+    )
+    existing = {str(row["id"]): row["props"] for row in rows}
+    return {
+        entity_id
+        for entity_id, props in items.items()
+        if any(
+            existing.get(entity_id, {}).get(key, "") != value
+            for key, value in props.items()
+        )
+    }
+
+
+def _update_entity_properties(
+    label: str, items: dict[str, dict[str, Any]], ids: set[str]
+) -> None:
+    """Update changed entity properties in one batched write."""
+    rows = [
+        {"id": entity_id, "props": items[entity_id]}
+        for entity_id in ids
+        if entity_id in items
+    ]
+    if not rows:
+        return
+    graph().query_write(
+        f"""
+        UNWIND $rows AS row
+        MATCH (n:{label} {{id: row.id}})
+        SET n += row.props
+        """,
+        {"rows": rows},
+    )
+
+
+def _ids_missing_has_sql(label: str, ids: list[str]) -> set[str]:
+    """Return the subset of *ids* for *label* nodes with no ``HAS_SQL`` edge.
+
+    SQL persistence for sql_attributes/custom_analyses runs after node
+    creation, outside the main transaction (see :func:`apply_import_model`).
+    If that step ever failed for an entity (bad SQL, transient error), the
+    entity node was already committed without its ``Sql`` node/edge — and
+    because :func:`_resolve_entities_batch` matches existing entities by
+    ``imported_id``/``id``, every later re-import would treat it as
+    "already exists" and skip attaching SQL forever. Callers use this to
+    retry SQL persistence for such orphaned nodes instead of leaving them
+    stuck (invisible in list views that inner-join on ``Sql``, and
+    undeletable by queries that match through the missing edge).
+    """
+    if not ids:
+        return set()
+    rows = graph().query_read(
+        f"""
+        UNWIND $ids AS entity_id
+        MATCH (n:{label} {{id: entity_id}})
+        WHERE NOT EXISTS {{ (n)-[:{Edges.HAS_SQL}]->(:{Labels.SQL}) }}
+        RETURN entity_id
+        """,
+        {"ids": ids},
+    )
+    return {row["entity_id"] for row in rows}
+
+
+def _custom_analysis_ids_with_changed_payload(
+    analyses: list[ModelCustomAnalysis],
+    live_ids_by_yaml_id: dict[str, str],
+) -> set[str]:
+    """Return existing analyses whose name, description, or SQL differs.
+
+    ``replace=True`` imports are snapshots, so an existing node with the
+    same stable YAML id must be restored to the payload's values.  Resolving
+    an entity by id alone is insufficient: it identifies the node but used
+    to leave its locally edited properties untouched.
+    """
+    rows = [
+        {
+            "live_id": live_ids_by_yaml_id[analysis.id],
+            "name": analysis.name,
+            "description": analysis.description,
+            "sql": analysis.sql,
+        }
+        for analysis in analyses
+    ]
+    if not rows:
+        return set()
+    changed_rows = graph().query_read(
+        f"""
+        UNWIND $rows AS row
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: row.live_id}})
+        OPTIONAL MATCH (ca)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        WITH row, ca, collect(sql.sql_full_query) AS sql_values
+        WHERE ca.name <> row.name
+           OR coalesce(ca.description, '') <> coalesce(row.description, '')
+           OR NOT (row.sql IN sql_values)
+        RETURN ca.id AS live_id
+        """,
+        {"rows": rows},
+    )
+    return {str(row["live_id"]) for row in changed_rows}
 
 
 def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
@@ -825,6 +1026,7 @@ def _import_catalog(
             (db.id, {"name": db_names[db.id]} if db_names[db.id] else {})
             for db in databases
         ],
+        match_by_name=True,
     )
     live_db_ids: list[str] = []
     for db in databases:
@@ -1059,7 +1261,7 @@ def _import_joins(document: GsfModelDocument, id_map: dict[str, str]) -> None:
             "target_table_id": _remap(
                 id_map, join.target_table_id, kind="join target table"
             ),
-            "join_columns": join.join_columns,
+            "join_columns": dump_join_columns(join.join_columns),
         }
         for join in document.data_layer.joins
     ]
@@ -1193,17 +1395,30 @@ def _import_terms(
             for term in terms
         ],
     )
+    props_by_live_id = {
+        term_results[term.id][0]: {
+            "name": term.name,
+            "description": term.description,
+            "source": SEMANTIC_SOURCE,
+        }
+        for term in terms
+        if not term_results[term.id][1]
+    }
+    changed_term_ids = _changed_entity_ids(LABEL_TERM, props_by_live_id)
+    _update_entity_properties(LABEL_TERM, props_by_live_id, changed_term_ids)
 
     represents_rows: list[dict[str, Any]] = []
-    newly_created_term_ids: list[str] = []
+    embedded_term_ids: list[str] = []
     for term in terms:
         live_term_id, was_created = term_results[term.id]
         id_map[term.id] = live_term_id
         if was_created:
             created["terms"] += 1
-            newly_created_term_ids.append(live_term_id)
+            embedded_term_ids.append(live_term_id)
         else:
             skipped["terms"] += 1
+            if live_term_id in changed_term_ids:
+                embedded_term_ids.append(live_term_id)
         table_ids = [
             _remap(id_map, table_id, kind="term represents table")
             for table_id in term.represents
@@ -1225,11 +1440,11 @@ def _import_terms(
             {"rows": represents_rows},
         )
 
-    if embed_buffer is not None and newly_created_term_ids:
-        db_names_by_term = _database_names_for_terms(newly_created_term_ids)
+    if embed_buffer is not None and embedded_term_ids:
+        db_names_by_term = _database_names_for_terms(embedded_term_ids)
         for term in terms:
-            live_term_id, was_created = term_results[term.id]
-            if not was_created:
+            live_term_id, _was_created = term_results[term.id]
+            if live_term_id not in embedded_term_ids:
                 continue
             embed_buffer.semantic_rows.extend(
                 build_term_semantic_rows(
@@ -1282,6 +1497,15 @@ def _import_column_attributes(
             }
 
     attr_results = _resolve_entities_batch(LABEL_COLUMN_ATTRIBUTE, attr_items)
+    props_by_live_id = {
+        attr_results[attr_id][0]: props
+        for attr_id, props in attr_items
+        if not attr_results[attr_id][1]
+    }
+    changed_attr_ids = _changed_entity_ids(LABEL_COLUMN_ATTRIBUTE, props_by_live_id)
+    _update_entity_properties(
+        LABEL_COLUMN_ATTRIBUTE, props_by_live_id, changed_attr_ids
+    )
 
     edge_rows: list[dict[str, Any]] = []
     for attr_id, (live_attr_id, was_created) in attr_results.items():
@@ -1302,7 +1526,11 @@ def _import_column_attributes(
                 "term_id": ctx["live_term_id"],
             },
         )
-        if was_created and embed_buffer is not None and col_ctx is not None:
+        if (
+            embed_buffer is not None
+            and (was_created or live_attr_id in changed_attr_ids)
+            and col_ctx is not None
+        ):
             embed_buffer.semantic_rows.extend(
                 build_column_attribute_semantic_rows(
                     database_name=col_ctx.database_name,
@@ -1396,6 +1624,7 @@ def _persist_sql_object(
         props=props,
         existing_id=node_id,
         match_props={"id": node_id},
+        override_existing_props=props,
     )
     query_obj.sql_node.match_props = {"sql_full_query": sql}
     edge_props = {Props.ANALYSIS_ID: node_id}
@@ -1428,6 +1657,7 @@ def _import_sql_attributes(
                     "description": attr.description,
                     "expression": attr.sql,
                     "source": source,
+                    "term_name": term_names.get(attr.term_id, ""),
                 },
             )
             for source, attr in grouped_attrs
@@ -1435,25 +1665,52 @@ def _import_sql_attributes(
     )
     for _source, attr in grouped_attrs:
         id_map[attr.id] = attr_results[attr.id][0]
+    props_by_live_id = {
+        attr_results[attr.id][0]: {
+            "name": attr.name,
+            "description": attr.description,
+            "expression": attr.sql,
+            "source": source,
+            "term_name": term_names.get(attr.term_id, ""),
+        }
+        for source, attr in grouped_attrs
+        if not attr_results[attr.id][1]
+    }
+    changed_attr_ids = _changed_entity_ids(LABEL_SQL_ATTRIBUTE, props_by_live_id)
+
+    # Nodes that already existed but never got their Sql node/edge attached
+    # (see _ids_missing_has_sql) get SQL persistence retried alongside
+    # freshly created ones, instead of being skipped forever.
+    missing_sql_ids = _ids_missing_has_sql(
+        LABEL_SQL_ATTRIBUTE,
+        [attr_results[attr.id][0] for _source, attr in grouped_attrs],
+    )
+
+    def _attr_needs_sql(attr_id: str) -> bool:
+        live_id, was_created = attr_results[attr_id]
+        return was_created or live_id in missing_sql_ids or live_id in changed_attr_ids
 
     # SQL parsing/graph linking (validate_sql, add_query) is inherently
     # per-item, but the resolve step and the database-name lookups it needs
     # are batched up front to cut round trips.
-    newly_created_term_ids = list(
+    term_ids_needing_lookup = list(
         {
             _remap(id_map, attr.term_id, kind="sql attribute term")
             for _source, attr in grouped_attrs
-            if attr_results[attr.id][1]
+            if _attr_needs_sql(attr.id)
         },
     )
-    db_names_by_term = _database_names_for_terms(newly_created_term_ids)
+    db_names_by_term = _database_names_for_terms(term_ids_needing_lookup)
 
     for source, attr in grouped_attrs:
         live_attr_id, was_created = attr_results[attr.id]
-        if not was_created:
+        if not _attr_needs_sql(attr.id):
             skipped["sql_attributes"] += 1
             continue
-        created["sql_attributes"] += 1
+        if was_created:
+            created["sql_attributes"] += 1
+        else:
+            skipped["sql_attributes"] += 1
         live_term_id = _remap(id_map, attr.term_id, kind="sql attribute term")
         database_name = db_names_by_term.get(live_term_id)
         detach_existing_sql_edges(live_attr_id)
@@ -1465,7 +1722,11 @@ def _import_sql_attributes(
             sql=attr.sql,
             database_name=database_name,
             schema_cache=schema_cache,
-            extra_props={"expression": attr.sql, "source": source},
+            extra_props={
+                "expression": attr.sql,
+                "source": source,
+                "term_name": term_names.get(attr.term_id, ""),
+            },
         )
         link_to_term(live_attr_id, live_term_id)
         if embed_buffer is not None:
@@ -1488,24 +1749,51 @@ def _import_custom_analyses(
     skipped: dict[str, int],
     embed_buffer: ImportEmbedBuffer | None,
     schema_cache: dict[str | None, tuple[list[str], dict[str, Any]]],
+    *,
+    replace: bool = False,
 ) -> None:
     analyses = document.semantic_layer.custom_analyses
+
     ca_results = _resolve_entities_batch(
         Labels.CUSTOM_ANALYSIS,
         [
-            (analysis.id, {"name": analysis.name, "description": analysis.description})
+            (
+                analysis.id,
+                {"name": analysis.name, "description": analysis.description},
+            )
             for analysis in analyses
         ],
     )
     for analysis in analyses:
         id_map[analysis.id] = ca_results[analysis.id][0]
 
+    # Nodes that already existed but never got their Sql node/edge attached
+    # (see _ids_missing_has_sql) get SQL persistence retried alongside
+    # freshly created ones, instead of being skipped forever.
+    missing_sql_ids = _ids_missing_has_sql(
+        Labels.CUSTOM_ANALYSIS,
+        [ca_results[analysis.id][0] for analysis in analyses],
+    )
+    live_ids_by_yaml_id = {
+        analysis.id: ca_results[analysis.id][0] for analysis in analyses
+    }
+    changed_payload_ids = (
+        _custom_analysis_ids_with_changed_payload(analyses, live_ids_by_yaml_id)
+        if replace
+        else set()
+    )
+
+    def _ca_needs_sql(analysis: ModelCustomAnalysis) -> bool:
+        live_id, was_created = ca_results[analysis.id]
+        return (
+            was_created or live_id in missing_sql_ids or live_id in changed_payload_ids
+        )
+
     live_col_by_analysis: dict[str, str | None] = {}
     lookup_col_ids: list[str] = []
     for analysis in analyses:
-        _live_id, was_created = ca_results[analysis.id]
         live_col_id: str | None = None
-        if was_created and analysis.sql_column_is:
+        if _ca_needs_sql(analysis) and analysis.sql_column_is:
             try:
                 live_col_id = _remap(
                     id_map,
@@ -1520,12 +1808,23 @@ def _import_custom_analyses(
 
     db_names_by_column = _database_names_for_columns(lookup_col_ids)
 
+    # Several YAML entries can converge on the same live node (duplicate
+    # names, or several rows re-matched by _resolve_key); only persist SQL
+    # for it once instead of redundantly rewriting the same Sql node/edge.
+    handled_ids: set[str] = set()
+
     for analysis in analyses:
         live_ca_id, was_created = ca_results[analysis.id]
-        if not was_created:
+        if not _ca_needs_sql(analysis):
             skipped["custom_analyses"] += 1
             continue
-        created["custom_analyses"] += 1
+        if was_created:
+            created["custom_analyses"] += 1
+        else:
+            skipped["custom_analyses"] += 1
+        if live_ca_id in handled_ids:
+            continue
+        handled_ids.add(live_ca_id)
         live_col_id = live_col_by_analysis.get(analysis.id)
         database_name = db_names_by_column.get(live_col_id) if live_col_id else None
         detach_ca_sql_edges(live_ca_id)

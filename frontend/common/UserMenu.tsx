@@ -5,6 +5,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { signOut, useSession } from '@/auth/auth-client';
 import { SelectButton } from '@/common/Button';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -14,6 +15,7 @@ import { TextVariant } from '@/enums/text';
 
 export const UserMenu = ({ version }: { version?: string }) => {
 	const { data } = useSession();
+	const router = useRouter();
 	const [signingOut, setSigningOut] = useState(false);
 
 	if (!data) return null;
@@ -47,6 +49,12 @@ export const UserMenu = ({ version }: { version?: string }) => {
 				</div>
 			}
 			items={[
+				{
+					// Self-service, so it lives here rather than under the
+					// admin-only Settings section.
+					label: 'API Tokens',
+					onClick: () => router.push('/account/api-tokens'),
+				},
 				{
 					label: signingOut ? 'Signing out…' : 'Sign out',
 					onClick: () => {

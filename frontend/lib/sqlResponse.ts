@@ -7,9 +7,8 @@
 // Normalise both shapes into a single string so DB persistence and parsing in
 // `DynamicTable` stay simple (compact JSON for objects → cheap to re-parse).
 //
-// Shared between `useChat.ts` (client-side render of the result event) and
-// the chat-completions proxy route (server-side persistence of the same
-// event), so both sides store/display the identical format.
+// Used by the shared answer-message builders so the live result table and the
+// visualization route's persisted fallback table use the identical format.
 export const stringifySqlResponse = (value: unknown): string | undefined => {
 	if (value == null) return undefined;
 	if (typeof value === 'string') return value.trim() ? value : undefined;

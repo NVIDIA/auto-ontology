@@ -6,15 +6,18 @@
 	"packageManager": "pnpm@10.34.3",
 	"scripts": {
 		"postinstall": "prisma generate",
+		"db:generate": "prisma generate",
 		"db:push": "prisma db push",
-		"dev": "pnpm db:push && next dev -p 3000",
-		"start": "prisma db push && next start",
+		"dev": "pnpm db:push && pnpm db:generate && next dev -p 3000",
+		"start": "prisma db push && prisma generate && next start",
 		"build": "prisma generate && next build",
 		"lint": "eslint .",
+		"openapi": "tsx scripts/generate-openapi.ts",
 		"format": "prettier --write .",
 		"format:check": "prettier --check ."
 	},
 	"dependencies": {
+		"@better-auth/api-key": "^1.6.20",
 		"@better-auth/sso": "^1.6.20",
 		"@nvidia/foundations-react-core": "^0.604.1",
 		"@prisma/adapter-pg": "^7.7.0",
@@ -29,7 +32,8 @@
 		"next": "16.2.6",
 		"pg": "^8.20.0",
 		"react": "19.2.4",
-		"react-dom": "19.2.4"
+		"react-dom": "19.2.4",
+		"zod": "^4.4.3"
 	},
 	"devDependencies": {
 		"@svgr/webpack": "^8.1.0",
@@ -44,6 +48,8 @@
 		"prettier": "^3.8.1",
 		"prisma": "^7.7.0",
 		"tailwindcss": "^4",
+		"ts-morph": "^28.0.0",
+		"tsx": "^4.23.11",
 		"typescript": "^5",
 		"vite": "^8.0.4",
 		"vitest": "^4.1.2"

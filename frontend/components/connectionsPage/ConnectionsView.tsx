@@ -13,6 +13,7 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
 import { ConfirmModal } from '@/common/modal';
+import { Toast } from '@/common/Toast';
 import { Icon, IconName } from '@/common/icons';
 import { connectionsApi } from '@/api/connections';
 import type { Connection } from '@/types/connection';
@@ -25,6 +26,8 @@ export const ConnectionsView = () => {
 	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
+	const [ssoFederationPending, setSsoFederationPending] = useState<string | null>(null);
+	const [ssoError, setSsoError] = useState<string | null>(null);
 
 	const fetchConnections = useCallback(async () => {
 		try {
@@ -61,6 +64,35 @@ export const ConnectionsView = () => {
 	const handleConnectionModalConfirm = () => {
 		handleConnectionModalClose();
 		void fetchConnections();
+	};
+
+	const handleSsoFederationChange = async (databaseName: string, enabled: boolean) => {
+		setSsoError(null);
+		setSsoFederationPending(databaseName);
+
+		// Optimistic update — apply immediately so the checkbox doesn't snap back.
+		setConnections((prev) =>
+			prev.map((c) =>
+				c.database_name === databaseName
+					? { ...c, connection: { ...c.connection, sso_federation: enabled } }
+					: c,
+			),
+		);
+
+		const res = await connectionsApi.setSsoFederation(databaseName, enabled);
+		setSsoFederationPending(null);
+
+		if (res.error) {
+			// Revert optimistic update on failure.
+			setConnections((prev) =>
+				prev.map((c) =>
+					c.database_name === databaseName
+						? { ...c, connection: { ...c.connection, sso_federation: !enabled } }
+						: c,
+				),
+			);
+			setSsoError(res.message ?? 'Failed to update connection.');
+		}
 	};
 
 	const handleDeleteRequest = (databaseName: string) => {
@@ -149,6 +181,10 @@ export const ConnectionsView = () => {
 					<ConnectionsInfoCardView
 						connections={connections}
 						onDelete={handleDeleteRequest}
+						onSsoFederationChange={(databaseName, enabled) => {
+							void handleSsoFederationChange(databaseName, enabled);
+						}}
+						ssoFederationPending={ssoFederationPending}
 					/>
 				</div>
 			)}
@@ -176,6 +212,13 @@ export const ConnectionsView = () => {
 				open={connectionModalOpen}
 				onConfirm={handleConnectionModalConfirm}
 				onCancel={handleConnectionModalClose}
+			/>
+
+			<Toast
+				open={ssoError !== null}
+				message={ssoError ?? ''}
+				variant="error"
+				onClose={() => setSsoError(null)}
 			/>
 		</div>
 	);

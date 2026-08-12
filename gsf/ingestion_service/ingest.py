@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
@@ -26,6 +27,25 @@ from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
 from gsf.dal.reset import delete_all_data, delete_semantic_layer
 
 logger = logging.getLogger("ingestion_service.ingest")
+
+
+@contextmanager
+def _shared_connection(connector: SQLDatabase) -> Iterator[None]:
+    """Hold one connection open for the whole extraction, where supported.
+
+    Introspection issues a statement per table, and on Databricks opening a connection
+    is both the slowest step (~0.9s) and the flakiest — measured hanging for minutes,
+    and sometimes never completing. Paying that once per run instead of once per
+    statement removes the dominant cost and the dominant failure mode.
+
+    Connectors without the hook are used unchanged.
+    """
+    reuse = getattr(connector, "reuse_connection", None)
+    if reuse is None:
+        yield
+        return
+    with reuse():
+        yield
 
 
 def run_ingest(connector: SQLDatabase) -> None:
@@ -50,7 +70,8 @@ def run_ingest(connector: SQLDatabase) -> None:
         >> _BatchEmbedActor(params=embed_params)
     )
 
-    results = graph.execute(None)
+    with _shared_connection(connector):
+        results = graph.execute(None)
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:

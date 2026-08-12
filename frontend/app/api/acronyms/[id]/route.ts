@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
+import { acronymSelect } from '@/lib/apiSelects';
 
 type Ctx = { params: Promise<{ id: string }> };
 
@@ -20,6 +21,7 @@ export const PATCH = withPermission<Ctx>({ acronym: ['update'] })(async (req, { 
 	const acronym = await prisma.acronym.update({
 		where: { id },
 		data,
+		select: acronymSelect,
 	});
 	return NextResponse.json(acronym);
 });

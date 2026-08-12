@@ -143,6 +143,22 @@ class AnchorColumnModel(BaseModel):
     )
 
 
+class FollowUpResolutionModel(StrictModel):
+    """Contextualize the current user question against completed prior turns."""
+
+    is_follow_up: bool = Field(
+        ...,
+        description="Whether the current question depends on prior conversation context.",
+    )
+    standalone_question: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A complete standalone question. It must equal the current question "
+            "when the question is independent."
+        ),
+    )
+
+
 class SQLGenerationModel(StrictModel):
     """Model for SQL generation without formatting requirements.
 

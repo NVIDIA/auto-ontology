@@ -79,8 +79,13 @@ def _worker_loop(
         from gsf.retrieval.text_to_sql.main import (
             stream_agent_response,
         )
+        from gsf.retrieval.text_to_sql.follow_up import resolve_follow_up
 
         from gsf.connectors import get_connectors
+        from gsf.utils.llm_invoke import (
+            get_llm_client,
+            get_non_reasoning_llm_client,
+        )
         from gsf.utils import (
             get_data_objects_retriever,
             get_semantic_objects_retriever,
@@ -94,6 +99,16 @@ def _worker_loop(
         data_retriever = get_data_objects_retriever()
         semantic_retriever = get_semantic_objects_retriever()
         connectors = get_connectors()
+        try:
+            follow_up_llm = get_non_reasoning_llm_client(max_tokens=1024)
+        except Exception:
+            try:
+                follow_up_llm = get_llm_client(max_tokens=1024)
+            except Exception:
+                logger.exception(
+                    "No LLM available for follow-up resolution; using raw questions"
+                )
+                follow_up_llm = None
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
         try:
@@ -119,8 +134,8 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
+        question, prediction, target_db, subject_token, conversation_history = payload
         try:
-            question, prediction, target_db = payload
             # Connections are resolved from Neo4j once at worker init. If that
             # lookup came back empty — Neo4j not yet reachable when this
             # subprocess booted, or the first connection created afterwards —
@@ -130,14 +145,41 @@ def _worker_loop(
             # itself; get_connectors() caches a non-empty result and only
             # retries while there is nothing to cache, so this costs nothing
             # on the normal path.
+            #
+            # This has to run BEFORE ``ask_connectors`` is bound: binding first
+            # would capture the stale empty list, and rebinding ``connectors``
+            # here would not update it, leaving the healing ineffective.
             if not connectors:
                 connectors = get_connectors()
+
+            # Per-user Databricks auth trades the prewarmed connectors for ones
+            # bound to the caller's exchanged token. Databricks connectors open
+            # connections per operation, so rebuilding them here is cheap.
+            if subject_token is not None:
+                from gsf.connectors.registry import get_connectors_for_subject_token
+
+                ask_connectors = get_connectors_for_subject_token(subject_token)
+            else:
+                ask_connectors = connectors
+
+            is_follow_up, processing_question = resolve_follow_up(
+                question=question,
+                history=conversation_history,
+                llm=follow_up_llm,
+            )
+            logger.info(
+                "Conversation context resolution: follow_up=%s processing_question=%s",
+                is_follow_up,
+                processing_question,
+            )
+
             agent_payload = {
                 "question": question,
+                "processing_question": processing_question,
                 "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
-                "connectors": connectors,
+                "connectors": ask_connectors,
                 "acronyms": fetch_acronyms(),
                 "custom_prompts": fetch_custom_prompts(),
             }
@@ -190,14 +232,30 @@ class PrewarmedWorker:
         question: str,
         prediction: bool | None = None,
         target_db: str | None = None,
+        subject_token: str | None = None,
+        conversation_history: list[dict[str, str | None]] | None = None,
     ) -> None:
         """Ask *question*, optionally forcing the prediction/SQL branch.
 
         *prediction* mirrors the API parameter: True or False skips the
         classification step, None classifies as usual.
         *target_db* scopes the run to one connected database when set.
+        *subject_token* is the caller's SSO JWT. When present the worker builds
+        per-user connectors for this question instead of using the prewarmed
+        ones, so SQL executes under that user's own Databricks grants.
         """
-        self._in_q.put((_MSG_ASK, (question, prediction, target_db)))
+        self._in_q.put(
+            (
+                _MSG_ASK,
+                (
+                    question,
+                    prediction,
+                    target_db,
+                    subject_token,
+                    conversation_history or [],
+                ),
+            )
+        )
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

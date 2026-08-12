@@ -181,10 +181,7 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        # target_db scopes execution to one database, so drop only the *database*
-        # prefix; keep the schema (Postgres/Snowflake need schema.table). SQLite/
-        # BIRD tables carry no schema_name, so this collapses to a bare name.
-        if database_name and schema_name and not target_db:
+        if database_name and schema_name:
             full_name = f"{database_name}.{schema_name}.{table_name}"
         elif schema_name:
             full_name = f"{schema_name}.{table_name}"

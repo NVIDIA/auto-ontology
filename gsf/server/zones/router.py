@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from gsf.dal import zones as dal
 from gsf.server.users import postgres_dal
+from gsf.server.responses import IdResponse, ZoneListResponse, ZoneResponse
 
 router = APIRouter()
 
@@ -42,14 +43,14 @@ def _require_admin(user_id: str) -> None:
         )
 
 
-@router.get("/zones")
+@router.get("/zones", response_model=ZoneListResponse)
 def list_zones(uid: str = Query(..., description="Requesting user id")) -> dict:
     """Return every zone to the requesting user."""
     rows = dal.list_zones()
     return {"data": rows, "count": len(rows)}
 
 
-@router.get("/zones/{zone_id}")
+@router.get("/zones/{zone_id}", response_model=ZoneResponse)
 def get_zone(
     zone_id: str,
     uid: str = Query(..., description="Requesting user id"),
@@ -61,7 +62,7 @@ def get_zone(
     return {"data": row}
 
 
-@router.post("/zones", status_code=201)
+@router.post("/zones", status_code=201, response_model=ZoneResponse)
 def create_zone(body: ZoneCreate) -> dict:
     """Create a zone and attach catalog items.  Requires admin role."""
     _require_admin(body.created_by)
@@ -80,7 +81,7 @@ def create_zone(body: ZoneCreate) -> dict:
     return {"data": row}
 
 
-@router.patch("/zones/{zone_id}")
+@router.patch("/zones/{zone_id}", response_model=ZoneResponse)
 def update_zone(zone_id: str, body: ZoneUpdate) -> dict:
     """Update zone fields and optionally replace catalog data items."""
     field_updates: dict[str, str | None] = {}
@@ -113,7 +114,7 @@ def update_zone(zone_id: str, body: ZoneUpdate) -> dict:
     return {"data": row}
 
 
-@router.delete("/zones/{zone_id}")
+@router.delete("/zones/{zone_id}", response_model=IdResponse)
 def delete_zone(zone_id: str) -> dict:
     """Delete one zone by id."""
     if not dal.delete_zone(zone_id):
@@ -121,7 +122,7 @@ def delete_zone(zone_id: str) -> dict:
     return {"data": {"id": zone_id}}
 
 
-@router.patch("/zones/{zone_id}/status")
+@router.patch("/zones/{zone_id}/status", response_model=ZoneResponse)
 def set_zone_status(
     zone_id: str,
     body: ZoneStatusUpdate,

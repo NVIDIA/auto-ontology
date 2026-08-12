@@ -5,6 +5,7 @@
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
+import { acronymSelect } from '@/lib/apiSelects';
 
 export const GET = withPermission({ acronym: ['read'] })(async (req) => {
 	const prisma = getPrisma();
@@ -16,7 +17,10 @@ export const GET = withPermission({ acronym: ['read'] })(async (req) => {
 		return NextResponse.json({ exists: existing !== null });
 	}
 
-	const acronyms = await prisma.acronym.findMany({ orderBy: { createdAt: 'desc' } });
+	const acronyms = await prisma.acronym.findMany({
+		orderBy: { created_at: 'desc' },
+		select: acronymSelect,
+	});
 	return NextResponse.json(acronyms);
 });
 
@@ -28,6 +32,7 @@ export const POST = withPermission({ acronym: ['create'] })(async (req) => {
 			name: body.name,
 			description: body.description ?? '',
 		},
+		select: acronymSelect,
 	});
 	return NextResponse.json(acronym, { status: 201 });
 });

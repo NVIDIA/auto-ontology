@@ -2,6 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { ModelFormat } from '@/enums/modelInterchange';
+
 /** Per-entity counts returned by POST /api/model/import (see gsf/dal/model_interchange.py). */
 export type ImportEntityCounts = {
 	databases: number;
@@ -25,6 +27,7 @@ export type ImportEmbedResult = ImportEmbedCounts & {
 };
 
 export type ImportSummary = {
+	format: ModelFormat;
 	database_ids: string[];
 	created: ImportEntityCounts;
 	skipped: ImportEntityCounts;

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse
 
 from gsf.dal.connections import verify_connectivity
 from gsf.infra.postgres import get_postgres_connection_string
+from gsf.server.responses import HealthResponse
 
 router = APIRouter()
 
@@ -38,7 +39,13 @@ def _check_postgres() -> dict[str, str]:
         return {"status": "error", "detail": (str(exc) or type(exc).__name__)[:200]}
 
 
-@router.get("/health")
+@router.get(
+    "/health",
+    responses={
+        200: {"model": HealthResponse, "description": "All dependencies reachable"},
+        503: {"model": HealthResponse, "description": "Neo4j or Postgres unreachable"},
+    },
+)
 def health() -> JSONResponse:
     neo4j = _check_neo4j()
     postgres = _check_postgres()

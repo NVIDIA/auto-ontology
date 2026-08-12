@@ -40,6 +40,7 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SQL_ATTR_SOURCE_BRIDGE,
 )
+from gsf.utils.join_columns import parse_join_columns
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
@@ -261,13 +262,13 @@ RETURN t1.name AS source_table,
 
 _FETCH_TABLES_BY_IDS = f"""
 UNWIND $table_ids AS tid
-MATCH (tbl:{Labels.TABLE} {{id: tid}})
-MATCH (tbl)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
+MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
+      -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
 MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-WITH tbl, sch, collect({{name: col.name, data_type: col.data_type,
+WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -409,6 +410,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "id": tid,
                 "name": row.get("name") or "",
                 "description": row.get("description") or "",
+                "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
                 "columns": cols,
@@ -461,8 +463,15 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
-    """Return all JOIN edges between tables."""
-    return graph().query_read(_FETCH_JOINS_QUERY)
+    """Return all JOIN edges between tables.
+
+    ``join_columns`` is stored as a JSON string (see
+    ``gsf.utils.join_columns``), so it is parsed back to a list here.
+    """
+    rows = graph().query_read(_FETCH_JOINS_QUERY)
+    for row in rows:
+        row["join_columns"] = parse_join_columns(row.get("join_columns"))
+    return rows
 
 
 # ---------------------------------------------------------------------------
@@ -496,7 +505,9 @@ _FETCH_COL_TABLE_CONTEXTS = f"""
 UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name
+      <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
+       db.name AS database_name
 """
 
 
@@ -608,7 +619,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → {table_name, schema_name}."""
+    """Batch lookup: Column id → database/schema/table identity."""
     if not col_ids:
         return {}
     try:
@@ -620,6 +631,7 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         r["col_id"]: {
             "table_name": r.get("table_name") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_name": r.get("database_name") or "",
         }
         for r in rows
         if r.get("col_id")

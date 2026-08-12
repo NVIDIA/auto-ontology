@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from gsf.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from gsf.server.metadata import service as dal
+from gsf.server.responses import EntityCoverageResponse
 
 router = APIRouter()
 
@@ -29,7 +30,7 @@ class EntityCoverageRequest(BaseModel):
     )
 
 
-@router.post("/question-entity-coverage")
+@router.post("/question-entity-coverage", response_model=EntityCoverageResponse)
 def entity_coverage(body: EntityCoverageRequest) -> dict:
     """Return ranked semantic candidates and a 0–1 entity coverage grade.
 
