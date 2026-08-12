@@ -1418,3 +1418,35 @@ the phase existed to do. Zone CRUD is ported. The four round trips in
 **Next:** Phase 6, `datasources` — the largest blast radius after
 `model_interchange`, and where `fetch_schemas_by_ids` feeds `Schema` and
 therefore every SQL validation.
+
+---
+
+## 2026-08-12 — Phase 6 — scaffolding, and the carried-over engine disposal
+
+**Merge:** `origin/main` at `0a3ed24`, branch 0 behind. Nothing to merge.
+
+**`dispose_engine()` is finally wired into `gsf.dal.close_store()`** — deferred
+since Phase 3 to avoid conflicting with the Phase 1 fork, and then simply
+carried. All three connections are now closed **unconditionally, whatever
+`GSF_STORE` says**: the setting decides which store is *used*, not which
+connections a process has opened, and a run that touched both would otherwise
+leak one backend's sockets. Closing what is open is cheaper than reasoning about
+what should be.
+
+`gsf/dal/datasources.py` moves to `gsf/dal/neo4j/` behind a 26-function
+selector. **`TABLE_COUNTS_SUBQUERY` is deliberately not re-exported**: it is
+Cypher, and the selector carries only the backend-neutral function surface.
+`gsf/dal/exploration.py` imports it from the Neo4j implementation directly until
+Phase 9 ports that module and the constant goes with it.
+
+Three test files patched `gsf.dal.datasources.graph`, which the selector does
+not have; they now patch the implementation. Worth noting because it is the
+predictable cost of the selector pattern — a test that patches *where a function
+lives* breaks when the module becomes a re-export, and the fix is always to
+patch the implementation rather than the seam.
+
+**Suite:** 461 passed, 3 skipped.
+
+**Next:** `gsf/dal/pg/datasources.py` — 26 functions, the largest blast radius
+after `model_interchange`, and the one where `fetch_schemas_by_ids` feeds the
+`Schema` model and therefore every SQL validation.

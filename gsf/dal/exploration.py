@@ -18,7 +18,11 @@ from gsf.catalog.constants import Edges, Labels
 from gsf.catalog.store.neo4j.connection import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import paging_clause, table_description_expr
-from gsf.dal.datasources import TABLE_COUNTS_SUBQUERY
+
+# Cypher, so imported from the Neo4j implementation directly rather than
+# through the selector: the selector carries only the backend-neutral function
+# surface. Phase 9 ports this module and the import goes with it.
+from gsf.dal.neo4j.datasources import TABLE_COUNTS_SUBQUERY
 from gsf.dal.sql_attributes import fetch_sql_attribute_counts
 from gsf.dal.terms import (
     build_term_table_maps,

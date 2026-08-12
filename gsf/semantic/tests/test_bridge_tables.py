@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.dal import datasources as neo4j_datasources
+from gsf.dal.neo4j import datasources as neo4j_datasources
 from gsf.dal.sql_attributes import SqlAttributeNameConflict
 from gsf.semantic.bridge_tables import (
     _BridgeSqlAttributeProposal,
@@ -15,7 +15,7 @@ from gsf.semantic.bridge_tables import (
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 
 
-@patch("gsf.dal.datasources.graph")
+@patch("gsf.dal.neo4j.datasources.graph")
 def test_fetch_bridge_table_candidates_query_uses_bridge_source(
     mock_conn: MagicMock,
 ) -> None:
@@ -57,7 +57,7 @@ def test_fetch_bridge_table_candidates_query_uses_bridge_source(
     assert "HAS_ATTRIBUTE" in query
 
 
-@patch("gsf.dal.datasources.graph")
+@patch("gsf.dal.neo4j.datasources.graph")
 def test_fetch_bridge_table_candidates_returns_empty(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = []
     assert neo4j_datasources.fetch_bridge_table_candidates("shop") == []

@@ -33,15 +33,22 @@ def close_store() -> None:
     * the driver :mod:`gsf.dal.neo4j_tx` opens for explicit write transactions,
       which nothing closed at all.
 
-    Imports are deferred so importing :mod:`gsf.dal` stays cheap and this
-    module keeps no import-time dependency on the driver.
+    …and, since Phase 3, the pooled SQLAlchemy engine.
 
-    When the Postgres backend lands this also disposes the SQLAlchemy engine —
-    the point of the indirection is that ``__main__`` never has to know which.
+    **All three are closed unconditionally, whatever ``GSF_STORE`` says.** The
+    setting decides which store is *used*; it does not tell you which
+    connections a process has actually opened. A run that ingested through one
+    backend and was reconfigured, or a test that touched both, would leak the
+    other's sockets if shutdown trusted the flag. Closing what is open is
+    cheaper than reasoning about what should be.
+
+    Imports are deferred so importing :mod:`gsf.dal` stays cheap and this
+    module keeps no import-time dependency on either driver.
     """
     from gsf.catalog.store.neo4j import connection
 
     from gsf.dal import neo4j_tx
+    from gsf.dal.pg.session import dispose_engine
 
     if connection._conn is not None:
         try:
@@ -62,3 +69,6 @@ def close_store() -> None:
             )
         finally:
             neo4j_tx._driver = None
+
+    # Already idempotent and already swallows its own failures.
+    dispose_engine()

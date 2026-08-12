@@ -12,6 +12,7 @@ import pytest
 from gsf.catalog.store.neo4j import connection
 
 from gsf.dal import close_store, neo4j_tx
+from gsf.dal.pg import session as pg_session
 
 
 @pytest.fixture(autouse=True)
@@ -59,6 +60,22 @@ def test_closes_driver_even_if_shared_connection_raises() -> None:
     driver.close.assert_called_once_with()
     assert connection._conn is None
     assert neo4j_tx._driver is None
+
+
+def test_disposes_the_postgres_engine_too() -> None:
+    """Every store's connections, regardless of ``GSF_STORE``.
+
+    The setting says which store is *used*; it does not say which connections a
+    process has opened. Trusting it at shutdown would leak the other backend's
+    sockets in any run that touched both.
+    """
+    engine = MagicMock()
+    pg_session._engine = engine
+
+    close_store()
+
+    engine.dispose.assert_called_once_with()
+    assert pg_session._engine is None
 
 
 def test_only_closes_what_is_open() -> None:
