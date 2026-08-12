@@ -46,13 +46,6 @@ def resolve_connector_from_tables(
         if database_name:
             table_database_names.add(database_name)
 
-    if len(table_database_names) > 1:
-        names = ", ".join(sorted(table_database_names))
-        raise ValueError(
-            f"Relevant tables span multiple databases ({names}); "
-            "cross-database SQL execution is not supported."
-        )
-
     if table_database_names:
         database_name = next(iter(table_database_names))
         connector = db_to_connector.get(database_name)
