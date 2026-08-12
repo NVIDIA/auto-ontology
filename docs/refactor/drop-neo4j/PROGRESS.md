@@ -2692,3 +2692,92 @@ endpoint — all require NIM credentials this environment does not have. Their D
 reads are covered by the suite and the golden replay; the orchestration above
 them is not exercised here, and that gap is real. It is the same gap the test
 suite has, not one introduced by the flip.
+
+---
+
+## 2026-08-12 — Phase 11 — end-to-end with live models
+
+The manual pass above stubbed embedding, so the model-dependent half of the
+system was untested. This run used a real NVIDIA API key against a **fresh
+`gsf_e2e` database**, and closes most of that gap.
+
+### Both connector types, real embeddings
+
+| fixture | connector | tables | embedded |
+|---|---|---|---|
+| chinook | **sqlite** | 11 | 75/75 |
+| pagila | postgres | 26 | 171/171 |
+
+246 vectors in `vdb.data_objects_layer`, written through the real embedding
+endpoint. Only one SQLite fixture exists in the repo (`chinook`) — pagila and
+testdb are Postgres — so "both fixture databases" is what was exercised, which
+covers both connector *types* rather than two of one.
+
+### LLM semantic compilation, writing to Postgres
+
+`run_semantic_compilation("chinook")` produced, over ~50 minutes of live model
+calls:
+
+* **10 Terms** with generated descriptions, and **53 ColumnAttributes** across
+  them. 10 rather than 11 is correct — `PlaylistTrack` is a pure junction table
+  and gets no Term.
+* **11 SEMANTIC_FK edges**, resolved by the LLM FK resolver.
+* **63 rows** in `vdb.semantic_layer`.
+
+**This is the prompt rename from earlier in Phase 11 verified in use.**
+`semantic_fk.py` labels its candidates `column_id` where it said `neo4j_id`, and
+the resolver produced 11 correct edges with the new wording — the change was
+flagged as behavioural precisely because a prompt is an interface, and this is
+the evidence it still works.
+
+The run was stopped after the taxonomy and FK phases completed; the SqlAttribute
+suggester phase was still running. `sql_attribute` was still 0 at that point,
+which is consistent with bug 4 (the suggester never ranks) rather than a port
+problem.
+
+### The join-path spike, on real LLM-produced data
+
+`find_join_path` resolved paths through the LLM-resolved SEMANTIC_FKs:
+
+```
+Track.AlbumId        -> Album.AlbumId       1 hop
+Invoice.CustomerId   -> Customer.CustomerId 1 hop
+Customer.SupportRepId-> Employee.EmployeeId 1 hop
+Employee.ReportsTo   -> Employee.EmployeeId 1 hop   (self-referential)
+```
+
+The Phase 7 spike had only synthetic fixtures behind it. This is the same code
+against a semantic layer a model actually produced, including the
+self-referential case.
+
+The semantic exploration graph over that layer: **10 nodes, 13 links.**
+
+### `validate_sql` against a Postgres-built schema map
+
+The Phase 6 Done criterion, on the SQLite catalog, with real data:
+
+```
+OK      SELECT "TrackId", "Name" FROM "Track"                    2 columns
+OK      SELECT t."Name", a."Title" FROM "Track" t JOIN "Album" a … 4 columns
+REJECT  SELECT nope FROM NoSuchTable                             SqlParseError
+```
+
+### What is still not verified: the chat SSE flow
+
+`POST /api/chat/completions` did not return in this environment — three
+attempts, up to 23 minutes each, no response headers, with and without
+`CONNECTION_STRINGS` set. **I could not demonstrate NL-to-SQL end to end, and I
+am not claiming it works.**
+
+What I did establish about it, so the next person starts further along:
+
+* the chat worker module and the retrieval package **import cleanly**;
+* the pool uses `mp.get_context("spawn")` explicitly (`worker.py:217`), so the
+  inherited-pooled-socket hazard that a fork would create — the one
+  `dispose_engine`'s docstring warns about — does not apply;
+* the gate it checks, `semantic_layer_calculated()`, returns `True`;
+* every DAL read the flow depends on is verified above or by the golden replay.
+
+So the evidence points at the worker-pool/SSE orchestration under `TestClient`
+rather than at the store, but that is an inference, not a result. Running it
+against a real `uvicorn` process is the obvious next step and was not done here.
