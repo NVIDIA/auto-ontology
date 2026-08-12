@@ -1591,3 +1591,55 @@ arbitrary row each time.
 **Next:** Phase 7 — the semantic core, plus the seven inherited functions. Port
 the description fallback (`column_description_expr` / `table_description_expr`
 → `sql_fragments`) first: five of the seven need nothing else.
+
+---
+
+## 2026-08-12 — Phase 7 — the description fallback
+
+`gsf/dal/pg/sql_fragments.py` — the Postgres counterpart to
+`cypher_fragments.py`, and the thing five of the seven functions Phase 6 handed
+forward (DECISION-009) were actually waiting on.
+
+**Two of the four Cypher helpers have no counterpart, deliberately.**
+`and_condition` existed because the Cypher builders returned either `""` or a
+whole `WHERE ...` clause, so a caller narrowing a query further could not
+concatenate; SQLAlchemy composes predicates natively, so the problem does not
+arise. `paging_clause` becomes `.offset()` / `.limit()`. Its docstring's warning
+survives the port unchanged and unsolved: without a total `ORDER BY`,
+consecutive pages both repeat and drop rows. That hazard is identical in SQL and
+belongs to each paged query, which must order by something unique — it is not
+something this module can fix on the caller's behalf.
+
+**`head([...])` becomes `ORDER BY id LIMIT 1`.** The Cypher took whichever
+element came first from a list with no defined order, so a column with two
+attributes could be described differently between two calls. Which attribute
+wins is still arbitrary; it is now at least *stably* arbitrary. Same reasoning
+as `fetch_sorted_tables` in Phase 6.
+
+### The bug the tests caught
+
+The first cut took a column **id** rather than a table alias, and read the
+column's own description back out with a second `SELECT` on `catalog_column`.
+That correlates the table with itself: `WHERE catalog_column.id =
+catalog_column.id` is a tautology matching every row. Postgres raised
+`CardinalityViolation` — loudly wrong rather than quietly wrong, which is the
+good outcome, but only because 11 of the 12 tests exercised it. Both helpers now
+take the table or alias the caller is already selecting from.
+
+### Tests — `gsf/dal/pg/tests/test_sql_fragments.py`, 12 of them
+
+Pinning three things that each fail silently:
+
+* **precedence** — own description, then `HAS_ATTRIBUTE`, then `SEMANTIC_FK`.
+  Not alphabetical: an attribute a column *is an instance of* describes it
+  better than one it merely *references*. One test asserts the order directly by
+  attaching both and checking which wins.
+* **blank counts as missing** — `trim(x) <> ""` in the Cypher. An empty string
+  is what a UI leaves behind when someone deletes text, so treating it as
+  present would make the fallback useless for exactly the rows a user has
+  touched. Covered on the column, on the attribute, and on the table.
+* **correlation** — a sibling column's attribute is not borrowed. This is the
+  test that would have caught the cardinality bug as a wrong answer had Postgres
+  been willing to return one.
+
+**Suite:** 473 passed, 3 skipped.
