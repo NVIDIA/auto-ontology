@@ -4,7 +4,7 @@
 
 from __future__ import annotations
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase

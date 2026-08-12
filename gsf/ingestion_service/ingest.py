@@ -11,11 +11,11 @@ from typing import Any, Iterator
 
 from gsf.utils import get_embed_params
 from gsf.utils.embedding import batch_embed
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
 from nemo_retriever.operators.vdb import IngestVdbOperator
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.catalog import ingest_catalog
 from gsf.vdb import get_data_vdb
@@ -65,7 +65,7 @@ def run_ingest(connector: SQLDatabase) -> None:
     with _shared_connection(connector):
         tables_df, columns_df = ingest_catalog(connector)
 
-    embed_rows = TabularFetchEmbeddingsOp(database_name=database_name)(
+    embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(
         (tables_df, columns_df)
     )
     result_df = batch_embed(embed_rows, embed_params)

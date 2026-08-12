@@ -7,7 +7,7 @@
 ``ingest_catalog`` replaces the library's ``TabularSchemaExtractOp``. These
 cover the parts that were the operator's contract rather than its plumbing: the
 empty paths, and the ``(tables_df, columns_df)`` concat across schemas that
-``TabularFetchEmbeddingsOp`` consumes downstream.
+``CatalogEmbeddingRowsOp`` consumes downstream.
 """
 
 from __future__ import annotations

@@ -47,7 +47,7 @@ def fetch_custom_prompts() -> str:
     """Return all stored prompts joined into one string (blank if none).
 
     The agent embeds this verbatim into the system prompt
-    (see ``nemo_retriever.tabular_data.retrieval.text_to_sql.main._build_state``).
+    (see ``gsf.retrieval.text_to_sql.main._build_state``).
     """
     try:
         with psycopg.connect(

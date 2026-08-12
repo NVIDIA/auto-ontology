@@ -16,7 +16,7 @@ from urllib.parse import unquote, urlparse
 import pandas as pd
 
 from gsf.catalog.constants import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

@@ -30,7 +30,7 @@ from gsf.server.sql_attributes.service import (
 )
 
 if TYPE_CHECKING:
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

@@ -58,7 +58,7 @@ def batch_embed(
 
     ``_BatchEmbedActor`` is an *archetype* operator: it resolves to a CPU or GPU
     variant only when a :class:`~nemo_retriever.graph.Graph` executes it, so it
-    cannot be called directly the way ``TabularFetchEmbeddingsOp`` and
+    cannot be called directly the way ``CatalogEmbeddingRowsOp`` and
     ``IngestVdbOperator`` can. Hence the one-node graph.
 
     Returns an empty DataFrame when *rows* is empty or the embed step yields

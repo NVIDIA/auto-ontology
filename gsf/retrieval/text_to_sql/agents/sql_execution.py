@@ -16,7 +16,7 @@ from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from gsf.retrieval.text_to_sql.state import AgentState
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

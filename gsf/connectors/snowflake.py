@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 import snowflake.connector
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

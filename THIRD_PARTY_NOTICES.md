@@ -24,7 +24,8 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | hvac | >=2.4.0 | Apache-2.0 | https://github.com/hvac/hvac |
 | langchain-openai | >=1.3.0 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
-| NeMo Retriever | upstream | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
+| LangGraph | >=1.2.0 | MIT | https://github.com/langchain-ai/langgraph |
+| NeMo Retriever | ==26.8rc1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
 | nvidia-sdfm | >=0.1.0 | Apache-2.0 | https://github.com/NVIDIA/nvidia-sdfm-sdk |
 | pandas | >=2.0,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg (`psycopg[binary]`) | >=3.3.3 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |

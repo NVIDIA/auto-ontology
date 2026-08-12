@@ -16,8 +16,8 @@ from __future__ import annotations
 import logging
 import os
 
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from gsf.catalog import ingest_catalog
@@ -36,7 +36,7 @@ def run_ingest(connection_string: str) -> None:
 
     schema_data = ingest_catalog(connector)
 
-    embed_rows = TabularFetchEmbeddingsOp(database_name=database_name)(schema_data)
+    embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(schema_data)
     result_df = batch_embed(embed_rows, get_embed_params())
 
     # PostgresVDB.__init__ wipes existing rows for `database_name` before we

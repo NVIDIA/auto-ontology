@@ -16,8 +16,8 @@ from typing import Any
 
 import pandas as pd
 from gsf.catalog.constants import Labels
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
 
 from gsf.dal.datasources import (
@@ -149,7 +149,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         )
         return
 
-    embed_df = TabularFetchEmbeddingsOp(database_name=database_name).process(
+    embed_df = CatalogEmbeddingRowsOp(database_name=database_name).process(
         (tables_df, columns_df),
     )
     if embed_df.empty:

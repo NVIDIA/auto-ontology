@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 from gsf.catalog.normalize import normalize_columns, normalize_tables
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 
 def create_dataframe(connector: "SQLDatabase"):

@@ -10,7 +10,7 @@ import logging
 import os
 from urllib.parse import urlparse
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.databricks import DatabricksDatabase
@@ -176,9 +176,9 @@ def get_connectors_for_subject_token(
 def get_connectors() -> list[SQLDatabase]:
     """Return cached connectors for all configured connections.
 
-    NeMo text-to-SQL resolves the execution connector from
+    Text-to-SQL resolves the execution connector from
     ``relevant_tables[*].database_name`` (see
-    ``nemo_retriever.tabular_data.retrieval.text_to_sql.connector_routing``).
+    ``gsf.retrieval.text_to_sql.connector_routing``).
     Each connector's ``database_name`` must therefore be unique across the
     returned list — use ``metadata_database`` on Snowflake URLs (or distinct
     physical databases) when wiring multiple connections.

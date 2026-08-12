@@ -23,11 +23,11 @@ import logging
 from typing import Optional
 
 import pandas as pd
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
 from nemo_retriever.common.params.models import EmbedParams
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.catalog import ingest_catalog
@@ -201,7 +201,7 @@ def run_mock_ingest() -> None:
     schema_data = ingest_catalog(connector)
 
     logger.info("Embedding %r schema rows", database_name)
-    embed_rows = TabularFetchEmbeddingsOp(database_name=database_name)(schema_data)
+    embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(schema_data)
     result_df = batch_embed(embed_rows, EMBED_PARAMS)
 
     vdb = get_data_vdb(database_name=database_name, reset=True)

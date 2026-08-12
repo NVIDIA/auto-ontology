@@ -20,7 +20,7 @@ from gsf.catalog.extract import extract_tabular_db_data
 from gsf.catalog.write import populate_tabular_data
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from nemo_retriever.tabular_data.sql_database import SQLDatabase
+    from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

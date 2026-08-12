@@ -9,7 +9,7 @@ scan CSV/Parquet/JSON files directly from the filesystem.  No server or Docker
 service is required — DuckDB runs fully in-process.
 
 This is the reference implementation of
-:class:`~nemo_retriever.tabular_data.sql_database.SQLDatabase`.
+:class:`~gsf.connectors.base.SQLDatabase`.
 
 Example
 -------
@@ -32,7 +32,7 @@ import duckdb
 import pandas as pd
 from typing import Optional
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 

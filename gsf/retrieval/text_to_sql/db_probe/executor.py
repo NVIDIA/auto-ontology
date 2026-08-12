@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.retrieval.text_to_sql.db_probe.config import (
     DB_PROBE_MAX_CALLS,

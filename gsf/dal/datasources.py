@@ -928,7 +928,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 def fetch_tables_and_columns_by_node_ids(
     node_ids: list[str],
 ) -> tuple[pd.DataFrame, pd.DataFrame, str]:
-    """Table and column frames for ``TabularFetchEmbeddingsOp``.
+    """Table and column frames for ``CatalogEmbeddingRowsOp``.
 
     *node_ids* mixes table and column ids freely. A table id pulls in all of its
     columns; a column id pulls in only itself. Both frames carry

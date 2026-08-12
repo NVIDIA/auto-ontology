@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from nemo_retriever.graph.retriever import Retriever
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 
 class AgentPayload(TypedDict):

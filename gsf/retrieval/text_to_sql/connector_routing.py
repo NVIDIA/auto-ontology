@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 
 def resolve_connector_from_tables(

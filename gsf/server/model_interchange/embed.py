@@ -17,10 +17,10 @@ from nemo_retriever.models.inference.main_text_embed import (
 )
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from gsf.catalog.constants import Labels
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    _create_column_text,
-    _create_row,
-    _create_table_text,
+from gsf.utils.embedding_rows import (
+    build_column_text,
+    build_embed_row,
+    build_table_text,
 )
 
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
@@ -65,7 +65,7 @@ def build_column_data_row(
     database_name: str,
 ) -> dict[str, Any]:
     """Build a data-layer embed row for a Column node."""
-    text = _create_column_text(
+    text = build_column_text(
         column_name=column_name,
         column_description=column_description,
         data_type=data_type,
@@ -74,7 +74,7 @@ def build_column_data_row(
         schema_name=schema_name,
         database_name=database_name,
     )
-    return _create_row(
+    return build_embed_row(
         text=text,
         node_id=live_id,
         label=Labels.COLUMN,
@@ -94,14 +94,14 @@ def build_table_data_row(
     columns: list[dict[str, Any]],
 ) -> dict[str, Any]:
     """Build a data-layer embed row for a Table node."""
-    text = _create_table_text(
+    text = build_table_text(
         table_name=table_name,
         table_description=table_description,
         columns=columns,
         schema_name=schema_name,
         database_name=database_name,
     )
-    return _create_row(
+    return build_embed_row(
         text=text,
         node_id=live_id,
         label=Labels.TABLE,
