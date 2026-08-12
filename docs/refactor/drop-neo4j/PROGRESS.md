@@ -2588,3 +2588,35 @@ lines alone.
 
 **The refactor is complete.** PLAN.md carries a banner saying so; it is kept as
 the record of why the schema looks the way it does.
+
+---
+
+## 2026-08-12 — Phase 11 postscript — the driver is still in the environment
+
+Verified rather than assumed, and it is not what the phase summary above would
+lead you to expect: **`import neo4j` still works.**
+
+GSF no longer declares it — `uv remove neo4j` took it out of `pyproject.toml`,
+and nothing in `gsf/` imports it. It arrives transitively, from
+`nemo-retriever[tabular]`, which GSF does depend on:
+
+```
+nemo-retriever
+└── neo4j v6.2.0 (extra: tabular)
+```
+
+So the accurate statement is **"GSF no longer uses or depends on Neo4j"**, not
+"the driver is gone". Removing it from the environment needs one of:
+
+* upstream dropping it from the `tabular` extra, or
+* GSF depending on `nemo-retriever` without that extra — which would need a
+  check of what else the extra provides, since Phase 1 forked the parts of
+  `tabular_data.ingestion` GSF uses but the extra may carry more.
+
+Neither belongs in this refactor. Noted here because the difference matters to
+anyone auditing the dependency tree, and because "we deleted Neo4j" is the kind
+of claim that gets repeated without the footnote.
+
+`test_storage_agnostic_modules_do_not_import_neo4j` in `test_fork_parity.py`
+still enforces the part that is actually under GSF's control: no module in
+`gsf/catalog/` outside the store may import the driver. It passes.
