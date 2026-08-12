@@ -1642,4 +1642,33 @@ Pinning three things that each fail silently:
   test that would have caught the cardinality bug as a wrong answer had Postgres
   been willing to return one.
 
-**Suite:** 473 passed, 3 skipped.
+**Suite:** 461 passed, 3 skipped.
+
+### Two corrections to the record
+
+**Phase 6's entry says 461 passed; it was 449.** Measured at `HEAD~1`, before
+this commit. The 461 written there was never true — the 12 tests that make the
+number 461 today are the ones added *above*. The coincidence is unlucky enough
+to be worth naming, because it would otherwise read as "Phase 7 added no tests".
+
+**How to actually run the suite.** Both facts below were reconstructed from
+`docker inspect` rather than read anywhere, which cost more time than writing
+them down would have:
+
+```
+docker run -d --name gsf-golden-neo4j -p 7475:7474 -p 7688:7687 \
+    -e NEO4J_AUTH=neo4j/goldenpass ...
+docker run -d --name gsf-golden-pg -p 55432:5432 ...
+
+export NEO4J_URI=bolt://localhost:7688 NEO4J_USERNAME=neo4j \
+       NEO4J_PASSWORD=goldenpass
+export POSTGRES_HOST=localhost POSTGRES_PORT=55432 POSTGRES_USER=postgres \
+       POSTGRES_PASSWORD=goldenpass POSTGRES_DATABASE=gsf_alembic
+uv run pytest gsf/ -q
+```
+
+Without these the suite still exits green — at **323 passed, 141 skipped**. The
+141 are the golden replays and the incremental-ingest tests skipping themselves
+because they cannot reach a store. A green run that has quietly stopped
+exercising the thing being refactored is the failure mode to watch for here;
+check the skip count, not just the exit code.
