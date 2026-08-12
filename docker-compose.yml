@@ -55,6 +55,12 @@ services:
     depends_on:
       postgres:
         condition: service_started
+      # Without this the backend starts before Alembic has run and 500s
+      # (UndefinedTable) on every catalog call. gsf-migrate waits for
+      # `service_healthy`, a stronger gate than this service's
+      # `service_started`, so the backend would otherwise always win the race.
+      gsf-migrate:
+        condition: service_completed_successfully
       ingestion-service:
         condition: service_started
 
@@ -88,6 +94,8 @@ services:
     depends_on:
       postgres:
         condition: service_started
+      gsf-migrate:
+        condition: service_completed_successfully
 
   # One-shot Job: apply the backend's Alembic migrations, which own the `gsf`
   # schema (catalog + semantic tier). Separate from frontend-migrate because

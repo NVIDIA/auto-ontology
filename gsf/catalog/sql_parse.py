@@ -122,7 +122,7 @@ def parse_query_slim(
             condition = f"{left_bare}.{jp.left_column} {jp.operator} {right_bare}.{jp.right_column}"
             join_edge_props = {
                 Props.JOIN: True,
-                "join_refs": [f"{sql_id}|{condition}"],
+                "refs": [f"{sql_id}|{condition}"],
             }
             query_obj.edges.append((left_col_node, right_col_node, join_edge_props))
         except Exception:
@@ -154,7 +154,7 @@ def parse_query_slim(
             condition = f"{left_bare}.{up.left_column} | {right_bare}.{up.right_column}"
             union_edge_props = {
                 Props.UNION: True,
-                "union_refs": [f"{sql_id}|{condition}"],
+                "refs": [f"{sql_id}|{condition}"],
             }
             query_obj.edges.append((left_col_node, right_col_node, union_edge_props))
         except Exception:

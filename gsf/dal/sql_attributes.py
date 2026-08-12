@@ -26,7 +26,7 @@ from sqlalchemy import String, delete, func, literal, or_, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
@@ -435,18 +435,25 @@ def detach_existing_sql_edges(attr_id: str) -> None:
 
 
 def link_to_term(attr_id: str, term_id: str) -> None:
-    """Point the attribute at exactly one Term, replacing any previous link."""
-    store().query_write(
-        delete(s.sql_attribute_term).where(
-            s.sql_attribute_term.c.attribute_id == attr_id,
-            s.sql_attribute_term.c.term_id != term_id,
+    """Point the attribute at exactly one Term, replacing any previous link.
+
+    Delete and insert in one transaction. Split across two autocommits there is
+    a window in which the attribute belongs to no Term at all, and every read
+    that runs in it sees an unlinked attribute; if the insert then fails, the
+    window never closes.
+    """
+    with write_transaction():
+        store().query_write(
+            delete(s.sql_attribute_term).where(
+                s.sql_attribute_term.c.attribute_id == attr_id,
+                s.sql_attribute_term.c.term_id != term_id,
+            )
         )
-    )
-    store().query_write(
-        insert(s.sql_attribute_term)
-        .values(attribute_id=attr_id, term_id=term_id)
-        .on_conflict_do_nothing()
-    )
+        store().query_write(
+            insert(s.sql_attribute_term)
+            .values(attribute_id=attr_id, term_id=term_id)
+            .on_conflict_do_nothing()
+        )
 
 
 def update_sql_attribute(

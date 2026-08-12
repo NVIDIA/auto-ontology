@@ -105,11 +105,20 @@ def get_schema_tables(database_name, schema_name):
 
 
 def load_schema_from_graph(database_name, schema_name, database_node=None):
+    """Rebuild a stored schema, or ``None`` when there is nothing stored.
+
+    Returning ``None`` rather than a ``Schema`` whose frames are ``None`` is
+    what the caller in :mod:`gsf.catalog.diff` already tests for. Handing back
+    the half-built object instead made that guard dead code and turned the next
+    line -- ``existing_schema.tables_df.table_name`` -- into an
+    ``AttributeError`` that aborted the whole database's re-ingest, so a schema
+    stored with tables but no columns could never re-ingest and never
+    self-healed.
+    """
     tables_df = get_schema_tables(database_name, schema_name)
     columns_df = get_schema_columns(database_name, schema_name)
     if tables_df.empty or columns_df.empty:
-        tables_df = None
-        columns_df = None
+        return None
 
     if database_node is None:
         database_node = CatalogNode(

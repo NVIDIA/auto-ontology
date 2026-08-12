@@ -309,6 +309,12 @@ def update_zone(
     # None leaves membership alone; an empty list clears it. The distinction
     # is deliberate, and collapsing the two would silently strip a zone's
     # items on any metadata-only edit.
+    #
+    # A supplied list is the zone's **complete** membership, not a delta: it
+    # replaces every grant, across every database. That is what makes removal
+    # expressible at all, and the UI honours it by hydrating the full item set
+    # before it opens the editor. A client that PUT only the database it happens
+    # to be looking at would silently revoke the rest.
     if item_ids is not None:
         store().query_write(
             s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)

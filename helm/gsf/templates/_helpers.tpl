@@ -109,6 +109,36 @@ present and already pulled. Runs after gsf.waitForDeps, so Postgres is reachable
 {{- end -}}
 
 {{/*
+Init container that blocks until the backend's Alembic schema exists, gating on
+`gsf.catalog_database`. Without it the backend goes Ready and serves 500s
+(UndefinedTable) on every catalog call while backend-migrate is still running --
+the Job is a normal release resource, so nothing else orders the two.
+
+Mirrors gsf.waitForSchema, which does the same for Prisma's `public` schema.
+Runs after gsf.waitForDeps, so Postgres is reachable.
+*/}}
+{{- define "gsf.waitForCatalogSchema" -}}
+- name: wait-for-catalog-schema
+  image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  envFrom:
+    - secretRef:
+        name: {{ include "gsf.secretName" . }}
+  command:
+    - sh
+    - -c
+    - |
+      until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
+        "SELECT 1 FROM information_schema.tables WHERE table_schema='gsf' AND table_name='catalog_database'" \
+        2>/dev/null | grep -q 1; do
+        echo "waiting for alembic schema (gsf.catalog_database)..."
+        sleep 2
+      done
+  {{- include "gsf.initResources" . | nindent 2 }}
+{{- end -}}
+
+{{/*
 Tiny resource bounds for the busybox wait-* init containers. Without an explicit
 limit, some namespace LimitRanges inject a large default limits.cpu, which
 (because pod quota counts max(initContainers, sum(containers))) can make every

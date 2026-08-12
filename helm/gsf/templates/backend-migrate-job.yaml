@@ -9,10 +9,10 @@ alembic/env.py precisely so it can never propose dropping a Prisma table.
 The two Jobs are independent and may run in either order.
 
 Ordering follows frontend-migrate: a normal release resource, NOT a Helm hook.
-The backend gates on the schema being present, so a post-install hook would
-deadlock (the Deployment would never become Ready, so the hook would never
-run). The wait-for-postgres init container handles Postgres readiness and
-`helm --wait` waits for the Job to complete.
+The backend gates on the schema being present -- via the wait-for-catalog-schema
+init container, which blocks on `gsf.catalog_database` -- so a post-install hook
+would deadlock (the Deployment would never become Ready, so the hook would never
+run). `helm --wait` waits for the Job to complete.
 
 Named per `.Release.Revision` because Job specs are immutable — a stable name
 could not re-run on upgrade — and ttlSecondsAfterFinished garbage-collects

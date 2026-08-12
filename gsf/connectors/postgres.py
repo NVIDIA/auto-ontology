@@ -118,6 +118,11 @@ class PostgresDatabase(SQLDatabase):
               AND n.nspname NOT LIKE 'pg\\_%'
               AND c.relispartition = false
               AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              -- Restores what information_schema filtered for free: a relation
+              -- the ingesting role cannot read must not be catalogued, or
+              -- text-to-SQL will offer it and every query dies with
+              -- "permission denied".
+              AND has_table_privilege(c.oid, 'SELECT')
             ORDER BY n.nspname, c.relname
         """)
 
@@ -128,11 +133,23 @@ class PostgresDatabase(SQLDatabase):
         columns are absent from ``information_schema.columns``, so a matview
         that reached the catalog would arrive with no columns at all.
 
-        ``format_type(atttypid, NULL)`` reproduces what
-        ``information_schema.columns.data_type`` reported — the unqualified type
-        name without precision (``character varying``, not
-        ``character varying(255)``) — so descriptions and embeddings built from
-        this text are unchanged for columns that were already being ingested.
+        ``format_type(atttypid, NULL)`` gives the unqualified type name without
+        precision (``character varying``, not ``character varying(255)``). It is
+        **not** identical to ``information_schema.columns.data_type``, which
+        flattens a domain to its base type and reports ``ARRAY`` /
+        ``USER-DEFINED`` where this reports ``text[]`` / ``mpaa_rating``. The
+        more specific name is deliberate — it is what the text-to-SQL agent
+        needs to write a valid predicate against an enum or an array column.
+
+        ``ordinal_position`` is a row number, not ``attnum``. ``attnum`` keeps
+        the slots of dropped columns, so a table that has ever had a
+        ``DROP COLUMN`` would number its columns 1, 3, 4 and disagree with both
+        ``information_schema`` and the model-interchange export.
+
+        ``has_table_privilege`` restores the filtering ``information_schema``
+        applied for free: without it, a role with rights on one schema still
+        catalogues, embeds and offers every table it cannot read, and every
+        generated query against them dies with ``permission denied``.
         """
         return self.execute("""
             SELECT
@@ -141,7 +158,9 @@ class PostgresDatabase(SQLDatabase):
                 a.attname                        AS column_name,
                 format_type(a.atttypid, NULL)    AS data_type,
                 NOT a.attnotnull                 AS is_nullable,
-                a.attnum                         AS ordinal_position
+                row_number() OVER (
+                    PARTITION BY c.oid ORDER BY a.attnum
+                )                                AS ordinal_position
             FROM pg_attribute a
             JOIN pg_class c ON c.oid = a.attrelid
             JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -149,6 +168,7 @@ class PostgresDatabase(SQLDatabase):
               AND n.nspname NOT LIKE 'pg\\_%'
               AND c.relispartition = false
               AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND has_table_privilege(c.oid, 'SELECT')
               AND a.attnum > 0
               AND NOT a.attisdropped
             ORDER BY n.nspname, c.relname, a.attnum

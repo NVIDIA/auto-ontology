@@ -23,7 +23,16 @@ import logging
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import ColumnElement, and_, case, func, literal, select, update
+from sqlalchemy import (
+    ColumnElement,
+    and_,
+    case,
+    distinct,
+    func,
+    literal,
+    select,
+    update,
+)
 
 from gsf.dal import schema as s
 from gsf.dal.session import store
@@ -940,7 +949,10 @@ def fetch_tables_and_columns_by_node_ids(
 
     columns_df = pd.DataFrame(
         [
-            dict(r)
+            # ``sample_values`` is stored as a JSON string. It has to be parsed
+            # here: the operator downstream slices it to five, and on a string
+            # that takes five *characters* rather than five values.
+            {**dict(r), "sample_values": parse_sample_values(r["sample_values"])}
             for r in conn.query_read(
                 select(
                     s.catalog_column.c.id,
@@ -1064,8 +1076,18 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     columns_count = _count_of(
         s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
     )
-    resolved_count = _count_of(
-        resolved, resolved.c.owner_table_id == s.catalog_table.c.id
+    # DISTINCT on the *column*, not a row count. `resolved` carries one row per
+    # resolvable target, and a column may have several -- two foreign keys, or a
+    # SEMANTIC_FK reaching an attribute owned by more than one column. Counting
+    # rows lets a table where one column resolves twice and another not at all
+    # match `columns_count`, which is exactly the "every column is a key" claim
+    # this is supposed to enforce. That is the first of the two checks the
+    # docstring describes; the subquery's own WHERE is the second.
+    resolved_count = (
+        select(func.count(distinct(resolved.c.column_id)))
+        .select_from(resolved)
+        .where(resolved.c.owner_table_id == s.catalog_table.c.id)
+        .scalar_subquery()
     )
     has_attribute_anywhere = (
         select(literal(1))

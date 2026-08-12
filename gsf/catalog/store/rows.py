@@ -127,9 +127,15 @@ def upsert_row(
         conflict_target = _conflict_target(spec)
         statement = insert(spec.table).values(**values)
         if conflict_target:
-            skip = set(spec.natural_key) | {
-                spec.parent_column if p == "parent" else p for p in spec.natural_key
-            }
+            skip = (
+                set(spec.natural_key)
+                | {spec.parent_column if p == "parent" else p for p in spec.natural_key}
+                # `id` is the primary key. Updating it on conflict rewrites the
+                # existing row's identity, dangling any id the caller already
+                # holds -- the same reason the match branch below refuses to
+                # overwrite it.
+                | {"id"}
+            )
             update = {k: v for k, v in values.items() if k not in skip}
             statement = (
                 statement.on_conflict_do_update(

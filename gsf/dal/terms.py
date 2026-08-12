@@ -33,7 +33,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from gsf.dal import schema as s
 from gsf.dal.attributes import fetch_column_attribute_columns_map
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.dal.zones import fetch_table_zones_map, zone_covers_table
 from gsf.semantic.constants import SEMANTIC_SOURCE
@@ -118,7 +118,13 @@ def _semantic_terms(
     if term_id is not None:
         conditions.append(s.term.c.id == term_id)
     if search:
-        conditions.append(s.term.c.name.ilike(f"%{search.strip()}%"))
+        # Escaped: the caller means a literal substring. Unescaped, `_`
+        # matches any character (so `customer_id` also finds `customerXid`)
+        # and a lone `%` returns the entire glossary.
+        needle = (
+            search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        conditions.append(s.term.c.name.ilike(f"%{needle}%", escape="\\"))
     return conditions
 
 
@@ -306,45 +312,51 @@ def update_term(
     ``fetch_column_attributes_by_term_id`` matches attributes to their term
     *through it*, so a stale copy silently empties a term's attribute list.
     """
-    rows = store().query_write(
-        update(s.term)
-        .where(s.term.c.id == term_id)
-        .values(
-            name=func.coalesce(literal(name, String), s.term.c.name),
-            description=func.coalesce(
-                literal(description, String), s.term.c.description
-            ),
-            name_certified=func.coalesce(name_certified, s.term.c.name_certified),
-            description_certified=func.coalesce(
-                description_certified, s.term.c.description_certified
-            ),
-        )
-        .returning(
-            s.term.c.id,
-            s.term.c.name,
-            s.term.c.description,
-            s.term.c.name_certified,
-            s.term.c.description_certified,
-        )
-    )
-    if not rows:
-        return None
-    result = dict(rows[0])
-
-    # Read before the UPDATE would have been simpler, but RETURNING gives the
-    # new name and the old one is only knowable beforehand -- so it is fetched
-    # first, above, by way of this second statement being the *rename*.
-    store().query_write(
-        update(s.column_attribute)
-        .where(
-            s.column_attribute.c.id.in_(
-                select(s.column_attribute_term.c.attribute_id).where(
-                    s.column_attribute_term.c.term_id == term_id
-                )
+    # One transaction: the rename and the denormalised copy on every
+    # ColumnAttribute are the same fact. If the second statement fails on its
+    # own, `fetch_column_attributes_by_term_id` matches through the stale copy
+    # and the Term's attribute list reads as empty from then on.
+    with write_transaction():
+        rows = store().query_write(
+            update(s.term)
+            .where(s.term.c.id == term_id)
+            .values(
+                name=func.coalesce(literal(name, String), s.term.c.name),
+                description=func.coalesce(
+                    literal(description, String), s.term.c.description
+                ),
+                name_certified=func.coalesce(name_certified, s.term.c.name_certified),
+                description_certified=func.coalesce(
+                    description_certified, s.term.c.description_certified
+                ),
+            )
+            .returning(
+                s.term.c.id,
+                s.term.c.name,
+                s.term.c.description,
+                s.term.c.name_certified,
+                s.term.c.description_certified,
             )
         )
-        .values(term_name=result["name"])
-    )
+        if not rows:
+            return None
+        result = dict(rows[0])
+
+        # Read before the UPDATE would have been simpler, but RETURNING gives
+        # the new name and the old one is only knowable beforehand -- so it is
+        # fetched first, above, by way of this second statement being the
+        # *rename*.
+        store().query_write(
+            update(s.column_attribute)
+            .where(
+                s.column_attribute.c.id.in_(
+                    select(s.column_attribute_term.c.attribute_id).where(
+                        s.column_attribute_term.c.term_id == term_id
+                    )
+                )
+            )
+            .values(term_name=result["name"])
+        )
     return result
 
 

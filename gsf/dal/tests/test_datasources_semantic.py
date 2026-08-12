@@ -267,10 +267,26 @@ def test_tables_without_term_scopes_to_one_database(world) -> None:
     with a database name — so an unscoped pass would file one database's tables
     under another's.
     """
-    scoped = d.fetch_all_tables_without_term(world.prefix)
-    everything = d.fetch_all_tables_without_term()
-    assert len(everything) > len(scoped)
-    assert {r["name"] for r in scoped} <= {r["name"] for r in everything}
+    # The second database is created here rather than assumed. The fixture
+    # builds exactly one, so comparing against whatever else happens to be in
+    # the store passes only on a dirty database and fails on a clean one.
+    other_db = _add(s.catalog_database, name=f"{world.prefix}-other")
+    other_schema = _add(s.catalog_schema, database_id=other_db, name="shop")
+    _add(s.catalog_table, schema_id=other_schema, name="elsewhere")
+    try:
+        scoped = d.fetch_all_tables_without_term(world.prefix)
+        everything = d.fetch_all_tables_without_term()
+
+        scoped_names = {r["name"] for r in scoped}
+        all_names = {r["name"] for r in everything}
+        assert scoped_names <= all_names
+        assert "elsewhere" in all_names, "unscoped must reach the other database"
+        assert "elsewhere" not in scoped_names, "scoped must not leak across databases"
+        assert len(everything) > len(scoped)
+    finally:
+        store().query_write(
+            s.catalog_database.delete().where(s.catalog_database.c.id == other_db)
+        )
 
 
 def test_tables_without_term_reads_the_tables_own_description(world) -> None:

@@ -178,8 +178,16 @@ def _dedupe(array):
     The graph did not de-duplicate and would append the same reference on every
     re-ingest of the same statement; that is a leak rather than a behaviour
     worth reproducing, and the readers treat the array as a set.
+
+    ``column_valued`` is what makes this legal: ``unnest`` is a set-returning
+    function and has to sit in ``FROM``, not in the select list. Calling it
+    inline instead makes SQLAlchemy infer the FROM from the array expression
+    and emit ``FROM column_union, column_union AS excluded``, which Postgres
+    rejects.
     """
-    return select(func.array_agg(distinct(func.unnest(array)))).scalar_subquery()
+    return select(
+        func.array_agg(distinct(func.unnest(array).column_valued("ref")))
+    ).scalar_subquery()
 
 
 def get_sql_by_full_query(sql_full_query: str):

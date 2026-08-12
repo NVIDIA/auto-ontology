@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, union
 
 from gsf.dal import schema as s
 from gsf.dal.session import store
@@ -215,6 +215,33 @@ def delete_semantic_layer(database_name: str | None = None) -> int:
     return semantic_deleted
 
 
+def _delete_orphaned_statements() -> int:
+    """Delete ``sql_query`` rows nothing references any more.
+
+    "Orphan" is defined as having no link left in *any* of the four tables that
+    point at a statement, not just the two the catalog cascade emptied. A
+    statement can also be owned by a SqlAttribute or a CustomAnalysis, and those
+    survive a data-layer reset — deleting on the catalog links alone would take
+    the semantic tier's statements with it.
+    """
+    referenced = union(
+        select(s.sql_query_table.c.sql_query_id),
+        select(s.sql_query_column.c.sql_query_id),
+        select(s.sql_attribute_sql.c.sql_query_id),
+        select(s.custom_analysis_sql.c.sql_query_id),
+    )
+    removed = len(
+        store().query_write(
+            delete(s.sql_query)
+            .where(s.sql_query.c.id.not_in(referenced))
+            .returning(s.sql_query.c.id)
+        )
+    )
+    if removed:
+        logger.info("delete_data_layer: removed %d orphaned statement rows", removed)
+    return removed
+
+
 def delete_data_layer(database_name: str | None = None) -> int:
     """Delete a database's catalog rows and its pgvector embeddings.
 
@@ -222,6 +249,12 @@ def delete_data_layer(database_name: str | None = None) -> int:
     keys, joins, statement links and zone targets all follow by cascade — which
     is the point of modelling ``CONTAINS`` as a parent FK rather than an edge
     table, and means a child table added later cannot be forgotten here.
+
+    Statements are the exception and need the second delete below: ``sql_query``
+    has no foreign key into the catalog, so the cascade takes its *links* and
+    leaves the rows. Left behind they are invisible but not harmless — dedup
+    matches on ``md5(sql_full_query)``, so the next ingest merges into the old
+    row and ``total_counter`` accumulates across resets.
 
     Returns the number of pgvector rows deleted.
     """
@@ -234,6 +267,7 @@ def delete_data_layer(database_name: str | None = None) -> int:
         deleted,
         database_name or "<all>",
     )
+    _delete_orphaned_statements()
 
     data_vdb = get_data_vdb()
     if database_name is None:

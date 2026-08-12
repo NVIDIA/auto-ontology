@@ -20,7 +20,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from gsf.dal import schema as s
 from gsf.dal.datasources import fetch_col_table_contexts
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.semantic.constants import SEMANTIC_SOURCE
 
 logger = logging.getLogger(__name__)
@@ -84,31 +84,38 @@ def merge_column_attribute(
         datatype=datatype,
         description=description,
     )
-    rows = store().query_write(
-        statement.on_conflict_do_update(
-            constraint="uq_column_attribute_merge_key",
-            set_={
-                "datatype": statement.excluded.datatype,
-                "description": func.coalesce(
-                    statement.excluded.description,
-                    s.column_attribute.c.description,
-                ),
-            },
-        ).returning(s.column_attribute.c.id)
-    )
-    attribute_id = rows[0]["id"]
+    # One transaction: the attribute and its two links are a single fact. Without
+    # this each statement autocommits, so a failure on the second leaves a
+    # ColumnAttribute with no link to its column and no link to its Term --
+    # visible in the Term's list, uncounted by the certification rollup, and
+    # permanent. This runs inside the ingestion thread fan-out against a bounded
+    # pool, so a pool timeout mid-way is the realistic trigger, not a crash.
+    with write_transaction():
+        rows = store().query_write(
+            statement.on_conflict_do_update(
+                constraint="uq_column_attribute_merge_key",
+                set_={
+                    "datatype": statement.excluded.datatype,
+                    "description": func.coalesce(
+                        statement.excluded.description,
+                        s.column_attribute.c.description,
+                    ),
+                },
+            ).returning(s.column_attribute.c.id)
+        )
+        attribute_id = rows[0]["id"]
 
-    for table, values in (
-        (
-            s.column_has_attribute,
-            {"column_id": column_id, "attribute_id": attribute_id},
-        ),
-        (
-            s.column_attribute_term,
-            {"attribute_id": attribute_id, "term_id": term_id},
-        ),
-    ):
-        store().query_write(insert(table).values(**values).on_conflict_do_nothing())
+        for table, values in (
+            (
+                s.column_has_attribute,
+                {"column_id": column_id, "attribute_id": attribute_id},
+            ),
+            (
+                s.column_attribute_term,
+                {"attribute_id": attribute_id, "term_id": term_id},
+            ),
+        ):
+            store().query_write(insert(table).values(**values).on_conflict_do_nothing())
 
     return attribute_id
 

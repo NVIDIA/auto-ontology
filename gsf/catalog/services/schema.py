@@ -73,7 +73,11 @@ def add_schema(
 
         edges_per_table = schema.get_edges_per_table()
         with ThreadPoolExecutor(num_workers) as executor:
-            executor.map(add_table, edges_per_table)
+            # `list(...)` is load-bearing: an exception in a worker is stored in
+            # its future and re-raised only when consumed. Left unconsumed,
+            # every failure to write a table's columns is discarded in silence
+            # and this function reports success having written nothing.
+            list(executor.map(add_table, edges_per_table))
 
     except Exception as err:
         logger.error(f"Failed adding schema: {schema.get_schema_name()}")

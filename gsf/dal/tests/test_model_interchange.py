@@ -300,7 +300,35 @@ def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
         ).data_layer.databases
     }
     assert world.database in ids
-    assert len(ids) > 1
+    # A *second* database, created here rather than assumed: the fixture builds
+    # exactly one, so asserting `> 1` against whatever else happens to be in the
+    # store passes only on a developer's dirty database and fails on a clean one.
+    other = _add(s.catalog_database, name=f"{world.prefix}-second")
+    # Down to a column: the export walks the whole hierarchy and joins through
+    # catalog_column, so a database with no columns does not appear at all.
+    other_schema = _add(s.catalog_schema, database_id=other, name="shop")
+    other_table = _add(s.catalog_table, schema_id=other_schema, name="elsewhere")
+    _add(
+        s.catalog_column,
+        table_id=other_table,
+        name="id",
+        data_type="integer",
+        ordinal_position=1,
+    )
+    try:
+        ids_again = {
+            database.id
+            for database in mi.assemble_export_document(
+                mi.fetch_export_rows([]),
+                dialect_by_db_name={},
+                sql_column_resolver=lambda sql, database_name: [],
+            ).data_layer.databases
+        }
+        assert {world.database, other} <= ids_again
+    finally:
+        store().query_write(
+            s.catalog_database.delete().where(s.catalog_database.c.id == other)
+        )
 
 
 def test_validate_database_ids_rejects_an_unknown_one(world) -> None:
