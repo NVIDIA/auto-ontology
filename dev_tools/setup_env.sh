@@ -4,20 +4,12 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO_ROOT"
 
-INFRA_SERVICES="postgres pgadmin neo4j ingestion-service"
+INFRA_SERVICES="postgres pgadmin ingestion-service"
 GSF_SERVICES="gsf gsf-frontend"
-
-neo4j_running() {
-	docker inspect --format='{{.State.Running}}' neo4j 2>/dev/null | grep -q true
-}
 
 resolve_infra_services() {
 	local services=""
 	for svc in $INFRA_SERVICES; do
-		if [[ "$svc" == "neo4j" ]] && neo4j_running; then
-			echo "Neo4j is already running — skipping" >&2
-			continue
-		fi
 		services="$services $svc"
 	done
 	echo "${services# }"

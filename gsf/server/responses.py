@@ -156,7 +156,6 @@ class HealthResponse(_Payload):
     """Liveness/readiness body — 200 when healthy, 503 when degraded."""
 
     status: str
-    neo4j: dict[str, str]
     postgres: dict[str, str]
 
 

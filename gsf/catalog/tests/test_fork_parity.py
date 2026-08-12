@@ -17,8 +17,11 @@ this repo's style and carries a provenance docstring, neither of which is a
 behaviour change. Module docstrings are dropped from both sides before
 comparing.
 
-**Delete this suite in Phase 4**, when ``store/`` stops being a copy — or move
-the remaining storage-agnostic modules into a narrower list at that point.
+Phase 11 took the narrower-list option this docstring offered. ``gsf/catalog/store/``
+is no longer a fork of anything — it is the Postgres implementation — so every
+mapping naming it is gone. What remains is the genuinely storage-agnostic part
+of the fork: normalisation, SQL parsing, the model classes and the parsers.
+Those still track upstream, and upstream drift in them is still worth catching.
 """
 
 from __future__ import annotations
@@ -47,10 +50,6 @@ FORKED = {
         "nemo_retriever.tabular_data.ingestion.parsers.schemas_parser"
     ),
     "gsf.catalog.services.schema": "nemo_retriever.tabular_data.ingestion.services.schema",
-    "gsf.catalog.store.neo4j.schemas": "nemo_retriever.tabular_data.ingestion.dal.schemas_dal",
-    "gsf.catalog.store.neo4j.edges": "nemo_retriever.tabular_data.ingestion.dal.utils_dal",
-    "gsf.catalog.store.neo4j.indexes": "nemo_retriever.tabular_data.ingestion.indexes",
-    "gsf.catalog.store.neo4j.connection": "nemo_retriever.tabular_data.neo4j.neo4j_connection",
 }
 
 # Deliberately **not** verbatim, each with a reason. Anything added here needs a
@@ -62,18 +61,6 @@ DIVERGED = {
         "calls directly) — DECISION-004"
     ),
     "gsf.catalog.ingest": "new in Phase 1; replaces the library's TabularSchemaExtractOp",
-    "gsf.catalog.store.db": "Phase 4 backend selector; not a fork",
-    "gsf.catalog.store.schemas": "Phase 4 backend selector; not a fork",
-    "gsf.catalog.store.queries": "Phase 4 backend selector; not a fork",
-    "gsf.catalog.store.edges": "Phase 4 backend selector; not a fork",
-    "gsf.catalog.store.indexes": "Phase 4 backend selector; not a fork",
-    "gsf.catalog.store.pg.registry": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.rows": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.edges": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.schemas": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.indexes": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.db": "Phase 4 Postgres implementation; not a fork",
-    "gsf.catalog.store.pg.queries": "Phase 4 Postgres implementation; not a fork",
     "gsf.catalog.query_stats": (
         "Phase 4: get_sql_counters and get_candidate_sql_ids are pure, so they "
         "moved out of store/neo4j/queries.py to be shared -- DECISION-007"
@@ -82,20 +69,20 @@ DIVERGED = {
         "Phase 4: the storage-agnostic re-ingest diff, lifted out of "
         "store/neo4j/db.py so both backends share one copy -- DECISION-006"
     ),
-    "gsf.catalog.store.neo4j.queries": (
-        "get_sql_counters and get_candidate_sql_ids moved to "
-        "gsf.catalog.query_stats so both backends share one copy -- DECISION-007"
-    ),
-    "gsf.catalog.store.neo4j.db": (
-        "column-diff merge keys corrected — upstream merges on a 'schema' column "
-        "neither frame has and a 'database' column only one has, so the column "
-        "diff raised KeyError on every re-ingest — DECISION-006"
-    ),
     "gsf.catalog.write": (
         "executor.map result is consumed, so a failing schema update raises "
         "instead of being discarded with its future — DECISION-006"
     ),
     "gsf.catalog.constants": "forked in Phase 0; covered by test_constants.py",
+    # Phase 4 wrote these for Postgres and Phase 11 promoted them out of
+    # `store/pg/`. Not forks of anything, and never were after Phase 4.
+    "gsf.catalog.store.db": "Postgres implementation; not a fork",
+    "gsf.catalog.store.schemas": "Postgres implementation; not a fork",
+    "gsf.catalog.store.queries": "Postgres implementation; not a fork",
+    "gsf.catalog.store.edges": "Postgres implementation; not a fork",
+    "gsf.catalog.store.indexes": "Postgres implementation; not a fork",
+    "gsf.catalog.store.registry": "Postgres implementation; not a fork",
+    "gsf.catalog.store.rows": "Postgres implementation; not a fork",
 }
 
 MODULE_MAP = {
@@ -115,16 +102,20 @@ MODULE_MAP = {
     "nemo_retriever.tabular_data.ingestion.parsers": "gsf.catalog.parsers",
     "nemo_retriever.tabular_data.ingestion.services.schema": "gsf.catalog.services.schema",
     "nemo_retriever.tabular_data.ingestion.services.queries": "gsf.catalog.sql_parse",
-    "nemo_retriever.tabular_data.ingestion.dal.db_dal": "gsf.catalog.store.neo4j.db",
-    "nemo_retriever.tabular_data.ingestion.dal.schemas_dal": "gsf.catalog.store.neo4j.schemas",
-    "nemo_retriever.tabular_data.ingestion.dal.queries_dal": "gsf.catalog.store.neo4j.queries",
-    "nemo_retriever.tabular_data.ingestion.dal.utils_dal": "gsf.catalog.store.neo4j.edges",
-    "nemo_retriever.tabular_data.ingestion.indexes": "gsf.catalog.store.neo4j.indexes",
+    # Import-path equivalences. These are not claims that the modules match —
+    # `gsf.catalog.store.*` is the Postgres implementation and appears in
+    # DIVERGED — only that an upstream module importing `queries_dal` and a
+    # forked module importing `gsf.catalog.store.queries` are importing the
+    # same thing by different names. Without them a *genuinely* verbatim fork
+    # reads as drift on its import lines alone.
+    "nemo_retriever.tabular_data.ingestion.dal.db_dal": "gsf.catalog.store.db",
+    "nemo_retriever.tabular_data.ingestion.dal.schemas_dal": "gsf.catalog.store.schemas",
+    "nemo_retriever.tabular_data.ingestion.dal.queries_dal": "gsf.catalog.store.queries",
+    "nemo_retriever.tabular_data.ingestion.dal.utils_dal": "gsf.catalog.store.edges",
+    "nemo_retriever.tabular_data.ingestion.indexes": "gsf.catalog.store.indexes",
     "nemo_retriever.tabular_data.ingestion.utils": "gsf.catalog.normalize",
     "nemo_retriever.tabular_data.ingestion.extract_data": "gsf.catalog.extract",
     "nemo_retriever.tabular_data.ingestion.write_to_graph": "gsf.catalog.write",
-    "nemo_retriever.tabular_data.neo4j.neo4j_connection": "gsf.catalog.store.neo4j.connection",
-    "nemo_retriever.tabular_data.neo4j": "gsf.catalog.store.neo4j.connection",
 }
 
 CATALOG_DIR = pathlib.Path(__file__).resolve().parents[1]
@@ -144,30 +135,12 @@ def _rewrite(text: str) -> str:
     return re.sub(r"\bNeo4jNode\b", "CatalogNode", text)
 
 
-def _canonical_store_paths(text: str) -> str:
-    """Collapse ``gsf.catalog.store.neo4j.X`` and ``gsf.catalog.store.X``.
-
-    Phase 4 put the Neo4j implementation behind a backend selector, which split
-    one import path into two legitimate ones: storage-agnostic modules above
-    ``store/`` import the selector (``gsf.catalog.store.db``), while modules
-    *inside* ``store/neo4j/`` import their siblings directly
-    (``gsf.catalog.store.neo4j.db``) — going through their own selector would
-    make the Neo4j implementation call the Postgres one under
-    ``GSF_STORE=postgres``.
-
-    Both are correct rewrites of the same upstream module, so the comparison
-    normalises them rather than the map having to know which caller is which.
-    """
-    return text.replace("gsf.catalog.store.neo4j.", "gsf.catalog.store.")
-
-
 def _normalised_ast(text: str) -> str:
     """AST dump with the module docstring dropped.
 
     Formatting, comments and the provenance docstring are not behaviour, so
     comparing dumps keeps the test about the code and nothing else.
     """
-    text = _canonical_store_paths(text)
     tree = ast.parse(text)
     body = tree.body
     if (

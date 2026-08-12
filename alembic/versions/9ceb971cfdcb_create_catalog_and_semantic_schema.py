@@ -22,7 +22,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from gsf.dal.pg.schema import (
+from gsf.dal.schema import (
     DROP_JOIN_PATH_EDGE_VIEW_SQL,
     JOIN_PATH_EDGE_VIEW_SQL,
     SCHEMA,

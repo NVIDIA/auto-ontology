@@ -24,8 +24,8 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from gsf.dal.pg.schema import METADATA, SCHEMA
-from gsf.dal.pg.session import sqlalchemy_url
+from gsf.dal.schema import METADATA, SCHEMA
+from gsf.dal.session import sqlalchemy_url
 from gsf.env import load_env
 
 load_env()

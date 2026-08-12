@@ -2,32 +2,24 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for GSF model YAML export/import."""
+"""Unit tests for GSF model YAML export/import.
+
+Scope note (Phase 11): the tests that mocked ``apply_import_model``'s internals
+and ``_resolve_entity`` went with the Neo4j implementation they patched. Their
+coverage did not — ``gsf/dal/tests/test_model_interchange.py`` asserts the same
+behaviours against a live store, which is a better test of "the import is one
+transaction" than a mocked ``write_transaction`` ever was.
+"""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-import pytest
 import yaml
 
 from gsf.dal.model_interchange import assemble_export_document
 
-# Imported from the Neo4j implementation, not the selector: every test below
-# that touches these patches `gsf.dal.neo4j.model_interchange` internals, so
-# calling them through the selector would run the *other* backend under
-# `GSF_STORE=postgres` and the patches would silently miss. The Postgres
-# equivalents have their own tests in `gsf/dal/pg/tests/`.
-#
-# `_resolve_entity` is Neo4j-only besides: the Postgres implementation has no
-# single-entity path, only the batched one.
-from gsf.dal.neo4j.model_interchange import (
-    UnknownDatabaseIdsError,
-    _resolve_entity,
-    resolve_sql_column_ids,
-    validate_database_ids,
-)
+from gsf.dal.model_interchange import resolve_sql_column_ids
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
     SQL_ATTR_SOURCE_MANUAL,
@@ -49,12 +41,6 @@ from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
 # which asks the connector registry and `list_connections()` what dialect each
 # database speaks. That second call is what kept the two export tests skipped
 # until Phase 10; both now patch it, since neither is about dialect resolution.
-
-
-@contextmanager
-def _null_transaction():
-    """Stand in for ``write_transaction`` so unit tests need no live Neo4j."""
-    yield
 
 
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:
@@ -248,16 +234,6 @@ def test_export_model_all_databases_uses_empty_filter(
     mock_fetch.assert_called_once_with([])
 
 
-@patch("gsf.dal.neo4j.model_interchange.graph")
-def test_validate_database_ids_raises_for_unknown(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = [{"ids": ["db-1"]}]
-
-    with pytest.raises(UnknownDatabaseIdsError) as exc:
-        validate_database_ids(["db-1", "missing"])
-
-    assert exc.value.database_ids == ["missing"]
-
-
 @patch("gsf.server.model_interchange.service.flush_import_embeddings")
 @patch("gsf.server.model_interchange.service.dal.apply_import_model")
 def test_import_model_flushes_embeddings_when_embed_true(
@@ -336,9 +312,9 @@ def test_build_catalog_embed_rows_match_tabular_shape() -> None:
     assert "columns:" in table_row["text"]
 
 
-@patch("gsf.dal.neo4j.model_interchange.get_schemas")
-@patch("gsf.dal.neo4j.model_interchange.get_dialects")
-@patch("gsf.dal.neo4j.model_interchange.validate_sql")
+@patch("gsf.dal.model_interchange.get_schemas")
+@patch("gsf.dal.model_interchange.get_dialects")
+@patch("gsf.dal.model_interchange.validate_sql")
 def test_resolve_sql_column_ids_returns_parser_column_ids(
     mock_validate: MagicMock,
     mock_dialects: MagicMock,
@@ -352,97 +328,3 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
         "col-1",
         "col-2",
     ]
-
-
-@patch("gsf.dal.neo4j.model_interchange.graph")
-def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = [{"id": "live-1"}]
-
-    live_id, created = _resolve_entity("Database", "yaml-1")
-
-    assert live_id == "live-1"
-    assert created is False
-    mock_conn.return_value.query_write.assert_called()
-    mock_conn.return_value.query_read.assert_called_once()
-
-
-@patch("gsf.dal.neo4j.model_interchange.graph")
-def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = []
-    mock_conn.return_value.query_write.return_value = [{"id": "new-1"}]
-
-    live_id, created = _resolve_entity(
-        "Table",
-        "yaml-table",
-        create_props={"name": "orders"},
-    )
-
-    assert live_id == "new-1"
-    assert created is True
-    write_params = mock_conn.return_value.query_write.call_args[0][1]
-    assert write_params["props"]["imported_id"] == "yaml-table"
-    assert write_params["props"]["name"] == "orders"
-
-
-@patch("gsf.dal.neo4j.model_interchange._ensure_import_indexes")
-@patch("gsf.dal.neo4j.model_interchange.write_transaction", _null_transaction)
-@patch("gsf.dal.neo4j.model_interchange._import_custom_analyses")
-@patch("gsf.dal.neo4j.model_interchange._import_sql_attributes")
-@patch("gsf.dal.neo4j.model_interchange._import_semantic_fks")
-@patch("gsf.dal.neo4j.model_interchange._import_column_attributes")
-@patch("gsf.dal.neo4j.model_interchange._import_terms")
-@patch("gsf.dal.neo4j.model_interchange._import_joins")
-@patch("gsf.dal.neo4j.model_interchange._import_foreign_keys")
-@patch("gsf.dal.neo4j.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.neo4j.model_interchange._import_catalog")
-def test_apply_import_model_creates_when_catalog_missing(
-    mock_catalog: MagicMock,
-    mock_delete: MagicMock,
-    *_mocks: MagicMock,
-) -> None:
-    from gsf.dal.neo4j.model_interchange import apply_import_model
-
-    mock_catalog.return_value = ["live-db"]
-    document = assemble_export_document(
-        _export_rows(),
-        dialect_by_db_name={"retail": "sqlite"},
-        sql_column_resolver=lambda _sql, _db: [],
-    )
-
-    summary = apply_import_model(document, replace=True, embed_buffer=None)
-
-    mock_catalog.assert_called_once()
-    assert summary["database_ids"] == ["live-db"]
-    assert "created" in summary
-    assert "skipped" in summary
-
-
-@patch("gsf.dal.neo4j.model_interchange._ensure_import_indexes")
-@patch(
-    "gsf.dal.neo4j.model_interchange._import_terms", side_effect=RuntimeError("bad sql")
-)
-@patch("gsf.dal.neo4j.model_interchange._import_joins")
-@patch("gsf.dal.neo4j.model_interchange._import_foreign_keys")
-@patch("gsf.dal.neo4j.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.neo4j.model_interchange._import_catalog")
-@patch("gsf.dal.neo4j.model_interchange.write_transaction")
-def test_apply_import_model_runs_in_one_transaction(
-    mock_transaction: MagicMock,
-    mock_catalog: MagicMock,
-    *_mocks: MagicMock,
-) -> None:
-    """A failure part-way through must not escape the transaction scope."""
-    from gsf.dal.neo4j.model_interchange import apply_import_model
-
-    mock_transaction.return_value = _null_transaction()
-    mock_catalog.return_value = ["live-db"]
-    document = assemble_export_document(
-        _export_rows(),
-        dialect_by_db_name={"retail": "sqlite"},
-        sql_column_resolver=lambda _sql, _db: [],
-    )
-
-    with pytest.raises(RuntimeError, match="bad sql"):
-        apply_import_model(document, replace=True, embed_buffer=None)
-
-    mock_transaction.assert_called_once()

@@ -2,30 +2,25 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Backend selector for ``gsf.catalog.store.indexes``.
+"""Index creation — a no-op, because Alembic owns the schema.
 
-Resolves to the Neo4j or Postgres implementation once, at import, based on
-``GSF_STORE``. See :mod:`gsf.infra.store`.
+The Neo4j implementation creates a uniqueness constraint and two indexes per
+label on **every ingest**, because a schemaless store has nowhere else to put
+them. Here they are declared in ``gsf/dal/pg/schema.py`` and created once by a
+migration, so there is nothing for an ingest to do.
 
-The import lists are explicit rather than ``import *`` for the same reason the
-DAL's are: they *are* the frozen public surface both implementations must
-provide, they double as a porting checklist, and a star-import would silently
-paper over a function the Postgres side has not implemented yet.
-
-Phase 11 deletes this file and promotes ``pg/indexes.py`` in its place.
+Kept as a function rather than deleted because ``write.py`` calls it
+unconditionally at the top of ``populate_tabular_data``, and that call site is
+storage-agnostic code the fork does not edit. Phase 11 removes both.
 """
 
-from gsf.infra.store import USE_PG
+from __future__ import annotations
 
-if USE_PG:
-    from gsf.catalog.store.pg.indexes import (  # noqa: F401
-        add_indices,
-    )
-else:
-    from gsf.catalog.store.neo4j.indexes import (  # noqa: F401
-        add_indices,
-    )
+import logging
 
-__all__ = [
-    "add_indices",
-]
+logger = logging.getLogger(__name__)
+
+
+def add_indices():
+    """Do nothing. Indexes are created by migration, not by ingestion."""
+    logger.debug("add_indices: no-op on Postgres; indexes come from Alembic")

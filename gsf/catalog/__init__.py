@@ -19,7 +19,7 @@ Everything above :mod:`gsf.catalog.store` is storage-agnostic. ``store/`` is the
 only subtree Phase 4 rewrites for Postgres — keep Cypher and driver types out of
 everything else.
 
-``ingest_catalog`` is imported lazily: it pulls in pandas, sqlglot and the neo4j
+``ingest_catalog`` is imported lazily: it pulls in pandas, sqlglot and the store
 driver, and several modules import :mod:`gsf.catalog.constants` for nothing but
 the label vocabulary.
 """

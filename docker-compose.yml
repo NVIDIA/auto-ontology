@@ -36,40 +36,6 @@ services:
     depends_on:
       - postgres
 
-  neo4j:
-    image: neo4j:latest
-    container_name: neo4j
-    restart: unless-stopped
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    environment:
-      NEO4J_AUTH: ${NEO4J_USERNAME}/${NEO4J_PASSWORD}
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_server_config_strict__validation_enabled: "false"
-      NEO4J_apoc_export_file_enabled: "true"
-      NEO4J_dbms_security_auth__minimum__password__length: "3"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-      - neo4j_plugins:/plugins
-      - neo4j_import:/var/lib/neo4j/import
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "cypher-shell",
-          "-u",
-          "neo4j",
-          "-p",
-          "${NEO4J_PASSWORD}",
-          "RETURN 1",
-        ]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
   gsf:
     build:
       context: .
@@ -85,13 +51,10 @@ services:
       POSTGRES_HOST: postgres
       # In-network port; POSTGRES_PORT in .env is the host-side mapping.
       POSTGRES_PORT: "5432"
-      NEO4J_URI: bolt://neo4j:7687
       INGESTION_SERVICE_URL: http://ingestion-service:3002
     depends_on:
       postgres:
         condition: service_started
-      neo4j:
-        condition: service_healthy
       ingestion-service:
         condition: service_started
 
@@ -122,12 +85,9 @@ services:
     environment:
       POSTGRES_HOST: postgres
       POSTGRES_PORT: "5432"
-      NEO4J_URI: bolt://neo4j:7687
     depends_on:
       postgres:
         condition: service_started
-      neo4j:
-        condition: service_healthy
 
   # One-shot Job: apply the backend's Alembic migrations, which own the `gsf`
   # schema (catalog + semantic tier). Separate from frontend-migrate because
@@ -204,7 +164,3 @@ services:
 volumes:
   postgres_data:
   pgadmin_data:
-  neo4j_data:
-  neo4j_logs:
-  neo4j_plugins:
-  neo4j_import:

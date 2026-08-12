@@ -13,14 +13,14 @@ with a renamed keyword or a dropped pass-through argument, which type checks
 fine and fails at runtime for one caller.
 
 This snapshots every public callable each DAL module defines, with its
-signature, and fails when the two disagree. Once ``gsf/dal/pg/`` and
-``gsf/dal/neo4j/`` exist side by side it also asserts the two implementations
-expose the same surface.
+signature, and fails when the two disagree.
 
-**Functions only, deliberately.** Module-level constants are not frozen —
-several of them (``TABLE_COUNTS_SUBQUERY``, the ``cypher_fragments`` builders'
-output) are Cypher, and Cypher is exactly what this refactor is meant to
-delete. Freezing them would fight the work rather than protect it.
+Through Phases 3-10 it also compared the Postgres and Neo4j implementations
+against each other, which is what made the ``GSF_STORE`` flip safe. Phase 11
+removed the Neo4j side, so only the freeze remains — and it is still the thing
+that catches a renamed keyword.
+
+**Functions only, deliberately.** Module-level constants are not frozen.
 
 Regenerate after an *intentional* signature change::
 
@@ -33,9 +33,9 @@ from __future__ import annotations
 
 import importlib
 import inspect
-import re
 import json
 import pkgutil
+import re
 from pathlib import Path
 from typing import Any
 
@@ -45,50 +45,13 @@ import gsf.dal
 
 SNAPSHOT = Path(__file__).with_name("dal_surface.json")
 
-#: Functions whose *annotations* legitimately differ between backends, with the
-#: reason. Parameter **names** are still required to match — those are what
-#: callers pass — so this permits a changed type, never a changed call shape.
-#:
-#: Anything added here needs a DECISIONS.md record first.
-#: Functions the Postgres side places in a different module than Neo4j did,
-#: with the reason. These are *relocations*, not additions: the function exists
-#: on both backends, so the ``GSF_STORE`` flip stays safe -- only the module it
-#: lives in differs, and only until the Neo4j module that hosts it is ported.
-#:
-#: Anything added here needs a DECISIONS.md record first.
-RELOCATED: dict[tuple[str, str], str] = {
-    ("zones", "fetch_table_zones_map"): (
-        "Neo4j keeps it in exploration.py (Phase 9); Postgres needs it in "
-        "Phase 7, because the Term reads render zone chips. Duplicating a "
-        "zone-resolution rule is how a viewer ends up seeing a chip on one "
-        "screen and not another, so it lands once, in zones.py, and Phase 9 "
-        "re-exports it rather than rewriting it -- DECISION-011"
-    ),
-    ("zones", "zone_covers_table"): (
-        "the predicate behind fetch_table_zones_map, shared with the Term and "
-        "SqlAttribute zone chips. No Neo4j counterpart: there it is the "
-        "inline `CONTAINS*0..2` walk, repeated at each site -- DECISION-011"
-    ),
-}
-
-BACKEND_SPECIFIC: dict[tuple[str, str], str] = {
-    ("users", "resolve_table_filter"): (
-        "returns a SQLAlchemy predicate where Neo4j returns a Cypher WHERE "
-        "string, and takes a Column rather than a column-name string. Every "
-        "caller is inside gsf/dal and is ported with its own phase, so the two "
-        "shapes never meet -- DECISION-008"
-    ),
-}
-
 
 def _dal_modules() -> list[str]:
     """Every domain module directly under ``gsf.dal``.
 
-    Packages are skipped, which covers ``tests`` now and ``pg`` / ``neo4j``
-    once the split lands — those are compared against each other by
-    :func:`test_postgres_and_neo4j_surfaces_match` instead. ``gsf.dal`` itself
-    is not a module here, so ``close_store`` is out of scope: it's a lifecycle
-    hook, not a data function, and Phase 3 deliberately changes what it closes.
+    Packages are skipped, which covers ``tests``. ``gsf.dal`` itself is not a
+    module here, so ``close_store`` is out of scope: it is a lifecycle hook, not
+    a data function.
     """
     return sorted(m.name for m in pkgutil.iter_modules(gsf.dal.__path__) if not m.ispkg)
 
@@ -105,17 +68,28 @@ def _describe(obj: Any) -> str:
         bases = ", ".join(base.__name__ for base in obj.__bases__)
         return f"class({bases})"
     try:
-        return str(inspect.signature(obj))
+        return _stable(str(inspect.signature(obj)))
     except (ValueError, TypeError):  # C-implemented or otherwise opaque
         return "callable(?)"
+
+
+#: ``<... object at 0x7f...>`` — a default argument that is an object without a
+#: ``__repr__`` renders its address, which differs every process. A snapshot
+#: containing one can never match itself, so the address is normalised away and
+#: the type name kept. ``sql_fragments`` defaults to a ``Table``, whose repr is
+#: full of these.
+_ADDRESS = re.compile(r" object at 0x[0-9a-f]+")
+
+
+def _stable(signature: str) -> str:
+    return _ADDRESS.sub(" object", signature)
 
 
 def _public_surface(module: Any) -> dict[str, str]:
     """Public callables *defined in* ``module``, mapped to their shape.
 
-    The ``__module__`` check drops re-exports — ``Labels``, ``graph``,
-    ``get_neo4j_conn`` and friends are imported into most DAL modules and are
-    not part of any module's own contract.
+    The ``__module__`` check drops re-exports — helpers imported into a module
+    are not part of that module's own contract.
     """
     exported = set(getattr(module, "__all__", ()) or ())
     return {
@@ -125,10 +99,10 @@ def _public_surface(module: Any) -> dict[str, str]:
         and callable(obj)
         and (
             getattr(obj, "__module__", None) == module.__name__
-            # Backend selectors re-export their implementation's functions, so
-            # __module__ points at gsf.dal.neo4j.X or gsf.dal.pg.X. Without this
-            # a selector would appear to have no public surface at all, and the
-            # freeze would silently stop guarding the module it was written for.
+            # A module may deliberately re-export something defined elsewhere
+            # (``exploration.fetch_table_zones_map`` lives in ``zones``). Those
+            # are part of its contract, and __module__ points at the definition,
+            # so ``__all__`` is what makes them visible here.
             or name in exported
         )
     }
@@ -167,34 +141,14 @@ def test_module_surface_is_unchanged(module_name: str) -> None:
         f"If the removal is intentional, regenerate the snapshot."
     )
 
-    # The snapshot records one backend's annotations, and `BACKEND_SPECIFIC`
-    # names the functions whose types legitimately differ between the two — so
-    # under the other backend those trip this comparison for a reason already
-    # recorded in DECISIONS.md. Exempted here as they are in the pg/neo4j
-    # comparison, and on the same terms: **parameter names must still match**,
-    # since those are what callers pass.
-    module = importlib.import_module(f"gsf.dal.{module_name}")
-    changed = {}
-    for name in frozen:
-        if frozen[name] == actual[name]:
-            continue
-        if (module_name, name) in BACKEND_SPECIFIC:
-            _assert_same_parameters(module, module_name, name, frozen[name])
-            continue
-        changed[name] = f"{frozen[name]} -> {actual[name]}"
+    changed = {
+        name: f"{frozen[name]} -> {actual[name]}"
+        for name in frozen
+        if frozen[name] != actual[name]
+    }
     assert not changed, (
         f"gsf.dal.{module_name} signatures changed. A renamed keyword or a "
         f"dropped argument breaks callers silently: {changed}"
-    )
-
-
-def _assert_same_parameters(module, module_name: str, name: str, frozen: str) -> None:
-    """A backend-specific function may change its types, never its call shape."""
-    live = list(inspect.signature(getattr(module, name)).parameters)
-    recorded = re.findall(r"[(,]\s*([a-z_][a-z0-9_]*)\s*:", frozen)
-    assert live == recorded, (
-        f"gsf.dal.{module_name}.{name} is allowed to differ in types, not in "
-        f"parameters: {live} vs {recorded}"
     )
 
 
@@ -207,68 +161,6 @@ def test_snapshot_is_not_empty() -> None:
     """Guard against a regeneration that captured nothing."""
     snapshot = _load_snapshot()
     assert sum(len(fns) for fns in snapshot.values()) > 100
-
-
-def test_postgres_and_neo4j_surfaces_match() -> None:
-    """Both implementations must expose an identical surface.
-
-    Skipped until ``gsf/dal/pg/`` and ``gsf/dal/neo4j/`` exist side by side
-    (Phase 3 onward). From then on this is the check that makes the
-    ``GSF_STORE`` flip safe: the two packages have to be substitutable
-    function-for-function, or flipping the switch breaks a caller.
-    """
-    pg_root = Path(gsf.dal.__path__[0]) / "pg"
-    neo4j_root = Path(gsf.dal.__path__[0]) / "neo4j"
-    if not (pg_root.is_dir() and neo4j_root.is_dir()):
-        pytest.skip("split implementations do not exist yet (lands in Phase 3)")
-
-    # Only modules with both implementations. A domain reaches pg/ one phase at
-    # a time, and session.py / schema.py have no Neo4j counterpart by design.
-    both = sorted(
-        path.stem
-        for path in pg_root.glob("*.py")
-        if not path.stem.startswith("_") and (neo4j_root / path.name).is_file()
-    )
-    assert both, "no domain has been ported yet; this test is vacuous"
-
-    mismatches: dict[str, str] = {}
-    for stem in both:
-        path = pg_root / f"{stem}.py"
-        pg_module = importlib.import_module(f"gsf.dal.pg.{path.stem}")
-        neo_module = importlib.import_module(f"gsf.dal.neo4j.{path.stem}")
-        pg = _public_surface(pg_module)
-        neo = _public_surface(neo_module)
-
-        # An allowed divergence still has to keep its parameter names: a caller
-        # passes those, and a renamed keyword breaks it whatever the types say.
-        for name in set(pg) & set(neo):
-            if (path.stem, name) not in BACKEND_SPECIFIC:
-                continue
-            pg_params = list(inspect.signature(getattr(pg_module, name)).parameters)
-            neo_params = list(inspect.signature(getattr(neo_module, name)).parameters)
-            assert pg_params == neo_params, (
-                f"{path.stem}.{name} is allowed to differ in types, not in "
-                f"parameters: {pg_params} vs {neo_params}"
-            )
-            pg[name] = neo[name] = "<backend-specific>"
-
-        for name in list(pg):
-            if (path.stem, name) in RELOCATED and name not in neo:
-                del pg[name]
-
-        if pg != neo:
-            only_pg = {n: pg[n] for n in set(pg) - set(neo)}
-            only_neo = {n: neo[n] for n in set(neo) - set(pg)}
-            differing = {
-                n: f"pg{pg[n]} != neo4j{neo[n]}"
-                for n in set(pg) & set(neo)
-                if pg[n] != neo[n]
-            }
-            mismatches[path.stem] = (
-                f"only in pg={only_pg}, only in neo4j={only_neo}, differing={differing}"
-            )
-
-    assert not mismatches, f"pg/neo4j DAL surfaces diverged: {mismatches}"
 
 
 if __name__ == "__main__":

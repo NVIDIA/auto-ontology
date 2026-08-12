@@ -29,9 +29,6 @@ podAnnotations: {}
 postgresUser: gsf
 postgresPassword: ""
 postgresDatabase: gsf
-# Neo4j
-neo4jUsername: neo4j
-neo4jPassword: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
@@ -121,28 +118,7 @@ pgadmin:
       memory: 128Mi
 
 # ------------------------------------------------------------------
-# Neo4j
 # ------------------------------------------------------------------
-neo4j:
-  image:
-    repository: neo4j
-    tag: latest
-  service:
-    httpPort: 7474
-    boltPort: 7687
-  persistence:
-    dataSize: 5Gi
-    logsSize: 1Gi
-    pluginsSize: 1Gi
-    importSize: 1Gi
-    # Set to a specific class on clusters without a default dynamic provisioner
-    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
-    storageClassName: ""
-  resources:
-    requests:
-      cpu: 200m
-      memory: 1Gi
-
 # ------------------------------------------------------------------
 # GSF FastAPI backend
 # ------------------------------------------------------------------

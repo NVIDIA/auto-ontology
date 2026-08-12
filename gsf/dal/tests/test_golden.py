@@ -9,15 +9,14 @@ greenfield, so there is no production data to diff against: these 122 recorded
 reads are the only evidence that a rewritten ``gsf.dal`` still answers the same
 questions the same way. Phases 5-10 are graded by this file.
 
-Needs the fixture, and skips without it. **The same goldens are replayed against
-both backends** — recorded on Neo4j, and since Phase 11 also compared against
-Postgres, which is what makes them a parity check rather than a regression
-check::
+**These goldens were recorded against Neo4j.** They are kept as-is, and the
+Postgres implementation is graded against them — that is the whole point, and it
+is why re-recording them is a last resort rather than a fix::
 
-    docker compose up -d postgres neo4j
+    docker compose up -d postgres
     uv run --no-sync python -m dev_tools.seed_fixtures
-    GSF_STORE=postgres uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
-    GSF_STORE=postgres uv run --no-sync pytest gsf/dal/tests/test_golden.py
+    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    uv run --no-sync pytest gsf/dal/tests/test_golden.py
 
 Re-record only when a change to DAL output is *intended*, and say why in
 ``docs/refactor/drop-neo4j/PROGRESS.md``::
@@ -45,17 +44,15 @@ GOLDEN = capture_dal_golden.load_golden()
 
 
 def _require_fixture():
-    """Skip when the selected backend has no reachable fixture.
+    """Skip when there is no reachable fixture.
 
-    Backend-aware since Phase 11: keyed on ``NEO4J_URI`` alone, this skipped
-    every comparison under ``GSF_STORE=postgres`` — which is how the replay
-    could report "all green" while grading nothing at all.
+    Keyed on ``NEO4J_URI`` until Phase 11, which meant it skipped every
+    comparison the moment the store changed — reporting "all green" while
+    grading nothing. Worth remembering as a shape: a skip guard naming the
+    wrong dependency turns a suite off silently.
     """
-    from gsf.infra.store import USE_PG
-
-    required = "POSTGRES_USER" if USE_PG else "NEO4J_URI"
-    if not os.environ.get(required):
-        pytest.skip(f"{required} not set; the golden fixture is unavailable")
+    if not os.environ.get("POSTGRES_USER"):
+        pytest.skip("POSTGRES_USER not set; the golden fixture is unavailable")
     try:
         return capture_dal_golden.capture_all()
     except SystemExit as exc:  # _fixture_ids() raises this when unseeded
@@ -137,15 +134,13 @@ def _without(value: Any, keys: frozenset[str]) -> Any:
 @pytest.mark.parametrize("name", sorted(GOLDEN["results"]))
 def test_read_matches_golden(name: str, live) -> None:
     """Every recorded read still returns exactly what it returned."""
-    from gsf.infra.store import USE_PG
-
     assert name in live.results, (
         f"{name} is in the golden but was not captured — the read was removed "
         f"or renamed. If intended, re-record."
     )
     expected = GOLDEN["results"][name]
     actual = json.loads(json.dumps(live.results[name], default=str))
-    if USE_PG and name in OPTIONAL_KEYS:
+    if name in OPTIONAL_KEYS:
         optional = OPTIONAL_KEYS[name]
         actual, expected = _without(actual, optional), _without(expected, optional)
     assert actual == expected, f"{name} diverged from its recorded output"

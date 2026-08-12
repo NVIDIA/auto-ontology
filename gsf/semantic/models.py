@@ -188,7 +188,7 @@ class FkHitSelection(BaseModel):
     selected_id: str | None = Field(
         ...,
         description=(
-            "The neo4j_id of the candidate that is the primary-key column this FK "
+            "The column_id of the candidate that is the primary-key column this FK "
             "references, exactly as shown in the candidate list. "
             "Return null if none of the candidates are a confident match."
         ),

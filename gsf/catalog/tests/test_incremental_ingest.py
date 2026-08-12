@@ -15,8 +15,7 @@ go through :mod:`gsf.catalog.tests.catalog_inspector`, which asks the same
 question of both stores, so the file is one specification rather than two. The
 switch is read once at import, so covering both means two processes::
 
-    GSF_STORE=neo4j    uv run pytest gsf/catalog/tests/test_incremental_ingest.py
-    GSF_STORE=postgres uv run pytest gsf/catalog/tests/test_incremental_ingest.py
+    uv run pytest gsf/catalog/tests/test_incremental_ingest.py
 
 CI has to run both. One passing does not imply the other.
 
@@ -35,7 +34,6 @@ pytest.importorskip("psycopg")
 import psycopg  # noqa: E402
 
 from gsf.catalog.tests import catalog_inspector as catalog  # noqa: E402
-from gsf.infra.store import STORE, USE_PG  # noqa: E402
 
 
 def _pg_dsn(dbname: str) -> str:
@@ -52,28 +50,13 @@ def require_store():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set (needed for the source database)")
 
-    if USE_PG:
-        try:
-            from gsf.dal.pg import schema as s
-            from gsf.dal.pg.session import store
+    try:
+        from gsf.dal import schema as s
+        from gsf.dal.session import store
 
-            store().query_read(f"SELECT 1 FROM {s.SCHEMA}.catalog_database LIMIT 1")
-        except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
-    else:
-        if not os.environ.get("NEO4J_URI"):
-            pytest.skip("NEO4J_URI not set")
-        try:
-            from gsf.catalog.store.neo4j.connection import get_neo4j_conn
-
-            get_neo4j_conn().query_read("RETURN 1 AS ok")
-        except Exception as exc:  # noqa: BLE001
-            pytest.skip(f"neo4j unavailable: {exc}")
-
-
-def test_the_configured_backend_is_the_one_under_test() -> None:
-    """Guard against a run that silently exercised the default twice."""
-    assert STORE in {"neo4j", "postgres"}
+        store().query_read(f"SELECT 1 FROM {s.SCHEMA}.catalog_database LIMIT 1")
+    except Exception as exc:  # noqa: BLE001
+        pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
 
 
 @pytest.fixture
