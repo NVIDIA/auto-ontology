@@ -220,6 +220,43 @@ column_foreign_key = Table(
     Column("last_seen", DateTime(timezone=True), nullable=True),
 )
 
+
+# JOIN / UNION: Column <-> Column, carrying the statements that observed them.
+#
+# Distinct from `table_join` below, and both are real. This one is written by
+# **query** ingestion -- `sql_parse` emits one entry per observed join
+# condition, so `refs` accumulates `"<sql id>|<condition>"` strings as more
+# statements are seen. `table_join` is written only by a model import and
+# carries the join's *columns*; nothing writes both.
+#
+# `refs` is an array that grows rather than a row per reference, because that is
+# what the graph did (`coalesce(rel.join_refs, []) + new`) and what the readers
+# expect. A row per ref would be the better model and is a deliberate follow-up,
+# not a porting decision.
+def _column_pair_edge(name: str) -> Table:
+    return Table(
+        name,
+        METADATA,
+        Column(
+            "source_column_id",
+            Text,
+            ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        Column(
+            "target_column_id",
+            Text,
+            ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+            primary_key=True,
+        ),
+        Column("refs", ARRAY(Text), nullable=False, server_default=text("'{}'")),
+    )
+
+
+column_join = _column_pair_edge("column_join")
+column_union = _column_pair_edge("column_union")
+
+
 # JOIN: Table -> Table, carrying the columns that join them.
 table_join = Table(
     "table_join",
@@ -728,6 +765,8 @@ join_path_edge = Table(
 
 __all__ = [
     "METADATA",
+    "column_join",
+    "column_union",
     "SCHEMA",
     "VIEWS",
     "join_path_edge",

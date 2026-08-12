@@ -29,7 +29,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from gsf.catalog.constants import Edges, Labels, Props
@@ -165,6 +165,16 @@ def add_edges(edges_data):
         _upsert_edge_row(spec, source_id, target_id, data["edge_props"])
 
 
+#: Edge properties that **accumulate** on conflict instead of overwriting.
+#:
+#: The Cypher was explicit about this — ``coalesce(rel.join_refs, []) +
+#: data.edge_props.join_refs`` — and it is the whole point of the column: each
+#: statement that joins two columns adds its own reference, so the edge records
+#: *how often and where* the join was observed. Overwriting would leave only the
+#: most recent statement and make the history meaningless.
+_ACCUMULATING = frozenset({"refs"})
+
+
 def _upsert_edge_row(
     spec: registry.LinkSpec, source_id: str, target_id: str, edge_props: dict
 ) -> None:
@@ -174,12 +184,33 @@ def _upsert_edge_row(
 
     statement = insert(spec.table).values(**values)
     conflict = [spec.source_column, spec.target_column]
-    statement = (
-        statement.on_conflict_do_update(index_elements=conflict, set_=payload)
-        if payload
-        else statement.on_conflict_do_nothing(index_elements=conflict)
-    )
+    if not payload:
+        statement = statement.on_conflict_do_nothing(index_elements=conflict)
+    else:
+        updates = {}
+        for key, value in payload.items():
+            column = spec.table.c[key]
+            if key in _ACCUMULATING:
+                # Append, then de-duplicate: re-ingesting the same statement
+                # must not grow the array without bound.
+                updates[key] = _dedupe(column + getattr(statement.excluded, key))
+            else:
+                updates[key] = getattr(statement.excluded, key)
+        statement = statement.on_conflict_do_update(
+            index_elements=conflict, set_=updates
+        )
     store().query_write(statement)
+
+
+def _dedupe(array):
+    """Distinct elements of a text[], order not preserved.
+
+    ``ARRAY(SELECT DISTINCT unnest(...))``. The graph did not de-duplicate and
+    would append the same reference on every re-ingest of the same statement;
+    that is a leak rather than a behaviour worth reproducing, and the readers
+    treat the array as a set.
+    """
+    return select(func.array_agg(distinct(func.unnest(array)))).scalar_subquery()
 
 
 def get_node_properties_by_id(id, label: str | list[str]):

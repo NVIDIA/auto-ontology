@@ -33,7 +33,13 @@ import pathlib
 import sys
 
 MODULE = sys.argv[1] if len(sys.argv) > 1 else "datasources"
-SRC = pathlib.Path(__file__).resolve().parents[1] / "gsf" / "dal" / "neo4j" / f"{MODULE}.py"
+SRC = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "gsf"
+    / "dal"
+    / "neo4j"
+    / f"{MODULE}.py"
+)
 if not SRC.is_file():
     raise SystemExit(f"no such module: {SRC}")
 text = SRC.read_text()

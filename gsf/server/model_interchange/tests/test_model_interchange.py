@@ -12,18 +12,22 @@ from unittest.mock import MagicMock, patch
 import pytest
 import yaml
 
-from gsf.dal.model_interchange import (
+from gsf.dal.model_interchange import assemble_export_document
+
+# Imported from the Neo4j implementation, not the selector: every test below
+# that touches these patches `gsf.dal.neo4j.model_interchange` internals, so
+# calling them through the selector would run the *other* backend under
+# `GSF_STORE=postgres` and the patches would silently miss. The Postgres
+# equivalents have their own tests in `gsf/dal/pg/tests/`.
+#
+# `_resolve_entity` is Neo4j-only besides: the Postgres implementation has no
+# single-entity path, only the batched one.
+from gsf.dal.neo4j.model_interchange import (
     UnknownDatabaseIdsError,
-    assemble_export_document,
+    _resolve_entity,
     resolve_sql_column_ids,
     validate_database_ids,
 )
-
-# `_resolve_entity` is Neo4j-only: the Postgres implementation has no
-# single-entity path, only the batched one. Imported from the implementation
-# rather than the selector for that reason -- and because a module-private
-# helper is not part of the contract the selector exports.
-from gsf.dal.neo4j.model_interchange import _resolve_entity
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
     SQL_ATTR_SOURCE_MANUAL,

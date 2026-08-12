@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Build the canonical graph fixture: catalog + a hand-authored semantic layer.
+"""Build the canonical fixture: catalog + a hand-authored semantic layer.
 
 This is the input to the golden capture that grades the Neo4j-to-Postgres
 refactor (``docs/refactor/drop-neo4j/PLAN.md``). It must be **deterministic** —
@@ -23,10 +23,13 @@ Two deliberate choices:
 
 Usage::
 
-    export NEO4J_URI=bolt://localhost:7687 NEO4J_USERNAME=neo4j NEO4J_PASSWORD=...
     export POSTGRES_HOST=... POSTGRES_PORT=... POSTGRES_USER=... POSTGRES_PASSWORD=...
     export CONNECTION_STRINGS="postgresql://.../pagila,sqlite:////abs/path/chinook.sqlite"
-    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+
+    # Whichever backend GSF_STORE selects -- the fixture is built through the
+    # DAL, so the same script produces the same fixture on both.
+    GSF_STORE=postgres uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    NEO4J_URI=bolt://... uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
 """
 
 from __future__ import annotations
@@ -64,40 +67,64 @@ def ingest_catalog() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Graph lookups
+# Catalog lookups
 # ---------------------------------------------------------------------------
+#
+# Resolved through the DAL rather than by querying a store directly, so this
+# module builds the fixture on whichever backend ``GSF_STORE`` selects. The
+# Cypher these replaced is why the golden replay could not grade Postgres at
+# all — see PLAN.md, Phase 11's prerequisite.
+
+
+def _catalog_index() -> dict[str, dict[tuple[str, ...], str]]:
+    """One pass over the catalog, indexed by name.
+
+    Cached for the life of the process: the seeder resolves a few dozen names
+    and the catalog does not change under it.
+    """
+    global _CATALOG_INDEX
+    if _CATALOG_INDEX is not None:
+        return _CATALOG_INDEX
+
+    from gsf.dal.datasources import (
+        fetch_databases,
+        fetch_schemas_by_ids,
+        fetch_schemas_for_database,
+    )
+
+    schemas: dict[tuple[str, ...], str] = {}
+    for database in fetch_databases():
+        found = fetch_schemas_for_database(database["id"])
+        for schema in (found or {}).get("schemas", []):
+            schemas[(database["name"], schema["schema_name"])] = schema["id"]
+
+    tables: dict[tuple[str, ...], str] = {}
+    columns: dict[tuple[str, ...], str] = {}
+    for row in fetch_schemas_by_ids():
+        key = (row["database_name"], row["table_schema"], row["table_name"])
+        tables[key] = row["table_id"]
+        columns[(*key, row["column_name"])] = row["column_id"]
+
+    _CATALOG_INDEX = {"schemas": schemas, "tables": tables, "columns": columns}
+    return _CATALOG_INDEX
+
+
+_CATALOG_INDEX: dict[str, dict[tuple[str, ...], str]] | None = None
+
+
+def _lookup(kind: str, key: tuple[str, ...]) -> str:
+    found = _catalog_index()[kind].get(key)
+    if found is None:
+        raise LookupError(f"{kind[:-1]} not found: {'.'.join(key)}")
+    return found
 
 
 def _table_id(database: str, schema: str, table: str) -> str:
-    from gsf.dal.neo4j_tx import graph
-
-    rows = graph().query_read(
-        """
-        MATCH (d:Database {name:$database})-[:CONTAINS]->(s:Schema {name:$schema})
-              -[:CONTAINS]->(t:Table {name:$table})
-        RETURN t.id AS id
-        """,
-        {"database": database, "schema": schema, "table": table},
-    )
-    if not rows:
-        raise LookupError(f"table not found: {database}.{schema}.{table}")
-    return rows[0]["id"]
+    return _lookup("tables", (database, schema, table))
 
 
 def _column_id(database: str, schema: str, table: str, column: str) -> str:
-    from gsf.dal.neo4j_tx import graph
-
-    rows = graph().query_read(
-        """
-        MATCH (d:Database {name:$database})-[:CONTAINS]->(s:Schema {name:$schema})
-              -[:CONTAINS]->(t:Table {name:$table})-[:CONTAINS]->(c:Column {name:$column})
-        RETURN c.id AS id
-        """,
-        {"database": database, "schema": schema, "table": table, "column": column},
-    )
-    if not rows:
-        raise LookupError(f"column not found: {database}.{schema}.{table}.{column}")
-    return rows[0]["id"]
+    return _lookup("columns", (database, schema, table, column))
 
 
 # ---------------------------------------------------------------------------
@@ -408,18 +435,7 @@ def seed_zones() -> list[dict[str, Any]]:
 
 
 def _schema_id(database: str, schema: str) -> str:
-    from gsf.dal.neo4j_tx import graph
-
-    rows = graph().query_read(
-        """
-        MATCH (d:Database {name:$database})-[:CONTAINS]->(s:Schema {name:$schema})
-        RETURN s.id AS id
-        """,
-        {"database": database, "schema": schema},
-    )
-    if not rows:
-        raise LookupError(f"schema not found: {database}.{schema}")
-    return rows[0]["id"]
+    return _lookup("schemas", (database, schema))
 
 
 # ---------------------------------------------------------------------------
@@ -443,10 +459,25 @@ def _stub_embedding() -> None:
 
 
 def reset_graph() -> None:
-    from gsf.dal.neo4j_tx import graph
+    """Empty the store, whichever one is selected.
 
-    graph().query_write("MATCH (n) DETACH DELETE n")
-    logger.info("graph cleared")
+    ``delete_all_data(None)`` is the DAL's own definition of a full wipe, so the
+    fixture is built from the same empty state a reset produces — **plus the
+    zones, which that reset does not touch.** Zones are not part of either
+    layer: the Cypher's semantic labels never included them, so
+    ``delete_all_data`` left them standing on both backends. The old
+    ``MATCH (n) DETACH DELETE n`` swept them up incidentally, and a fixture
+    built on top of leftover zones is not reproducible.
+    """
+    from gsf.dal.reset import delete_all_data
+    from gsf.dal.zones import delete_zone, list_zones
+
+    global _CATALOG_INDEX
+    _CATALOG_INDEX = None
+    delete_all_data(None)
+    for zone in list_zones():
+        delete_zone(zone["id"])
+    logger.info("store cleared")
 
 
 def main() -> None:
@@ -492,18 +523,36 @@ def main() -> None:
     logger.info("seeding zones...")
     zones = seed_zones()
 
-    from gsf.dal.neo4j_tx import graph
+    _log_summary(zones)
 
-    logger.info("--- fixture graph ---")
-    for row in graph().query_read(
-        "MATCH (n) RETURN labels(n)[0] AS label, count(*) AS n ORDER BY label"
-    ):
-        logger.info("  %-18s %s", row["label"], row["n"])
-    for row in graph().query_read(
-        "MATCH ()-[r]->() RETURN type(r) AS t, count(*) AS n ORDER BY t"
-    ):
-        logger.info("  [%s] %s", row["t"], row["n"])
-    logger.info("zones: %s", [z["name"] for z in zones])
+
+def _log_summary(zones: list[dict[str, Any]]) -> None:
+    """Print what was built, counted through the DAL rather than the store.
+
+    A summary is worth having — it is how you notice a fixture that seeded
+    without error and produced nothing — but it must not reintroduce a
+    store-specific query, so it counts what the DAL can see.
+    """
+    from gsf.dal.datasources import fetch_databases, fetch_schemas_by_ids
+    from gsf.dal.custom_analyses import list_custom_analyses
+    from gsf.dal.pql_analyses import list_pql_analyses
+    from gsf.dal.sql_attributes import list_sql_attributes
+    from gsf.dal.terms import count_terms
+
+    columns = fetch_schemas_by_ids()
+    counts = {
+        "databases": len(fetch_databases()),
+        "tables": len({row["table_id"] for row in columns}),
+        "columns": len(columns),
+        "terms": count_terms(),
+        "sql_attributes": len(list_sql_attributes()),
+        "custom_analyses": len(list_custom_analyses()),
+        "pql_analyses": len(list_pql_analyses()),
+    }
+    logger.info("--- fixture ---")
+    for name, total in counts.items():
+        logger.info("  %-16s %s", name, total)
+    logger.info("  %-16s %s", "zones", [z["name"] for z in zones])
 
 
 if __name__ == "__main__":

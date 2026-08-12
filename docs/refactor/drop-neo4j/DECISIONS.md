@@ -33,6 +33,7 @@ must be restated in the PR description of the change that introduces it.
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
+| B10 | `fetch_item_by_id` / `fetch_node_properties_by_id` return **every column of the row**, where the graph returned only the properties something had set. Unset fields are `null` rather than absent, defaults appear, the parent FK is visible, and `created` — which the graph stamped on every node and nothing reads — is gone | Phase 11 ([013](#013--a-row-has-every-column-a-node-had-only-what-was-set)) |
 | B9 | Importing a model whose Term name already exists now **raises** instead of creating a duplicate Term. `term` is `UNIQUE(name, source)`; the graph had no such rule, and `merge_term` matched on `{name, source}`, so which of two same-named Terms a later write found was arbitrary | Phase 10 ([012](#012--the-import-meets-constraints-the-graph-never-had)) |
 | B8 | `description_certified` becomes a real column on `catalog_table` and `catalog_column`. No behaviour change against Neo4j — it restores behaviour that Postgres would otherwise have lost silently | Phase 7 ([010](#010--description_certified-was-about-to-be-lost-silently)) |
 | ~~B7~~ | **Withdrawn.** Ranking the suggester *would* have been a behaviour change, so it is not being made here — the bug is documented in place and the inert behaviour preserved. See [007](#007--the-sqlattribute-suggester-was-never-actually-ranking) |
@@ -692,3 +693,35 @@ raises on it. That is not a constraint — it is the export and the import
 disagreeing about what a partial document should contain, and settling it means
 deciding what a partial export *should* say about a shared term. Out of scope
 here, recorded there, and pinned by a test either way.
+
+
+---
+
+## 013 — A row has every column; a node had only what was set
+
+**Status:** accepted · **Phase:** 11 · **Table entry:** B10
+
+`fetch_item_by_id` and `fetch_node_properties_by_id` are the two reads that
+promise "everything about this thing". On a graph that meant `properties(n)` —
+the properties something had actually set. On a table it means every column.
+
+So under Postgres these return extra keys (`description: null`,
+`description_certified: false`, `imported_id: null`, `schema_id`) and lose one
+(`created`, which the graph stamped on every node and **no consumer reads** —
+verified across the backend and the frontend before accepting the loss).
+
+**There is no way to express "absent" in a relational row.** Omitting nulls
+would make a genuinely missing value indistinguishable from an unset one, which
+is a worse contract than the extra keys. Adding a `created` column to satisfy a
+golden would be the tail wagging the dog.
+
+### How the golden replay handles it
+
+Not by exempting the two reads. `OPTIONAL_KEYS` in `test_golden.py` names the
+**individual keys** whose presence may differ, per read; every other key is
+still compared exactly, so a changed value, a genuinely missing field, or a new
+key not on the list still fails.
+
+That distinction matters: a blanket exemption would have quietly stopped
+grading two of the 128 reads, which is precisely the failure mode this refactor
+found in the harness itself.

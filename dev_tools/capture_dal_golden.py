@@ -46,86 +46,83 @@ UUID_RE = re.compile(
 
 
 def build_id_map() -> dict[str, str]:
-    """Map every node id to a stable token describing what the node is."""
-    from gsf.dal.neo4j_tx import graph
+    """Map every id to a stable token describing what it names.
+
+    Read through the DAL, not the store — like ``_fixture_ids``, this was
+    hardcoded Cypher and is why the replay could not grade Postgres. A token has
+    to describe the *same* entity on both backends or the normalised goldens
+    compare nothing.
+    """
+    from gsf.dal.custom_analyses import list_custom_analyses
+    from gsf.dal.datasources import (
+        fetch_databases,
+        fetch_schemas_by_ids,
+        fetch_schemas_for_database,
+    )
+    from gsf.dal.pql_analyses import list_pql_analyses
+    from gsf.dal.sql_attributes import list_sql_attributes
+    from gsf.dal.terms import fetch_all_terms, fetch_column_attributes_by_term_id
+    from gsf.dal.zones import list_zones
 
     id_map: dict[str, str] = {}
 
-    def add(rows: list[dict[str, Any]], template: str) -> None:
-        for row in rows:
-            node_id = row.get("id")
-            if node_id:
-                id_map[node_id] = template.format(**row)
+    for database in fetch_databases():
+        id_map[database["id"]] = f"<db:{database['name']}>"
+        found = fetch_schemas_for_database(database["id"]) or {}
+        for schema in found.get("schemas", []):
+            id_map[schema["id"]] = (
+                f"<schema:{database['name']}.{schema['schema_name']}>"
+            )
 
-    add(
-        graph().query_read("MATCH (d:Database) RETURN d.id AS id, d.name AS name"),
-        "<db:{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (d:Database)-[:CONTAINS]->(s:Schema) "
-            "RETURN s.id AS id, d.name AS db, s.name AS name"
-        ),
-        "<schema:{db}.{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (d:Database)-[:CONTAINS]->(s:Schema)-[:CONTAINS]->(t:Table) "
-            "RETURN t.id AS id, d.name AS db, s.name AS schema, t.name AS name"
-        ),
-        "<table:{db}.{schema}.{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (d:Database)-[:CONTAINS]->(s:Schema)-[:CONTAINS]->(t:Table)"
-            "-[:CONTAINS]->(c:Column) "
-            "RETURN c.id AS id, d.name AS db, s.name AS schema, "
-            "t.name AS table, c.name AS name"
-        ),
-        "<col:{db}.{schema}.{table}.{name}>",
-    )
-    add(
-        graph().query_read("MATCH (t:Term) RETURN t.id AS id, t.name AS name"),
-        "<term:{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (a:ColumnAttribute) RETURN a.id AS id, a.name AS name, "
-            "a.term_name AS term, a.source_column AS col"
-        ),
-        "<attr:{term}/{name}/{col}>",
-    )
-    add(
-        graph().query_read("MATCH (a:SqlAttribute) RETURN a.id AS id, a.name AS name"),
-        "<sqlattr:{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (a:CustomAnalysis) RETURN a.id AS id, a.name AS name"
-        ),
-        "<analysis:{name}>",
-    )
-    add(
-        graph().query_read("MATCH (p:PqlAnalysis) RETURN p.id AS id, p.name AS name"),
-        "<pql:{name}>",
-    )
-    add(
-        graph().query_read(
-            "MATCH (z:Zone|disableZone) RETURN z.id AS id, z.name AS name"
-        ),
-        "<zone:{name}>",
-    )
+    for row in fetch_schemas_by_ids():
+        path = f"{row['database_name']}.{row['table_schema']}.{row['table_name']}"
+        id_map[row["table_id"]] = f"<table:{path}>"
+        id_map[row["column_id"]] = f"<col:{path}.{row['column_name']}>"
 
-    # Sql nodes carry no name; key them by their statement so the token is
-    # stable across runs regardless of insertion order.
-    for row in graph().query_read(
-        "MATCH (s:Sql) RETURN s.id AS id, s.sql_full_query AS q ORDER BY s.sql_full_query"
-    ):
-        if row.get("id"):
-            digest = re.sub(r"\s+", " ", (row.get("q") or "")).strip()[:60]
-            id_map[row["id"]] = f"<sql:{digest}>"
+    for term in fetch_all_terms():
+        id_map[term["id"]] = f"<term:{term['name']}>"
+        for attribute in fetch_column_attributes_by_term_id(term["id"]):
+            id_map[attribute["id"]] = (
+                f"<attr:{attribute.get('term_name')}/{attribute['name']}"
+                f"/{attribute.get('source_column')}>"
+            )
+
+    for attribute in list_sql_attributes():
+        id_map[attribute["id"]] = f"<sqlattr:{attribute['name']}>"
+    for analysis in list_custom_analyses():
+        id_map[analysis["id"]] = f"<analysis:{analysis['name']}>"
+    for analysis in list_pql_analyses():
+        id_map[analysis["id"]] = f"<pql:{analysis['name']}>"
+    for zone in list_zones():
+        id_map[zone["id"]] = f"<zone:{zone['name']}>"
+
+    # Statements carry no name, so they are keyed by their text -- stable across
+    # runs regardless of insertion order, which an id is not.
+    for statement in _all_statements():
+        digest = re.sub(r"\s+", " ", statement.get("sql") or "").strip()[:60]
+        if statement.get("id"):
+            id_map[statement["id"]] = f"<sql:{digest}>"
 
     return id_map
+
+
+def _all_statements() -> list[dict[str, Any]]:
+    """Every stored statement, reached through the reads that expose them.
+
+    No DAL function lists statements outright — they are always reached from a
+    table, an attribute or an analysis — so this unions those routes. A
+    statement no read can reach is one no golden can contain either, so nothing
+    is lost by not finding it.
+    """
+    from gsf.dal.datasources import fetch_schemas_by_ids
+    from gsf.dal.exploration import fetch_table_exploration_details
+
+    seen: dict[str, dict[str, Any]] = {}
+    for table_id in {row["table_id"] for row in fetch_schemas_by_ids()}:
+        for query in fetch_table_exploration_details(table_id).get("queries", []):
+            if query.get("id"):
+                seen[query["id"]] = query
+    return sorted(seen.values(), key=lambda row: row.get("sql") or "")
 
 
 # Keys whose value is wall-clock and therefore differs on every ingest. Redacted
@@ -305,70 +302,122 @@ def _zone_modes(ids: dict[str, Any]) -> tuple[tuple[str, Any], ...]:
 
 
 def _fixture_ids() -> dict[str, Any]:
-    """Resolve the fixture's entities by name, so captures read declaratively."""
-    from gsf.dal.neo4j_tx import graph
+    """Resolve the fixture's entities by name, through the DAL.
 
-    def one(query: str, **params: Any) -> str | None:
-        rows = graph().query_read(query, params)
-        return rows[0]["id"] if rows else None
+    **Backend-agnostic on purpose.** This used to be hardcoded Cypher, which is
+    why the replay could not grade Postgres at all: under ``GSF_STORE=postgres``
+    it handed Neo4j ids to the Postgres DAL and almost every read came back
+    empty, so 49 of 128 comparisons failed for a reason that had nothing to do
+    with the DAL. Resolving by name through the same facade the captures use
+    means the two backends are asked the same questions about the same fixture.
+    """
+    from gsf.dal.custom_analyses import list_custom_analyses
+    from gsf.dal.datasources import (
+        fetch_databases,
+        fetch_schemas_by_ids,
+        fetch_schemas_for_database,
+    )
+    from gsf.dal.pql_analyses import list_pql_analyses
+    from gsf.dal.sql_attributes import list_sql_attributes
+    from gsf.dal.terms import fetch_all_terms
+    from gsf.dal.zones import list_zones
+
+    databases = {row["name"]: row["id"] for row in fetch_databases()}
+    columns = fetch_schemas_by_ids()
+
+    def table(database: str, schema: str, name: str) -> str | None:
+        for row in columns:
+            if (
+                row["database_name"] == database
+                and row["table_schema"] == schema
+                and row["table_name"] == name
+            ):
+                return row["table_id"]
+        return None
+
+    def column(database: str, schema: str, table_name: str, name: str) -> str | None:
+        for row in columns:
+            if (
+                row["database_name"] == database
+                and row["table_schema"] == schema
+                and row["table_name"] == table_name
+                and row["column_name"] == name
+            ):
+                return row["column_id"]
+        return None
+
+    def first(rows: list[dict[str, Any]], **match: str) -> str | None:
+        for row in rows:
+            if all(row.get(key) == value for key, value in match.items()):
+                return row["id"]
+        return None
+
+    schema_public = None
+    if "pagila" in databases:
+        found = fetch_schemas_for_database(databases["pagila"]) or {}
+        for schema in found.get("schemas", []):
+            if schema["schema_name"] == "public":
+                schema_public = schema["id"]
+
+    terms = fetch_all_terms()
+    attributes = list_sql_attributes()
+    analyses = list_custom_analyses()
+    pql = list_pql_analyses()
+    zones = list_zones()
 
     ids: dict[str, Any] = {
-        "db_pagila": one("MATCH (d:Database {name:'pagila'}) RETURN d.id AS id"),
-        "schema_public": one(
-            "MATCH (:Database {name:'pagila'})-[:CONTAINS]->(s:Schema {name:'public'}) "
-            "RETURN s.id AS id"
-        ),
-        "attr_film_id": one(
-            "MATCH (a:ColumnAttribute {name:'film id'}) RETURN a.id AS id"
-        ),
-        "sqlattr_revenue": one(
-            "MATCH (a:SqlAttribute {name:'total revenue'}) RETURN a.id AS id"
-        ),
-        "analysis_top_films": one(
-            "MATCH (a:CustomAnalysis {name:'Top rented films'}) RETURN a.id AS id"
-        ),
-        "pql_churn": one("MATCH (p:PqlAnalysis) RETURN p.id AS id"),
-        "zone_film": one("MATCH (z:Zone {name:'Film domain'}) RETURN z.id AS id"),
-        "zone_cross": one("MATCH (z:Zone {name:'Cross database'}) RETURN z.id AS id"),
-        "zone_retired": one(
-            "MATCH (z:disableZone {name:'Retired zone'}) RETURN z.id AS id"
-        ),
+        "db_pagila": databases.get("pagila"),
+        "schema_public": schema_public,
+        "attr_film_id": _column_attribute_id("film id"),
+        "sqlattr_revenue": first(attributes, name="total revenue"),
+        "analysis_top_films": first(analyses, name="Top rented films"),
+        "pql_churn": pql[0]["id"] if pql else None,
+        "zone_film": first(zones, name="Film domain"),
+        "zone_cross": first(zones, name="Cross database"),
+        "zone_retired": first(zones, name="Retired zone"),
     }
 
-    for table in ("film", "rental", "customer", "payment", "inventory", "category"):
-        ids[f"table_{table}"] = one(
-            "MATCH (:Database {name:'pagila'})-[:CONTAINS]->(:Schema {name:'public'})"
-            "-[:CONTAINS]->(t:Table {name:$n}) RETURN t.id AS id",
-            n=table,
-        )
-    ids["table_track"] = one(
-        "MATCH (:Database {name:'chinook'})-[:CONTAINS]->(:Schema {name:'main'})"
-        "-[:CONTAINS]->(t:Table {name:'Track'}) RETURN t.id AS id"
-    )
-    for table, column in (
+    for name in ("film", "rental", "customer", "payment", "inventory", "category"):
+        ids[f"table_{name}"] = table("pagila", "public", name)
+    ids["table_track"] = table("chinook", "main", "Track")
+
+    for table_name, column_name in (
         ("film", "film_id"),
         ("film", "title"),
         ("rental", "customer_id"),
         ("customer", "customer_id"),
         ("inventory", "film_id"),
     ):
-        ids[f"col_{table}_{column}"] = one(
-            "MATCH (:Database {name:'pagila'})-[:CONTAINS]->(:Schema {name:'public'})"
-            "-[:CONTAINS]->(:Table {name:$t})-[:CONTAINS]->(c:Column {name:$c}) "
-            "RETURN c.id AS id",
-            t=table,
-            c=column,
+        ids[f"col_{table_name}_{column_name}"] = column(
+            "pagila", "public", table_name, column_name
         )
-    for term in ("Film", "Customer", "Payment", "Track"):
-        ids[f"term_{term}"] = one("MATCH (t:Term {name:$n}) RETURN t.id AS id", n=term)
 
-    missing = sorted(k for k, v in ids.items() if v is None)
+    for name in ("Film", "Customer", "Payment", "Track"):
+        ids[f"term_{name}"] = first(terms, name=name)
+
+    missing = sorted(key for key, value in ids.items() if value is None)
     if missing:
         raise SystemExit(
             f"fixture incomplete, ids not found: {missing}\n"
             f"Run: uv run --no-sync python -m dev_tools.seed_graph_fixture --reset"
         )
     return ids
+
+
+def _column_attribute_id(name: str) -> str | None:
+    """A ColumnAttribute id by name.
+
+    No DAL read lists attributes by name alone — they are always reached through
+    a Term — so this walks the terms the fixture seeded. Slower than a lookup
+    and irrelevant at fixture scale.
+    """
+    from gsf.dal.terms import fetch_all_terms, fetch_column_attributes_by_term_id
+
+    for term in fetch_all_terms():
+        for attribute in fetch_column_attributes_by_term_id(term["id"]):
+            if attribute.get("name") == name:
+                return attribute["id"]
+    return None
 
 
 def capture_arg_reads(cap: Capture, ids: dict[str, Any]) -> None:

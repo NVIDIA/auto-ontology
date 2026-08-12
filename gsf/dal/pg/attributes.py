@@ -257,8 +257,16 @@ def fetch_attr_column_contexts(
     losing the decoration beats losing the result.
 
     One entry per attribute even though an attribute may be referenced by many
-    columns: the Cypher returned a row per column and the dict comprehension
-    kept whichever came last. Ordered here so "whichever" is stable.
+    columns. The Cypher returned a row per column and kept whichever came last,
+    which was arbitrary; here **the owning column wins** — the one linked by
+    ``HAS_ATTRIBUTE`` rather than one merely pointing at the attribute through
+    ``SEMANTIC_FK``.
+
+    That is a real improvement, not a tidy-up: the attribute *describes* its
+    owning column, so returning a referencing column's name and table as the
+    attribute's context was simply wrong whenever the arbitrary order landed
+    there. The golden recorded on Neo4j happens to agree, which is how the
+    difference was found.
     """
     if not attr_ids:
         return {}
@@ -273,15 +281,19 @@ def fetch_attr_column_contexts(
     if database_name is not None:
         database_join = and_(database_join, s.catalog_database.c.name == database_name)
 
+    # 0 for the owning link, 1 for a referencing one -- the sort key that makes
+    # "which column describes this attribute" a decision rather than an accident.
     link = (
         select(
             s.column_has_attribute.c.attribute_id,
             s.column_has_attribute.c.column_id,
+            literal(0).label("rank"),
         )
         .union(
             select(
                 s.column_semantic_fk.c.attribute_id,
                 s.column_semantic_fk.c.column_id,
+                literal(1).label("rank"),
             )
         )
         .subquery("link")
@@ -318,7 +330,7 @@ def fetch_attr_column_contexts(
             .outerjoin(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
         )
         .where(s.column_attribute.c.id.in_(list(attr_ids)))
-        .order_by(s.column_attribute.c.id, s.catalog_column.c.id)
+        .order_by(s.column_attribute.c.id, link.c.rank, s.catalog_column.c.id)
     )
     try:
         rows = store().query_read(statement)
@@ -326,21 +338,28 @@ def fetch_attr_column_contexts(
         logger.warning("fetch_attr_column_contexts: query failed", exc_info=True)
         return {}
 
-    return {
-        row["attr_id"]: {
-            "attr_name": row["attr_name"] or "",
-            "attr_description": row["attr_description"] or "",
-            "col_id": row["col_id"],
-            "col_name": row["col_name"] or "",
-            "table_id": row["table_id"],
-            "table_name": row["table_name"] or "",
-            "schema_name": row["schema_name"] or "",
-            "database_name": row["database_name"] or "",
-            "term_name": row["term_name"] or "",
-        }
-        for row in rows
-        if row["attr_id"]
-    }
+    # First row per attribute wins, and the ORDER BY above put the owning
+    # column first. `setdefault` rather than a comprehension, which would keep
+    # the last.
+    result: dict[str, dict] = {}
+    for row in rows:
+        if not row["attr_id"]:
+            continue
+        result.setdefault(
+            row["attr_id"],
+            {
+                "attr_name": row["attr_name"] or "",
+                "attr_description": row["attr_description"] or "",
+                "col_id": row["col_id"],
+                "col_name": row["col_name"] or "",
+                "table_id": row["table_id"],
+                "table_name": row["table_name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "term_name": row["term_name"] or "",
+            },
+        )
+    return result
 
 
 # ---------------------------------------------------------------------------

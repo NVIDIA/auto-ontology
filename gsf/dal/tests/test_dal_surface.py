@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import importlib
 import inspect
+import re
 import json
 import pkgutil
 from pathlib import Path
@@ -166,14 +167,34 @@ def test_module_surface_is_unchanged(module_name: str) -> None:
         f"If the removal is intentional, regenerate the snapshot."
     )
 
-    changed = {
-        name: f"{frozen[name]} -> {actual[name]}"
-        for name in frozen
-        if frozen[name] != actual[name]
-    }
+    # The snapshot records one backend's annotations, and `BACKEND_SPECIFIC`
+    # names the functions whose types legitimately differ between the two — so
+    # under the other backend those trip this comparison for a reason already
+    # recorded in DECISIONS.md. Exempted here as they are in the pg/neo4j
+    # comparison, and on the same terms: **parameter names must still match**,
+    # since those are what callers pass.
+    module = importlib.import_module(f"gsf.dal.{module_name}")
+    changed = {}
+    for name in frozen:
+        if frozen[name] == actual[name]:
+            continue
+        if (module_name, name) in BACKEND_SPECIFIC:
+            _assert_same_parameters(module, module_name, name, frozen[name])
+            continue
+        changed[name] = f"{frozen[name]} -> {actual[name]}"
     assert not changed, (
         f"gsf.dal.{module_name} signatures changed. A renamed keyword or a "
         f"dropped argument breaks callers silently: {changed}"
+    )
+
+
+def _assert_same_parameters(module, module_name: str, name: str, frozen: str) -> None:
+    """A backend-specific function may change its types, never its call shape."""
+    live = list(inspect.signature(getattr(module, name)).parameters)
+    recorded = re.findall(r"[(,]\s*([a-z_][a-z0-9_]*)\s*:", frozen)
+    assert live == recorded, (
+        f"gsf.dal.{module_name}.{name} is allowed to differ in types, not in "
+        f"parameters: {live} vs {recorded}"
     )
 
 

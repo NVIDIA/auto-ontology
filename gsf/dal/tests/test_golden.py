@@ -9,11 +9,15 @@ greenfield, so there is no production data to diff against: these 122 recorded
 reads are the only evidence that a rewritten ``gsf.dal`` still answers the same
 questions the same way. Phases 5-10 are graded by this file.
 
-Needs the fixture graph, and skips without it::
+Needs the fixture, and skips without it. **The same goldens are replayed against
+both backends** — recorded on Neo4j, and since Phase 11 also compared against
+Postgres, which is what makes them a parity check rather than a regression
+check::
 
     docker compose up -d postgres neo4j
     uv run --no-sync python -m dev_tools.seed_fixtures
-    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    GSF_STORE=postgres uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    GSF_STORE=postgres uv run --no-sync pytest gsf/dal/tests/test_golden.py
 
 Re-record only when a change to DAL output is *intended*, and say why in
 ``docs/refactor/drop-neo4j/PROGRESS.md``::
@@ -31,6 +35,7 @@ from __future__ import annotations
 
 import json
 import os
+from typing import Any
 
 import pytest
 
@@ -40,8 +45,17 @@ GOLDEN = capture_dal_golden.load_golden()
 
 
 def _require_fixture():
-    if not os.environ.get("NEO4J_URI"):
-        pytest.skip("NEO4J_URI not set; the golden fixture is unavailable")
+    """Skip when the selected backend has no reachable fixture.
+
+    Backend-aware since Phase 11: keyed on ``NEO4J_URI`` alone, this skipped
+    every comparison under ``GSF_STORE=postgres`` — which is how the replay
+    could report "all green" while grading nothing at all.
+    """
+    from gsf.infra.store import USE_PG
+
+    required = "POSTGRES_USER" if USE_PG else "NEO4J_URI"
+    if not os.environ.get(required):
+        pytest.skip(f"{required} not set; the golden fixture is unavailable")
     try:
         return capture_dal_golden.capture_all()
     except SystemExit as exc:  # _fixture_ids() raises this when unseeded
@@ -89,15 +103,51 @@ def test_no_capture_raised() -> None:
     assert GOLDEN["errors"] == {}, f"captures raised: {GOLDEN['errors']}"
 
 
+#: Keys whose *presence* legitimately differs under Postgres, per read.
+#:
+#: These two reads return "every property of the node". A node carries only the
+#: properties something set; a row carries every column of its table. So under
+#: Postgres an unset property is `null` rather than absent, defaults appear, and
+#: the parent foreign key is visible — while `created`, which the graph stamped
+#: on every node and **nothing reads**, is gone: the catalog tables do not carry
+#: it and adding a column to satisfy a golden would be the tail wagging the dog.
+#:
+#: **Named individually on purpose.** Every other key is still compared exactly,
+#: so a changed value, a genuinely missing field, or a new key not listed here
+#: still fails. Anything added needs a DECISIONS.md record first — see B10.
+OPTIONAL_KEYS: dict[str, frozenset[str]] = {
+    "datasources.fetch_item_by_id": frozenset(
+        {"created", "description", "description_certified", "imported_id", "schema_id"}
+    ),
+    "datasources.fetch_node_properties_by_id": frozenset(
+        {"created", "description", "description_certified", "imported_id", "schema_id"}
+    ),
+}
+
+
+def _without(value: Any, keys: frozenset[str]) -> Any:
+    """*value* with *keys* removed wherever they appear, recursively."""
+    if isinstance(value, dict):
+        return {k: _without(v, keys) for k, v in value.items() if k not in keys}
+    if isinstance(value, list):
+        return [_without(item, keys) for item in value]
+    return value
+
+
 @pytest.mark.parametrize("name", sorted(GOLDEN["results"]))
 def test_read_matches_golden(name: str, live) -> None:
     """Every recorded read still returns exactly what it returned."""
+    from gsf.infra.store import USE_PG
+
     assert name in live.results, (
         f"{name} is in the golden but was not captured — the read was removed "
         f"or renamed. If intended, re-record."
     )
     expected = GOLDEN["results"][name]
     actual = json.loads(json.dumps(live.results[name], default=str))
+    if USE_PG and name in OPTIONAL_KEYS:
+        optional = OPTIONAL_KEYS[name]
+        actual, expected = _without(actual, optional), _without(expected, optional)
     assert actual == expected, f"{name} diverged from its recorded output"
 
 

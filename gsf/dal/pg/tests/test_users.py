@@ -54,7 +54,7 @@ def catalog():
     single-table fixture.
     """
     prefix = f"z-{uuid.uuid4().hex[:8]}"
-    ids: dict[str, str] = {}
+    ids: dict[str, str] = {"prefix": prefix}
 
     def insert(table, **values):
         row = store().query_write(table.insert().values(**values).returning(table.c.id))
@@ -75,15 +75,20 @@ def catalog():
 
     yield ids
 
+    # Zones share the fixture's prefix so they can be cleaned up with it. They
+    # did not, originally, and leaked ~8 rows per run into a shared store --
+    # which `test_golden`'s `zones.list_zones` comparison eventually caught,
+    # since it reads whatever is actually there.
+    store().query_write(s.zone.delete().where(s.zone.c.name.like(f"{prefix}%")))
     store().query_write(
         s.catalog_database.delete().where(s.catalog_database.c.name.like(f"{prefix}%"))
     )
 
 
-def _zone_over(**target) -> str:
+def _zone_over(prefix: str, **target) -> str:
     zone_id = store().query_write(
         s.zone.insert()
-        .values(name=f"zone-{uuid.uuid4().hex[:8]}")
+        .values(name=f"{prefix}-zone-{uuid.uuid4().hex[:8]}")
         .returning(s.zone.c.id)
     )[0]["id"]
     store().query_write(s.zone_target.insert().values(zone_id=zone_id, **target))
@@ -96,7 +101,7 @@ def _zone_over(**target) -> str:
 
 
 def test_database_grant_admits_its_schemas_and_tables(catalog) -> None:
-    zone = _zone_over(database_id=catalog["db1"])
+    zone = _zone_over(catalog["prefix"], database_id=catalog["db1"])
     got = get_accessible_catalog_ids_for_zones([zone])
 
     assert got["db_ids"] == {catalog["db1"]}
@@ -110,7 +115,7 @@ def test_database_grant_admits_its_schemas_and_tables(catalog) -> None:
 
 
 def test_schema_grant_admits_its_parent_and_its_tables(catalog) -> None:
-    zone = _zone_over(schema_id=catalog["db1.sch1"])
+    zone = _zone_over(catalog["prefix"], schema_id=catalog["db1.sch1"])
     got = get_accessible_catalog_ids_for_zones([zone])
 
     assert got["db_ids"] == {catalog["db1"]}, "the parent database is needed to render"
@@ -125,7 +130,7 @@ def test_table_grant_admits_its_ancestors_only(catalog) -> None:
     **not** then admit that schema's other tables, which would hand over data
     the zone never granted.
     """
-    zone = _zone_over(table_id=catalog["db1.sch1.t1"])
+    zone = _zone_over(catalog["prefix"], table_id=catalog["db1.sch1.t1"])
     got = get_accessible_catalog_ids_for_zones([zone])
 
     assert got["db_ids"] == {catalog["db1"]}
@@ -137,8 +142,8 @@ def test_table_grant_admits_its_ancestors_only(catalog) -> None:
 
 
 def test_grants_from_several_zones_are_unioned(catalog) -> None:
-    zone_a = _zone_over(table_id=catalog["db1.sch1.t1"])
-    zone_b = _zone_over(table_id=catalog["db2.sch2.t2"])
+    zone_a = _zone_over(catalog["prefix"], table_id=catalog["db1.sch1.t1"])
+    zone_b = _zone_over(catalog["prefix"], table_id=catalog["db2.sch2.t2"])
 
     got = get_accessible_catalog_ids_for_zones([zone_a, zone_b])
 
@@ -147,7 +152,7 @@ def test_grants_from_several_zones_are_unioned(catalog) -> None:
 
 
 def test_other_databases_are_never_admitted(catalog) -> None:
-    zone = _zone_over(database_id=catalog["db1"])
+    zone = _zone_over(catalog["prefix"], database_id=catalog["db1"])
     got = get_accessible_catalog_ids_for_zones([zone])
 
     assert catalog["db2"] not in got["db_ids"]
@@ -186,7 +191,7 @@ def test_empty_zone_list_denies_everything(catalog) -> None:
 
 
 def test_filter_admits_exactly_the_granted_tables(catalog) -> None:
-    zone = _zone_over(schema_id=catalog["db1.sch1"])
+    zone = _zone_over(catalog["prefix"], schema_id=catalog["db1.sch1"])
     predicate, _ = resolve_table_filter([zone], s.catalog_table.c.id)
 
     rows = store().query_read(s.catalog_table.select().where(predicate))
@@ -202,7 +207,7 @@ def test_filter_works_on_a_plain_id_column_too(catalog) -> None:
     The filter has to apply to it as readily as to a real key, since that is
     how the semantic tier is scoped.
     """
-    zone = _zone_over(table_id=catalog["db1.sch1.t1"])
+    zone = _zone_over(catalog["prefix"], table_id=catalog["db1.sch1.t1"])
     predicate, _ = resolve_table_filter([zone], s.column_attribute.c.table_id)
     assert predicate is not None
 

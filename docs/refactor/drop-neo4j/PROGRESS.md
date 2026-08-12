@@ -2392,3 +2392,105 @@ is live Databricks credentials; the two model-interchange skips are gone.
 implementations and the selectors. Note its prerequisite, recorded in Phase 7:
 `capture_dal_golden._fixture_ids()` still resolves every fixture entity with
 hardcoded Cypher, so the golden replay cannot grade Postgres until it is ported.
+
+---
+
+## 2026-08-12 — Phase 11, part 1 — the golden replay finally grades Postgres
+
+**128 of 128 goldens, recorded on Neo4j, now pass against Postgres.** The
+prerequisite recorded in Phase 7 is met, and the claim this plan has been making
+since Phase 5 — that the replay is the fidelity oracle — is true for the first
+time.
+
+Before: 49 of 128 failed. Not because the DAL was wrong, but because the harness
+could only ever ask Neo4j.
+
+### What had to change
+
+**`capture_dal_golden._fixture_ids()` and `build_id_map()` were hardcoded
+Cypher.** Both now resolve through the DAL, so the two backends are asked the
+same questions about the same fixture. `build_id_map` matters as much as the
+ids: a normalisation token has to describe the *same* entity on both sides or
+the comparison compares nothing.
+
+**`seed_graph_fixture` was Cypher in four places** — three id lookups and the
+reset. All four go through the DAL now, so one script builds the same fixture on
+either backend. The summary it prints is counted through the DAL too, rather
+than reintroducing a store-specific query.
+
+**`test_golden`'s skip guard keyed on `NEO4J_URI`.** Under
+`GSF_STORE=postgres` it skipped all 128 comparisons — reporting "all green"
+while grading nothing. That is the same failure mode as the harness itself, one
+level down.
+
+### Two real gaps the seeding surfaced
+
+**`SqlAttribute -[HAS_SQL]-> Sql` was not in the Postgres link registry.** Phase
+4 built that registry from the ingest path, where a SqlAttribute never appears —
+so creating one on Postgres raised `UnknownLink`. Registered, along with the
+`sql_attribute` entity spec.
+
+**`Column -[JOIN]-> Column` had nowhere to go.** Query ingestion emits one edge
+per observed join condition, carrying `join_refs`; the schema had only
+`table_join` (Table→Table, `join_columns`), which is written by model import and
+is a different thing entirely. Nothing writes both. Added `column_join` and
+`column_union` in migration `63f6c85ccfce`.
+
+This never fired before because the *catalog* ingest emits no queries — "Total
+Added Queries: 0" — so Phase 4's verification could not have caught it. The
+semantic fixture is the first thing that parses SQL.
+
+`refs` accumulates on conflict rather than overwriting, which is what the Cypher
+did (`coalesce(rel.join_refs, []) + new`) and the point of the column: each
+statement adds its own reference. It also **de-duplicates**, which the graph did
+not — re-ingesting the same statement grew the array without bound there, and
+that is a leak rather than a behaviour worth reproducing.
+
+### One improvement, found by the oracle doing its job
+
+`fetch_attr_column_contexts` returned a different column than Neo4j did. Both
+were arbitrary — a row per linked column, last one wins — but the *right* answer
+is not arbitrary: **the owning column wins**, the one linked by `HAS_ATTRIBUTE`
+rather than one merely pointing at the attribute through `SEMANTIC_FK`. An
+attribute describes its owning column, so returning a referencing column's name
+and table as the attribute's context was simply wrong whenever the ordering
+landed there. The golden happens to agree, which is how it was found.
+
+### One divergence accepted — B10
+
+`fetch_item_by_id` and `fetch_node_properties_by_id` return every column of a
+row where the graph returned only the properties something had set. Extra keys
+appear; `created` — stamped on every node, read by nothing, verified across
+backend and frontend — is gone. [DECISION-013].
+
+Handled by naming the **individual keys** whose presence may differ, per read,
+rather than exempting the two reads. Every other key is still compared exactly.
+A blanket exemption would have quietly stopped grading two of the 128 — the
+exact failure this phase exists to fix.
+
+### Test-hygiene fixes
+
+* **The Phase 5 zone tests leaked ~8 rows per run** into the shared store, named
+  outside their fixture's prefix so cleanup never matched them. 32 had
+  accumulated. `zones.list_zones` reads what is actually there, so the golden
+  caught it — a test asserting real state is worth more than one asserting a
+  mock, and this is why.
+* **`reset_graph` had to clear zones explicitly.** `delete_all_data(None)` does
+  not touch them on either backend — the Cypher's semantic labels never included
+  Zone — and the old `MATCH (n) DETACH DELETE n` swept them up incidentally. A
+  fixture built on leftover zones is not reproducible.
+* **The frozen surface snapshot records one backend's annotations**, so
+  `resolve_table_filter` — whose types legitimately differ ([DECISION-008]) —
+  tripped it under the other. The `BACKEND_SPECIFIC` allowlist now applies to
+  the snapshot comparison as well as the pg/neo4j one, on the same terms:
+  parameter *names* must still match, since those are what callers pass.
+* **Two `model_interchange` server tests patched Neo4j internals but called
+  through the selector**, so under Postgres they patched one backend and ran the
+  other. They also imported `UnknownDatabaseIdsError` from the selector while
+  calling the Neo4j function — the exception-identity hazard the selector
+  docstrings warn about, showing up for real.
+
+**Suite: 725 passed, 1 skipped — on both backends, repeatably.**
+
+**Next:** the flip itself — default `GSF_STORE=postgres`, then delete
+`gsf/dal/neo4j/`, the selectors, and the Neo4j infrastructure.

@@ -46,6 +46,7 @@ from sqlalchemy import Table, func
 
 from gsf.catalog.constants import Edges, Labels
 from gsf.dal.pg import schema as s
+from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 
 
 @dataclass(frozen=True)
@@ -123,6 +124,18 @@ ENTITIES: dict[str, EntitySpec] = {
         columns=_cols(s.custom_analysis),
         natural_key=("name",),
     ),
+    # The semantic write path routes through here too: creating a SqlAttribute
+    # persists its statement with `add_query`, exactly as an ingest does, so
+    # the attribute lands with the same table and column links -- which is what
+    # makes it appear in the exploration graph and pass the zone checks.
+    # Registered late (Phase 11): Phase 4 built this registry from the ingest
+    # path alone, where a SqlAttribute never appears.
+    LABEL_SQL_ATTRIBUTE: EntitySpec(
+        label=LABEL_SQL_ATTRIBUTE,
+        table=s.sql_attribute,
+        columns=_cols(s.sql_attribute),
+        natural_key=("name",),
+    ),
 }
 
 
@@ -166,6 +179,22 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
         "target_table_id",
         frozenset({"join_columns"}),
     ),
+    # Column-level JOIN/UNION, written by query ingestion. `refs` accumulates
+    # rather than overwrites -- see `_upsert_edge_row`.
+    (Edges.JOIN, Labels.COLUMN, Labels.COLUMN): LinkSpec(
+        Edges.JOIN,
+        s.column_join,
+        "source_column_id",
+        "target_column_id",
+        frozenset({"refs"}),
+    ),
+    (Edges.UNION, Labels.COLUMN, Labels.COLUMN): LinkSpec(
+        Edges.UNION,
+        s.column_union,
+        "source_column_id",
+        "target_column_id",
+        frozenset({"refs"}),
+    ),
     (Edges.SQL, Labels.SQL, Labels.TABLE): LinkSpec(
         Edges.SQL, s.sql_query_table, "sql_query_id", "table_id"
     ),
@@ -176,6 +205,9 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
     ),
     (Edges.HAS_SQL, Labels.CUSTOM_ANALYSIS, Labels.SQL): LinkSpec(
         Edges.HAS_SQL, s.custom_analysis_sql, "analysis_id", "sql_query_id"
+    ),
+    (Edges.HAS_SQL, LABEL_SQL_ATTRIBUTE, Labels.SQL): LinkSpec(
+        Edges.HAS_SQL, s.sql_attribute_sql, "attribute_id", "sql_query_id"
     ),
 }
 
