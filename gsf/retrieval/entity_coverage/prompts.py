@@ -19,8 +19,6 @@ Rules:
 - Preserve every factual constraint: numbers, product names, brands, categories, and \
 qualifiers such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.
-- If the input is already a direct domain question without generic request framing,
-  return it unchanged.
 - Output one concise question or search intent, not a paragraph.
 
 Examples:
@@ -31,9 +29,6 @@ sanitized_question: Find a 4-person tent, prioritizing lighter weight.
 
 Input: How many shipments were delivered last month?
 sanitized_question: How many shipments were delivered last month?
-
-Input: get semantic objects related to customers or Q1 revenue
-sanitized_question: customers or Q1 revenue
 
 ## Part 2 — required_entity_name
 
