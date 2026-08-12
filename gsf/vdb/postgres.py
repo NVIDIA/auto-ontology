@@ -454,6 +454,63 @@ class PostgresVDB(VDB):
         except Exception:
             pass
 
+    # ------------------------------------------------------------------
+    # Collection management — required by the ABC, unused by GSF
+    # ------------------------------------------------------------------
+    #
+    # ``VDB`` gained a collection-management API (scopes, collections,
+    # per-document CRUD) that models a multi-tenant document store. GSF has one
+    # collection per tier, created by ``_ensure_schema``, and reaches the store
+    # through ``run`` / ``write_to_index`` / ``retrieval`` and the three bulk
+    # deletes above — none of these are on any path it takes.
+    #
+    # They are declared abstract, so leaving them out makes ``PostgresVDB``
+    # itself abstract and every ``get_data_vdb()`` raise ``TypeError`` at
+    # construction. They raise rather than returning a plausible empty value:
+    # if GSF ever grows a caller, it should fail here and get a real
+    # implementation, not silently read an empty collection.
+
+    def _unsupported(self, method: str) -> NotImplementedError:
+        return NotImplementedError(
+            f"PostgresVDB does not implement {method}(): GSF uses a single "
+            f"collection per tier and never calls the collection-management "
+            f"API. Implement it here if that changes."
+        )
+
+    def create_collection(self, *, scope, request):
+        raise self._unsupported("create_collection")
+
+    def get_collection(self, *, scope, collection_name):
+        raise self._unsupported("get_collection")
+
+    def update_collection(self, *, scope, collection_name, request):
+        raise self._unsupported("update_collection")
+
+    def delete_collection(self, *, scope, collection_name, if_exists):
+        raise self._unsupported("delete_collection")
+
+    def list_collections(self, *, scope, limit, continuation_token):
+        raise self._unsupported("list_collections")
+
+    def retrieve_collection(
+        self, vectors, *, scope, collection_name, query_texts, top_k, **kwargs
+    ):
+        raise self._unsupported("retrieve_collection")
+
+    def write_collection(self, records, *, context):
+        # Reached only when a caller passes `collection_context` to
+        # IngestVdbOperator; GSF never does, so ingestion takes `run()`.
+        raise self._unsupported("write_collection")
+
+    def get_document(self, *, scope, collection_name, document_id):
+        raise self._unsupported("get_document")
+
+    def list_documents(self, *, scope, collection_name, limit, continuation_token):
+        raise self._unsupported("list_documents")
+
+    def delete_document(self, *, scope, collection_name, document_id, if_exists):
+        raise self._unsupported("delete_document")
+
     def __del__(self) -> None:
         try:
             self.close()

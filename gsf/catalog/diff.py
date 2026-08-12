@@ -122,6 +122,36 @@ def update_diff_from_existing_schema(new_schema, latest_timestamp):
                     latest_timestamp,
                 )
 
+        # Tables in both: refresh the facts the source owns. Only additions and
+        # deletions used to be handled, so a table that changed *shape* kept its
+        # original values forever -- drop a view and re-create it as a base
+        # table and `table_type` still read 'view', which tells the text-to-SQL
+        # agent a queryable table is not one. `description` is excluded: it is
+        # curated in the UI and must survive a re-ingest.
+        tables_names_in_both = set(new_table_names) & set(existing_table_names)
+        table_updates = []
+        for table_name in tables_names_in_both:
+            existing_props = existing_schema.get_table_node_props(table_name)
+            new_props = new_schema.get_table_node_props(table_name)
+            changed = {
+                key: new_props.get(key)
+                for key in ("table_type", "pk")
+                if key in new_props and new_props.get(key) != existing_props.get(key)
+            }
+            if changed:
+                table_updates.append(
+                    {
+                        "id": existing_props["id"],
+                        "label": Labels.TABLE,
+                        "props": changed,
+                    }
+                )
+        if table_updates:
+            logger.info(
+                f"Tables to update in schema {schema_name}: {len(table_updates)}"
+            )
+            update_properties_in_graph_batch(table_updates)
+
         tables_names_to_delete = set(existing_table_names) - set(new_table_names)
         logger.info(
             f"Tables to delete in schema {schema_name}: {len(tables_names_to_delete)}"

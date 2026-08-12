@@ -252,9 +252,44 @@ def merge_schema_nodes(nodes, created):
                 # Nothing to key it by, so it cannot be claimed by an edge
                 # later. Write it now and let the parent column complain if it
                 # was actually required.
-                upsert_row(node["label"], node["match_props"], node["props"])
+                upsert_row(
+                    node["label"],
+                    node["match_props"],
+                    node["props"],
+                    on_match=_source_owned(node),
+                )
                 continue
             _pending[node_id] = node
+
+
+#: Fields the *source database* owns, refreshed on every re-ingest.
+#:
+#: `upsert_row` writes `properties` on insert and only `on_match` on update, and
+#: no caller here used to pass `on_match` — so a row's structural facts were
+#: frozen at first ingest. Dropping a view and re-creating it as a base table
+#: left `table_type` reading 'view' forever, and the text-to-SQL agent was told
+#: a queryable table was a view.
+#:
+#: `description` is deliberately absent: it is curated in the UI and must
+#: survive a re-ingest, which is the same rule `update_properties_in_graph_batch`
+#: enforces with its coalesce.
+_SOURCE_OWNED = {
+    Labels.TABLE: ("table_type", "pk"),
+    Labels.COLUMN: ("data_type", "is_nullable", "ordinal_position", "sample_values"),
+}
+
+
+def _source_owned(node) -> dict:
+    """The subset of *node*'s properties the source is authoritative for.
+
+    ``label`` arrives as a string from some callers and a one-element list from
+    others, which is why it is normalised here rather than at each call site.
+    """
+    label = node["label"]
+    if isinstance(label, (list, tuple)):
+        label = label[0] if label else None
+    fields = _SOURCE_OWNED.get(label, ())
+    return {k: node["props"][k] for k in fields if k in node["props"]}
 
 
 def merge_schema_edges(edges, from_label, to_label):
@@ -278,6 +313,7 @@ def merge_schema_edges(edges, from_label, to_label):
                 node["match_props"],
                 node["props"],
                 parent_id=parent_id,
+                on_match=_source_owned(node),
             )
             continue
 

@@ -1207,11 +1207,21 @@ def _import_terms(
             newly_created.append(live_term_id)
         else:
             skipped["terms"] += 1
-        # The payload is authoritative about which tables represent a term, so
-        # the existing links go first -- a table dropped from the YAML must stop
-        # representing it.
+        # The payload is authoritative about which tables represent a term --
+        # but only for the tables it carries. Scoped to those, so a term also
+        # represented in a database outside this export keeps that link: the
+        # unscoped delete removed it and the re-insert could not restore it,
+        # because the id does not resolve. Before out-of-scope references were
+        # skipped rather than rejected this could not happen, since such a
+        # document aborted the import outright.
+        # `id_map.values()` is every live id this document resolved. Only table
+        # ids can match `table_id`, so the wider list is harmless and avoids
+        # threading the document's table set through here.
         store().query_write(
-            s.table_term.delete().where(s.table_term.c.term_id == live_term_id)
+            s.table_term.delete().where(
+                s.table_term.c.term_id == live_term_id,
+                s.table_term.c.table_id.in_(list(id_map.values())),
+            )
         )
         for table_id in term.represents:
             live_table_id = _remap_optional(id_map, table_id)

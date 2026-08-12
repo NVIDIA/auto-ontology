@@ -65,8 +65,15 @@ def insert_connection(
     Creating it matters: a connection is normally configured *before* anything
     is ingested, so there is usually no database row to attach to yet.
     """
+    # An empty string means "no connection JSON on the row" -- the Vault path
+    # writes the credentials to Vault and deliberately keeps them off the
+    # catalog. `json.loads("")` raises, and because the Vault write happens
+    # first, the secret was already stored when the insert 500s: no
+    # catalog_database row, so the connection is invisible to list_connections
+    # and cannot be ingested.
+    payload = json.loads(connection) if connection and connection.strip() else None
     statement = insert(s.catalog_database).values(
-        name=database_name, connection=json.loads(connection)
+        name=database_name, connection=payload
     )
     rows = store().query_write(
         statement.on_conflict_do_update(
