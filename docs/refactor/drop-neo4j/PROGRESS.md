@@ -2494,3 +2494,97 @@ exact failure this phase exists to fix.
 
 **Next:** the flip itself — default `GSF_STORE=postgres`, then delete
 `gsf/dal/neo4j/`, the selectors, and the Neo4j infrastructure.
+
+---
+
+## 2026-08-12 — Phase 11 complete — **Neo4j is gone**
+
+The last phase. `origin/main` merged first (one commit), then the flip.
+
+**Suite: 692 passed, 1 skipped.** The count dropped from 725 because tests of
+deleted code went with it, not because coverage did — see below.
+
+### What was deleted
+
+`gsf/dal/neo4j/`, `gsf/catalog/store/neo4j/`, `neo4j_tx.py`,
+`cypher_fragments.py`, `gsf/infra/store.py` (the `GSF_STORE` switch itself), and
+every selector. `gsf/dal/pg/*` and `gsf/catalog/store/pg/*` are promoted a level
+— `gsf.dal.terms` is now the implementation rather than a two-branch import.
+
+Also gone: `neo4j>=6.1.0` from `pyproject.toml`, the `neo4j` service and its
+four volumes from `docker-compose.yml`, `helm/gsf/templates/neo4j.yaml` and the
+`NEO4J_*` values, `.env.example`, `dev_tools/setup_env.sh`, and the README /
+DEPLOYMENT sections.
+
+### The health endpoint was reporting a lie
+
+`_check_neo4j()` called `verify_connectivity()` — which, once `connections.py`
+was ported, probed **Postgres**. So the endpoint reported `neo4j: ok` while
+checking a database Neo4j had nothing to do with, and would have kept doing so
+indefinitely. Collapsed to a single `postgres` key, checked through the DAL's
+pooled connection rather than a fresh `psycopg.connect`: a raw connection proves
+the *server* is reachable, which is not the same as proving this process can get
+a usable connection out of its pool, and the pool is what every request needs.
+
+`HealthResponse.neo4j` is removed. No frontend consumer, verified before
+deleting rather than assumed.
+
+### A prompt change, called out as one
+
+`semantic_fk.py` labelled its retrieval candidates `neo4j_id`, in **LLM prompt
+text**. Renaming it to `column_id` is a prompt change, not a cosmetic one — the
+prompt is the interface to the model. Done anyway: leaving a deleted store's
+name in a prompt is worse than the small risk of a reworded instruction, and the
+label only has to be consistent between the candidate list and the instruction
+that reads it. Both were changed together, along with the
+`FkHitSelection.selected_id` description.
+
+`check_properties_compatibility_with_neo4j` is now `check_properties_are_flat`.
+Its own docstring had said Phase 11 should rename it. The constraint outlived
+its reason: these values become table columns, and a dict arriving where a
+scalar belongs fails at the insert with a far less useful message.
+
+### Tests: what went, and what did not
+
+Deleted with their subject: `test_neo4j_tx.py`, `test_neo4j_dal_merge.py`,
+`test_bridge_tables.py`, the pg/neo4j surface comparison, and six mock-based
+`model_interchange` tests.
+
+**Their coverage did not go with them.** Every one of those six had a Postgres
+equivalent in `gsf/dal/tests/test_model_interchange.py` asserting the same
+behaviour against a live store — which is a better test of "the import is one
+transaction" than a mocked `write_transaction` ever was. That is stated in the
+remaining file's docstring so the next reader does not mistake the deletion for
+a gap.
+
+`test_close_store.py` shrank from four tests to two, because `close_store` now
+closes one thing instead of three.
+
+### Two findings from the deletion itself
+
+**The surface snapshot could never have matched itself.** `sql_fragments`
+defaults an argument to a `Table`, whose `repr` embeds memory addresses — so the
+frozen signature differed every process. It had never been exercised because the
+module was new in Phase 7 and the snapshot was regenerated in the same run.
+`_describe` now normalises addresses away.
+
+**`SqlAttributeSqlError` vanished from the frozen surface** without being
+removed from the code — `router.py` still catches it to return a 422. It is an
+alias for `SqlParseError`, so its `__module__` points elsewhere and the freeze
+could not see it once the selector's `__all__` was gone. `sql_attributes.py`
+now declares its own `__all__`. Worth noting as a shape: a freeze that resolves
+by `__module__` is blind to aliases, and an alias is exactly the kind of thing
+that gets deleted by accident.
+
+### Fork parity, narrowed rather than deleted
+
+`gsf/catalog/store/` is no longer a fork of anything, so every mapping naming it
+is gone from `FORKED` and it sits in `DIVERGED` instead. What remains is the
+genuinely storage-agnostic part of the Phase 1 fork — normalisation, SQL
+parsing, the model classes, the parsers — which still tracks upstream and where
+drift is still worth catching. The upstream→GSF import equivalences had to stay,
+though: without them a genuinely verbatim fork reads as drift on its import
+lines alone.
+
+**The refactor is complete.** PLAN.md carries a banner saying so; it is kept as
+the record of why the schema looks the way it does.

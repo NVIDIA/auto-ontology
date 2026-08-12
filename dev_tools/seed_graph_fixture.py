@@ -25,11 +25,7 @@ Usage::
 
     export POSTGRES_HOST=... POSTGRES_PORT=... POSTGRES_USER=... POSTGRES_PASSWORD=...
     export CONNECTION_STRINGS="postgresql://.../pagila,sqlite:////abs/path/chinook.sqlite"
-
-    # Whichever backend GSF_STORE selects -- the fixture is built through the
-    # DAL, so the same script produces the same fixture on both.
-    GSF_STORE=postgres uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
-    NEO4J_URI=bolt://... uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
 """
 
 from __future__ import annotations

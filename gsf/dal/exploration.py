@@ -32,7 +32,7 @@ from gsf.dal import schema as s
 
 # Private on purpose, and imported across modules on purpose: these are the one
 # definition of a table's column/sql/term counts, and the Cypher shared them the
-# same way (`TABLE_COUNTS_SUBQUERY`, imported from neo4j/datasources). A second
+# same way -- `TABLE_COUNTS_SUBQUERY`, imported across modules. A second
 # copy here is how the graph's badge and the schema tree's badge start
 # disagreeing about the same table.
 from gsf.dal.datasources import _count_of, _terms_count

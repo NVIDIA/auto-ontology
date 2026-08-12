@@ -1,5 +1,10 @@
 # Drop Neo4j: migrate the graph to Postgres
 
+> **This refactor is complete.** Every phase landed; Neo4j is gone from the
+> repository. The document is kept as the record of *why* the schema and the
+> code look the way they do — the schema-design section and DECISIONS.md are
+> the parts still worth reading before changing a table.
+
 ## Context
 
 GSF stores its data catalog and semantic layer in Neo4j, but the model is not

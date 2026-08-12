@@ -62,13 +62,16 @@ def is_flat_dict(properties: dict):
             )
 
 
-def check_properties_compatibility_with_neo4j(
+def check_properties_are_flat(
     node_from: CatalogNode, node_to: CatalogNode, edge_props: dict
 ):
-    """Name kept for call-site compatibility; the check is store-agnostic.
+    """Reject nested property values on either endpoint or the edge.
 
-    Renaming it would touch every caller for no behaviour change. Phase 11 can
-    rename it once the Neo4j path is gone.
+    Renamed in Phase 11 from ``check_properties_compatibility_with_neo4j``,
+    which is what it was called when a node property genuinely could not hold a
+    nested structure. The constraint outlived the reason: these values become
+    table columns, and a dict arriving where a scalar is expected fails at the
+    insert with a far less useful message than this one.
     """
     is_flat_dict(node_from.get_properties())
     if node_from.get_override_existing_props():
@@ -109,7 +112,7 @@ def prepare_edge(edge):
     v2_label, v2_identity, v2_on_create, v2_on_match = prepare_node(node_to)
     edge_props = edge[2].copy()
 
-    check_properties_compatibility_with_neo4j(node_from, node_to, edge[2])
+    check_properties_are_flat(node_from, node_to, edge[2])
 
     if e_label in (Edges.JOIN, Edges.UNION):
         edge_identity_props: dict[str, Any] = {}

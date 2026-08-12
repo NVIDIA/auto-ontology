@@ -47,7 +47,7 @@ To install dependencies:
 
 ## Backend Rules
 
-- **In-flight refactor — dropping Neo4j.** Read `docs/refactor/drop-neo4j/PLAN.md` before changing anything under `gsf/dal/` or `gsf/catalog/`. Log what you land in `PROGRESS.md` **in the same commit**, and record any deviation from the plan in `DECISIONS.md` *before* the code lands. Do not silently absorb behaviour changes — surface them.
+- **The store is Postgres.** `gsf/dal/` queries it with SQLAlchemy Core (no ORM); `gsf/dal/schema.py` is the single source of truth for the schema and `gsf/dal/session.py` owns the pooled engine. Schema changes go through Alembic — `uv run alembic revision --autogenerate -m "..."` — never by hand-editing a migration that has been applied. `docs/refactor/drop-neo4j/` records why the schema looks the way it does; read `DECISIONS.md` before changing a table, since several shapes are deliberate and non-obvious.
 - **Formatting/Linting**: Ruff (line-length: 88). Run `uv run ruff check gsf/` and `uv run ruff format gsf/` from repo root before committing.
 - **Dependencies**: Managed with `uv`. Add dependencies via `uv add`, not pip. Do not edit `pyproject.toml` manually for deps.
 - **API prefix**: All routes under `/api/`. Routes live in `gsf/server/datasources/router.py`, orchestration in `gsf/server/datasources/service.py`.
