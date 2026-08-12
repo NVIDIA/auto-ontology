@@ -2298,3 +2298,97 @@ than a tidy-up that quietly changes what the panel shows.
 **Next:** Phase 10 — `model_interchange`, the last module. It must fix bug 3
 (`bool('NO')` is `True`, so every column exports as nullable) and un-skip the
 two `test_export_model_*` tests **together**.
+
+---
+
+## 2026-08-12 — Phase 10 complete — `model_interchange`
+
+**Every DAL module now runs on Postgres.** `gsf/dal/pg/` is 15 modules; the only
+Cypher left is behind the selectors, waiting for Phase 11 to delete it.
+
+### Bug 3 is fixed, and it was worse than the description
+
+`is_nullable` is stored as the strings `'YES'`/`'NO'` — what
+`information_schema` reports — and the reader was `bool(...)`. `bool('NO')` is
+`True`, so **every column in every export claimed to be nullable**. Measured on
+the fixture: **112 of 218 columns wrong**, and an export is what another
+deployment imports as truth.
+
+Nothing ever failed, because a bool is exactly what the schema expects and
+`True` is a plausible one. The only way to see it was to look at what was stored
+rather than at what was read.
+
+`_is_nullable` parses it properly, and `_nullable_to_stored` writes it back in
+the store's own vocabulary on import — a bool there would make a re-ingest diff
+see every imported column as changed, so the column would flap on every
+subsequent ingest. One test covers both stored values, one covers the parser
+directly, and one runs export → import → re-export, which is the only one that
+would catch getting the reader right and the writer wrong.
+
+**The two `test_export_model_*` tests are un-skipped**, in the same change, as
+the plan required. The thing that had kept them skipped was not the store at
+all: `export_model` reaches it twice, and only one of the two paths was patched.
+`_dialect_by_database_name()` asks the connector registry and `list_connections()`
+what dialect each database speaks. Both are patched now; neither test is about
+dialect resolution.
+
+### Two simplifications banked
+
+**`_ensure_import_indexes` is gone.** It created uniqueness constraints and
+`imported_id` indexes on every import — a schemaless store had no other way to
+guarantee them, and an unindexed `imported_id` turned a several-thousand-column
+import into a quadratic crawl. The schema declares them once.
+
+**The split transaction collapses into one.** SQL attributes and custom analyses
+used to be applied *outside* the main transaction because `add_query` opened its
+own auto-commit Neo4j session and would deadlock against locks the outer
+transaction held. The Postgres `add_query` runs on the same connection, so the
+whole import is atomic — a failure part-way now leaves nothing behind, where
+before it could leave a catalog with no semantics on top. Pinned by a test that
+fails an import mid-way and asserts the database row is absent.
+
+Containment being a parent FK also removes a step per level: each level is
+created *with* its parent, where the Cypher needed a second batched `MERGE` for
+the `CONTAINS` edges.
+
+### Two findings from the round trip
+
+**Bug 6 — an export of one database cannot be imported when a Term spans two.**
+`_export_terms` returns *every* table representing a term, including tables
+outside the exported set; that is deliberate and keeps a partial export honest
+about a term it only partly owns. But the importer resolves each `represents`
+entry against the document, so such an export names a table it does not carry
+and raises.
+
+Preserved. Silently dropping the unresolvable entry would import the term as
+though it belonged wholly to the importing database — quieter, and worse, than
+an error naming the table it cannot find. Fixing it properly means deciding what
+a partial export *should* say about a shared term, which is a product question.
+Recorded in PLAN.md and pinned by a test.
+
+**B9 — the import now meets constraints the graph never had.** `term` is
+`UNIQUE(name, source)`, so importing a document whose Term shares a name with an
+existing one raises where the graph created a *second* Term node — and
+`merge_term` matched on `{name, source}`, so which of the two a later write
+found was arbitrary. The duplicate was the bug; the error is the fix. Left to
+surface ([DECISION-012]); it does not affect the normal workflow, where an
+import targets a deployment that does not already have those names.
+
+### Tests — `gsf/dal/pg/tests/test_model_interchange.py`, 28 of them
+
+The plan's Done criterion — **the round trip is idempotent** — needed a helper
+worth naming. A document exported here carries this store's live ids, and the
+import matches those against `catalog_table.id`, so re-importing it *adopts* the
+rows rather than copying them. That is correct, and has its own test. To
+exercise the *create* path the ids have to be foreign, which is what a document
+from another deployment has — `_reid` rewrites them, and the names with them,
+because otherwise the run collides with the constraints above rather than
+testing the import.
+
+**Suite:** 725 passed, 1 skipped (was 695 passed, 3 skipped). The remaining skip
+is live Databricks credentials; the two model-interchange skips are gone.
+
+**Next:** Phase 11 — flip `GSF_STORE` to Postgres, delete the Neo4j
+implementations and the selectors. Note its prerequisite, recorded in Phase 7:
+`capture_dal_golden._fixture_ids()` still resolves every fixture entity with
+hardcoded Cypher, so the golden replay cannot grade Postgres until it is ported.

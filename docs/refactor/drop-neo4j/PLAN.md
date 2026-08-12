@@ -50,11 +50,12 @@ getting wrong in production.
 |---|---|---|---|
 | 1 | **Partitioned tables and materialized views were missing from every Postgres catalog.** `relkind` excluded `'p'`, so a partitioned parent appeared nowhere; and `information_schema` lists no matviews, making `TableTypes.MATERIALIZED_VIEW` unreachable dead code | ingesting the Pagila fixture | fixed, **B3** ([003](DECISIONS.md)) |
 | 2 | **No column change ever survived a re-ingest.** The column diff merged on keys neither frame had, raising `KeyError` every time — and `executor.map`'s result was never consumed, so the exception was discarded in silence. Added columns never appeared; dropped columns left ghosts the SQL generator kept querying | writing the incremental-diff tests | fixed, **B6** ([006](DECISIONS.md)) |
-| 3 | **Every column exports as nullable.** `model_interchange` reads `is_nullable` with `bool(...)`, but the graph stores the strings `'YES'`/`'NO'` — and `bool('NO')` is `True` | measuring stored property types | **open**, for Phase 10 |
+| 3 | **Every column exports as nullable.** `model_interchange` reads `is_nullable` with `bool(...)`, but the graph stores the strings `'YES'`/`'NO'` — and `bool('NO')` is `True` | measuring stored property types | **fixed in Phase 10** — measured on the fixture at 112 of 218 columns wrong |
 | 4 | **The SqlAttribute suggester never ranked anything.** Its scorer matched `count_monthly_YYYY_MM` while the writer produced `count_{month}_{year}`, so every expression scored 0.0 and ordering was dict insertion order | deciding how to store monthly counters | **open** — documented in place, behaviour preserved ([007](DECISIONS.md)) |
 | 5 | **A retrieval hit with no SQL behind it disappears or degrades, depending on its type.** `candidates.expand_info` requires a statement for a `SqlAttribute` — no statement, no entry, so the vector store returns a candidate and the enrichment silently drops it — but uses `OPTIONAL MATCH` for a `CustomAnalysis`, which comes back with `sql: ""`. Same situation, two behaviours, in adjacent branches of one query | porting `expand_info` off `apoc.case` | **open** — both arms preserved and tested ([Phase 8](#phase-8--custom_analyses-pql_analyses-candidates-connections-reset-46d-23-people)) |
+| 6 | **An export of one database cannot be imported when a Term spans two.** `_export_terms` returns *every* table representing a term, including tables outside the exported databases — deliberately, so a partial export is honest about a term it only partly owns. But the importer resolves each `represents` entry against the document, so such an export names a table it does not carry and raises. Any deployment with a term shared across databases cannot export those databases separately | round-tripping the Phase 10 fixture | **open** — fails loudly, preserved and tested |
 
-Four of the five are silent: no error, no log, no failing test. That is the
+Four of the six are silent: no error, no log, no failing test. That is the
 pattern worth noting — a schemaless store lets a name mismatch sit undetected
 indefinitely, because nothing declares what a name is supposed to be. Two of
 them (2 and 4) were a regex or a merge key disagreeing with a writer that no
@@ -71,17 +72,26 @@ arms are now pinned by tests in `gsf/dal/pg/tests/test_candidates.py`, so
 whichever way it is eventually settled, the change is deliberate and one test
 fails to mark it. Settling it is not this refactor's call.
 
-**Bugs 3 and 4 are still open, deliberately.** Both change product output —
-what a model export claims about nullability, and which SqlAttributes get
-suggested — so both belong in their own change with their own tests rather than
-inside a port. Bug 3 is Phase 10's, which must fix it and un-skip the two
-`test_export_model_*` tests together. Bug 4 has its fix written out in
-`_usage_score`'s docstring, ready to apply.
+**Bug 6 is the loud one, and is the only one still open that raises.** It is
+also the only one where preserving the behaviour is clearly right: silently
+dropping the unresolvable `represents` entry would import the term as though it
+belonged wholly to the importing database, which is quieter and worse than an
+error naming the table it cannot find. Fixing it properly means deciding what a
+partial export *should* say about a shared term — a product question, and a
+larger change than a port.
+
+**Bug 4 is still open, deliberately.** It changes which SqlAttributes get
+suggested, so it belongs in its own change with its own tests rather than inside
+a port; its fix is written out in `_usage_score`'s docstring, ready to apply.
+
+**Bug 3 was fixed in Phase 10**, with the two `test_export_model_*` tests
+un-skipped in the same change, as this plan required.
 
 The line between fixing and preserving is whether the bug destroys something.
-Bugs 1 and 2 lost catalog entries, so reproducing them faithfully would have
-meant porting data loss. Bugs 3, 4 and 5 produce wrong-but-harmless output, and
-preserving them keeps the port honest about what it changed.
+Bugs 1, 2 and 3 lost or falsified data — catalog entries in the first two, every
+column's nullability in the third — so reproducing them faithfully would have
+meant porting the damage. Bugs 4, 5 and 6 produce wrong-but-harmless output or
+fail loudly, and preserving them keeps the port honest about what it changed.
 
 ---
 

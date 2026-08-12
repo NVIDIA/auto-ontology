@@ -33,6 +33,7 @@ must be restated in the PR description of the change that introduces it.
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
+| B9 | Importing a model whose Term name already exists now **raises** instead of creating a duplicate Term. `term` is `UNIQUE(name, source)`; the graph had no such rule, and `merge_term` matched on `{name, source}`, so which of two same-named Terms a later write found was arbitrary | Phase 10 ([012](#012--the-import-meets-constraints-the-graph-never-had)) |
 | B8 | `description_certified` becomes a real column on `catalog_table` and `catalog_column`. No behaviour change against Neo4j — it restores behaviour that Postgres would otherwise have lost silently | Phase 7 ([010](#010--description_certified-was-about-to-be-lost-silently)) |
 | ~~B7~~ | **Withdrawn.** Ranking the suggester *would* have been a behaviour change, so it is not being made here — the bug is documented in place and the inert behaviour preserved. See [007](#007--the-sqlattribute-suggester-was-never-actually-ranking) |
 
@@ -655,3 +656,39 @@ an addition — the function exists on both backends, only the module differs, a
 only until Phase 9.
 
 **Phase 9 must re-export, not rewrite.** Noted there as well as here.
+
+
+---
+
+## 012 — The import meets constraints the graph never had
+
+**Status:** accepted · **Phase:** 10 · **Table entry:** B9
+
+`apply_import_model` writes into a schema with real constraints where it used to
+write into a graph with none. Two bite:
+
+* **`term` is `UNIQUE(name, source)`.** A document whose Term shares a name with
+  an existing one now raises. Before, it created a *second* Term node — and
+  `merge_term` matched on `{name, source}`, so which of the two any later write
+  found was arbitrary. The duplicate was the bug; the error is the fix.
+* **`column_attribute` has the five-part merge key** as a unique constraint, so
+  the same applies to an imported attribute that collides on all five.
+
+**Left to surface, not caught.** Both constraints describe a genuine ambiguity,
+and swallowing the error would put it back — as a duplicate row that no read can
+choose between. The message names the colliding row, which is more than the
+graph ever offered.
+
+**This does not affect the normal workflow.** An import targets a different
+deployment, where those names do not exist. It bites when importing a copy of a
+catalog back into the store it came from under fresh ids — which is a test
+scenario, and is exactly how it was found.
+
+### The related hazard that is *not* a constraint problem
+
+Bug 6 in PLAN.md: exporting one database when a Term also represents a table in
+another produces a document naming a table it does not carry, and the import
+raises on it. That is not a constraint — it is the export and the import
+disagreeing about what a partial document should contain, and settling it means
+deciding what a partial export *should* say about a shared term. Out of scope
+here, recorded there, and pinned by a test either way.

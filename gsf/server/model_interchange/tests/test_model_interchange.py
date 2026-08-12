@@ -14,11 +14,16 @@ import yaml
 
 from gsf.dal.model_interchange import (
     UnknownDatabaseIdsError,
-    _resolve_entity,
     assemble_export_document,
     resolve_sql_column_ids,
     validate_database_ids,
 )
+
+# `_resolve_entity` is Neo4j-only: the Postgres implementation has no
+# single-entity path, only the batched one. Imported from the implementation
+# rather than the selector for that reason -- and because a module-private
+# helper is not part of the contract the selector exports.
+from gsf.dal.neo4j.model_interchange import _resolve_entity
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
     SQL_ATTR_SOURCE_MANUAL,
@@ -35,13 +40,11 @@ from gsf.server.model_interchange.embed import (
 from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
 
 
-_NEEDS_LIVE_STORE = (
-    "Needs a live graph store. These patch three DAL functions, but "
-    "service.export_model also calls _dialect_by_database_name() -> "
-    "list_connections(), which is unpatched and queries the store directly. "
-    "Pre-dates the Neo4j-to-Postgres refactor; Phase 10 rewrites these against "
-    "the Pagila/Chinook fixture. See docs/refactor/drop-neo4j/PLAN.md."
-)
+# `export_model` reaches the store twice: once through the three DAL functions
+# each export test patches, and once through `_dialect_by_database_name()`,
+# which asks the connector registry and `list_connections()` what dialect each
+# database speaks. That second call is what kept the two export tests skipped
+# until Phase 10; both now patch it, since neither is about dialect resolution.
 
 
 @contextmanager
@@ -195,7 +198,8 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     )
 
 
-@pytest.mark.skip(reason=_NEEDS_LIVE_STORE)
+@patch("gsf.server.model_interchange.service.get_connectors", return_value=[])
+@patch("gsf.server.model_interchange.service.list_connections", return_value=[])
 @patch(
     "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
 )
@@ -205,6 +209,8 @@ def test_export_model_filters_by_database_id(
     mock_validate: MagicMock,
     mock_fetch: MagicMock,
     _mock_resolver: MagicMock,
+    _mock_connections: MagicMock,
+    _mock_connectors: MagicMock,
 ) -> None:
     mock_fetch.return_value = _export_rows(db_id="db-2", db_name="inventory")
 
@@ -216,7 +222,8 @@ def test_export_model_filters_by_database_id(
     assert payload["data_layer"]["databases"][0]["id"] == "db-2"
 
 
-@pytest.mark.skip(reason=_NEEDS_LIVE_STORE)
+@patch("gsf.server.model_interchange.service.get_connectors", return_value=[])
+@patch("gsf.server.model_interchange.service.list_connections", return_value=[])
 @patch(
     "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
 )
@@ -226,6 +233,8 @@ def test_export_model_all_databases_uses_empty_filter(
     mock_validate: MagicMock,
     mock_fetch: MagicMock,
     _mock_resolver: MagicMock,
+    _mock_connections: MagicMock,
+    _mock_connectors: MagicMock,
 ) -> None:
     mock_fetch.return_value = _export_rows()
 
@@ -235,7 +244,7 @@ def test_export_model_all_databases_uses_empty_filter(
     mock_fetch.assert_called_once_with([])
 
 
-@patch("gsf.dal.model_interchange.graph")
+@patch("gsf.dal.neo4j.model_interchange.graph")
 def test_validate_database_ids_raises_for_unknown(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = [{"ids": ["db-1"]}]
 
@@ -323,9 +332,9 @@ def test_build_catalog_embed_rows_match_tabular_shape() -> None:
     assert "columns:" in table_row["text"]
 
 
-@patch("gsf.dal.model_interchange.get_schemas")
-@patch("gsf.dal.model_interchange.get_dialects")
-@patch("gsf.dal.model_interchange.validate_sql")
+@patch("gsf.dal.neo4j.model_interchange.get_schemas")
+@patch("gsf.dal.neo4j.model_interchange.get_dialects")
+@patch("gsf.dal.neo4j.model_interchange.validate_sql")
 def test_resolve_sql_column_ids_returns_parser_column_ids(
     mock_validate: MagicMock,
     mock_dialects: MagicMock,
@@ -341,7 +350,7 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
     ]
 
 
-@patch("gsf.dal.model_interchange.graph")
+@patch("gsf.dal.neo4j.model_interchange.graph")
 def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = [{"id": "live-1"}]
 
@@ -353,7 +362,7 @@ def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> N
     mock_conn.return_value.query_read.assert_called_once()
 
 
-@patch("gsf.dal.model_interchange.graph")
+@patch("gsf.dal.neo4j.model_interchange.graph")
 def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = []
     mock_conn.return_value.query_write.return_value = [{"id": "new-1"}]
@@ -371,23 +380,23 @@ def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
     assert write_params["props"]["name"] == "orders"
 
 
-@patch("gsf.dal.model_interchange._ensure_import_indexes")
-@patch("gsf.dal.model_interchange.write_transaction", _null_transaction)
-@patch("gsf.dal.model_interchange._import_custom_analyses")
-@patch("gsf.dal.model_interchange._import_sql_attributes")
-@patch("gsf.dal.model_interchange._import_semantic_fks")
-@patch("gsf.dal.model_interchange._import_column_attributes")
-@patch("gsf.dal.model_interchange._import_terms")
-@patch("gsf.dal.model_interchange._import_joins")
-@patch("gsf.dal.model_interchange._import_foreign_keys")
-@patch("gsf.dal.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.model_interchange._import_catalog")
+@patch("gsf.dal.neo4j.model_interchange._ensure_import_indexes")
+@patch("gsf.dal.neo4j.model_interchange.write_transaction", _null_transaction)
+@patch("gsf.dal.neo4j.model_interchange._import_custom_analyses")
+@patch("gsf.dal.neo4j.model_interchange._import_sql_attributes")
+@patch("gsf.dal.neo4j.model_interchange._import_semantic_fks")
+@patch("gsf.dal.neo4j.model_interchange._import_column_attributes")
+@patch("gsf.dal.neo4j.model_interchange._import_terms")
+@patch("gsf.dal.neo4j.model_interchange._import_joins")
+@patch("gsf.dal.neo4j.model_interchange._import_foreign_keys")
+@patch("gsf.dal.neo4j.model_interchange._delete_scoped_semantics_not_in_payload")
+@patch("gsf.dal.neo4j.model_interchange._import_catalog")
 def test_apply_import_model_creates_when_catalog_missing(
     mock_catalog: MagicMock,
     mock_delete: MagicMock,
     *_mocks: MagicMock,
 ) -> None:
-    from gsf.dal.model_interchange import apply_import_model
+    from gsf.dal.neo4j.model_interchange import apply_import_model
 
     mock_catalog.return_value = ["live-db"]
     document = assemble_export_document(
@@ -404,20 +413,22 @@ def test_apply_import_model_creates_when_catalog_missing(
     assert "skipped" in summary
 
 
-@patch("gsf.dal.model_interchange._ensure_import_indexes")
-@patch("gsf.dal.model_interchange._import_terms", side_effect=RuntimeError("bad sql"))
-@patch("gsf.dal.model_interchange._import_joins")
-@patch("gsf.dal.model_interchange._import_foreign_keys")
-@patch("gsf.dal.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.model_interchange._import_catalog")
-@patch("gsf.dal.model_interchange.write_transaction")
+@patch("gsf.dal.neo4j.model_interchange._ensure_import_indexes")
+@patch(
+    "gsf.dal.neo4j.model_interchange._import_terms", side_effect=RuntimeError("bad sql")
+)
+@patch("gsf.dal.neo4j.model_interchange._import_joins")
+@patch("gsf.dal.neo4j.model_interchange._import_foreign_keys")
+@patch("gsf.dal.neo4j.model_interchange._delete_scoped_semantics_not_in_payload")
+@patch("gsf.dal.neo4j.model_interchange._import_catalog")
+@patch("gsf.dal.neo4j.model_interchange.write_transaction")
 def test_apply_import_model_runs_in_one_transaction(
     mock_transaction: MagicMock,
     mock_catalog: MagicMock,
     *_mocks: MagicMock,
 ) -> None:
     """A failure part-way through must not escape the transaction scope."""
-    from gsf.dal.model_interchange import apply_import_model
+    from gsf.dal.neo4j.model_interchange import apply_import_model
 
     mock_transaction.return_value = _null_transaction()
     mock_catalog.return_value = ["live-db"]
