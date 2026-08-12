@@ -1450,3 +1450,55 @@ patch the implementation rather than the seam.
 **Next:** `gsf/dal/pg/datasources.py` — 26 functions, the largest blast radius
 after `model_interchange`, and the one where `fetch_schemas_by_ids` feeds the
 `Schema` model and therefore every SQL validation.
+
+---
+
+## 2026-08-12 — Phase 6 — dependency analysis before implementing
+
+Measured which of `datasources`' 26 functions can be *verified* now, rather than
+discovering it partway through writing them.
+
+**21 need only the catalog tier**, which Phase 4 already populates in Postgres:
+`fetch_databases`, `fetch_schemas_for_database`, `fetch_all_schema_ids`,
+`fetch_schema_ids_for_database`, `fetch_schemas_by_ids`, `fetch_sorted_tables`,
+`fetch_table_by_id`, `fetch_table_by_name`, `fetch_tables_by_ids`,
+`fetch_join_neighbors`, `fetch_join_edges`, `count_columns_for_table`,
+`fetch_parent_table_id_for_column`, `fetch_table_context`,
+`fetch_col_table_contexts`, `store_column_sample_values`,
+`store_column_uniqueness`, `apply_metadata_batch`, `patch_catalog_node`,
+`fetch_node_properties_by_id`, `fetch_item_by_id`.
+
+**5 join to the semantic tier** — `Term`, `ColumnAttribute`, or the description
+fallback through them: `fetch_tables_for_schema`, `fetch_all_tables_without_term`,
+`fetch_columns_for_table`, `fetch_tables_and_columns_by_node_ids`,
+`fetch_bridge_table_candidates`.
+
+Those five are *implementable* now — the tables exist from Phase 3 — but they
+are **not verifiable** until Phase 7 writes terms and attributes, because until
+then every semantic join returns empty and a wrong join reads exactly like a
+correct one against no data. Their golden captures are non-trivial precisely
+because the fixture *has* semantic data.
+
+**This is worth flagging against PLAN.md's ordering.** The plan sequences 6
+before 7 and notes only that 6 has "the largest blast radius after
+`model_interchange`". It does not record that a fifth of the module cannot be
+checked until 7 lands. Two workable options, and the choice belongs to whoever
+picks this up:
+
+1. **Implement all 26 now, verify 21, and re-verify the remaining 5 during
+   Phase 7.** Keeps the plan's order; costs a second verification pass and
+   leaves five functions carrying unearned confidence in between.
+2. **Implement the 21, and move the 5 into Phase 7** where their data and their
+   goldens arrive together. Phase 6 then genuinely completes, at the cost of
+   `datasources` being finished across two phases.
+
+I would take (2): a phase that ends with everything it produced actually checked
+is worth more than one that ends on schedule. But it changes the phase
+boundaries the plan defines, so it wants a DECISIONS record rather than a
+quiet reinterpretation.
+
+**Nothing implemented this session beyond the scaffolding** — stopping at a
+clean point rather than writing 700 lines that could not be verified before the
+session ended.
+
+**Suite:** 461 passed, 3 skipped. Working tree clean.
