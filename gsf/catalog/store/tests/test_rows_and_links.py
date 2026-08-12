@@ -30,7 +30,7 @@ from sqlalchemy import select  # noqa: E402
 
 from gsf.catalog.constants import Edges, Labels, Props  # noqa: E402
 from gsf.catalog.model.node import CatalogNode  # noqa: E402
-from gsf.catalog.store import edges as pg_edges  # noqa: E402
+from gsf.catalog.store import queries as pg_queries  # noqa: E402
 from gsf.catalog.store import registry  # noqa: E402
 from gsf.catalog.store.rows import resolve_id, upsert_row  # noqa: E402
 from gsf.dal import schema as s  # noqa: E402
@@ -120,9 +120,7 @@ def test_referencing_rows_survive_a_reingest() -> None:
             Labels.SQL, {"sql_full_query": statement}, {"sql_full_query": statement}
         )
         table = _node(Labels.TABLE, {"id": table_id}, {"id": table_id})
-        pg_edges.add_edges(
-            [pg_edges.prepare_edge([sql_node, table, {Props.SQL_ID: "sql-1"}])]
-        )
+        pg_queries.add_query([(sql_node, table, {Props.SQL_ID: "sql-1"})])
 
     write_sql_edge()
     write_sql_edge()
@@ -158,9 +156,9 @@ def test_resolve_id_returns_none_for_absent_node() -> None:
 # CONTAINS is a parent column, not a row
 #
 # Exercised through upsert_row's parent_id, which is the primitive the
-# hierarchy writers use. CONTAINS never reaches prepare_edge: add_schemas_edge
-# and merge_schema_edges hardcode it, because in the graph it was the one
-# relationship with no properties to inspect.
+# hierarchy writers use. The parent link never reaches add_query:
+# add_schemas_edge_batch and merge_schema_edges write it directly, because it
+# is the one relationship carried by a column rather than a row.
 # --------------------------------------------------------------------------
 
 
@@ -267,12 +265,12 @@ def test_full_hierarchy_hangs_together() -> None:
 
 
 # --------------------------------------------------------------------------
-# Real edges, in the shape add_edges actually receives
+# Real links, in the shape add_query actually receives
 # --------------------------------------------------------------------------
 
 
 def test_sql_edge_becomes_a_row() -> None:
-    """``Sql -[SQL]-> Table``: the shape queries.py builds via prepare_edge."""
+    """``Sql`` → ``Table``: the shape ``sql_parse`` hands to ``add_query``."""
     name = _db_name()
     table_id, _ = _column(name, "customer", "customer_id")
 
@@ -282,9 +280,7 @@ def test_sql_edge_becomes_a_row() -> None:
     )
     table = _node(Labels.TABLE, {"id": table_id}, {"id": table_id})
 
-    pg_edges.add_edges(
-        [pg_edges.prepare_edge([sql_node, table, {Props.SQL_ID: "sql-1"}])]
-    )
+    pg_queries.add_query([(sql_node, table, {Props.SQL_ID: "sql-1"})])
 
     rows = store().query_read(
         s.sql_query_table.select().where(s.sql_query_table.c.table_id == table_id)
@@ -292,7 +288,7 @@ def test_sql_edge_becomes_a_row() -> None:
     assert len(rows) == 1
 
 
-def test_repeated_sql_edge_does_not_duplicate() -> None:
+def test_repeated_sql_link_does_not_duplicate() -> None:
     name = _db_name()
     table_id, _ = _column(name, "customer", "customer_id")
     statement = "SELECT customer_id FROM customer"
@@ -300,9 +296,9 @@ def test_repeated_sql_edge_does_not_duplicate() -> None:
         Labels.SQL, {"sql_full_query": statement}, {"sql_full_query": statement}
     )
     table = _node(Labels.TABLE, {"id": table_id}, {"id": table_id})
-    edge = pg_edges.prepare_edge([sql_node, table, {Props.SQL_ID: "sql-1"}])
+    link = (sql_node, table, {Props.SQL_ID: "sql-1"})
 
-    pg_edges.add_edges([edge, edge])
+    pg_queries.add_query([link, link])
 
     rows = store().query_read(
         s.sql_query_table.select().where(s.sql_query_table.c.table_id == table_id)
@@ -310,36 +306,14 @@ def test_repeated_sql_edge_does_not_duplicate() -> None:
     assert len(rows) == 1
 
 
-def test_unknown_edge_shape_raises() -> None:
+def test_unknown_link_shape_raises() -> None:
     with pytest.raises(registry.UnknownLink):
         registry.link_spec(Edges.FOREIGN_KEY, Labels.DB, Labels.SCHEMA)
 
 
 # --------------------------------------------------------------------------
-# Lookups and deletes
+# Deletes
 # --------------------------------------------------------------------------
-
-
-def test_get_node_properties_by_id_reports_its_label() -> None:
-    name = _db_name()
-    node_id = _database(name)
-
-    props = pg_edges.get_node_properties_by_id(node_id, Labels.DB)
-    assert props["name"] == name
-    assert props["label"] == Labels.DB
-
-
-def test_get_node_properties_by_id_searches_several_labels() -> None:
-    """A lookup may name several labels; each is a separate table here."""
-    name = _db_name()
-    node_id = _database(name)
-
-    props = pg_edges.get_node_properties_by_id(node_id, [Labels.TABLE, Labels.DB])
-    assert props is not None and props["label"] == Labels.DB
-
-
-def test_get_node_properties_by_id_returns_none_when_absent() -> None:
-    assert pg_edges.get_node_properties_by_id(str(uuid.uuid4()), Labels.DB) is None
 
 
 def test_delete_cascades_to_children() -> None:
@@ -348,7 +322,9 @@ def test_delete_cascades_to_children() -> None:
     table_id, column_id = _column(name, "customer", "customer_id")
     db_id = resolve_id(Labels.DB, {"name": name})
 
-    pg_edges.delete_bulk_of_nodes([db_id], [Labels.DB])
+    store().query_write(
+        s.catalog_database.delete().where(s.catalog_database.c.id == db_id)
+    )
 
     assert (
         store().query_read(
@@ -362,14 +338,3 @@ def test_delete_cascades_to_children() -> None:
         )
         == []
     )
-
-
-def test_delete_of_nothing_is_harmless() -> None:
-    pg_edges.delete_bulk_of_nodes([], [Labels.DB])
-
-
-def test_get_node_id_by_name_and_label() -> None:
-    name = _db_name()
-    node_id = _database(name)
-    assert pg_edges.get_node_id_by_name_and_label(name, Labels.DB) == node_id
-    assert pg_edges.get_node_id_by_name_and_label("nope", Labels.DB) is None

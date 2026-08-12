@@ -29,17 +29,19 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
-from sqlalchemy import select, update
+from sqlalchemy import distinct, func, select, update
+from sqlalchemy.dialects.postgresql import insert
 
+from gsf.catalog.constants import Edges, Props
 from gsf.catalog.model.node import CatalogNode
-from gsf.catalog.normalize import chunks
 
 # Pure, so it lives outside this module rather than being reimplemented.
 from gsf.catalog.query_stats import (  # noqa: F401
     get_candidate_sql_ids,
     get_sql_counters,
 )
-from gsf.catalog.store.edges import add_edges, prepare_edge
+from gsf.catalog.store import registry
+from gsf.catalog.store.rows import upsert_row
 from gsf.dal import schema as s
 from gsf.dal.session import store
 
@@ -56,11 +58,128 @@ _EMPTY_SQLS_COLUMNS = [
 ]
 
 
-def add_query(edges):
-    """Write a parsed query's nodes and edges."""
-    edges_data = [prepare_edge(edge) for edge in edges]
-    for chunk in chunks(edges_data, 10):
-        add_edges(chunk)
+# ---------------------------------------------------------------------------
+# Writing a statement and what it references
+# ---------------------------------------------------------------------------
+#
+# ``sql_parse`` hands over pairs of endpoints plus the properties of the
+# relationship between them, four kinds in all: a statement to a table, a
+# statement to a column, and column-to-column ``JOIN`` / ``UNION``. Each pair
+# becomes two upserted rows and one association row.
+
+
+#: Link properties that **accumulate** on conflict instead of overwriting.
+#:
+#: Each statement joining two columns adds its own reference, so the link
+#: records *how often and where* the join was observed. Overwriting would
+#: leave only the most recent statement and make the history meaningless.
+_ACCUMULATING = frozenset({"refs"})
+
+
+def _link_kind(properties: dict) -> str:
+    """Which relationship a set of link properties describes.
+
+    The kind is inferred from the properties rather than passed alongside
+    them, because that is the shape ``sql_parse`` produces.
+    """
+    if Props.JOIN in properties:
+        return Edges.JOIN
+    if Props.UNION in properties:
+        return Edges.UNION
+    if Props.SQL_ID in properties:
+        return Edges.SQL
+    if Props.ANALYSIS_ID in properties:
+        return Edges.HAS_SQL
+    return next(iter(properties))
+
+
+def _reject_nested(properties: dict) -> None:
+    """Reject nested property values.
+
+    These become scalar columns. Postgres would take nested JSON in a jsonb
+    column, but not here — failing with the offending key named beats the
+    insert's own message.
+    """
+    for key, value in properties.items():
+        nested = isinstance(value, dict) or (
+            isinstance(value, list)
+            and any(isinstance(item, (list, dict)) for item in value)
+        )
+        if nested:
+            raise ValueError(
+                f"Invalid property name: {key}\nThe property value: {value}"
+            )
+
+
+def add_query(edges) -> None:
+    """Write a parsed statement, the rows it references, and the links."""
+    for source, target, properties in edges:
+        _write_link(source, target, properties)
+
+
+def _write_link(source: CatalogNode, target: CatalogNode, properties: dict) -> None:
+    """Upsert both endpoint rows and the association between them."""
+    for endpoint in (source, target):
+        _reject_nested(endpoint.get_properties())
+        if endpoint.get_override_existing_props():
+            _reject_nested(endpoint.get_override_existing_props())
+    _reject_nested(properties)
+
+    spec = registry.link_spec(
+        _link_kind(properties), source.get_label(), target.get_label()
+    )
+
+    source_id = upsert_row(
+        source.get_label(),
+        source.get_match_props(),
+        source.get_properties(),
+        on_match=source.get_override_existing_props() or {},
+    )
+    # For a foreign key link the child's row *carries* the relationship, so the
+    # parent id goes in with the child rather than as a separate write.
+    target_id = upsert_row(
+        target.get_label(),
+        target.get_match_props(),
+        target.get_properties(),
+        parent_id=source_id if spec.is_parent_link else None,
+        on_match=target.get_override_existing_props() or {},
+    )
+
+    if spec.is_parent_link:
+        return
+
+    values = {spec.source_column: source_id, spec.target_column: target_id}
+    payload = {k: v for k, v in properties.items() if k in spec.property_columns}
+    values.update(payload)
+
+    statement = insert(spec.table).values(**values)
+    conflict = [spec.source_column, spec.target_column]
+    if not payload:
+        statement = statement.on_conflict_do_nothing(index_elements=conflict)
+    else:
+        updates = {}
+        for key, value in payload.items():
+            column = spec.table.c[key]
+            if key in _ACCUMULATING:
+                # Append, then de-duplicate: re-ingesting the same statement
+                # must not grow the array without bound.
+                updates[key] = _dedupe(column + getattr(statement.excluded, key))
+            else:
+                updates[key] = getattr(statement.excluded, key)
+        statement = statement.on_conflict_do_update(
+            index_elements=conflict, set_=updates
+        )
+    store().query_write(statement)
+
+
+def _dedupe(array):
+    """Distinct elements of a text[], order not preserved.
+
+    The graph did not de-duplicate and would append the same reference on every
+    re-ingest of the same statement; that is a leak rather than a behaviour
+    worth reproducing, and the readers treat the array as a set.
+    """
+    return select(func.array_agg(distinct(func.unnest(array)))).scalar_subquery()
 
 
 def get_sql_by_full_query(sql_full_query: str):
