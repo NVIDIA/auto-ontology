@@ -520,7 +520,28 @@ into one atomic transaction. Update those docstrings or they mislead forever.
 zero created); `replace=True` scoped delete verified.
 
 ### Phase 11 — Flip and delete *(2–3d)*
-Default `GSF_STORE=postgres`, full manual pass, then one PR deleting:
+
+**Prerequisite, added during Phase 7: make the golden harness backend-aware.**
+This file calls `test_golden.py` the fidelity oracle and says Phases 5-10 are
+graded by it. Measured under `GSF_STORE=postgres`, it grades nothing — 49 of 128
+fail, including functions Phase 6 landed and verified separately. Two causes,
+both in the harness rather than the DAL:
+
+* `capture_dal_golden._fixture_ids()` resolves every fixture entity with
+  hardcoded Cypher, so under Postgres it hands Neo4j ids to the Postgres DAL and
+  almost every read returns nothing. It must resolve by name against whichever
+  backend is selected — which is only possible once terms, zones, and analyses
+  exist in Postgres, i.e. after Phase 9.
+* `gsf/dal/neo4j/datasources.py` formats the zone filter into a Cypher string
+  and, under `GSF_STORE=postgres`, receives the Phase 5 predicate object and
+  interpolates `None`. Harmless in production, where one backend is selected and
+  the facade dispatches to it; fatal to any mixed-backend run.
+
+Until both are fixed, **parity is asserted by hand-written per-phase tests, not
+by the golden replay.** Say so plainly in the Phase 11 PR rather than implying a
+green oracle that was never run against Postgres.
+
+Then: default `GSF_STORE=postgres`, full manual pass, then one PR deleting:
 `gsf/dal/neo4j/`, `neo4j_tx.py`, `cypher_fragments.py`, the `GSF_STORE` switch
 (flatten `gsf/dal/pg/*` up a level), `neo4j>=6.1.0` from `pyproject.toml`,
 `_check_neo4j` + `HealthResponse.neo4j` (`gsf/server/responses.py:159` — no
