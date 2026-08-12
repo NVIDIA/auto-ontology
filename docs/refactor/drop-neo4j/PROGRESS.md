@@ -1803,3 +1803,88 @@ it under a collation that ignores punctuation at the first level. The contract i
 the database's order, so the test now compares against the database.
 
 **Suite:** 495 passed, 3 skipped (was 461).
+
+---
+
+## 2026-08-12 — Phase 7 — attributes, and the join-path spike
+
+`gsf/dal/pg/attributes.py` — 8 functions, including `find_join_path`, which
+PLAN.md carved out as its own 2-3 day spike. `gsf/dal/attributes.py` becomes a
+selector and the Cypher moves to `gsf/dal/neo4j/attributes.py`.
+
+The move fixed a backend leak on the way past: the Neo4j module imported
+`fetch_col_table_contexts` from the **selector**, so under
+`GSF_STORE=postgres` the Cypher implementation would have called the Postgres
+one. It now imports from `gsf.dal.neo4j.datasources` directly. This is the same
+class of bug as the `resolve_table_filter` leak recorded in the previous entry —
+worth checking for in every module still to be ported.
+
+### `find_join_path`
+
+Level-at-a-time BFS from Python over the `join_path_edge` view, with the
+recursive CTE kept beside it as `JOIN_PATH_CTE_SQL` and used as a test oracle —
+exactly as the plan called for. The CTE is correct and is *not* what APOC did:
+its visited array is per-path, so it re-expands every distinct route to a node,
+where `uniqueness: 'NODE_GLOBAL'` visits each node once. On a hub attribute
+referenced by hundreds of columns that difference is the whole ballgame. A test
+counts queries to pin it.
+
+**The depth bound was nearly a silent regression.** `maxLevel: 30` looks
+generous when you know real join paths are 2-4 hops, so 10 seemed like a safe
+tightening that would make runaway traversals fail fast. It is not: **a hop is
+four edges, not one.** Getting from one FK column to the next runs
+`Column -SEMANTIC_FK-> ColumnAttribute -HAS_ATTRIBUTE-> Column -CONTAINS->
+Table -CONTAINS-> Column`, so an n-hop path is `4n - 2` edges and an ordinary
+4-hop path is 14. A ceiling of 10 would have returned "no path" for it, silently
+and only on the longer paths. Caught by the depth-bound test failing on a
+3-table chain, which was the assertion doing its job in the least convenient
+way. `MAX_PATH_DEPTH` is 30, unchanged from the Cypher.
+
+Also fixed while writing the oracle: `:anchor::text` inside a SQLAlchemy
+`text()` is a syntax error, because `::` collides with bind-parameter parsing.
+`CAST(:anchor AS text)`.
+
+### A filter that belonged in the JOIN, not the WHERE
+
+`fetch_attr_column_contexts` takes an optional `database_name`. Written as a
+`WHERE` over the outer join, it **deleted the attribute's row entirely** when
+its column belonged to another database. The Cypher put the condition on an
+`OPTIONAL MATCH`, so the attribute survived with a null database and the
+empty-string defaults took over.
+
+The difference is invisible to a caller that uses `.get`, and the function
+swallows exceptions and returns `{}` — so the first version failed by returning
+an empty dict rather than by raising. It is caught here by asserting the key is
+present, not by asserting the values.
+
+### One divergence, left to surface
+
+`update_column_attribute` renames an attribute, and `name` is part of the 5-part
+merge key — a **real unique constraint** in Postgres where Cypher had only a
+`MERGE` pattern. The graph let a later `SET` produce two attributes identical on
+all five properties, which the next merge would then match arbitrarily. Renaming
+onto an existing key now raises `IntegrityError`.
+
+Not caught, deliberately: the constraint is describing a genuine conflict, and
+swallowing it would put the ambiguity back. Documented on the function.
+
+### Tests — `gsf/dal/pg/tests/test_attributes.py`, 31 of them
+
+The one that matters most: **two columns referencing the same attribute must not
+join to each other.** Traversing `SEMANTIC_FK` backwards walks up from one FK
+column and down another, producing a join between two `customer_id` columns that
+have nothing to do with each other — a wrong answer that reads as obviously
+right. The view simply does not emit the reverse row, and a test says so.
+
+Alongside it: the `-Schema` exclusion (two tables in one schema, unconnected,
+must not find each other), cycle termination, cross-database rejection through a
+shared attribute, hop pairing on a real 2-hop path, and agreement with the CTE
+oracle on every path case.
+
+A test-hygiene note worth keeping: the fixture cleaned up by name prefix, and
+`update_column_attribute` **renames** rows — so a renamed row stopped matching
+the prefix, survived teardown, and collided with the next run on the merge key.
+Cleanup is by id now. A fixture that tests a rename cannot identify its rows by
+name.
+
+**Suite:** 526 passed, 3 skipped (was 495).

@@ -707,9 +707,30 @@ CREATE OR REPLACE VIEW {SCHEMA}.join_path_edge AS
 
 DROP_JOIN_PATH_EDGE_VIEW_SQL = f"DROP VIEW IF EXISTS {SCHEMA}.join_path_edge"
 
+#: The view as something ``select()`` can take, on its **own** ``MetaData``.
+#:
+#: Not on :data:`METADATA`, deliberately. Alembic autogenerates by diffing that
+#: object against the database and cannot tell a view from a table, so a view
+#: registered there would be emitted as a ``CREATE TABLE`` on the next
+#: autogenerate and then reported as permanent drift. Keeping it in a separate
+#: registry means the DDL above stays the single definition of this view, while
+#: queries still get column objects instead of raw strings.
+VIEWS = MetaData(schema=SCHEMA)
+
+join_path_edge = Table(
+    "join_path_edge",
+    VIEWS,
+    Column("src_kind", Text, nullable=False),
+    Column("src_id", Text, nullable=False),
+    Column("dst_kind", Text, nullable=False),
+    Column("dst_id", Text, nullable=False),
+)
+
 __all__ = [
     "METADATA",
     "SCHEMA",
+    "VIEWS",
+    "join_path_edge",
     "JOIN_PATH_EDGE_VIEW_SQL",
     "DROP_JOIN_PATH_EDGE_VIEW_SQL",
     "analysis",
