@@ -2620,3 +2620,75 @@ of claim that gets repeated without the footnote.
 `test_storage_agnostic_modules_do_not_import_neo4j` in `test_fork_parity.py`
 still enforces the part that is actually under GSF's control: no module in
 `gsf/catalog/` outside the store may import the driver. It passes.
+
+---
+
+## 2026-08-12 — Phase 11 — the manual pass
+
+The plan asked for a full manual pass before calling the flip done. The suite
+proves the DAL answers correctly; it does not prove the application serves
+requests. Done on a **throwaway database created empty**, not on the
+already-migrated developer one, so the migration chain was exercised too.
+
+### Migrations, from nothing
+
+```
+upgrade head   →  3 migrations applied, no drift
+downgrade base →  3 reversed
+upgrade head   →  3 re-applied, no drift
+```
+
+The whole chain applies, reverses and re-applies cleanly. Worth doing on an
+empty database specifically: the developer one has had every migration applied
+incrementally as it was written, which is not the path a new deployment takes.
+
+### Ingest and seed
+
+Both fixture databases ingested and the hand-authored semantic layer seeded:
+2 databases, 37 tables, 209 columns, 5 terms, 4 SqlAttributes, 2 CustomAnalyses,
+1 PqlAnalysis, 3 zones.
+
+### Reads — every route, through the real app
+
+`/api/health`, `/api/datasources/dbs`, `/api/schemas/{id}`, `/api/columns/{id}`,
+`/api/terms`, `/api/semantic-compilation/status`, `/api/sql-attributes`,
+`/api/custom-analyses`, `/api/pql-analyses`, `/api/connections`,
+`/api/exploration/{graph,semantic-graph,edges,tables/zones}`,
+`/api/exploration/tables/{id}/details`,
+`/api/exploration/nodes/{id}/relationships`. **All 200.**
+
+### Writes
+
+* **`PATCH /api/nodes/{id}` — 200**, and the write lands: the description
+  persists and `description_certified` is `true` in the table. That is the
+  column added in Phase 7 ([DECISION-010]) working end to end through the API,
+  which is the thing that was silently dropped before it existed.
+* **CustomAnalysis and PqlAnalysis create / update / delete — 200.**
+* **SqlAttribute create** is exercised by the fixture seeder rather than this
+  pass: it calls the same `service.create_sql_attribute` and succeeded four
+  times against Postgres. The API-level attempt here hit a 401 from the
+  embedding endpoint, which needs a live NIM key — an environment limit, not a
+  defect, and the reason the seeder stubs embedding in the first place.
+* **The conflict checks fire correctly.** Re-posting an analysis with SQL that
+  already exists returns 409 naming the owner — including across a process
+  restart, which is what makes it a store check rather than a cache.
+
+### Export → import round trip, over HTTP
+
+```
+POST /api/model/export  →  200, 59,957 bytes of YAML
+POST /api/model/import  →  200, created 0, skipped 271
+```
+
+**Created 0 is the assertion.** Phase 10's Done criterion, verified through the
+HTTP API rather than the DAL: re-importing a document the store already
+contains is a no-op.
+
+### What this pass did not cover
+
+Chat and NL-to-SQL (`/api/chat/*`), semantic compilation
+(`/api/semantic-compilation/trigger`) and anything else needing a live model
+endpoint — all require NIM credentials this environment does not have. Their DAL
+reads are covered by the suite and the golden replay; the orchestration above
+them is not exercised here, and that gap is real. It is the same gap the test
+suite has, not one introduced by the flip.
