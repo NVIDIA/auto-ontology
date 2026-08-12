@@ -1531,3 +1531,63 @@ starting to port it, not the analysis.
 
 **Nothing implemented yet.** The corrected boundary is what Phase 6 builds
 against.
+
+---
+
+## 2026-08-12 — Phase 6 — the catalog reads run on Postgres
+
+`gsf/dal/pg/datasources.py` implements the 19 catalog-tier functions. The seven
+that reach the semantic tier raise `NotImplementedError` naming Phase 7 and the
+reason — a loud failure rather than a query that quietly returns nothing.
+
+**Phase 6's Done criterion is met**: a `Schema` map built from Postgres resolves
+real SQL. `validate_sql` succeeds on `SELECT film_id FROM film` and on
+`SELECT customer_id, amount FROM payment` — the second being the partitioned
+table that was invisible to the catalog entirely until B3.
+
+Verified against the ingested fixture: `fetch_databases` → chinook (1 schema),
+pagila (2); `fetch_schemas_for_database` → analytics 3 tables, public 23;
+`fetch_schemas_by_ids` → 209 column rows; `fetch_sorted_tables` → 37. Writes
+and `patch_catalog_node` round-trip.
+
+### Four shapes that needed deciding rather than translating
+
+**Empty parents disappear.** `MATCH (db)-[:CONTAINS]->(s)` is an inner join, so
+a database with no schemas produced no row at all rather than a row with zero.
+Reproduced with inner joins; `fetch_schemas_for_database` still returns `None`
+for a database with no tables, which is what its caller treats as absent.
+
+**`fetch_schemas_by_ids` reads an empty id list as *everything*.** The Cypher's
+`WHERE size($schema_ids) = 0 OR ...`. Reading it as "nothing" would leave every
+query unresolvable — and silently, since an empty catalog map produces "no table
+known" rather than an error.
+
+**`apply_metadata_batch`'s `coalesce` direction is the point.** `coalesce(new,
+existing)` means a curated description survives a batch that has nothing to say
+about it. Tested by running a second batch with `description: None` and
+asserting the first one is still there.
+
+**`catalog_database` has no `description` column.** The Cypher read
+`db.description`, a property nothing writes, so the value was always `None`. The
+key stays in the returned shape because callers read it; there is nothing to
+read it from.
+
+### One deliberate improvement
+
+`fetch_sorted_tables` now breaks ties on `name`. The Cypher ordered by
+`query_count DESC` alone and nearly every table ties at zero, so a function whose
+name promises an order returned rows in whatever order the store felt like —
+differing between calls. A tiebreaker cannot break a caller that was already
+receiving an arbitrary order. This settles the finding raised during the Phase 2
+golden capture, which asked Phase 6 to decide.
+
+`fetch_table_by_name` gets the same treatment for the same reason: it takes
+`LIMIT 1` over a name that is not unique across schemas or databases, so it now
+orders by id. Which row wins is still arbitrary; it is at least the same
+arbitrary row each time.
+
+**Suite:** 461 passed, 3 skipped.
+
+**Next:** Phase 7 — the semantic core, plus the seven inherited functions. Port
+the description fallback (`column_description_expr` / `table_description_expr`
+→ `sql_fragments`) first: five of the seven need nothing else.
