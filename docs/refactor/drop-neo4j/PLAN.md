@@ -544,12 +544,22 @@ into one atomic transaction. Update those docstrings or they mislead forever.
 **Done:** export→import round-trip is idempotent (second import: all skipped,
 zero created); `replace=True` scoped delete verified.
 
-> **Phase 9 note (added during Phase 7):** `fetch_table_zones_map` and
-> `zone_covers_table` already exist in `gsf/dal/pg/zones.py` — the Term reads
-> needed them two phases early ([DECISION-011]). Port `exploration` by
-> **re-exporting** them, not by writing a second copy: two spellings of the
-> zone-resolution rule is how a viewer ends up seeing a chip on one screen and
-> not another.
+> **Phase 9 note (added during Phase 7, resolved during Phase 9):**
+> `fetch_table_zones_map` and `zone_covers_table` were already in
+> `gsf/dal/pg/zones.py` ([DECISION-011]). `pg/exploration.py` re-exports the
+> first and declares it in `__all__` — the surface freeze resolves a module's
+> contract by `__module__`, which for a re-export points at the definition, so
+> without that the two backends' `exploration` surfaces read as diverging on a
+> function both provide.
+
+> **Phase 9 finding:** `fetch_table_exploration_details` and the edge set
+> disagree about what a blank statement is. The edge predicate trims before
+> deciding, so a whitespace-only statement is not an edge; the details list
+> drops only *falsy* text, so the same statement still appears among a table's
+> queries — a query on the detail panel with no line on the graph beside it.
+> Same family as bug 5, an order of magnitude smaller: nothing is lost, and a
+> whitespace-only statement should not exist. Preserved, and pinned by a test
+> so nobody unifies the two filters without meaning to.
 
 ### Phase 11 — Flip and delete *(2–3d)*
 

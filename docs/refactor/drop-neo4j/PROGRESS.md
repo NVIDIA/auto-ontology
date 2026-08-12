@@ -2210,3 +2210,91 @@ preserve while unpicking the `apoc.case` — including the two that are easy to
 `""` rather than `None` (callers concatenate it, and `None` renders as the word).
 
 No code change; `pg/candidates.py`'s module docstring gains a pointer.
+
+---
+
+## 2026-08-12 — Phase 9 complete — `exploration`
+
+`gsf/dal/pg/exploration.py` — 6 public functions plus
+`MAX_EXPLORATION_GRAPH_NODES`. As the plan predicted, most of it composes
+helpers that already existed: `fetch_semantic_exploration_graph` is almost
+entirely calls into `pg/terms` and `pg/sql_attributes`, and porting it late made
+it nearly free.
+
+Only **`gsf/dal/model_interchange.py`** is left on Cypher.
+
+### The degree invariant, and what protects it
+
+A table's `relationship_count` in the graph payload must equal the `total` its
+related-nodes page reports. The two are computed by different code — one counts
+edges, the other counts neighbours — so they agree only if "related" means
+exactly the same thing in both. When they drift the UI draws a node labelled "5
+relationships" whose panel lists 4, and nothing fails anywhere.
+
+`_related_tables()` is now the single definition, read by both sides:
+a shared statement with text, or a foreign key in **either** direction. The two
+FK legs stay separate because a foreign key is stored one way round and
+relatedness is not.
+
+Two details that keep it true and are easy to lose:
+
+* **Counts are computed before truncation.** `limit` can leave a neighbour out
+  of the payload; counting after would shrink a node's degree to match the
+  subset drawn and contradict the page behind it.
+* **The catalog path is an outer join** in the related-nodes page. Requiring it
+  would drop a related table with no schema or database above it from the page
+  while the graph still counted it — the invariant broken by a join, not by a
+  count.
+
+The test asserts the invariant for every table in a fixture built to break it:
+edges by shared SQL *and* by foreign key, keys in both directions, a pair
+connected by both mechanisms at once, and a self-referential key that must count
+as nothing. A second test pins the expected degrees outright, so the invariant
+cannot pass by comparing zero with zero. Both are re-asserted under zone
+scoping — an invariant that only holds for an admin is not worth much.
+
+### `fetch_table_zones_map` is re-exported, and says so
+
+[DECISION-011] held: `pg/exploration` imports it from `pg/zones` rather than
+writing a second copy, and a test asserts the two names are literally the same
+function object.
+
+That surfaced a mirror image of the Phase 7 surface problem. The freeze resolves
+a module's contract by `__module__`, which for a re-export points at the
+*definition* — so `pg/exploration` appeared to be missing a function
+`neo4j/exploration` has. Fixed by declaring `__all__` on `pg/exploration`, which
+is the honest answer: it genuinely is part of that module's public surface.
+Better than a second `RELOCATED` entry, which would have recorded an exemption
+where there is no divergence.
+
+### A finding: two filters disagree about "blank"
+
+`_non_empty_sql` trims before deciding, so a whitespace-only statement makes no
+edge. `fetch_table_exploration_details` drops only *falsy* text, so the same
+statement is still listed among the table's queries. The user-visible effect is
+a query on the detail panel with no line on the graph beside it.
+
+Preserved. It loses nothing, and a whitespace-only statement should not exist in
+the first place — but the two filters differing is now pinned by a test, and
+recorded in PLAN.md's Phase 9 entry, so unifying them is a deliberate act rather
+than a tidy-up that quietly changes what the panel shows.
+
+### Smaller notes
+
+* **`_count_of` and `_terms_count` are imported across modules, privately.**
+  They are the one definition of a table's column/sql/term counts, and the
+  Cypher shared them the same way — `TABLE_COUNTS_SUBQUERY`, imported from
+  `neo4j/datasources`. A second copy is how the graph's badge and the schema
+  tree's badge start disagreeing about the same table.
+* **`MAX_EXPLORATION_GRAPH_NODES` is re-exported by the selector.** The router
+  reads it to document its own cap; a per-backend value would let the two
+  disagree about how large a payload can get.
+* **`neo4j/exploration.py` was importing from three selectors** — `sql_attributes`,
+  `terms` and `users`. Seven instances of that leak now, one in every module
+  ported so far.
+
+**Suite:** 695 passed, 3 skipped (was 666).
+
+**Next:** Phase 10 — `model_interchange`, the last module. It must fix bug 3
+(`bool('NO')` is `True`, so every column exports as nullable) and un-skip the
+two `test_export_model_*` tests **together**.
