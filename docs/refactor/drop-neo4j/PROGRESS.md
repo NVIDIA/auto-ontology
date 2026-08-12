@@ -1351,3 +1351,70 @@ backend-parity test now runs instead of skipping.
 
 **Next:** `gsf/dal/pg/zones.py`, then a cross-backend equivalence check for both
 against the same fixture.
+
+---
+
+## 2026-08-12 — Phase 5 complete — zones ported
+
+`gsf/dal/pg/zones.py` lands, finishing Phase 5.
+
+### A wrong constraint, caught by porting
+
+`zone.name` was declared `UNIQUE` in Phase 3. Reading the Cypher's
+`_zone_name_exists` showed that is wrong in **both** directions at once:
+
+- the rule is **case-insensitive on the trimmed name** (`toLower(trim(z.name))`),
+  so a `UNIQUE` column would *admit* "Sales" alongside "sales", which the
+  application rejects;
+- the rule is **scoped to zones sharing a database** with the zone's items, so a
+  `UNIQUE` column would *reject* the same zone name in two unrelated databases,
+  which the application allows.
+
+A constraint wrong in both directions is worse than none, so it is removed and
+the check stays in application code exactly as today. Expressing it in the
+database would need a partial index on `lower(trim(name))` *per database*, which
+zone membership — many-to-many through `zone_target` — cannot express. An index
+on `lower(name)` supports the lookup. Migration regenerated as `9ceb971cfdcb`.
+
+Both directions are now tests: one asserts `"  NAME  "` collides with `"name"`,
+another asserts the same name in a different database does not.
+
+### Polymorphic targets
+
+Callers pass a flat list of ids without saying whether each is a database,
+schema or table — a graph never needed to know, and three nullable foreign keys
+very much do. `_classify_items` resolves each id to its tier before writing it
+to the right column, and unknown ids are dropped rather than rejected, matching
+the Cypher's `MATCH` finding nothing and moving on.
+
+### Two distinctions that would be easy to flatten
+
+- **`item_ids=None` vs `[]` on update.** `None` means "not editing membership";
+  `[]` means "clear it". Collapsing them would strip a zone's items on any
+  metadata-only edit.
+- **A disabled zone stays visible.** The label swap is a boolean column now, but
+  `list_zones` still returns disabled zones — they are administered, just not
+  granting.
+
+### Tests
+
+15 in `gsf/dal/pg/tests/test_zones.py`, plus the 13 for users. One asserts that
+deleting a table removes its zone membership by cascade — the reason
+`zone_target` uses three real foreign keys rather than a `(kind, id)` pair,
+since a dangling grant is an access-control bug rather than untidiness.
+
+**Suite:** 460 passed, 3 skipped.
+
+### Phase 5 Done criteria — met
+
+`resolve_accessible_catalog_ids` / `resolve_table_filter` are ported and the
+filter contract is settled once ([DECISION-008](DECISIONS.md)), which is what
+the phase existed to do. Zone CRUD is ported. The four round trips in
+`get_accessible_catalog_ids_for_zones` collapse to one query.
+
+**Still owed, carried since Phase 3:** `dispose_engine()` is not yet called from
+`gsf.dal.close_store()`.
+
+**Next:** Phase 6, `datasources` — the largest blast radius after
+`model_interchange`, and where `fetch_schemas_by_ids` feeds `Schema` and
+therefore every SQL validation.

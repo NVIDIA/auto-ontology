@@ -538,7 +538,21 @@ zone = Table(
     "zone",
     METADATA,
     _id(),
-    Column("name", Text, nullable=False, unique=True),
+    # Deliberately **not** unique. The rule the application enforces is neither
+    # what a plain UNIQUE gives you nor a stricter version of it:
+    #
+    #   * it is case-insensitive on the *trimmed* name, so a UNIQUE column would
+    #     admit "Sales" alongside "sales", which the application rejects; and
+    #   * it is scoped to zones sharing a database with the zone's items, so a
+    #     UNIQUE column would reject the same zone name in two unrelated
+    #     databases, which the application allows.
+    #
+    # A constraint that is wrong in both directions is worse than none. The
+    # check stays in application code, exactly as today. Making it a database
+    # constraint would mean a partial index on `lower(trim(name))` *per
+    # database*, which zone membership -- being many-to-many through
+    # zone_target -- cannot express.
+    Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
     Column("color", Text, nullable=True),
     # Replaces the Zone/disableZone *label swap*. A boolean says the same thing
@@ -610,6 +624,8 @@ Index("ix_sql_attribute_term_term_id", sql_attribute_term.c.term_id)
 Index("ix_column_has_attribute_attribute_id", column_has_attribute.c.attribute_id)
 Index("ix_column_semantic_fk_attribute_id", column_semantic_fk.c.attribute_id)
 
+# Supports the case-insensitive name check that replaces a unique constraint.
+Index("ix_zone_name_lower", func.lower(zone.c.name))
 Index("ix_zone_target_zone_id", zone_target.c.zone_id)
 Index("ix_zone_target_database_id", zone_target.c.database_id)
 Index("ix_zone_target_schema_id", zone_target.c.schema_id)

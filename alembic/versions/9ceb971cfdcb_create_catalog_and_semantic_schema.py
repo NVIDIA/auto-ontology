@@ -11,9 +11,9 @@ The relational replacement for the Neo4j graph. See
 Everything lives in the ``gsf`` schema -- never ``public`` (Prisma's) and never
 ``vdb`` (langchain_postgres').
 
-Revision ID: a969ade140be
+Revision ID: 9ceb971cfdcb
 Revises: 
-Create Date: 2026-08-11 21:38:35.007319
+Create Date: 2026-08-12 08:25:28.211290
 
 """
 from typing import Sequence, Union
@@ -29,7 +29,7 @@ from gsf.dal.pg.schema import (
 )
 
 # revision identifiers, used by Alembic.
-revision: str = 'a969ade140be'
+revision: str = '9ceb971cfdcb'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -162,9 +162,9 @@ def upgrade() -> None:
     sa.Column('color', sa.Text(), nullable=True),
     sa.Column('enabled', sa.Boolean(), server_default=sa.text('true'), nullable=False),
     sa.PrimaryKeyConstraint('id', name=op.f('pk_zone')),
-    sa.UniqueConstraint('name', name=op.f('uq_zone_name')),
     schema='gsf'
     )
+    op.create_index('ix_zone_name_lower', 'zone', [sa.literal_column('lower(name)')], unique=False, schema='gsf')
     op.create_table('catalog_schema',
     sa.Column('id', sa.Text(), server_default=sa.text('(gen_random_uuid())::text'), nullable=False),
     sa.Column('database_id', sa.Text(), nullable=False),
@@ -379,6 +379,7 @@ def downgrade() -> None:
     op.drop_index('ix_catalog_schema_imported_id', table_name='catalog_schema', schema='gsf')
     op.drop_index('ix_catalog_schema_database_id', table_name='catalog_schema', schema='gsf')
     op.drop_table('catalog_schema', schema='gsf')
+    op.drop_index('ix_zone_name_lower', table_name='zone', schema='gsf')
     op.drop_table('zone', schema='gsf')
     op.drop_table('text_attribute', schema='gsf')
     op.drop_index('ix_term_name', table_name='term', schema='gsf')
