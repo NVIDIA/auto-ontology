@@ -2762,22 +2762,58 @@ OK      SELECT t."Name", a."Title" FROM "Track" t JOIN "Album" a … 4 columns
 REJECT  SELECT nope FROM NoSuchTable                             SqlParseError
 ```
 
-### What is still not verified: the chat SSE flow
+### NL-to-SQL, end to end
 
-`POST /api/chat/completions` did not return in this environment — three
-attempts, up to 23 minutes each, no response headers, with and without
-`CONNECTION_STRINGS` set. **I could not demonstrate NL-to-SQL end to end, and I
-am not claiming it works.**
+**`POST /api/chat/completions` works.** It did not under `TestClient` — three
+attempts, no response headers — and the inference recorded here first was that
+the SSE/worker-pool machinery was at fault rather than the store. Confirmed by
+running it against a real `uvicorn` process, where it returns 200 and streams
+normally. **`TestClient` is not a substitute for a server for this endpoint**;
+the `spawn`-based worker pool needs a real event loop and process.
 
-What I did establish about it, so the next person starts further along:
+Two questions against the SQLite fixture, both answered correctly:
 
-* the chat worker module and the retrieval package **import cleanly**;
-* the pool uses `mp.get_context("spawn")` explicitly (`worker.py:217`), so the
-  inherited-pooled-socket hazard that a fork would create — the one
-  `dispose_engine`'s docstring warns about — does not apply;
-* the gate it checks, `semantic_layer_calculated()`, returns `True`;
-* every DAL read the flow depends on is verified above or by the golden replay.
+| question | generated SQL | result |
+|---|---|---|
+| How many tracks are in the database? | `SELECT COUNT(*) AS TrackCount FROM Track;` | `3503` |
+| Which 3 artists have the most albums? | `SELECT ar.Name, COUNT(al.AlbumId) … JOIN Album al ON ar.ArtistId = al.ArtistId GROUP BY … LIMIT 3` | Iron Maiden 21, Led Zeppelin 14, Deep Purple 11 |
 
-So the evidence points at the worker-pool/SSE orchestration under `TestClient`
-rather than at the store, but that is an inference, not a result. Running it
-against a real `uvicorn` process is the obvious next step and was not done here.
+Both verified against the SQLite file directly — 3503 tracks, and the same three
+artists in the same order. The second is a real multi-table join written from
+the catalog, not a lookup.
+
+Eleven graph nodes traversed: `question_extraction` → `validate_intent` →
+`classify_prediction` → `retrieve_candidates` → `prepare_candidates` →
+`construct_sql_from_candidates` → `validate_sql_query` → `execute_sql_query` →
+`check_empty_like_result` → `check_value_repair` → `format_and_respond`. 84s and
+94s respectively, on Opus.
+
+That closes the last gap: **retrieval over real embeddings, SQL generation
+against a Postgres-built catalog, validation, execution against the source
+database, and the answer — all on the ported store.**
+
+### Two things checked rather than assumed
+
+**Chat-generated SQL is not written to `sql_query`.** It looked like a gap; it
+is not. Nothing in the chat or retrieval path calls `add_query` — only ingest,
+the attribute and analysis services, and model import do. Query history is
+*ingested* history, which is what the suggester scores; recording the
+generator's own output there is precisely the feedback loop
+`fetch_terms_with_sqls` already excludes.
+
+**Two `UndefinedTable` errors in the log** — `acronyms` and `prompts`. Those are
+Prisma-owned tables in `public`, created by the frontend migration job, and this
+run only applied Alembic (which owns `gsf`). The code logs and continues with
+empty defaults, which is the right behaviour. Not related to the port.
+
+### Setup note for repeating this
+
+The fixture seeder stubs embedding, so a seeded database has **no vectors** and
+retrieval finds nothing. Embedding the catalog and the semantic layer for real
+is a required step before the chat flow can work:
+
+```
+uv run python -m dev_tools.seed_graph_fixture --reset   # catalog + semantics
+# then embed for real: ingest_catalog + TabularFetchEmbeddingsOp + batch_embed
+# into get_data_vdb(), and embed_all_semantic_nodes(build_semantic_embedder(db))
+```
