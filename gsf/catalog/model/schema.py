@@ -128,8 +128,19 @@ class Schema:
                 "data_type": (
                     None if pd.isna(x["data_type"]) else x["data_type"].strip('"')
                 ),
-                "is_nullable": x["is_nullable"],
-                "ordinal_position": x["ordinal_position"],
+                # `pd.isna`, not a truthiness test: after normalize_columns
+                # these are pandas' nullable dtypes, so a missing value is
+                # pd.NA, which psycopg cannot adapt -- it aborts the whole
+                # schema write rather than storing NULL. A connector is allowed
+                # to omit is_nullable; see SQLDatabase.get_columns.
+                "is_nullable": (
+                    None if pd.isna(x["is_nullable"]) else bool(x["is_nullable"])
+                ),
+                "ordinal_position": (
+                    None
+                    if pd.isna(x["ordinal_position"])
+                    else int(x["ordinal_position"])
+                ),
                 "description": None if pd.isna(x["description"]) else x["description"],
                 "id": x.id,
             },

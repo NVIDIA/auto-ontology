@@ -109,10 +109,16 @@ present and already pulled. Runs after gsf.waitForDeps, so Postgres is reachable
 {{- end -}}
 
 {{/*
-Init container that blocks until the backend's Alembic schema exists, gating on
-`gsf.catalog_database`. Without it the backend goes Ready and serves 500s
-(UndefinedTable) on every catalog call while backend-migrate is still running --
+Init container that blocks until the backend's Alembic migrations have been
+applied *to the revision this release ships*. Without it the backend goes Ready
+and serves 500s on every catalog call while backend-migrate is still running --
 the Job is a normal release resource, so nothing else orders the two.
+
+Gating on a table's existence is not enough: it is satisfied from the first
+install onward, so on an upgrade that adds a column the new Pods roll out while
+the migration is still running and every query touching that column fails with
+UndefinedColumn. This compares `alembic_version.version_num` against the head
+revision baked into the image at build time, so it blocks on upgrades too.
 
 Mirrors gsf.waitForSchema, which does the same for Prisma's `public` schema.
 Runs after gsf.waitForDeps, so Postgres is reachable.
@@ -130,9 +136,9 @@ Runs after gsf.waitForDeps, so Postgres is reachable.
     - |
       until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
         -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
-        "SELECT 1 FROM information_schema.tables WHERE table_schema='gsf' AND table_name='catalog_database'" \
+        "SELECT 1 FROM gsf.alembic_version WHERE version_num = '{{ .Values.backend.alembicRevision }}'" \
         2>/dev/null | grep -q 1; do
-        echo "waiting for alembic schema (gsf.catalog_database)..."
+        echo "waiting for alembic revision {{ .Values.backend.alembicRevision }}..."
         sleep 2
       done
   {{- include "gsf.initResources" . | nindent 2 }}

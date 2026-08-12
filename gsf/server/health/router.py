@@ -2,7 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Liveness/readiness endpoint — probes Postgres connectivity."""
+"""Health endpoints.
+
+Two, deliberately. ``/health`` proves the dependencies are usable and backs
+**readiness**. ``/health/live`` proves only that this process is serving and
+backs **liveness** — a liveness probe that depends on Postgres asks the kubelet
+to restart a healthy backend whenever the database is slow or its pool is
+saturated, which removes capacity exactly when there is least to spare and can
+kill a process mid-write.
+"""
 
 from __future__ import annotations
 
@@ -47,3 +55,16 @@ def health() -> JSONResponse:
         "postgres": postgres,
     }
     return JSONResponse(status_code=200 if healthy else 503, content=body)
+
+
+@router.get(
+    "/health/live",
+    responses={200: {"description": "The process is serving requests"}},
+)
+def liveness() -> JSONResponse:
+    """Liveness only: no dependency is checked, and this must never fail.
+
+    Restarting the process cannot fix an unreachable database, so making this
+    depend on one converts a database blip into a rolling restart.
+    """
+    return JSONResponse(status_code=200, content={"status": "ok"})

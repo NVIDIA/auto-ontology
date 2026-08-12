@@ -72,6 +72,10 @@ def _qualified_name(t: dict) -> str:
 
 logger = logging.getLogger(__name__)
 
+#: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
+#: wide candidate set cannot starve the rest of the request.
+_JOIN_PATH_WORKERS = 4
+
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
 # (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
@@ -206,7 +210,14 @@ class CandidatePreparationAgent(BaseAgent):
                     for did, dctx in attr_contexts.items()
                     if did != anchor_id
                 ]
-                with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
+                # Bounded, not one worker per destination. Each worker runs
+                # find_join_path, which is several sequential checkouts from a
+                # 10-connection pool; a wide fan-out exhausts it, and
+                # find_join_path catches the QueuePool timeout and returns []
+                # -- so the failure shows up as missing joins in the prompt
+                # rather than as an error.
+                workers = min(len(dest_items) or 1, _JOIN_PATH_WORKERS)
+                with ThreadPoolExecutor(max_workers=workers) as pool:
                     futures = {
                         pool.submit(
                             find_join_path, anchor_ctx["col_id"], dctx["col_id"]

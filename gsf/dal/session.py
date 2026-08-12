@@ -84,6 +84,12 @@ def get_engine() -> Engine:
             # request rather than as a reconnect.
             pool_recycle=1800,
             pool_pre_ping=True,
+            # A TCP connect must not hang forever. Every other Postgres consumer
+            # in the repo passes connect_timeout=3; without it here, a
+            # blackholed database makes the health endpoint -- which is the
+            # *liveness* probe as well as readiness -- hang until the kubelet
+            # kills a backend that is otherwise fine.
+            connect_args={"connect_timeout": 3},
             future=True,
         )
     return _engine

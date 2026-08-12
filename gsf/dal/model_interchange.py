@@ -728,6 +728,22 @@ def _remap(id_map: dict[str, str], yaml_id: str, *, kind: str) -> str:
     return live_id
 
 
+def _remap_optional(id_map: dict[str, str], yaml_id: str) -> str | None:
+    """Resolve an id that a scoped export may legitimately not carry.
+
+    A scoped export is deliberately honest about the parts of a term it does not
+    own: ``_export_terms`` emits *every* table representing a term, in scope or
+    not, and ``_export_semantic_fks`` every pair touching an in-scope column.
+    Those ids point outside the document by design, so requiring them -- as
+    :func:`_remap` does -- made any such document abort the whole import.
+
+    Structural references still use :func:`_remap`. The difference is what a
+    missing id means: for a foreign key's endpoints it is a corrupt document,
+    for these it is the expected shape of a partial export.
+    """
+    return id_map.get(yaml_id)
+
+
 def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
     if not term_ids:
         return {}
@@ -1198,12 +1214,17 @@ def _import_terms(
             s.table_term.delete().where(s.table_term.c.term_id == live_term_id)
         )
         for table_id in term.represents:
-            represents_rows.append(
-                {
-                    "term_id": live_term_id,
-                    "table_id": _remap(id_map, table_id, kind="term represents table"),
-                }
-            )
+            live_table_id = _remap_optional(id_map, table_id)
+            if live_table_id is None:
+                # A table from another database this term also represents. The
+                # export records it on purpose; this document cannot create it.
+                logger.debug(
+                    "import: term %s represents out-of-scope table %s; skipping",
+                    term.id,
+                    table_id,
+                )
+                continue
+            represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
     _link(s.table_term, represents_rows)
 
     if embed_buffer is not None and newly_created:
@@ -1308,17 +1329,22 @@ def _import_column_attributes(
 
 
 def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> None:
+    rows = []
+    for fk in document.semantic_layer.semantic_fks:
+        column_id = _remap_optional(id_map, fk.column_id)
+        attribute_id = _remap_optional(id_map, fk.column_attribute_id)
+        if column_id is None or attribute_id is None:
+            # The pair reaches an attribute whose term fell outside this export.
+            logger.debug(
+                "import: semantic fk %s -> %s is out of scope; skipping",
+                fk.column_id,
+                fk.column_attribute_id,
+            )
+            continue
+        rows.append({"column_id": column_id, "attribute_id": attribute_id})
     _link(
         s.column_semantic_fk,
-        [
-            {
-                "column_id": _remap(id_map, fk.column_id, kind="semantic fk column"),
-                "attribute_id": _remap(
-                    id_map, fk.column_attribute_id, kind="semantic fk attribute"
-                ),
-            }
-            for fk in document.semantic_layer.semantic_fks
-        ],
+        rows,
     )
 
 

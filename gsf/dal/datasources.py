@@ -1089,6 +1089,9 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         .where(resolved.c.owner_table_id == s.catalog_table.c.id)
         .scalar_subquery()
     )
+    resolved_rows = _count_of(
+        resolved, resolved.c.owner_table_id == s.catalog_table.c.id
+    )
     has_attribute_anywhere = (
         select(literal(1))
         .select_from(
@@ -1132,6 +1135,12 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
             ~has_attribute_anywhere,
             ~already_bridged,
             resolved_count == columns_count,
+            # Both bounds. The line above says every column resolves; this one
+            # says none resolves twice. Without it a 2-column junction whose
+            # first column carries two foreign keys still qualifies and hands
+            # `_generate_bridge_sql_attribute` three pairs, so the bridge joins
+            # a table the junction does not connect.
+            resolved_rows == columns_count,
         )
         .order_by(s.catalog_table.c.name)
     )

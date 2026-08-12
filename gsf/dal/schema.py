@@ -109,6 +109,12 @@ catalog_database = Table(
     # name is the lookup key -- there is no separate reference field).
     Column("connection", JSONB, nullable=True),
     Column("dialect", Text, nullable=True),
+    # A database and a schema each carry a curated description, as tables and
+    # columns do. Without them `patch_catalog_node` silently dropped the write
+    # and still answered 200, so the UI reported success and the text was gone
+    # on reload.
+    Column("description", Text, nullable=True),
+    _certified("description_certified"),
     _imported_id(),
     Column("created", DateTime(timezone=True), server_default=func.now()),
     Column("pulled", DateTime(timezone=True), nullable=True),
@@ -125,6 +131,8 @@ catalog_schema = Table(
         nullable=False,
     ),
     Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    _certified("description_certified"),
     _imported_id(),
     UniqueConstraint("database_id", "name", name="uq_catalog_schema_database_name"),
 )

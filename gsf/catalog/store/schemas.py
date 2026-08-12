@@ -345,7 +345,13 @@ def delete_old_fks(last_seen, database_name: str):
                 )
                 .where(s.catalog_database.c.name == database_name)
             ),
-            s.column_foreign_key.c.last_seen.is_distinct_from(last_seen),
+            # NOT `is_distinct_from`: that is true for NULL, and an imported
+            # foreign key has no `last_seen`. Using it deleted every curated FK
+            # from a model import on the next re-ingest. Cypher's `<>` yielded
+            # NULL here, so those rows were never matched -- preserved by
+            # requiring the column to be set *and* stale.
+            s.column_foreign_key.c.last_seen.isnot(None),
+            s.column_foreign_key.c.last_seen != last_seen,
         )
     )
 

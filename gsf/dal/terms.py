@@ -317,6 +317,16 @@ def update_term(
     # own, `fetch_column_attributes_by_term_id` matches through the stale copy
     # and the Term's attribute list reads as empty from then on.
     with write_transaction():
+        # Read the old name first. RETURNING gives the *new* one, and the caller
+        # compares the two to decide whether a rename happened -- with it always
+        # None, `name_changed` was true for every edit, so a description-only
+        # PATCH cleared description_suggestion on every SqlAttribute of the term
+        # and re-embedded all of them.
+        previous = store().query_read(
+            select(s.term.c.name).where(s.term.c.id == term_id)
+        )
+        old_name = previous[0]["name"] if previous else None
+
         rows = store().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
@@ -341,6 +351,7 @@ def update_term(
         if not rows:
             return None
         result = dict(rows[0])
+        result["old_name"] = old_name
 
         # Read before the UPDATE would have been simpler, but RETURNING gives
         # the new name and the old one is only knowable beforehand -- so it is
@@ -384,21 +395,25 @@ def merge_term(
         description=description,
         synonyms=synonyms or [],
     )
-    rows = store().query_write(
-        statement.on_conflict_do_update(
-            constraint="uq_term_name_source",
-            set_={
-                "description": statement.excluded.description,
-                "synonyms": statement.excluded.synonyms,
-            },
-        ).returning(s.term.c.id)
-    )
-    term_id = rows[0]["id"]
-    store().query_write(
-        insert(s.table_term)
-        .values(table_id=table_id, term_id=term_id)
-        .on_conflict_do_nothing()
-    )
+    # One transaction, as `update_term` above. A term with no `table_term` link
+    # is excluded by `_represented()`, so it is invisible to every read while
+    # still occupying `uq_term_name_source` -- it blocks its own name forever.
+    with write_transaction():
+        rows = store().query_write(
+            statement.on_conflict_do_update(
+                constraint="uq_term_name_source",
+                set_={
+                    "description": statement.excluded.description,
+                    "synonyms": statement.excluded.synonyms,
+                },
+            ).returning(s.term.c.id)
+        )
+        term_id = rows[0]["id"]
+        store().query_write(
+            insert(s.table_term)
+            .values(table_id=table_id, term_id=term_id)
+            .on_conflict_do_nothing()
+        )
     return term_id
 
 

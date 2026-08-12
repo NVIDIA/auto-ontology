@@ -31,7 +31,11 @@ from gsf.env import load_env
 load_env()
 
 config = context.config
-config.set_main_option("sqlalchemy.url", sqlalchemy_url())
+# `%` doubled: set_main_option goes through ConfigParser, which applies
+# pyformat interpolation, so a password containing a percent sign raises
+# "invalid interpolation syntax" and alembic dies before running anything --
+# on a password SQLAlchemy itself accepts.
+config.set_main_option("sqlalchemy.url", sqlalchemy_url().replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

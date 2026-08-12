@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy import distinct, func, or_, select
 
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.server.zones.utils import format_zone
 
 logger = logging.getLogger(__name__)
@@ -217,6 +217,23 @@ def get_zone_by_id(zone_id: str) -> dict[str, Any] | None:
     return format_zone(_zone_row(rows[0]), items=_zone_items(zone_id))
 
 
+def _current_item_ids(zone_id: str) -> list[str]:
+    """Every catalog id this zone currently grants, across all three tiers."""
+    rows = store().query_read(
+        select(
+            s.zone_target.c.database_id,
+            s.zone_target.c.schema_id,
+            s.zone_target.c.table_id,
+        ).where(s.zone_target.c.zone_id == zone_id)
+    )
+    return [
+        value
+        for row in rows
+        for value in (row["database_id"], row["schema_id"], row["table_id"])
+        if value is not None
+    ]
+
+
 def _link_items(zone_id: str, item_ids: list[str]) -> list[str]:
     """Point a zone at each item, returning the ids actually linked, in order.
 
@@ -263,21 +280,22 @@ def create_zone(
     if _zone_name_exists(name, item_ids=item_ids):
         raise ValueError(f"Zone with name {name!r} already exists")
 
-    rows = store().query_write(
-        s.zone.insert()
-        .values(name=name, description=description, color=color)
-        .returning(
-            s.zone.c.id,
-            s.zone.c.name,
-            s.zone.c.description,
-            s.zone.c.color,
-            s.zone.c.enabled,
+    with write_transaction():
+        rows = store().query_write(
+            s.zone.insert()
+            .values(name=name, description=description, color=color)
+            .returning(
+                s.zone.c.id,
+                s.zone.c.name,
+                s.zone.c.description,
+                s.zone.c.color,
+                s.zone.c.enabled,
+            )
         )
-    )
-    zone = format_zone(_zone_row(rows[0]), items=[], enabled=True)
+        zone = format_zone(_zone_row(rows[0]), items=[], enabled=True)
 
-    if item_ids:
-        zone["items"] = _link_items(zone["id"], item_ids)
+        if item_ids:
+            zone["items"] = _link_items(zone["id"], item_ids)
     return zone
 
 
@@ -293,7 +311,12 @@ def update_zone(
         return None
 
     if "name" in updates and updates["name"] is not None:
-        if _zone_name_exists(updates["name"], exclude_id=zone_id, item_ids=item_ids):
+        # Fall back to the zone's *current* items. Zone names are unique per
+        # database, not globally; with `item_ids` None -- a metadata-only edit --
+        # the check would find no databases to scope by and reject any name used
+        # anywhere, including ones `create_zone` accepts.
+        scope_ids = item_ids if item_ids is not None else _current_item_ids(zone_id)
+        if _zone_name_exists(updates["name"], exclude_id=zone_id, item_ids=scope_ids):
             raise ValueError(f"Zone with name {updates['name']!r} already exists")
 
     fields = {
@@ -316,10 +339,14 @@ def update_zone(
     # before it opens the editor. A client that PUT only the database it happens
     # to be looking at would silently revoke the rest.
     if item_ids is not None:
-        store().query_write(
-            s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)
-        )
-        _link_items(zone_id, item_ids)
+        # One transaction: split across two autocommits, a failure after the
+        # delete leaves the zone granting nothing, and every user scoped to it
+        # loses catalog access with no error surfaced to the caller.
+        with write_transaction():
+            store().query_write(
+                s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)
+            )
+            _link_items(zone_id, item_ids)
 
     return get_zone_by_id(zone_id)
 

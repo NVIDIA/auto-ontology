@@ -485,7 +485,10 @@ def test_a_failed_import_leaves_nothing_behind(world) -> None:
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)
     document.data_layer.databases[0].schemas[0].database_name = target
-    document.semantic_layer.terms[0].represents = ["no-such-table"]
+    # A structural reference, not a `represents` entry: an unresolvable foreign
+    # key endpoint is a corrupt document and still raises, whereas a term
+    # representing a table outside the export is expected and now skipped.
+    document.data_layer.foreign_keys[0].target_column_id = "no-such-column"
 
     try:
         with pytest.raises(mi.ModelImportValidationError):
@@ -523,18 +526,19 @@ def test_replace_drops_a_term_the_payload_omits(world) -> None:
     assert store().query_read(select(s.term.c.id).where(s.term.c.id == world.term))
 
 
-def test_a_cross_database_term_makes_the_export_unimportable(world) -> None:
-    """A hazard in the original, preserved because it fails loudly.
+def test_a_cross_database_term_stays_importable(world) -> None:
+    """A scoped export names tables it does not carry, and must still import.
 
     `_export_terms` returns **all** the tables representing a term, including
     ones outside the exported databases, which keeps a partial export honest
-    about a term it only partly owns. But the importer resolves every `represents` entry against the
-    document, so such an export cannot be imported anywhere: it names a table it
-    does not carry.
+    about a term it only partly owns. Requiring every `represents` entry to
+    resolve made exactly those honest documents unimportable anywhere — the
+    export and the import disagreed about what the document meant.
 
-    Preserved rather than papered over. Silently dropping the unresolvable entry
-    would import the term as if it belonged wholly to this database, which is a
-    quieter and worse outcome than the error.
+    The import now skips the entries this document does not carry. The term
+    arrives representing the tables that are present, which is the truth about
+    *this* catalog; the out-of-scope entry is not silently asserted, it is
+    simply absent, and re-exporting from a catalog that has both restores it.
     """
     other_prefix = f"{world.prefix}-other"
     other_db = _add(s.catalog_database, name=other_prefix)
@@ -547,10 +551,19 @@ def test_a_cross_database_term_makes_the_export_unimportable(world) -> None:
 
     document = _document(world)
     represents = {term.id: term.represents for term in document.semantic_layer.terms}
-    assert sorted(represents[shared]) == sorted([world.orders, outside])
+    assert sorted(represents[shared]) == sorted([world.orders, outside]), (
+        "the export still records the out-of-scope table"
+    )
 
-    with pytest.raises(mi.ModelImportValidationError, match="term represents table"):
-        mi.apply_import_model(document, replace=True)
+    mi.apply_import_model(document, replace=True)
+
+    linked = {
+        row["table_id"]
+        for row in store().query_read(
+            select(s.table_term.c.table_id).where(s.table_term.c.term_id == shared)
+        )
+    }
+    assert world.orders in linked, "the in-scope table is represented"
 
 
 def test_replace_keeps_a_term_that_left_this_databases_scope(world) -> None:
