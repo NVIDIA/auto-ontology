@@ -1968,3 +1968,102 @@ selector's `__all__` made it explicit. The snapshot now records what callers
 could always import.
 
 **Suite:** 559 passed, 3 skipped (was 526).
+
+---
+
+## 2026-08-12 — Phase 7 complete — Terms
+
+`gsf/dal/pg/terms.py` — 28 functions, the largest module in the DAL. With it,
+**Phase 7 is done**: `datasources` (26), `attributes` (8), `sql_attributes` (21)
+and `terms` (28) all run on Postgres.
+
+`gsf/dal/terms.py` becomes a selector and the Cypher moves to
+`gsf/dal/neo4j/terms.py` — which was importing `fetch_column_attribute_columns_map`
+and `resolve_accessible_catalog_ids` from the **selectors**. That is the fourth
+and fifth instance of the cross-backend leak; every ported module has had at
+least one. Worth checking for first, not last, in Phases 8-10.
+
+### Three rules, each held in one place
+
+The Cypher had already been through a round of consolidation here, and the
+comments explaining *why* were the most valuable thing in the file. They are
+preserved as the reason each helper exists:
+
+* **What counts as a Term** — semantic, and represented by at least one table.
+  `fetch_all_terms`, `count_terms` and `term_is_in_scope` read it from
+  `_semantic_terms`, so a total can never describe a different set than the list
+  it pages.
+* **All-or-nothing visibility** (`_in_scope`) — a term representing *any*
+  out-of-zone table is hidden entirely. Phrased in the negative, like the
+  SqlAttribute check, and for the same reason.
+* **What "related" means** (`fetch_term_table_pairs`) — three paths from table to
+  term, counted once. Spelling them out separately is what once let a card's
+  badge, the "Relationships" column and the length of the list behind them
+  report three different numbers.
+
+### The certification rollup
+
+`_certification` replaces a Cypher list-comprehension that built a `flags` array
+and measured it. In SQL it is four correlated counts — total and certified, for
+column and sql attributes — plus the Term's own two booleans, compared as
+`certified == total`.
+
+The zone-scoped variant applies **each attribute kind's own visibility rule**:
+plain `table_id` membership for ColumnAttribute, all-or-nothing over the SQL's
+tables for SqlAttribute. That asymmetry is real and not an oversight — a
+ColumnAttribute is owned by exactly one table, so it has no "straddles the
+boundary" case to protect against. A test asserts a badge reads `certified` for
+a scoped viewer and `partial` for an admin, off the same term.
+
+### The rename that silently empties a list
+
+`update_term` rewrites `term_name` on every ColumnAttribute of the Term. It
+looks like housekeeping on a denormalised copy; it is not optional.
+`fetch_column_attributes_by_term_id` matches attributes to their term *through
+that column*, so a stale copy leaves the rows in place and the list empty, with
+nothing raising. Pinned by a test that renames and then re-reads the list.
+
+### Smaller notes
+
+* **`merge_term` overwrites the description** where `merge_column_attribute`
+  coalesces it. So a semantic rebuild discards a hand-edited term description.
+  That is what the Cypher did; preserved, tested, and flagged here rather than
+  quietly improved — changing it alters what a rebuild does.
+* **`fetch_terms_with_sqls` excludes attribute- and analysis-owned statements**,
+  so the suggester cannot learn from its own output.
+* **`props` is now the `sql_query` row.** In Cypher it was `properties(sql)`,
+  including the `count_monthly_YYYY_MM` counters — measured as unread in Phase 6
+  and absent from the schema, so there is nothing to carry.
+* **`find_column_attribute_by_column_id` is exported by both `terms` and
+  `attributes`**, as it was in Cypher. `pg/terms` delegates rather than
+  reimplementing; the duplication is a caller contract, not a mistake to fix.
+
+### `fetch_table_zones_map` moved, deliberately
+
+Neo4j keeps it in `exploration.py` (Phase 9). Postgres needs it now, so it lands
+once in `pg/zones.py` and Phase 9 re-exports it — [DECISION-011], with a note
+added to PLAN.md at the Phase 9 entry.
+
+`test_postgres_and_neo4j_surfaces_match` would read that as pg gaining two
+functions. It is the check that makes the `GSF_STORE` flip safe, so rather than
+weaken it, a `RELOCATED` allowlist covers exactly those two names with their
+reasons — a relocation is not an addition, since the function exists on both
+backends and only its module differs.
+
+### Test-suite fix
+
+`gsf/semantic/tests/test_neo4j_dal_merge.py` patched `gsf.dal.terms.get_neo4j_conn`,
+which stopped existing when that module became a selector. Retargeted at
+`gsf.dal.neo4j.terms`, which is what it was always testing.
+
+### Tests — `gsf/dal/pg/tests/test_terms.py`, 51 of them
+
+Each of the three rules gets a test that fails for a *different reason* than "the
+number is wrong": the list/total/scope-check triple asserted together, a term
+straddling the zone boundary, and the related-count matched against the related
+list. The certification section is deliberately dense, because every wrong
+version of that rollup still returns one of three valid strings.
+
+**Suite:** 610 passed, 3 skipped (was 559).
+
+**Next:** Phase 8 — analyses, candidates, connections, reset.

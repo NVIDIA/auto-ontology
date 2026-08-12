@@ -519,6 +519,13 @@ into one atomic transaction. Update those docstrings or they mislead forever.
 **Done:** export→import round-trip is idempotent (second import: all skipped,
 zero created); `replace=True` scoped delete verified.
 
+> **Phase 9 note (added during Phase 7):** `fetch_table_zones_map` and
+> `zone_covers_table` already exist in `gsf/dal/pg/zones.py` — the Term reads
+> needed them two phases early ([DECISION-011]). Port `exploration` by
+> **re-exporting** them, not by writing a second copy: two spellings of the
+> zone-resolution rule is how a viewer ends up seeing a chip on one screen and
+> not another.
+
 ### Phase 11 — Flip and delete *(2–3d)*
 
 **Prerequisite, added during Phase 7: make the golden harness backend-aware.**

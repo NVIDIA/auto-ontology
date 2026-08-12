@@ -49,6 +49,27 @@ SNAPSHOT = Path(__file__).with_name("dal_surface.json")
 #: callers pass — so this permits a changed type, never a changed call shape.
 #:
 #: Anything added here needs a DECISIONS.md record first.
+#: Functions the Postgres side places in a different module than Neo4j did,
+#: with the reason. These are *relocations*, not additions: the function exists
+#: on both backends, so the ``GSF_STORE`` flip stays safe -- only the module it
+#: lives in differs, and only until the Neo4j module that hosts it is ported.
+#:
+#: Anything added here needs a DECISIONS.md record first.
+RELOCATED: dict[tuple[str, str], str] = {
+    ("zones", "fetch_table_zones_map"): (
+        "Neo4j keeps it in exploration.py (Phase 9); Postgres needs it in "
+        "Phase 7, because the Term reads render zone chips. Duplicating a "
+        "zone-resolution rule is how a viewer ends up seeing a chip on one "
+        "screen and not another, so it lands once, in zones.py, and Phase 9 "
+        "re-exports it rather than rewriting it -- DECISION-011"
+    ),
+    ("zones", "zone_covers_table"): (
+        "the predicate behind fetch_table_zones_map, shared with the Term and "
+        "SqlAttribute zone chips. No Neo4j counterpart: there it is the "
+        "inline `CONTAINS*0..2` walk, repeated at each site -- DECISION-011"
+    ),
+}
+
 BACKEND_SPECIFIC: dict[tuple[str, str], str] = {
     ("users", "resolve_table_filter"): (
         "returns a SQLAlchemy predicate where Neo4j returns a Cypher WHERE "
@@ -209,6 +230,10 @@ def test_postgres_and_neo4j_surfaces_match() -> None:
                 f"parameters: {pg_params} vs {neo_params}"
             )
             pg[name] = neo[name] = "<backend-specific>"
+
+        for name in list(pg):
+            if (path.stem, name) in RELOCATED and name not in neo:
+                del pg[name]
 
         if pg != neo:
             only_pg = {n: pg[n] for n in set(pg) - set(neo)}

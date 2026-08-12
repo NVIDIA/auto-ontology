@@ -345,3 +345,98 @@ def set_zone_enabled(zone_id: str, enabled: bool) -> dict[str, Any] | None:
     if not rows:
         return None
     return get_zone_by_id(zone_id)
+
+
+# ---------------------------------------------------------------------------
+# Table -> zones, shared with the semantic reads
+# ---------------------------------------------------------------------------
+
+
+def zone_covers_table():
+    """A zone target covering a table, at any of the three grains it can name.
+
+    The Cypher walked ``(item)-[:CONTAINS*0..2]->(t)`` — zero hops meaning the
+    zone names the table itself, one its schema, two its database. Containment
+    is FK columns here, so the walk becomes three explicit branches.
+
+    Expects ``catalog_table`` and ``catalog_schema`` in the enclosing query, so
+    a caller joining differently still gets one definition of "covered".
+    """
+    return or_(
+        s.zone_target.c.table_id == s.catalog_table.c.id,
+        s.zone_target.c.schema_id == s.catalog_table.c.schema_id,
+        s.zone_target.c.database_id == s.catalog_schema.c.database_id,
+    )
+
+
+def fetch_table_zones_map(
+    zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+    table_ids: list[str] | None = None,
+) -> dict[str, list[dict[str, Any]]]:
+    """``{table_id: [zone, ...]}`` for every visible table.
+
+    Lives here rather than in ``exploration`` — where the Cypher version does —
+    because the semantic reads need it a phase earlier and two copies of a
+    zone-resolution rule is exactly how a viewer ends up seeing a chip on one
+    screen and not another. Phase 9 should re-export it, not rewrite it.
+
+    **A viewer never sees a disabled zone's chip**, even when its id is in
+    *zone_ids* — access may have been granted before the zone was retired.
+    Admins (``zone_ids=None``) do see them, with ``enabled: False``, so they can
+    be managed; that grants nothing, since *zone_ids* is itself computed from
+    enabled zones only.
+
+    *table_ids* narrows the scan and is **intersected** with what the zones
+    already allow, so it can never widen access.
+    """
+    from gsf.dal.pg.users import resolve_accessible_catalog_ids
+
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+
+    filter_ids: set[str] | None = None
+    if resolved is not None:
+        filter_ids = set(resolved["table_ids"])
+    if table_ids is not None:
+        filter_ids = (
+            set(table_ids) if filter_ids is None else filter_ids & set(table_ids)
+        )
+    if filter_ids is not None and not filter_ids:
+        return {}
+
+    statement = (
+        select(
+            s.catalog_table.c.id.label("table_id"),
+            s.zone.c.id,
+            s.zone.c.name,
+            s.zone.c.color,
+            s.zone.c.enabled,
+        )
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(s.zone_target, zone_covers_table())
+            .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
+        )
+        .distinct()
+        .order_by(s.catalog_table.c.id, s.zone.c.name)
+    )
+    if filter_ids is not None:
+        statement = statement.where(s.catalog_table.c.id.in_(list(filter_ids)))
+    if zone_ids is not None:
+        statement = statement.where(
+            s.zone.c.id.in_(list(zone_ids)), s.zone.c.enabled.is_(True)
+        )
+
+    result: dict[str, list[dict[str, Any]]] = {}
+    for row in store().query_read(statement):
+        result.setdefault(row["table_id"], []).append(
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "color": row["color"],
+                "enabled": row["enabled"],
+            }
+        )
+    return result

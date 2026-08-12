@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.dal import terms as neo4j_terms
+from gsf.dal.neo4j import terms as neo4j_terms
 from gsf.dal.neo4j import datasources as neo4j_datasources
 from gsf.semantic.constants import SEMANTIC_SOURCE
 
 
-@patch("gsf.dal.terms.get_neo4j_conn")
+@patch("gsf.dal.neo4j.terms.get_neo4j_conn")
 def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     mock_conn.return_value = MagicMock()
     neo4j_terms.merge_term("Orders", "Order entity", "table-1")
@@ -20,7 +20,7 @@ def test_merge_term_uses_name_and_source(mock_conn: MagicMock) -> None:
     assert params["source"] == SEMANTIC_SOURCE
 
 
-@patch("gsf.dal.terms.get_neo4j_conn")
+@patch("gsf.dal.neo4j.terms.get_neo4j_conn")
 def test_fetch_terms_with_sqls_excludes_owned_sql(mock_conn: MagicMock) -> None:
     mock_conn.return_value.query_read.return_value = []
 

@@ -621,3 +621,37 @@ container. Rewriting a migration that has been run turns "upgrade head" into a
 silent no-op for anyone who already ran it — they would keep a schema that does
 not match `schema.py` and find out at the first insert. A second migration costs
 one file and is honest about what happened.
+
+
+---
+
+## 011 — `fetch_table_zones_map` moves from `exploration` to `zones`
+
+**Status:** accepted · **Phase:** 7 · **Behaviour change:** none
+
+Neo4j keeps table→zone resolution in `exploration.py`, which Phase 9 ports.
+Phase 7 needs it two phases earlier: the Term reads render zone chips, and
+`fetch_column_attributes_by_term_id` attaches a zone list to every attribute.
+
+The options were to duplicate it in `pg/terms.py` now and reconcile in Phase 9,
+or to land it once in `pg/zones.py` and have Phase 9 re-export it.
+
+**Landed once, in `pg/zones.py`.** Two copies of a zone-resolution rule is
+precisely how a viewer ends up seeing a chip on one screen and not another, and
+the reconciliation would be a task nobody is holding a note for. `zones.py` is
+also where it belongs on the merits — it resolves zones, and `exploration` was
+simply the first module that happened to need it.
+
+`zone_covers_table()` comes with it: the predicate behind the map, shared with
+the Term and SqlAttribute chips. It has no Neo4j counterpart at all — there it
+is the inline `CONTAINS*0..2` walk, written out at each site.
+
+**Consequences** — `test_postgres_and_neo4j_surfaces_match` would read this as
+`pg/zones` having two functions `neo4j/zones` lacks. That test is the check that
+makes the `GSF_STORE` flip safe, so it is not weakened: a new `RELOCATED`
+allowlist covers exactly these two names, alongside the existing
+`BACKEND_SPECIFIC` one, and each entry carries its reason. A relocation is not
+an addition — the function exists on both backends, only the module differs, and
+only until Phase 9.
+
+**Phase 9 must re-export, not rewrite.** Noted there as well as here.
