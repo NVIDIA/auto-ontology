@@ -33,6 +33,7 @@ must be restated in the PR description of the change that introduces it.
 | B4 | The source connection `run_ingest` holds open now covers extraction only, not extraction + embedding — strictly narrower, and measurably so on Databricks | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B5 | `SemanticEmbedder` builds its one-node embed graph per call instead of once in `__post_init__`; the `embed_graph` attribute is gone | Phase 1 ([004](#004--the-shape-of-the-fork-boundary)) |
 | B6 | **Column-level changes now apply on re-ingest.** Added columns appear, dropped columns are removed, changed types update. None of this happened before — the column diff raised on every run and the error was swallowed | Phase 4 ([006](#006--column-diffs-never-ran-and-the-error-was-swallowed)) |
+| B8 | `description_certified` becomes a real column on `catalog_table` and `catalog_column`. No behaviour change against Neo4j — it restores behaviour that Postgres would otherwise have lost silently | Phase 7 ([010](#010--description_certified-was-about-to-be-lost-silently)) |
 | ~~B7~~ | **Withdrawn.** Ranking the suggester *would* have been a behaviour change, so it is not being made here — the bug is documented in place and the inert behaviour preserved. See [007](#007--the-sqlattribute-suggester-was-never-actually-ranking) |
 
 Any further behaviour change discovered mid-port gets added to this table
@@ -574,3 +575,49 @@ their cost was always going to be the semantic fixture rather than the SQL.
 **Phase 6's Done criteria change accordingly:** `validate_sql` resolving against
 a Postgres-built `Schema` map still belongs to Phase 6, because
 `fetch_schemas_by_ids` is catalog-only and is the function that feeds it.
+
+
+---
+
+## 010 — `description_certified` was about to be lost silently
+
+**Status:** accepted · **Phase:** 7 · **Table entry:** B8
+
+The UI has a certification checkbox on table and column descriptions. It PATCHes
+`description_certified` through `patch_catalog_node`, which — by an earlier and
+still correct decision — **drops properties that have no column**, because the
+graph accepted arbitrary properties and refusing them would fail writes that
+work today.
+
+Put together, those two facts mean that on Postgres the PATCH returns 200, the
+checkbox ticks, the page re-renders as certified, and the flag is gone by the
+next read. No exception, no log line, nothing failing in CI.
+
+`catalog_table` and `catalog_column` now carry the column, added by migration
+`325e4825d9ee`. `NOT NULL DEFAULT false`, because every Cypher read was
+`coalesce(x.description_certified, false)` — absent has always meant false, so
+making it the column's job removes the coalesce from each caller and removes the
+chance of one caller forgetting it. The same helper now defines `term`'s two
+existing flags, which were spelled out longhand.
+
+### Why it was missed
+
+Nothing in the ingest writes it. It appears only after a human certifies
+something, so it is absent from the Pagila fixture, absent from the golden
+capture, and absent from the graph you get by reading the write path. The schema
+was built by reading what the ingest writes and what the DAL returns, and this
+falls between the two: written by the API, read by the API, touched by neither
+pipeline.
+
+The general shape is worth naming, because it will recur for the rest of the
+port: **a property only a user can create is invisible to a fixture nobody has
+used.** The remaining candidates are the other `*_certified` flags and
+`description_suggestion`, which do have columns — checked while writing this.
+
+### Why not amend the initial migration
+
+It is already applied to every developer database and the golden Postgres
+container. Rewriting a migration that has been run turns "upgrade head" into a
+silent no-op for anyone who already ran it — they would keep a schema that does
+not match `schema.py` and find out at the first insert. A second migration costs
+one file and is honest about what happened.

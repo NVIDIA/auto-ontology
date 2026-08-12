@@ -41,8 +41,8 @@ make migrate-check   # fail if the database has drifted from schema.py
 |---|---|---|---|
 | `catalog_database` | 7 | `:Database` | `connection jsonb` — populated only when Vault is unconfigured |
 | `catalog_schema` | 4 | `:Schema` | FK → `catalog_database`; unique on (database, name) |
-| `catalog_table` | 7 | `:Table` | FK → `catalog_schema`; `pk text[]`, `table_type` |
-| `catalog_column` | 10 | `:Column` | FK → `catalog_table`; `sample_values` and **`is_nullable`** kept as `text` — the graph stores `is_nullable` as the strings `'YES'`/`'NO'`, and a boolean column would change what callers receive. `ordinal_position` is a genuine integer |
+| `catalog_table` | 8 | `:Table` | FK → `catalog_schema`; `pk text[]`, `table_type`, `description_certified` |
+| `catalog_column` | 11 | `:Column` | `description_certified`; FK → `catalog_table`; `sample_values` and **`is_nullable`** kept as `text` — the graph stores `is_nullable` as the strings `'YES'`/`'NO'`, and a boolean column would change what callers receive. `ordinal_position` is a genuine integer |
 | `column_foreign_key` | 3 | `:FOREIGN_KEY` | Column → Column; `last_seen` is stamped each ingest so keys the source has dropped can be found and removed |
 | `table_join` | 3 | `:JOIN` | Table → Table, carries `join_columns jsonb` |
 | `sql_query` | 5 | `:Sql` | unique on `md5(sql_full_query)` — statement text can exceed the btree row limit, so the hash carries the constraint |

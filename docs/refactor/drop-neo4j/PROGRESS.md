@@ -1672,3 +1672,134 @@ Without these the suite still exits green — at **323 passed, 141 skipped**. Th
 because they cannot reach a store. A green run that has quietly stopped
 exercising the thing being refactored is the failure mode to watch for here;
 check the skip count, not just the exit code.
+
+---
+
+## 2026-08-12 — Phase 7 — the seven inherited functions
+
+`gsf/dal/pg/datasources.py` is complete: 26 of 26. The seven Phase 6 deferred
+(DECISION-009) now run on Postgres, and `_PHASE_7` and its `NotImplementedError`
+stubs are gone.
+
+They were held back for want of terms and attributes to join to, and that was
+the right call — three of the findings below are things that look correct
+against an empty semantic tier.
+
+### A missing column, found by porting rather than by reading
+
+**`description_certified` does not exist on `catalog_table` or
+`catalog_column`.** The UI's certification checkbox PATCHes it through
+`patch_catalog_node`, which deliberately drops properties with no column. So on
+Postgres the request returns 200, the checkbox ticks, and the flag is gone by
+the next read — no exception, no log line, nothing red in CI.
+
+Added by migration `325e4825d9ee`, `NOT NULL DEFAULT false`. Recorded as
+[DECISION-010] / B8, including why the initial migration was not amended: it is
+already applied everywhere, and rewriting an applied migration makes `upgrade
+head` a silent no-op for anyone who ran it.
+
+Worth generalising: **a property only a user can create is invisible to a
+fixture nobody has used.** Nothing in the ingest writes this, so it is absent
+from Pagila, absent from the golden capture, and absent from the write path the
+schema was built by reading. Checked the neighbours while there —
+`description_suggestion` and the other `*_certified` flags do have columns.
+
+### The bug the term count was hiding
+
+`_terms_count` has to count the *deduplicated union* of two routes to a Term: a
+table `REPRESENTS` one directly, and reaches others through its columns'
+attributes. Written as a `UNION` of id lists wrapped in `.subquery()` to be
+counted, it silently stopped correlating — two levels between the leg predicates
+and `catalog_table` is one too many for SQLAlchemy's auto-correlation — and
+**every table reported the same total**.
+
+Rewritten as "count Terms reachable by any route", with `.correlate()` spelled
+out. The explicit calls are load-bearing for the same underlying reason:
+auto-correlation only considers the immediately enclosing `SELECT`, and that one
+selects from `term` alone, so left alone it adds a second unconstrained
+`catalog_table` to each `EXISTS`.
+
+The failure was invisible on the first fixture, where the one table under test
+happened to have the same count either way. It is caught now by asserting a
+table with **no** terms alongside one with two — the assertion that makes an
+uncorrelated subquery impossible to pass.
+
+### `fetch_bridge_table_candidates`, and why Pagila cannot test it
+
+It returns **nothing** on Pagila. That is correct: `film_actor` and
+`film_category` each carry a `last_update` column, so no table has a foreign key
+on every column. The golden capture agrees — Neo4j recorded `[]` too.
+
+Two empty lists agreeing is not evidence. The bridge fixture is therefore built
+by hand, and covers the parts that would otherwise be asserted by nothing: the
+`SEMANTIC_FK` direction (Column → ColumnAttribute ← Column, so the *owning*
+column is the join target — read backwards, every bridge points at itself),
+self-referential bridges, the `source = 'bridgeTable'` filter that stops it
+re-proposing its own output, and the FK that resolves to nothing because its
+target table was never ingested.
+
+That last one is why the Cypher checked "every column resolves" twice, in two
+different ways. The checks are not redundant — `ALL(c IN cols ...)` asks whether
+each column has an outgoing edge, `size(fk_pairs) = size(cols)` asks whether each
+edge lands somewhere real. Both are kept.
+
+### Smaller things, each preserved deliberately
+
+* **`fetch_columns_for_table` runs two queries, not one.** The header decides
+  whether the table exists; the page decides which columns come back. A single
+  join with `OFFSET` would return nothing for a page past the last column, and
+  the caller would read "page 3 of a 2-page table" as "no such table".
+* **Page order gets `id` as a tiebreaker.** `ordinal_position` is nullable and
+  not unique, so on its own it is not a stable page order: two columns sharing a
+  position can swap between pages, showing one twice and the other never.
+* **`fetch_tables_and_columns_by_node_ids` uses the description fallback for
+  columns but not for tables.** Asymmetric in the Cypher. Preserved, because
+  these frames feed embeddings and widening what gets embedded would move
+  retrieval results with nothing failing.
+* **`fetch_tables_by_ids` still drops a table with no columns** — the Cypher's
+  second `MATCH` was an inner join. A column-less table is a symptom worth
+  seeing where it originates, not something to paper over in a read.
+* **`fetch_tables_for_schema` ignores its `database_name` argument**, as before:
+  schema ids are globally unique, so it can only agree or contradict. Pinned by
+  a test, because the next reader is otherwise right to assume it filters.
+
+### A finding about the grading mechanism itself
+
+`test_golden.py` describes itself as the fidelity oracle — "Phases 5-10 are
+graded by this file". **It cannot currently grade Postgres at all.**
+
+Run with `GSF_STORE=postgres`, 49 of 128 fail, including functions that Phase 6
+landed and verified. The cause is not the DAL:
+`capture_dal_golden._fixture_ids()` resolves every fixture entity with
+hardcoded Cypher, so under Postgres it hands *Neo4j* ids to the Postgres DAL and
+essentially every read returns nothing. A second leak shows up in the same run —
+`gsf/dal/neo4j/datasources.py` formats a zone filter into a Cypher string, and
+under `GSF_STORE=postgres` it receives the Phase 5 predicate object and
+interpolates `None` into the query.
+
+Neither breaks production, where one backend is selected and the facade
+dispatches to it. Both break the parity check, which is the thing the plan is
+counting on.
+
+Nobody noticed because every phase so far was verified by hand-written tests
+instead — which is why the count of those matters and why this entry is not
+claiming parity it has not measured. **Porting `_fixture_ids` to be
+backend-aware is a prerequisite for the Phase 11 gate**, and it cannot be
+finished before the semantic tier is seeded in Postgres, since it also resolves
+terms, zones, and analyses. Added to PLAN.md as explicit Phase 11 work rather
+than left as a surprise.
+
+### Tests — `gsf/dal/pg/tests/test_datasources_semantic.py`, 34 of them
+
+A hand-built catalog (`World`) rather than the Pagila ingest, shaped so each
+join has something to get wrong: a Term reachable by both routes, a column whose
+description comes from an attribute, a genuine junction table, and an FK whose
+target is deleted out from under it.
+
+Two of the three initial failures were the tests being wrong, and one is worth
+repeating: **`ORDER BY name` was compared against Python's `sorted()`**, which
+disagrees with Postgres. `order_tag` sorts before `orders` by codepoint and after
+it under a collation that ignores punctuation at the first level. The contract is
+the database's order, so the test now compares against the database.
+
+**Suite:** 495 passed, 3 skipped (was 461).

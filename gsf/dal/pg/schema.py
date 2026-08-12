@@ -87,6 +87,17 @@ def _imported_id() -> Column:
     return Column("imported_id", Text, nullable=True)
 
 
+def _certified(name: str) -> Column:
+    """A human-set certification flag.
+
+    ``NOT NULL DEFAULT false`` rather than nullable, because every read of these
+    in the Cypher was ``coalesce(x.<flag>, false)`` — absent has always meant
+    false. Making that the column's job removes the coalesce from each caller
+    and, more usefully, removes the chance of one caller forgetting it.
+    """
+    return Column(name, Boolean, nullable=False, server_default=text("false"))
+
+
 # ---------------------------------------------------------------------------
 # Catalog tier — Database -> Schema -> Table -> Column
 # ---------------------------------------------------------------------------
@@ -133,6 +144,12 @@ catalog_table = Table(
     ),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
+    # Set from the UI's certification checkbox, via patch_catalog_node. Easy to
+    # miss when reading the graph, because nothing in the ingest ever writes it
+    # -- it only appears once a human certifies a description. Without the
+    # column the PATCH still returns 200 and the checkbox still ticks; the flag
+    # is simply dropped on the way in and reads back false forever.
+    _certified("description_certified"),
     # Primary key column names. A list on the node today, so a text[] here
     # rather than a join table -- nothing ever queries "which tables have this
     # pk column", and a join table would make every read a second query.
@@ -154,6 +171,8 @@ catalog_column = Table(
     ),
     Column("name", Text, nullable=False),
     Column("description", Text, nullable=True),
+    # As on catalog_table: written only by the UI's certification checkbox.
+    _certified("description_certified"),
     Column("data_type", Text, nullable=True),
     # JSON string on the node today, and read back as a string by callers.
     # Kept as text rather than promoted to jsonb so the port stays behaviour
@@ -307,10 +326,8 @@ term = Table(
     Column("description", Text, nullable=True),
     Column("source", Text, nullable=False, server_default=text("'semantic'")),
     Column("synonyms", ARRAY(Text), nullable=True),
-    Column("name_certified", Boolean, nullable=False, server_default=text("false")),
-    Column(
-        "description_certified", Boolean, nullable=False, server_default=text("false")
-    ),
+    _certified("name_certified"),
+    _certified("description_certified"),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
 )
