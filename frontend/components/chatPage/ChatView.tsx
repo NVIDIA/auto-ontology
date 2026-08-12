@@ -70,7 +70,7 @@ export const ChatView = () => {
 					id: s.id,
 					title: s.title || 'New conversation',
 					messages: [],
-					createdAt: new Date(s.createdAt).getTime(),
+					createdAt: new Date(s.created_at).getTime(),
 				})),
 			);
 		} catch {

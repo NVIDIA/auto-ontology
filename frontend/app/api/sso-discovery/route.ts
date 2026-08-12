@@ -75,12 +75,16 @@ export const GET = withPermission({ sso: ['manage'] })(async (request) => {
 		}
 	}
 
+	// The pass-through fields keep the names OpenID Connect Discovery gives
+	// them, so this route relays the document rather than re-spelling it;
+	// `discovery_endpoint` is the one field we add ourselves. Better Auth's
+	// `oidcConfig` wants camelCase — `api/auth.ts` maps into it at the call.
 	return NextResponse.json({
 		issuer: doc.issuer,
-		authorizationEndpoint: doc.authorization_endpoint,
-		tokenEndpoint: doc.token_endpoint,
-		userInfoEndpoint: typeof doc.userinfo_endpoint === 'string' ? doc.userinfo_endpoint : null,
-		jwksEndpoint: typeof doc.jwks_uri === 'string' ? doc.jwks_uri : null,
-		discoveryEndpoint,
+		authorization_endpoint: doc.authorization_endpoint,
+		token_endpoint: doc.token_endpoint,
+		userinfo_endpoint: typeof doc.userinfo_endpoint === 'string' ? doc.userinfo_endpoint : null,
+		jwks_uri: typeof doc.jwks_uri === 'string' ? doc.jwks_uri : null,
+		discovery_endpoint: discoveryEndpoint,
 	});
 });

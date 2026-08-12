@@ -18,20 +18,25 @@ from fastapi import APIRouter
 
 from gsf.dal.terms import semantic_layer_calculated
 from gsf.server.ingestion.proxy import trigger_semantic_compile, trigger_semantic_reset
+from gsf.server.responses import SemanticStatusResponse, StatusResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.post("/semantic-compilation/trigger", status_code=202)
+@router.post(
+    "/semantic-compilation/trigger", status_code=202, response_model=StatusResponse
+)
 async def trigger() -> dict[str, str]:
     """Ask the ingestion service to run (and schedule) semantic compilation."""
     trigger_semantic_compile()
     return {"status": "accepted"}
 
 
-@router.post("/semantic-compilation/reset", status_code=202)
+@router.post(
+    "/semantic-compilation/reset", status_code=202, response_model=StatusResponse
+)
 async def reset() -> dict[str, str]:
     """Ask the ingestion service to rebuild every database's semantic layer.
 
@@ -42,7 +47,7 @@ async def reset() -> dict[str, str]:
     return {"status": "accepted"}
 
 
-@router.get("/semantic-compilation/status")
+@router.get("/semantic-compilation/status", response_model=SemanticStatusResponse)
 def semantic_status() -> dict[str, bool]:
     """Report whether the semantic layer has been calculated (any Term exists)."""
     return {"calculated": semantic_layer_calculated()}

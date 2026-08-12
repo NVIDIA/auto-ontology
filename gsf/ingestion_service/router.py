@@ -14,23 +14,24 @@ from gsf.ingestion_service.ingest import (
     trigger_ingest,
     trigger_reset_semantic,
 )
+from gsf.server.responses import StatusResponse
 
 router = APIRouter()
 
 
-@router.get("/health")
+@router.get("/health", response_model=StatusResponse)
 async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@router.post("/ingest", status_code=202)
+@router.post("/ingest", status_code=202, response_model=StatusResponse)
 async def ingest_connection(connection: dict[str, Any] = Body(...)) -> dict[str, str]:
     """Trigger a non-blocking ingest for a single connection."""
     trigger_ingest(connection)
     return {"status": "accepted"}
 
 
-@router.post("/ingest/delete", status_code=202)
+@router.post("/ingest/delete", status_code=202, response_model=StatusResponse)
 async def ingest_delete(database_name: str) -> dict[str, str]:
     """Trigger a non-blocking reset of a database's ingested data.
 
@@ -40,7 +41,7 @@ async def ingest_delete(database_name: str) -> dict[str, str]:
     return {"status": "accepted"}
 
 
-@router.post("/semantic/reset", status_code=202)
+@router.post("/semantic/reset", status_code=202, response_model=StatusResponse)
 async def semantic_reset(
     request: Request, database_name: str | None = None
 ) -> dict[str, str]:
@@ -62,7 +63,7 @@ async def semantic_reset(
     return {"status": "accepted"}
 
 
-@router.post("/semantic/compile", status_code=202)
+@router.post("/semantic/compile", status_code=202, response_model=StatusResponse)
 async def semantic_compile(request: Request) -> dict[str, str]:
     """Trigger a non-blocking semantic compilation pass.
 
@@ -80,7 +81,7 @@ async def semantic_compile(request: Request) -> dict[str, str]:
     return {"status": "accepted"}
 
 
-@router.post("/semantic/stop", status_code=202)
+@router.post("/semantic/stop", status_code=202, response_model=StatusResponse)
 async def semantic_stop(request: Request) -> dict[str, str]:
     """Ask the in-flight semantic compilation pass to stop.
 

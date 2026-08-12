@@ -1,0 +1,86 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: OpenAPI CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/app/api/**'
+      - 'frontend/scripts/generate-openapi.ts'
+      # Also inputs to gsf-api.json: the shared zod shapes are inlined into it,
+      # the contract types shape what the declarations may express, and the
+      # package version is written to `info.version`.
+      - 'frontend/lib/openapiSchemas.ts'
+      - 'frontend/types/openapi.ts'
+      - 'frontend/package.json'
+      - 'gsf/**'
+      - 'dev_tools/generate_backend_openapi.py'
+      - 'docs/openapi/**'
+
+jobs:
+  # The public spec is generated from the route handlers plus the *committed*
+  # backend spec, so this job needs Node only — no Python, no running server.
+  public_spec:
+    name: Public spec is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: '10.33.0'
+          run_install: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate
+        working-directory: frontend
+        run: pnpm openapi
+
+      - name: Fail if the committed spec drifted
+        run: |
+          git diff --exit-code -- docs/openapi/gsf-api.json \
+            || { echo '::error::docs/openapi/gsf-api.json is stale — run `pnpm openapi` and commit the result'; exit 1; }
+
+  # Building the FastAPI apps needs the full backend environment, so this job
+  # is the expensive one; it only guards the internal spec it produces.
+  backend_spec:
+    name: Backend spec is up to date
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies
+        run: uv sync --frozen
+
+      - name: Regenerate
+        run: uv run python -m dev_tools.generate_backend_openapi
+
+      - name: Fail if the committed spec drifted
+        run: |
+          git diff --exit-code -- docs/openapi/backend.json docs/openapi/ingestion.json \
+            || { echo '::error::docs/openapi/*.json is stale — run `uv run python -m dev_tools.generate_backend_openapi` and commit the result'; exit 1; }

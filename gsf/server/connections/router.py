@@ -10,11 +10,17 @@ import logging
 import os
 from typing import Any, TypedDict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Path
 from pydantic import BaseModel
 
 from gsf.dal.connections import list_connections as _list_connections
 from gsf.server.connections import service
+from gsf.server.responses import (
+    ConnectionListResponse,
+    ConnectionResponse,
+    ConnectionTestResponse,
+    SsoFederationResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +49,7 @@ def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
     }
 
 
-@router.get("/connections/source")
+@router.get("/connections/source", response_model=bool)
 def is_env_source() -> bool:
     """Report whether connections are managed via the ``CONNECTION_STRINGS`` env."""
     connection_strings = os.environ.get("CONNECTION_STRINGS", "")
@@ -53,13 +59,13 @@ def is_env_source() -> bool:
     return bool(connection_strings_exists)
 
 
-@router.get("/connections")
+@router.get("/connections", response_model=ConnectionListResponse)
 def list_connections() -> dict:
     rows = [_serialize_connection(conn) for conn in _list_connections()]
     return {"data": rows, "count": len(rows)}
 
 
-@router.post("/connections/test")
+@router.post("/connections/test", response_model=ConnectionTestResponse)
 def test_connection(body: ConnectionBody) -> dict:
     """Validate a connection and return its schemas (for the schema picker)."""
     try:
@@ -74,7 +80,7 @@ def test_connection(body: ConnectionBody) -> dict:
     return {"success": True, "schemas": schemas}
 
 
-@router.post("/connections", status_code=201)
+@router.post("/connections", status_code=201, response_model=ConnectionResponse)
 def create_connection(body: ConnectionBody) -> dict:
     try:
         row = service.create_connection(connection=body.connection)
@@ -93,8 +99,18 @@ class SsoFederationBody(BaseModel):
     enabled: bool
 
 
-@router.patch("/connections/{database_name}/sso-federation")
-def set_sso_federation(database_name: str, body: SsoFederationBody) -> dict:
+@router.patch(
+    "/connections/{database_name}/sso-federation",
+    response_model=SsoFederationResponse,
+)
+def set_sso_federation(
+    body: SsoFederationBody,
+    database_name: str = Path(
+        description=(
+            "Catalog database name, which doubles as the connection's identity."
+        )
+    ),
+) -> dict:
     """Toggle whether chat runs this connection's SQL as the signed-in user."""
     try:
         row = service.set_sso_federation(
@@ -111,8 +127,14 @@ def set_sso_federation(database_name: str, body: SsoFederationBody) -> dict:
     return {"data": row}
 
 
-@router.delete("/connections/{database_name}")
-def delete_connection(database_name: str) -> dict:
+@router.delete("/connections/{database_name}", response_model=ConnectionResponse)
+def delete_connection(
+    database_name: str = Path(
+        description=(
+            "Catalog database name, which doubles as the connection's identity."
+        )
+    ),
+) -> dict:
     try:
         row = service.delete_connection(database_name)
     except ValueError as exc:

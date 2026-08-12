@@ -7,19 +7,19 @@ import type { Conversation, ChatMessage } from '@/types/chat';
 export type ConversationSummary = {
 	id: string;
 	title: string;
-	createdAt: string;
-	updatedAt: string;
+	created_at: string;
+	updated_at: string;
 };
 
 export type ConversationDetail = ConversationSummary & {
 	messages: Array<{
 		id: string;
-		conversationId: string;
+		conversation_id: string;
 		role: 'user' | 'assistant';
 		content: string;
-		sqlCode: string | null;
-		sqlResponse: string | null;
-		createdAt: string;
+		sql_code: string | null;
+		sql_response: string | null;
+		created_at: string;
 	}>;
 };
 
@@ -62,7 +62,15 @@ export const conversationsApi = {
 		json<{ id: string }>(`/api/conversations/${conversationId}/messages`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify(msg),
+			// Callers pass the camelCase shape the chat UI works in; the API
+			// speaks snake_case, so the rename happens here rather than at
+			// every call site.
+			body: JSON.stringify({
+				role: msg.role,
+				content: msg.content,
+				sql_code: msg.sqlCode ?? null,
+				sql_response: msg.sqlResponse ?? null,
+			}),
 		}),
 };
 
@@ -70,7 +78,7 @@ export function toConversation(detail: ConversationDetail): Conversation {
 	return {
 		id: detail.id,
 		title: detail.title,
-		createdAt: new Date(detail.createdAt).getTime(),
+		createdAt: new Date(detail.created_at).getTime(),
 		messages: detail.messages.map(toMessage),
 	};
 }
@@ -80,8 +88,8 @@ export function toMessage(msg: ConversationDetail['messages'][number]): ChatMess
 		id: msg.id,
 		role: msg.role,
 		content: msg.content,
-		sql: msg.sqlCode ?? undefined,
-		sqlResponse: msg.sqlResponse ?? undefined,
-		timestamp: new Date(msg.createdAt).getTime(),
+		sql: msg.sql_code ?? undefined,
+		sqlResponse: msg.sql_response ?? undefined,
+		timestamp: new Date(msg.created_at).getTime(),
 	};
 }

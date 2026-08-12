@@ -20,9 +20,6 @@ import type { PageParams, ResponseWithCount, ResponseWithError } from './types';
 
 export type ExplorationGraphResponse<Graph> = {
 	data: Graph;
-	meta?: {
-		noZoneAccess?: boolean;
-	};
 };
 
 // Server caps the response at the same number regardless of what's sent (see

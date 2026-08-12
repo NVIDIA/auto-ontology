@@ -76,8 +76,8 @@ export const useChat = () => {
 	);
 
 	// Message 1 — prose + SQL, rendered as soon as the SQL pipeline resolves.
-	// Built with the same helper the completions proxy persists with, so a
-	// reloaded conversation matches what the user watched arrive.
+	// FastAPI persists the same response + SQL fields, so a reloaded
+	// conversation matches what the user watched arrive.
 	const appendSqlAnswerMessage = useCallback(
 		(answer: ResultEvent['answer']) => {
 			const msg = buildSqlAnswerMessage(answer);

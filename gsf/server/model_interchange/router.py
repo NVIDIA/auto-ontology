@@ -16,11 +16,27 @@ from gsf.dal.model_interchange import (
 )
 from gsf.server.model_interchange import service
 from gsf.server.model_interchange.schemas import ExportRequest
+from gsf.server.responses import ModelImportResponse
 
 router = APIRouter()
 
 
-@router.post("/model/export")
+class YamlResponse(Response):
+    """Declares the export's media type so the spec doesn't also claim JSON."""
+
+    media_type = "application/x-yaml"
+
+
+@router.post(
+    "/model/export",
+    response_class=YamlResponse,
+    responses={
+        200: {
+            "content": {"application/x-yaml": {"schema": {"type": "string"}}},
+            "description": "GSF model YAML, sent as a file attachment",
+        }
+    },
+)
 def export_model(body: ExportRequest) -> Response:
     """Export the scoped catalog + semantic model as a YAML attachment."""
     try:
@@ -36,7 +52,7 @@ def export_model(body: ExportRequest) -> Response:
     )
 
 
-@router.post("/model/import")
+@router.post("/model/import", response_model=ModelImportResponse)
 async def import_model(
     request: Request,
     file: UploadFile | None = File(default=None),

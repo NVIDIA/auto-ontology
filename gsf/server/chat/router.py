@@ -15,8 +15,9 @@ Each conversation gets its own warm agent subprocess and may only have one
 in-flight stream at a time; different conversations run fully independently
 (each `WarmPool.acquire()` cold-starts a fresh subprocess if no standby is
 free, so there's no cap on how many conversations can run concurrently).
-Slots are keyed by ``request.conversation_id`` — callers that omit it (e.g.
-direct API/NAT plugin usage) get a fresh key per request and never collide.
+Authenticated slots are keyed by user plus ``request.conversation_id``.
+Callers that omit it (e.g. direct one-shot API usage) get a fresh key per
+request and never collide.
 
 * If the conversation's slot is empty → request runs.
 * If the slot is held by a stream whose **client is still connected**
@@ -54,6 +55,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Generator
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -61,12 +63,37 @@ from fastapi.responses import StreamingResponse
 from gsf.dal.terms import semantic_layer_calculated
 from gsf.retrieval.text_to_sql.visualization import analyze_and_visualize
 from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, VisualizeRequest
+from gsf.server.chat.conversation_dal import (
+    ConversationAccessError,
+    create_stateless_analytics,
+    persist_analytics_result,
+    persist_assistant_result,
+    prepare_conversation,
+)
+from gsf.server.chat.identity import resolve_internal_user
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
+from gsf.server.responses import ChartsResponse, ChatCancelResponse
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+class EventStreamResponse(StreamingResponse):
+    """Declares the SSE media type so the spec doesn't also claim JSON."""
+
+    media_type = "text/event-stream"
+
+
+# The two streaming routes emit OpenAI-style SSE frames rather than a JSON
+# body, so they document a media type instead of a response_model.
+SSE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {
+        "content": {"text/event-stream": {"schema": {"type": "string"}}},
+        "description": "Server-sent events; the stream ends with `data: [DONE]`",
+    }
+}
 
 # Built once at import time, same fallback order as the main agent pipeline
 # (gsf.retrieval.text_to_sql.main): prefer the cheaper non-reasoning model,
@@ -107,6 +134,9 @@ class _Slot:
 
     key: str
     worker: PrewarmedWorker
+    user_id: str | None
+    conversation_id: UUID | None
+    analytics_id: str | None
     client_alive: threading.Event
     # Set if the watchdog detected a client disconnect. Tells the stream's
     # finally whether to ``replace`` the worker (cancel) or ``return_alive``
@@ -129,8 +159,8 @@ class _Slot:
     finished: threading.Event = field(default_factory=threading.Event)
 
 
-# Keyed by conversation_id (or a generated per-request key when absent) so
-# distinct conversations never contend for the same slot.
+# Keyed by authenticated user + conversation_id (or a generated per-request
+# key when absent) so distinct users and conversations never contend.
 _active_slots: dict[str, _Slot] = {}
 _slot_lock = threading.Lock()
 
@@ -215,6 +245,46 @@ def _pump(slot: _Slot) -> None:
     whether anyone is currently watching.
     """
 
+    persisted = False
+
+    def persist_event(event: dict) -> None:
+        nonlocal persisted
+        if persisted or slot.user_id is None or slot.analytics_id is None:
+            return
+
+        event_type = event.get("type")
+        if event_type == "result":
+            answer = event.get("answer") or {}
+            response = str(answer.get("response") or "")
+            sql_code = answer.get("sql_code")
+        elif event_type == "error":
+            response = str(event.get("message") or "")
+            sql_code = None
+        else:
+            return
+        if not response and not sql_code:
+            return
+
+        try:
+            if slot.conversation_id is not None:
+                persist_assistant_result(
+                    conversation_id=slot.conversation_id,
+                    user_id=slot.user_id,
+                    analytics_id=slot.analytics_id,
+                    response=response,
+                    sql_code=sql_code,
+                )
+            else:
+                persist_analytics_result(
+                    analytics_id=slot.analytics_id,
+                    user_id=slot.user_id,
+                    response=response,
+                    sql_code=sql_code,
+                )
+            persisted = True
+        except Exception:  # noqa: BLE001 — persistence must not break SSE
+            logger.exception("Failed to persist assistant conversation turn")
+
     try:
         for item in slot.worker.events():
             if item is None:
@@ -226,14 +296,15 @@ def _pump(slot: _Slot) -> None:
             if event.get("type") == "step":
                 node_name = event.get("node", "")
                 event = {**event, "label": NODE_LABELS.get(node_name, node_name)}
+            persist_event(event)
             with slot.buffer_lock:
                 slot.buffer.append(event)
     except RuntimeError as exc:
         logger.exception("Agent stream failed")
+        error_event = {"type": "error", "message": f"Agent stream failed: {exc}"}
+        persist_event(error_event)
         with slot.buffer_lock:
-            slot.buffer.append(
-                {"type": "error", "message": f"Agent stream failed: {exc}"}
-            )
+            slot.buffer.append(error_event)
     finally:
         slot.finished.set()
         _release(slot)
@@ -295,19 +366,31 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
     yield "data: [DONE]\n\n"
 
 
-@router.post("/chat/completions")
+@router.post(
+    "/chat/completions",
+    response_class=EventStreamResponse,
+    responses=SSE_RESPONSES,
+)
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
+    logger.info("Chat completions request: %s", request.model_dump())
+
     # Block chat when the semantic layer hasn't been built — no connectors/graph
     # run happens. The chat page gates on the status API; this is the backstop.
     if not semantic_layer_calculated():
         raise HTTPException(status_code=409, detail=_SEMANTIC_MISSING_MSG)
 
-    # Callers without a conversation_id (direct API/NAT plugin usage) get a
-    # fresh key per request so they never contend with each other or with
-    # conversations that do send one.
-    key = request.conversation_id or str(uuid.uuid4())
+    # Conversation persistence trusts identity forwarded by the private Next.js
+    # gateway. One-shot direct callers remain stateless.
+    user_id = resolve_internal_user(
+        http_request, required=request.conversation_id is not None
+    )
+    key = (
+        f"{user_id}:{request.conversation_id}"
+        if request.conversation_id is not None
+        else str(uuid.uuid4())
+    )
 
     subject_token = _subject_token(http_request)
 
@@ -316,6 +399,9 @@ async def chat_completions(
     slot = _Slot(
         key=key,
         worker=worker,
+        user_id=user_id,
+        conversation_id=request.conversation_id,
+        analytics_id=None,
         client_alive=threading.Event(),
         cancelled=threading.Event(),
         released=threading.Event(),
@@ -336,11 +422,54 @@ async def chat_completions(
         displaced.cancelled.set()
         _release(displaced)
 
+    conversation_history: list[dict[str, str | None]] = []
+    if request.conversation_id is not None and user_id is not None:
+        try:
+            prepared = await asyncio.to_thread(
+                prepare_conversation,
+                conversation_id=request.conversation_id,
+                user_id=user_id,
+                question=request.question,
+                source=http_request.headers.get("x-gsf-source") or "api",
+            )
+        except ConversationAccessError as exc:
+            _release(slot)
+            raise HTTPException(
+                status_code=404, detail="Conversation not found"
+            ) from exc
+        except Exception as exc:
+            logger.exception("Failed to prepare conversation history")
+            _release(slot)
+            raise HTTPException(
+                status_code=503, detail="Conversation storage unavailable"
+            ) from exc
+
+        slot.analytics_id = prepared.analytics_id
+        conversation_history = [
+            {
+                "question": turn.question,
+                "response": turn.response,
+                "sql_code": turn.sql_code,
+            }
+            for turn in prepared.history
+        ]
+    elif user_id is not None:
+        try:
+            slot.analytics_id = await asyncio.to_thread(
+                create_stateless_analytics,
+                user_id=user_id,
+                question=request.question,
+                source=http_request.headers.get("x-gsf-source") or "api",
+            )
+        except Exception:  # noqa: BLE001 — analytics is best-effort
+            logger.exception("Failed to create stateless conversation analytics")
+
     worker.submit(
         request.question,
         prediction=request.prediction,
         target_db=request.target_db,
         subject_token=subject_token,
+        conversation_history=conversation_history,
     )
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))
@@ -355,8 +484,12 @@ async def chat_completions(
     )
 
 
-@router.get("/chat/watch")
-async def chat_watch(conversation_id: str) -> StreamingResponse:
+@router.get(
+    "/chat/watch",
+    response_class=EventStreamResponse,
+    responses=SSE_RESPONSES,
+)
+async def chat_watch(conversation_id: UUID, request: Request) -> StreamingResponse:
     """Reattach to an in-flight run for ``conversation_id``, if any.
 
     Purely a passive observer: it never submits a question, never touches
@@ -373,8 +506,10 @@ async def chat_watch(conversation_id: str) -> StreamingResponse:
     needed.
     """
 
+    user_id = resolve_internal_user(request, required=True)
+    key = f"{user_id}:{conversation_id}"
     with _slot_lock:
-        slot = _active_slots.get(conversation_id)
+        slot = _active_slots.get(key)
 
     if slot is None:
         return StreamingResponse(
@@ -396,8 +531,8 @@ async def chat_watch(conversation_id: str) -> StreamingResponse:
     )
 
 
-@router.post("/chat/cancel")
-async def chat_cancel(conversation_id: str) -> dict[str, bool]:
+@router.post("/chat/cancel", response_model=ChatCancelResponse)
+async def chat_cancel(conversation_id: UUID, request: Request) -> dict[str, bool]:
     """Abort the in-flight run for ``conversation_id``, if any.
 
     Backs the chat UI's Stop button. Without this, stopping only detached
@@ -408,11 +543,13 @@ async def chat_cancel(conversation_id: str) -> dict[str, bool]:
     than raise, so ``_pump`` appends no error event: the run's buffer ends
     with whatever steps completed and the stream closes with ``[DONE]``.
     Consumers therefore see a run that stopped without an answer, and the
-    completions proxy persists no assistant turn for it.
+    conversation keeps its user turn with no assistant reply.
     """
 
+    user_id = resolve_internal_user(request, required=True)
+    key = f"{user_id}:{conversation_id}"
     with _slot_lock:
-        slot = _active_slots.get(conversation_id)
+        slot = _active_slots.get(key)
 
     if slot is None:
         return {"cancelled": False}
@@ -422,7 +559,7 @@ async def chat_cancel(conversation_id: str) -> dict[str, bool]:
     return {"cancelled": True}
 
 
-@router.post("/chat/visualize")
+@router.post("/chat/visualize", response_model=ChartsResponse)
 async def chat_visualize(request: VisualizeRequest) -> dict[str, Any]:
     """Second step: recommend a chart for an already-executed SQL result.
 

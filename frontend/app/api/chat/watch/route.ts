@@ -6,13 +6,13 @@
 // letting a reloaded/reopened browser tab reattach to a chat run already in
 // progress for a conversation it owns. This is a passive observer only —
 // it never submits a question and performs no persistence. The original
-// submitting request's proxy route (`../completions/route.ts`) remains the
-// single writer of the conversation's messages regardless of who's
-// watching, so a failed/dropped watch connection here has no effect on the
-// underlying run or on what eventually gets saved.
+// FastAPI owns completion persistence regardless of who's watching, so a
+// failed/dropped watch connection here has no effect on the underlying run or
+// on what eventually gets saved.
 
 import { withPermission } from '@/auth/with-auth';
 import { findOwnedConversation } from '@/lib/chatConversations';
+import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -20,9 +20,9 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const GET = withPermission({ conversation: ['read'] })(async (req, { user }) => {
-	const conversationId = new URL(req.url).searchParams.get('conversationId');
+	const conversationId = new URL(req.url).searchParams.get('conversation_id');
 	if (!conversationId) {
-		return new Response('Missing conversationId', { status: 400 });
+		return new Response('Missing conversation_id', { status: 400 });
 	}
 
 	const conversation = await findOwnedConversation(user, conversationId);
@@ -32,7 +32,12 @@ export const GET = withPermission({ conversation: ['read'] })(async (req, { user
 
 	const upstream = await fetch(
 		`${PYTHON_API_URL}/api/chat/watch?conversation_id=${encodeURIComponent(conversationId)}`,
-		{ headers: { Accept: 'text/event-stream' } },
+		{
+			headers: {
+				Accept: 'text/event-stream',
+				...buildInternalIdentityHeaders(user.id),
+			},
+		},
 	);
 
 	if (!upstream.ok || !upstream.body) {

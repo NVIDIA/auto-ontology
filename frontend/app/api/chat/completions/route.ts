@@ -9,21 +9,15 @@
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
 //
-// This route is also the single writer of `Message` rows for chat turns —
-// the user's turn is persisted synchronously below, the assistant's inside
-// `after()`. Persisting here rather than letting the browser call
-// `/api/conversations/[id]/messages` means a full turn is saved even if the
-// user navigates away mid-stream — the agent keeps running server-side
-// regardless (the analytics tee below keeps the upstream connection alive),
-// so persistence should not depend on the browser still being around to see
-// it finish.
+// FastAPI owns completion persistence so web and Agent API callers share one
+// history implementation. This route authenticates the caller, forwards its
+// GSF user identity over the private upstream hop, and otherwise preserves SSE.
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
+import { userCan } from '@/auth/permissions';
 import { resolveSubjectToken } from '@/auth/sso-token';
-import { getPrisma } from '@/lib/prisma';
-import { resolveOrCreateOwnedConversation } from '@/lib/chatConversations';
-import { buildSqlAnswerMessage, type AgentAnswer, type AnswerMessage } from '@/lib/answerMessages';
+import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -42,75 +36,13 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 	}
 };
 
-type ChatStreamResultEvent = {
-	type?: string;
-	answer?: AgentAnswer;
-	message?: string;
-};
-
-// Consume a teed copy of the SSE stream, returning the final answer (as the
-// assistant bubble it renders into), the analytics fields, and — on a
-// mid-stream agent failure — the raw error message. Mirrors the parsing the
-// browser does in `frontend/api/chat.ts` (data: lines, `[DONE]` sentinel,
-// JSON `result`/`error` events).
-//
-// Only Message 1 comes out of this stream: charts are a separate second step,
-// so the bubble carrying them (or the result table) is written by
-// `/api/chat/visualize` once that step reports back.
-const readFinalAnswer = async (
-	stream: ReadableStream<Uint8Array>,
-): Promise<{
-	response: string | null;
-	sql: string | null;
-	answerMessages: AnswerMessage[];
-	errorMessage: string | null;
-}> => {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let buffer = '';
-	let response: string | null = null;
-	let sql: string | null = null;
-	let answerMessages: AnswerMessage[] = [];
-	let errorMessage: string | null = null;
-
-	const handleData = (data: string): void => {
-		if (!data || data === '[DONE]') return;
-		try {
-			const event = JSON.parse(data) as ChatStreamResultEvent;
-			if (event.type === 'result') {
-				response = event.answer?.response ?? null;
-				sql = event.answer?.sql_code ?? null;
-				const sqlAnswer = event.answer ? buildSqlAnswerMessage(event.answer) : null;
-				answerMessages = sqlAnswer ? [sqlAnswer] : [];
-			} else if (event.type === 'error') {
-				errorMessage = event.message ?? null;
-			}
-		} catch {
-			// Skip heartbeats / malformed lines.
-		}
-	};
-
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
-			const lines = buffer.split('\n');
-			buffer = lines.pop() ?? '';
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (trimmed.startsWith('data:')) handleData(trimmed.slice(5).trim());
-			}
-		}
-	} finally {
-		reader.releaseLock();
-	}
-
-	return { response, sql, answerMessages, errorMessage };
-};
-
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
+	const hasConversationId =
+		typeof payload.conversation_id === 'string' && payload.conversation_id.trim() !== '';
+	if (hasConversationId && !userCan(user, { conversation: ['write'] })) {
+		return new Response('Forbidden', { status: 403 });
+	}
 
 	// Step 1 only: SQL + formatted answer. Charts are a separate, second-step
 	// request (POST /api/chat/visualize) the client makes after this
@@ -123,6 +55,8 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const upstreamHeaders: Record<string, string> = {
 		'Content-Type': 'application/json',
 		Accept: 'text/event-stream',
+		[SOURCE_HEADER]: req.headers.get(SOURCE_HEADER) ?? 'api',
+		...buildInternalIdentityHeaders(user.id),
 	};
 
 	const subjectToken = await resolveSubjectToken(req.headers, user.id);
@@ -156,10 +90,6 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 		});
 	}
 
-	// Source label for the analytics row: the web app tags itself `app`; any
-	// other caller (the NAT plugin / direct API) defaults to `api`.
-	const source = req.headers.get(SOURCE_HEADER) ?? 'api';
-
 	const responseHeaders = {
 		'Content-Type': 'text/event-stream; charset=utf-8',
 		'Cache-Control': 'no-cache, no-transform',
@@ -167,80 +97,13 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 		'X-Accel-Buffering': 'no',
 	};
 
-	// Single writer for analytics and conversation history, for every caller.
-	// Create the analytics row and persist the user's turn up front, then tee
-	// the stream — one branch flows to the client untouched, the other is
-	// parsed after the response to backfill the final answer and persist the
-	// assistant's turn. `user` is the resolved GSF user (session or SSO
-	// bearer), injected by withPermission.
-	const question = typeof payload.question === 'string' ? payload.question : '';
-	const conversationId =
-		typeof payload.conversation_id === 'string' && payload.conversation_id.trim()
-			? payload.conversation_id
-			: null;
-
-	const title = question.slice(0, 50) || 'New conversation';
-	const prisma = getPrisma();
-	const [row, conversation] = await Promise.all([
-		prisma.conversationAnalytics.create({
-			data: { question, source, userId: user.id },
-		}),
-		resolveOrCreateOwnedConversation(user, conversationId, title),
-	]);
-
-	if (conversation) {
-		await prisma.message.create({
-			data: { conversationId: conversation.id, role: 'user', content: question },
-		});
-	}
-
-	const [toClient, toCapture] = upstream.body.tee();
-
+	const [toClient, toKeepAlive] = upstream.body.tee();
 	after(async () => {
 		try {
-			const { response, sql, answerMessages, errorMessage } =
-				await readFinalAnswer(toCapture);
-			await prisma.conversationAnalytics.update({
-				where: { id: row.id },
-				data: { response, sql, responseTimestamp: new Date() },
-			});
-
-			if (conversation) {
-				// A result persists the prose + SQL bubble the browser rendered,
-				// so reopening the conversation looks identical to watching it
-				// stream; `/api/chat/visualize` adds the chart/table bubble when
-				// the second step lands. A mid-stream agent failure persists the
-				// real error text instead, paired with the already-persisted user
-				// turn. A stream that closed with neither (e.g. the upstream
-				// connection dropped) has nothing meaningful to save.
-				const rows: AnswerMessage[] =
-					answerMessages.length > 0
-						? answerMessages
-						: errorMessage != null
-							? [{ content: errorMessage }]
-							: [];
-
-				if (rows.length > 0) {
-					await prisma.message.createMany({
-						data: rows.map((msg) => ({
-							conversationId: conversation.id,
-							role: 'assistant',
-							content: msg.content,
-							sqlCode: msg.sql ?? null,
-							sqlResponse: msg.sqlResponse ?? null,
-						})),
-					});
-					await prisma.conversation.update({
-						where: { id: conversation.id },
-						data: { updatedAt: new Date() },
-					});
-				}
-			}
+			await toKeepAlive.pipeTo(new WritableStream());
 		} catch {
-			// Best-effort analytics/persistence — never let capture failures
-			// affect the already-delivered chat response.
+			// The browser-facing stream is already independent of this drain.
 		}
 	});
-
 	return new Response(toClient, { status: 200, headers: responseHeaders });
 });

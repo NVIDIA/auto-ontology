@@ -25,7 +25,9 @@ import { userCan, type PermissionRequest } from '@/auth/permissions';
 // wide shape so both `withPermission({...})(fn)` (static) and
 // `withPermission<{ params: Promise<{ id: string }> }>({...})(fn)` (dynamic)
 // satisfy Next's generated route types at build time.
-type RouteContext = { params: Promise<Record<string, string>> };
+// A catch-all segment (`[...all]`) resolves to a string[], so the value type has
+// to admit both or the auth catch-all cannot be wrapped.
+type RouteContext = { params: Promise<Record<string, string | string[]>> };
 
 type AuthedHandler<C extends RouteContext> = (
 	req: Request,

@@ -8,12 +8,12 @@
 // merely detaching the browser from it — leaving the run alive would keep
 // the conversation's slot claimed and reject the next question with 409.
 //
-// Cancelling ends the run without a final answer, so the completions proxy
-// (`../completions/route.ts`, still the single writer of chat messages)
-// persists the user's turn with no assistant reply.
+// Cancelling ends the run without a final answer, so FastAPI leaves the
+// persisted user turn without an assistant reply.
 
 import { withPermission } from '@/auth/with-auth';
 import { findOwnedConversation } from '@/lib/chatConversations';
+import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export const POST = withPermission({ conversation: ['write'] })(async (req, { user }) => {
-	const conversationId = new URL(req.url).searchParams.get('conversationId');
+	const conversationId = new URL(req.url).searchParams.get('conversation_id');
 	const conversation = conversationId ? await findOwnedConversation(user, conversationId) : null;
 
 	if (!conversation) {
@@ -30,7 +30,10 @@ export const POST = withPermission({ conversation: ['write'] })(async (req, { us
 
 	const upstream = await fetch(
 		`${PYTHON_API_URL}/api/chat/cancel?conversation_id=${encodeURIComponent(conversation.id)}`,
-		{ method: 'POST' },
+		{
+			method: 'POST',
+			headers: buildInternalIdentityHeaders(user.id),
+		},
 	);
 
 	if (!upstream.ok) {

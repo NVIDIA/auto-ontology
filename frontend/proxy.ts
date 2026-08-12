@@ -13,26 +13,6 @@ const isPublicPath = (pathname: string): boolean =>
 	PUBLIC_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 
 /**
- * For /api/* requests, moves the first `*_id` query parameter into the URL path
- * so the backend receives it as a path param.
- *
- * Example: GET /api/schemas?db_id=abc  →  GET /api/schemas/abc
- */
-function rewriteApiIdParam(request: NextRequest): NextResponse {
-	const url = request.nextUrl.clone();
-
-	for (const [key, value] of url.searchParams.entries()) {
-		if (key.endsWith('_id')) {
-			url.pathname = `${url.pathname}/${encodeURIComponent(value)}`;
-			url.searchParams.delete(key);
-			return NextResponse.rewrite(url);
-		}
-	}
-
-	return NextResponse.next();
-}
-
-/**
  * Optimistic, cookie-only auth gate (no DB call). Redirects unauthenticated
  * users to /login and authenticated users away from the auth pages. Role-based
  * gating of admin areas (e.g. /settings/*) happens in those layouts/pages via
@@ -64,19 +44,19 @@ function guardPage(request: NextRequest): NextResponse {
 export function proxy(request: NextRequest) {
 	const { pathname } = request.nextUrl;
 
-	// API routes are not auth-gated here: every route handler enforces its own
+	// API routes pass straight through: every route handler enforces its own
 	// access via withPublic / withPermission (see auth/with-auth.ts), which is
-	// the single source of truth. The middleware only performs the `*_id` → path
-	// rewrite for /api/*. Pages are still gated below (handlers can't redirect).
+	// the single source of truth. Pages are still gated below, because a route
+	// handler cannot redirect the way the middleware can.
 	if (pathname.startsWith('/api/')) {
-		return rewriteApiIdParam(request);
+		return NextResponse.next();
 	}
 
 	return guardPage(request);
 }
 
 export const config = {
-	// Run on API routes (for the _id rewrite) and all pages (for the auth gate),
-	// excluding Next internals and static assets.
+	// Run on all pages (for the auth gate), excluding Next internals and static
+	// assets.
 	matcher: ['/((?!_next/static|_next/image|favicon.svg|.*\\.svg$).*)'],
 };

@@ -77,9 +77,14 @@ def _uncovered_entities(
 
 def _enrich_column_attributes(
     hits: list[dict[str, Any]],
+    *,
+    database_name: str | None,
 ) -> list[dict[str, Any]]:
     attr_ids = [str(h["id"]) for h in hits if h.get("id")]
-    contexts = fetch_attr_column_contexts(attr_ids)
+    contexts = fetch_attr_column_contexts(
+        attr_ids,
+        database_name=database_name,
+    )
     enriched: list[dict[str, Any]] = []
     for hit in hits:
         aid = str(hit.get("id") or "")
@@ -185,7 +190,10 @@ class CoverageGradeAgent(BaseAgent):
         coverage = _compute_coverage(entities, col_hits)
 
         ranked = _rank_candidates(
-            _enrich_column_attributes(col_hits)
+            _enrich_column_attributes(
+                col_hits,
+                database_name=path_state.get("target_db"),
+            )
             + _enrich_sql_attributes(sql_hits)
             + _enrich_custom_analyses(custom_hits)
         )

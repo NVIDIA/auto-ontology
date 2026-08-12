@@ -104,9 +104,9 @@ const LoginForm = () => {
 					<Button
 						theme={ButtonTheme.Primary}
 						size={Size.REGULAR}
-						key={provider.providerId}
+						key={provider.provider_id}
 						type="button"
-						onClick={() => handleSso(provider.providerId)}
+						onClick={() => handleSso(provider.provider_id)}
 					>
 						Sign in with SSO
 					</Button>

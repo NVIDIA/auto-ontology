@@ -9,30 +9,30 @@ generator client {
 }
 
 model Conversation {
-  id        String    @id @default(uuid()) @db.Uuid
-  userId    String    @map("user_id")
-  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String    @default("")
-  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt DateTime  @updatedAt @map("updated_at") @db.Timestamptz
-  messages  Message[]
+  id         String    @id @default(uuid()) @db.Uuid
+  user_id    String    @map("user_id")
+  user       User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  title      String    @default("")
+  created_at DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updated_at DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  messages   Message[]
 
-  @@index([userId])
+  @@index([user_id])
   @@map("conversations")
   @@schema("public")
 }
 
 model Message {
-  id             String       @id @default(uuid()) @db.Uuid
-  conversationId String       @map("conversation_id") @db.Uuid
-  role           String
-  content        String       @default("")
-  sqlCode        String?      @map("sql_code")
-  sqlResponse    String?      @map("sql_response")
-  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  id              String       @id @default(uuid()) @db.Uuid
+  conversation_id String       @map("conversation_id") @db.Uuid
+  role            String
+  content         String       @default("")
+  sql_code        String?      @map("sql_code")
+  sql_response    String?      @map("sql_response")
+  created_at      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
 
-  @@index([conversationId, createdAt])
+  @@index([conversation_id, created_at])
   @@map("messages")
   @@schema("public")
 }
@@ -54,9 +54,9 @@ model Prompt {
 //                                  (auto-generate visualizations for SQL results;
 //                                   a missing row means enabled)
 model Configuration {
-  key       String   @id
-  value     String
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  key        String   @id
+  value      String
+  updated_at DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("configurations")
   @@schema("public")
@@ -66,25 +66,25 @@ model Acronym {
   id          String   @id @default(uuid()) @db.Uuid
   name        String   @unique
   description String   @default("")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  created_at  DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updated_at  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("acronyms")
   @@schema("public")
 }
 
 model ConversationAnalytics {
-  id                String    @id @default(uuid()) @db.Uuid
-  userId            String    @map("user_id")
-  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  source            String    @default("app") @map("source")
-  question          String    @default("")
-  questionTimestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
-  response          String?
-  responseTimestamp DateTime? @map("response_timestamp") @db.Timestamptz
-  sql               String?
+  id                 String    @id @default(uuid()) @db.Uuid
+  user_id            String    @map("user_id")
+  user               User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  source             String    @default("app") @map("source")
+  question           String    @default("")
+  question_timestamp DateTime  @default(now()) @map("question_timestamp") @db.Timestamptz
+  response           String?
+  response_timestamp DateTime? @map("response_timestamp") @db.Timestamptz
+  sql                String?
 
-  @@index([userId])
+  @@index([user_id])
   @@map("conversation_analytics")
   @@schema("public")
 }
@@ -107,6 +107,7 @@ model User {
   ssoproviders  SsoProvider[]
   conversations Conversation[]
   analytics     ConversationAnalytics[]
+  apiKeys       Apikey[]
 
   @@unique([email])
   @@map("user")
@@ -178,5 +179,52 @@ model SsoProvider {
 
   @@unique([providerId])
   @@map("ssoProvider")
+  @@schema("public")
+}
+
+// API tokens for machine-to-machine access (scripts, CI, notebooks). Owned and
+// managed by the Better Auth `apiKey` plugin — field names/types must match the
+// plugin's schema exactly, so this model breaks the snake_case convention the
+// GSF-owned tables use, like the other Better Auth tables above.
+//
+// `key` holds a SHA-256 hash of the token, never the token itself: the plaintext
+// is returned once at creation and is unrecoverable afterwards. `referenceId` is
+// the owning user's id (the plugin is configured with references: "user"); the
+// relation is declared here so revoking a user cascades to their tokens.
+//
+// The model is `Apikey`, not the more natural `ApiKey`, because the Better Auth
+// Prisma adapter looks the model up as `prisma[<its model name>]` and the plugin
+// names it `apikey` (all lowercase). Prisma derives the delegate from the model
+// name, so `ApiKey` would generate `prisma.apiKey` and every call would fail at
+// runtime with "Model apikey does not exist in the database".
+model Apikey {
+  id                  String    @id
+  configId            String    @default("default")
+  name                String?
+  start               String?
+  prefix              String?
+  key                 String
+  referenceId         String
+  user                User      @relation(fields: [referenceId], references: [id], onDelete: Cascade)
+  refillInterval      Int?
+  refillAmount        Int?
+  lastRefillAt        DateTime?
+  enabled             Boolean   @default(true)
+  rateLimitEnabled    Boolean   @default(true)
+  rateLimitTimeWindow Int?
+  rateLimitMax        Int?
+  requestCount        Int       @default(0)
+  remaining           Int?
+  lastRequest         DateTime?
+  expiresAt           DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  permissions         String?
+  metadata            String?
+
+  @@index([configId])
+  @@index([referenceId])
+  @@index([key])
+  @@map("apikey")
   @@schema("public")
 }

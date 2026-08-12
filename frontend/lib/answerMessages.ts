@@ -10,8 +10,8 @@
 // second step (POST /api/chat/visualize) rather than part of the agent's
 // answer: Message 1 ships as soon as the SQL pipeline resolves, Message 2 once
 // the chart step reports back. Each is therefore persisted by the route that
-// produces it — the chat-completions proxy writes Message 1 in `after()`, the
-// visualize proxy writes Message 2 — so history matches the live view.
+// produces it — FastAPI writes Message 1 while the visualize proxy writes
+// Message 2 — so history matches the live view.
 //
 // The split lives here because those routes and `useChat.ts` (which renders it
 // live) all have to agree on it exactly. If they disagreed, reloading a
