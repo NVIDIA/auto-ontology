@@ -110,6 +110,7 @@
   "sql_attributes": {
     "SqlAttributeExpressionConflict": "class(Exception)",
     "SqlAttributeNameConflict": "class(Exception)",
+    "SqlAttributeSqlError": "class(Exception)",
     "clear_sql_attribute_description_suggestion": "(attr_id: 'str') -> 'None'",
     "clear_sql_attribute_description_suggestions_for_term": "(term_id: 'str') -> 'None'",
     "count_sql_attributes_by_term_id": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'int'",

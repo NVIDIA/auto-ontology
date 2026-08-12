@@ -1888,3 +1888,83 @@ Cleanup is by id now. A fixture that tests a rename cannot identify its rows by
 name.
 
 **Suite:** 526 passed, 3 skipped (was 495).
+
+---
+
+## 2026-08-12 — Phase 7 — SqlAttribute
+
+`gsf/dal/pg/sql_attributes.py` — 21 functions plus the three exception types.
+`gsf/dal/sql_attributes.py` becomes a selector; the Cypher moves to
+`gsf/dal/neo4j/sql_attributes.py` and, as with `attributes`, stops importing
+`resolve_accessible_catalog_ids` from the *selector* — a third instance of the
+same cross-backend leak.
+
+**The selector re-exports the exception types, and that is not cosmetic.**
+`service.py` catches `SqlAttributeNameConflict` imported from here. If each
+backend defined its own class the `except` would stop matching under one of
+them, and a name conflict would surface as a 500 instead of a 409 — a
+correctness bug with no failing test anywhere, because both classes exist and
+both are importable.
+
+### Two rules that fail quietly
+
+**A SqlAttribute is scoped by the tables its own SQL references**, not by its
+parent Term's tables. The two genuinely differ; using the Term's would show a
+viewer an attribute querying data they cannot see.
+
+**The check is all-or-nothing**, and phrased in the negative for a reason: not
+"does it touch an allowed table" but "does it touch a disallowed one". An
+attribute joining an in-zone table to an out-of-zone one passes the positive
+form and must fail. The fixture builds exactly that attribute, because it is the
+one case where a wrong implementation still looks right on every other row.
+
+`_has_sql` is repeated across the list, both counts, and the retrieval reads for
+a related reason: the Cypher's `HAS_SQL` match was not optional, so an attribute
+with no statement is invisible. A count that included them would render a badge
+promising rows the list cannot produce.
+
+### `except Exception: return []` hid a hard SQL error, again
+
+`fetch_tables_from_sql_attributes` combines `SELECT DISTINCT` with an `ORDER BY
+ordinal_position` that was not in the select list — which Postgres rejects
+outright. The function caught it, logged a warning, and returned `[]`, so the
+test failed as "0 tables instead of 1" rather than as a syntax error.
+
+That is the second time this session (after `fetch_attr_column_contexts`) that a
+deliberate catch-and-degrade turned a hard error into a plausible empty result.
+The catches are correct — losing retrieval context beats losing the answer — but
+they mean **a test asserting emptiness proves nothing**. Every test here asserts
+content.
+
+### Notes on individual functions
+
+* **`find_attr_by_expression` still compares in Python.** The normalisation is
+  `" ".join(x.split())`, which collapses runs of *any* whitespace, and no SQL
+  expression reproduces it — `regexp_replace` on `\s+` is close but differs on
+  the Unicode whitespace `str.split` accepts. One full scan of a single term's
+  attributes is worth matching the old behaviour exactly.
+* **`update_sql_attribute` types its `source` parameter.** With every argument
+  `None` — an empty PATCH body — Postgres cannot infer a type for a bare `NULL`
+  inside `coalesce` and rejects the statement. Pinned by a test that calls it
+  with nothing set.
+* **`delete_sql_attribute_node` relies on `ON DELETE CASCADE`** rather than
+  deleting links itself. That is `DETACH DELETE` moved into the schema, so a
+  link table added later cannot be forgotten here.
+* **`detach_existing_sql_edges` leaves the Sql rows alone**, as before — they
+  are shared with query history and with other attributes.
+* **The embedding doc text is reproduced literally.** It is what gets embedded,
+  so a changed separator silently invalidates every stored vector for these
+  attributes and nothing downstream fails — retrieval just quietly degrades.
+  Pinned character for character, including the blank description being omitted
+  rather than rendered as an empty clause.
+
+### One snapshot regeneration
+
+`dal_surface.json` gained `SqlAttributeSqlError` for `sql_attributes`. Not new
+API — it has always been importable from this module — but the freeze
+identifies a module's surface by `__module__`, and `SqlAttributeSqlError` is an
+alias for `SqlParseError` defined elsewhere, so it was invisible until the
+selector's `__all__` made it explicit. The snapshot now records what callers
+could always import.
+
+**Suite:** 559 passed, 3 skipped (was 526).
