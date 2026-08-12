@@ -305,7 +305,7 @@ class HeavyDBDatabase(SQLDatabase):
                             "table_name": meta.table_name,
                             "column_name": name,
                             "data_type": _type_name(type_info),
-                            "is_nullable": "YES" if type_info.nullable else "NO",
+                            "is_nullable": bool(type_info.nullable),
                             "ordinal_position": position,
                         }
                     )

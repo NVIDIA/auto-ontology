@@ -680,7 +680,7 @@ class DatabricksDatabase(SQLDatabase):
                     table_name,
                     column_name,
                     full_data_type AS data_type,
-                    is_nullable,
+                    is_nullable = 'YES' AS is_nullable,
                     ordinal_position
                 FROM {catalog}.information_schema.columns
                 WHERE {self._schema_condition()}

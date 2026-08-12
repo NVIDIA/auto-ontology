@@ -140,7 +140,7 @@ class PostgresDatabase(SQLDatabase):
                 c.relname                        AS table_name,
                 a.attname                        AS column_name,
                 format_type(a.atttypid, NULL)    AS data_type,
-                CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END AS is_nullable,
+                NOT a.attnotnull                 AS is_nullable,
                 a.attnum                         AS ordinal_position
             FROM pg_attribute a
             JOIN pg_class c ON c.oid = a.attrelid

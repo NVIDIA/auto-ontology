@@ -78,7 +78,7 @@ class World:
             name="id",
             data_type="integer",
             ordinal_position=1,
-            is_nullable="NO",
+            is_nullable=False,
         )
         self.customer_ref = _add(
             s.catalog_column,
@@ -86,7 +86,7 @@ class World:
             name="customer_id",
             data_type="integer",
             ordinal_position=2,
-            is_nullable="YES",
+            is_nullable=True,
         )
         self.customer_id = _add(
             s.catalog_column,
@@ -94,7 +94,7 @@ class World:
             name="id",
             data_type="integer",
             ordinal_position=1,
-            is_nullable="NO",
+            is_nullable=False,
         )
         _link(
             s.column_foreign_key,
@@ -233,33 +233,16 @@ def test_nullability_survives_the_export(world) -> None:
     assert columns["customer_id"].is_nullable is True
 
 
-@pytest.mark.parametrize(
-    ("stored", "expected"),
-    [
-        ("YES", True),
-        ("NO", False),
-        ("yes", True),
-        ("no", False),
-        (" NO ", False),
-        (None, True),
-        (True, True),
-        (False, False),
-    ],
-)
-def test_is_nullable_parses_what_the_catalog_stores(stored, expected) -> None:
-    """Absent means nullable — the permissive default for an unknown column."""
-    assert mi._is_nullable(stored) is expected
+def test_an_undetermined_column_exports_as_nullable() -> None:
+    """NULL means the connector could not tell, and absent has always meant
+    nullable — the permissive reading for a constraint we cannot prove.
 
-
-def test_nullability_round_trips_in_the_stores_own_vocabulary(world) -> None:
-    """An imported column must be indistinguishable from an ingested one.
-
-    Written back as a bool, a re-ingest diff would see every imported column as
-    changed — the column would flap on every subsequent ingest.
+    The export schema types ``is_nullable`` as a plain ``bool``, so this is the
+    one place the store's three states collapse into two.
     """
-    assert mi._nullable_to_stored(False) == "NO"
-    assert mi._nullable_to_stored(True) == "YES"
-    assert mi._nullable_to_stored(None) == "YES"
+    assert mi._nullable_or_default(None) is True
+    assert mi._nullable_or_default(True) is True
+    assert mi._nullable_or_default(False) is False
 
 
 # --------------------------------------------------------------------------
@@ -425,8 +408,8 @@ def test_an_adopted_row_is_stamped_so_the_next_import_is_faster(world) -> None:
 def test_nullability_survives_the_whole_round_trip(world) -> None:
     """Bug 3 again, end to end: export, import, re-export.
 
-    Getting `_is_nullable` right but `_nullable_to_stored` wrong would pass the
-    export test and fail here.
+    The export path alone can look correct while the import path writes a value
+    that reads back inverted; only a round trip catches that.
     """
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)

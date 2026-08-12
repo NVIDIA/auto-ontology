@@ -175,15 +175,13 @@ catalog_column = Table(
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
-    # Text, not Boolean: this holds the *strings* `information_schema` reports,
-    # 'YES' and 'NO', and the DAL returns the value raw. A boolean column would
-    # hand callers True/False where they receive 'YES'/'NO' today, which is a
-    # read-contract change wearing the costume of a type fix.
-    #
-    # It should become a boolean, but as a deliberate change with its consumers
-    # updated -- `model_interchange` parses these strings explicitly, because a
-    # naive `bool('NO')` is True.
-    Column("is_nullable", Text, nullable=True),
+    # A real Boolean. It used to hold the *strings* `information_schema`
+    # reports, 'YES' and 'NO', which read back as truthy either way -- so
+    # `bool(stored)` was True for every column and every export claimed the
+    # whole catalog was nullable. Connectors now convert at their own edge
+    # (see `gsf.connectors.base.SQLDatabase.get_columns`) and NULL still means
+    # "the connector could not determine it", which callers treat as nullable.
+    Column("is_nullable", Boolean, nullable=True),
     # A genuine integer, despite the parser handing the write path a string --
     # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),

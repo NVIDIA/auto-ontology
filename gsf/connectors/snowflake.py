@@ -210,7 +210,7 @@ class SnowflakeDatabase(SQLDatabase):
                 TABLE_NAME       AS "table_name",
                 COLUMN_NAME      AS "column_name",
                 DATA_TYPE        AS "data_type",
-                IS_NULLABLE      AS "is_nullable",
+                IS_NULLABLE = 'YES' AS "is_nullable",
                 ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'

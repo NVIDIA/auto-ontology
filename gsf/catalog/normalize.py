@@ -7,6 +7,7 @@
 import regex
 from datetime import timezone
 
+import numpy as np
 import pandas as pd
 
 from gsf.catalog.constants import TableTypes
@@ -107,6 +108,41 @@ def normalize_tables(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+_NULLABLE_TRUE = {"YES", "TRUE", "T", "Y", "1"}
+_NULLABLE_FALSE = {"NO", "FALSE", "F", "N", "0"}
+
+
+def coerce_nullable(value: object) -> bool | None:
+    """Coerce one ``is_nullable`` value to a boolean.
+
+    Connectors are required to return real booleans (see
+    :meth:`gsf.connectors.base.SQLDatabase.get_columns`), and every connector
+    in this repo does. This exists for the two cases that still arrive as
+    text: a third-party connector that returns ``information_schema``'s
+    ``'YES'``/``'NO'`` verbatim, and catalogs written before the column became
+    a boolean.
+
+    Both spellings are truthy as strings, which is what made ``bool(stored)``
+    report the entire catalog as nullable. Unrecognised values raise rather
+    than defaulting — silently guessing is what the bug was.
+    """
+    if value is None or value is pd.NA or (isinstance(value, float) and pd.isna(value)):
+        return None
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    text = str(value).strip().upper()
+    if text in _NULLABLE_TRUE:
+        return True
+    if text in _NULLABLE_FALSE:
+        return False
+    if text == "":
+        return None
+    raise ValueError(
+        f"is_nullable must be a boolean (or 'YES'/'NO'); got {value!r}. "
+        "Convert it in the connector — see SQLDatabase.get_columns."
+    )
+
+
 def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
     """Normalize and type a columns DataFrame. Expects a DataFrame only."""
     types = {
@@ -115,7 +151,9 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
         "column_name": "string",
         "ordinal_position": "Int16",
         "data_type": "category",
-        "is_nullable": "category",
+        # "boolean", not "bool": the nullable dtype, because a connector that
+        # cannot determine nullability leaves it NULL.
+        "is_nullable": "boolean",
         "description": "string",
     }
     df = (
@@ -131,6 +169,7 @@ def normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
             df[key] = pd.NA
 
     df["ordinal_position"] = pd.to_numeric(df["ordinal_position"])
+    df["is_nullable"] = df["is_nullable"].map(coerce_nullable)
     df = df.astype(dtype=types)
 
     return df

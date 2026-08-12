@@ -117,7 +117,7 @@ class DuckDBDatabase(SQLDatabase):
                 table_name,
                 column_name,
                 data_type,
-                is_nullable,
+                is_nullable = 'YES' AS is_nullable,
                 ordinal_position
             FROM information_schema.columns
             ORDER BY table_schema, table_name, ordinal_position

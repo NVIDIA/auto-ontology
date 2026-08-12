@@ -101,48 +101,23 @@ class ModelImportValidationError(ModelInterchangeError):
 
 
 # ---------------------------------------------------------------------------
-# Nullability — bug 3
-# ---------------------------------------------------------------------------
-
-
-def _is_nullable(raw: Any) -> bool:
-    """Whether a column is nullable, from what the catalog actually stores.
-
-    **This is the fix for bug 3.** The catalog stores the *strings* ``'YES'``
-    and ``'NO'`` — the values ``information_schema`` reports — and the previous
-    reader was ``bool(raw)``. ``bool('NO')`` is ``True``, so **every column in
-    every export claimed to be nullable**: measured on the fixture, 112 of 218
-    columns were wrong, and the export is what another deployment imports as
-    truth.
-
-    Nothing failed, because a bool is exactly what the schema expects and
-    ``True`` is a plausible value for it. The only way to see it was to look at
-    what was stored rather than at what was read.
-
-    Absent still means nullable — the permissive default the catalog has always
-    used for a column it could not determine. Booleans pass through so an
-    already-parsed value round-trips, which is what an import writes back.
-    """
-    if raw is None:
-        return True
-    if isinstance(raw, bool):
-        return raw
-    return str(raw).strip().upper() not in {"NO", "FALSE", "0", "F", "N"}
-
-
-def _nullable_to_stored(value: bool | None) -> str:
-    """The inverse of :func:`_is_nullable`, for the import path.
-
-    Written back in ``information_schema``'s vocabulary rather than as a
-    boolean, so an imported column is indistinguishable from an ingested one —
-    otherwise a re-ingest diff would see every imported column as changed.
-    """
-    return "YES" if value is None or value else "NO"
-
-
-# ---------------------------------------------------------------------------
 # Export
 # ---------------------------------------------------------------------------
+
+
+def _nullable_or_default(raw: Any) -> bool:
+    """The stored boolean, defaulting an undetermined column to nullable.
+
+    The catalog stores ``is_nullable`` as a real boolean but leaves it NULL
+    when the connector could not determine it; the export schema types it as a
+    plain ``bool``. Absent has always meant nullable — the permissive reading
+    for a constraint we cannot prove — so that is what NULL becomes here.
+
+    This is the *only* place the two vocabularies meet. It used to be a pair of
+    string parsers on both sides of the store, because the column held
+    ``'YES'``/``'NO'`` and ``bool('NO')`` is ``True``.
+    """
+    return True if raw is None else bool(raw)
 
 
 def _database_scope(database_ids: list[str]):
@@ -587,7 +562,7 @@ def _assemble_databases(
                     description=row.get("column_description") or "",
                     type=row.get("column_type") or "",
                     sample_values=parse_sample_values(row.get("sample_values")) or [],
-                    is_nullable=_is_nullable(row.get("is_nullable")),
+                    is_nullable=_nullable_or_default(row.get("is_nullable")),
                     is_unique=bool(row.get("is_unique") or False),
                 ),
             )
@@ -982,10 +957,7 @@ def _import_catalog(
                                     else None
                                 ),
                                 "is_unique": column.is_unique,
-                                # Written in information_schema's vocabulary so
-                                # an imported column is indistinguishable from
-                                # an ingested one -- see _nullable_to_stored.
-                                "is_nullable": _nullable_to_stored(column.is_nullable),
+                                "is_nullable": column.is_nullable,
                                 "ordinal_position": ordinal,
                                 "table_id": id_map[table.id],
                             },

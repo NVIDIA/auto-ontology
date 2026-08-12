@@ -555,8 +555,12 @@ class Schema:
             props.update({"data_type": data_type})
         if description:
             props.update({"description": description})
-        if is_nullable:
-            props.update({"is_nullable": is_nullable})
+        # `is not None`, not truthiness: `is_nullable` is a boolean, and a
+        # falsy-skip would drop every NOT NULL column's value on the floor and
+        # leave it NULL -- which reads back as nullable, the exact bug this
+        # column's type change was meant to end.
+        if is_nullable is not None and not pd.isna(is_nullable):
+            props.update({"is_nullable": bool(is_nullable)})
         if not pd.isna(ordinal_position):
             props.update({"ordinal_position": ordinal_position})
         return props

@@ -124,7 +124,7 @@ class SQLiteDatabase(SQLDatabase):
                         "table_name": table_name,
                         "column_name": name,
                         "data_type": data_type or "TEXT",
-                        "is_nullable": "NO" if notnull else "YES",
+                        "is_nullable": not notnull,
                         "ordinal_position": cid + 1,
                     }
                 )

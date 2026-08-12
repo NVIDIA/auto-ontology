@@ -97,6 +97,13 @@ class SQLDatabase(ABC):
 
         Expected columns: ``table_schema``, ``table_name``,
         ``column_name``, ``data_type``, ``is_nullable``.
+
+        ``is_nullable`` must be a **boolean**, not the ``'YES'``/``'NO'``
+        text that ``information_schema`` reports — convert at the query
+        (``is_nullable = 'YES'``) or in the driver loop. Both strings are
+        truthy, so a connector that leaks them makes every column read as
+        nullable. A missing or null value means "could not determine", which
+        the catalog stores as NULL and callers treat as nullable.
         """
 
     @abstractmethod

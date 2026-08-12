@@ -124,12 +124,23 @@ def test_system_schemas_are_excluded(pagila) -> None:
     assert schemas == {"public", "analytics"}, schemas
 
 
-def test_nullability_matches_information_schema(pagila) -> None:
-    """``is_nullable`` keeps the ``YES``/``NO`` spelling callers expect."""
+def test_nullability_is_a_real_boolean(pagila) -> None:
+    """Not the ``'YES'``/``'NO'`` text ``information_schema`` reports.
+
+    Both spellings are truthy, so leaking them makes every column read as
+    nullable — the bug this connector's ``NOT a.attnotnull`` avoids by never
+    producing a string in the first place.
+    """
     columns = pagila.get_columns()
-    assert set(columns.is_nullable) <= {"YES", "NO"}
+    assert columns.is_nullable.dtype == bool
+    assert set(columns.is_nullable) <= {True, False}
+
     film = columns[
         (columns.table_schema == "public") & (columns.table_name == "film")
     ].set_index("column_name")
-    assert film.loc["film_id", "is_nullable"] == "NO"
-    assert film.loc["description", "is_nullable"] == "YES"
+    assert bool(film.loc["film_id", "is_nullable"]) is False, "film_id is NOT NULL"
+    assert bool(film.loc["description", "is_nullable"]) is True
+
+    # The real assertion: a mix, not a column of all-True. The bug's signature
+    # was every column agreeing.
+    assert 0 < int(columns.is_nullable.sum()) < len(columns)
