@@ -3538,7 +3538,7 @@
     },
     "/api/model/import": {
       "post": {
-        "description": "modelInterchangeApi.importModel — upload a GSF model YAML file and apply it\nto the catalog + semantic layer. Admin-only: can replace existing data.",
+        "description": "modelInterchangeApi.importModel — upload a native GSF or Apache Ossie model\nYAML file and apply it to the catalog + semantic layer. Admin-only: can\nreplace existing data.",
         "operationId": "post_api_model_import",
         "parameters": [
           {
@@ -6838,6 +6838,10 @@
             },
             "title": "Databases",
             "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ModelFormat",
+            "default": "gsf"
           }
         },
         "title": "ExportRequest",
@@ -7082,6 +7086,12 @@
         "required": ["data", "count"],
         "title": "ListResponse[Zone]",
         "type": "object"
+      },
+      "ModelFormat": {
+        "description": "Serialisation dialect of an exchanged model document.",
+        "enum": ["gsf", "ossie"],
+        "title": "ModelFormat",
+        "type": "string"
       },
       "ModelImportResponse": {
         "additionalProperties": true,

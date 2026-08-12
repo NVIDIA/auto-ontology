@@ -1335,6 +1335,10 @@
             },
             "title": "Databases",
             "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ModelFormat",
+            "default": "gsf"
           }
         },
         "title": "ExportRequest",
@@ -1658,6 +1662,15 @@
         ],
         "title": "ListResponse[Zone]",
         "type": "object"
+      },
+      "ModelFormat": {
+        "description": "Serialisation dialect of an exchanged model document.",
+        "enum": [
+          "gsf",
+          "ossie"
+        ],
+        "title": "ModelFormat",
+        "type": "string"
       },
       "ModelImportResponse": {
         "additionalProperties": true,
@@ -4765,7 +4778,7 @@
     },
     "/api/model/import": {
       "post": {
-        "description": "Import a GSF model YAML file or raw YAML body.",
+        "description": "Import a native GSF or Apache Ossie model YAML file or raw YAML body.",
         "operationId": "import_model_api_model_import_post",
         "parameters": [
           {

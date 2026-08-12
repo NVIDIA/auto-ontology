@@ -86,7 +86,7 @@ const TermCard = ({
 		<div className="flex items-start justify-between gap-3">
 			<div className="min-w-0 space-y-0.5">
 				<Text as="h2" text={term.name} variant={TextVariant.CardTitle} />
-				{term.synonyms.length > 0 && (
+				{term.synonyms && term.synonyms.length > 0 && (
 					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
 				)}
 			</div>

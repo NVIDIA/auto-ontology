@@ -15,10 +15,30 @@ import { SkeletonRows } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
 import { ButtonTheme, Size } from '@/enums/button';
+import { ModelFormat } from '@/enums/modelInterchange';
 import type { Database } from '@/types/datasources';
 import type { ImportEntityCounts, ImportSummary } from '@/types/modelInterchange';
 
-const EXPORT_FILENAME = 'gsf-model.yaml';
+const FORMAT_LABEL: Record<ModelFormat, string> = {
+	[ModelFormat.GSF]: 'Native GSF',
+	[ModelFormat.OSSIE]: 'Apache Ossie',
+};
+
+const EXPORT_FILENAME: Record<ModelFormat, string> = {
+	[ModelFormat.GSF]: 'gsf-model.yaml',
+	[ModelFormat.OSSIE]: 'ossie-model.yaml',
+};
+
+const FORMAT_OPTIONS: { value: ModelFormat; description: string }[] = [
+	{
+		value: ModelFormat.GSF,
+		description: 'Everything GSF stores, including catalog objects Ossie cannot name.',
+	},
+	{
+		value: ModelFormat.OSSIE,
+		description: 'Open Semantic Interchange model, portable to other Ossie tools.',
+	},
+];
 
 const downloadBlob = (blob: Blob, filename: string) => {
 	const url = URL.createObjectURL(blob);
@@ -36,6 +56,8 @@ const createdCountEntries = (counts: ImportEntityCounts): [string, number][] =>
 
 const checkboxClassName = 'h-4 w-4 rounded border-zinc-300 text-[#76b900] focus:ring-[#76b900]/30';
 
+const radioClassName = 'mt-0.5 h-4 w-4 border-zinc-300 text-[#76b900] focus:ring-[#76b900]/30';
+
 const isYamlFile = (file: File): boolean => /\.ya?ml$/i.test(file.name);
 
 const validateYamlFile = (file: File): string | null =>
@@ -47,6 +69,7 @@ export const ImportExportView = () => {
 	const [databasesError, setDatabasesError] = useState<string | null>(null);
 	const [selectedDbIds, setSelectedDbIds] = useState<Set<string>>(new Set());
 
+	const [exportFormat, setExportFormat] = useState<ModelFormat>(ModelFormat.GSF);
 	const [exporting, setExporting] = useState(false);
 	const [exportError, setExportError] = useState<string | null>(null);
 	const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -104,7 +127,7 @@ export const ImportExportView = () => {
 		if (selectedDbIds.size === 0 || exporting) return;
 		setExporting(true);
 		setExportError(null);
-		const res = await modelInterchangeApi.exportModel(Array.from(selectedDbIds));
+		const res = await modelInterchangeApi.exportModel(Array.from(selectedDbIds), exportFormat);
 		setExporting(false);
 
 		if (res.error) {
@@ -112,8 +135,8 @@ export const ImportExportView = () => {
 			return;
 		}
 
-		downloadBlob(res.blob, EXPORT_FILENAME);
-		setExportMessage('Model exported.');
+		downloadBlob(res.blob, EXPORT_FILENAME[exportFormat]);
+		setExportMessage(`Model exported as ${FORMAT_LABEL[exportFormat]}.`);
 	};
 
 	const handleImportFileChange = (file: File | null) => {
@@ -164,6 +187,37 @@ export const ImportExportView = () => {
 					Download the catalog and semantic layer for the selected databases as a YAML
 					file.
 				</p>
+
+				<fieldset className="mt-4">
+					<legend className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+						Format
+					</legend>
+					<div className="mt-2 grid gap-2 sm:grid-cols-2">
+						{FORMAT_OPTIONS.map(({ value, description }) => (
+							<label
+								key={value}
+								className="flex cursor-pointer items-start gap-2 rounded-lg border border-zinc-200 px-3 py-2 hover:bg-zinc-50 dark:border-zinc-700 dark:hover:bg-zinc-800/80"
+							>
+								<input
+									type="radio"
+									name="export-format"
+									value={value}
+									checked={exportFormat === value}
+									onChange={() => setExportFormat(value)}
+									className={radioClassName}
+								/>
+								<span>
+									<span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+										{FORMAT_LABEL[value]}
+									</span>
+									<span className="block text-xs text-zinc-500">
+										{description}
+									</span>
+								</span>
+							</label>
+						))}
+					</div>
+				</fieldset>
 
 				{databasesLoading ? (
 					<div className="mt-4">
@@ -234,7 +288,8 @@ export const ImportExportView = () => {
 					Import model
 				</h2>
 				<p className="mt-1 text-xs text-zinc-500">
-					Upload a GSF model YAML file to write it into the catalog and semantic layer.
+					Upload a native GSF or Apache Ossie model YAML file to write it into the catalog
+					and semantic layer. The format is detected from the file.
 				</p>
 
 				<FileUpload
@@ -244,7 +299,7 @@ export const ImportExportView = () => {
 					validate={validateYamlFile}
 					accept=".yaml,.yml"
 					description="YAML files (.yaml, .yml)"
-					aria-label="Upload a GSF model YAML file"
+					aria-label="Upload a GSF or Apache Ossie model YAML file"
 					className="mt-4"
 				/>
 
@@ -291,6 +346,7 @@ export const ImportExportView = () => {
 							Import summary
 						</p>
 						<ul className="mt-1.5 space-y-0.5">
+							<li>Read as {FORMAT_LABEL[importSummary.format]}</li>
 							{createdCountEntries(importSummary.created).map(([key, value]) => (
 								<li key={key}>
 									Created {value} {key.replace(/_/g, ' ')}

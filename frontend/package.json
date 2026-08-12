@@ -6,9 +6,10 @@
 	"packageManager": "pnpm@10.34.3",
 	"scripts": {
 		"postinstall": "prisma generate",
+		"db:generate": "prisma generate",
 		"db:push": "prisma db push",
-		"dev": "pnpm db:push && next dev -p 3000",
-		"start": "prisma db push && next start",
+		"dev": "pnpm db:push && pnpm db:generate && next dev -p 3000",
+		"start": "prisma db push && prisma generate && next start",
 		"build": "prisma generate && next build",
 		"lint": "eslint .",
 		"openapi": "tsx scripts/generate-openapi.ts",
