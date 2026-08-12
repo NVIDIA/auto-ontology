@@ -465,7 +465,7 @@ Largest blast radius after `model_interchange`: `TABLE_COUNTS_SUBQUERY`, and
 resolving tables. **Done** additionally requires `validate_sql` on a known-good
 query to resolve against the PG-built `Schema` map.
 
-**Scope: 20 of 26 functions** — the catalog-tier ones. The six that join to
+**Scope: 19 of 26 functions** — the catalog-tier ones. The seven that reach
 `Term`/`ColumnAttribute` moved to Phase 7 by
 [DECISION-009](DECISIONS.md), because nothing writes semantic data until then
 and against no data a wrong join is indistinguishable from a correct one.
@@ -473,11 +473,17 @@ and against no data a wrong join is indistinguishable from a correct one.
 stays here.
 
 ### Phase 7 — `terms` + `attributes` + `sql_attributes` *(8–12d, 2 people)*
-The semantic core, 2,437 lines, **plus six functions inherited from Phase 6**
+The semantic core, 2,437 lines, **plus seven functions inherited from Phase 6**
 ([DECISION-009](DECISIONS.md)): `fetch_tables_for_schema`,
 `fetch_all_tables_without_term`, `fetch_columns_for_table`,
-`fetch_tables_and_columns_by_node_ids`, `fetch_bridge_table_candidates` and
-`fetch_tables_by_ids`.
+`fetch_tables_and_columns_by_node_ids`, `fetch_bridge_table_candidates`,
+`fetch_tables_by_ids` and `fetch_table_context`.
+
+Five of the seven need only the description fallback
+(`column_description_expr` / `table_description_expr` → `sql_fragments`), so
+port that first and most of the group follows. Re-check the list with
+`uv run --no-sync python -m dev_tools.classify_dal_dependencies` rather than
+by eye — three hand-analyses got it wrong.
 They are small; they waited for the semantic fixture, which this phase creates.
 
 Splits cleanly: one person on `terms` (+
