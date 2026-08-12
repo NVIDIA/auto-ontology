@@ -2181,3 +2181,32 @@ asymmetries, and both embedding text formats character for character.
 **Next:** Phase 9 — `exploration`. Re-export `fetch_table_zones_map` and
 `zone_covers_table` from `pg/zones.py` ([DECISION-011]); do not write a second
 copy.
+
+---
+
+## 2026-08-12 — Phase 8 follow-up — the `expand_info` asymmetry is now bug 5
+
+The two branches of `candidates.expand_info` that disagree about a candidate
+with no statement behind it are recorded in PLAN.md's surfaced-bugs table rather
+than only in this log and a docstring — they belong with the other four, and a
+finding that lives only in a commit message is a finding nobody reads.
+
+Stated plainly: **a `SqlAttribute` with no SQL is dropped from the enrichment
+entirely, while a `CustomAnalysis` with no SQL comes back with `sql: ""`.** The
+vector store returns the candidate either way; in the first case the enrichment
+silently discards it and the generator never learns it existed.
+
+Which arm is correct is a product question and this refactor does not settle it.
+Both are defensible — an attribute with nothing to say contributes nothing to a
+prompt, and equally a caller that asked about a specific id is better served by
+a visibly blank entry than an absent one. What was not defensible is that the
+two rules sat in adjacent branches of one query with nothing recording that the
+difference was intended.
+
+PLAN.md's Phase 8 entry now also carries a four-row table of the differences to
+preserve while unpicking the `apoc.case` — including the two that are easy to
+"tidy" into a bug: `sample_values` must be `None` rather than `[]` when empty
+(`[]` in a prompt asserts the column *has* no values), and `data_type` must be
+`""` rather than `None` (callers concatenate it, and `None` renders as the word).
+
+No code change; `pg/candidates.py`'s module docstring gains a pointer.

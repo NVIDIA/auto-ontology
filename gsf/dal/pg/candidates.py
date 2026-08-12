@@ -12,6 +12,14 @@ The Cypher was one ``apoc.case`` with three inlined sub-queries. Here each label
 gets its own function, dispatched by a dict, which is the same shape without the
 string nesting. The **output** is what matters and is unchanged: a mapping of id
 to a properties dict, with the per-label extras merged in.
+
+**The branches disagree with each other, and that is preserved.** A candidate
+with no statement behind it vanishes if it is a SqlAttribute and comes back
+blank if it is a CustomAnalysis — one branch matched, the other used ``OPTIONAL
+MATCH``. Which arm is right is a product question, not a porting one; it is
+recorded as bug 5 in ``docs/refactor/drop-neo4j/PLAN.md`` and both arms are
+pinned by tests, so settling it later is a deliberate change that fails a test
+rather than a silent one.
 """
 
 from __future__ import annotations

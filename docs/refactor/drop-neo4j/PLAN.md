@@ -52,12 +52,24 @@ getting wrong in production.
 | 2 | **No column change ever survived a re-ingest.** The column diff merged on keys neither frame had, raising `KeyError` every time — and `executor.map`'s result was never consumed, so the exception was discarded in silence. Added columns never appeared; dropped columns left ghosts the SQL generator kept querying | writing the incremental-diff tests | fixed, **B6** ([006](DECISIONS.md)) |
 | 3 | **Every column exports as nullable.** `model_interchange` reads `is_nullable` with `bool(...)`, but the graph stores the strings `'YES'`/`'NO'` — and `bool('NO')` is `True` | measuring stored property types | **open**, for Phase 10 |
 | 4 | **The SqlAttribute suggester never ranked anything.** Its scorer matched `count_monthly_YYYY_MM` while the writer produced `count_{month}_{year}`, so every expression scored 0.0 and ordering was dict insertion order | deciding how to store monthly counters | **open** — documented in place, behaviour preserved ([007](DECISIONS.md)) |
+| 5 | **A retrieval hit with no SQL behind it disappears or degrades, depending on its type.** `candidates.expand_info` requires a statement for a `SqlAttribute` — no statement, no entry, so the vector store returns a candidate and the enrichment silently drops it — but uses `OPTIONAL MATCH` for a `CustomAnalysis`, which comes back with `sql: ""`. Same situation, two behaviours, in adjacent branches of one query | porting `expand_info` off `apoc.case` | **open** — both arms preserved and tested ([Phase 8](#phase-8--custom_analyses-pql_analyses-candidates-connections-reset-46d-23-people)) |
 
-Three of the four are silent: no error, no log, no failing test. That is the
+Four of the five are silent: no error, no log, no failing test. That is the
 pattern worth noting — a schemaless store lets a name mismatch sit undetected
 indefinitely, because nothing declares what a name is supposed to be. Two of
 them (2 and 4) were a regex or a merge key disagreeing with a writer that no
 schema constrained.
+
+**Bug 5 is an inconsistency, and which arm is correct is a product question.**
+Dropping the entry is defensible — an attribute with no statement has nothing to
+contribute to a prompt, and the caller reads a missing id as "no context
+available". So is returning it empty — the caller asked about a specific id, and
+a silently absent entry is harder to notice than one that is visibly blank. What
+is *not* defensible is the two rules living side by side with nothing recording
+that the difference is intentional, which is how it survived this long. Both
+arms are now pinned by tests in `gsf/dal/pg/tests/test_candidates.py`, so
+whichever way it is eventually settled, the change is deliberate and one test
+fails to mark it. Settling it is not this refactor's call.
 
 **Bugs 3 and 4 are still open, deliberately.** Both change product output —
 what a model export claims about nullability, and which SqlAttributes get
@@ -68,7 +80,7 @@ inside a port. Bug 3 is Phase 10's, which must fix it and un-skip the two
 
 The line between fixing and preserving is whether the bug destroys something.
 Bugs 1 and 2 lost catalog entries, so reproducing them faithfully would have
-meant porting data loss. Bugs 3 and 4 produce wrong-but-harmless output, and
+meant porting data loss. Bugs 3, 4 and 5 produce wrong-but-harmless output, and
 preserving them keeps the port honest about what it changed.
 
 ---
@@ -499,6 +511,19 @@ produces the same terms/attributes as the Phase-2 fixture.
 ### Phase 8 — `custom_analyses`, `pql_analyses`, `candidates`, `connections`, `reset` *(4–6d, 2–3 people)*
 Small and mutually independent. `reset.py` *shrinks*. Good moment to retire the
 `add_query(edges)` tuple protocol for `persist_sql(query_obj, owner)`.
+
+`candidates.expand_info` is one `apoc.case` with three sub-queries inlined as
+strings; it becomes one function per label with a dict dispatch. **Do not
+normalise the branches while doing it** — they disagree about a candidate with
+no statement behind it (bug 5 above), and about whether `sample_values` and
+`data_type` may be absent. Each difference changes what reaches a prompt:
+
+| Cypher | Behaviour to preserve | Why it matters |
+|---|---|---|
+| `MATCH` on `SqlAttribute -> Sql` | no statement → **no entry at all** | the caller reads a missing id as "no context available" |
+| `OPTIONAL MATCH` on `CustomAnalysis -> Sql` | no statement → entry with `sql: ""` | the caller asked for this id; a blank entry is visible, an absent one is not |
+| `CASE WHEN ... size(...) > 0` | empty sample values → `None`, not `[]` | `[]` in a prompt reads as "this column has no values", which is a different claim from "we never profiled it" |
+| `toString(coalesce(c.data_type, ""))` | null type → `""`, not `None` | callers concatenate it, and `None` renders as the word "None" |
 
 ### Phase 9 — `exploration` *(4–6d)*
 Deliberately near-last: most of its 764 lines compose Phase 5/6/7 helpers, so
