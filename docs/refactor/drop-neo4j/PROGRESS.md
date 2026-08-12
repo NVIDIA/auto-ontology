@@ -2067,3 +2067,117 @@ version of that rollup still returns one of three valid strings.
 **Suite:** 610 passed, 3 skipped (was 559).
 
 **Next:** Phase 8 — analyses, candidates, connections, reset.
+
+---
+
+## 2026-08-12 — Phase 8 complete — analyses, candidates, connections, reset
+
+Five modules, 31 functions and 6 exception types, all now on Postgres:
+`connections` (3), `candidates` (1), `reset` (3 + `ResetResult`),
+`custom_analyses` (10 + 3), `pql_analyses` (8 + 2). Each moves to
+`gsf/dal/neo4j/` behind a selector.
+
+`custom_analyses` had the same cross-backend leak as every other module —
+`resolve_accessible_catalog_ids` imported from the selector. Six now.
+
+### `reset.py` is where the schema pays for itself
+
+`_delete_nodes_in_batches`, `apoc.periodic.iterate` and `apoc.path.subgraphNodes`
+are all gone. `delete_data_layer` is one `DELETE` on `catalog_database`; schemas,
+tables, columns, foreign keys, joins, statement links and zone targets follow by
+`ON DELETE CASCADE`. That is exactly what modelling `CONTAINS` as a parent FK
+was for, and it means a child table added later cannot be forgotten here — the
+batching existed only because the traversal could return more nodes than one
+transaction could hold.
+
+**B1 — the deletes are narrower, and that is a fix.** `subgraphNodes` followed
+*any* relationship, so from a `Database` it reached that database's Terms and,
+through a shared Term, a **different database's tables**. Resetting one database
+could delete another's data. Foreign keys only point downward within one
+database, so it cannot happen now. The scoped semantic delete resolves each
+entity by its own path — a Term through the tables representing it, a
+SqlAttribute or CustomAnalysis through the tables its SQL touches — and deletes
+it only when *every* table it touches is inside this database.
+
+**B2 — the scoped reset still does not reach `PqlAnalysis`.** It is never
+attached to a database, so the traversal never found it. Preserved: a scoped
+reset silently wiping every predictive analysis in the deployment is a worse
+surprise than the current gap. The unscoped reset does remove them, matching the
+Cypher's label-only match.
+
+`delete_all_data` still deletes semantic before data, and the docstring now says
+why in terms that survive the port: the semantic rows are identified *through*
+the catalog, so deleting the catalog first would leave the semantic pass with
+nothing to scope and every Term standing.
+
+### I deleted the shared fixture, and it took a test to notice
+
+`test_an_unscoped_reset_clears_both_collections` called `delete_all_data(None)`
+against `gsf_alembic` — the database holding the ingested Pagila, Chinook and
+testdb catalogs every other suite reads. It wiped all three: 3 databases, 39
+tables, 218 columns, gone.
+
+Restored by re-running `ingest_catalog` against all three connectors, and
+verified against the pre-existing counts. The cause is fixed rather than worked
+around: the unscoped variants now run inside `_rolled_back()`, which drives
+`write_transaction` and raises a sentinel at the end of the block so the
+transaction unwinds. The assertions still see the deletion — same transaction —
+and one test additionally asserts the row is *back* afterwards, so the
+containment itself cannot silently stop working.
+
+The general lesson is worth stating: **a test for an unscoped destructive
+function has no fixture boundary by construction.** "Scoped to a test prefix"
+protects nothing when the function under test means "everything".
+
+### `candidates.expand_info` — one `apoc.case`, five functions
+
+The Cypher was a single `apoc.case` with three sub-queries inlined as strings.
+Here each label gets a function and a dict dispatches on it; the output shape is
+unchanged. Two asymmetries in the original are preserved and tested, because
+both look like oversights until you see what they do:
+
+* a **SqlAttribute with no statement does not appear at all** (the match was not
+  optional) — it has nothing to contribute to a prompt, and the caller reads a
+  missing id as "no context";
+* a **CustomAnalysis with no statement does** appear, with `sql: ""` — that
+  branch used `OPTIONAL MATCH`.
+
+`sample_values` is emitted only when non-empty, which the Cypher was explicit
+about. An empty list rendered into a prompt reads as "this column has no
+values" — a different claim from "we never profiled it". Likewise
+`toString(coalesce(c.data_type, ""))`: callers concatenate it, so a null must
+become `""` rather than the word "None".
+
+### Smaller notes
+
+* **`delete_custom_analysis_node` deletes the statement too**, reproducing
+  `DETACH DELETE ca, sql` rather than leaving it to the cascade — which would
+  only drop the link row. An analysis's statement is not shared: it is parsed
+  from text typed into that analysis, so leaving it behind accumulates
+  unreachable rows that still surface in query-history reads.
+* **`find_analysis_by_sql` matches exact text**, where `find_attr_by_expression`
+  normalises whitespace and case. Inherited, not chosen — loosening it would
+  start rejecting saves that succeed today.
+* **`insert_connection` creates the database row if absent.** A connection is
+  normally configured *before* anything is ingested, so there is usually nothing
+  to attach to yet.
+* **`list_connections` decodes a stored string as well as jsonb**, so a row
+  written before the column was typed stays readable.
+* **The `neo4j:` prefix in embedding row keys stays.** It is a stored key, not a
+  reference to the store; changing it would orphan every embedding already
+  written. A deliberate re-embed can migrate it later.
+
+### Tests — 56 across three files
+
+`test_reset.py` (14) asserts what **survives** in every case, not only what
+goes: a delete that removes too much passes any "is it gone?" assertion. B1 gets
+a shared-Term test with a single-database control beside it, so "survives"
+cannot just mean the delete never matched. `test_analyses.py` (27) and
+`test_candidates.py` (15) cover the zone boundary, the two OPTIONAL-MATCH
+asymmetries, and both embedding text formats character for character.
+
+**Suite:** 666 passed, 3 skipped (was 610).
+
+**Next:** Phase 9 — `exploration`. Re-export `fetch_table_zones_map` and
+`zone_covers_table` from `pg/zones.py` ([DECISION-011]); do not write a second
+copy.
