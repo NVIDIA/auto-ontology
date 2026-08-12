@@ -622,7 +622,6 @@ class CandidateRetrievalAgent(BaseAgent):
         else:
             path_state.pop("retrieval_database", None)
 
-
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
             "%d SqlAttribute candidates, and subject Term %s "
