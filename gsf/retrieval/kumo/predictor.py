@@ -328,6 +328,111 @@ def _declare_primary_keys(
     return declared
 
 
+def _adopt_unique_keys(graph: Any, frames: dict[str, pd.DataFrame]) -> int:
+    """Key a table on a column that already identifies its rows, where nothing else did.
+
+    A catalog that records no key leaves inference as the only source of one, and
+    inference declines whenever several columns are ``stype=ID`` and none resembles the
+    table name. The table then reaches KumoRFM with no identity, so it can neither be
+    linked to nor named as a prediction entity, and every ``FOR EACH`` against it is
+    rejected as "not a primary key" -- the single largest family of prediction failures
+    in the evaluation sweep.
+
+    Uniqueness is judged over the loaded frame, which is the data the graph is built
+    from, so a column that identifies those rows is a valid key for that graph even
+    when the warehouse table it was sampled from holds more.
+
+    Only tables that have no key at all are touched, so a catalog key and an inferred
+    key both keep precedence. Returns the number of tables given a key.
+    """
+    adopted = 0
+    for name, table in graph.tables.items():
+        if key_columns(table):
+            continue
+        frame = frames.get(name)
+        if frame is None or frame.empty:
+            continue
+        candidate = _identifying_column(table, frame)
+        if candidate is None:
+            continue
+        try:
+            _mark_as_identifier(table, candidate)
+            table.primary_key = candidate
+        except Exception:
+            logger.debug(
+                "kumo: could not adopt key %s on %s", candidate, name, exc_info=True
+            )
+            continue
+        adopted += 1
+        logger.info("kumo: keyed %s on %s (unique in the loaded rows)", name, candidate)
+    return adopted
+
+
+def _mark_as_identifier(table: Any, column: str) -> None:
+    """Re-type *column* as an identifier, which is what adopting it as the key makes it.
+
+    Inference reads a column of long strings as free text, which is a reasonable
+    reading of an app id or a slug right up until that column becomes the key: a key
+    is matched, never learned from, and leaving it as text would have KumoRFM
+    tokenizing the identities it is supposed to be joining on.
+    """
+    from kumorfm.api.typing import Stype
+
+    if str(getattr(table[column], "stype", "")) != "ID":
+        table[column].stype = Stype.ID
+
+
+_KEY_SUFFIXES = ("id", "code", "key", "no", "num", "uuid", "guid")
+
+
+def _alphanumeric(name: str) -> str:
+    """Fold a name to its letters and digits, so spelling cannot hide a match."""
+    return "".join(c for c in name.lower() if c.isalnum())
+
+
+def _identifying_column(table: Any, frame: pd.DataFrame) -> str | None:
+    """The column of *frame* likeliest to be meant as the table's identity.
+
+    A column earns the key by naming it: ``code``/``id``/``key`` and the like are what
+    a schema calls an identity, and a name carrying the table's own on top of that
+    (``SeriesCode`` on ``Series``) is the column a declaration would have picked. An
+    ``ID`` semantic type breaks the remaining ties, then position, since a key
+    conventionally sits leftmost.
+
+    A floating-point column is never adopted whatever its name: measurements are
+    distinct by accident rather than by identity, and one becoming the key would give
+    every row its own entity.
+    """
+    stypes = {c.name: str(getattr(c, "stype", "")) for c in table.columns}
+    table_stem = _alphanumeric(str(table.name))
+
+    def rank(column: str) -> tuple[int, int, int]:
+        stem = _alphanumeric(column)
+        identifying = stem == "id" or stem.endswith(_KEY_SUFFIXES)
+        related = table_stem.startswith(stem[:-2] or "\0") or stem.startswith(
+            table_stem
+        )
+        return (
+            0 if (identifying and related) else 1,
+            0 if identifying else 1,
+            0 if stypes.get(column) == "ID" else 1,
+        )
+
+    best: tuple[tuple[int, int, int], int, str] | None = None
+    for position, column in enumerate(frame.columns):
+        values = frame[column]
+        if pd.api.types.is_float_dtype(values) or pd.api.types.is_datetime64_any_dtype(
+            values
+        ):
+            continue
+        if values.isna().any() or values.duplicated().any():
+            continue
+        key = (rank(column), position, column)
+        if best is None or key < best:
+            best = key
+    return best[2] if best else None
+
+
 def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
     """Flatten a join-path entry into its ``(table, column)`` node sequence.
 
@@ -577,6 +682,7 @@ def build_prediction_context(
     # Before any linking: an edge is oriented towards a primary key, so a table whose
     # key inference missed can take part in no relationship at all.
     _declare_primary_keys(graph, catalog_keys)
+    _adopt_unique_keys(graph, frames)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
