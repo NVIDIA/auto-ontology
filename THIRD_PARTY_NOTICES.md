@@ -18,7 +18,6 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | --- | --- | --- | --- |
 | FastAPI | >=0.115.0 | MIT | https://github.com/fastapi/fastapi |
 | NeMo Retriever | upstream | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
-| Neo4j Python Driver | >=6.1.0 | Apache-2.0 | https://github.com/neo4j/neo4j-python-driver |
 | pandas | >=2.0,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg2-binary | >=2.9.11 | LGPL-3.0-or-later (with OpenSSL exception) | https://github.com/psycopg/psycopg2 |
 | python-dotenv | >=1.2.2 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
