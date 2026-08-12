@@ -1502,3 +1502,32 @@ clean point rather than writing 700 lines that could not be verified before the
 session ended.
 
 **Suite:** 461 passed, 3 skipped. Working tree clean.
+
+---
+
+## 2026-08-12 — Phase 6 — correction: the split is 20/6, not 21/5
+
+The previous entry and DECISION-009 both said 21 catalog-tier functions and
+five semantic-dependent ones. **`fetch_tables_by_ids` belongs in the second
+group**, so it is 20 and six. Both documents are corrected in place, with the
+reasoning kept in DECISION-009 rather than erased.
+
+`_FETCH_TABLES_BY_IDS` calls `column_description_expr`, the ColumnAttribute
+description fallback — so the function reads the semantic tier and, like the
+other five, cannot be verified until Phase 7 writes it.
+
+**How two analyses agreed on the wrong answer**, which is the part worth
+keeping. The first script resolved each function's query constants with a regex
+that stopped at the first line beginning with a letter; every one of these
+constants is a Cypher string whose second line is `MATCH`, so it read one line
+of each and found nothing. The second recursed properly but guarded
+self-reference with "the constant's text does not start with its own name" —
+true of every assignment, so the recursion never ran and it reproduced the first
+answer exactly.
+
+Two independent bugs producing the same number is precisely how a wrong figure
+survives a second look. What caught it was reading the actual Cypher while
+starting to port it, not the analysis.
+
+**Nothing implemented yet.** The corrected boundary is what Phase 6 builds
+against.

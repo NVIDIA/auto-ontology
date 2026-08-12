@@ -510,11 +510,27 @@ answers.
 **Date:** 2026-08-12  **Phase:** 6  **Supersedes:** PLAN.md § Phase 6 and § Phase 7 (both amended in the same commit)
 
 **Context** — `datasources` has 26 public functions. Measured before
-implementing: 21 read only the catalog tier, which Phase 4 already populates in
-Postgres. Five join to `Term` or `ColumnAttribute`, or reach them through the
-description fallback — `fetch_tables_for_schema`,
+implementing: **20** read only the catalog tier, which Phase 4 already populates
+in Postgres. **Six** join to `Term` or `ColumnAttribute`, or reach them through
+the description fallback — `fetch_tables_for_schema`,
 `fetch_all_tables_without_term`, `fetch_columns_for_table`,
-`fetch_tables_and_columns_by_node_ids`, `fetch_bridge_table_candidates`.
+`fetch_tables_and_columns_by_node_ids`, `fetch_bridge_table_candidates` and
+`fetch_tables_by_ids`.
+
+> **Corrected before implementation.** This record first said 21 and five,
+> omitting `fetch_tables_by_ids`. The classification script resolved each
+> function's query constants with a regex that stopped at the first line
+> beginning with a letter — and every one of these constants is a Cypher string
+> whose second line is `MATCH`. So it read only the first line of each constant
+> and saw no semantic reference. A second attempt recursed into constants but
+> guarded self-reference with "the constant's text does not start with its own
+> name", which is true of *every* assignment, so the recursion never ran and
+> reproduced the same answer. Checking the constants directly showed
+> `_FETCH_TABLES_BY_IDS` calls `column_description_expr`, which is the
+> ColumnAttribute description fallback.
+>
+> Worth keeping rather than quietly fixing: two different analysis bugs agreed
+> with each other, which is exactly how a wrong number survives review.
 
 Those five are implementable now, since the tables exist from Phase 3. They are
 not **verifiable** now. Nothing writes terms or attributes until Phase 7, so
@@ -527,8 +543,8 @@ Their golden captures are non-trivial precisely because the fixture *does* have
 semantic data, so the check that would catch a mistake is the one that cannot
 run yet.
 
-**Decision** — Phase 6 implements and verifies the 21 catalog-tier functions.
-The five semantic-dependent ones move into Phase 7, where their data and their
+**Decision** — Phase 6 implements and verifies the 20 catalog-tier functions.
+The six semantic-dependent ones move into Phase 7, where their data and their
 goldens arrive together.
 
 The alternative was to implement all 26 now and re-verify five of them during
@@ -539,11 +555,11 @@ one that ends on the original schedule.
 
 **Consequences** — `datasources` is finished across two phases, so
 `gsf/dal/pg/datasources.py` is incomplete at the end of Phase 6 and the
-selector will raise for those five under ``GSF_STORE=postgres``. That is
+selector will raise for those six under ``GSF_STORE=postgres``. That is
 deliberate and loud: a ``NotImplementedError`` naming the phase is better than a
 query that quietly returns nothing.
 
-Phase 7 grows by five functions and keeps its estimate — they are small, and
+Phase 7 grows by six functions and keeps its estimate — they are small, and
 their cost was always going to be the semantic fixture rather than the SQL.
 
 **Phase 6's Done criteria change accordingly:** `validate_sql` resolving against
