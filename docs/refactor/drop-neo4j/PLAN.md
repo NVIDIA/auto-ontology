@@ -465,8 +465,21 @@ Largest blast radius after `model_interchange`: `TABLE_COUNTS_SUBQUERY`, and
 resolving tables. **Done** additionally requires `validate_sql` on a known-good
 query to resolve against the PG-built `Schema` map.
 
+**Scope: 21 of 26 functions** — the catalog-tier ones. The five that join to
+`Term`/`ColumnAttribute` moved to Phase 7 by
+[DECISION-009](DECISIONS.md), because nothing writes semantic data until then
+and against no data a wrong join is indistinguishable from a correct one.
+`fetch_schemas_by_ids` is catalog-only, so the `validate_sql` criterion above
+stays here.
+
 ### Phase 7 — `terms` + `attributes` + `sql_attributes` *(8–12d, 2 people)*
-The semantic core, 2,437 lines. Splits cleanly: one person on `terms` (+
+The semantic core, 2,437 lines, **plus five functions inherited from Phase 6**
+([DECISION-009](DECISIONS.md)): `fetch_tables_for_schema`,
+`fetch_all_tables_without_term`, `fetch_columns_for_table`,
+`fetch_tables_and_columns_by_node_ids` and `fetch_bridge_table_candidates`.
+They are small; they waited for the semantic fixture, which this phase creates.
+
+Splits cleanly: one person on `terms` (+
 `cypher_fragments` → `sql_fragments`), one on `attributes` + `sql_attributes`.
 Carve `find_join_path` out as its own **2–3d spike** — design is in
 [`find_join_path`](#find_join_path--the-one-query-without-a-mechanical-translation)
