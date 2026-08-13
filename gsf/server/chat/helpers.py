@@ -40,7 +40,12 @@ class ChatRequest(BaseModel):
     prediction: bool | None = None
     # Scope retrieval/SQL to one connected database. When omitted (and more
     # than one connector is loaded), the pipeline does not pin a database.
-    target_db: str | None = None
+    target_db: str | None = Field(
+        default=None,
+        description=(
+            "Catalog database UUID or database name used to scope retrieval and SQL."
+        ),
+    )
 
 
 class VisualizeRequest(BaseModel):
