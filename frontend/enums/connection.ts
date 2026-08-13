@@ -28,6 +28,8 @@ export type ConnectionFieldKey =
 	| 'warehouse'
 	| 'user'
 	| 'password'
+	| 'private_key'
+	| 'private_key_passphrase'
 	| 'database'
 	| 'protocol'
 	| 'schema'
@@ -44,8 +46,23 @@ export type ConnectionField = {
 	testOnly?: boolean;
 	/** Rendered as a checkbox and sent as a boolean rather than a string. */
 	boolean?: boolean;
+	/** Rendered as a textarea. Needed for pasted PEM keys, which span many lines. */
+	multiline?: boolean;
 	/** Helper text shown under the field. */
 	hint?: string;
+};
+
+/**
+ * Fields where supplying any one satisfies the requirement, so none of them can
+ * be marked required on its own.
+ *
+ * Snowflake accounts that enforce MFA reject password sign-in for person users
+ * and forbid passwords on service users, leaving a key pair as the only usable
+ * credential. Accounts without that enforcement still take a password, so the
+ * form has to accept either.
+ */
+export const CONNECTION_EITHER_FIELDS: Partial<Record<ConnectionType, ConnectionFieldKey[]>> = {
+	[ConnectionType.SNOWFLAKE]: ['password', 'private_key'],
 };
 
 /** Form fields rendered per connector type. `database` is the connection identity. */
@@ -90,7 +107,29 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'account', label: 'Account', placeholder: 'xy12345.us-east-1' },
 		{ key: 'warehouse', label: 'Warehouse', placeholder: 'COMPUTE_WH' },
 		{ key: 'user', label: 'User' },
-		{ key: 'password', label: 'Password', secret: true },
+		{
+			key: 'password',
+			label: 'Password',
+			secret: true,
+			optional: true,
+			hint: 'Leave empty and paste a private key below if the account enforces MFA, which blocks password sign-in for unattended services.',
+		},
+		{
+			key: 'private_key',
+			label: 'Private key (PEM)',
+			placeholder: '-----BEGIN PRIVATE KEY-----',
+			secret: true,
+			optional: true,
+			multiline: true,
+			hint: 'Key-pair authentication. Paste the full PEM for a key registered on the Snowflake user. Used instead of a password.',
+		},
+		{
+			key: 'private_key_passphrase',
+			label: 'Private key passphrase',
+			secret: true,
+			optional: true,
+			hint: 'Only needed if the private key above is encrypted.',
+		},
 		{ key: 'database', label: 'Database', placeholder: 'MY_DATABASE' },
 	],
 	[ConnectionType.HEAVYDB]: [

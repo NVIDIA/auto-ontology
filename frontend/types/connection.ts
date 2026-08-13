@@ -39,7 +39,16 @@ export type SnowflakeConnectionParams = {
 	account: string;
 	warehouse: string;
 	user: string;
-	password: string;
+	/**
+	 * Empty when authenticating with `private_key`. Accounts that enforce MFA
+	 * reject password sign-in for person users and forbid passwords on service
+	 * users, so a key pair is the only credential an unattended service can use.
+	 */
+	password?: string;
+	/** PEM private key for key-pair authentication, used instead of `password`. */
+	private_key?: string;
+	/** Only required when `private_key` is encrypted. */
+	private_key_passphrase?: string;
 	database: string;
 	/** Optional ingestion allowlist: only these schemas are ingested. Empty/absent = all. */
 	schemas?: string[];

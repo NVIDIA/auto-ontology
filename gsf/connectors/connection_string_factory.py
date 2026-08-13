@@ -11,6 +11,7 @@ so this module converts the structured form into the URL the connectors expect.
 
 from __future__ import annotations
 
+import base64
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -31,6 +32,20 @@ def _enc(value: str) -> str:
     return quote(value, safe="")
 
 
+def _encode_private_key(pem: str) -> str:
+    """Return URL-safe base64 for a PEM private key.
+
+    A PEM cannot travel through a query string as-is: its newlines and its ``+``
+    and ``/`` characters get mangled, and ``parse_qs`` decodes ``+`` as a space,
+    which corrupts the key silently rather than failing. Base64 sidesteps all of
+    that. An already-encoded value is passed through so re-building a connection
+    string is idempotent.
+    """
+    if "BEGIN" not in pem:
+        return pem
+    return base64.urlsafe_b64encode(pem.encode()).decode()
+
+
 def build_connection_string(connection: Mapping[str, Any]) -> str:
     """Return a connector connection string for a structured *connection*."""
     conn_type = str(connection.get("type") or "").strip().lower()
@@ -49,12 +64,23 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         account = _require(connection, "account")
         warehouse = _require(connection, "warehouse")
         user = _require(connection, "user")
-        password = _require(connection, "password")
         database = _require(connection, "database")
-        return (
-            f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
-            f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
-        )
+        params = f"warehouse={_enc(warehouse)}&database={_enc(database)}"
+
+        # Snowflake accounts that enforce MFA reject passwords for PERSON users and
+        # forbid them on SERVICE users, so a key pair is the only credential an
+        # unattended service can use. Password auth stays supported for accounts
+        # that still permit it.
+        private_key = str(connection.get("private_key") or "").strip()
+        if private_key:
+            params += f"&private_key={_enc(_encode_private_key(private_key))}"
+            passphrase = str(connection.get("private_key_passphrase") or "").strip()
+            if passphrase:
+                params += f"&private_key_passphrase={_enc(passphrase)}"
+            return f"snowflake://{_enc(user)}@{account}?{params}"
+
+        password = _require(connection, "password")
+        return f"snowflake://{_enc(user)}:{_enc(password)}@{account}?{params}"
 
     if conn_type == "databricks":
         host = _require(connection, "host").rstrip("/")

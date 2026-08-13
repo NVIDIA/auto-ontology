@@ -10,7 +10,12 @@ import { ModalWithSteps, type StepperFooterAction } from '@/common/modal';
 import { ConnectionConnectStep } from '@/components/connectionsPage/steps/ConnectionConnectStep';
 import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/ConnectionSelectDataStep';
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
-import { CONNECTION_FIELDS, ConnectionType, type ConnectionFieldKey } from '@/enums/connection';
+import {
+	CONNECTION_EITHER_FIELDS,
+	CONNECTION_FIELDS,
+	ConnectionType,
+	type ConnectionFieldKey,
+} from '@/enums/connection';
 import type { ConnectionInput } from '@/types/connection';
 
 const BASE_STEPS = ['Select Connector', 'Connect'] as const;
@@ -83,13 +88,19 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		[connectionType, values, supportsSchemaSelection, selectedSchemas, explicitSchema],
 	);
 
-	const fieldsComplete = useMemo(
-		() =>
-			CONNECTION_FIELDS[connectionType].every(
-				(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
-			),
-		[connectionType, values],
-	);
+	const fieldsComplete = useMemo(() => {
+		const allRequiredPresent = CONNECTION_FIELDS[connectionType].every(
+			(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+		);
+		// Alternative credentials are each optional on their own, so the "every
+		// required field" check above cannot see that one of them is still needed.
+		const alternatives = CONNECTION_EITHER_FIELDS[connectionType];
+		const alternativeSatisfied =
+			alternatives == null ||
+			alternatives.some((key) => (values[key] ?? '').trim().length > 0);
+
+		return allRequiredPresent && alternativeSatisfied;
+	}, [connectionType, values]);
 
 	const canContinue = activeStep === 0 ? false : fieldsComplete;
 

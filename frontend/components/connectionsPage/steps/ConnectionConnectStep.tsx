@@ -54,8 +54,12 @@ export const ConnectionConnectStep = ({
 			</p>
 			<div className="flex w-full flex-col gap-3">
 				{fields.map((field) => {
-					const onChange = ({ target }: ChangeEvent<HTMLInputElement>) =>
+					const onChange = ({
+						target,
+					}: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
 						onFieldChange(field.key, target.value);
+					const inputClassName =
+						'rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100';
 
 					// Boolean fields render as a checkbox; the modal stores every
 					// value as a string, so 'true'/'' is the on/off representation.
@@ -91,14 +95,34 @@ export const ConnectionConnectStep = ({
 									<span className="ml-0.5 text-red-500">*</span>
 								)}
 							</span>
-							<input
-								type={field.secret ? 'password' : 'text'}
-								value={values[field.key] ?? ''}
-								onChange={onChange}
-								placeholder={field.placeholder}
-								autoComplete={field.secret ? 'new-password' : 'off'}
-								className="rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-							/>
+							{field.multiline ? (
+								// A PEM key is multi-line, and its newlines are
+								// significant, so it cannot use a text input.
+								<textarea
+									value={values[field.key] ?? ''}
+									onChange={onChange}
+									placeholder={field.placeholder}
+									rows={5}
+									spellCheck={false}
+									data-testid={`connection-field-${field.key}`}
+									className={`${inputClassName} resize-y`}
+								/>
+							) : (
+								<input
+									type={field.secret ? 'password' : 'text'}
+									value={values[field.key] ?? ''}
+									onChange={onChange}
+									placeholder={field.placeholder}
+									autoComplete={field.secret ? 'new-password' : 'off'}
+									data-testid={`connection-field-${field.key}`}
+									className={inputClassName}
+								/>
+							)}
+							{field.hint != null && (
+								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									{field.hint}
+								</span>
+							)}
 						</label>
 					);
 				})}
