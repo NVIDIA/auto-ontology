@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class QuestionExtractionLiteModel(BaseModel):
-    """Sanitize + entity extraction only (no subject / used_acronyms)."""
+    """Sanitize + entity extraction only (no subject / used_glossary_names)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -47,7 +47,7 @@ class QuestionExtractionModel(QuestionExtractionLiteModel):
             "shortcut. Excludes filters, aggregations, and date qualifiers."
         ),
     )
-    used_acronyms: list[str] = Field(
+    used_glossary_names: list[str] = Field(
         ...,
         description=(
             "Names of glossary entries used to interpret the question. "

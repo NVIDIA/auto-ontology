@@ -127,9 +127,9 @@ Examples:
   Q: "Which vendors had the highest invoice totals in Q2?"
   → subject: "vendor"
 
-## Part 4 — used_acronyms
+## Part 4 — used_glossary_names
 
-Populate "used_acronyms" with the names of only the Glossary entries you actually used
+Populate "used_glossary_names" with the names of only the Glossary entries you actually used
 to interpret, sanitize, resolve entities in, or determine the subject of this question.
 Copy each name exactly as written in the Glossary. Do not infer entries by lexical
 matching alone: include an entry only when its definition is semantically relevant.
@@ -137,7 +137,7 @@ Return an empty list when no Glossary definition applies.
 
 Example (Glossary contains "MRR: monthly recurring revenue"):
   Q: "Show MRR by region."
-  → used_acronyms: ["MRR"]
+  → used_glossary_names: ["MRR"]
 """
 
 

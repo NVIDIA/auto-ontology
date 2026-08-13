@@ -48,7 +48,7 @@ class QuestionExtractionAgent(BaseAgent):
     """Sanitize the question and extract entities in one structured LLM call.
 
     When ``include_subject`` is False (entity-coverage path), the LLM is not asked
-    for subject or used_acronyms; glossary is still injected for sanitization.
+    for subject or used_glossary_names; glossary is still injected for sanitization.
     """
 
     def __init__(self, *, include_subject: bool = True) -> None:
@@ -124,7 +124,7 @@ class QuestionExtractionAgent(BaseAgent):
                     )
                 glossary = _filter_glossary_by_used_names(
                     glossary,
-                    getattr(extraction, "used_acronyms", None) or [],
+                    getattr(extraction, "used_glossary_names", None) or [],
                 )
                 result["glossary"] = glossary
                 self.logger.info(
