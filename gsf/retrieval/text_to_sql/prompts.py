@@ -313,9 +313,14 @@ problems. Minor issues or alternative approaches are
 acceptable.
 
 Check for CRITICAL issues only:
-1. **Seriously Wrong Joins**: Are there joins that would
-produce completely wrong results? (Minor join variations
-are acceptable)
+1. **Seriously Wrong Joins**: Flag only joins that are
+nonsensical or clearly break the question (e.g. joining
+unrelated tables, inventing keys). Alternate but plausible
+join paths that still answer the question are acceptable —
+including a different entity for a filter dimension, a
+different field/role for the same concept, a
+shorter/longer path, or another valid FK chain. Do NOT
+fail for those.
 2. **Clearly Wrong Aggregations**: Are aggregations
 completely incorrect? (e.g., COUNT when user explicitly
 asks for SUM) (Minor variations are acceptable)
@@ -514,7 +519,7 @@ Generated SQL Query:
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are there any joins that would produce COMPLETELY WRONG results? (Alternative join approaches are OK)
+1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
