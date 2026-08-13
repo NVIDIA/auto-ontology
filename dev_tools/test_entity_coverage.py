@@ -82,6 +82,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Same settings the API reads, so a debug run sees the Glossary the UI shows.
     acronyms = fetch_acronyms()
+    custom_prompts = fetch_custom_prompts()
     logger.info("Loaded %d glossary definition(s)", len(acronyms))
 
     payload: EntityCoveragePayload = {
@@ -90,7 +91,7 @@ def main(argv: list[str] | None = None) -> int:
         "semantic_retriever": get_semantic_objects_retriever(),
         "connectors": connectors,
         "acronyms": acronyms,
-        "custom_prompts": fetch_custom_prompts(),
+        "custom_prompts": custom_prompts,
         "max_distance": args.max_distance,
     }
 
