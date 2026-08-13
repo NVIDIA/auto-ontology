@@ -359,6 +359,28 @@ def delete_custom_analysis_node(analysis_id: str) -> None:
     )
 
 
+def fetch_database_names_for_analysis(analysis_id: str) -> list[str]:
+    """Return the databases whose tables an analysis's SQL references."""
+    query = f"""
+    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+          -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
+    MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(:{Labels.SCHEMA})
+          -[:{Edges.CONTAINS}]->(tbl)
+    RETURN collect(DISTINCT db.name) AS database_names
+    """
+    try:
+        rows = graph().query_read(query, {"analysis_id": analysis_id})
+    except Exception:
+        logger.warning(
+            "fetch_database_names_for_analysis: Neo4j query failed", exc_info=True
+        )
+        return []
+    if not rows:
+        return []
+    return [str(name) for name in (rows[0].get("database_names") or [])]
+
+
 def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
     """Fetch Tables referenced by CustomAnalysis nodes via HAS_SQL -> Sql -> SQL -> Table."""
     if not analysis_ids:
