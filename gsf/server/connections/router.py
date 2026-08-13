@@ -36,12 +36,20 @@ class PublicConnection(TypedDict):
     connection: dict[str, Any]
 
 
+_SECRET_FIELDS = frozenset(
+    {
+        "password",
+        "password_env",
+        "private_key",
+        "private_key_passphrase",
+    }
+)
+
+
 def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
     """Shape a connection object into a credential-free public payload."""
     public_connection = {
-        key: value
-        for key, value in connection.items()
-        if key not in {"password", "password_env"}
+        key: value for key, value in connection.items() if key not in _SECRET_FIELDS
     }
     return {
         "database_name": str(connection.get("database") or ""),
