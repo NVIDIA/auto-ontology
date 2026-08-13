@@ -288,12 +288,20 @@ class SQLReconstructionAgent(BaseAgent):
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
         previous_thought = (getattr(incorrect_response, "thought", "") or "").strip()
+        interpretation_history = list(path_state.get("interpretation_history") or [])
+        if previous_thought and previous_thought not in interpretation_history:
+            interpretation_history.append(previous_thought)
+        path_state["interpretation_history"] = interpretation_history
 
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
             path_state["error_analysis_done"] = True
             response_text = getattr(incorrect_response, "response", "") or ""
-            error_context = f"SQL: {sql_code}\nResponse: {response_text}"
+            error_context = (
+                f"SQL: {sql_code}\n"
+                f"Response: {response_text}\n"
+                f"Actual validation/execution error: {error}"
+            )
 
             analysis = self._analyze_error(
                 state, question_block, error_context, relevant_tables
@@ -360,14 +368,18 @@ class SQLReconstructionAgent(BaseAgent):
         # "recently" from scratch and silently drifts (e.g. 5 months -> 4
         # months) even when the time window was never the flagged problem.
         prior_interpretation_section = ""
-        if previous_thought:
+        if interpretation_history:
+            interpretation_text = "\n".join(
+                f"  {index}. {thought}"
+                for index, thought in enumerate(interpretation_history, 1)
+            )
             prior_interpretation_section = (
-                "\nPRIOR INTERPRETATION (from the reasoning behind the SQL above):\n"
-                f"  {previous_thought}\n\n"
-                "Preserve user-intent assumptions when valid. Do not treat SQL "
-                "implementation choices—such as joins, columns, aliases, or "
-                "query structure—as fixed. Revise only parts contradicted by "
-                "the question, available schema, or validation error.\n\n"
+                "\nINTERPRETATION HISTORY:\n"
+                f"{interpretation_text}\n\n"
+                "Keep every valid assumption above. Change one only when required "
+                "by the question, schema, or error, and state the change explicitly. "
+                "Omission does not remove an assumption. Restate all active "
+                "assumptions in `thought`; SQL implementation details may change.\n\n"
             )
 
         error_prompt = (
@@ -418,6 +430,9 @@ class SQLReconstructionAgent(BaseAgent):
         )
         if thought and thought != "No explanation":
             record_thought(path_state, _GRAPH_NODE_NAME, thought)
+            if thought not in interpretation_history:
+                interpretation_history.append(thought)
+                path_state["interpretation_history"] = interpretation_history
 
         custom_analyses_used: list = []
         if hasattr(response, "custom_analyses_used"):

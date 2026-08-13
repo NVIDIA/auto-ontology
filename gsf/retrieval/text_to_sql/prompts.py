@@ -255,9 +255,12 @@ ORDER BY total_sales DESC;"""
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 Output (fill fields in this exact order):
-- thought: 2-3 sentence internal reasoning — your approach and key
-  decisions. If the question is AMBIGUOUS, explicitly state the assumption
-  you're making to resolve it.
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): time window (the
+  boundary for vague/relative phrases), zero/missing values (included,
+  excluded, or coerced to 0; how division guards a zero denominator), and
+  ties (what breaks a tie in a ranking/superlative query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
@@ -293,9 +296,12 @@ If no tables are relevant, explain politely and suggest rephrasing.
 Otherwise, construct an optimized SQL query to answer the question.
 
 Output (fill fields in this exact order):
-- thought: 2-3 sentence internal reasoning — your approach and key
-  decisions. If the question is AMBIGUOUS, explicitly state the assumption
-  you're making to resolve it.
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): time window (the
+  boundary for vague/relative phrases), zero/missing values (included,
+  excluded, or coerced to 0; how division guards a zero denominator), and
+  ties (what breaks a tie in a ranking/superlative query).
 - sql_code: the complete SQL, no comments or delimiters.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time

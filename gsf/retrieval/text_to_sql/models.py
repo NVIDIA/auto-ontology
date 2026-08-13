@@ -172,9 +172,16 @@ class SQLGenerationModel(StrictModel):
     thought: str = Field(
         ...,
         description=(
-            "Brief reasoning (2-3 sentences) explaining the SQL approach and "
-            "key decisions. If the question was AMBIGUOUS, explicitly state "
-            "the assumption made to resolve it."
+            "Briefly explain the SQL approach and explicitly state every assumption "
+            "made where the user's request or available schema does not uniquely "
+            "determine the query. Do not omit assumptions. For each of the following "
+            'that applies, state the choice AND the reason ("X, because Y"): '
+            "(1) time window — the concrete boundary for any vague/relative time "
+            "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
+            "or NULL groups are included, excluded, or coerced to 0, and how any "
+            "division guards against a zero denominator; (3) ties — what breaks a "
+            "tie in a ranking/superlative query. If none were needed, state that "
+            "explicitly."
         ),
     )
     sql_code: NonEmptyStr = Field(
