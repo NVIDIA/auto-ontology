@@ -404,7 +404,8 @@ class CandidateRetrievalAgent(BaseAgent):
     - ColumnAttributes: searched per entity from the semantic VDB.
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
-    - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit).
+    - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit)
+      when that key is a non-empty string; skipped when absent/None/blank.
 
     Deduplicate across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
@@ -428,8 +429,18 @@ class CandidateRetrievalAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        entities: list[str] = path_state.get("entities") or []
-        subject = (path_state.get("subject") or "").strip()
+        raw_entities = path_state.get("entities")
+        entities: list[str] = [
+            e.strip()
+            for e in (raw_entities if isinstance(raw_entities, list) else [])
+            if isinstance(e, str) and e.strip()
+        ]
+        raw_subject = path_state.get("subject")
+        subject = (
+            raw_subject.strip()
+            if isinstance(raw_subject, str) and raw_subject.strip()
+            else ""
+        )
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
@@ -441,7 +452,7 @@ class CandidateRetrievalAgent(BaseAgent):
         subject_term_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            clean_entities = [e.strip() for e in entities if (e or "").strip()]
+            clean_entities = entities
 
             search_tasks: list[tuple[str, Any]] = [
                 (
@@ -616,7 +627,10 @@ class CandidateRetrievalAgent(BaseAgent):
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
-        path_state["retrieved_subject_term"] = subject_term
+        if subject:
+            path_state["retrieved_subject_term"] = subject_term
+        else:
+            path_state.pop("retrieved_subject_term", None)
         if retrieval_database:
             path_state["retrieval_database"] = retrieval_database
         else:

@@ -29,7 +29,7 @@ def create_graph() -> StateGraph:
 
     graph.add_node(
         "question_extraction",
-        agent_wrapper(QuestionExtractionAgent()),
+        agent_wrapper(QuestionExtractionAgent(include_subject=False)),
     )
     graph.add_node(
         "retrieve_candidates",

@@ -31,17 +31,7 @@ abbreviations, shortcuts, and internal jargon in the question.
 """
 
 
-def create_question_extraction_prompt(
-    question: str,
-    glossary: list[dict[str, str]] | None = None,
-) -> str:
-    """Single prompt: sanitize, extract entity noun phrases, name the subject."""
-    glossary_section = format_glossary_section(glossary)
-    return f"""You rewrite conversational user requests into concise, SQL-ready questions, \
-extract database entity noun phrases from the sanitized intent, AND name the question's \
-main subject.
-
-## Part 1 — sanitized_question
+_SANITIZE_AND_ENTITIES = """## Part 1 — sanitized_question
 
 Rules:
 - Remove personal background, narrative fluff, filler, politeness, and generic request
@@ -116,8 +106,9 @@ Examples:
 
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]
+"""
 
-## Part 3 — subject
+_SUBJECT_AND_ACRONYMS = """## Part 3 — subject
 
 Populate "subject" with one short noun phrase naming what the question is about — the
 single thing being asked for. Derive it from the sanitized question, resolving any
@@ -147,7 +138,41 @@ Return an empty list when no Glossary definition applies.
 Example (Glossary contains "MRR: monthly recurring revenue"):
   Q: "Show MRR by region."
   → used_acronyms: ["MRR"]
+"""
 
+
+def create_question_extraction_prompt(
+    question: str,
+    glossary: list[dict[str, str]] | None = None,
+    *,
+    include_subject: bool = True,
+) -> str:
+    """Sanitize and extract entity noun phrases; optionally also name subject/acronyms.
+
+    Glossary is always injected so the model can resolve abbreviations while
+    sanitizing and extracting entities, even when ``include_subject`` is False.
+    """
+    glossary_section = format_glossary_section(glossary)
+    if include_subject:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions, extract database entity noun phrases from the sanitized "
+            "intent, AND name the question's main subject."
+        )
+        trailing = _SUBJECT_AND_ACRONYMS
+    else:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions and extract database entity noun phrases from the "
+            "sanitized intent. Do not produce a subject field or list of used "
+            "acronyms."
+        )
+        trailing = ""
+
+    return f"""{intro}
+
+{_SANITIZE_AND_ENTITIES}
+{trailing}
 {glossary_section}## Input
 
 {question}

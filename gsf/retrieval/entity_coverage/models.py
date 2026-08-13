@@ -11,8 +11,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class QuestionExtractionModel(BaseModel):
-    """Combined sanitize + entity extraction structured output."""
+class QuestionExtractionLiteModel(BaseModel):
+    """Sanitize + entity extraction only (no subject / used_acronyms)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -34,6 +34,11 @@ class QuestionExtractionModel(BaseModel):
             "number-based thresholds."
         ),
     )
+
+
+class QuestionExtractionModel(QuestionExtractionLiteModel):
+    """Full sanitize + entity extraction structured output (text-to-sql)."""
+
     subject: str = Field(
         ...,
         description=(
@@ -69,6 +74,7 @@ class EntityCoverageResponse(BaseModel):
 
 
 __all__ = [
+    "QuestionExtractionLiteModel",
     "QuestionExtractionModel",
     "EntityCoverageResponse",
 ]

@@ -11,7 +11,10 @@ from typing import Any, Dict
 
 from langchain_core.messages import SystemMessage
 
-from gsf.retrieval.entity_coverage.models import QuestionExtractionModel
+from gsf.retrieval.entity_coverage.models import (
+    QuestionExtractionLiteModel,
+    QuestionExtractionModel,
+)
 from gsf.retrieval.entity_coverage.prompts import create_question_extraction_prompt
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
@@ -42,10 +45,15 @@ def _filter_glossary_by_used_names(
 
 
 class QuestionExtractionAgent(BaseAgent):
-    """Sanitize the question and extract entities in one structured LLM call."""
+    """Sanitize the question and extract entities in one structured LLM call.
 
-    def __init__(self) -> None:
+    When ``include_subject`` is False (entity-coverage path), the LLM is not asked
+    for subject or used_acronyms; glossary is still injected for sanitization.
+    """
+
+    def __init__(self, *, include_subject: bool = True) -> None:
         super().__init__("question_extraction")
+        self._include_subject = include_subject
 
     def validate_input(self, state: AgentState) -> bool:
         question = get_original_question(state)
@@ -59,7 +67,7 @@ class QuestionExtractionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
         glossary = state.get("glossary") or []
-        # After this node, ``glossary`` means only the entries actually used.
+        # After this node (full mode), ``glossary`` means only the entries used.
         result: Dict[str, Any] = {"path_state": path_state, "glossary": []}
 
         try:
@@ -68,14 +76,16 @@ class QuestionExtractionAgent(BaseAgent):
                     content=create_question_extraction_prompt(
                         original_question,
                         glossary,
+                        include_subject=self._include_subject,
                     )
                 )
             ]
-            extraction = invoke_with_structured_output(
-                llm,
-                messages,
-                QuestionExtractionModel,
+            schema = (
+                QuestionExtractionModel
+                if self._include_subject
+                else QuestionExtractionLiteModel
             )
+            extraction = invoke_with_structured_output(llm, messages, schema)
 
             if extraction is None:
                 self.logger.warning(
@@ -83,7 +93,8 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 path_state["normalized_question"] = original_question
                 path_state["entities"] = [original_question]
-                path_state["subject"] = original_question
+                if self._include_subject:
+                    path_state["subject"] = original_question
                 return result
 
             sanitized = (extraction.sanitized_question or "").strip()
@@ -100,30 +111,39 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 entities = [sanitized]
 
-            subject = (extraction.subject or "").strip()
-            if not subject:
-                self.logger.warning(
-                    "Question extraction returned empty subject — using sanitized"
-                )
-                subject = sanitized
-
-            glossary = _filter_glossary_by_used_names(
-                glossary,
-                extraction.used_acronyms or [],
-            )
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
-            path_state["subject"] = subject
-            result["glossary"] = glossary
-            self.logger.info(
-                "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s"
-                "\n  subject: %s\n  glossary: %s",
-                original_question,
-                sanitized,
-                entities,
-                subject,
-                [e.get("name") for e in glossary],
-            )
+
+            if self._include_subject:
+                subject = (getattr(extraction, "subject", None) or "").strip()
+                if subject:
+                    path_state["subject"] = subject
+                else:
+                    self.logger.warning(
+                        "Question extraction returned empty subject — continuing without it"
+                    )
+                glossary = _filter_glossary_by_used_names(
+                    glossary,
+                    getattr(extraction, "used_acronyms", None) or [],
+                )
+                result["glossary"] = glossary
+                self.logger.info(
+                    "Extracted question:\n  raw: %s\n  sanitized: %s\n  entities: %s"
+                    "\n  subject: %s\n  glossary: %s",
+                    original_question,
+                    sanitized,
+                    entities,
+                    subject or None,
+                    [e.get("name") for e in glossary],
+                )
+            else:
+                self.logger.info(
+                    "Extracted question (lite):\n  raw: %s\n  sanitized: %s"
+                    "\n  entities: %s",
+                    original_question,
+                    sanitized,
+                    entities,
+                )
         except Exception as exc:
             self.logger.warning(
                 "Question extraction failed: %s, using original question",
@@ -131,6 +151,7 @@ class QuestionExtractionAgent(BaseAgent):
             )
             path_state["normalized_question"] = original_question
             path_state["entities"] = [original_question]
-            path_state["subject"] = original_question
+            if self._include_subject:
+                path_state["subject"] = original_question
 
         return result
