@@ -61,6 +61,12 @@ def is_env_source() -> bool:
 
 @router.get("/connections", response_model=ConnectionListResponse)
 def list_connections() -> dict:
+    """List every configured database connection, credential-free.
+
+    ``password`` and ``password_env`` are stripped from each connection object,
+    so the payload is safe to render in the UI. ``database_name`` doubles as the
+    connection's identity in the other routes here.
+    """
     rows = [_serialize_connection(conn) for conn in _list_connections()]
     return {"data": rows, "count": len(rows)}
 
@@ -82,6 +88,13 @@ def test_connection(body: ConnectionBody) -> dict:
 
 @router.post("/connections", status_code=201, response_model=ConnectionResponse)
 def create_connection(body: ConnectionBody) -> dict:
+    """Register a database connection and return it credential-free.
+
+    The connection is validated on the way in; anything the driver rejects comes
+    back as 422 with the failure message rather than a 500. Call
+    ``POST /connections/test`` first to check credentials and list the schemas
+    available for the picker.
+    """
     try:
         row = service.create_connection(connection=body.connection)
     except ValueError as exc:
@@ -135,6 +148,12 @@ def delete_connection(
         )
     ),
 ) -> dict:
+    """Remove a connection, returning the deleted row.
+
+    404 when no connection carries that ``database_name``. Data already ingested
+    from the connection is not removed here — reset it through the ingestion
+    service's ``POST /ingest/delete``.
+    """
     try:
         row = service.delete_connection(database_name)
     except ValueError as exc:

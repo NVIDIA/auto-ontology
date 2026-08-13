@@ -8,8 +8,10 @@ import { withPermission } from '@/auth/with-auth';
 const DISCOVERY_TIMEOUT_MS = 8000;
 
 /**
- * Admin-only helper that fetches an OIDC provider's discovery document
- * server-side and returns the endpoints the SSO form needs.
+ * Resolve an OIDC issuer's discovery document, admin-only.
+ *
+ * The document is fetched server-side and relayed as the endpoints the SSO
+ * registration form needs.
  *
  * Resolving the endpoints here (instead of letting Better Auth's SSO plugin
  * auto-discover from the issuer) lets us register providers with

@@ -47,6 +47,12 @@ def _check_postgres() -> dict[str, str]:
     },
 )
 def health() -> JSONResponse:
+    """Liveness/readiness probe for the API service.
+
+    Probes Neo4j and Postgres on every call and reports each one separately, so
+    a degraded response names the dependency that is down. 200 when both are
+    reachable, 503 otherwise — suitable for a Kubernetes readiness probe.
+    """
     neo4j = _check_neo4j()
     postgres = _check_postgres()
     healthy = neo4j["status"] == "ok" and postgres["status"] == "ok"

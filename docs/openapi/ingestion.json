@@ -79,6 +79,7 @@
   "paths": {
     "/health": {
       "get": {
+        "description": "Liveness probe for the ingestion service.\n\nAnswers ``{\"status\": \"ok\"}`` as soon as the process is serving. It checks no\ndependencies, so it reports nothing about whether an ingest can currently\nsucceed \u2014 only that the service is up.",
         "operationId": "health_health_get",
         "responses": {
           "200": {

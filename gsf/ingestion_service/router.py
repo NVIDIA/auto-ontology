@@ -21,6 +21,12 @@ router = APIRouter()
 
 @router.get("/health", response_model=StatusResponse)
 async def health() -> dict[str, str]:
+    """Liveness probe for the ingestion service.
+
+    Answers ``{"status": "ok"}`` as soon as the process is serving. It checks no
+    dependencies, so it reports nothing about whether an ingest can currently
+    succeed — only that the service is up.
+    """
     return {"status": "ok"}
 
 

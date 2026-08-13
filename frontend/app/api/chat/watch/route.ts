@@ -19,6 +19,12 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+// Reattach to a chat run already in progress, as a Server-Sent Events stream.
+//
+// A reloaded or reopened tab uses this to follow a run it did not start. It is a
+// passive observer: it never submits a question and persists nothing, so a
+// dropped watch connection has no effect on the run or on what gets saved. 400
+// without `conversation_id`, 404 when the conversation is not the caller's.
 export const GET = withPermission({ conversation: ['read'] })(async (req, { user }) => {
 	const conversationId = new URL(req.url).searchParams.get('conversation_id');
 	if (!conversationId) {

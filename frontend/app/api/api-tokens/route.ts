@@ -20,6 +20,11 @@ import {
 
 const SECONDS_PER_DAY = 60 * 60 * 24;
 
+// List the caller's own API tokens.
+//
+// Metadata only: tokens are stored hashed, so the plaintext value is never
+// returned again after creation. Requires a browser session — an API token may
+// not enumerate tokens.
 export const GET = withPermission({ apiToken: ['manage'] })(async () => {
 	const denied = await requireSessionCaller();
 	if (denied) return denied;
@@ -28,6 +33,12 @@ export const GET = withPermission({ apiToken: ['manage'] })(async () => {
 	return NextResponse.json(apiKeys.map(toApiToken));
 });
 
+// Mint a new API token for the caller, carrying the caller's own permissions.
+//
+// `expires_in_days` is optional — omitting it mints a non-expiring token, which
+// is what an unattended script usually wants. The response is the only place the
+// plaintext token ever appears; it is stored hashed and cannot be shown again.
+// Requires a browser session — a token may not mint another token.
 export const POST = withPermission({ apiToken: ['manage'] })(async (req) => {
 	const denied = await requireSessionCaller();
 	if (denied) return denied;

@@ -374,6 +374,18 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
+    """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
+
+    Step 1 of a chat turn: the SQL and the formatted answer. Charts are a
+    separate second call to ``POST /chat/visualize`` so the answer never waits on
+    an extra LLM round trip.
+
+    Requires a compiled semantic layer; without one the request is rejected with
+    409 rather than run against a bare schema. Passing ``conversation_id``
+    persists the turn and claims that conversation's single run slot — a second
+    concurrent request for the same conversation also gets 409. Omitting it runs
+    the question statelessly with a fresh key, so one-shot callers never collide.
+    """
     logger.info("Chat completions request: %s", request.model_dump())
 
     # Block chat when the semantic layer hasn't been built — no connectors/graph

@@ -31,7 +31,15 @@ const blockPluginApiKeyRoutes =
 		return handler(req);
 	};
 
-// Public by design: sign-in, SSO callback and the rest of the Better Auth
-// surface must be reachable without a session.
+// Better Auth's GET surface: session lookup and the SSO callbacks.
+//
+// Public by design — sign-in and the callback that completes it must both be
+// reachable without a session. The plugin's own `/api/auth/api-key/*` routes
+// are blocked here so `/api/api-tokens` stays the single way to manage tokens.
 export const GET = withPublic(blockPluginApiKeyRoutes(handlers.GET));
+// Better Auth's POST surface: sign-in, sign-out, and the SSO callbacks.
+//
+// Public for the same reason GET is — none of it can require a session. The
+// plugin's own `/api/auth/api-key/*` management routes are blocked here so
+// `/api/api-tokens` stays the single way to mint or revoke a token.
 export const POST = withPublic(blockPluginApiKeyRoutes(handlers.POST));

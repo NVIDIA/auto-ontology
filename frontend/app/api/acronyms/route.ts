@@ -7,6 +7,10 @@ import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
 import { acronymSelect } from '@/lib/apiSelects';
 
+// List every acronym, newest first.
+//
+// With `?name=`, the route answers `{ exists }` instead of listing — the create
+// form uses it to pre-check the unique constraint before submitting.
 export const GET = withPermission({ acronym: ['read'] })(async (req) => {
 	const prisma = getPrisma();
 	const { searchParams } = new URL(req.url);
@@ -24,6 +28,9 @@ export const GET = withPermission({ acronym: ['read'] })(async (req) => {
 	return NextResponse.json(acronyms);
 });
 
+// Create an acronym: the term plus the expansion the agent should read it as.
+//
+// `name` must be unique; `description` is optional and defaults to empty.
 export const POST = withPermission({ acronym: ['create'] })(async (req) => {
 	const prisma = getPrisma();
 	const body = await req.json();

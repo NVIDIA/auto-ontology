@@ -36,6 +36,14 @@ const parseBody = (rawBody: string): Record<string, unknown> => {
 	}
 };
 
+// Ask a question and stream the answer back as Server-Sent Events.
+//
+// Step 1 of a chat turn: SQL plus the formatted answer. Charts are a separate
+// second request (`POST /api/chat/visualize`) the client makes once this
+// completes, so the answer never waits on an extra LLM round trip. Passing
+// `conversation_id` persists the turn and additionally requires
+// `conversation: ['write']`; it answers 409 while that conversation already has
+// a run in flight. Omitting it runs the question statelessly.
 export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const payload = parseBody(await req.text());
 	const hasConversationId =
