@@ -4702,7 +4702,7 @@
     },
     "/api/health": {
       "get": {
-        "description": "Liveness/readiness probe for the API service.\n\nProbes Neo4j and Postgres on every call and reports each one separately, so\na degraded response names the dependency that is down. 200 when both are\nreachable, 503 otherwise \u2014 suitable for a Kubernetes readiness probe.",
+        "description": "Readiness probe for the API service.\n\nProbes Postgres \u2014 the only dependency now that the catalog no longer lives\nin Neo4j \u2014 through the pooled connection the application actually uses. 200\nwhen reachable, 503 otherwise.\n\nThis backs **readiness** only. Liveness is /health/live, which checks\nnothing: restarting the process cannot fix an unreachable database, so a\nliveness probe gated on one turns a database blip into a rolling restart.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -4727,6 +4727,26 @@
           }
         },
         "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/health/live": {
+      "get": {
+        "description": "Liveness only: no dependency is checked, and this must never fail.\n\nRestarting the process cannot fix an unreachable database, so making this\ndepend on one converts a database blip into a rolling restart.",
+        "operationId": "liveness_api_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "The process is serving requests"
+          }
+        },
+        "summary": "Liveness",
         "tags": [
           "health"
         ]
