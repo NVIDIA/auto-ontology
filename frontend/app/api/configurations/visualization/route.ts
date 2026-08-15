@@ -7,14 +7,20 @@ import { getPrisma } from '@/lib/prisma';
 import { VISUALIZATION_ENABLED_KEY, isVisualizationEnabled } from '@/lib/configurations';
 import { withPermission } from '@/auth/with-auth';
 
-// Instance-wide "Visualize SQL Results" setting (Settings > Agent Settings),
-// stored in the `configurations` key/value table. Admin-only, like the other
-// settings flags. The chat proxy route resolves the value per request, so a
-// client cannot override it.
+// Report whether the instance-wide "Visualize SQL Results" setting is on.
+//
+// The flag lives under Settings > Agent Settings, stored in the
+// `configurations` key/value table. The chat proxy route resolves the value per
+// request, so a client cannot override it.
 export const GET = withPermission({ visualization: ['read'] })(async () => {
 	return NextResponse.json({ enabled: await isVisualizationEnabled() });
 });
 
+// Turn the instance-wide "Visualize SQL Results" setting on or off (admin-only).
+//
+// Chat resolves the value per request, so the change takes effect on the next
+// question without a client reload. It gates chart *generation* only — the
+// result table still renders when it is off.
 export const PUT = withPermission({ visualization: ['manage'] })(async (req) => {
 	const prisma = getPrisma();
 	const body = await req.json();

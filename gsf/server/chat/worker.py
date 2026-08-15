@@ -172,6 +172,7 @@ def _worker_loop(
                 is_follow_up,
                 processing_question,
             )
+            custom_prompts = fetch_custom_prompts()
 
             agent_payload = {
                 "question": question,
@@ -181,7 +182,7 @@ def _worker_loop(
                 "semantic_retriever": semantic_retriever,
                 "connectors": ask_connectors,
                 "acronyms": fetch_acronyms(),
-                "custom_prompts": fetch_custom_prompts(),
+                "custom_prompts": custom_prompts,
             }
             if target_db:
                 agent_payload["target_db"] = target_db

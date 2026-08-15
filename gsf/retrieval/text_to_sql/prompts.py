@@ -313,12 +313,24 @@ problems. Minor issues or alternative approaches are
 acceptable.
 
 Check for CRITICAL issues only:
-1. **Seriously Wrong Joins**: Are there joins that would
-produce completely wrong results? (Minor join variations
-are acceptable)
+1. **Seriously Wrong Joins**: Flag only joins that are
+nonsensical or clearly break the question (e.g. joining
+unrelated tables, inventing keys). Alternate but plausible
+join paths that still answer the question are acceptable —
+including a different entity for a filter dimension, a
+different field/role for the same concept, a
+shorter/longer path, or another valid FK chain. Do NOT
+fail for those.
 2. **Clearly Wrong Aggregations**: Are aggregations
 completely incorrect? (e.g., COUNT when user explicitly
 asks for SUM) (Minor variations are acceptable)
+
+When DOMAIN-SPECIFIC CUSTOM ANALYSES are provided, treat
+their SQL patterns as intentional user-defined domain
+definitions. Fragments that look unusual, incomplete, or
+nonstandard in isolation are still valid if they follow
+those custom analyses — do NOT mark them as critical issues
+solely for that reason.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -333,6 +345,33 @@ def format_dual_question_block(original_question: str, sanitized_question: str) 
     return (
         f"Original user request:\n{original_question}\n\n"
         f"Sanitized SQL intent:\n{sanitized_question}"
+    )
+
+
+def format_custom_analyses_section(custom_analyses: list[dict] | None) -> str:
+    """Render custom analyses (name / description / SQL) for prompt injection.
+
+    Matches the DOMAIN-SPECIFIC CUSTOM ANALYSES block used by SQL generation.
+    Returns "" when there is nothing to inject.
+    """
+    if not custom_analyses:
+        return ""
+    ca_lines: list[str] = []
+    for analysis in custom_analyses:
+        line = f"- {analysis.get('name', '(unnamed)')}"
+        desc = (analysis.get("description") or "").strip()
+        if desc:
+            line += f": {desc}"
+        sql = (analysis.get("sql") or "").strip()
+        if sql:
+            line += f"\n  SQL: {sql}"
+        ca_lines.append(line)
+    if not ca_lines:
+        return ""
+    return (
+        "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
+        + "\n".join(ca_lines)
+        + "\n\n"
     )
 
 
@@ -467,21 +506,24 @@ def create_intent_validation_prompt(
     sanitized_question: str,
     entities_text: str,
     sql_code: str,
+    custom_analyses: str = "",
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
+    custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
     return f"""User's Question:
 {question_block}
-
+{custom_analyses_block}
 Generated SQL Query:
 ```sql
 {sql_code}
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are there any joins that would produce COMPLETELY WRONG results? (Alternative join approaches are OK)
+1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
+If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.
 
 Provide your analysis."""
 

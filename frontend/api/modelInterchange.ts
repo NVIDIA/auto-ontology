@@ -4,6 +4,7 @@
 
 import { requests } from './requests';
 import type { ResponseWithError } from './types';
+import type { ModelFormat } from '@/enums/modelInterchange';
 import type { ImportModelResult } from '@/types/modelInterchange';
 
 export type ImportModelOptions = {
@@ -12,11 +13,17 @@ export type ImportModelOptions = {
 };
 
 export const modelInterchangeApi = {
-	/** Export the scoped GSF model (catalog + semantic layer) as a YAML file blob. */
-	exportModel: (databaseIds: string[]): Promise<ResponseWithError<{ blob: Blob }>> =>
-		requests.postBlob('model/export', { databases: databaseIds }),
+	/** Export the scoped model (catalog + semantic layer) as a YAML file blob in `format`. */
+	exportModel: (
+		databaseIds: string[],
+		format: ModelFormat,
+	): Promise<ResponseWithError<{ blob: Blob }>> =>
+		requests.postBlob('model/export', { databases: databaseIds, format }),
 
-	/** Import a GSF model YAML file, applying it and optionally refreshing VDB embeddings. */
+	/**
+	 * Import a native GSF or Apache Ossie model YAML file, applying it and
+	 * optionally refreshing VDB embeddings. The backend detects the format from the file.
+	 */
 	importModel: (
 		file: File,
 		{ replace, embed }: ImportModelOptions,

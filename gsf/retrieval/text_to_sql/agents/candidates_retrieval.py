@@ -11,12 +11,14 @@ entity's raw hits, and stores typed results in path_state.
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
 - Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
+- Search the semantic VDB for one Term hit using path_state["subject"].
 - Filter each entity's hits by intent using the LLM (full question, not entity).
 - Deduplicate across entities and store results in path_state.
 """
 
 import logging
 
+from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
@@ -24,7 +26,11 @@ from langchain_core.messages import SystemMessage
 
 from gsf.catalog.constants import Labels
 
-from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
+from gsf.semantic.constants import (
+    LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SQL_ATTRIBUTE,
+    LABEL_TERM,
+)
 
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
@@ -103,6 +109,79 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         result,
         key=lambda h: float(h.get("score") or float("inf")),
     )
+
+
+def _database_name(hit: dict) -> str | None:
+    """Return a normalized database name from a semantic hit."""
+    database_name = str(hit.get("database_name") or "").strip()
+    return database_name or None
+
+
+def _score(hit: dict) -> float:
+    """Return a sortable semantic distance, treating missing scores as worst."""
+    score = hit.get("score")
+    return float(score) if score is not None else float("inf")
+
+
+def _select_candidate_database(
+    column_hits: list[dict],
+    custom_hits: list[dict],
+    sql_attribute_hits: list[dict],
+) -> tuple[str | None, dict[str, dict[str, Any]]]:
+    """Select the database that covers the most searched entities.
+
+    Databases are ranked by distinct ColumnAttribute ``query_entity`` coverage,
+    then total hits across all candidate types, aggregate semantic distance,
+    and finally database name for deterministic ties.
+    """
+    stats: dict[str, dict[str, Any]] = defaultdict(
+        lambda: {"entities": set(), "hit_count": 0, "score_total": 0.0}
+    )
+
+    for hit in column_hits:
+        database_name = _database_name(hit)
+        if database_name is None:
+            continue
+        entity = str(hit.get("query_entity") or "").strip()
+        if entity:
+            stats[database_name]["entities"].add(entity)
+        stats[database_name]["hit_count"] += 1
+        stats[database_name]["score_total"] += _score(hit)
+
+    for hit in [*custom_hits, *sql_attribute_hits]:
+        database_name = _database_name(hit)
+        if database_name is None:
+            continue
+        stats[database_name]["hit_count"] += 1
+        stats[database_name]["score_total"] += _score(hit)
+
+    if not stats:
+        return None, {}
+
+    selected_database = min(
+        stats,
+        key=lambda database_name: (
+            -len(stats[database_name]["entities"]),
+            -stats[database_name]["hit_count"],
+            stats[database_name]["score_total"],
+            database_name,
+        ),
+    )
+    return selected_database, dict(stats)
+
+
+def _filter_hits_to_database(hits: list[dict], database_name: str) -> list[dict]:
+    """Keep only semantic hits belonging to *database_name*."""
+    return [hit for hit in hits if _database_name(hit) == database_name]
+
+
+def _covered_entities(column_hits: list[dict]) -> set[str]:
+    """Return entities represented by the retained ColumnAttribute hits."""
+    return {
+        str(hit.get("query_entity")).strip()
+        for hit in column_hits
+        if str(hit.get("query_entity") or "").strip()
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -320,11 +399,13 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 
 
 class CandidateRetrievalAgent(BaseAgent):
-    """Retrieve ColumnAttribute, CustomAnalysis, and SqlAttribute candidates.
+    """Retrieve ColumnAttribute, CustomAnalysis, SqlAttribute, and subject Term candidates.
 
     - ColumnAttributes: searched per entity from the semantic VDB.
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
+    - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit)
+      when that key is a non-empty string; skipped when absent/None/blank.
 
     Deduplicate across entities and store:
     - ``path_state["retrieved_column_attributes"]``: ``list[dict]``
@@ -332,6 +413,7 @@ class CandidateRetrievalAgent(BaseAgent):
       ``query_entities`` naming the extraction string(s) that retrieved it)
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
     - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
+    - ``path_state["retrieved_subject_term"]``:      ``dict | None``
     """
 
     def __init__(self):
@@ -347,17 +429,30 @@ class CandidateRetrievalAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        entities: list[str] = path_state.get("entities") or []
+        raw_entities = path_state.get("entities")
+        entities: list[str] = [
+            e.strip()
+            for e in (raw_entities if isinstance(raw_entities, list) else [])
+            if isinstance(e, str) and e.strip()
+        ]
+        raw_subject = path_state.get("subject")
+        subject = (
+            raw_subject.strip()
+            if isinstance(raw_subject, str) and raw_subject.strip()
+            else ""
+        )
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
+        retrieval_database = target_db
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
+        subject_term_hits: list[dict] = []
 
         if semantic_retriever is not None:
-            clean_entities = [e.strip() for e in entities if (e or "").strip()]
+            clean_entities = entities
 
             search_tasks: list[tuple[str, Any]] = [
                 (
@@ -394,6 +489,19 @@ class CandidateRetrievalAgent(BaseAgent):
                     for entity in clean_entities
                 ],
             ]
+            if subject:
+                search_tasks.append(
+                    (
+                        "subject_term",
+                        (
+                            semantic_retriever,
+                            subject,
+                            LABEL_TERM,
+                            1,
+                            target_db,
+                        ),
+                    )
+                )
 
             with ThreadPoolExecutor(max_workers=len(search_tasks) or 1) as pool:
                 futures = {
@@ -407,6 +515,8 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_custom_hits = result
                     elif key == "sql_attr":
                         all_sql_attr_hits = result
+                    elif key == "subject_term":
+                        subject_term_hits = result
                     else:
                         # key is "col_attr:{entity}" — tag each hit for coverage.
                         entity = key.split(":", 1)[1]
@@ -415,6 +525,96 @@ class CandidateRetrievalAgent(BaseAgent):
                             tagged["query_entity"] = entity
                             all_col_attr_hits.append(tagged)
 
+            if target_db is None:
+                selected_database, database_stats = _select_candidate_database(
+                    all_col_attr_hits,
+                    all_custom_hits,
+                    all_sql_attr_hits,
+                )
+                if selected_database is None:
+                    self.logger.warning(
+                        "No database-scoped semantic hits found; dropping %d "
+                        "hits without database_name",
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits),
+                    )
+                    all_col_attr_hits = []
+                    all_custom_hits = []
+                    all_sql_attr_hits = []
+                else:
+                    retrieval_database = selected_database
+                    initial_hit_count = (
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits)
+                    )
+                    selected_stats = database_stats[selected_database]
+                    self.logger.info(
+                        "Selected candidate database %r: %d entities covered, "
+                        "%d hits, aggregate score %.4f",
+                        selected_database,
+                        len(selected_stats["entities"]),
+                        selected_stats["hit_count"],
+                        selected_stats["score_total"],
+                    )
+
+                    all_col_attr_hits = _filter_hits_to_database(
+                        all_col_attr_hits, selected_database
+                    )
+                    all_custom_hits = _filter_hits_to_database(
+                        all_custom_hits, selected_database
+                    )
+                    all_sql_attr_hits = _filter_hits_to_database(
+                        all_sql_attr_hits, selected_database
+                    )
+                    retained_hit_count = (
+                        len(all_col_attr_hits)
+                        + len(all_custom_hits)
+                        + len(all_sql_attr_hits)
+                    )
+                    self.logger.info(
+                        "Dropped %d semantic hits outside candidate database %r",
+                        initial_hit_count - retained_hit_count,
+                        selected_database,
+                    )
+
+                    covered_entities = _covered_entities(all_col_attr_hits)
+                    uncovered_entities = [
+                        entity
+                        for entity in clean_entities
+                        if entity not in covered_entities
+                    ]
+                    if uncovered_entities:
+                        self.logger.info(
+                            "Backfilling %d uncovered entities in database %r: %s",
+                            len(uncovered_entities),
+                            selected_database,
+                            uncovered_entities,
+                        )
+                        with ThreadPoolExecutor(
+                            max_workers=len(uncovered_entities)
+                        ) as pool:
+                            futures = {
+                                pool.submit(
+                                    _search_by_label,
+                                    semantic_retriever,
+                                    entity,
+                                    LABEL_COLUMN_ATTRIBUTE,
+                                    2,
+                                    selected_database,
+                                ): entity
+                                for entity in uncovered_entities
+                            }
+                            for future in as_completed(futures):
+                                entity = futures[future]
+                                for hit in _filter_hits_to_database(
+                                    future.result(), selected_database
+                                ):
+                                    tagged = dict(hit)
+                                    tagged["query_entity"] = entity
+                                    all_col_attr_hits.append(tagged)
+
         all_custom_hits, all_sql_attr_hits = _llm_filter_both(
             llm, question, all_custom_hits, all_sql_attr_hits
         )
@@ -422,18 +622,34 @@ class CandidateRetrievalAgent(BaseAgent):
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
+        subject_term = subject_term_hits[0] if subject_term_hits else None
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
+        if subject:
+            path_state["retrieved_subject_term"] = subject_term
+        else:
+            path_state.pop("retrieved_subject_term", None)
+        if retrieval_database:
+            path_state["retrieval_database"] = retrieval_database
+        else:
+            path_state.pop("retrieval_database", None)
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
-            "and %d SqlAttribute candidates (%d entities queried)",
+            "%d SqlAttribute candidates, and subject Term %s "
+            "(%d entities queried, subject=%r)",
             len(deduped_col_attr),
             len(deduped_custom),
             len(deduped_sql_attr),
+            (
+                f"id={subject_term.get('id')!r} score={subject_term.get('score')}"
+                if subject_term
+                else "None"
+            ),
             len(entities),
+            subject,
         )
 
         return {"path_state": path_state}

@@ -78,6 +78,7 @@ def _build_state(payload: EntityCoveragePayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "glossary": list(acronyms or []),
     }
     return state  # type: ignore[return-value]
 

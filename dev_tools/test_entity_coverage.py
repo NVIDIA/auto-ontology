@@ -28,6 +28,10 @@ from gsf.retrieval.entity_coverage.state import (  # noqa: E402
     DEFAULT_MAX_DISTANCE,
     EntityCoveragePayload,
 )
+from gsf.server.chat.settings_dal import (  # noqa: E402
+    fetch_acronyms,
+    fetch_custom_prompts,
+)
 from gsf.utils.retriever import (  # noqa: E402
     close_retrievers,
     get_data_objects_retriever,
@@ -76,13 +80,18 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("No connectors configured (check CONNECTION_STRINGS in .env)")
         return 1
 
+    # Same settings the API reads, so a debug run sees the Glossary the UI shows.
+    acronyms = fetch_acronyms()
+    custom_prompts = fetch_custom_prompts()
+    logger.info("Loaded %d glossary definition(s)", len(acronyms))
+
     payload: EntityCoveragePayload = {
         "question": args.question,
         "data_retriever": get_data_objects_retriever(),
         "semantic_retriever": get_semantic_objects_retriever(),
         "connectors": connectors,
-        "acronyms": [],
-        "custom_prompts": "",
+        "acronyms": acronyms,
+        "custom_prompts": custom_prompts,
         "max_distance": args.max_distance,
     }
 

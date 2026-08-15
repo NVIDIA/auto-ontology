@@ -88,6 +88,8 @@ const persistResultMessage = async (
 	});
 };
 
+// Pick charts for an executed SQL result — step 2 of a chat turn.
+//
 // Same permission as the chat completions route: every chat user may trigger
 // this, not just admins.
 //

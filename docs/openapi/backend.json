@@ -100,6 +100,7 @@
                 "type": "null"
               }
             ],
+            "description": "Catalog database UUID or database name used to scope retrieval and SQL.",
             "title": "Target Db"
           }
         },
@@ -1335,6 +1336,10 @@
             },
             "title": "Databases",
             "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ModelFormat",
+            "default": "gsf"
           }
         },
         "title": "ExportRequest",
@@ -1650,6 +1655,15 @@
         ],
         "title": "ListResponse[Zone]",
         "type": "object"
+      },
+      "ModelFormat": {
+        "description": "Serialisation dialect of an exchanged model document.",
+        "enum": [
+          "gsf",
+          "ossie"
+        ],
+        "title": "ModelFormat",
+        "type": "string"
       },
       "ModelImportResponse": {
         "additionalProperties": true,
@@ -3723,6 +3737,7 @@
     },
     "/api/chat/completions": {
       "post": {
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nStep 1 of a chat turn: the SQL and the formatted answer. Charts are a\nseparate second call to ``POST /chat/visualize`` so the answer never waits on\nan extra LLM round trip.\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. Passing ``conversation_id``\npersists the turn and claims that conversation's single run slot \u2014 a second\nconcurrent request for the same conversation also gets 409. Omitting it runs\nthe question statelessly with a fresh key, so one-shot callers never collide.",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {
@@ -3927,6 +3942,7 @@
     },
     "/api/connections": {
       "get": {
+        "description": "List every configured database connection, credential-free.\n\n``password`` and ``password_env`` are stripped from each connection object,\nso the payload is safe to render in the UI. ``database_name`` doubles as the\nconnection's identity in the other routes here.",
         "operationId": "list_connections_api_connections_get",
         "responses": {
           "200": {
@@ -3946,6 +3962,7 @@
         ]
       },
       "post": {
+        "description": "Register a database connection and return it credential-free.\n\nThe connection is validated on the way in; anything the driver rejects comes\nback as 422 with the failure message rather than a 500. Call\n``POST /connections/test`` first to check credentials and list the schemas\navailable for the picker.",
         "operationId": "create_connection_api_connections_post",
         "requestBody": {
           "content": {
@@ -4052,6 +4069,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
+        "description": "Remove a connection, returning the deleted row.\n\n404 when no connection carries that ``database_name``. Data already ingested\nfrom the connection is not removed here \u2014 reset it through the ingestion\nservice's ``POST /ingest/delete``.",
         "operationId": "delete_connection_api_connections__database_name__delete",
         "parameters": [
           {
@@ -4684,6 +4702,7 @@
     },
     "/api/health": {
       "get": {
+        "description": "Liveness/readiness probe for the API service.\n\nProbes Neo4j and Postgres on every call and reports each one separately, so\na degraded response names the dependency that is down. 200 when both are\nreachable, 503 otherwise \u2014 suitable for a Kubernetes readiness probe.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -4757,7 +4776,7 @@
     },
     "/api/model/import": {
       "post": {
-        "description": "Import a GSF model YAML file or raw YAML body.",
+        "description": "Import a native GSF or Apache Ossie model YAML file or raw YAML body.",
         "operationId": "import_model_api_model_import_post",
         "parameters": [
           {

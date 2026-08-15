@@ -7,6 +7,10 @@ import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
 import { conversationSelect } from '@/lib/apiSelects';
 
+// List the caller's own conversations, newest first, without their messages.
+//
+// Scoped to the authenticated user: a conversation is only ever visible to its
+// owner, so there is no way to list someone else's.
 export const GET = withPermission({ conversation: ['read'] })(async (_req, { user }) => {
 	const prisma = getPrisma();
 	const conversations = await prisma.conversation.findMany({
@@ -17,6 +21,10 @@ export const GET = withPermission({ conversation: ['read'] })(async (_req, { use
 	return NextResponse.json(conversations);
 });
 
+// Start a new, empty conversation owned by the caller.
+//
+// `title` is optional and defaults to empty. Chat clients usually create the
+// conversation here first, then pass its id to `POST /api/chat/completions`.
 export const POST = withPermission({ conversation: ['write'] })(async (req, { user }) => {
 	const prisma = getPrisma();
 	const body = await req.json();

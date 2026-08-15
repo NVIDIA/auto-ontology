@@ -6,12 +6,16 @@
 
 from __future__ import annotations
 
+import base64
+import binascii
 import logging
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 import snowflake.connector
+from cryptography.hazmat.primitives import serialization
+
 from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
@@ -22,17 +26,69 @@ def _quoted_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def _load_private_key(encoded: str, passphrase: str | None) -> bytes:
+    """Return the DER bytes for a PEM private key supplied in a connection string.
+
+    Accepts either a bare PEM or URL-safe base64 of one. Base64 is what
+    :func:`build_connection_string` emits, since a PEM's newlines and ``+``/``/``
+    characters do not survive a query string intact -- ``parse_qs`` decodes ``+``
+    as a space, which silently corrupts the key.
+
+    The driver documents DER bytes as the accepted form, so the key is normalised
+    here rather than passing a key object through.
+    """
+    text = encoded.strip()
+    if "BEGIN" in text:
+        pem = text.encode()
+    else:
+        try:
+            # Tolerate stripped padding; base64 requires a multiple of 4.
+            pem = base64.urlsafe_b64decode(text + "=" * (-len(text) % 4))
+        except (binascii.Error, ValueError) as exc:
+            raise ValueError(
+                "Snowflake private_key must be a PEM key or base64-encoded PEM"
+            ) from exc
+
+    # A PEM pasted through JSON often arrives with literal backslash-n instead of
+    # real newlines, which the PEM parser rejects with an unhelpful error.
+    if b"\\n" in pem:
+        pem = pem.replace(b"\\n", b"\n")
+
+    try:
+        key = serialization.load_pem_private_key(
+            pem, password=passphrase.encode() if passphrase else None
+        )
+    except TypeError as exc:
+        raise ValueError(
+            "Snowflake private_key is encrypted; supply private_key_passphrase"
+        ) from exc
+    except ValueError as exc:
+        raise ValueError(f"Snowflake private_key could not be parsed: {exc}") from exc
+
+    return key.private_bytes(
+        encoding=serialization.Encoding.DER,
+        format=serialization.PrivateFormat.PKCS8,
+        encryption_algorithm=serialization.NoEncryption(),
+    )
+
+
 def _parse_connection_string(
     connection_string: str,
 ) -> tuple[dict[str, Any], str, str]:
     """Parse a Snowflake URL into connector kwargs, warehouse, and database name.
 
-    Required URL parts: ``user``, ``password``, ``account`` (host), ``warehouse``,
-    and ``database`` query param.
+    Required URL parts: ``user``, ``account`` (host), ``warehouse``, ``database``
+    query param, and one credential -- either a password or a ``private_key``.
 
-    Expected format::
+    Expected formats::
 
         snowflake://USER:PASSWORD@ACCOUNT?warehouse=WH&database=SF_DB
+        snowflake://USER@ACCOUNT?warehouse=WH&database=SF_DB&private_key=BASE64_PEM
+
+    Key-pair auth is not merely an alternative: Snowflake accounts that enforce
+    MFA reject password sign-in for ``PERSON`` users and forbid passwords on
+    ``SERVICE`` users entirely, leaving a key pair as the only credential an
+    unattended service can present.
     """
     parsed = urlparse(connection_string)
     if parsed.scheme.split("+", 1)[0].lower() != "snowflake":
@@ -49,16 +105,18 @@ def _parse_connection_string(
             "snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB"
         )
 
-    if parsed.password is None:
-        raise ValueError(
-            "Snowflake connection string requires password in the URL, e.g. "
-            "snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB"
-        )
-    password = unquote(parsed.password)
-    if not password:
-        raise ValueError("Snowflake connection string requires a non-empty password")
-
     query = parse_qs(parsed.query)
+
+    password = unquote(parsed.password) if parsed.password is not None else ""
+    private_key = query.get("private_key", [None])[0]
+    if not password and not private_key:
+        raise ValueError(
+            "Snowflake connection string requires either a password or a private_key, "
+            "e.g. snowflake://user:pass@account?warehouse=COMPUTE_WH&database=MY_DB "
+            "or snowflake://user@account?warehouse=COMPUTE_WH&database=MY_DB"
+            "&private_key=BASE64_PEM"
+        )
+
     warehouse = query.get("warehouse", [None])[0]
     if not warehouse:
         raise ValueError("Snowflake connection string requires ?warehouse=COMPUTE_WH")
@@ -76,12 +134,20 @@ def _parse_connection_string(
 
     connect_kwargs: dict[str, Any] = {
         "user": user,
-        "password": password,
         "account": parsed.hostname,
         "database": database,
         "warehouse": warehouse,
         "login_timeout": 10,
     }
+
+    # A key pair takes precedence: if one is supplied it is the credential the
+    # account will actually accept, so a stale password alongside it is ignored.
+    if private_key:
+        connect_kwargs["private_key"] = _load_private_key(
+            private_key, query.get("private_key_passphrase", [None])[0]
+        )
+    else:
+        connect_kwargs["password"] = password
 
     role = query.get("role", [None])[0]
     if role:

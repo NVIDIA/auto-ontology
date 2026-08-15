@@ -6,13 +6,23 @@
 
 from __future__ import annotations
 
+from enum import Enum
+
 from pydantic import BaseModel, Field
+
+
+class ModelFormat(str, Enum):
+    """Serialisation dialect of an exchanged model document."""
+
+    GSF = "gsf"
+    OSSIE = "ossie"
 
 
 class ExportRequest(BaseModel):
     """Export scope: empty ``databases`` exports every catalog database."""
 
     databases: list[str] = Field(default_factory=list)
+    format: ModelFormat = ModelFormat.GSF
 
 
 class ImportRequest(BaseModel):

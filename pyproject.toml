@@ -24,6 +24,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0",
     "alembic>=1.19.1",
+    "apache-ossie-gsf",
 ]
 
 [build-system]
@@ -40,6 +41,10 @@ package = true
 name = "vendored-sdfm"
 url = "vendor/wheels"
 format = "flat"
+
+[tool.uv.sources]
+apache-ossie-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/gsf" }
+# apache-ossie-gsf = { path = "../ossie/converters/gsf", editable = true }
 
 [dependency-groups]
 dev = [

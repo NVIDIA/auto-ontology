@@ -7,8 +7,10 @@ import { getPrisma } from '@/lib/prisma';
 import { withPublic } from '@/auth/with-auth';
 
 /**
- * Public list of registered SSO providers (no secrets) so the login page can
- * decide whether to show the "Sign in with SSO" option.
+ * Public list of registered SSO providers, carrying no secrets.
+ *
+ * The login page reads it to decide whether to show the "Sign in with SSO"
+ * option, so it has to answer before anyone is authenticated.
  */
 export const GET = withPublic(async () => {
 	const rows = await getPrisma().ssoProvider.findMany({

@@ -33,6 +33,7 @@ from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
 )
+from gsf.retrieval.entity_coverage.prompts import format_glossary_section
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -41,6 +42,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -350,29 +352,16 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            glossary_section = format_glossary_section(state.get("glossary") or [])
+            if glossary_section:
+                observation_block += f"\n{glossary_section}"
             if extract_evidence(original_question):
                 evidence_hints = build_evidence_hints_block(original_question)
                 if evidence_hints:
                     observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
-            ca_section = ""
-            if custom_analyses:
-                ca_lines = []
-                for a in custom_analyses:
-                    line = f"- {a.get('name', '(unnamed)')}"
-                    desc = (a.get("description") or "").strip()
-                    if desc:
-                        line += f": {desc}"
-                    sql = (a.get("sql") or "").strip()
-                    if sql:
-                        line += f"\n  SQL: {sql}"
-                    ca_lines.append(line)
-                ca_section = (
-                    "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
-                    + "\n".join(ca_lines)
-                    + "\n\n"
-                )
+            ca_section = format_custom_analyses_section(custom_analyses)
 
             # Build sql attributes section for user prompt
             sa_section = ""

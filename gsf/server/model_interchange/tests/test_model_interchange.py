@@ -2,24 +2,39 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for GSF model YAML export/import.
+"""Model-interchange service tests.
 
-Scope note: the tests that mocked ``apply_import_model``'s internals
-and ``_resolve_entity`` were removed with the implementation they patched. Their
-coverage did not — ``gsf/dal/tests/test_model_interchange.py`` asserts the same
-behaviours against a live store, which is a better test of "the import is one
-transaction" than a mocked ``write_transaction`` ever was.
-"""
+Thirteen tests from the Neo4j era were dropped in the Postgres migration.
+They patched module internals that no longer exist (``graph``,
+``_ensure_import_indexes``, ``_custom_analysis_ids_with_changed_payload``,
+``_resolve_entity``) or asserted Neo4j-shaped storage — ``join_columns`` was a
+JSON *string* because Neo4j properties cannot hold a list of maps, and is now a
+``jsonb`` column holding the structure directly.
+
+Their behaviour is covered against a live database by the DAL suite in
+``gsf/dal/tests/test_model_interchange.py``, and by the 122 recorded golden
+reads. Specifically:
+``test_export_queries_use_portable_ids`` and
+``test_changed_entity_ids_returns_only_modified_payloads`` asserted the text of
+Cypher query constants that no longer exist, and the two ``_resolve_entity``
+tests covered a helper the batch resolver replaced. The behaviour they guarded
+— portable ``imported_id`` matching — is covered by the DAL suite in
+``gsf/dal/tests/test_model_interchange.py`` against a live database.
+Unit tests for GSF model YAML export/import."""
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
+import pytest
 import yaml
+from ossie_gsf import GSFConversionError, convert_gsf_to_ossie
 
-from gsf.dal.model_interchange import assemble_export_document
-
-from gsf.dal.model_interchange import resolve_sql_column_ids
+from gsf.dal.model_interchange import (
+    assemble_export_document,
+    resolve_sql_column_ids,
+)
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
     SQL_ATTR_SOURCE_MANUAL,
@@ -33,14 +48,17 @@ from gsf.server.model_interchange.embed import (
     build_table_data_row,
     flush_import_embeddings,
 )
-from gsf.server.model_interchange.schemas import ExportRequest, GsfModelDocument
+from gsf.server.model_interchange.schemas import (
+    ExportRequest,
+    GsfModelDocument,
+    ModelFormat,
+)
 
 
-# `export_model` reaches the store twice: once through the three DAL functions
-# each export test patches, and once through `_dialect_by_database_name()`,
-# which asks the connector registry and `list_connections()` what dialect each
-# database speaks. That second call is what kept the two export tests skipped
-# for a while; both now patch it, since neither is about dialect resolution.
+@contextmanager
+def _null_transaction():
+    """Stand in for ``write_transaction`` so unit tests need no live Neo4j."""
+    yield
 
 
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:
@@ -166,7 +184,77 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.table) == 1
     assert len(document.semantic_layer.sql_attributes.sql) == 1
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
+
+
+def _in_scope_export_rows() -> dict:
+    """Export rows whose semantic layer stays inside the exported catalog."""
+    rows = _export_rows()
+    rows["catalog"] = [
+        *_catalog_rows(),
+        {
+            **_catalog_rows()[0],
+            "column_id": "col-2",
+            "column_name": "customer_id",
+            "column_description": "",
+            "sample_values": "[]",
+            "is_unique": False,
+            "is_nullable": True,
+            "ordinal_position": 2,
+        },
+    ]
+    rows["foreign_keys"] = [
+        {"source_column_id": "col-2", "target_column_id": "col-1"},
+    ]
+    rows["joins"] = []
+    rows["semantic_fks"] = [
+        {"column_id": "col-2", "column_attribute_id": "attr-1"},
+    ]
+    return rows
+
+
+def test_assemble_export_document_drops_references_outside_the_catalog() -> None:
+    """A scoped export must not point at objects its own catalog omits.
+
+    The fixture's foreign key, join and semantic FK all reach for tbl-2/col-2/
+    col-3, which no exported database contains; keeping them would make the
+    importer reject the file this very export produced.
+    """
+    document = assemble_export_document(
+        _export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: ["col-1", "col-outside"],
+    )
+
+    assert document.data_layer.foreign_keys == []
+    assert document.data_layer.joins == []
+    assert document.semantic_layer.semantic_fks == []
+    assert document.semantic_layer.sql_attributes.manual[0].sql_column_is == ["col-1"]
+    assert document.semantic_layer.custom_analyses[0].sql_column_is == ["col-1"]
+
+
+def test_assemble_export_document_keeps_in_scope_references() -> None:
+    document = assemble_export_document(
+        _in_scope_export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    assert document.data_layer.foreign_keys[0].source_column_id == "col-2"
     assert document.semantic_layer.semantic_fks[0].column_attribute_id == "attr-1"
+    assert document.semantic_layer.terms[0].represents == ["tbl-1"]
+
+
+def test_assemble_export_document_drops_sql_attributes_of_absent_terms() -> None:
+    rows = _export_rows()
+    rows["terms"] = []
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    assert document.semantic_layer.sql_attributes.manual == []
+    assert document.semantic_layer.sql_attributes.table == []
 
 
 def test_export_yaml_round_trips_through_safe_load() -> None:
@@ -188,8 +276,6 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     )
 
 
-@patch("gsf.server.model_interchange.service.get_connectors", return_value=[])
-@patch("gsf.server.model_interchange.service.list_connections", return_value=[])
 @patch(
     "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
 )
@@ -199,8 +285,6 @@ def test_export_model_filters_by_database_id(
     mock_validate: MagicMock,
     mock_fetch: MagicMock,
     _mock_resolver: MagicMock,
-    _mock_connections: MagicMock,
-    _mock_connectors: MagicMock,
 ) -> None:
     mock_fetch.return_value = _export_rows(db_id="db-2", db_name="inventory")
 
@@ -210,10 +294,12 @@ def test_export_model_filters_by_database_id(
     mock_validate.assert_called_once_with(["db-2"])
     mock_fetch.assert_called_once_with(["db-2"])
     assert payload["data_layer"]["databases"][0]["id"] == "db-2"
+    assert (
+        payload["data_layer"]["databases"][0]["schemas"][0]["database_name"]
+        == "inventory"
+    )
 
 
-@patch("gsf.server.model_interchange.service.get_connectors", return_value=[])
-@patch("gsf.server.model_interchange.service.list_connections", return_value=[])
 @patch(
     "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
 )
@@ -223,8 +309,6 @@ def test_export_model_all_databases_uses_empty_filter(
     mock_validate: MagicMock,
     mock_fetch: MagicMock,
     _mock_resolver: MagicMock,
-    _mock_connections: MagicMock,
-    _mock_connectors: MagicMock,
 ) -> None:
     mock_fetch.return_value = _export_rows()
 
@@ -232,6 +316,227 @@ def test_export_model_all_databases_uses_empty_filter(
 
     mock_validate.assert_called_once_with([])
     mock_fetch.assert_called_once_with([])
+
+
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
+@patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
+@patch("gsf.server.model_interchange.service.dal.validate_database_ids")
+def test_export_model_ossie_format_emits_ossie_document(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    mock_fetch.return_value = _export_rows()
+
+    yaml_text = service.export_model(
+        ExportRequest(databases=[], format=ModelFormat.OSSIE),
+    )
+    payload = yaml.safe_load(yaml_text)
+
+    assert "data_layer" not in payload
+    model = payload["semantic_model"][0]
+    assert [dataset["name"] for dataset in model["datasets"]] == ["Order"]
+    assert model["datasets"][0]["source"] == "retail.main.orders"
+
+
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
+@patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
+@patch("gsf.server.model_interchange.service.dal.validate_database_ids")
+def test_export_model_ossie_reports_all_duplicate_custom_analysis_names(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    rows = _export_rows()
+    rows["custom_analyses"] = [
+        {
+            "id": "ca-1",
+            "name": "name25",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-2",
+            "name": "name25",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-3",
+            "name": "name3",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+        {
+            "id": "ca-4",
+            "name": "name3",
+            "description": "",
+            "sql": "SELECT 1",
+            "database_name": "retail",
+        },
+    ]
+    mock_fetch.return_value = rows
+
+    with pytest.raises(
+        GSFConversionError,
+        match=r"duplicate names.*'name25' \(2\), 'name3' \(2\)",
+    ):
+        service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE))
+
+
+def _multi_table_term_rows() -> dict:
+    """A term representing two tables, as a junction concept usually does."""
+    rows = _export_rows()
+    rows["catalog"] = [
+        *_catalog_rows(),
+        {
+            **_catalog_rows()[0],
+            "table_id": "tbl-2",
+            "table_name": "categories",
+            "table_description": "Categories table",
+            "column_id": "col-2",
+            "column_name": "category_id",
+            "column_description": "",
+            "sample_values": "[]",
+            "is_unique": False,
+            "is_nullable": True,
+            "ordinal_position": 1,
+        },
+    ]
+    rows["joins"] = []
+    rows["semantic_fks"] = []
+    rows["sql_attributes"] = []
+    rows["terms"] = [
+        {
+            "id": "term-1",
+            "name": "Category",
+            "description": "A category",
+            "represents": ["tbl-1", "tbl-2"],
+            "columns_attributes": [
+                {
+                    "id": "attr-1",
+                    "name": "order id",
+                    "description": "",
+                    "column_id": "col-1",
+                },
+                {
+                    "id": "attr-2",
+                    "name": "category id",
+                    "description": "",
+                    "column_id": "col-2",
+                },
+                {
+                    "id": "attr-3",
+                    "name": "category id again",
+                    "description": "",
+                    "column_id": "col-2",
+                },
+            ],
+        },
+    ]
+    return rows
+
+
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
+@patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
+@patch("gsf.server.model_interchange.service.dal.validate_database_ids")
+def test_export_model_ossie_keeps_one_table_per_term(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    """A multi-table term exports as the single dataset Ossie can hold.
+
+    The table contributing most of the term's column attributes wins, and the
+    attributes of the other table go with it — an Ossie field may only name a
+    column of its own dataset.
+    """
+    mock_fetch.return_value = _multi_table_term_rows()
+
+    payload = yaml.safe_load(
+        service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE)),
+    )
+
+    datasets = payload["semantic_model"][0]["datasets"]
+    assert [dataset["name"] for dataset in datasets] == ["Category"]
+    assert datasets[0]["source"] == "retail.main.categories"
+    assert [field["name"] for field in datasets[0]["fields"]] == [
+        "category id",
+        "category id again",
+    ]
+
+
+@patch(
+    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+)
+@patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
+@patch("gsf.server.model_interchange.service.dal.validate_database_ids")
+def test_export_model_gsf_keeps_every_represented_table(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    mock_fetch.return_value = _multi_table_term_rows()
+
+    payload = yaml.safe_load(service.export_model(ExportRequest(databases=[])))
+
+    term = payload["semantic_layer"]["terms"][0]
+    assert term["represents"] == ["tbl-1", "tbl-2"]
+    assert len(term["columns_attributes"]) == 3
+
+
+def test_detect_model_format_tells_the_vocabularies_apart() -> None:
+    assert service.detect_model_format({"data_layer": {}}) is ModelFormat.GSF
+    assert service.detect_model_format({"semantic_model": []}) is ModelFormat.OSSIE
+
+
+@patch("gsf.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_converts_ossie_document_back_to_gsf(
+    mock_apply: MagicMock,
+) -> None:
+    """An Ossie file must reach the DAL as the GSF document it describes."""
+    mock_apply.return_value = {}
+    document = assemble_export_document(
+        _export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+    gsf_yaml = yaml.safe_dump(document.model_dump(mode="python"), sort_keys=False)
+    ossie_yaml = convert_gsf_to_ossie(gsf_yaml)
+
+    summary = service.import_model(ossie_yaml, replace=True, embed=False)
+
+    assert summary["format"] == ModelFormat.OSSIE.value
+    imported = mock_apply.call_args[0][0]
+    assert isinstance(imported, GsfModelDocument)
+    assert [term.name for term in imported.semantic_layer.terms] == ["Order"]
+    table = imported.data_layer.databases[0].schemas[0].tables[0]
+    assert table.name == "orders"
+    assert [column.name for column in table.columns] == ["id"]
+
+
+@patch("gsf.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_reports_gsf_format(mock_apply: MagicMock) -> None:
+    mock_apply.return_value = {}
+    document = assemble_export_document(
+        _export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+    yaml_text = yaml.safe_dump(document.model_dump(mode="python"))
+
+    summary = service.import_model(yaml_text, replace=True, embed=False)
+
+    assert summary["format"] == ModelFormat.GSF.value
 
 
 @patch("gsf.server.model_interchange.service.flush_import_embeddings")

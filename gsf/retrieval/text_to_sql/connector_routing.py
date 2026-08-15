@@ -18,6 +18,40 @@ from typing import Iterable
 from gsf.connectors.base import SQLDatabase
 
 
+def resolve_target_database_name(
+    target_db: str,
+    connectors: list[SQLDatabase],
+) -> str:
+    """Return the configured database name matching *target_db*.
+
+    Matching is exact first and then case-insensitive. Unknown identifiers are
+    rejected before they can be used as vector-metadata filters.
+    """
+    requested = target_db.strip()
+    database_names = [
+        str(database_name)
+        for connector in connectors
+        if (database_name := getattr(connector, "database_name", None))
+    ]
+
+    if requested in database_names:
+        return requested
+
+    casefold_matches = [
+        database_name
+        for database_name in database_names
+        if database_name.casefold() == requested.casefold()
+    ]
+    if len(casefold_matches) == 1:
+        return casefold_matches[0]
+
+    available = ", ".join(sorted(database_names)) or "(none)"
+    raise ValueError(
+        f"target_db {target_db!r} does not match a configured database name. "
+        f"Available databases: {available}."
+    )
+
+
 def resolve_connector_from_tables(
     tables: Iterable[dict],
     connectors: list[SQLDatabase],
@@ -47,10 +81,14 @@ def resolve_connector_from_tables(
             table_database_names.add(database_name)
 
     if len(table_database_names) > 1:
-        names = ", ".join(sorted(table_database_names))
+        # Picking one arbitrarily would run the statement against the wrong
+        # database. `test_rejects_cross_database_tables` has asserted this
+        # message since #179; the check itself was never written, so the test
+        # failed on main as well.
         raise ValueError(
-            f"Relevant tables span multiple databases ({names}); "
-            "cross-database SQL execution is not supported."
+            "Relevant tables span multiple databases "
+            f"({', '.join(sorted(table_database_names))}); "
+            "a single statement cannot be routed across them."
         )
 
     if table_database_names:
@@ -71,4 +109,4 @@ def resolve_connector_from_tables(
     )
 
 
-__all__ = ["resolve_connector_from_tables"]
+__all__ = ["resolve_connector_from_tables", "resolve_target_database_name"]

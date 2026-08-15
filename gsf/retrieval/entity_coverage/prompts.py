@@ -4,13 +4,34 @@
 
 """Prompts for the entity-coverage question_extraction node."""
 
+from __future__ import annotations
 
-def create_question_extraction_prompt(question: str) -> str:
-    """Single prompt: sanitize the question and extract entity noun phrases."""
-    return f"""You rewrite conversational user requests into concise, SQL-ready questions \
-AND extract database entity noun phrases from the sanitized intent.
 
-## Part 1 — sanitized_question
+def format_glossary_section(glossary: list[dict[str, str]] | None) -> str:
+    """Render the user-curated Glossary, or "" when there is nothing to inject.
+
+    Entries are a flat list rather than ``rules_to_text``'s ``## name`` headings,
+    which would collide with surrounding ``##`` prompt sections.
+    """
+    entries = [
+        f"- {name}: {(entry.get('description') or '').strip()}"
+        for entry in glossary or []
+        if (name := (entry.get("name") or "").strip())
+    ]
+    if not entries:
+        return ""
+    definitions = "\n".join(entries)
+    return f"""## Glossary
+
+Definitions the user's organization has registered. Use them to resolve \
+abbreviations, shortcuts, and internal jargon in the question.
+
+{definitions}
+
+"""
+
+
+_SANITIZE_AND_ENTITIES = """## Part 1 — sanitized_question
 
 Rules:
 - Remove personal background, narrative fluff, filler, politeness, and generic request
@@ -37,6 +58,14 @@ tables, columns, or relationships. Extract from the sanitized intent.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,
 uppercase, or normalize them.
+
+Glossary rule: when a word or phrase in the question matches a Glossary entry — an
+abbreviation, a shortcut, or internal jargon — resolve it in place using that entry's
+definition instead of emitting the raw shortcut. Resolving rewrites an existing entry;
+it never adds an extra one, so the number of entries stays what it would have been
+without the Glossary. Leave a phrase untouched when no Glossary entry applies.
+  Example (Glossary: "MRR" = "monthly recurring revenue"):
+  "show MRR by region" → ["monthly recurring revenue", "region"], not ["MRR", "region"]
 
 Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
@@ -77,8 +106,74 @@ Examples:
 
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]
+"""
 
-## Input
+_SUBJECT_AND_ACRONYMS = """## Part 3 — subject
+
+Populate "subject" with one short noun phrase naming what the question is about — the
+single thing being asked for. Derive it from the sanitized question, resolving any
+Glossary entry that applies, and preserve casing the same way Part 2 does.
+
+Exclude from the subject: filters and qualifiers, aggregation words ("count", "total",
+"average"), date and time qualifiers, and number literals.
+
+Examples:
+  Q: "How many shipments were delivered last month?"
+  → subject: "shipment"
+
+  Q: "Find a waterproof hiking tent for family camping."
+  → subject: "tent"
+
+  Q: "Which vendors had the highest invoice totals in Q2?"
+  → subject: "vendor"
+
+## Part 4 — used_glossary_names
+
+Populate "used_glossary_names" with the names of only the Glossary entries you actually used
+to interpret, sanitize, resolve entities in, or determine the subject of this question.
+Copy each name exactly as written in the Glossary. Do not infer entries by lexical
+matching alone: include an entry only when its definition is semantically relevant.
+Return an empty list when no Glossary definition applies.
+
+Example (Glossary contains "MRR: monthly recurring revenue"):
+  Q: "Show MRR by region."
+  → used_glossary_names: ["MRR"]
+"""
+
+
+def create_question_extraction_prompt(
+    question: str,
+    glossary: list[dict[str, str]] | None = None,
+    *,
+    include_subject: bool = True,
+) -> str:
+    """Sanitize and extract entity noun phrases; optionally also name subject/acronyms.
+
+    Glossary is always injected so the model can resolve abbreviations while
+    sanitizing and extracting entities, even when ``include_subject`` is False.
+    """
+    glossary_section = format_glossary_section(glossary)
+    if include_subject:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions, extract database entity noun phrases from the sanitized "
+            "intent, AND name the question's main subject."
+        )
+        trailing = _SUBJECT_AND_ACRONYMS
+    else:
+        intro = (
+            "You rewrite conversational user requests into concise, SQL-ready "
+            "questions and extract database entity noun phrases from the "
+            "sanitized intent. Do not produce a subject field or list of used "
+            "acronyms."
+        )
+        trailing = ""
+
+    return f"""{intro}
+
+{_SANITIZE_AND_ENTITIES}
+{trailing}
+{glossary_section}## Input
 
 {question}
 """

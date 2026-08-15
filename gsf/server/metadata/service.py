@@ -48,13 +48,14 @@ def _build_coverage_payload(
     connectors = get_connectors()
     if not connectors:
         raise PredictionFlowError("No database connection is configured.")
+    custom_prompts = fetch_custom_prompts()
     return {
         "question": question,
         "data_retriever": get_data_objects_retriever(),
         "semantic_retriever": get_semantic_objects_retriever(),
         "connectors": connectors,
         "acronyms": fetch_acronyms(),
-        "custom_prompts": fetch_custom_prompts(),
+        "custom_prompts": custom_prompts,
         "max_distance": max_distance,
     }
 

@@ -2,12 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""HTTP routes for GSF model YAML export/import."""
+"""HTTP routes for native GSF and Apache Ossie model YAML export/import."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
+from ossie_gsf import GSFConversionError
 from pydantic import ValidationError
 
 from gsf.dal.model_interchange import (
@@ -43,11 +44,18 @@ def export_model(body: ExportRequest) -> Response:
         yaml_text = service.export_model(body)
     except UnknownDatabaseIdsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except GSFConversionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot express this model as Apache Ossie YAML: {exc}",
+        ) from exc
     return Response(
         content=yaml_text,
         media_type="application/x-yaml",
         headers={
-            "Content-Disposition": 'attachment; filename="gsf-model.yaml"',
+            "Content-Disposition": (
+                f'attachment; filename="{body.format.value}-model.yaml"'
+            ),
         },
     )
 
@@ -59,7 +67,7 @@ async def import_model(
     replace: bool = Query(default=True),
     embed: bool = Query(default=True),
 ) -> dict:
-    """Import a GSF model YAML file or raw YAML body."""
+    """Import a native GSF or Apache Ossie model YAML file or raw YAML body."""
     if file is not None:
         raw = await file.read()
     else:
@@ -80,6 +88,11 @@ async def import_model(
         summary = service.import_model(yaml_text, replace=replace, embed=embed)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except GSFConversionError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot read this file as Apache Ossie YAML: {exc}",
+        ) from exc
     except ModelImportValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:

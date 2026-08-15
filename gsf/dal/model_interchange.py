@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, literal, select, update
@@ -434,6 +435,35 @@ def fetch_export_rows(database_ids: list[str]) -> dict[str, Any]:
     }
 
 
+def _catalog_ids(databases: list[ModelDatabase]) -> tuple[set[str], set[str]]:
+    """Return the table and column ids the exported catalog actually carries."""
+    tables = [
+        table
+        for database in databases
+        for schema in database.schemas
+        for table in schema.tables
+    ]
+    return (
+        {table.id for table in tables},
+        {column.id for table in tables for column in table.columns},
+    )
+
+
+def _scoped_ids(values: Iterable[Any], known: set[str]) -> list[str]:
+    """Keep the ids present in the exported catalog, in their original order.
+
+    A scoped export must be importable on its own. Emitting a reference to a
+    table the document does not carry -- a Term also represented in another
+    database, say -- makes the document unimportable anywhere, because the
+    importer has nothing to resolve it against.
+
+    The importer is *also* tolerant of unresolvable references (see
+    ``_remap_optional``), so this is belt and braces: the document stays
+    self-contained, and a document produced elsewhere still imports.
+    """
+    return [str(value) for value in values if str(value) in known]
+
+
 def assemble_export_document(
     rows: dict[str, Any],
     *,
@@ -442,13 +472,15 @@ def assemble_export_document(
 ) -> GsfModelDocument:
     """Build a validated document from raw export rows."""
     databases = _assemble_databases(rows["catalog"], dialect_by_db_name)
+    table_ids, column_ids = _catalog_ids(databases)
     foreign_keys = [
         ModelForeignKey(
             source_column_id=str(row["source_column_id"]),
             target_column_id=str(row["target_column_id"]),
         )
         for row in rows["foreign_keys"]
-        if row.get("source_column_id") and row.get("target_column_id")
+        if str(row.get("source_column_id") or "") in column_ids
+        and str(row.get("target_column_id") or "") in column_ids
     ]
     joins = [
         ModelJoin(
@@ -457,14 +489,15 @@ def assemble_export_document(
             join_columns=row.get("join_columns") or [],
         )
         for row in rows["joins"]
-        if row.get("source_table_id") and row.get("target_table_id")
+        if str(row.get("source_table_id") or "") in table_ids
+        and str(row.get("target_table_id") or "") in table_ids
     ]
     terms = [
         ModelTerm(
             id=str(row["id"]),
             name=row.get("name") or "",
             description=row.get("description") or "",
-            represents=[str(x) for x in (row.get("represents") or []) if x],
+            represents=_scoped_ids(row.get("represents") or [], table_ids),
             columns_attributes=[
                 ModelColumnAttribute(
                     id=str(attr["id"]),
@@ -473,22 +506,28 @@ def assemble_export_document(
                     column_id=str(attr.get("column_id") or ""),
                 )
                 for attr in (row.get("columns_attributes") or [])
-                if attr.get("id")
+                if attr.get("id") and str(attr.get("column_id") or "") in column_ids
             ],
         )
         for row in rows["terms"]
         if row.get("id")
     ]
+    _term_ids = {term.id for term in terms}
+    _attribute_ids = {attr.id for term in terms for attr in term.columns_attributes}
     semantic_fks = [
         ModelSemanticFk(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
         )
         for row in rows["semantic_fks"]
-        if row.get("column_attribute_id") and row.get("column_id")
+        if str(row.get("column_attribute_id") or "") in _attribute_ids
+        and str(row.get("column_id") or "") in column_ids
     ]
     sql_attributes = _assemble_sql_attributes(
-        rows["sql_attributes"], sql_column_resolver
+        rows["sql_attributes"],
+        sql_column_resolver,
+        column_ids=column_ids,
+        term_ids=_term_ids,
     )
     custom_analyses = [
         ModelCustomAnalysis(
@@ -496,8 +535,9 @@ def assemble_export_document(
             name=row.get("name") or "",
             description=row.get("description") or "",
             sql=row.get("sql") or "",
-            sql_column_is=sql_column_resolver(
-                row.get("sql") or "", row.get("database_name")
+            sql_column_is=_scoped_ids(
+                sql_column_resolver(row.get("sql") or "", row.get("database_name")),
+                column_ids,
             ),
         )
         for row in rows["custom_analyses"]
@@ -593,9 +633,15 @@ def _assemble_databases(
 def _assemble_sql_attributes(
     rows: list[dict[str, Any]],
     sql_column_resolver: Any,
+    column_ids: set[str] | None = None,
+    term_ids: set[str] | None = None,
 ) -> ModelSqlAttributesBySource:
     grouped: dict[str, list[ModelSqlAttribute]] = {key: [] for key in _YAML_SOURCE_KEYS}
     for row in rows:
+        # An attribute whose Term did not make the document references an id the
+        # importer cannot resolve, so it is dropped rather than emitted dangling.
+        if term_ids is not None and str(row.get("term_id") or "") not in term_ids:
+            continue
         yaml_key = _SOURCE_TO_YAML_KEY.get(row.get("source") or "", "manual")
         sql_text = row.get("sql") or row.get("expression") or ""
         grouped[yaml_key].append(
@@ -604,7 +650,12 @@ def _assemble_sql_attributes(
                 name=row.get("name") or "",
                 description=row.get("description") or "",
                 sql=sql_text,
-                sql_column_is=sql_column_resolver(sql_text, row.get("database_name")),
+                sql_column_is=_scoped_ids(
+                    sql_column_resolver(sql_text, row.get("database_name")),
+                    column_ids if column_ids is not None else set(),
+                )
+                if column_ids is not None
+                else sql_column_resolver(sql_text, row.get("database_name")),
                 term_id=str(row.get("term_id") or ""),
             ),
         )

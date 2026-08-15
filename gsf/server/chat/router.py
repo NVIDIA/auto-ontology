@@ -60,6 +60,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from gsf.dal import datasources as datasources_dal
 from gsf.dal.terms import semantic_layer_calculated
 from gsf.retrieval.text_to_sql.visualization import analyze_and_visualize
 from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, VisualizeRequest
@@ -126,6 +127,29 @@ _DISCONNECT_POLL_S = 0.1
 # How often `_stream_slot` re-checks `slot.buffer` for new events when it
 # has caught up to the live tail. Also the SSE heartbeat cadence.
 _BUFFER_POLL_S = 0.25
+
+
+def _resolve_chat_target_db(target_db: str | None) -> str | None:
+    """Resolve a catalog database UUID or name to its canonical name."""
+    if target_db is None or not target_db.strip():
+        return None
+
+    requested = target_db.strip()
+    databases = datasources_dal.fetch_databases(zone_ids=None)
+    for database in databases:
+        database_id = str(database.get("id") or "").strip()
+        database_name = str(database.get("name") or "").strip()
+        if database_name and (
+            requested == database_id or requested.casefold() == database_name.casefold()
+        ):
+            return database_name
+
+    raise HTTPException(
+        status_code=422,
+        detail=(
+            f"target_db {target_db!r} does not match a catalog database UUID or name."
+        ),
+    )
 
 
 @dataclass
@@ -374,12 +398,26 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
+    """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
+
+    Step 1 of a chat turn: the SQL and the formatted answer. Charts are a
+    separate second call to ``POST /chat/visualize`` so the answer never waits on
+    an extra LLM round trip.
+
+    Requires a compiled semantic layer; without one the request is rejected with
+    409 rather than run against a bare schema. Passing ``conversation_id``
+    persists the turn and claims that conversation's single run slot — a second
+    concurrent request for the same conversation also gets 409. Omitting it runs
+    the question statelessly with a fresh key, so one-shot callers never collide.
+    """
     logger.info("Chat completions request: %s", request.model_dump())
 
     # Block chat when the semantic layer hasn't been built — no connectors/graph
     # run happens. The chat page gates on the status API; this is the backstop.
     if not semantic_layer_calculated():
         raise HTTPException(status_code=409, detail=_SEMANTIC_MISSING_MSG)
+
+    target_db = await asyncio.to_thread(_resolve_chat_target_db, request.target_db)
 
     # Conversation persistence trusts identity forwarded by the private Next.js
     # gateway. One-shot direct callers remain stateless.
@@ -467,7 +505,7 @@ async def chat_completions(
     worker.submit(
         request.question,
         prediction=request.prediction,
-        target_db=request.target_db,
+        target_db=target_db,
         subject_token=subject_token,
         conversation_history=conversation_history,
     )

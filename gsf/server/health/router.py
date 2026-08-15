@@ -48,6 +48,16 @@ def _check_store() -> dict[str, str]:
     },
 )
 def health() -> JSONResponse:
+    """Readiness probe for the API service.
+
+    Probes Postgres — the only dependency now that the catalog no longer lives
+    in Neo4j — through the pooled connection the application actually uses. 200
+    when reachable, 503 otherwise.
+
+    This backs **readiness** only. Liveness is /health/live, which checks
+    nothing: restarting the process cannot fix an unreachable database, so a
+    liveness probe gated on one turns a database blip into a rolling restart.
+    """
     postgres = _check_store()
     healthy = postgres["status"] == "ok"
     body: dict[str, Any] = {

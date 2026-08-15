@@ -13,6 +13,9 @@ from gsf.retrieval.text_to_sql.text_to_sql_graph import (
     _prediction_enabled,
     create_graph,
 )
+from gsf.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
@@ -72,7 +75,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     target_db = payload.get("target_db")
     if target_db:
-        initial_path_state["target_db"] = target_db
+        initial_path_state["target_db"] = resolve_target_database_name(
+            target_db, connectors
+        )
     elif len(connectors) == 1:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
@@ -101,6 +106,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "glossary": list(acronyms or []),
         "prediction_override": prediction_override,
     }
     return state

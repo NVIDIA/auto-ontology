@@ -14,6 +14,8 @@
     "/api/acronyms": {
       "get": {
         "tags": ["acronyms"],
+        "summary": "List every acronym, newest first.",
+        "description": "List every acronym, newest first.\n\nWith `?name=`, the route answers `{ exists }` instead of listing — the create\nform uses it to pre-check the unique constraint before submitting.",
         "operationId": "get_api_acronyms",
         "parameters": [
           {
@@ -102,6 +104,8 @@
       },
       "post": {
         "tags": ["acronyms"],
+        "summary": "Create an acronym: the term plus the expansion the agent should read it as.",
+        "description": "Create an acronym: the term plus the expansion the agent should read it as.\n\n`name` must be unique; `description` is optional and defaults to empty.",
         "operationId": "post_api_acronyms",
         "requestBody": {
           "required": true,
@@ -187,6 +191,8 @@
     "/api/acronyms/{id}": {
       "delete": {
         "tags": ["acronyms"],
+        "summary": "Delete an acronym permanently.",
+        "description": "Delete an acronym permanently. Answers 204 with no body.",
         "operationId": "delete_api_acronyms_id_",
         "parameters": [
           {
@@ -226,6 +232,8 @@
       },
       "patch": {
         "tags": ["acronyms"],
+        "summary": "Update an acronym's name or description.",
+        "description": "Update an acronym's name or description.\n\nBoth fields are optional and only the ones present in the body are written,\nso a partial body leaves the rest of the record untouched.",
         "operationId": "patch_api_acronyms_id_",
         "requestBody": {
           "required": true,
@@ -480,6 +488,8 @@
     "/api/api-tokens": {
       "get": {
         "tags": ["api-tokens"],
+        "summary": "List the caller's own API tokens.",
+        "description": "List the caller's own API tokens.\n\nMetadata only: tokens are stored hashed, so the plaintext value is never\nreturned again after creation. Requires a browser session — an API token may\nnot enumerate tokens.",
         "operationId": "get_api_api_tokens",
         "responses": {
           "200": {
@@ -582,6 +592,8 @@
       },
       "post": {
         "tags": ["api-tokens"],
+        "summary": "Mint a new API token for the caller, carrying the caller's own permissions.",
+        "description": "Mint a new API token for the caller, carrying the caller's own permissions.\n\n`expires_in_days` is optional — omitting it mints a non-expiring token, which\nis what an unattended script usually wants. The response is the only place the\nplaintext token ever appears; it is stored hashed and cannot be shown again.\nRequires a browser session — a token may not mint another token.",
         "operationId": "post_api_api_tokens",
         "requestBody": {
           "required": true,
@@ -770,7 +782,8 @@
     "/api/auth/{all}": {
       "get": {
         "tags": ["auth"],
-        "description": "Public by design: sign-in, SSO callback and the rest of the Better Auth\nsurface must be reachable without a session.",
+        "summary": "Better Auth's GET surface: session lookup and the SSO callbacks.",
+        "description": "Better Auth's GET surface: session lookup and the SSO callbacks.\n\nPublic by design — sign-in and the callback that completes it must both be\nreachable without a session. The plugin's own `/api/auth/api-key/*` routes\nare blocked here so `/api/api-tokens` stays the single way to manage tokens.",
         "operationId": "get_api_auth_all_",
         "parameters": [
           {
@@ -808,6 +821,8 @@
       },
       "post": {
         "tags": ["auth"],
+        "summary": "Better Auth's POST surface: sign-in, sign-out, and the SSO callbacks.",
+        "description": "Better Auth's POST surface: sign-in, sign-out, and the SSO callbacks.\n\nPublic for the same reason GET is — none of it can require a session. The\nplugin's own `/api/auth/api-key/*` management routes are blocked here so\n`/api/api-tokens` stays the single way to mint or revoke a token.",
         "operationId": "post_api_auth_all_",
         "parameters": [
           {
@@ -847,6 +862,8 @@
     "/api/chat/cancel": {
       "post": {
         "tags": ["chat"],
+        "summary": "Abort the agent run in flight for a conversation the caller owns.",
+        "description": "Abort the agent run in flight for a conversation the caller owns.\n\nThis is what makes the chat UI's Stop button actually stop the run rather than\nmerely detach the browser from it: an abandoned run keeps the conversation's\nslot claimed and the next question is rejected with 409. Cancelling ends the\nrun without a final answer, so the persisted user turn keeps no assistant\nreply. 404 when the conversation does not exist or belongs to someone else.",
         "operationId": "post_api_chat_cancel",
         "x-gsf-upstream": "/api/chat/cancel",
         "parameters": [
@@ -917,6 +934,8 @@
     "/api/chat/completions": {
       "post": {
         "tags": ["chat"],
+        "summary": "Ask a question and stream the answer back as Server-Sent Events.",
+        "description": "Ask a question and stream the answer back as Server-Sent Events.\n\nStep 1 of a chat turn: SQL plus the formatted answer. Charts are a separate\nsecond request (`POST /api/chat/visualize`) the client makes once this\ncompletes, so the answer never waits on an extra LLM round trip. Passing\n`conversation_id` persists the turn and additionally requires\n`conversation: ['write']`; it answers 409 while that conversation already has\na run in flight. Omitting it runs the question statelessly.",
         "operationId": "post_api_chat_completions",
         "x-gsf-upstream": "/api/chat/completions",
         "requestBody": {
@@ -1029,7 +1048,8 @@
     "/api/chat/visualize": {
       "post": {
         "tags": ["chat"],
-        "description": "Same permission as the chat completions route: every chat user may trigger\nthis, not just admins.\n\nUnlike the completions route, this one never creates a conversation: by the\ntime step 2 runs, step 1 (or `POST /api/conversations`) has already created\nit. Falling back to create-on-missing here would leave an orphan\nconversation — just the chart/table bubble, with no question or Message 1\nahead of it — whenever this is called with an id that never got that far\n(e.g. a standalone API caller skipping the completions step).",
+        "summary": "Pick charts for an executed SQL result — step 2 of a chat turn.",
+        "description": "Pick charts for an executed SQL result — step 2 of a chat turn.\n\nSame permission as the chat completions route: every chat user may trigger\nthis, not just admins.\n\nUnlike the completions route, this one never creates a conversation: by the\ntime step 2 runs, step 1 (or `POST /api/conversations`) has already created\nit. Falling back to create-on-missing here would leave an orphan\nconversation — just the chart/table bubble, with no question or Message 1\nahead of it — whenever this is called with an id that never got that far\n(e.g. a standalone API caller skipping the completions step).",
         "operationId": "post_api_chat_visualize",
         "x-gsf-upstream": "/api/chat/visualize",
         "requestBody": {
@@ -1106,6 +1126,8 @@
     "/api/chat/watch": {
       "get": {
         "tags": ["chat"],
+        "summary": "Reattach to a chat run already in progress, as a Server-Sent Events stream.",
+        "description": "Reattach to a chat run already in progress, as a Server-Sent Events stream.\n\nA reloaded or reopened tab uses this to follow a run it did not start. It is a\npassive observer: it never submits a question and persists nothing, so a\ndropped watch connection has no effect on the run or on what gets saved. 400\nwithout `conversation_id`, 404 when the conversation is not the caller's.",
         "operationId": "get_api_chat_watch",
         "x-gsf-upstream": "/api/chat/watch",
         "parameters": [
@@ -1277,6 +1299,8 @@
     "/api/configurations/semantic-compilation": {
       "get": {
         "tags": ["configurations"],
+        "summary": "Report whether scheduled semantic compilation is enabled instance-wide.",
+        "description": "Report whether scheduled semantic compilation is enabled instance-wide.",
         "operationId": "get_api_configurations_semantic_compilation",
         "responses": {
           "200": {
@@ -1316,6 +1340,8 @@
       },
       "put": {
         "tags": ["configurations"],
+        "summary": "Turn scheduled semantic compilation on or off instance-wide (admin-only).",
+        "description": "Turn scheduled semantic compilation on or off instance-wide (admin-only).\n\nEnabling also kicks off a compilation run immediately and starts the ingestion\nservice's scheduler, so the change takes effect without a restart. That\ntrigger is best-effort: the setting is still saved if the service is down, and\nthe scheduler picks the flag up on its next boot.",
         "operationId": "put_api_configurations_semantic_compilation",
         "requestBody": {
           "required": true,
@@ -1374,7 +1400,8 @@
     "/api/configurations/visualization": {
       "get": {
         "tags": ["configurations"],
-        "description": "Instance-wide \"Visualize SQL Results\" setting (Settings > Agent Settings),\nstored in the `configurations` key/value table. Admin-only, like the other\nsettings flags. The chat proxy route resolves the value per request, so a\nclient cannot override it.",
+        "summary": "Report whether the instance-wide \"Visualize SQL Results\" setting is on.",
+        "description": "Report whether the instance-wide \"Visualize SQL Results\" setting is on.\n\nThe flag lives under Settings > Agent Settings, stored in the\n`configurations` key/value table. The chat proxy route resolves the value per\nrequest, so a client cannot override it.",
         "operationId": "get_api_configurations_visualization",
         "responses": {
           "200": {
@@ -1414,6 +1441,8 @@
       },
       "put": {
         "tags": ["configurations"],
+        "summary": "Turn the instance-wide \"Visualize SQL Results\" setting on or off (admin-only).",
+        "description": "Turn the instance-wide \"Visualize SQL Results\" setting on or off (admin-only).\n\nChat resolves the value per request, so the change takes effect on the next\nquestion without a client reload. It gates chart *generation* only — the\nresult table still renders when it is off.",
         "operationId": "put_api_configurations_visualization",
         "requestBody": {
           "required": true,
@@ -1471,6 +1500,7 @@
     },
     "/api/connections": {
       "get": {
+        "description": "connectionsApi.getAll — list connections (viewable by all).",
         "operationId": "get_api_connections",
         "responses": {
           "200": {
@@ -1492,7 +1522,6 @@
         },
         "summary": "List Connections",
         "tags": ["connections"],
-        "description": "connectionsApi.getAll — list connections (viewable by all).",
         "security": [
           {
             "ApiToken": []
@@ -1505,6 +1534,7 @@
         "x-gsf-proxied": true
       },
       "post": {
+        "description": "connectionsApi.create — add a connection (admin only; carries credentials).",
         "operationId": "post_api_connections",
         "requestBody": {
           "content": {
@@ -1546,7 +1576,6 @@
         },
         "summary": "Create Connection",
         "tags": ["connections"],
-        "description": "connectionsApi.create — add a connection (admin only; carries credentials).",
         "security": [
           {
             "ApiToken": []
@@ -1561,6 +1590,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
+        "description": "connectionsApi.delete — remove a connection (admin only).",
         "operationId": "delete_api_connections_database_name_",
         "parameters": [
           {
@@ -1605,7 +1635,6 @@
         },
         "summary": "Delete Connection",
         "tags": ["connections"],
-        "description": "connectionsApi.delete — remove a connection (admin only).",
         "security": [
           {
             "ApiToken": []
@@ -1783,6 +1812,8 @@
     "/api/conversations": {
       "get": {
         "tags": ["conversations"],
+        "summary": "List the caller's own conversations, newest first, without their messages.",
+        "description": "List the caller's own conversations, newest first, without their messages.\n\nScoped to the authenticated user: a conversation is only ever visible to its\nowner, so there is no way to list someone else's.",
         "operationId": "get_api_conversations",
         "responses": {
           "200": {
@@ -1847,6 +1878,8 @@
       },
       "post": {
         "tags": ["conversations"],
+        "summary": "Start a new, empty conversation owned by the caller.",
+        "description": "Start a new, empty conversation owned by the caller.\n\n`title` is optional and defaults to empty. Chat clients usually create the\nconversation here first, then pass its id to `POST /api/chat/completions`.",
         "operationId": "post_api_conversations",
         "requestBody": {
           "required": true,
@@ -1926,6 +1959,8 @@
     "/api/conversations/{id}": {
       "delete": {
         "tags": ["conversations"],
+        "summary": "Delete a conversation and its messages; 404 when it is not the caller's.",
+        "description": "Delete a conversation and its messages; 404 when it is not the caller's.\n\nAnswers 204 with no body. The delete cascades to the conversation's messages.",
         "operationId": "delete_api_conversations_id_",
         "parameters": [
           {
@@ -1979,6 +2014,8 @@
       },
       "get": {
         "tags": ["conversations"],
+        "summary": "Fetch one conversation with its full message history, oldest message first.",
+        "description": "Fetch one conversation with its full message history, oldest message first.\n\nScoped to the caller, so another user's conversation reads as 404 rather than\n403 — ownership is not disclosed.",
         "operationId": "get_api_conversations_id_",
         "parameters": [
           {
@@ -2128,6 +2165,8 @@
       },
       "patch": {
         "tags": ["conversations"],
+        "summary": "Rename a conversation the caller owns; 404 when it is not theirs.",
+        "description": "Rename a conversation the caller owns; 404 when it is not theirs.",
         "operationId": "patch_api_conversations_id_",
         "requestBody": {
           "required": true,
@@ -2235,6 +2274,8 @@
     "/api/conversations/{id}/messages": {
       "post": {
         "tags": ["conversations"],
+        "summary": "Append a message to a conversation the caller owns.",
+        "description": "Append a message to a conversation the caller owns.\n\nThe manual path, for clients that record their own turns; the chat routes\npersist their messages themselves via FastAPI, so a normal chat flow never\ncalls this. Also bumps the conversation's `updated_at`. 404 when the\nconversation does not exist or belongs to someone else.",
         "operationId": "post_api_conversations_id_messages",
         "requestBody": {
           "required": true,
@@ -2659,6 +2700,8 @@
     "/api/custom-prompts": {
       "get": {
         "tags": ["custom-prompts"],
+        "summary": "List every custom prompt: the instance-wide prompt overrides the agent uses.",
+        "description": "List every custom prompt: the instance-wide prompt overrides the agent uses.",
         "operationId": "get_api_custom_prompts",
         "responses": {
           "200": {
@@ -2705,6 +2748,8 @@
       },
       "post": {
         "tags": ["custom-prompts"],
+        "summary": "Create a custom prompt from `content`, which defaults to empty when omitted.",
+        "description": "Create a custom prompt from `content`, which defaults to empty when omitted.",
         "operationId": "post_api_custom_prompts",
         "requestBody": {
           "required": true,
@@ -2766,6 +2811,8 @@
     "/api/custom-prompts/{id}": {
       "delete": {
         "tags": ["custom-prompts"],
+        "summary": "Delete a custom prompt permanently.",
+        "description": "Delete a custom prompt permanently. Answers 204 with no body.",
         "operationId": "delete_api_custom_prompts_id_",
         "parameters": [
           {
@@ -2805,6 +2852,8 @@
       },
       "get": {
         "tags": ["custom-prompts"],
+        "summary": "Fetch one custom prompt by id; 404 when no prompt has that id.",
+        "description": "Fetch one custom prompt by id; 404 when no prompt has that id.",
         "operationId": "get_api_custom_prompts_id_",
         "parameters": [
           {
@@ -2876,6 +2925,8 @@
       },
       "patch": {
         "tags": ["custom-prompts"],
+        "summary": "Update a custom prompt's text.",
+        "description": "Update a custom prompt's text. `content` is the only writable field, and a\nbody without it leaves the prompt unchanged.",
         "operationId": "patch_api_custom_prompts_id_",
         "requestBody": {
           "required": true,
@@ -3375,6 +3426,8 @@
     "/api/health": {
       "get": {
         "tags": ["health"],
+        "summary": "Liveness/readiness probe for the Next.js tier, unauthenticated by design.",
+        "description": "Liveness/readiness probe for the Next.js tier, unauthenticated by design.\n\nProbes Postgres and answers 200 `{ status: 'ok' }`, or 503\n`{ status: 'degraded' }` carrying the failing check's error detail.",
         "operationId": "get_api_health",
         "responses": {
           "200": {
@@ -3538,7 +3591,7 @@
     },
     "/api/model/import": {
       "post": {
-        "description": "modelInterchangeApi.importModel — upload a GSF model YAML file and apply it\nto the catalog + semantic layer. Admin-only: can replace existing data.",
+        "description": "modelInterchangeApi.importModel — upload a native GSF or Apache Ossie model\nYAML file and apply it to the catalog + semantic layer. Admin-only: can\nreplace existing data.",
         "operationId": "post_api_model_import",
         "parameters": [
           {
@@ -4509,7 +4562,8 @@
     "/api/sso-discovery": {
       "get": {
         "tags": ["sso-discovery"],
-        "description": "Admin-only helper that fetches an OIDC provider's discovery document\nserver-side and returns the endpoints the SSO form needs.\n\nResolving the endpoints here (instead of letting Better Auth's SSO plugin\nauto-discover from the issuer) lets us register providers with\n`skipDiscovery: true`. For public IdPs that path requires no `trustedOrigins`\nentry, so admins can add any provider without per-provider config.\n\nGated on sso:manage (admin) — it's an outbound fetch proxy.",
+        "summary": "Resolve an OIDC issuer's discovery document, admin-only.",
+        "description": "Resolve an OIDC issuer's discovery document, admin-only.\n\nThe document is fetched server-side and relayed as the endpoints the SSO\nregistration form needs.\n\nResolving the endpoints here (instead of letting Better Auth's SSO plugin\nauto-discover from the issuer) lets us register providers with\n`skipDiscovery: true`. For public IdPs that path requires no `trustedOrigins`\nentry, so admins can add any provider without per-provider config.\n\nGated on sso:manage (admin) — it's an outbound fetch proxy.",
         "operationId": "get_api_sso_discovery",
         "parameters": [
           {
@@ -4650,7 +4704,8 @@
     "/api/sso-providers": {
       "get": {
         "tags": ["sso-providers"],
-        "description": "Public list of registered SSO providers (no secrets) so the login page can\ndecide whether to show the \"Sign in with SSO\" option.",
+        "summary": "Public list of registered SSO providers, carrying no secrets.",
+        "description": "Public list of registered SSO providers, carrying no secrets.\n\nThe login page reads it to decide whether to show the \"Sign in with SSO\"\noption, so it has to answer before anyone is authenticated.",
         "operationId": "get_api_sso_providers",
         "responses": {
           "200": {
@@ -6838,6 +6893,10 @@
             },
             "title": "Databases",
             "type": "array"
+          },
+          "format": {
+            "$ref": "#/components/schemas/ModelFormat",
+            "default": "gsf"
           }
         },
         "title": "ExportRequest",
@@ -7082,6 +7141,12 @@
         "required": ["data", "count"],
         "title": "ListResponse[Zone]",
         "type": "object"
+      },
+      "ModelFormat": {
+        "description": "Serialisation dialect of an exchanged model document.",
+        "enum": ["gsf", "ossie"],
+        "title": "ModelFormat",
+        "type": "string"
       },
       "ModelImportResponse": {
         "additionalProperties": true,

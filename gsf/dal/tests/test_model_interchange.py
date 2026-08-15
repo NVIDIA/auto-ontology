@@ -527,18 +527,17 @@ def test_replace_drops_a_term_the_payload_omits(world) -> None:
 
 
 def test_a_cross_database_term_stays_importable(world) -> None:
-    """A scoped export names tables it does not carry, and must still import.
+    """A scoped export must be importable on its own.
 
-    `_export_terms` returns **all** the tables representing a term, including
-    ones outside the exported databases, which keeps a partial export honest
-    about a term it only partly owns. Requiring every `represents` entry to
-    resolve made exactly those honest documents unimportable anywhere — the
-    export and the import disagreed about what the document meant.
+    A Term can be represented by tables in more than one database. `_scoped_ids`
+    drops the out-of-scope ones at export, so the document only references
+    tables it carries; the importer is *also* tolerant of ids it cannot resolve
+    (`_remap_optional`), so a document produced elsewhere still imports.
 
-    The import now skips the entries this document does not carry. The term
-    arrives representing the tables that are present, which is the truth about
-    *this* catalog; the out-of-scope entry is not silently asserted, it is
-    simply absent, and re-exporting from a catalog that has both restores it.
+    Belt and braces, and deliberately so: the export half keeps documents
+    self-contained, the import half stops one bad reference aborting a whole
+    import. Either alone leaves a gap — before both, such an export raised
+    ModelImportValidationError and could not be imported anywhere.
     """
     other_prefix = f"{world.prefix}-other"
     other_db = _add(s.catalog_database, name=other_prefix)
@@ -551,8 +550,11 @@ def test_a_cross_database_term_stays_importable(world) -> None:
 
     document = _document(world)
     represents = {term.id: term.represents for term in document.semantic_layer.terms}
-    assert sorted(represents[shared]) == sorted([world.orders, outside]), (
-        "the export still records the out-of-scope table"
+    assert represents[shared] == [world.orders], (
+        "the export carries only the table this document also carries"
+    )
+    assert outside not in represents[shared], (
+        "the out-of-scope table is dropped, so the document imports anywhere"
     )
 
     mi.apply_import_model(document, replace=True)

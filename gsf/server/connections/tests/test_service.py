@@ -49,6 +49,20 @@ def test_public_connection_payload_redacts_credentials() -> None:
     assert "password_env" not in serialized["connection"]
 
 
+def test_public_connection_payload_redacts_the_private_key() -> None:
+    serialized = _serialize_connection(
+        {
+            **_snowflake_connection(),
+            "private_key": "-----BEGIN PRIVATE KEY-----\nsecret\n",
+            "private_key_passphrase": "phrase",
+        }
+    )
+
+    assert "private_key" not in serialized["connection"]
+    assert "private_key_passphrase" not in serialized["connection"]
+    assert "BEGIN PRIVATE KEY" not in json.dumps(serialized)
+
+
 class _StubConnector:
     def __init__(self, schemas: list[str]) -> None:
         self._schemas = schemas
