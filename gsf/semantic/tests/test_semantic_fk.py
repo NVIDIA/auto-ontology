@@ -24,6 +24,7 @@ def _hit(
             "table_name": table_name,
             "schema_name": schema_name,
             "source_column": source_column,
+            "is_unique": True,
         },
         "score": score,
         "text": f"ColumnAttribute {attr_id}",
@@ -52,6 +53,10 @@ def test_vdb_resolution_excludes_same_table_candidates(
 
     assert selected == "other-attr"
     assert mock_llm_pick.call_args.args[1] == [_hit("other-attr", "table-2")]
+    assert all(
+        call.kwargs["vdb_kwargs"]["where"]["is_unique"] is True
+        for call in retriever.query.call_args_list
+    )
     mock_sql_fallback.assert_not_called()
 
 
@@ -116,14 +121,17 @@ def test_column_attribute_embedding_includes_physical_table() -> None:
                 "source_column": "id",
                 "table_id": "table-1",
                 "table_name": "tags",
+                "is_unique": True,
             }
         ],
     )
 
     assert rows[0]["metadata"]["table_id"] == "table-1"
     assert rows[0]["metadata"]["table_name"] == "tags"
+    assert rows[0]["metadata"]["is_unique"] is True
     assert rows[0]["metadata"]["content_metadata"]["table_id"] == "table-1"
     assert rows[0]["metadata"]["content_metadata"]["table_name"] == "tags"
+    assert rows[0]["metadata"]["content_metadata"]["is_unique"] is True
 
 
 def _probe_result(*values: object, ok: bool = True) -> dict:

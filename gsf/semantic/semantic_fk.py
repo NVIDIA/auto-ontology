@@ -247,6 +247,7 @@ def _resolve_via_vdb(
         "where": {
             "label": "ColumnAttribute",
             "database_name": database_name,
+            "is_unique": True,
         }
     }
     full_query = _build_query_text(col)

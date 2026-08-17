@@ -292,6 +292,7 @@ def _build_rows(
             "source_column": a.get("source_column"),
             "table_id": a.get("table_id"),
             "table_name": a.get("table_name"),
+            "is_unique": a.get("is_unique"),
             "database_name": database_name,
             "source_path": path,
         }

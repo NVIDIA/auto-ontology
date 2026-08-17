@@ -48,6 +48,7 @@ class ColumnCatalogMeta:
     description: str
     data_type: str
     sample_values: list[str]
+    is_unique: bool
     table_yaml_id: str
     table_name: str
     schema_name: str
@@ -143,6 +144,7 @@ def build_column_attribute_semantic_rows(
     source_column: str,
     table_id: str,
     table_name: str,
+    is_unique: bool,
     sample_values: list[str] | str | None,
     schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -158,6 +160,7 @@ def build_column_attribute_semantic_rows(
                 "source_column": source_column,
                 "table_id": table_id,
                 "table_name": table_name,
+                "is_unique": is_unique,
                 "sample_values": sample_values,
                 "id": live_id,
                 "schema_name": schema_name,

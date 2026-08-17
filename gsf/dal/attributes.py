@@ -104,6 +104,7 @@ def update_column_attribute(
                attr.source_column AS source_column,
                col.id AS column_id,
                col.sample_values AS sample_values,
+               col.is_unique AS is_unique,
                table.id AS table_id,
                table.name AS table_name,
                sch.name AS schema_name,
