@@ -18,8 +18,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from gsf.dal.session import SCHEMA
-
 
 def wipe(database_name: str) -> None:
     """Remove a database and everything under it."""
@@ -34,9 +32,9 @@ def wipe(database_name: str) -> None:
 
 def tables(database_name: str) -> set[str]:
     rows = _pg(
-        f"SELECT t.name AS name FROM {SCHEMA}.catalog_table t "
-        f"JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id "
-        f"JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id "
+        "SELECT t.name AS name FROM catalog_table t "
+        "JOIN catalog_schema s ON s.id = t.schema_id "
+        "JOIN catalog_database d ON d.id = s.database_id "
         "WHERE d.name = :name",
         name=database_name,
     )
@@ -45,10 +43,10 @@ def tables(database_name: str) -> set[str]:
 
 def columns(database_name: str, table: str) -> set[str]:
     rows = _pg(
-        f"SELECT c.name AS name FROM {SCHEMA}.catalog_column c "
-        f"JOIN {SCHEMA}.catalog_table t ON t.id = c.table_id "
-        f"JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id "
-        f"JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id "
+        "SELECT c.name AS name FROM catalog_column c "
+        "JOIN catalog_table t ON t.id = c.table_id "
+        "JOIN catalog_schema s ON s.id = t.schema_id "
+        "JOIN catalog_database d ON d.id = s.database_id "
         "WHERE d.name = :name AND t.name = :table",
         name=database_name,
         table=table,
@@ -59,10 +57,10 @@ def columns(database_name: str, table: str) -> set[str]:
 def column_property(database_name: str, table: str, column: str, prop: str) -> Any:
     """One column property. *prop* is a node property or a column name."""
     rows = _pg(
-        f"SELECT c.{prop} AS value FROM {SCHEMA}.catalog_column c "
-        f"JOIN {SCHEMA}.catalog_table t ON t.id = c.table_id "
-        f"JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id "
-        f"JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id "
+        f"SELECT c.{prop} AS value FROM catalog_column c "
+        f"JOIN catalog_table t ON t.id = c.table_id "
+        f"JOIN catalog_schema s ON s.id = t.schema_id "
+        f"JOIN catalog_database d ON d.id = s.database_id "
         "WHERE d.name = :name AND t.name = :table AND c.name = :column",
         name=database_name,
         table=table,
@@ -79,19 +77,19 @@ def entity_counts(database_name: str) -> dict[str, int]:
     so counts are what a no-op re-ingest has to be checked against.
     """
     rows = _pg(
-        f"""
+        """
         SELECT
-          (SELECT count(*) FROM {SCHEMA}.catalog_schema s
-             JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id
+          (SELECT count(*) FROM catalog_schema s
+             JOIN catalog_database d ON d.id = s.database_id
             WHERE d.name = :name) AS schemas,
-          (SELECT count(*) FROM {SCHEMA}.catalog_table t
-             JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id
-             JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id
+          (SELECT count(*) FROM catalog_table t
+             JOIN catalog_schema s ON s.id = t.schema_id
+             JOIN catalog_database d ON d.id = s.database_id
             WHERE d.name = :name) AS tables,
-          (SELECT count(*) FROM {SCHEMA}.catalog_column c
-             JOIN {SCHEMA}.catalog_table t ON t.id = c.table_id
-             JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id
-             JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id
+          (SELECT count(*) FROM catalog_column c
+             JOIN catalog_table t ON t.id = c.table_id
+             JOIN catalog_schema s ON s.id = t.schema_id
+             JOIN catalog_database d ON d.id = s.database_id
             WHERE d.name = :name) AS columns
         """,
         name=database_name,
@@ -108,12 +106,12 @@ def foreign_keys(database_name: str) -> set[tuple[str, str]]:
     """``(source column name, target column name)`` for each foreign key."""
     rows = _pg(
         "SELECT sc.name AS src, tc.name AS dst "
-        f"FROM {SCHEMA}.column_foreign_key fk "
-        f"JOIN {SCHEMA}.catalog_column sc ON sc.id = fk.source_column_id "
-        f"JOIN {SCHEMA}.catalog_column tc ON tc.id = fk.target_column_id "
-        f"JOIN {SCHEMA}.catalog_table t ON t.id = sc.table_id "
-        f"JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id "
-        f"JOIN {SCHEMA}.catalog_database d ON d.id = s.database_id "
+        "FROM column_foreign_key fk "
+        "JOIN catalog_column sc ON sc.id = fk.source_column_id "
+        "JOIN catalog_column tc ON tc.id = fk.target_column_id "
+        "JOIN catalog_table t ON t.id = sc.table_id "
+        "JOIN catalog_schema s ON s.id = t.schema_id "
+        "JOIN catalog_database d ON d.id = s.database_id "
         "WHERE d.name = :name",
         name=database_name,
     )

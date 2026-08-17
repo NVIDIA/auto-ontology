@@ -34,7 +34,7 @@ def require_schema():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
-        store().query_read(f"SELECT 1 FROM {s.SCHEMA}.custom_analysis LIMIT 1")
+        store().query_read("SELECT 1 FROM custom_analysis LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
 

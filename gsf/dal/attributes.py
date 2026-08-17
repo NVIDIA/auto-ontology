@@ -680,13 +680,13 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
 #: than visiting each once, which is the scaling problem described there. Kept
 #: beside the BFS rather than in the test file so the two sit together and a
 #: change to the edge rules is obviously a change to both.
-JOIN_PATH_CTE_SQL = f"""
+JOIN_PATH_CTE_SQL = """
 WITH RECURSIVE walk(node_id, node_kind, path, depth) AS (
     SELECT CAST(:anchor AS text), 'column'::text, ARRAY[CAST(:anchor AS text)], 0
   UNION ALL
     SELECT e.dst_id, e.dst_kind, w.path || e.dst_id, w.depth + 1
       FROM walk w
-      JOIN {s.SCHEMA}.join_path_edge e ON e.src_id = w.node_id
+      JOIN join_path_edge e ON e.src_id = w.node_id
      WHERE NOT e.dst_id = ANY(w.path)
        AND w.depth < :max_depth
        AND w.node_id <> CAST(:dest AS text)

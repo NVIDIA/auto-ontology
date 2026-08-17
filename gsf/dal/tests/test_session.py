@@ -44,7 +44,7 @@ def require_database():
     try:
         rows = pg_session.store().query_read("SELECT 1 AS ok")
         assert rows == [{"ok": 1}]
-        pg_session.store().query_read(f"SELECT 1 FROM {pg_session.SCHEMA}.term LIMIT 1")
+        pg_session.store().query_read("SELECT 1 FROM term LIMIT 1")
     except Exception as exc:  # noqa: BLE001 — unmigrated or unreachable
         pytest.skip(f"gsf schema unavailable (run alembic upgrade head): {exc}")
     yield
@@ -55,22 +55,19 @@ def require_database():
 def clean_terms():
     """Remove anything a test inserted, whatever it did to the transaction."""
     yield
-    pg_session.store().query_write(
-        f"DELETE FROM {pg_session.SCHEMA}.term WHERE name LIKE 'tx-test-%'"
-    )
+    pg_session.store().query_write("DELETE FROM term WHERE name LIKE 'tx-test-%'")
 
 
 def _insert_term(name: str) -> None:
     pg_session.store().query_write(
-        f"INSERT INTO {pg_session.SCHEMA}.term (name, description) "
-        f"VALUES (:name, 'transaction test')",
+        "INSERT INTO term (name, description) VALUES (:name, 'transaction test')",
         {"name": name},
     )
 
 
 def _term_exists(name: str) -> bool:
     rows = pg_session.store().query_read(
-        f"SELECT 1 AS found FROM {pg_session.SCHEMA}.term WHERE name = :name",
+        "SELECT 1 AS found FROM term WHERE name = :name",
         {"name": name},
     )
     return bool(rows)

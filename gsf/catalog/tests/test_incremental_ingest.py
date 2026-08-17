@@ -51,10 +51,9 @@ def require_store():
         pytest.skip("POSTGRES_* not set (needed for the source database)")
 
     try:
-        from gsf.dal import schema as s
         from gsf.dal.session import store
 
-        store().query_read(f"SELECT 1 FROM {s.SCHEMA}.catalog_database LIMIT 1")
+        store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
 

@@ -21,7 +21,7 @@ from typing import Any
 
 from sqlalchemy import text
 
-from gsf.dal.session import SCHEMA, store
+from gsf.dal.session import store
 
 #: One query in place of four round trips.
 #:
@@ -29,10 +29,10 @@ from gsf.dal.session import SCHEMA, store
 #: granting a table admits its schema, but not that schema's other tables.
 #: Every branch reads from ``granted`` rather than from another CTE, which is
 #: what keeps it non-recursive.
-_ACCESSIBLE_SQL = f"""
+_ACCESSIBLE_SQL = """
 WITH granted AS (
     SELECT database_id, schema_id, table_id
-      FROM {SCHEMA}.zone_target
+      FROM zone_target
      WHERE zone_id = ANY(:zone_ids)
 ),
 tabs AS (
@@ -40,40 +40,40 @@ tabs AS (
     SELECT table_id AS id FROM granted WHERE table_id IS NOT NULL
     UNION
     -- under a granted schema
-    SELECT t.id FROM {SCHEMA}.catalog_table t
+    SELECT t.id FROM catalog_table t
       JOIN granted g ON g.schema_id = t.schema_id
     UNION
     -- under a granted database
-    SELECT t.id FROM {SCHEMA}.catalog_table t
-      JOIN {SCHEMA}.catalog_schema s ON s.id = t.schema_id
+    SELECT t.id FROM catalog_table t
+      JOIN catalog_schema s ON s.id = t.schema_id
       JOIN granted g ON g.database_id = s.database_id
 ),
 schemas AS (
     SELECT schema_id AS id FROM granted WHERE schema_id IS NOT NULL
     UNION
-    SELECT s.id FROM {SCHEMA}.catalog_schema s
+    SELECT s.id FROM catalog_schema s
       JOIN granted g ON g.database_id = s.database_id
     UNION
     -- the parent of a directly granted table
-    SELECT t.schema_id FROM {SCHEMA}.catalog_table t
+    SELECT t.schema_id FROM catalog_table t
       JOIN granted g ON g.table_id = t.id
 ),
 dbs AS (
     SELECT database_id AS id FROM granted WHERE database_id IS NOT NULL
     UNION
     -- the parent of a directly granted schema
-    SELECT s.database_id FROM {SCHEMA}.catalog_schema s
+    SELECT s.database_id FROM catalog_schema s
       JOIN granted g ON g.schema_id = s.id
     UNION
     -- the grandparent of a directly granted table
-    SELECT s.database_id FROM {SCHEMA}.catalog_schema s
-      JOIN {SCHEMA}.catalog_table t ON t.schema_id = s.id
+    SELECT s.database_id FROM catalog_schema s
+      JOIN catalog_table t ON t.schema_id = s.id
       JOIN granted g ON g.table_id = t.id
 )
 SELECT
-    (SELECT coalesce(array_agg(id), '{{}}') FROM dbs)     AS db_ids,
-    (SELECT coalesce(array_agg(id), '{{}}') FROM schemas) AS schema_ids,
-    (SELECT coalesce(array_agg(id), '{{}}') FROM tabs)    AS table_ids
+    (SELECT coalesce(array_agg(id), '{}') FROM dbs)     AS db_ids,
+    (SELECT coalesce(array_agg(id), '{}') FROM schemas) AS schema_ids,
+    (SELECT coalesce(array_agg(id), '{}') FROM tabs)    AS table_ids
 """
 
 

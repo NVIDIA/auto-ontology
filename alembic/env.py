@@ -25,7 +25,7 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from gsf.dal.schema import METADATA, SCHEMA
+from gsf.dal.schema import METADATA
 from gsf.dal.session import sqlalchemy_url
 from gsf.env import load_env
 
@@ -51,7 +51,7 @@ _MISSING = object()
 
 
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """Consider only objects in :data:`SCHEMA` (``public``).
+    """Consider only objects in the connection's default schema.
 
     This is what keeps autogenerate away from the two schemas GSF does not own:
     Prisma's ``frontend`` and langchain_postgres' ``vdb``. Both are reflected and
@@ -88,9 +88,11 @@ def include_object(obj, name, type_, reflected, compare_to) -> bool:
         # Constraints and indexes reached before their parent is resolved fall
         # here. Keep them only if the migration context is already scoped to us.
         return type_ not in {"table", "column"}
-    # Metadata objects carry None (unqualified); reflected objects in the default
-    # schema also come back as None, while `frontend` and `vdb` come back named.
-    return (schema or SCHEMA) == SCHEMA
+    # Both sides spell the default schema as None: the MetaData is unqualified,
+    # and Alembic normalises a reflected default-schema table to None too. The
+    # schemas GSF does not own -- `frontend` and `vdb` -- come back named, so
+    # this single test is the whole filter.
+    return schema is None
 
 
 def _configure(**kwargs) -> None:
@@ -99,14 +101,15 @@ def _configure(**kwargs) -> None:
         include_object=include_object,
         include_schemas=True,
         version_table="alembic_version",
-        # Deliberately *not* `version_table_schema=SCHEMA`. Naming it while the
+        # Deliberately no `version_table_schema`. Naming the default schema while the
         # MetaData is unqualified makes Alembic fail to recognise its own version
         # table during autogenerate -- reflection reports the default schema as
         # None, the configured value says "public", they do not match, and the
         # table is treated as drift. The generated migration then contained
         # `op.drop_table('alembic_version')` in *upgrade*, i.e. the migration
         # deletes the record of which migrations have run. Left unset it resolves
-        # through the search_path pinned above, to the same place.
+        # through the connection's search_path, to the same place the tables go.
+        #
         # Without this a changed column type is silently ignored by
         # autogenerate, which is worse than a false positive.
         compare_type=True,
@@ -133,20 +136,13 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        # `public` already exists, so this is a no-op today. It stays because
-        # SCHEMA is a knob: point it anywhere else and the version table needs
-        # its schema to exist before Alembic stamps anything, including on a
-        # blank database where no migration has run yet.
-        connection.exec_driver_sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
-
-        # This session, not just future ones. The migration emits unqualified
-        # DDL (the MetaData does not name the schema), and the ALTER ROLE below
-        # only takes effect for *new* sessions -- so without this the very
-        # migration that creates the tables could place them somewhere else.
-        connection.exec_driver_sql(f"SET search_path TO {SCHEMA}")
-
-        # Pin the role's search_path to `public`, which is where GSF's own tables
-        # now live.
+        # Pin the role's search_path to `public`.
+        #
+        # This is the one place a schema name is still written down, and it is
+        # deliberate: it is not a parameter the model reads, it is an assertion
+        # about the *role*, making the default schema deterministic instead of
+        # inherited. Everything else -- the MetaData, the migration DDL, every
+        # raw query and the view -- is unqualified and simply resolves here.
         #
         # The hazard this defends against: the default search_path is
         # `"$user", public`, and `"$user"` is normally inert because no schema is
