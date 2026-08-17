@@ -8,7 +8,6 @@ export enum ConnectionType {
 	POSTGRESQL = 'postgresql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
-	SQLITE = 'sqlite',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -16,7 +15,6 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
-	[ConnectionType.SQLITE]: 'SQLite',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -33,7 +31,6 @@ export type ConnectionFieldKey =
 	| 'private_key'
 	| 'private_key_passphrase'
 	| 'database'
-	| 'path'
 	| 'protocol'
 	| 'schema'
 	| 'sso_federation';
@@ -142,19 +139,5 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'heavyai' },
 		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
-	],
-	[ConnectionType.SQLITE]: [
-		{
-			key: 'path',
-			label: 'File path',
-			placeholder: '/data/analytics.sqlite',
-			hint: 'Absolute path to the .sqlite file, as seen from the GSF backend and ingestion containers — not from your machine.',
-		},
-		{
-			key: 'database',
-			label: 'Database name',
-			placeholder: 'analytics',
-			hint: 'Names the connection in the catalog. Must be the file name without its extension, which is what the connector reports.',
-		},
 	],
 };
