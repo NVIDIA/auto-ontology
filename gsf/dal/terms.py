@@ -532,6 +532,7 @@ def fetch_all_terms_and_attributes(
                col.sample_values AS sample_values,
                attr.id AS id,
                t.id AS table_id,
+               t.name AS table_name,
                sch.name AS schema_name
         """,
         attr_params,
@@ -824,6 +825,7 @@ def fetch_terms_and_attributes_for_table(
                col.sample_values AS sample_values,
                attr.id AS id,
                t.id AS table_id,
+               t.name AS table_name,
                sch.name AS schema_name
         """,
         params,
@@ -860,7 +862,8 @@ def fetch_term_and_column_attributes_for_embedding(
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
               (term:{LABEL_TERM} {{id: $term_id}})
         // ColumnAttribute embeddings include sample values from the owning Column.
-        OPTIONAL MATCH (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->
               (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         RETURN attr.name AS name,
                attr.description AS description,
@@ -868,7 +871,9 @@ def fetch_term_and_column_attributes_for_embedding(
                attr.source_column AS source_column,
                col.sample_values AS sample_values,
                attr.id AS id,
-               table.id AS table_id
+               table.id AS table_id,
+               table.name AS table_name,
+               sch.name AS schema_name
         """,
         params,
     )
@@ -885,7 +890,7 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
         MATCH (col:{Labels.COLUMN} {{id: $column_id}})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
               (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
         RETURN term.name AS term_name,
                term.description AS term_description,
@@ -899,7 +904,9 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
                    source_column: attr.source_column,
                    sample_values: col.sample_values,
                    id: attr.id,
-                   table_id: table.id
+                   table_id: table.id,
+                   table_name: table.name,
+                   schema_name: sch.name
                }}) AS attrs
         """,
         {"column_id": column_id},

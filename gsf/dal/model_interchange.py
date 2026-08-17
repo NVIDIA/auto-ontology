@@ -1138,6 +1138,7 @@ def _import_catalog(
                         data_type=column.type,
                         sample_values=column.sample_values,
                         table_yaml_id=table.id,
+                        table_name=table.name,
                         schema_name=schema.name,
                         database_name=schema_db_name,
                     )
@@ -1541,6 +1542,7 @@ def _import_column_attributes(
                     term_name=term.name,
                     source_column=col_ctx.name,
                     table_id=ctx["live_table_id"],
+                    table_name=col_ctx.table_name,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
                 ),

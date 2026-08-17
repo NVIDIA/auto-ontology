@@ -95,8 +95,8 @@ def update_column_attribute(
         WITH attr, term
         OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
         RETURN attr.id AS id,
                attr.name AS name,
                attr.description AS description,
@@ -104,6 +104,9 @@ def update_column_attribute(
                attr.source_column AS source_column,
                col.id AS column_id,
                col.sample_values AS sample_values,
+               table.id AS table_id,
+               table.name AS table_name,
+               sch.name AS schema_name,
                term.id AS term_id,
                term.synonyms AS term_synonyms,
                head(collect(DISTINCT db.name)) AS database_name,

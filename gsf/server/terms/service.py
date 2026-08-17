@@ -148,6 +148,8 @@ def update_column_attribute(
             "source_column": row.get("source_column"),
             "sample_values": row.get("sample_values"),
             "table_id": row.get("table_id"),
+            "table_name": row.get("table_name"),
+            "schema_name": row.get("schema_name"),
         }
         # Pass Term synonyms only — omit Term name so we re-embed just this attr row.
         term_ctx = {"synonyms": row.get("term_synonyms") or []}

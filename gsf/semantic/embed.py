@@ -83,7 +83,7 @@ class SemanticEmbedder:
 
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries include ``name``, ``term_name``, ``source_column``,
-        ``description``, ``id``, and the owning ``table_id``.
+        ``description``, ``id``, and the owning table metadata.
         ``id`` is the Neo4j node ``id`` property (UUID) and, when present, lands
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
@@ -291,6 +291,7 @@ def _build_rows(
             "term_name": owner,
             "source_column": a.get("source_column"),
             "table_id": a.get("table_id"),
+            "table_name": a.get("table_name"),
             "database_name": database_name,
             "source_path": path,
         }
