@@ -17,7 +17,7 @@ import logging
 import psycopg
 from psycopg.rows import dict_row
 
-from gsf.infra.postgres import get_postgres_connection_string
+from gsf.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,7 @@ def fetch_acronyms() -> list[dict[str, str]]:
         ) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
                 cur.execute(
-                    "SELECT name, description FROM acronyms ORDER BY created_at"
+                    f"SELECT name, description FROM {FRONTEND_SCHEMA}.acronyms ORDER BY created_at"
                 )
                 return [dict(row) for row in cur.fetchall()]
     except Exception:
@@ -54,7 +54,7 @@ def fetch_custom_prompts() -> str:
             get_postgres_connection_string(), connect_timeout=3
         ) as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT content FROM prompts")
+                cur.execute(f"SELECT content FROM {FRONTEND_SCHEMA}.prompts")
                 rows = cur.fetchall()
     except Exception:
         logger.exception("Failed to fetch custom prompts; continuing with empty string")
