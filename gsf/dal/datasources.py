@@ -837,6 +837,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.id,
                 s.catalog_table.c.name,
                 s.catalog_table.c.description,
+                s.catalog_table.c.pk,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
@@ -867,6 +868,11 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row["database_name"] or "",
                 "schema_name": row["schema_name"] or "",
                 "label": "Table",
+                # The prediction graph keys its entities on this: a table
+                # that arrives without a pk reaches KumoRFM with no identity,
+                # which costs it every edge and makes it unusable in
+                # `FOR EACH`. It has to survive every path to relevant_tables.
+                "pk": row.get("pk") or [],
                 "columns": [],
             },
         )

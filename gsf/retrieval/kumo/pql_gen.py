@@ -172,6 +172,9 @@ def _aggregation_clauses(pql: str) -> list[tuple[str, str | None]]:
 
     The inner WHERE is the part of the aggregation body after ``WHERE`` and before the trailing window args;
     the FOR-EACH entity filter lives outside the parens and is intentionally not returned here.
+
+    The table name comes back unquoted, matching what ``parse_entity`` and the graph edges carry: a name
+    PQL has to backtick (one containing a space) would otherwise never compare equal to either.
     """
     clauses: list[tuple[str, str | None]] = []
     for match in _AGG_OPEN.finditer(pql):
@@ -182,7 +185,7 @@ def _aggregation_clauses(pql: str) -> list[tuple[str, str | None]]:
         if not table_match:
             continue
         where_clause = parts[1] if len(parts) > 1 else None
-        clauses.append((table_match.group(1), where_clause))
+        clauses.append((unquote_name(table_match.group(1)), where_clause))
     return clauses
 
 

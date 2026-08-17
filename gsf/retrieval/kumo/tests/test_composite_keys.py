@@ -77,15 +77,15 @@ def _graph(declare: bool = True):
 @pytest.mark.parametrize(
     ("entry", "expected"),
     [
-        ({"primary_key": ["Customer ID", "REGION"]}, ["Customer ID", "REGION"]),
+        ({"pk": ["Customer ID", "REGION"]}, ["Customer ID", "REGION"]),
         ({"pk": ["Order ID"]}, ["Order ID"]),
-        ({"primary_key": "Order ID"}, ["Order ID"]),
-        ({"primary_key": [" Customer ID ", "", None]}, ["Customer ID"]),
+        ({"pk": "Order ID"}, ["Order ID"]),
+        ({"pk": [" Customer ID ", "", None]}, ["Customer ID"]),
         ({}, []),
-        ({"primary_key": None, "pk": None}, []),
+        ({"pk": None}, []),
     ],
 )
-def test_catalog_key_columns_reads_either_spelling(entry, expected) -> None:
+def test_catalog_key_columns_reads_the_catalog_spelling(entry, expected) -> None:
     assert _catalog_key_columns(entry) == expected
 
 

@@ -89,13 +89,11 @@ def _quote(schema: str, table: str) -> str:
 def _catalog_key_columns(entry: dict[str, Any]) -> list[str]:
     """Primary-key columns the catalog recorded for a table.
 
-    Retrieval spells the field ``primary_key`` (see ``relevant_tables``) while the
-    PQL-example enrichment path carries the raw catalog ``pk``. Either may hold a
-    single name or several for a composite key.
+    Every path spells the field ``pk``, the catalog's own name for it — both
+    retrieval (see ``relevant_tables``) and the PQL-example enrichment. It may
+    hold a single name or several for a composite key.
     """
-    raw = entry.get("primary_key")
-    if raw is None:
-        raw = entry.get("pk")
+    raw = entry.get("pk")
     if isinstance(raw, str):
         return [raw.strip()] if raw.strip() else []
     if isinstance(raw, (list, tuple)):

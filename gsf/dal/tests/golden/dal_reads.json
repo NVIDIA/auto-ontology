@@ -1712,6 +1712,9 @@
         "id": "<table:pagila.public.rental>",
         "label": "Table",
         "name": "rental",
+        "pk": [
+          "rental_id"
+        ],
         "schema_name": "public"
       },
       {
@@ -1742,6 +1745,9 @@
         "id": "<table:pagila.public.inventory>",
         "label": "Table",
         "name": "inventory",
+        "pk": [
+          "inventory_id"
+        ],
         "schema_name": "public"
       },
       {
@@ -1822,6 +1828,9 @@
         "id": "<table:pagila.public.film>",
         "label": "Table",
         "name": "film",
+        "pk": [
+          "film_id"
+        ],
         "schema_name": "public"
       }
     ],
@@ -2970,6 +2979,9 @@
         "id": "<table:pagila.public.rental>",
         "label": "Table",
         "name": "rental",
+        "pk": [
+          "rental_id"
+        ],
         "schema_name": "public"
       },
       {
@@ -3050,6 +3062,9 @@
         "id": "<table:pagila.public.film>",
         "label": "Table",
         "name": "film",
+        "pk": [
+          "film_id"
+        ],
         "schema_name": "public"
       }
     ],
@@ -5269,6 +5284,10 @@
         "id": "<table:pagila.public.payment>",
         "label": "Table",
         "name": "payment",
+        "pk": [
+          "payment_date",
+          "payment_id"
+        ],
         "schema_name": "public"
       }
     ],

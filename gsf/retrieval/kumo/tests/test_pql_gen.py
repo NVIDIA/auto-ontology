@@ -214,6 +214,21 @@ def test_static_lint_reads_through_quotes() -> None:
         )
 
 
+def test_static_lint_accepts_a_quoted_event_table_that_links_to_the_entity() -> None:
+    """Graph edges carry bare names, so a backticked aggregation table has to be
+    unquoted before the direct-foreign-key check compares the two."""
+    pql_gen.validate_pql_static(
+        "PREDICT COUNT(`Sales Orders`.*, 0, 30, days) FOR EACH `Store Locations`.StoreID",
+        edges=[("Sales Orders", "_StoreID", "Store Locations")],
+    )
+
+    with pytest.raises(pql_gen.PqlStaticError, match="no direct foreign key"):
+        pql_gen.validate_pql_static(
+            "PREDICT COUNT(`Line Items`.*, 0, 30, days) FOR EACH `Store Locations`.StoreID",
+            edges=[("Sales Orders", "_StoreID", "Store Locations")],
+        )
+
+
 def test_unquote_and_quote_round_trip() -> None:
     assert pql_gen.unquote_name("`Customer ID`") == "Customer ID"
     assert pql_gen.unquote_name("CUSTOMER_ID") == "CUSTOMER_ID"
