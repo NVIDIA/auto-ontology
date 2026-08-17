@@ -12,7 +12,6 @@ so this module converts the structured form into the URL the connectors expect.
 from __future__ import annotations
 
 import base64
-from pathlib import PurePosixPath
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -119,29 +118,5 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"heavydb://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
             f"?protocol={_enc(protocol)}"
         )
-
-    if conn_type == "sqlite":
-        # A SQLite "connection" is just a file the backend and the ingestion
-        # service can both read, so ``path`` is the only credential-free field
-        # that matters. It must be absolute: the two services run from different
-        # working directories, so a relative path would resolve differently.
-        path = _require(connection, "path")
-        if not path.startswith("/"):
-            raise ValueError(f"SQLite path must be absolute, got {path!r}")
-        # The connection is stored and looked up under ``database`` (the Neo4j
-        # node name, and the Vault secret key), while the connector reports the
-        # file stem. Letting the two differ would leave the Connections page and
-        # the ingested database naming the same connection differently.
-        stem = PurePosixPath(path).stem
-        database = str(connection.get("database") or "").strip()
-        if database and database != stem:
-            raise ValueError(
-                f"SQLite database name must match the file name: expected {stem!r}, "
-                f"got {database!r}"
-            )
-        # The path travels through ``urlparse`` + ``unquote`` on the way back, so
-        # a '#' or '?' in it would be read as a fragment or query and truncate
-        # the name, and a literal '%20' would decode to a space.
-        return f"sqlite://{quote(path)}"
 
     raise ValueError(f"Unsupported connection type: {conn_type!r}")

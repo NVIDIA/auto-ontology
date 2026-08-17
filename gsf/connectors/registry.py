@@ -212,17 +212,7 @@ def get_connectors() -> list[SQLDatabase]:
         loaded: list[SQLDatabase] = []
         seen_database_names: set[str] = set()
         for cs, schemas in specs:
-            # One unreachable connection must not cost every other database its
-            # connector: a wrong password, an expired token, or a SQLite file
-            # that is missing from this container would otherwise raise here and
-            # leave the whole deployment with nothing to query.
-            try:
-                connector = create_connector(cs, schemas=schemas)
-            except Exception:
-                logger.exception(
-                    "Skipping connection that failed to initialize: %s", _redact(cs)
-                )
-                continue
+            connector = create_connector(cs, schemas=schemas)
             database_name = connector.database_name
             if database_name in seen_database_names:
                 logger.warning(

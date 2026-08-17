@@ -3,14 +3,12 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import base64
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import pytest
 
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.snowflake import _parse_connection_string
-from gsf.connectors.sqlite import _sqlite_path_from_connection_string
 
 PEM = (
     "-----BEGIN PRIVATE KEY-----\n"
@@ -114,46 +112,3 @@ def test_round_trip_reaches_the_driver_kwargs() -> None:
     # key itself -- proving the value arrived intact rather than being mangled.
     with pytest.raises(ValueError, match="could not be parsed"):
         _parse_connection_string(build_connection_string(connection))
-
-
-def test_sqlite_path_becomes_a_uri_the_connector_can_parse() -> None:
-    result = build_connection_string(
-        {"type": "sqlite", "database": "rs", "path": "/data/rs.sqlite"}
-    )
-
-    assert result == "sqlite:///data/rs.sqlite"
-    assert _sqlite_path_from_connection_string(result) == Path("/data/rs.sqlite")
-
-
-@pytest.mark.parametrize(
-    "path",
-    [
-        "/data/rs (copy).sqlite",
-        "/data/q?a.sqlite",
-        "/data/tag#1.sqlite",
-        "/da ta/%20.sqlite",
-    ],
-)
-def test_sqlite_path_survives_characters_a_uri_would_eat(path: str) -> None:
-    """A '?' or '#' would otherwise start a query/fragment and truncate the path."""
-    result = build_connection_string({"type": "sqlite", "path": path})
-
-    assert _sqlite_path_from_connection_string(result) == Path(path)
-
-
-def test_sqlite_rejects_a_database_name_that_is_not_the_file_name() -> None:
-    """The connection is stored under ``database``; the connector reports the stem."""
-    with pytest.raises(ValueError, match="must match the file name"):
-        build_connection_string(
-            {"type": "sqlite", "database": "regional_sales", "path": "/data/rs.sqlite"}
-        )
-
-
-def test_sqlite_requires_a_path() -> None:
-    with pytest.raises(ValueError, match="path"):
-        build_connection_string({"type": "sqlite", "database": "regional_sales"})
-
-
-def test_sqlite_rejects_a_relative_path() -> None:
-    with pytest.raises(ValueError, match="absolute"):
-        build_connection_string({"type": "sqlite", "path": "rs.sqlite"})

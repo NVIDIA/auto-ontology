@@ -183,15 +183,6 @@ class SQLiteDatabase(SQLDatabase):
                 )
         return pd.DataFrame(rows)
 
-    def ping(self) -> None:
-        """Verify the file is readable as a SQLite database.
-
-        The connection test in the settings UI calls this on connectors that
-        cannot enumerate schemas, which is every file-backed one. Opening the
-        file succeeds even when it is not a database, so read the catalog.
-        """
-        self._conn.execute("SELECT name FROM sqlite_master LIMIT 1").fetchone()
-
     def close(self) -> None:
         with self._conns_lock:
             for conn in self._all_conns:
