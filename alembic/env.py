@@ -115,10 +115,16 @@ def run_migrations_online() -> None:
         # schema. Every unqualified `CREATE TABLE` from any other tool sharing
         # this database then lands in `gsf` instead of `public`.
         #
-        # That breaks Prisma, which owns `public`: its tables were created in
-        # `gsf`, so the next `db push` found `public` empty, tried to create them
+        # That is how it first broke Prisma: its tables were created in `gsf`, so
+        # the next `db push` found its own schema empty, tried to create them
         # again, and failed with `relation "conversations" already exists` --
         # leaving the frontend blocked forever on its wait-for-schema probe.
+        #
+        # Prisma no longer relies on this: it names its schema explicitly in the
+        # connection URL (`?schema=frontend`, see `frontend/prisma.config.ts`), so
+        # it is now immune to whatever the search_path happens to be. The pin
+        # stays anyway -- it is the general fix, and it protects the next tool to
+        # share this database, which will not have thought about any of this.
         #
         # Pinning the role's search_path to `public` restores the behaviour every
         # other consumer had before this schema existed. GSF itself is unaffected:

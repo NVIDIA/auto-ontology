@@ -1,6 +1,6 @@
 datasource db {
   provider = "postgresql"
-  schemas  = ["public"]
+  schemas  = ["frontend"]
 }
 
 generator client {
@@ -19,7 +19,7 @@ model Conversation {
 
   @@index([user_id])
   @@map("conversations")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Message {
@@ -34,7 +34,7 @@ model Message {
 
   @@index([conversation_id, created_at])
   @@map("messages")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Prompt {
@@ -42,7 +42,7 @@ model Prompt {
   content String @default("")
 
   @@map("prompts")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // Generic key/value application settings (e.g. feature flags). Read by the
@@ -59,7 +59,7 @@ model Configuration {
   updated_at DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("configurations")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Acronym {
@@ -70,7 +70,7 @@ model Acronym {
   updated_at  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("acronyms")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model ConversationAnalytics {
@@ -86,7 +86,7 @@ model ConversationAnalytics {
 
   @@index([user_id])
   @@map("conversation_analytics")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // Auto generated from https://better-auth.com/docs/concepts/database#generating-schema
@@ -111,7 +111,7 @@ model User {
 
   @@unique([email])
   @@map("user")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Session {
@@ -129,7 +129,7 @@ model Session {
   @@unique([token])
   @@index([userId])
   @@map("session")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Account {
@@ -150,7 +150,7 @@ model Account {
 
   @@index([userId])
   @@map("account")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Verification {
@@ -163,7 +163,7 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model SsoProvider {
@@ -179,7 +179,7 @@ model SsoProvider {
 
   @@unique([providerId])
   @@map("ssoProvider")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // API tokens for machine-to-machine access (scripts, CI, notebooks). Owned and
@@ -226,5 +226,5 @@ model Apikey {
   @@index([referenceId])
   @@index([key])
   @@map("apikey")
-  @@schema("public")
+  @@schema("frontend")
 }
