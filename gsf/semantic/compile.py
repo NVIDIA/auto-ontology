@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from gsf.semantic.bridge_tables import build_bridge_tables_sql_attributes
 from gsf.semantic.domain import DomainSummary, load_domain_summary
@@ -25,6 +26,7 @@ def run_semantic_compilation(
     """
     summary = domain_summary or load_domain_summary(database_name)
 
+    started = time.monotonic()
     embedder = build_semantic_embedder(database_name, reset=False)
 
     logger.info("=" * 60)
@@ -63,5 +65,24 @@ def run_semantic_compilation(
     logger.info("=" * 60)
     bridge_table_count = build_bridge_tables_sql_attributes(database_name)
     logger.info("Bridge tables built: %d", bridge_table_count)
+
+    # One line carrying every stage's result. Until now the last thing a
+    # completed compilation logged was the bridge-table count, which is a stage
+    # result and not a verdict — there was no way to tell a finished run from one
+    # that died after the bridge-table stage. Every stage above propagates its
+    # exceptions, so reaching this means all four stages completed.
+    logger.info("=" * 60)
+    logger.info(
+        "Semantic calculation finished successfully (database=%r) — "
+        "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
+        "%d bridge table(s) in %.1fs",
+        database_name,
+        count,
+        fk_count,
+        attr_count,
+        bridge_table_count,
+        time.monotonic() - started,
+    )
+    logger.info("=" * 60)
 
     return count

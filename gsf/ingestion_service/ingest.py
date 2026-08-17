@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from contextlib import contextmanager
 from typing import Any, Iterator
 
@@ -44,6 +45,18 @@ def _shared_connection(connector: SQLDatabase) -> Iterator[None]:
         yield
 
 
+def _row_count(frame: Any) -> int:
+    """Row count for a possibly-``None`` DataFrame.
+
+    Kept defensive on purpose: this only feeds a log line, and a completion log
+    that raises would turn a successful ingest into a failed one.
+    """
+    try:
+        return 0 if frame is None else len(frame)
+    except TypeError:
+        return 0
+
+
 def run_ingest(connector: SQLDatabase) -> None:
     """Extract, embed, and persist a connector's tabular catalog.
 
@@ -62,6 +75,9 @@ def run_ingest(connector: SQLDatabase) -> None:
     database_name = connector.database_name
     embed_params = get_embed_params()
 
+    started = time.monotonic()
+    logger.info("Data ingestion started for database %s", database_name)
+
     with _shared_connection(connector):
         tables_df, columns_df = ingest_catalog(connector)
 
@@ -70,13 +86,35 @@ def run_ingest(connector: SQLDatabase) -> None:
     )
     result_df = batch_embed(embed_rows, embed_params)
 
+    rows_written = 0
     if result_df is not None and not result_df.empty:
+        rows_written = len(result_df)
         data_vdb = get_data_vdb(database_name=database_name, reset=True)
         ingest_op = IngestVdbOperator(vdb=data_vdb)
         ingest_op(result_df.to_dict(orient="records"))
+        logger.info("Tabular ingest result: %d rows written to pgvector", rows_written)
+    else:
+        # Previously silent, which read exactly like a successful embed. An empty
+        # result is normal for a catalog that has not changed, but it is also what
+        # a broken embed step produces, so it is worth a line either way.
         logger.info(
-            f"Tabular ingest result: {len(result_df)} rows written to pgvector",
+            "No embedding rows produced for database %s — nothing written to "
+            "pgvector (expected when the catalog is unchanged)",
+            database_name,
         )
+
+    # Only reached when every step above succeeded: each one raises rather than
+    # returning a failure, and nothing here catches. So this line means the run
+    # is genuinely complete, not merely over.
+    logger.info(
+        "Data ingestion finished successfully for database %s — "
+        "%d table(s), %d column(s), %d embedding row(s) in %.1fs",
+        database_name,
+        _row_count(tables_df),
+        _row_count(columns_df),
+        rows_written,
+        time.monotonic() - started,
+    )
 
 
 def trigger_ingest(connection: dict[str, Any]) -> None:
