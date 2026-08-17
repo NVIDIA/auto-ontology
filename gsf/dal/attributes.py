@@ -360,6 +360,12 @@ def fetch_attr_column_contexts(
 # ---------------------------------------------------------------------------
 
 
+#: The FK target side of the join. Aliased because `catalog_column` and
+#: `catalog_table` already appear as the *source* side of the same statement.
+_fk_target_column = s.catalog_column.alias("fk_target_column")
+_fk_target_table = s.catalog_table.alias("fk_target_table")
+
+
 def find_unlinked_fk_columns(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -379,15 +385,30 @@ def find_unlinked_fk_columns(
             s.catalog_column.c.name,
             s.catalog_column.c.description,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
             s.column_foreign_key.c.target_column_id.label("fk_target_col_id"),
+            # The FK target's *table*, not just its column: `resolve_semantic_fks`
+            # skips a candidate whose target table is the source table, which it
+            # cannot tell without this.
+            _fk_target_table.c.id.label("fk_target_table_id"),
         )
         .select_from(
             s.catalog_column.join(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
-            ).outerjoin(
+            )
+            .outerjoin(
                 s.column_foreign_key,
                 s.column_foreign_key.c.source_column_id == s.catalog_column.c.id,
+            )
+            .outerjoin(
+                _fk_target_column,
+                _fk_target_column.c.id == s.column_foreign_key.c.target_column_id,
+            )
+            .outerjoin(
+                _fk_target_table,
+                _fk_target_table.c.id == _fk_target_column.c.table_id,
             )
         )
         .where(

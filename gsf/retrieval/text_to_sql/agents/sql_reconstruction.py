@@ -33,10 +33,8 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
-    format_tables_for_prompt,
-)
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import (
     build_evidence_hints_block,

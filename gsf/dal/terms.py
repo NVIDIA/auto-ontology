@@ -558,6 +558,9 @@ def fetch_all_terms_and_attributes(
             s.column_attribute.c.source_column,
             s.catalog_column.c.name.label("column_name"),
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
             s.column_attribute.c.id,
             s.catalog_schema.c.name.label("schema_name"),
         )
@@ -859,6 +862,9 @@ def _embedding_attrs_for_table(table_id: str):
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
             s.column_attribute.c.id,
             s.catalog_schema.c.name.label("schema_name"),
         )
@@ -953,6 +959,9 @@ def fetch_term_and_column_attributes_for_embedding(
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
             s.column_attribute.c.id,
         )
         .select_from(
@@ -967,6 +976,13 @@ def fetch_term_and_column_attributes_for_embedding(
             .outerjoin(
                 s.catalog_column,
                 s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+            )
+            # Outer, like the join above it: an attribute need not reach a
+            # column, and an inner join here would drop those attributes
+            # entirely rather than leaving their table fields null.
+            .outerjoin(
+                s.catalog_table,
+                s.catalog_table.c.id == s.catalog_column.c.table_id,
             )
         )
         .where(s.column_attribute_term.c.term_id == term_id)
@@ -995,6 +1011,9 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
             s.column_attribute.c.term_name,
             s.column_attribute.c.source_column,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
             s.column_attribute.c.id,
         )
         .select_from(

@@ -210,6 +210,14 @@ class PostgresVDB(VDB):
         where = kwargs.get("where") or {}
         labels = _requested_labels(where, self.labels)
         database_name = where.get("database_name") or self.database_name
+        # Anything the filter names beyond label/database_name is matched
+        # against the stored metadata -- `is_unique`, for instance, which
+        # semantic FK inference uses to keep candidates to unique columns.
+        extra = {
+            key: value
+            for key, value in where.items()
+            if key not in {"label", "database_name"}
+        }
 
         return [
             entity_store.search(
@@ -217,6 +225,7 @@ class PostgresVDB(VDB):
                 labels=labels,
                 top_k=top_k,
                 database_name=database_name,
+                extra_filters=extra,
             )
             for query in queries
         ]

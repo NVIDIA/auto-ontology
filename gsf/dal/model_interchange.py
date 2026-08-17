@@ -1007,7 +1007,9 @@ def _import_catalog(
                         description=column.description,
                         data_type=column.type,
                         sample_values=column.sample_values,
+                        is_unique=column.is_unique,
                         table_yaml_id=table.id,
+                        table_name=table.name,
                         schema_name=schema.name,
                         database_name=schema_db_name,
                     )
@@ -1319,6 +1321,15 @@ def _import_column_attributes(
         live_term_id = _remap(id_map, term.id, kind="term")
         for attr in term.columns_attributes:
             col_ctx = column_meta.get(attr.column_id)
+            # Deliberately '' when the column is unknown: the schema keeps
+            # table_id NOT NULL but not a foreign key, exactly so this import
+            # stays legal. Bound once here because the embedding context needs
+            # the same value -- computing it twice is how the two drifted apart.
+            live_table_id = (
+                _remap(id_map, col_ctx.table_yaml_id, kind="column attribute table")
+                if col_ctx
+                else ""
+            )
             attr_items.append(
                 (
                     attr.id,
@@ -1328,18 +1339,7 @@ def _import_column_attributes(
                         "source": SEMANTIC_SOURCE,
                         "term_name": term.name,
                         "source_column": col_ctx.name if col_ctx else "",
-                        # Deliberately '' when the column is unknown: the schema
-                        # keeps table_id NOT NULL but not a foreign key, exactly
-                        # so this import stays legal.
-                        "table_id": (
-                            _remap(
-                                id_map,
-                                col_ctx.table_yaml_id,
-                                kind="column attribute table",
-                            )
-                            if col_ctx
-                            else ""
-                        ),
+                        "table_id": live_table_id,
                     },
                 ),
             )
@@ -1348,6 +1348,7 @@ def _import_column_attributes(
                 "term": term,
                 "col_ctx": col_ctx,
                 "live_term_id": live_term_id,
+                "live_table_id": live_table_id,
             }
 
     attr_results = _resolve_entities_batch(s.column_attribute, attr_items)
@@ -1380,6 +1381,9 @@ def _import_column_attributes(
                     description=attr.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
+                    table_id=ctx["live_table_id"],
+                    table_name=col_ctx.table_name,
+                    is_unique=col_ctx.is_unique,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
                 ),

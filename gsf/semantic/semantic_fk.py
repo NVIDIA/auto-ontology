@@ -10,9 +10,10 @@ Algorithm
       create SEMANTIC_FK directly.
    b. **LLM / VDB fallback** — if there is no declared FK, embed the column
       context, search the *semantic* VDB for the top-5 most similar
-      ColumnAttribute records, ask the LLM to pick the best match, and create
-      SEMANTIC_FK when a match is found.  The hit's ``metadata["id"]`` is the
-      ColumnAttribute id directly — no additional graph lookup needed.
+        ColumnAttribute records, and ask the LLM to pick the best match. If the
+        LLM abstains, probe the candidate columns for the FK's sample values.
+        The hit's ``metadata["id"]`` is the ColumnAttribute id directly — no
+        additional lookup needed.
 """
 
 from __future__ import annotations
@@ -23,17 +24,22 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from nemo_retriever.graph.retriever import Retriever
+from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from sqlglot import exp
 
+from gsf.connectors import get_connectors
 from gsf.dal.attributes import (
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
 )
+from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
 )
 from gsf.utils.model_config import resolve
+from gsf.utils.sample_values import parse_sample_values
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -43,6 +49,10 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
+_SQLGLOT_DIALECTS = {
+    "postgresql": "postgres",
+    "postgres": "postgres",
+}
 
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
@@ -74,13 +84,28 @@ def resolve_semantic_fks(database_name: str) -> int:
     )
 
     declared_written = 0
-    llm_queue: list[dict[str, Any]] = []
+    total_candidates = len(candidates)
+    llm_queue: list[tuple[int, dict[str, Any]]] = []
 
-    for col in candidates:
+    def _log_start(index: int, col: dict[str, Any]) -> None:
+        logger.info(
+            "Resolving semantic FK edges… (%d/%d): %s.%s",
+            index,
+            total_candidates,
+            col.get("table_name"),
+            col.get("name"),
+        )
+
+    for index, col in enumerate(candidates, start=1):
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
+            if col.get("fk_target_table_id") == col.get("table_id"):
+                _log_start(index, col)
+                # resolve_semantic_fks [declared]: rejected same-table target
+                continue
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
+                _log_start(index, col)
                 merge_semantic_fk(col["id"], attr_id)
                 declared_written += 1
                 logger.debug(
@@ -94,12 +119,12 @@ def resolve_semantic_fks(database_name: str) -> int:
                     "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
                     fk_target_col_id,
                 )
-                llm_queue.append(col)
+                llm_queue.append((index, col))
         else:
-            llm_queue.append(col)
+            llm_queue.append((index, col))
 
     logger.info(
-        "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for LLM",
+        "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for inference",
         declared_written,
         len(llm_queue),
     )
@@ -115,16 +140,18 @@ def resolve_semantic_fks(database_name: str) -> int:
             len(llm_queue),
         )
         return declared_written
+    connector = _resolve_connector(database_name)
 
-    llm_written = 0
+    inferred_written = 0
 
-    def _resolve_one(col: dict[str, Any]) -> bool:
+    def _resolve_one(index: int, col: dict[str, Any]) -> bool:
+        _log_start(index, col)
         try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name)
+            attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
                 logger.debug(
-                    "resolve_semantic_fks [llm]: %s.%s → attr %s",
+                    "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
                     col.get("name"),
                     attr_id,
@@ -138,16 +165,19 @@ def resolve_semantic_fks(database_name: str) -> int:
         return False
 
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {pool.submit(_resolve_one, col): col for col in llm_queue}
+        futures = {
+            pool.submit(_resolve_one, index, col): col for index, col in llm_queue
+        }
         for future in as_completed(futures):
             if future.result():
-                llm_written += 1
+                inferred_written += 1
 
-    total = declared_written + llm_written
+    total = declared_written + inferred_written
     logger.info(
-        "resolve_semantic_fks: done — %d declared + %d LLM = %d total SEMANTIC_FK edge(s)",
+        "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
+        "SEMANTIC_FK edge(s)",
         declared_written,
-        llm_written,
+        inferred_written,
         total,
     )
     return total
@@ -156,6 +186,16 @@ def resolve_semantic_fks(database_name: str) -> int:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _resolve_connector(database_name: str) -> SQLDatabase | None:
+    """Return the configured connector matching *database_name*."""
+    target = database_name.casefold()
+    for connector in get_connectors():
+        name = getattr(connector, "database_name", None)
+        if isinstance(name, str) and name.casefold() == target:
+            return connector
+    return None
 
 
 def _build_retriever(database_name: str) -> Retriever | None:
@@ -206,6 +246,7 @@ def _resolve_via_vdb(
     col: dict[str, Any],
     retriever: Retriever,
     database_name: str,
+    connector: SQLDatabase | None = None,
 ) -> str | None:
     """Search the semantic VDB for a matching ColumnAttribute and return its id.
 
@@ -222,6 +263,7 @@ def _resolve_via_vdb(
         "where": {
             "label": "ColumnAttribute",
             "database_name": database_name,
+            "is_unique": True,
         }
     }
     full_query = _build_query_text(col)
@@ -238,10 +280,133 @@ def _resolve_via_vdb(
             seen_ids.add(hit_id)
             merged.append(hit)
 
+    source_table_id = col.get("table_id")
+    if source_table_id and merged:
+        merged = [
+            hit
+            for hit in merged
+            if (hit.get("metadata") or {}).get("table_id")
+            and (hit.get("metadata") or {}).get("table_id") != source_table_id
+        ]
+
     if not merged:
         return None
 
-    return _llm_pick_hit(col, merged)
+    selected = _llm_pick_hit(col, merged)
+    if selected:
+        return selected
+    return _match_hit_by_sample_values(col, merged, connector)
+
+
+def _match_hit_by_sample_values(
+    col: dict[str, Any],
+    hits: list[dict[str, Any]],
+    connector: SQLDatabase | None,
+) -> str | None:
+    """Choose the best VDB hit whose physical column contains every FK sample."""
+    samples = _distinct_samples(col.get("sample_values"))
+    if connector is None or not samples:
+        return None
+
+    source_column = str(col.get("name") or "").lower()
+    if not source_column:
+        return None
+    matching_name_hits = [
+        hit
+        for hit in hits
+        if str((hit.get("metadata") or {}).get("source_column") or "").lower()
+        == source_column
+    ]
+    if not matching_name_hits:
+        return None
+
+    matches: list[dict[str, Any]] = []
+    with ProbeExecutor(connector, max_calls=len(matching_name_hits)) as executor:
+        for hit in matching_name_hits:
+            sql = _sample_match_sql(
+                hit.get("metadata") or {},
+                samples,
+                getattr(connector, "dialect", None),
+            )
+            if not sql:
+                continue
+            result = executor.run(sql, purpose="semantic FK sample match")
+            if not result["ok"]:
+                continue
+            matched_values = {
+                str(next(iter(row.values())))
+                for row in (result.get("rows") or [])
+                if row and next(iter(row.values())) is not None
+            }
+            if set(samples).issubset(matched_values):
+                matches.append(hit)
+
+    if not matches:
+        return None
+
+    best = min(matches, key=_hit_score)
+    metadata = best.get("metadata") or {}
+    selected = metadata.get("id")
+    if selected:
+        logger.info(
+            "resolve_semantic_fks [sql-fallback]: %s.%s matched %d sample value(s) "
+            "in %s.%s.%s",
+            col.get("table_name"),
+            col.get("name"),
+            len(samples),
+            metadata.get("schema_name") or "",
+            metadata.get("table_name") or "",
+            metadata.get("source_column") or "",
+        )
+    return selected
+
+
+def _distinct_samples(raw: Any) -> list[str]:
+    """Parse, deduplicate, and preserve the order of stored sample values."""
+    values = parse_sample_values(raw) or []
+    return list(dict.fromkeys(value for value in values if value is not None))
+
+
+def _sample_match_sql(
+    metadata: dict[str, Any],
+    samples: list[str],
+    dialect: str | None,
+) -> str | None:
+    """Build a dialect-quoted, bounded query for candidate sample membership."""
+    table_name = metadata.get("table_name")
+    column_name = metadata.get("source_column")
+    if not table_name or not column_name or not samples:
+        return None
+
+    schema_name = metadata.get("schema_name")
+    table = exp.Table(
+        this=exp.to_identifier(str(table_name)),
+        db=exp.to_identifier(str(schema_name)) if schema_name else None,
+    )
+    column = exp.column(str(column_name))
+    text_column = exp.cast(column, "TEXT")
+    query = (
+        exp.select(text_column.copy().as_("matched_value"))
+        .distinct()
+        .from_(table)
+        .where(
+            text_column.copy().isin(*(exp.Literal.string(value) for value in samples))
+        )
+        .limit(len(samples))
+    )
+    dialect_name = _SQLGLOT_DIALECTS.get((dialect or "").lower(), dialect or None)
+    try:
+        return query.sql(dialect=dialect_name, identify=True)
+    except ValueError:
+        return query.sql(identify=True)
+
+
+def _hit_score(hit: dict[str, Any]) -> float:
+    """Return VDB distance, treating missing or malformed scores as worst."""
+    try:
+        return float(hit.get("score", float("inf")))
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def _llm_pick_hit(

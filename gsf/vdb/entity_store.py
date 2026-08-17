@@ -32,6 +32,7 @@ import logging
 from typing import Any, Iterable
 
 from pgvector.sqlalchemy import HALFVEC, Vector
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy import (
     Text,
     cast,
@@ -126,6 +127,26 @@ def _flatten(records: Iterable) -> Iterable[dict]:
             yield from _flatten(item)
 
 
+#: Keys that have their own column, so they are not duplicated into the JSON.
+_PROMOTED_KEYS = frozenset({"id", "label", "database_name", "embedding"})
+
+
+def _extra_metadata(record: dict) -> dict:
+    """The producer's metadata minus what already has a column of its own.
+
+    Kept general rather than a fixed list: semantic FK inference reads
+    ``table_id`` and ``source_column`` off a hit and filters on ``is_unique``,
+    and those three arrived in a single upstream change. The next one should not
+    need a migration.
+    """
+    metadata = record.get("metadata") or {}
+    return {
+        key: value
+        for key, value in metadata.items()
+        if key not in _PROMOTED_KEYS and key != "content_metadata"
+    }
+
+
 def _record_fields(record: dict) -> tuple[str | None, str | None, str, str | None]:
     """Pull ``(id, label, text, database_name)`` out of one NV-Ingest record.
 
@@ -180,6 +201,7 @@ def write_embeddings(records: list, *, allowed_labels: Iterable[str]) -> int:
                 "embedding": vector,
                 "embedding_text": body,
                 "embedding_database_name": database_name,
+                "embedding_metadata": _extra_metadata(record),
             }
         )
 
@@ -198,6 +220,7 @@ def write_embeddings(records: list, *, allowed_labels: Iterable[str]) -> int:
                 column("embedding", Vector(EMBEDDING_DIMENSIONS)),
                 column("embedding_text", Text),
                 column("embedding_database_name", Text),
+                column("embedding_metadata", JSONB),
                 name="incoming",
             )
             .data(
@@ -207,6 +230,7 @@ def write_embeddings(records: list, *, allowed_labels: Iterable[str]) -> int:
                         row["embedding"],
                         row["embedding_text"],
                         row["embedding_database_name"],
+                        row["embedding_metadata"],
                     )
                     for row in rows
                 ]
@@ -223,6 +247,7 @@ def write_embeddings(records: list, *, allowed_labels: Iterable[str]) -> int:
                 embedding=cast(source.c.embedding, Vector(EMBEDDING_DIMENSIONS)),
                 embedding_text=source.c.embedding_text,
                 embedding_database_name=source.c.embedding_database_name,
+                embedding_metadata=cast(source.c.embedding_metadata, JSONB),
             )
             .returning(table.c.id)
         )
@@ -251,6 +276,7 @@ def search_statement(
     label: str,
     top_k: int,
     database_name: str | None,
+    extra_filters: dict | None = None,
 ):
     """The SELECT one label's search issues.
 
@@ -273,6 +299,7 @@ def search_statement(
     never to what is reported.
     """
     table = LABEL_TABLES[label]
+    extra = dict(extra_filters or {})
     approx = cast(table.c.embedding, HALFVEC(EMBEDDING_DIMENSIONS)).cosine_distance(
         cast(
             literal(vector, Vector(EMBEDDING_DIMENSIONS)),
@@ -284,6 +311,7 @@ def search_statement(
             table.c.id.label("id"),
             table.c.embedding_text.label("text"),
             table.c.embedding_database_name.label("database_name"),
+            table.c.embedding_metadata.label("metadata"),
             table.c.embedding.label("embedding"),
         )
         # Not merely an optimisation: an unembedded row would otherwise sort as
@@ -294,13 +322,24 @@ def search_statement(
     )
     if database_name:
         shortlist = shortlist.where(table.c.embedding_database_name == database_name)
+    if extra:
+        # JSONB containment, so any key the producer stored is filterable without
+        # this function needing to know its name. `@>` matches a subset, which is
+        # the same semantics the old dict filter had.
+        shortlist = shortlist.where(table.c.embedding_metadata.contains(extra))
     shortlist = shortlist.subquery()
 
     # `<=>` is cosine distance; lower is better, which matches the ordering
     # `_hits_to_semantic_rows` assumes.
     exact = shortlist.c.embedding.cosine_distance(vector).label("_distance")
     return (
-        select(shortlist.c.id, shortlist.c.text, shortlist.c.database_name, exact)
+        select(
+            shortlist.c.id,
+            shortlist.c.text,
+            shortlist.c.database_name,
+            shortlist.c.metadata,
+            exact,
+        )
         .order_by(exact)
         .limit(top_k)
     )
@@ -312,6 +351,7 @@ def search(
     labels: Iterable[str],
     top_k: int = 10,
     database_name: str | None = None,
+    extra_filters: dict | None = None,
 ) -> list[dict]:
     """Cosine k-NN over the tables owning *labels*, best-first.
 
@@ -331,13 +371,21 @@ def search(
         if label not in LABEL_TABLES:
             continue
         statement = search_statement(
-            vector, label=label, top_k=top_k, database_name=database_name
+            vector,
+            label=label,
+            top_k=top_k,
+            database_name=database_name,
+            extra_filters=extra_filters,
         )
         for row in store().query_read(statement):
             hits.append(
                 {
                     "text": row["text"] or "",
+                    # Stored metadata first, so the columns below always win:
+                    # `id` and `label` are identity and must not be shadowed by
+                    # a stale copy a producer happened to include.
                     "metadata": {
+                        **(row["metadata"] or {}),
                         "id": row["id"],
                         "label": label,
                         "database_name": row["database_name"],

@@ -344,6 +344,11 @@ nonstandard in isolation are still valid if they follow
 those custom analyses — do NOT mark them as critical issues
 solely for that reason.
 
+When AUTHORITATIVE JOIN PATHS are provided, they come from
+the verified semantic model. If the generated SQL uses a
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
+
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
 Only fail validation for serious, critical errors that
@@ -519,23 +524,30 @@ def create_intent_validation_prompt(
     entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
+    join_paths: str = "",
 ) -> str:
     question_block = format_dual_question_block(original_question, sanitized_question)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
+    join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
+{join_paths_block}
 Generated SQL Query:
 ```sql
 {sql_code}
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible join paths that could still answer it are OK — including different fields/roles for the same concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
+1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible \
+join paths that could still answer it are OK — including different fields/roles for the same \
+concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
-If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.
+If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
+definitions — do not flag the generated query as invalid merely for following those patterns.
+If AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows one of those verified paths.
 
 Provide your analysis."""
 

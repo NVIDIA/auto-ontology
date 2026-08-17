@@ -155,7 +155,14 @@ EMBEDDING_DIMENSIONS = 2048
 #: user-facing properties. `select(table)` returns every column, so any read
 #: that means "all of this node's properties" has to subtract these -- otherwise
 #: a node-detail API response carries 2048 floats (~8KB) per row.
-INTERNAL_COLUMNS = frozenset({"embedding", "embedding_text", "embedding_database_name"})
+INTERNAL_COLUMNS = frozenset(
+    {
+        "embedding",
+        "embedding_text",
+        "embedding_database_name",
+        "embedding_metadata",
+    }
+)
 
 
 def public_columns(table) -> list:
@@ -196,6 +203,19 @@ def _embedding_columns() -> tuple[Column, ...]:
         # vector means a hit's explanation always matches why it matched.
         Column("embedding_text", Text, nullable=True),
         Column("embedding_database_name", Text, nullable=True),
+        # Whatever else the producer attached to the embedded record.
+        #
+        # The old collection stored arbitrary metadata in a JSON column, and
+        # callers rely on it: semantic FK inference filters candidates on
+        # `is_unique` and reads `table_id` / `source_column` back off each hit.
+        # Promoting those to real columns would work until the next field is
+        # added -- which is exactly what happened while this was being written --
+        # so the general shape is kept.
+        #
+        # `id`, `label` and `database_name` are deliberately *not* duplicated in
+        # here: those have real columns, and two copies of an identifier is one
+        # too many.
+        Column("embedding_metadata", JSONB, nullable=True),
     )
 
 
