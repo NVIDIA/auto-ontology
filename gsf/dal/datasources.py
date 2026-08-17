@@ -268,7 +268,14 @@ MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
+"""
+
+_FETCH_PRIMARY_KEYS_BY_IDS = f"""
+UNWIND $table_ids AS tid
+MATCH (t:{Labels.TABLE} {{id: tid}})
+WHERE t.pk IS NOT NULL
+RETURN t.id AS id, t.pk AS pk
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -390,6 +397,34 @@ def fetch_table_by_name(name: str) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def fetch_primary_keys_by_ids(table_ids: list[str]) -> dict[str, list[str]]:
+    """Return ``{table_id: [pk column, ...]}`` for the tables that declare one.
+
+    Tables without a key are absent from the result rather than present with an
+    empty list, so a caller can tell "no key recorded" from "not asked about".
+
+    Returns an empty mapping when the query fails: a caller uses this to fill in
+    what it is missing, and a failure to fill leaves it no worse off.
+    """
+    if not table_ids:
+        return {}
+    try:
+        rows = graph().query_read(_FETCH_PRIMARY_KEYS_BY_IDS, {"table_ids": table_ids})
+    except Exception:
+        logger.warning("fetch_primary_keys_by_ids: Neo4j query failed", exc_info=True)
+        return {}
+    keys: dict[str, list[str]] = {}
+    for row in rows:
+        table_id = row.get("id")
+        pk = row.get("pk")
+        if not table_id or not pk:
+            continue
+        columns = [str(pk)] if isinstance(pk, str) else [str(c) for c in pk if c]
+        if columns:
+            keys[str(table_id)] = columns
+    return keys
+
+
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     """Return Table rows with nested column summaries for the given IDs."""
     if not table_ids:
@@ -413,6 +448,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                "primary_key": row.get("pk") or [],
                 "columns": cols,
             }
         )

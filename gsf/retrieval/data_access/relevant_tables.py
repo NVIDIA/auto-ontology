@@ -21,6 +21,7 @@ import re
 from typing import TYPE_CHECKING
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.dal.datasources import fetch_primary_keys_by_ids
 from gsf.retrieval.data_access.semantic_search import (
     search_semantic_index,
 )
@@ -161,6 +162,39 @@ def dedupe_merge_relevant_tables(tables: list[dict]) -> list[dict]:
     return merged
 
 
+def restore_primary_keys(tables: list[dict]) -> list[dict]:
+    """Fill in the primary key of any table that arrived without one.
+
+    A table reaches here from the vector index, which carries a hit's text and a
+    few metadata fields and no key, so a key the source declared is absent by the
+    time these dicts are built. Nothing downstream can recover it: an edge is
+    oriented towards a primary key and a prediction names its entity by one, so a
+    table that arrives without one is neither linkable nor predictable.
+
+    The catalog is asked instead, in one round trip for the whole list, and only
+    for the tables still missing a key -- a caller that already supplied one has
+    the richer answer.
+    """
+    missing = [
+        str(t["id"])
+        for t in tables
+        if t.get("id") is not None and not t.get("primary_key")
+    ]
+    if not missing:
+        return tables
+    keys = fetch_primary_keys_by_ids(missing)
+    if not keys:
+        return tables
+    for table in tables:
+        table_id = table.get("id")
+        if table_id is None or table.get("primary_key"):
+            continue
+        columns = keys.get(str(table_id))
+        if columns:
+            table["primary_key"] = columns
+    return tables
+
+
 def get_relevant_tables_from_candidates(
     candidates: list[dict],
 ) -> list[dict]:
@@ -198,7 +232,9 @@ def get_relevant_tables_from_candidates(
     if not table_by_id:
         return []
 
-    return [_normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id]
+    return restore_primary_keys(
+        [_normalize_table_to_relevant_shape(table_by_id[tid]) for tid in table_by_id]
+    )
 
 
 def get_relevant_tables(
@@ -245,4 +281,4 @@ def get_relevant_tables(
         )
         relevant_tables_list.append(entry)
 
-    return relevant_tables_list
+    return restore_primary_keys(relevant_tables_list)

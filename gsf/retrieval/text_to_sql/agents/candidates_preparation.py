@@ -42,6 +42,7 @@ from gsf.dal.terms import fetch_term_synonyms
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
+    restore_primary_keys,
     get_relevant_tables_from_candidates,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
@@ -347,6 +348,8 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
+
+        relevant_tables = restore_primary_keys(relevant_tables)
 
         if target_db:
             relevant_tables = [
