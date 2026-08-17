@@ -19,6 +19,7 @@ credentials in a committed file.
 
 from __future__ import annotations
 
+import logging
 from logging.config import fileConfig
 
 from alembic import context
@@ -39,6 +40,8 @@ config.set_main_option("sqlalchemy.url", sqlalchemy_url().replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+logger = logging.getLogger(__name__)
 
 target_metadata = METADATA
 
@@ -105,6 +108,38 @@ def run_migrations_online() -> None:
         # Alembic tries to stamp anything -- including on a completely blank
         # database, where migration 0001 has not run yet.
         connection.exec_driver_sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
+
+        # Creating a schema named `gsf` is not neutral when the Postgres role is
+        # also called `gsf`: the default `search_path` is `"$user", public`, so
+        # `"$user"` stops resolving to nothing and starts resolving to *our*
+        # schema. Every unqualified `CREATE TABLE` from any other tool sharing
+        # this database then lands in `gsf` instead of `public`.
+        #
+        # That breaks Prisma, which owns `public`: its tables were created in
+        # `gsf`, so the next `db push` found `public` empty, tried to create them
+        # again, and failed with `relation "conversations" already exists` --
+        # leaving the frontend blocked forever on its wait-for-schema probe.
+        #
+        # Pinning the role's search_path to `public` restores the behaviour every
+        # other consumer had before this schema existed. GSF itself is unaffected:
+        # its MetaData carries `schema=gsf`, so the DAL qualifies every reference
+        # and never depends on the search_path.
+        # Unconditional, and safe: `public` is the default anyway, so this is a
+        # no-op unless the collision above applies. Guarding on a detected
+        # condition proved unreliable -- the check evaluated inside the same
+        # transaction as the CREATE SCHEMA and did not fire -- and the cost of
+        # simply always pinning is nil, because nothing in GSF reads the
+        # search_path: the MetaData carries `schema=gsf` and the DAL qualifies
+        # every reference.
+        connection.exec_driver_sql(
+            "DO $$ BEGIN "
+            # `%%I`, not `%I`: psycopg treats a bare % as a parameter placeholder
+            # and rejects the statement before Postgres ever sees it.
+            "EXECUTE format('ALTER ROLE %%I SET search_path TO public', current_user); "
+            "EXCEPTION WHEN insufficient_privilege THEN NULL; "
+            "END $$;"
+        )
+
         connection.commit()
 
         _configure(connection=connection)
