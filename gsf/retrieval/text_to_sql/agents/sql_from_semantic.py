@@ -195,8 +195,8 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
             table_parts.append(f"  Description: {table_description}")
 
         # Primary key
-        if "primary_key" in table:
-            table_parts.append(f"  Primary Key: {table['primary_key']}")
+        if "pk" in table:
+            table_parts.append(f"  Primary Key: {table['pk']}")
 
         columns = table.get("columns")
         if not isinstance(columns, list):
