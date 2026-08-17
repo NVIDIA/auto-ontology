@@ -79,7 +79,7 @@ def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
     return f"{prefix}.{column}"
 
 
-def _format_semantic_context(
+def format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
@@ -392,7 +392,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             if primary_attribute:
                 join_paths = (
                     "## Semantic Hints & Join Paths\n"
-                    + _format_semantic_context(
+                    + format_semantic_context(
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
