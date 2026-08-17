@@ -83,16 +83,28 @@ def resolve_semantic_fks(database_name: str) -> int:
     )
 
     declared_written = 0
-    llm_queue: list[dict[str, Any]] = []
+    total_candidates = len(candidates)
+    llm_queue: list[tuple[int, dict[str, Any]]] = []
 
-    for col in candidates:
+    def _log_start(index: int, col: dict[str, Any]) -> None:
+        logger.info(
+            "Resolving semantic FK edges… (%d/%d): %s.%s",
+            index,
+            total_candidates,
+            col.get("table_name"),
+            col.get("name"),
+        )
+
+    for index, col in enumerate(candidates, start=1):
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
             if col.get("fk_target_table_id") == col.get("table_id"):
+                _log_start(index, col)
                 # resolve_semantic_fks [declared]: rejected same-table target
                 continue
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
+                _log_start(index, col)
                 merge_semantic_fk(col["id"], attr_id)
                 declared_written += 1
                 logger.debug(
@@ -106,9 +118,9 @@ def resolve_semantic_fks(database_name: str) -> int:
                     "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
                     fk_target_col_id,
                 )
-                llm_queue.append(col)
+                llm_queue.append((index, col))
         else:
-            llm_queue.append(col)
+            llm_queue.append((index, col))
 
     logger.info(
         "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for inference",
@@ -131,7 +143,8 @@ def resolve_semantic_fks(database_name: str) -> int:
 
     inferred_written = 0
 
-    def _resolve_one(col: dict[str, Any]) -> bool:
+    def _resolve_one(index: int, col: dict[str, Any]) -> bool:
+        _log_start(index, col)
         try:
             attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
             if attr_id:
@@ -151,7 +164,9 @@ def resolve_semantic_fks(database_name: str) -> int:
         return False
 
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {pool.submit(_resolve_one, col): col for col in llm_queue}
+        futures = {
+            pool.submit(_resolve_one, index, col): col for index, col in llm_queue
+        }
         for future in as_completed(futures):
             if future.result():
                 inferred_written += 1
@@ -292,9 +307,21 @@ def _match_hit_by_sample_values(
     if connector is None or not samples:
         return None
 
+    source_column = str(col.get("name") or "").lower()
+    if not source_column:
+        return None
+    matching_name_hits = [
+        hit
+        for hit in hits
+        if str((hit.get("metadata") or {}).get("source_column") or "").lower()
+        == source_column
+    ]
+    if not matching_name_hits:
+        return None
+
     matches: list[dict[str, Any]] = []
-    with ProbeExecutor(connector, max_calls=len(hits)) as executor:
-        for hit in hits:
+    with ProbeExecutor(connector, max_calls=len(matching_name_hits)) as executor:
+        for hit in matching_name_hits:
             sql = _sample_match_sql(
                 hit.get("metadata") or {},
                 samples,
@@ -356,11 +383,14 @@ def _sample_match_sql(
         db=exp.to_identifier(str(schema_name)) if schema_name else None,
     )
     column = exp.column(str(column_name))
+    text_column = exp.cast(column, "TEXT")
     query = (
-        exp.select(column.copy().as_("matched_value"))
+        exp.select(text_column.copy().as_("matched_value"))
         .distinct()
         .from_(table)
-        .where(column.copy().isin(*(exp.Literal.string(value) for value in samples)))
+        .where(
+            text_column.copy().isin(*(exp.Literal.string(value) for value in samples))
+        )
         .limit(len(samples))
     )
     dialect_name = _SQLGLOT_DIALECTS.get((dialect or "").lower(), dialect or None)

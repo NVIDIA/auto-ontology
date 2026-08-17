@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from gsf.semantic import semantic_fk
 from gsf.semantic.embed import _build_rows
@@ -166,7 +169,7 @@ def test_sql_fallback_selects_candidate_containing_all_samples() -> None:
 
     selected, executor = _run_sample_fallback(
         column,
-        [_hit("torrent-id", "torrent-table")],
+        [_hit("torrent-id", "torrent-table", source_column="ID")],
         _probe_result(72, 35),
     )
 
@@ -243,7 +246,26 @@ def test_sql_fallback_skips_without_samples_or_connector(
     mock_executor.assert_not_called()
 
 
-def test_sample_match_sql_quotes_physical_location_for_dialect() -> None:
+@patch("gsf.semantic.semantic_fk.ProbeExecutor")
+def test_sql_fallback_skips_candidates_with_different_column_names(
+    mock_executor: MagicMock,
+) -> None:
+    column = {
+        "name": "id",
+        "table_name": "tags",
+        "sample_values": '["1"]',
+    }
+    hit = _hit(
+        "timestamp-attr",
+        "table-2",
+        source_column="lasteditedwhen",
+    )
+
+    assert semantic_fk._match_hit_by_sample_values(column, [hit], MagicMock()) is None
+    mock_executor.assert_not_called()
+
+
+def test_sample_match_sql_quotes_location_and_compares_as_text() -> None:
     sql = semantic_fk._sample_match_sql(
         {
             "schema_name": "music",
@@ -256,5 +278,29 @@ def test_sample_match_sql_quotes_physical_location_for_dialect() -> None:
 
     assert sql is not None
     assert 'FROM "music"."torrents"' in sql
-    assert "\"id\" IN ('72', '35')" in sql
+    assert "CAST(\"id\" AS TEXT) IN ('72', '35')" in sql
     assert sql.endswith("LIMIT 2")
+
+
+def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) -> None:
+    candidates = [
+        {"id": "col-1", "name": "customer_id", "table_name": "orders"},
+        {"id": "col-2", "name": "product_id", "table_name": "order_items"},
+    ]
+    caplog.set_level(logging.INFO, logger=semantic_fk.__name__)
+
+    with (
+        patch(
+            "gsf.semantic.semantic_fk.find_unlinked_fk_columns",
+            return_value=candidates,
+        ),
+        patch("gsf.semantic.semantic_fk._build_retriever", return_value=MagicMock()),
+        patch("gsf.semantic.semantic_fk._resolve_connector", return_value=None),
+        patch("gsf.semantic.semantic_fk._resolve_via_vdb", return_value=None),
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 0
+
+    assert "Resolving semantic FK edges… (1/2): orders.customer_id" in caplog.messages
+    assert (
+        "Resolving semantic FK edges… (2/2): order_items.product_id" in caplog.messages
+    )
