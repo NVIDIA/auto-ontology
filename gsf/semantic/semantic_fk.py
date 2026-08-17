@@ -79,6 +79,9 @@ def resolve_semantic_fks(database_name: str) -> int:
     for col in candidates:
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
+            if col.get("fk_target_table_id") == col.get("table_id"):
+                # resolve_semantic_fks [declared]: rejected same-table target
+                continue
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
@@ -237,6 +240,15 @@ def _resolve_via_vdb(
         if hit_id and hit_id not in seen_ids:
             seen_ids.add(hit_id)
             merged.append(hit)
+
+    source_table_id = col.get("table_id")
+    if source_table_id and merged:
+        merged = [
+            hit
+            for hit in merged
+            if (hit.get("metadata") or {}).get("table_id")
+            and (hit.get("metadata") or {}).get("table_id") != source_table_id
+        ]
 
     if not merged:
         return None

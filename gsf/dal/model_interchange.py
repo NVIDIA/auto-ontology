@@ -1494,6 +1494,7 @@ def _import_column_attributes(
                 "term": term,
                 "col_ctx": col_ctx,
                 "live_term_id": live_term_id,
+                "live_table_id": live_table_id,
             }
 
     attr_results = _resolve_entities_batch(LABEL_COLUMN_ATTRIBUTE, attr_items)
@@ -1539,6 +1540,7 @@ def _import_column_attributes(
                     description=attr.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
+                    table_id=ctx["live_table_id"],
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
                 ),

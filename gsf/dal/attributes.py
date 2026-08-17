@@ -213,12 +213,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """,
             {"database_name": database_name},
         )
@@ -229,12 +232,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """
         )
     return result
