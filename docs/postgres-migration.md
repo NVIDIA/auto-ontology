@@ -69,7 +69,7 @@ endpoints, are still a hard error.)
 
 ## 2. ERD
 
-Everything lives in the `gsf` schema — never `public` (Prisma's) and never
+Everything lives in the `gsf` schema — never `frontend` (Prisma's) and never
 `vdb` (langchain_postgres'). Every foreign key below is `ON DELETE CASCADE`.
 
 ```
@@ -135,7 +135,7 @@ uv run alembic upgrade head
 
 **This could have been Prisma instead, and deliberately isn't.** The frontend
 already runs Prisma against the *same Postgres database* — `schema.prisma`
-declares `schemas = ["public"]` and owns the auth, conversation and
+declares `schemas = ["frontend"]` and owns the auth, conversation and
 configuration models — and Prisma's multi-schema support would happily have
 taken `gsf` as a second entry. One migration tool for the whole database is a
 real option and would have meant one `migrate` job instead of two.
@@ -146,12 +146,12 @@ of truth a Python developer edits, autogenerate diffs against that same object,
 and a backend schema change never requires touching a frontend file or running
 `pnpm`. The cost is that the two tools must stay out of each other's way — which
 is exactly what `include_object` below enforces, and why each migrator is
-scoped to its own Postgres schema (`gsf` vs `public`) rather than sharing one.
+scoped to its own Postgres schema (`gsf` vs `frontend`) rather than sharing one.
 
 Two pieces of `alembic/env.py` are load-bearing and easy to break:
 
 **`include_object` filters to the `gsf` schema.** The same database also holds
-Prisma's tables (`public`) and langchain_postgres' vector tables (`vdb`).
+Prisma's tables (`frontend`) and langchain_postgres' vector tables (`vdb`).
 Without the filter, autogenerate sees them as untracked and proposes dropping
 them. The filter **defaults to exclude**: Alembic passes tables, columns,
 indexes and constraints through the same hook and they disagree about how to
