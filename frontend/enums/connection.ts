@@ -154,7 +154,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			key: 'database',
 			label: 'Database name',
 			placeholder: 'analytics',
-			hint: 'Names the connection in the catalog. Use the file name without its extension, which is what the connector reports.',
+			hint: 'Names the connection in the catalog. Must be the file name without its extension, which is what the connector reports.',
 		},
 	],
 };

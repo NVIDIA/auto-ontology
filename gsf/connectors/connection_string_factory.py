@@ -12,6 +12,7 @@ so this module converts the structured form into the URL the connectors expect.
 from __future__ import annotations
 
 import base64
+from pathlib import PurePosixPath
 from typing import Any, Mapping
 from urllib.parse import quote
 
@@ -127,6 +128,20 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         path = _require(connection, "path")
         if not path.startswith("/"):
             raise ValueError(f"SQLite path must be absolute, got {path!r}")
-        return f"sqlite://{path}"
+        # The connection is stored and looked up under ``database`` (the Neo4j
+        # node name, and the Vault secret key), while the connector reports the
+        # file stem. Letting the two differ would leave the Connections page and
+        # the ingested database naming the same connection differently.
+        stem = PurePosixPath(path).stem
+        database = str(connection.get("database") or "").strip()
+        if database and database != stem:
+            raise ValueError(
+                f"SQLite database name must match the file name: expected {stem!r}, "
+                f"got {database!r}"
+            )
+        # The path travels through ``urlparse`` + ``unquote`` on the way back, so
+        # a '#' or '?' in it would be read as a fragment or query and truncate
+        # the name, and a literal '%20' would decode to a space.
+        return f"sqlite://{quote(path)}"
 
     raise ValueError(f"Unsupported connection type: {conn_type!r}")

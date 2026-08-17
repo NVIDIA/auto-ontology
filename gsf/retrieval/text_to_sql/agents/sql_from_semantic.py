@@ -194,8 +194,9 @@ def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -
         if table_description:
             table_parts.append(f"  Description: {table_description}")
 
-        # Primary key
-        if "pk" in table:
+        # Primary key. Tested for truth, not presence: the DAL sets ``pk`` to []
+        # for a keyless table, which would otherwise render as an empty line.
+        if table.get("pk"):
             table_parts.append(f"  Primary Key: {table['pk']}")
 
         columns = table.get("columns")
