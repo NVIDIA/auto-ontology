@@ -184,8 +184,16 @@ def _embedding_columns() -> tuple[Column, ...]:
     """
     return (
         Column("embedding", Vector(EMBEDDING_DIMENSIONS), nullable=True),
-        # The exact text that was embedded. Kept so a hit can be explained, and
-        # so re-embedding can skip rows whose text has not changed.
+        # The exact text that was embedded, returned with every hit as ``text``.
+        # Not decorative: ``generate_sql`` concatenates it into the prompt the
+        # model sees, so this is the description the LLM reasons over.
+        #
+        # Stored rather than re-rendered from the row on read. The renderer
+        # composes a table with all of its columns, so deriving it would mean a
+        # join plus an aggregation per hit -- and, more importantly, a freshly
+        # rendered string describes the entity *now*, while the vector describes
+        # it as of the last embed. Keeping the text that actually produced the
+        # vector means a hit's explanation always matches why it matched.
         Column("embedding_text", Text, nullable=True),
         Column("embedding_database_name", Text, nullable=True),
     )
