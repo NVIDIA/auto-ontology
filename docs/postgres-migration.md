@@ -69,7 +69,7 @@ endpoints, are still a hard error.)
 
 ## 2. ERD
 
-Everything lives in the `gsf` schema — never `frontend` (Prisma's) and never
+Everything lives in the `public` schema — never `frontend` (Prisma's) and never
 `vdb` (langchain_postgres'). Every foreign key below is `ON DELETE CASCADE`.
 
 ```
@@ -146,14 +146,19 @@ of truth a Python developer edits, autogenerate diffs against that same object,
 and a backend schema change never requires touching a frontend file or running
 `pnpm`. The cost is that the two tools must stay out of each other's way — which
 is exactly what `include_object` below enforces, and why each migrator is
-scoped to its own Postgres schema (`gsf` vs `frontend`) rather than sharing one.
+scoped to its own Postgres schema (`public` vs `frontend`) rather than sharing one.
 
 Two pieces of `alembic/env.py` are load-bearing and easy to break:
 
-**`include_object` filters to the `gsf` schema.** The same database also holds
+**`include_object` filters to the `public` schema.** The same database also holds
 Prisma's tables (`frontend`) and langchain_postgres' vector tables (`vdb`).
 Without the filter, autogenerate sees them as untracked and proposes dropping
-them. The filter **defaults to exclude**: Alembic passes tables, columns,
+them — verified, not assumed: putting a table Alembic does not know about into
+the filtered schema makes the next `--autogenerate` emit `op.drop_table` for it.
+The corollary of GSF owning `public` is that this now cuts both ways: a table
+created there by anything other than a migration will be proposed for deletion,
+because from the filter's side it is indistinguishable from one removed from the
+model. The filter **defaults to exclude**: Alembic passes tables, columns,
 indexes and constraints through the same hook and they disagree about how to
 reach their schema — some carry `.schema`, some carry a `.table` that is a
 `Table`, some carry a `.table` that is only its name as a string. An object
@@ -188,7 +193,7 @@ stored revision that no longer exists in the version directory.
 
 The revision id changes on every squash, and `backend.alembicRevision` in
 `helm/gsf/values.yaml` must track it: the backend's `wait-for-catalog-schema`
-init container blocks until `gsf.alembic_version` matches that value, so a
+init container blocks until `public.alembic_version` matches that value, so a
 stale pin leaves every Pod waiting forever. `gsf/dal/tests/test_migration_revision.py`
 fails if the two drift, and if there is ever more than one head.
 

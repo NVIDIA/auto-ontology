@@ -136,7 +136,7 @@ Runs after gsf.waitForDeps, so Postgres is reachable.
     - |
       until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
         -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
-        "SELECT 1 FROM gsf.alembic_version WHERE version_num = '{{ .Values.backend.alembicRevision }}'" \
+        "SELECT 1 FROM public.alembic_version WHERE version_num = '{{ .Values.backend.alembicRevision }}'" \
         2>/dev/null | grep -q 1; do
         echo "waiting for alembic revision {{ .Values.backend.alembicRevision }}..."
         sleep 2

@@ -5,7 +5,7 @@
 """The Helm chart's pinned Alembic revision must match the head migration.
 
 The backend's ``wait-for-catalog-schema`` init container blocks until
-``gsf.alembic_version`` equals ``backend.alembicRevision``. That makes the value
+``public.alembic_version`` equals ``backend.alembicRevision``. That makes the value
 load-bearing in a way a comment cannot enforce: pin it to a revision that never
 arrives and every backend Pod waits forever; leave it behind after adding a
 migration and the gate passes before the new schema is applied, which is the

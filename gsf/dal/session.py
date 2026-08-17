@@ -44,11 +44,19 @@ from gsf.infra.postgres import get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
-#: Postgres schema owning every GSF catalog and semantic table. Never ``public``
-#: (Prisma's, and ``prisma db push`` reconciles drift there) and never ``vdb``
-#: (langchain_postgres'). Set on the MetaData rather than via ``search_path``,
-#: which is per-session and would be a silent hazard on a pooled connection.
-SCHEMA = "gsf"
+#: Postgres schema owning every GSF catalog and semantic table.
+#:
+#: GSF is the application, so it holds the default schema. The other two owners
+#: are named explicitly and stay out of it: Prisma has ``frontend``
+#: (``schemas = ["frontend"]`` in ``frontend/prisma/schema.prisma``) and
+#: langchain_postgres has ``vdb`` (``gsf.vdb.VDB_SCHEMA``). Nothing else writes
+#: here, which is what lets Alembic treat "in this schema but not in
+#: ``METADATA``" as drift.
+#:
+#: Still set on the MetaData rather than via ``search_path``: search_path is
+#: per-session and would be a silent hazard on a pooled connection, and every
+#: statement being schema-qualified is what makes the ownership legible.
+SCHEMA = "public"
 
 _engine: Engine | None = None
 _active: ContextVar[StoreConn | None] = ContextVar("_active_pg_conn", default=None)
@@ -89,7 +97,17 @@ def get_engine() -> Engine:
             # blackholed database makes the health endpoint -- which is the
             # *liveness* probe as well as readiness -- hang until the kubelet
             # kills a backend that is otherwise fine.
-            connect_args={"connect_timeout": 3},
+            # `options` pins the search_path for the life of every connection in
+            # the pool, set at connect time rather than by a statement someone
+            # has to remember to issue. The MetaData deliberately does not name
+            # the schema (see `gsf/dal/schema.py`), so this is what decides where
+            # unqualified SQL resolves -- and pinning it here means it cannot
+            # drift per session, which was the original objection to relying on
+            # search_path at all.
+            connect_args={
+                "connect_timeout": 3,
+                "options": f"-csearch_path={SCHEMA}",
+            },
             future=True,
         )
     return _engine

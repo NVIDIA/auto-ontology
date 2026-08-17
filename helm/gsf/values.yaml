@@ -124,10 +124,10 @@ pgadmin:
 # ------------------------------------------------------------------
 backend:
   # The Alembic head revision this chart's image ships. The backend's
-  # wait-for-catalog-schema init container blocks until gsf.alembic_version
+  # wait-for-catalog-schema init container blocks until public.alembic_version
   # matches it, so new Pods never serve against a schema the migration Job has
   # not finished applying. Bump this with the migration, in the same commit.
-  alembicRevision: 46fb8b1368af
+  alembicRevision: a7db0e25b5ea
   image:
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1

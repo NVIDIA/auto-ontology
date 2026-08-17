@@ -10,7 +10,7 @@ The two Jobs are independent and may run in either order.
 
 Ordering follows frontend-migrate: a normal release resource, NOT a Helm hook.
 The backend gates on the schema being present -- via the wait-for-catalog-schema
-init container, which blocks on `gsf.catalog_database` -- so a post-install hook
+init container, which blocks on `public.catalog_database` -- so a post-install hook
 would deadlock (the Deployment would never become Ready, so the hook would never
 run). `helm --wait` waits for the Job to complete.
 
@@ -19,7 +19,7 @@ could not re-run on upgrade — and ttlSecondsAfterFinished garbage-collects
 finished Jobs.
 
 Alembic applies each revision in a transaction and records it in
-gsf.alembic_version, so re-running is a no-op rather than an error. A failed
+public.alembic_version, so re-running is a no-op rather than an error. A failed
 migration leaves the version table pointing at the last good revision.
 */}}
 apiVersion: batch/v1

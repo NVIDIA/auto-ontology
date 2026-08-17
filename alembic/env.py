@@ -4,13 +4,13 @@
 
 """Alembic environment for the GSF catalog/semantic schema.
 
-**Scoped to the ``gsf`` schema, deliberately.** Three systems share this
-database: Prisma owns ``public`` (and ``prisma db push`` reconciles drift there
-on every deploy), ``langchain_postgres`` owns ``vdb``, and this owns ``gsf``.
-Without ``include_object`` filtering, autogenerate would see Prisma's tables as
-"not in my metadata" and cheerfully emit ``DROP TABLE`` for the user table.
-That is the single most destructive mistake available here, so the filter is
-not an optimisation.
+**Scoped to one schema, deliberately.** Three systems share this database:
+Prisma owns ``frontend`` (and ``prisma db push`` reconciles drift there on every
+deploy), ``langchain_postgres`` owns ``vdb``, and this owns ``public``. Without
+``include_object`` filtering, autogenerate would see the other two as "not in my
+metadata" and cheerfully emit ``DROP TABLE`` for the user table and the vector
+store. That is the single most destructive mistake available here, so the filter
+is not an optimisation.
 
 The connection URL comes from ``POSTGRES_*`` via the same helper the rest of the
 codebase uses, rather than ``alembic.ini`` — one source of truth, and no
@@ -45,9 +45,25 @@ logger = logging.getLogger(__name__)
 
 target_metadata = METADATA
 
+#: Sentinel for "this object did not carry a schema at all", distinct from the
+#: schema *being* None (which means the default schema, i.e. ours).
+_MISSING = object()
+
 
 def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """Consider only objects in the ``gsf`` schema.
+    """Consider only objects in :data:`SCHEMA` (``public``).
+
+    This is what keeps autogenerate away from the two schemas GSF does not own:
+    Prisma's ``frontend`` and langchain_postgres' ``vdb``. Both are reflected and
+    reach this function; without the filter they are tables Alembic can see but
+    cannot find in ``METADATA``, and it would faithfully emit ``drop_table`` for
+    every one of them.
+
+    The corollary now that GSF holds ``public``: anything created there by
+    something other than a migration *will* be proposed for deletion, because
+    from here it is indistinguishable from a table someone removed from the
+    model. That is the intended reading — ``public`` is GSF's — but it means a
+    stray table is a loaded footgun rather than a curiosity.
 
     Alembic passes a wide range of objects through here — tables, columns,
     indexes, constraints — and they do not agree on how to reach their schema.
@@ -58,17 +74,23 @@ def include_object(obj, name, type_, reflected, compare_to) -> bool:
 
     The default is to *exclude*: an object whose schema cannot be established is
     not ours, and letting it through risks autogenerate proposing a drop against
-    Prisma's tables — the one outcome this filter exists to prevent.
+    somebody else's tables — the one outcome this filter exists to prevent.
     """
-    schema = getattr(obj, "schema", None)
-    if schema is None:
+    # `_MISSING`, not None: None is a *meaningful* schema here -- it is how both
+    # SQLAlchemy and Alembic spell "the default schema", which is ours. Using
+    # None as the not-found marker too would make an object with no schema at all
+    # indistinguishable from one explicitly in `public`.
+    schema = getattr(obj, "schema", _MISSING)
+    if schema is _MISSING:
         parent = getattr(obj, "table", None)
-        schema = getattr(parent, "schema", None)
-    if schema is None:
+        schema = getattr(parent, "schema", _MISSING)
+    if schema is _MISSING:
         # Constraints and indexes reached before their parent is resolved fall
         # here. Keep them only if the migration context is already scoped to us.
         return type_ not in {"table", "column"}
-    return schema == SCHEMA
+    # Metadata objects carry None (unqualified); reflected objects in the default
+    # schema also come back as None, while `frontend` and `vdb` come back named.
+    return (schema or SCHEMA) == SCHEMA
 
 
 def _configure(**kwargs) -> None:
@@ -77,7 +99,14 @@ def _configure(**kwargs) -> None:
         include_object=include_object,
         include_schemas=True,
         version_table="alembic_version",
-        version_table_schema=SCHEMA,
+        # Deliberately *not* `version_table_schema=SCHEMA`. Naming it while the
+        # MetaData is unqualified makes Alembic fail to recognise its own version
+        # table during autogenerate -- reflection reports the default schema as
+        # None, the configured value says "public", they do not match, and the
+        # table is treated as drift. The generated migration then contained
+        # `op.drop_table('alembic_version')` in *upgrade*, i.e. the migration
+        # deletes the record of which migrations have run. Left unset it resolves
+        # through the search_path pinned above, to the same place.
         # Without this a changed column type is silently ignored by
         # autogenerate, which is worse than a false positive.
         compare_type=True,
@@ -104,39 +133,41 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        # The version table lives in `gsf`, so the schema has to exist before
-        # Alembic tries to stamp anything -- including on a completely blank
-        # database, where migration 0001 has not run yet.
+        # `public` already exists, so this is a no-op today. It stays because
+        # SCHEMA is a knob: point it anywhere else and the version table needs
+        # its schema to exist before Alembic stamps anything, including on a
+        # blank database where no migration has run yet.
         connection.exec_driver_sql(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
 
-        # Creating a schema named `gsf` is not neutral when the Postgres role is
-        # also called `gsf`: the default `search_path` is `"$user", public`, so
-        # `"$user"` stops resolving to nothing and starts resolving to *our*
-        # schema. Every unqualified `CREATE TABLE` from any other tool sharing
-        # this database then lands in `gsf` instead of `public`.
+        # This session, not just future ones. The migration emits unqualified
+        # DDL (the MetaData does not name the schema), and the ALTER ROLE below
+        # only takes effect for *new* sessions -- so without this the very
+        # migration that creates the tables could place them somewhere else.
+        connection.exec_driver_sql(f"SET search_path TO {SCHEMA}")
+
+        # Pin the role's search_path to `public`, which is where GSF's own tables
+        # now live.
         #
-        # That is how it first broke Prisma: its tables were created in `gsf`, so
-        # the next `db push` found its own schema empty, tried to create them
-        # again, and failed with `relation "conversations" already exists` --
-        # leaving the frontend blocked forever on its wait-for-schema probe.
+        # The hazard this defends against: the default search_path is
+        # `"$user", public`, and `"$user"` is normally inert because no schema is
+        # named after the role. Create one -- a schema named `gsf` while the role
+        # is also called `gsf` -- and every unqualified `CREATE TABLE` in the
+        # database silently retargets to it. That is not hypothetical; it is what
+        # happened when GSF's tables lived in a `gsf` schema. Prisma's tables were
+        # created there instead of its own schema, so the next `db push` found its
+        # schema empty, tried to create them again, and failed with
+        # `relation "conversations" already exists`, leaving the frontend blocked
+        # forever on its wait-for-schema probe.
         #
-        # Prisma no longer relies on this: it names its schema explicitly in the
-        # connection URL (`?schema=frontend`, see `frontend/prisma.config.ts`), so
-        # it is now immune to whatever the search_path happens to be. The pin
-        # stays anyway -- it is the general fix, and it protects the next tool to
-        # share this database, which will not have thought about any of this.
+        # Both of today's other owners are already immune by being explicit:
+        # Prisma names `?schema=frontend` in its connection URL and
+        # langchain_postgres is handed `vdb`. The pin is for whoever comes next
+        # and will not have thought about any of this.
         #
-        # Pinning the role's search_path to `public` restores the behaviour every
-        # other consumer had before this schema existed. GSF itself is unaffected:
-        # its MetaData carries `schema=gsf`, so the DAL qualifies every reference
-        # and never depends on the search_path.
-        # Unconditional, and safe: `public` is the default anyway, so this is a
-        # no-op unless the collision above applies. Guarding on a detected
-        # condition proved unreliable -- the check evaluated inside the same
-        # transaction as the CREATE SCHEMA and did not fire -- and the cost of
-        # simply always pinning is nil, because nothing in GSF reads the
-        # search_path: the MetaData carries `schema=gsf` and the DAL qualifies
-        # every reference.
+        # Unconditional, and safe: `public` is the default anyway. Guarding on a
+        # detected condition proved unreliable -- the check evaluated inside the
+        # same transaction as the CREATE SCHEMA and did not fire -- and always
+        # pinning costs nothing.
         connection.exec_driver_sql(
             "DO $$ BEGIN "
             # `%%I`, not `%I`: psycopg treats a bare % as a parameter placeholder

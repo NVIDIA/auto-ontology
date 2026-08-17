@@ -57,7 +57,15 @@ NAMING_CONVENTION = {
     "pk": "pk_%(table_name)s",
 }
 
-METADATA = MetaData(schema=SCHEMA, naming_convention=NAMING_CONVENTION)
+# No ``schema=`` on purpose, even though these tables live in ``SCHEMA``.
+# Naming the default schema explicitly makes autogenerate emit permanent drift:
+# metadata reports ``referent_schema='public'`` for every foreign key while
+# reflection reports the default schema as ``None``, so Alembic sees 33 changed
+# constraints and proposes dropping and recreating all of them, on every run,
+# forever. Leaving it unset makes both sides agree. Placement is guaranteed by
+# the ``search_path`` pinned on every connection (see ``gsf/dal/session.py``),
+# not by luck.
+METADATA = MetaData(naming_convention=NAMING_CONVENTION)
 
 #: ``gen_random_uuid()`` is built into Postgres from 13; no pgcrypto needed.
 #:
@@ -749,7 +757,7 @@ DROP_JOIN_PATH_EDGE_VIEW_SQL = f"DROP VIEW IF EXISTS {SCHEMA}.join_path_edge"
 #: autogenerate and then reported as permanent drift. Keeping it in a separate
 #: registry means the DDL above stays the single definition of this view, while
 #: queries still get column objects instead of raw strings.
-VIEWS = MetaData(schema=SCHEMA)
+VIEWS = MetaData()  # unqualified, for the same reason as METADATA
 
 join_path_edge = Table(
     "join_path_edge",
