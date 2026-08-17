@@ -119,4 +119,14 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"?protocol={_enc(protocol)}"
         )
 
+    if conn_type == "sqlite":
+        # A SQLite "connection" is just a file the backend and the ingestion
+        # service can both read, so ``path`` is the only credential-free field
+        # that matters. It must be absolute: the two services run from different
+        # working directories, so a relative path would resolve differently.
+        path = _require(connection, "path")
+        if not path.startswith("/"):
+            raise ValueError(f"SQLite path must be absolute, got {path!r}")
+        return f"sqlite://{path}"
+
     raise ValueError(f"Unsupported connection type: {conn_type!r}")

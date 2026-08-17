@@ -64,12 +64,25 @@ export type HeavyDBConnectionParams = {
 	protocol: string;
 };
 
+export type SQLiteConnectionParams = {
+	type: ConnectionType.SQLITE;
+	/**
+	 * Absolute path to the `.sqlite` file inside the backend and ingestion
+	 * containers. Both read the file directly, so a path that only exists on the
+	 * operator's machine will not resolve.
+	 */
+	path: string;
+	/** Catalog name for the connection; the connector reports the file stem. */
+	database: string;
+};
+
 /** Structured connection form fields, discriminated by `type`. */
 export type ConnectionParams =
 	| DatabricksConnectionParams
 	| PostgresConnectionParams
 	| SnowflakeConnectionParams
-	| HeavyDBConnectionParams;
+	| HeavyDBConnectionParams
+	| SQLiteConnectionParams;
 
 /** A stored connection returned by the API. */
 export type Connection = {
