@@ -57,9 +57,10 @@ def _close_retriever_vdb(retriever: Retriever | None) -> None:
 def close_retrievers() -> None:
     """Dispose singleton retriever VDB pools so CLI/debug processes can exit.
 
-    PGEngine keeps a background asyncio loop and ThreadPoolExecutor workers;
-    without an explicit close, interpreter shutdown joins those workers and
-    appears to hang after the coverage result is already printed.
+    Historically this mattered because the vector store kept its own asyncio
+    loop and worker threads, and interpreter shutdown would join them and appear
+    to hang. The store now uses the shared DAL pool, so closing is a formality --
+    kept because the singletons still need clearing between runs.
     """
     global _data_retriever, _semantic_retriever
     _close_retriever_vdb(_data_retriever)

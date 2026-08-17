@@ -150,7 +150,9 @@ def _expand_custom_analyses(ids: list[str]) -> dict[str, dict[str, Any]]:
     with ``sql: ""`` and an empty ``relevant_tables``.
     """
     rows = store().query_read(
-        select(s.custom_analysis).where(s.custom_analysis.c.id.in_(ids))
+        select(*s.public_columns(s.custom_analysis)).where(
+            s.custom_analysis.c.id.in_(ids)
+        )
     )
     sql = _sql_text(s.custom_analysis_sql, s.custom_analysis_sql.c.analysis_id, ids)
     owned = _sql_owned_tables(
@@ -265,7 +267,9 @@ def _expand_plain(table):
     def expand(ids: list[str]) -> dict[str, dict[str, Any]]:
         return {
             row["id"]: dict(row)
-            for row in store().query_read(select(table).where(table.c.id.in_(ids)))
+            for row in store().query_read(
+                select(*s.public_columns(table)).where(table.c.id.in_(ids))
+            )
         }
 
     return expand

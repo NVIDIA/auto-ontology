@@ -42,6 +42,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from pgvector.sqlalchemy import Vector
 from sqlalchemy.dialects.postgresql import JSONB
 
 
@@ -144,6 +145,52 @@ catalog_schema = Table(
     UniqueConstraint("database_id", "name", name="uq_catalog_schema_database_name"),
 )
 
+#: Dimensionality of the embedding model (`nvidia/llama-nemotron-embed-vl-1b-v2`).
+#: Not a tuning knob -- it is what the model emits, and a column declared at any
+#: other width rejects every insert.
+EMBEDDING_DIMENSIONS = 2048
+
+
+#: Columns that exist for vector search and are never part of an entity's
+#: user-facing properties. `select(table)` returns every column, so any read
+#: that means "all of this node's properties" has to subtract these -- otherwise
+#: a node-detail API response carries 2048 floats (~8KB) per row.
+INTERNAL_COLUMNS = frozenset({"embedding", "embedding_text", "embedding_database_name"})
+
+
+def public_columns(table) -> list:
+    """Every column of *table* except the vector-search internals."""
+    return [c for c in table.c if c.name not in INTERNAL_COLUMNS]
+
+
+def _embedding_columns() -> tuple[Column, ...]:
+    """Vector-search columns, carried by every embeddable entity.
+
+    These live on the entity itself rather than in a side table, which is what
+    makes an embedding subject to the same ``ON DELETE CASCADE`` as the row it
+    describes. The previous arrangement -- a separate collection keyed by an id
+    in a JSON blob -- had no such link, so deleting a catalog row orphaned its
+    vector, and retrieval kept scoring rows that no longer existed.
+
+    All three are nullable: a row exists before it is embedded, and "not yet
+    embedded" has to be representable. ``embedding IS NULL`` is the re-embed
+    work queue.
+
+    ``embedding_database_name`` is denormalised on purpose. It is the filter
+    every search applies, and the relational path to it is three joins deep from
+    a column (``catalog_column -> catalog_table -> catalog_schema ->
+    catalog_database``) and undefined for a Term or a CustomAnalysis, which are
+    not owned by one database at all.
+    """
+    return (
+        Column("embedding", Vector(EMBEDDING_DIMENSIONS), nullable=True),
+        # The exact text that was embedded. Kept so a hit can be explained, and
+        # so re-embedding can skip rows whose text has not changed.
+        Column("embedding_text", Text, nullable=True),
+        Column("embedding_database_name", Text, nullable=True),
+    )
+
+
 catalog_table = Table(
     "catalog_table",
     METADATA,
@@ -169,6 +216,7 @@ catalog_table = Table(
     Column("table_type", Text, nullable=True),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
+    *_embedding_columns(),
 )
 
 catalog_column = Table(
@@ -202,6 +250,7 @@ catalog_column = Table(
     Column("ordinal_position", Integer, nullable=True),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
+    *_embedding_columns(),
 )
 
 # FOREIGN_KEY: Column -> Column.
@@ -373,6 +422,7 @@ term = Table(
     _certified("description_certified"),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
+    *_embedding_columns(),
 )
 
 # REPRESENTS: Table -> Term.
@@ -417,6 +467,7 @@ column_attribute = Table(
         "source",
         name="uq_column_attribute_merge_key",
     ),
+    *_embedding_columns(),
 )
 
 # PROPERTY_OF: ColumnAttribute -> Term.
@@ -495,6 +546,7 @@ sql_attribute = Table(
         "source IS NULL OR source IN ('manual', 'sql', 'table', 'bridgeTable')",
         name="source_value",
     ),
+    *_embedding_columns(),
 )
 
 # PROPERTY_OF: SqlAttribute -> Term.
@@ -537,6 +589,7 @@ custom_analysis = Table(
     Column("name", Text, nullable=False, unique=True),
     Column("description", Text, nullable=True),
     _imported_id(),
+    *_embedding_columns(),
 )
 
 # HAS_SQL: CustomAnalysis -> Sql.
@@ -567,6 +620,7 @@ pql_analysis = Table(
     Column("description", Text, nullable=True),
     Column("pql", Text, nullable=True),
     _imported_id(),
+    *_embedding_columns(),
 )
 
 # Declared in gsf/semantic/constants.py and referenced by reset.py's

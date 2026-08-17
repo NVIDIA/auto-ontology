@@ -9,7 +9,6 @@ dependencies = [
     "hvac>=2.4.0",
     "langchain-openai>=1.3.0",
     "langgraph>=1.2.0",
-    "langchain-postgres>=0.0.17",
     "nemo-retriever==26.8rc1",
     "pydantic>=2.0",
     "pandas>=2.0,<3",
@@ -25,6 +24,7 @@ dependencies = [
     "sqlalchemy>=2.0",
     "alembic>=1.19.1",
     "apache-ossie-gsf",
+    "pgvector>=0.5.0",
 ]
 
 [build-system]

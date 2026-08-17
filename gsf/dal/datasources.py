@@ -573,7 +573,11 @@ def patch_catalog_node(
             store().query_write(
                 update(table).where(table.c.id == node_id).values(**values)
             )
-        props = dict(store().query_read(select(table).where(table.c.id == node_id))[0])
+        props = dict(
+            store().query_read(
+                select(*s.public_columns(table)).where(table.c.id == node_id)
+            )[0]
+        )
         return {"id": node_id, "label": label, "props": props}
     return None
 
@@ -594,7 +598,12 @@ def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
 
     for candidate in labels:
         table = _NODE_TABLES[candidate]
-        rows = store().query_read(select(table).where(table.c.id == id))
+        # `public_columns`, not `select(table)`: the embedding columns are
+        # storage for vector search, not properties of the node, and this
+        # result is serialised straight into an API response.
+        rows = store().query_read(
+            select(*s.public_columns(table)).where(table.c.id == id)
+        )
         if rows:
             props = dict(rows[0])
             props["label"] = candidate
