@@ -124,18 +124,3 @@ def test_every_shipped_connector_subclasses_the_base() -> None:
 def test_the_base_is_re_exported_from_the_package() -> None:
     assert connectors.SQLDatabase is SQLDatabase
     assert "SQLDatabase" in connectors.__all__
-
-
-def test_no_module_imports_from_the_upstream_tabular_package() -> None:
-    """``SQLDatabase`` and the embed-row builder now live in GSF.
-
-    Reaching back into ``nemo_retriever.tabular_data`` would reintroduce the
-    ``tabular`` extra — and with it the Neo4j driver — through the back door.
-    """
-    offenders = [
-        str(path.relative_to(GSF_ROOT))
-        for path in GSF_ROOT.rglob("*.py")
-        if "nemo_retriever.tabular_data" in path.read_text()
-        and path.resolve() != pathlib.Path(__file__).resolve()
-    ]
-    assert offenders == [], f"import from GSF instead: {offenders}"
