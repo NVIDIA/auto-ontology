@@ -29,7 +29,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
+from gsf.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
 )
 from gsf.retrieval.text_to_sql.prompts import (
