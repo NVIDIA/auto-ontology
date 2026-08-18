@@ -126,6 +126,11 @@ def test_execute_returns_dataframe_and_closes_connection(
 
 
 def _live_connection() -> dict[str, Any]:
+    # Credentials in .env are for the app; opt in explicitly so pytest does not
+    # hit a live workspace whenever those vars happen to be set.
+    if os.environ.get("GSF_LIVE_DATABRICKS") != "1":
+        pytest.skip("Set GSF_LIVE_DATABRICKS=1 to run the live Databricks test")
+
     environment_fields = {
         "host": "DATABRICKS_SERVER_HOSTNAME",
         "http_path": "DATABRICKS_HTTP_PATH",
