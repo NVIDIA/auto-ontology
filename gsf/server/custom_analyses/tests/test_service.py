@@ -12,16 +12,16 @@ from gsf.server.custom_analyses import service
 
 
 @patch("gsf.server.custom_analyses.service.embed_custom_analyses")
-@patch("gsf.server.custom_analyses.service.fetch_database_names_for_analysis")
+@patch("gsf.server.custom_analyses.service.fetch_database_name_for_analysis")
 @patch("gsf.vdb.get_semantic_vdb")
 @patch("gsf.utils.get_embed_params")
 def test_embed_scopes_the_row_to_the_referenced_database(
     _embed_params: MagicMock,
     _vdb: MagicMock,
-    fetch_databases: MagicMock,
+    fetch_database: MagicMock,
     embed: MagicMock,
 ) -> None:
-    fetch_databases.return_value = ["WWI"]
+    fetch_database.return_value = "WWI"
 
     service._embed_analysis("analysis-1")
 
@@ -31,34 +31,16 @@ def test_embed_scopes_the_row_to_the_referenced_database(
 
 
 @patch("gsf.server.custom_analyses.service.embed_custom_analyses")
-@patch("gsf.server.custom_analyses.service.fetch_database_names_for_analysis")
-@patch("gsf.vdb.get_semantic_vdb")
-@patch("gsf.utils.get_embed_params")
-def test_cross_database_analysis_is_embedded_once_per_database(
-    _embed_params: MagicMock,
-    _vdb: MagicMock,
-    fetch_databases: MagicMock,
-    embed: MagicMock,
-) -> None:
-    fetch_databases.return_value = ["WWI", "SUPERSTORE"]
-
-    service._embed_analysis("analysis-2")
-
-    scoped = [call.kwargs["database_name"] for call in embed.call_args_list]
-    assert sorted(scoped) == ["SUPERSTORE", "WWI"]
-
-
-@patch("gsf.server.custom_analyses.service.embed_custom_analyses")
-@patch("gsf.server.custom_analyses.service.fetch_database_names_for_analysis")
+@patch("gsf.server.custom_analyses.service.fetch_database_name_for_analysis")
 @patch("gsf.vdb.get_semantic_vdb")
 @patch("gsf.utils.get_embed_params")
 def test_unresolvable_database_still_embeds_but_warns(
     _embed_params: MagicMock,
     _vdb: MagicMock,
-    fetch_databases: MagicMock,
+    fetch_database: MagicMock,
     embed: MagicMock,
 ) -> None:
-    fetch_databases.return_value = []
+    fetch_database.return_value = None
 
     service._embed_analysis("analysis-3")
 

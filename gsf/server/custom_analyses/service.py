@@ -28,7 +28,7 @@ from gsf.dal.custom_analyses import (
     delete_custom_analysis_node,
     detach_existing_sql_edges,
     embed_custom_analyses,
-    fetch_database_names_for_analysis,
+    fetch_database_name_for_analysis,
     find_analysis_by_name,
     find_analysis_by_sql,
     get_custom_analysis_by_id,
@@ -76,34 +76,29 @@ def validate_custom_analysis_sql(sql: str) -> dict[str, Any]:
 
 
 def _embed_analysis(analysis_id: str) -> None:
-    """Embed one VDB row per database whose tables the analysis references.
+    """Embed an analysis scoped to the database whose tables it references.
 
     Semantic search filters hits on ``database_name`` (see
-    :func:`gsf.retrieval.data_access.candidates.get_candidates`), so a row
-    embedded without one is never returned for any question.
+    :func:`gsf.retrieval.data_access.semantic_search.search_semantic_index`).
     """
     from gsf.utils import get_embed_params
     from gsf.vdb import get_semantic_vdb
 
     vdb = get_semantic_vdb()
-    database_names: list[str | None] = list(
-        fetch_database_names_for_analysis(analysis_id)
-    )
-    if not database_names:
+    database_name = fetch_database_name_for_analysis(analysis_id)
+    if database_name is None:
         logger.warning(
             "CustomAnalysis %s references no catalogued database; embedding it "
             "unscoped, so retrieval's database filter will skip it",
             analysis_id,
         )
-        database_names = [None]
 
-    for database_name in database_names:
-        embed_custom_analyses(
-            embed_params=get_embed_params(),
-            vdb=vdb,
-            analysis_id=analysis_id,
-            database_name=database_name,
-        )
+    embed_custom_analyses(
+        embed_params=get_embed_params(),
+        vdb=vdb,
+        analysis_id=analysis_id,
+        database_name=database_name,
+    )
 
 
 def _persist_analysis_with_sql(
