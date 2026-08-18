@@ -26,6 +26,7 @@
     "embed_custom_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'VDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_custom_analyses": "() -> 'list[dict[str, str]]'",
     "fetch_custom_analyses_with_sql": "(analysis_ids: 'list[str]') -> 'list[dict[str, str]]'",
+    "fetch_database_name_for_analysis": "(analysis_id: 'str') -> 'str | None'",
     "fetch_tables_from_custom_analyses": "(analysis_ids: 'list[str]') -> 'list[dict[str, Any]]'",
     "find_analysis_by_name": "(name: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "find_analysis_by_sql": "(sql: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",

@@ -501,3 +501,49 @@ def embed_custom_analyses(
         type(vdb).__name__,
         time.time() - before,
     )
+
+
+def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
+    """Return the database whose tables an analysis's SQL references.
+
+    Retrieval filters semantic hits on ``database_name``
+    (:func:`gsf.retrieval.data_access.semantic_search.search_semantic_index`),
+    so an analysis embedded without one is invisible to every scoped search.
+
+    The relational path mirrors the edges this replaced -- analysis -> its SQL
+    -> the tables that SQL reads -> schema -> database.
+
+    ``DISTINCT ... LIMIT 1`` is deliberate, and lossy: an analysis whose SQL
+    joins across two databases has two answers and this returns one of them.
+    That matches the behaviour being ported rather than quietly improving on
+    it; the column it feeds holds a single value.
+    """
+    rows = store().query_read(
+        select(s.catalog_database.c.name)
+        .select_from(
+            s.custom_analysis_sql.join(
+                s.sql_query_table,
+                s.sql_query_table.c.sql_query_id
+                == s.custom_analysis_sql.c.sql_query_id,
+            )
+            .join(
+                s.catalog_table,
+                s.catalog_table.c.id == s.sql_query_table.c.table_id,
+            )
+            .join(
+                s.catalog_schema,
+                s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.custom_analysis_sql.c.analysis_id == analysis_id)
+        .distinct()
+        # Stable across calls: without it two databases would alternate, and the
+        # embedding's scope would depend on plan order.
+        .order_by(s.catalog_database.c.name)
+        .limit(1)
+    )
+    return str(rows[0]["name"]) if rows else None
