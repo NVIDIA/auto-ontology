@@ -95,8 +95,8 @@ def update_column_attribute(
         WITH attr, term
         OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
         RETURN attr.id AS id,
                attr.name AS name,
                attr.description AS description,
@@ -104,6 +104,10 @@ def update_column_attribute(
                attr.source_column AS source_column,
                col.id AS column_id,
                col.sample_values AS sample_values,
+               col.is_unique AS is_unique,
+               table.id AS table_id,
+               table.name AS table_name,
+               sch.name AS schema_name,
                term.id AS term_id,
                term.synonyms AS term_synonyms,
                head(collect(DISTINCT db.name)) AS database_name,
@@ -213,12 +217,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """,
             {"database_name": database_name},
         )
@@ -229,12 +236,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """
         )
     return result

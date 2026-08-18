@@ -18,6 +18,40 @@ from typing import Iterable
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 
+def resolve_target_database_name(
+    target_db: str,
+    connectors: list[SQLDatabase],
+) -> str:
+    """Return the configured database name matching *target_db*.
+
+    Matching is exact first and then case-insensitive. Unknown identifiers are
+    rejected before they can be used as vector-metadata filters.
+    """
+    requested = target_db.strip()
+    database_names = [
+        str(database_name)
+        for connector in connectors
+        if (database_name := getattr(connector, "database_name", None))
+    ]
+
+    if requested in database_names:
+        return requested
+
+    casefold_matches = [
+        database_name
+        for database_name in database_names
+        if database_name.casefold() == requested.casefold()
+    ]
+    if len(casefold_matches) == 1:
+        return casefold_matches[0]
+
+    available = ", ".join(sorted(database_names)) or "(none)"
+    raise ValueError(
+        f"target_db {target_db!r} does not match a configured database name. "
+        f"Available databases: {available}."
+    )
+
+
 def resolve_connector_from_tables(
     tables: Iterable[dict],
     connectors: list[SQLDatabase],
@@ -64,4 +98,4 @@ def resolve_connector_from_tables(
     )
 
 
-__all__ = ["resolve_connector_from_tables"]
+__all__ = ["resolve_connector_from_tables", "resolve_target_database_name"]

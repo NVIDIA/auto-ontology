@@ -11,8 +11,8 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 
-class QuestionExtractionModel(BaseModel):
-    """Combined sanitize + entity extraction structured output."""
+class QuestionExtractionLiteModel(BaseModel):
+    """Sanitize + entity extraction only (no subject / used_glossary_names)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -36,6 +36,27 @@ class QuestionExtractionModel(BaseModel):
     )
 
 
+class QuestionExtractionModel(QuestionExtractionLiteModel):
+    """Full sanitize + entity extraction structured output (text-to-sql)."""
+
+    subject: str = Field(
+        ...,
+        description=(
+            "Main subject of the question - the single thing the user is asking "
+            "about, resolved through the glossary when the question uses a "
+            "shortcut. Excludes filters, aggregations, and date qualifiers."
+        ),
+    )
+    used_glossary_names: list[str] = Field(
+        ...,
+        description=(
+            "Names of glossary entries used to interpret the question. "
+            "Return each name exactly as it appears in the glossary, or an "
+            "empty list when no glossary definition applies."
+        ),
+    )
+
+
 class EntityCoverageResponse(BaseModel):
     """Final response for the entity-coverage pipeline."""
 
@@ -53,6 +74,7 @@ class EntityCoverageResponse(BaseModel):
 
 
 __all__ = [
+    "QuestionExtractionLiteModel",
     "QuestionExtractionModel",
     "EntityCoverageResponse",
 ]

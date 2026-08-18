@@ -38,7 +38,7 @@ from gsf.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
 )
-from gsf.dal.terms import fetch_term_synonyms
+from gsf.dal.terms import fetch_term_synonyms, fetch_term_table_pairs
 from gsf.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
@@ -344,6 +344,31 @@ class CandidatePreparationAgent(BaseAgent):
                 "Added %d table(s) from SqlAttribute SQL references: %s",
                 added,
                 [t["name"] for t in sa_linked_tables],
+            )
+
+        # --- 4d. Add tables linked to the subject Term ---
+        subject_term = path_state.get("retrieved_subject_term")
+        subject_term_id = (
+            str(subject_term.get("id") or "") if isinstance(subject_term, dict) else ""
+        )
+        if subject_term_id:
+            pairs = fetch_term_table_pairs(term_ids=[subject_term_id])
+            subject_table_ids = list(
+                dict.fromkeys(str(p["table_id"]) for p in pairs if p.get("table_id"))
+            )
+            subject_tables = fetch_tables_by_ids(subject_table_ids)
+            existing_ids = {t.get("id") for t in relevant_tables}
+            added = 0
+            for tbl in subject_tables:
+                if tbl.get("id") not in existing_ids:
+                    relevant_tables.append(tbl)
+                    existing_ids.add(tbl.get("id"))
+                    added += 1
+            self.logger.info(
+                "Added %d table(s) from subject Term %r: %s",
+                added,
+                subject_term.get("name") or subject_term_id,
+                [t["name"] for t in subject_tables],
             )
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)

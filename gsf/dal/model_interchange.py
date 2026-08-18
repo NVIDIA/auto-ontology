@@ -1137,7 +1137,9 @@ def _import_catalog(
                         description=column.description,
                         data_type=column.type,
                         sample_values=column.sample_values,
+                        is_unique=column.is_unique,
                         table_yaml_id=table.id,
+                        table_name=table.name,
                         schema_name=schema.name,
                         database_name=schema_db_name,
                     )
@@ -1494,6 +1496,7 @@ def _import_column_attributes(
                 "term": term,
                 "col_ctx": col_ctx,
                 "live_term_id": live_term_id,
+                "live_table_id": live_table_id,
             }
 
     attr_results = _resolve_entities_batch(LABEL_COLUMN_ATTRIBUTE, attr_items)
@@ -1539,6 +1542,9 @@ def _import_column_attributes(
                     description=attr.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
+                    table_id=ctx["live_table_id"],
+                    table_name=col_ctx.table_name,
+                    is_unique=col_ctx.is_unique,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
                 ),

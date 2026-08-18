@@ -268,7 +268,7 @@ MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -413,6 +413,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                # The prediction graph keys its entities on this: a table that
+                # arrives without it reaches KumoRFM with no identity, which
+                # costs it every edge and makes it unusable in `FOR EACH`.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )

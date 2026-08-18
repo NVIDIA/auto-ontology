@@ -62,6 +62,10 @@ class AgentState(TypedDict):
     data_retriever: Retriever
     semantic_retriever: Retriever
     domain_rules: list[dict[str, str]]
+    # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
+    # domain_rules so prompts can inject them without the custom-analysis SQL.
+    # After ``question_extraction``, this is narrowed to the entries the LLM used.
+    glossary: NotRequired[list[dict[str, str]]]
 
 
 def get_original_question(state: AgentState) -> str:

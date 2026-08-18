@@ -33,6 +33,11 @@ from gsf.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
 )
+from gsf.retrieval.entity_coverage.prompts import format_glossary_section
+from gsf.retrieval.text_to_sql.formatters_util import (
+    format_semantic_context,
+    format_tables_for_prompt,
+)
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -41,6 +46,7 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -57,176 +63,6 @@ logger = logging.getLogger(__name__)
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
 # right step event and ``NODE_LABELS`` entry.
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
-
-
-def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
-    """Format a hop endpoint (``side`` is ``"source"`` or ``"target"``) as
-    ``schema.table.column`` (or ``table.column`` when the schema is absent).
-
-    ``target_db`` scopes execution to one database, so the *database* prefix is
-    dropped — but the schema qualifier is kept whenever present, since schema
-    dialects (Postgres/Snowflake) need it to resolve the table.
-    """
-    schema = hop.get(f"{side}_schema", "")
-    table = hop.get(f"{side}_table", "")
-    column = hop.get(f"{side}_column", "")
-    if not schema:
-        prefix = table
-    else:
-        prefix = f"{schema}.{table}"
-    return f"{prefix}.{column}"
-
-
-def _format_semantic_context(
-    primary_attribute: dict,
-    attribute_join_paths: list[dict],
-    target_db: str | None = None,
-) -> str:
-    """Format the semantic anchor + join-path context for the SQL prompt.
-
-    Produces a human-readable block describing the anchor table/column and
-    how to reach every other retrieved column via JOIN conditions derived
-    from the semantic graph.
-
-    When *target_db* is set, schema qualifiers are omitted because
-    execution is already scoped to that database.
-
-    Example output::
-
-        ANCHOR TABLE (primary focus of the question):
-          Table: public.orders
-          Column: creator_id  (Creator)
-
-        RELATED COLUMNS (accessible via semantic joins):
-          User Name: public.users.name
-            Join path from anchor:
-              public.orders.creator_id = public.users.id
-    """
-    anchor_schema = primary_attribute.get("schema_name", "")
-    anchor_table = primary_attribute.get("table_name", "")
-    anchor_col = primary_attribute.get("col_name", "")
-    anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
-
-    lines: list[str] = [
-        "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
-        f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name})",
-    ]
-
-    if attribute_join_paths:
-        lines.append("")
-        lines.append(
-            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
-            "This is our most reliable knowledge of how these tables join: use these "
-            "exact join conditions almost always, and only deviate if they clearly "
-            "cannot answer the question. Use only the hops you need:"
-        )
-        for entry in attribute_join_paths:
-            attr_name = entry.get("attr_name", "")
-            col_name = entry.get("col_name", "")
-            schema = entry.get("schema_name", "")
-            table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
-            lines.append(f"  {attr_name}: {full_table}.{col_name}")
-            path = entry.get("path") or []
-            if path:
-                lines.append("    Join path:")
-                # The anchor column is the first hop's source; the destination
-                # is the last hop's target. Within a hop, source/target are the
-                # same table (navigation), so the actual cross-table joins are
-                # between consecutive hops: target[i] = source[i+1].
-                if len(path) == 1:
-                    left = _hop_column(path[0], "source", target_db)
-                    right = _hop_column(path[0], "target", target_db)
-                    lines.append(f"      {left} = {right}")
-                else:
-                    for cur, nxt in zip(path, path[1:]):
-                        left = _hop_column(cur, "target", target_db)
-                        right = _hop_column(nxt, "source", target_db)
-                        lines.append(f"      {left} = {right}")
-
-    return "\n".join(lines)
-
-
-def format_tables_for_prompt(tables: list[dict], target_db: str | None = None) -> str:
-    """
-    Format tables with clear column information to prevent cross-table column confusion.
-
-    Args:
-        tables: Table dicts from ``path_state["relevant_tables"]`` — each must expose
-            ``columns`` as a list of dicts (from ``_normalize_table_to_relevant_shape`` / prep).
-        target_db: When set, only the *database* prefix is omitted (execution is
-            already scoped to this database). The schema qualifier is kept when
-            present, since schema dialects (Postgres/Snowflake) need it.
-
-    Returns:
-        Formatted string clearly showing which columns belong to each table
-    """
-    if not tables:
-        return "No tables available"
-
-    formatted_tables = []
-    for table in tables:
-        table_parts = []
-
-        # Table identifier
-        table_name = table.get("name", "UNKNOWN")
-        table_label = table.get("label", "")
-        table_description = table.get("description", "")
-
-        # Database and schema info
-        database_name = table.get("database_name", "")
-        schema_name = table.get("schema_name", "")
-
-        if database_name and schema_name:
-            full_name = f"{database_name}.{schema_name}.{table_name}"
-        elif schema_name:
-            full_name = f"{schema_name}.{table_name}"
-        else:
-            full_name = table_name
-
-        table_parts.append(f"TABLE: {full_name}")
-        if table_label and table_label != table_name:
-            table_parts.append(f"  Label: {table_label}")
-        if table_description:
-            table_parts.append(f"  Description: {table_description}")
-
-        # Primary key
-        if "primary_key" in table:
-            table_parts.append(f"  Primary Key: {table['primary_key']}")
-
-        columns = table.get("columns")
-        if not isinstance(columns, list):
-            columns = []
-        if columns:
-            table_parts.append(
-                "  AVAILABLE COLUMNS (only use these columns for this table):"
-            )
-            for col in columns:
-                # Handle both dict and string column formats
-                if isinstance(col, dict):
-                    col_name = col.get("name", "UNKNOWN")
-                    col_type = col.get("data_type", "UNKNOWN")
-                    col_desc = col.get("description", "")
-                    sample_values = col.get("sample_values")
-
-                    col_line = f"    - {col_name} ({col_type})"
-                    if col_desc:
-                        col_line += f" - {col_desc}"
-                    if sample_values:
-                        col_line += f" | sample values: {sample_values}"
-                    table_parts.append(col_line)
-                elif isinstance(col, str):
-                    # If column is a string, use it directly
-                    table_parts.append(f"    - {col}")
-                else:
-                    # Unknown format, convert to string
-                    table_parts.append(f"    - {str(col)}")
-
-        formatted_tables.append("\n".join(table_parts))
-
-    return "\n\n".join(formatted_tables)
 
 
 class SQLFromCandidatesAgent(BaseAgent):
@@ -350,29 +186,16 @@ class SQLFromCandidatesAgent(BaseAgent):
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
                 observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+            glossary_section = format_glossary_section(state.get("glossary") or [])
+            if glossary_section:
+                observation_block += f"\n{glossary_section}"
             if extract_evidence(original_question):
                 evidence_hints = build_evidence_hints_block(original_question)
                 if evidence_hints:
                     observation_block += f"\n{evidence_hints}\n"
 
             # Build custom analyses section for user prompt
-            ca_section = ""
-            if custom_analyses:
-                ca_lines = []
-                for a in custom_analyses:
-                    line = f"- {a.get('name', '(unnamed)')}"
-                    desc = (a.get("description") or "").strip()
-                    if desc:
-                        line += f": {desc}"
-                    sql = (a.get("sql") or "").strip()
-                    if sql:
-                        line += f"\n  SQL: {sql}"
-                    ca_lines.append(line)
-                ca_section = (
-                    "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
-                    + "\n".join(ca_lines)
-                    + "\n\n"
-                )
+            ca_section = format_custom_analyses_section(custom_analyses)
 
             # Build sql attributes section for user prompt
             sa_section = ""
@@ -404,7 +227,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             if primary_attribute:
                 join_paths = (
                     "## Semantic Hints & Join Paths\n"
-                    + _format_semantic_context(
+                    + format_semantic_context(
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,

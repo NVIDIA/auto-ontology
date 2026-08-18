@@ -100,6 +100,7 @@
                 "type": "null"
               }
             ],
+            "description": "Catalog database UUID or database name used to scope retrieval and SQL.",
             "title": "Target Db"
           }
         },

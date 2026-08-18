@@ -33,10 +33,8 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import (
-    format_tables_for_prompt,
-)
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import (
     build_evidence_hints_block,
@@ -290,12 +288,21 @@ class SQLReconstructionAgent(BaseAgent):
         relevant_tables = list(path_state.get("relevant_tables") or [])
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
+        previous_thought = (getattr(incorrect_response, "thought", "") or "").strip()
+        interpretation_history = list(path_state.get("interpretation_history") or [])
+        if previous_thought and previous_thought not in interpretation_history:
+            interpretation_history.append(previous_thought)
+        path_state["interpretation_history"] = interpretation_history
 
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
             path_state["error_analysis_done"] = True
             response_text = getattr(incorrect_response, "response", "") or ""
-            error_context = f"SQL: {sql_code}\nResponse: {response_text}"
+            error_context = (
+                f"SQL: {sql_code}\n"
+                f"Response: {response_text}\n"
+                f"Actual validation/execution error: {error}"
+            )
 
             analysis = self._analyze_error(
                 state, question_block, error_context, relevant_tables
@@ -357,13 +364,39 @@ class SQLReconstructionAgent(BaseAgent):
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
+        # Anchor ambiguous-term interpretation across repair attempts: without
+        # this, each reconstruction call independently re-derives things like
+        # "recently" from scratch and silently drifts (e.g. 5 months -> 4
+        # months) even when the time window was never the flagged problem.
+        prior_interpretation_section = ""
+        if interpretation_history:
+            interpretation_text = "\n".join(
+                f"  {index}. {thought}"
+                for index, thought in enumerate(interpretation_history, 1)
+            )
+            prior_interpretation_section = (
+                "\nINTERPRETATION HISTORY:\n"
+                f"{interpretation_text}\n\n"
+                "Keep every valid assumption above. Change one only when required "
+                "by the question, schema, or error, and state the change explicitly. "
+                "Omission does not remove an assumption. Restate all active "
+                "assumptions in `thought`; SQL implementation details may change.\n\n"
+            )
+
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
             f"{history_section}"
+            f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
+            "Fix what the error requires while preserving every still-valid "
+            "user-intent assumption. Do not silently reinterpret an ambiguous "
+            "term merely because you're rewriting the query. In `thought`, "
+            "restate the assumptions that remain valid and clearly state any "
+            "assumption that had to change because it conflicted with the "
+            "user's question, the available schema, or the validation error.\n"
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
@@ -398,6 +431,9 @@ class SQLReconstructionAgent(BaseAgent):
         )
         if thought and thought != "No explanation":
             record_thought(path_state, _GRAPH_NODE_NAME, thought)
+            if thought not in interpretation_history:
+                interpretation_history.append(thought)
+                path_state["interpretation_history"] = interpretation_history
 
         custom_analyses_used: list = []
         if hasattr(response, "custom_analyses_used"):
