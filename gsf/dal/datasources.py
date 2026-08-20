@@ -491,7 +491,10 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
-       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
+       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
+       EXISTS {{
+           (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
+       }} AS is_foreign_key_target
 ORDER BY c.ordinal_position
 """
 
@@ -614,6 +617,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
         if r.get("id") is not None
