@@ -182,6 +182,7 @@ export const ApiTokensView = () => {
 				<Button
 					theme={ButtonTheme.IconDanger}
 					size={Size.SMALL}
+					iconOnly
 					aria-label={`Revoke ${token.name ?? 'token'}`}
 					onClick={() => {
 						setRevokeError(null);

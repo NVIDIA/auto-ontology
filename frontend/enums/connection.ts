@@ -6,6 +6,7 @@
 export enum ConnectionType {
 	DATABRICKS = 'databricks',
 	POSTGRESQL = 'postgresql',
+	MYSQL = 'mysql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
 }
@@ -13,6 +14,7 @@ export enum ConnectionType {
 export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.DATABRICKS]: 'Databricks',
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
+	[ConnectionType.MYSQL]: 'MySQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
 };
@@ -100,6 +102,13 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'host', label: 'Host', placeholder: 'localhost' },
 		{ key: 'port', label: 'Port', placeholder: '5432' },
 		{ key: 'user', label: 'User', placeholder: 'postgres' },
+		{ key: 'password', label: 'Password', secret: true },
+		{ key: 'database', label: 'Database', placeholder: 'my_database' },
+	],
+	[ConnectionType.MYSQL]: [
+		{ key: 'host', label: 'Host', placeholder: 'localhost' },
+		{ key: 'port', label: 'Port', placeholder: '3306', optional: true },
+		{ key: 'user', label: 'User', placeholder: 'root' },
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'my_database' },
 	],

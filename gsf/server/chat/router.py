@@ -15,9 +15,9 @@ Each conversation gets its own warm agent subprocess and may only have one
 in-flight stream at a time; different conversations run fully independently
 (each `WarmPool.acquire()` cold-starts a fresh subprocess if no standby is
 free, so there's no cap on how many conversations can run concurrently).
-Authenticated slots are keyed by user plus ``request.conversation_id``.
-Callers that omit it (e.g. direct one-shot API usage) get a fresh key per
-request and never collide.
+Slots are keyed by the authenticated user plus ``conversation_id``. Stateless
+calls (no ``conversation_id``, see ``ChatRequest``) get a fresh, unique key
+per request instead and so never contend with anything.
 
 * If the conversation's slot is empty → request runs.
 * If the slot is held by a stream whose **client is still connected**
@@ -34,6 +34,30 @@ request and never collide.
   navigate-away therefore does **not** free the slot for web-app requests —
   a second submit into the same conversation still gets 409 until the run
   completes. Use ``/chat/watch`` to reattach instead.
+
+Disconnecting never cuts the answer short
+------------------------------------------
+A disconnected client (navigate-away, switch to another conversation, closed
+tab) only clears ``client_alive`` — it does **not** cancel the run. ``_pump``
+keeps draining the worker and persisting the result independently of any HTTP
+connection, so the agent always finishes and the full answer always lands in
+the conversation, whether or not anyone is still watching. The only things
+that actually kill an in-flight worker are an explicit ``POST /chat/cancel``
+(Stop button) or a genuinely new question preempting an orphaned slot above.
+Reattach with ``/chat/watch`` to see a run that kept going after you left.
+
+The chart/table bubble is guaranteed too
+-----------------------------------------
+Once the SQL answer ("Message 1") lands, ``_pump`` immediately generates and
+persists the chart-or-table bubble ("Message 2") itself — see
+``_build_charts_event``. It streams back as its own ``charts`` SSE event once
+ready, so a still-connected client renders it with no extra request, and
+``/chat/watch`` replays it for anyone who reattaches later. Same guarantee as
+the SQL answer: it exists whether or not a browser tab is still around to ask
+for it — provided the call had a ``conversation_id`` to persist into.
+Stateless calls (no ``conversation_id``) don't get a chart step at all, same
+as they never got the old client-driven visualize step without an
+authenticated conversation to save into.
 
 Disconnect detection
 --------------------
@@ -63,18 +87,24 @@ from fastapi.responses import StreamingResponse
 from gsf.dal import datasources as datasources_dal
 from gsf.dal.terms import semantic_layer_calculated
 from gsf.retrieval.text_to_sql.visualization import analyze_and_visualize
-from gsf.server.chat.helpers import NODE_LABELS, ChatRequest, VisualizeRequest
+from gsf.server.chat.helpers import (
+    NODE_LABELS,
+    ChatRequest,
+    build_result_message,
+)
 from gsf.server.chat.conversation_dal import (
     ConversationAccessError,
     create_stateless_analytics,
     persist_analytics_result,
     persist_assistant_result,
+    persist_result_message,
     prepare_conversation,
 )
 from gsf.server.chat.identity import resolve_internal_user
+from gsf.server.chat.settings_dal import is_visualization_enabled
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
 from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
-from gsf.server.responses import ChartsResponse, ChatCancelResponse
+from gsf.server.responses import ChatCancelResponse
 
 logger = logging.getLogger(__name__)
 
@@ -100,17 +130,18 @@ SSE_RESPONSES: dict[int | str, dict[str, Any]] = {
 # (gsf.retrieval.text_to_sql.main): prefer the cheaper non-reasoning model,
 # fall back to the main reasoning model. Neither client does I/O at
 # construction time, so this is safe to build eagerly; a missing API key
-# just leaves the client as ``None`` and the endpoint soft-fails per request.
+# just leaves the client as ``None`` and ``_build_charts_event`` soft-fails
+# per run.
 try:
     _non_reasoning_llm = get_non_reasoning_llm_client(max_tokens=2048)
 except (ValueError, EnvironmentError) as e:
-    logger.warning("Chat visualize: failed to init non-reasoning LLM: %s", e)
+    logger.warning("Chart generation: failed to init non-reasoning LLM: %s", e)
     _non_reasoning_llm = None
 
 try:
     _reasoning_llm = get_llm_client()
 except (ValueError, EnvironmentError) as e:
-    logger.warning("Chat visualize: failed to init reasoning LLM: %s", e)
+    logger.warning("Chart generation: failed to init reasoning LLM: %s", e)
     _reasoning_llm = None
 
 # Returned as the 409 detail when a chat is attempted before the semantic
@@ -161,6 +192,10 @@ class _Slot:
     user_id: str | None
     conversation_id: UUID | None
     analytics_id: str | None
+    # The question this run answers — needed by ``_pump`` to generate the
+    # chart step itself (mirrors what the client used to pass to
+    # ``POST /chat/visualize``).
+    question: str
     client_alive: threading.Event
     # Set if the watchdog detected a client disconnect. Tells the stream's
     # finally whether to ``replace`` the worker (cancel) or ``return_alive``
@@ -183,8 +218,8 @@ class _Slot:
     finished: threading.Event = field(default_factory=threading.Event)
 
 
-# Keyed by authenticated user + conversation_id (or a generated per-request
-# key when absent) so distinct users and conversations never contend.
+# Keyed by authenticated user + conversation_id (or a per-request unique key
+# for stateless calls), so distinct users and conversations never contend.
 _active_slots: dict[str, _Slot] = {}
 _slot_lock = threading.Lock()
 
@@ -237,12 +272,23 @@ def _release(slot: _Slot) -> None:
 
 
 async def _watch_disconnect(http_request: Request, slot: _Slot) -> None:
-    """Free the slot the moment the ASGI client disconnects.
+    """Mark the slot orphaned the moment the ASGI client disconnects.
 
     Without this, the sync streaming generator only learns the client is
     gone when its next write to the socket fails — and the kernel happily
     buffers small heartbeat writes, so that signal can lag by tens of
     seconds, holding the slot and forcing follow-up requests into 409.
+
+    Crucially, this only clears ``client_alive`` — it never cancels the
+    run or releases the slot itself. A disconnected client (navigated
+    away, switched to another conversation, closed the tab) must not cut
+    the agent off mid-answer: ``_pump`` keeps draining the worker and
+    persisting the result regardless of whether anyone is watching, so the
+    run always finishes and the full answer always lands in the
+    conversation. Clearing ``client_alive`` only makes the slot eligible
+    for preemption — i.e. a genuinely new question posted into the same
+    conversation (see ``_try_claim_slot``) is what actually cancels an
+    orphaned run, not the mere act of disconnecting.
     """
 
     while slot.client_alive.is_set():
@@ -252,10 +298,66 @@ async def _watch_disconnect(http_request: Request, slot: _Slot) -> None:
             logger.exception("Disconnect watchdog failed")
             return
         if disconnected:
-            slot.cancelled.set()
-            _release(slot)
+            slot.client_alive.clear()
             return
         await asyncio.sleep(_DISCONNECT_POLL_S)
+
+
+def _build_charts_event(slot: _Slot, answer: dict[str, Any]) -> dict[str, Any] | None:
+    """Compute and persist Message 2 (chart, or the raw result table) for ``answer``.
+
+    Runs unconditionally from ``_pump`` — the same guarantee the SQL answer
+    already gets — instead of depending on a browser tab staying around to
+    ask for it. Returns the SSE event to buffer (so any live/reattached
+    consumer renders it immediately), or ``None`` when there's nothing to
+    show (no executed result).
+    """
+
+    # Stateless calls (no ``conversation_id``) have nowhere to persist a
+    # chart bubble to, so they simply don't get one.
+    if slot.conversation_id is None or slot.user_id is None:
+        return None
+
+    sql_response_from_db = answer.get("sql_response_from_db")
+    if not sql_response_from_db:
+        return None
+
+    charts: list[dict[str, Any]] | None = None
+    llm = _non_reasoning_llm or _reasoning_llm
+    if llm is not None:
+        try:
+            if is_visualization_enabled():
+                charts = analyze_and_visualize(
+                    llm=llm,
+                    question=slot.question,
+                    sql=str(answer.get("sql_code") or ""),
+                    sql_response_from_db=sql_response_from_db,
+                )
+        except Exception:  # noqa: BLE001 — charts are best-effort
+            logger.exception("Chart generation failed")
+
+    if slot.cancelled.is_set():
+        return None
+
+    built = build_result_message(sql_response_from_db, charts)
+    if built is None:
+        return None
+    content, sql_response = built
+
+    if slot.cancelled.is_set():
+        return None
+
+    try:
+        persist_result_message(
+            conversation_id=slot.conversation_id,
+            user_id=slot.user_id,
+            content=content,
+            sql_response=sql_response,
+        )
+    except Exception:  # noqa: BLE001 — persistence must not break SSE
+        logger.exception("Failed to persist chart/result message")
+
+    return {"type": "charts", "content": content, "sql_response": sql_response}
 
 
 def _pump(slot: _Slot) -> None:
@@ -323,6 +425,15 @@ def _pump(slot: _Slot) -> None:
             persist_event(event)
             with slot.buffer_lock:
                 slot.buffer.append(event)
+            if event.get("type") == "result" and not slot.cancelled.is_set():
+                try:
+                    charts_event = _build_charts_event(slot, event.get("answer") or {})
+                except Exception:  # noqa: BLE001 — the chart step must not break the run
+                    logger.exception("Chart step failed")
+                    charts_event = None
+                if charts_event is not None:
+                    with slot.buffer_lock:
+                        slot.buffer.append(charts_event)
     except RuntimeError as exc:
         logger.exception("Agent stream failed")
         error_event = {"type": "error", "message": f"Agent stream failed: {exc}"}
@@ -400,15 +511,20 @@ async def chat_completions(
 ) -> StreamingResponse:
     """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
 
-    Step 1 of a chat turn: the SQL and the formatted answer. Charts are a
-    separate second call to ``POST /chat/visualize`` so the answer never waits on
-    an extra LLM round trip.
+    Emits the SQL and formatted answer as a ``result`` event, then — if that
+    answer has an executed result — generates and persists the chart/table
+    bubble itself and streams it back as a ``charts`` event before the stream
+    closes with ``[DONE]``. Callers that only care about the text/SQL answer
+    can still stop reading after ``result``; the chart step and its
+    persistence happen server-side regardless of whether anyone keeps
+    listening (see ``_build_charts_event``).
 
     Requires a compiled semantic layer; without one the request is rejected with
-    409 rather than run against a bare schema. Passing ``conversation_id``
-    persists the turn and claims that conversation's single run slot — a second
-    concurrent request for the same conversation also gets 409. Omitting it runs
-    the question statelessly with a fresh key, so one-shot callers never collide.
+    409 rather than run against a bare schema. ``conversation_id`` persists the
+    turn and claims that conversation's single run slot — a second concurrent
+    request for the same conversation gets 409 too. Omitting ``conversation_id``
+    runs the question statelessly: no history, no persisted turn, and no chart
+    step (``_build_charts_event`` needs a conversation to save into).
     """
     logger.info("Chat completions request: %s", request.model_dump())
 
@@ -420,7 +536,7 @@ async def chat_completions(
     target_db = await asyncio.to_thread(_resolve_chat_target_db, request.target_db)
 
     # Conversation persistence trusts identity forwarded by the private Next.js
-    # gateway. One-shot direct callers remain stateless.
+    # gateway; only calls that persist (i.e. carry a conversation_id) need it.
     user_id = resolve_internal_user(
         http_request, required=request.conversation_id is not None
     )
@@ -440,6 +556,7 @@ async def chat_completions(
         user_id=user_id,
         conversation_id=request.conversation_id,
         analytics_id=None,
+        question=request.question,
         client_alive=threading.Event(),
         cancelled=threading.Event(),
         released=threading.Event(),
@@ -595,28 +712,3 @@ async def chat_cancel(conversation_id: UUID, request: Request) -> dict[str, bool
     slot.cancelled.set()
     _release(slot)
     return {"cancelled": True}
-
-
-@router.post("/chat/visualize", response_model=ChartsResponse)
-async def chat_visualize(request: VisualizeRequest) -> dict[str, Any]:
-    """Second step: recommend a chart for an already-executed SQL result.
-
-    Runs outside the ``WarmPool`` subprocess — unlike the main agent
-    pipeline, this is one or two short LLM calls with no DB/retriever
-    dependency, so it doesn't need process-level cancellation isolation.
-    The blocking LLM calls are offloaded to a thread so they don't block
-    the event loop.
-    """
-    llm = _non_reasoning_llm or _reasoning_llm
-    if llm is None:
-        logger.warning("No LLM available for chat visualize — skipping")
-        return {"charts": None}
-
-    specs = await asyncio.to_thread(
-        analyze_and_visualize,
-        llm=llm,
-        question=request.question,
-        sql=request.sql,
-        sql_response_from_db=request.result,
-    )
-    return {"charts": specs}

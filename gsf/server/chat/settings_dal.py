@@ -43,6 +43,32 @@ def fetch_acronyms() -> list[dict[str, str]]:
         return []
 
 
+def is_visualization_enabled() -> bool:
+    """Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
+
+    Reads the same ``configurations`` row the frontend's
+    ``isVisualizationEnabled`` (Prisma) checks, so both sides agree on the
+    setting without a round trip through the Next.js API. A missing row or a
+    DB hiccup both count as enabled — the feature is on by default and a
+    transient read failure shouldn't silently suppress every chart.
+    """
+    try:
+        with psycopg.connect(
+            get_postgres_connection_string(), connect_timeout=3
+        ) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT value FROM {FRONTEND_SCHEMA}.configurations "
+                    "WHERE key = %s",
+                    ("visualization_enabled",),
+                )
+                row = cur.fetchone()
+        return row is None or row[0] != "false"
+    except Exception:
+        logger.exception("Failed to read visualization setting; defaulting to enabled")
+        return True
+
+
 def fetch_custom_prompts() -> str:
     """Return all stored prompts joined into one string (blank if none).
 

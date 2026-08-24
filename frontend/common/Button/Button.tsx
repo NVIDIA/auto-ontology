@@ -20,15 +20,15 @@ const themeClasses: Record<ButtonTheme, string> = {
 	[ButtonTheme.DangerSubtle]:
 		'border border-red-300 bg-white text-red-600 hover:bg-red-50 dark:border-red-800 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950/30 disabled:border-zinc-300 disabled:bg-white disabled:text-zinc-400 dark:disabled:border-zinc-600 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500',
 	[ButtonTheme.Minimal]:
-		'border border-transparent bg-transparent text-zinc-600 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:text-zinc-300 dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-400 dark:disabled:text-zinc-500',
+		'border border-transparent bg-transparent text-zinc-600 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:text-zinc-300 dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-400 disabled:hover:bg-transparent dark:disabled:text-zinc-500',
 	[ButtonTheme.Icon]:
-		'border border-transparent bg-transparent text-zinc-400 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-400 dark:disabled:text-zinc-600',
+		'border border-transparent bg-transparent text-zinc-400 hover:bg-[#76b900]/10 hover:text-[#5e9400] dark:hover:bg-[#76b900]/20 dark:hover:text-[#a3d63a] disabled:text-zinc-300 disabled:hover:bg-transparent dark:disabled:text-zinc-600',
 	[ButtonTheme.IconNeutral]:
-		'border border-transparent bg-transparent text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 disabled:text-zinc-300 dark:disabled:text-zinc-600',
+		'border border-transparent bg-transparent text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-700 dark:hover:text-zinc-200 disabled:text-zinc-300 disabled:hover:bg-transparent dark:disabled:text-zinc-600',
 	[ButtonTheme.IconDanger]:
-		'border border-transparent bg-transparent text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 disabled:text-zinc-300 dark:disabled:text-zinc-600',
+		'border border-transparent bg-transparent text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 disabled:text-zinc-300 disabled:hover:bg-transparent dark:disabled:text-zinc-600',
 	[ButtonTheme.Soft]:
-		'border border-[#76b900]/40 bg-white text-[#4d7a00] hover:bg-[#76b900]/10 dark:border-[#76b900]/40 dark:bg-zinc-950 dark:text-[#a3d63a] dark:hover:bg-[#76b900]/15 disabled:border-zinc-300 disabled:bg-white disabled:text-zinc-400 dark:disabled:border-zinc-600 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500',
+		'border border-[#76b900]/40 bg-white text-[#4d7a00] hover:bg-[#76b900]/10 dark:border-[#76b900]/40 dark:bg-zinc-900 dark:text-[#a3d63a] dark:hover:bg-[#76b900]/15 disabled:border-zinc-300 disabled:bg-white disabled:text-zinc-400 dark:disabled:border-zinc-600 dark:disabled:bg-zinc-900 dark:disabled:text-zinc-500',
 };
 
 const sizeClasses: Record<Size, string> = {
@@ -49,23 +49,11 @@ const iconOnlySizeClasses: Record<Size, string> = {
 	[Size.LARGE]: 'w-10',
 };
 
-export type IconPosition = 'left' | 'right' | 'left-and-right';
+export type IconPosition = 'left' | 'right';
 
-const setPaddingClasses = (size: Size, iconPosition?: IconPosition, noPadding = false): string => {
+const setPaddingClasses = (size: Size, noPadding: boolean): string => {
 	if (noPadding) return 'p-0';
-
-	const isSmall = size === Size.SMALL;
-
-	switch (iconPosition) {
-		case 'left-and-right':
-			return isSmall ? 'px-1' : 'px-2';
-		case 'right':
-			return isSmall ? 'pl-1 pr-2' : 'pl-2 pr-4';
-		case 'left':
-			return isSmall ? 'pl-2 pr-1' : 'pl-4 pr-2';
-		default:
-			return isSmall ? 'px-2' : 'px-4';
-	}
+	return size === Size.SMALL ? 'px-2' : 'px-4';
 };
 
 export type ButtonProps = {
@@ -113,9 +101,7 @@ export const Button = forwardRef<
 				themeClasses[theme],
 				sizeClasses[size],
 				rounded ? 'rounded-full' : radiusClasses[size],
-				iconOnly
-					? iconOnlySizeClasses[size]
-					: setPaddingClasses(size, iconPosition, noPadding),
+				iconOnly ? iconOnlySizeClasses[size] : setPaddingClasses(size, noPadding),
 				iconOnly && 'p-0',
 				iconPosition && 'gap-1.5',
 				full && 'w-full',

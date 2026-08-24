@@ -4,7 +4,14 @@
 
 'use client';
 
-import { useCallback, useRef, useState, type KeyboardEvent, type FormEvent } from 'react';
+import {
+	useCallback,
+	useRef,
+	useState,
+	type KeyboardEvent,
+	type FormEvent,
+	type MouseEvent,
+} from 'react';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
@@ -73,6 +80,14 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 		[handleSubmit],
 	);
 
+	const handleStop = useCallback(
+		(e: MouseEvent<HTMLButtonElement>) => {
+			e.preventDefault();
+			onStop();
+		},
+		[onStop],
+	);
+
 	return (
 		<form
 			onSubmit={handleSubmit}
@@ -90,17 +105,19 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 
 				{isLoading ? (
 					<Button
+						key="stop"
 						theme={ButtonTheme.Danger}
 						size={Size.LARGE}
 						iconOnly
 						type="button"
-						onClick={onStop}
+						onClick={handleStop}
 						aria-label="Stop generation"
 					>
 						<Icon name={IconName.Stop} className="h-4 w-4" />
 					</Button>
 				) : (
 					<Button
+						key="send"
 						theme={ButtonTheme.Primary}
 						size={Size.LARGE}
 						iconOnly

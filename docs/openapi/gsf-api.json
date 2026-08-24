@@ -935,12 +935,12 @@
       "post": {
         "tags": ["chat"],
         "summary": "Ask a question and stream the answer back as Server-Sent Events.",
-        "description": "Ask a question and stream the answer back as Server-Sent Events.\n\nStep 1 of a chat turn: SQL plus the formatted answer. Charts are a separate\nsecond request (`POST /api/chat/visualize`) the client makes once this\ncompletes, so the answer never waits on an extra LLM round trip. Passing\n`conversation_id` persists the turn and additionally requires\n`conversation: ['write']`; it answers 409 while that conversation already has\na run in flight. Omitting it runs the question statelessly.",
+        "description": "Ask a question and stream the answer back as Server-Sent Events.\n\nFastAPI emits the SQL plus the formatted answer first (`result`), then —\nwhen that answer has an executed result — generates and persists the\nchart/table bubble itself and streams it back as its own `charts` event\nbefore the stream closes. No second request needed from this route or the\nbrowser. Passing `conversation_id` persists the turn and additionally\nrequires `conversation: ['write']`; the route answers 409 while that\nconversation already has a run in flight. Omitting it runs the question\nstatelessly, with no history and no chart step.",
         "operationId": "post_api_chat_completions",
         "x-gsf-upstream": "/api/chat/completions",
         "requestBody": {
           "required": true,
-          "description": "Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate `POST /api/chat/visualize` call. Reuse one `conversation_id` for follow-up turns; an unknown UUID creates a conversation, while an ID owned by another user returns 404.",
+          "description": "SQL plus a formatted answer, streamed as SSE. When the answer has an executed result, the backend also generates and persists a chart (or fallback table) and streams it back on this same connection as its own `charts` event — no follow-up call needed. Reuse one `conversation_id` for follow-up turns; an unknown UUID creates a conversation, while an ID owned by another user returns 404. Omitting `conversation_id` runs the question statelessly, with no history and no chart step.",
           "content": {
             "application/json": {
               "schema": {
@@ -1039,84 +1039,6 @@
           }
         ],
         "x-gsf-source": "frontend/app/api/chat/completions/route.ts",
-        "x-gsf-permissions": {
-          "chat": ["use"]
-        },
-        "x-gsf-proxied": false
-      }
-    },
-    "/api/chat/visualize": {
-      "post": {
-        "tags": ["chat"],
-        "summary": "Pick charts for an executed SQL result — step 2 of a chat turn.",
-        "description": "Pick charts for an executed SQL result — step 2 of a chat turn.\n\nSame permission as the chat completions route: every chat user may trigger\nthis, not just admins.\n\nUnlike the completions route, this one never creates a conversation: by the\ntime step 2 runs, step 1 (or `POST /api/conversations`) has already created\nit. Falling back to create-on-missing here would leave an orphan\nconversation — just the chart/table bubble, with no question or Message 1\nahead of it — whenever this is called with an id that never got that far\n(e.g. a standalone API caller skipping the completions step).",
-        "operationId": "post_api_chat_visualize",
-        "x-gsf-upstream": "/api/chat/visualize",
-        "requestBody": {
-          "required": false,
-          "description": "Step 2 of chat: the SQL and its already-executed result from step 1. A missing or unparseable body is tolerated — it degrades to `{ \"charts\": null }` rather than erroring, because the chart is a nice-to-have.",
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "question": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "sql": {
-                    "default": "",
-                    "type": "string"
-                  },
-                  "result": {
-                    "description": "The executed SQL result — the `sql_response_from_db` from the step 1 answer. Either a one-item list holding a JSON-records string, or a list of row objects."
-                  },
-                  "conversation_id": {
-                    "description": "When given and owned by the caller, the result and any chart are appended to that conversation as an assistant message. Ignored by the backend; consumed by this handler only.",
-                    "type": "string",
-                    "format": "uuid",
-                    "pattern": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$"
-                  }
-                },
-                "required": ["question", "result"]
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ChartsResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "No authenticated caller could be resolved"
-          },
-          "403": {
-            "description": "The caller lacks the required permission"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiToken": []
-          }
-        ],
-        "x-gsf-source": "frontend/app/api/chat/visualize/route.ts",
         "x-gsf-permissions": {
           "chat": ["use"]
         },
@@ -3035,6 +2957,153 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/exploration/column-attributes/{attr_id}/details": {
+      "get": {
+        "description": "explorationApi.getColumnAttributeExplorationDetails — a ColumnAttribute's own owning Term, for expanding it on the graph.",
+        "operationId": "get_api_exploration_column_attributes_attr_id_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ColumnAttributeExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Column Attribute Exploration Details",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/column-attributes/[attr_id]/details/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/exploration/columns/{column_id}/details": {
+      "get": {
+        "description": "explorationApi.getColumnExplorationDetails — the Column's own ColumnAttribute, for expanding it on the graph.",
+        "operationId": "get_api_exploration_columns_column_id_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "column_id",
+            "required": true,
+            "schema": {
+              "title": "Column Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ColumnExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Column Exploration Details",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/columns/[column_id]/details/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/exploration/edges": {
       "get": {
         "description": "explorationApi.getEdges — table connections backed by a shared SQL query or a foreign key.",
@@ -3297,6 +3366,120 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/exploration/sql-attributes/{attr_id}/details": {
+      "get": {
+        "description": "explorationApi.getSqlAttributeExplorationDetails — a SqlAttribute's own Sql query and owning Term, for expanding it on the graph.",
+        "operationId": "get_api_exploration_sql_attributes_attr_id_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attr_id",
+            "required": true,
+            "schema": {
+              "title": "Attr Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlAttributeExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sql Attribute Exploration Details",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/sql-attributes/[attr_id]/details/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/exploration/sql/{sql_id}/details": {
+      "get": {
+        "description": "explorationApi.getSqlExplorationDetails — the CustomAnalysis, Column, Table and SqlAttribute nodes hanging off this Sql node, for expanding it on the graph.",
+        "operationId": "get_api_exploration_sql_sql_id_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "sql_id",
+            "required": true,
+            "schema": {
+              "title": "Sql Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_SqlExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sql Exploration Details",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/sql/[sql_id]/details/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/exploration/tables/{table_id}/details": {
       "get": {
         "description": "explorationApi.getTableExplorationDetails — columns-adjacent SQL and Term details for one table.",
@@ -3417,6 +3600,162 @@
           }
         ],
         "x-gsf-source": "frontend/app/api/exploration/tables/zones/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/exploration/terms/{term_id}/details": {
+      "get": {
+        "description": "explorationApi.getTermExplorationDetails — Tables linked to one term, for expanding it on the graph.",
+        "operationId": "get_api_exploration_terms_term_id_details",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_TermExplorationDetails_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Term Exploration Details",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/terms/[term_id]/details/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/exploration/terms/{term_id}/path/{other_term_id}": {
+      "get": {
+        "description": "explorationApi.getSemanticLinkPath — the real hop chain connecting two terms, for\nhighlighting a clicked term↔term edge on the graph.",
+        "operationId": "get_api_exploration_terms_term_id_path_other_term_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "term_id",
+            "required": true,
+            "schema": {
+              "title": "Term Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "other_term_id",
+            "required": true,
+            "schema": {
+              "title": "Other Term Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ExplorationLinkPath_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Semantic Link Path",
+        "tags": ["exploration"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/exploration/terms/[term_id]/path/[other_term_id]/route.ts",
         "x-gsf-permissions": {
           "catalog": ["read"]
         },
@@ -5702,30 +6041,6 @@
         "title": "Body_import_model_api_model_import_post",
         "type": "object"
       },
-      "ChartsResponse": {
-        "additionalProperties": true,
-        "description": "``charts`` is null when the model declined to propose a chart.",
-        "properties": {
-          "charts": {
-            "anyOf": [
-              {
-                "items": {
-                  "additionalProperties": true,
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Charts"
-          }
-        },
-        "required": ["charts"],
-        "title": "ChartsResponse",
-        "type": "object"
-      },
       "ChatCancelResponse": {
         "additionalProperties": true,
         "properties": {
@@ -5880,6 +6195,155 @@
         "title": "ColumnAttribute",
         "type": "object"
       },
+      "ColumnAttributeExplorationColumn": {
+        "additionalProperties": true,
+        "description": "One Column HAS_ATTRIBUTE/SEMANTIC_FK-linked to a ColumnAttribute.\n\nSame shape as `ColumnExplorationForeignKeyColumn` — enough for a\nclient to graft it on as a fully expandable Column node.\n`relationship_types` mirrors `TermExplorationTable.relationship_types`:\na Column reaching the same attribute via more than one edge type\ncollects both once grouped.",
+        "properties": {
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship Types",
+            "type": "array"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          }
+        },
+        "required": ["id"],
+        "title": "ColumnAttributeExplorationColumn",
+        "type": "object"
+      },
+      "ColumnAttributeExplorationDetails": {
+        "additionalProperties": true,
+        "description": "A ColumnAttribute's own owning Term and every linked Column, for\nexpanding it on the graph.\n\n`term` is `None` only when the attribute has no owning Term (or it's\nout of scope). `columns` is one ordered page of *every* Column\nHAS_ATTRIBUTE/SEMANTIC_FK-linked to this attribute — not just the\n\"primary\" one whichever expansion grafted this attribute on already\nknew about — since a shared attribute (e.g. a common `user_id`-shaped\none) can be linked from many Columns across many Tables at once. See\n`fetch_column_attribute_exploration_details`.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnAttributeExplorationColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "columns_total": {
+            "default": 0,
+            "title": "Columns Total",
+            "type": "integer"
+          },
+          "term": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TermSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "ColumnAttributeExplorationDetails",
+        "type": "object"
+      },
       "ColumnAttributePatchResponse": {
         "additionalProperties": true,
         "description": "``term_certification`` is the owning Term's badge, recomputed on write.\n\nThe patch returns it alongside ``data`` so the Terms list can update the\nbadge without a second request, which is why this needs its own model\nrather than the plain ``DataResponse`` envelope.",
@@ -5955,6 +6419,206 @@
           }
         },
         "title": "ColumnAttributeUpdate",
+        "type": "object"
+      },
+      "ColumnExplorationAttribute": {
+        "additionalProperties": true,
+        "description": "The ColumnAttribute HAS_ATTRIBUTE/SEMANTIC_FK-linked to a Column, if any.\n\n`relationship_type` names the underlying Neo4j relationship type\n(``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) actually connecting the Column\nto this ColumnAttribute — same rationale as `relationship_types` on\n`TermExplorationTable`/`ExplorationLink` — so a client can label the\nedge the same way it would read in the graph itself, distinguishing a\nplain attribute from an FK-shaped one (like `user_id`).",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relationship Type"
+          }
+        },
+        "required": ["id"],
+        "title": "ColumnExplorationAttribute",
+        "type": "object"
+      },
+      "ColumnExplorationDetails": {
+        "additionalProperties": true,
+        "description": "A Column's own ColumnAttribute, outgoing FOREIGN_KEY target Column,\nincoming FOREIGN_KEY source Columns, and referencing Sql queries, for\nexpanding it on the graph.\n\n`column_attribute`/`foreign_key_column` are `None` for a column with no\nColumnAttribute/no outgoing FK; `referencing_columns` is empty when no\nother Column's own FK points at this one (the reverse of\n`foreign_key_column`); `sql_queries` is empty for a column no stored\nquery ever referenced directly — see `fetch_column_exploration_details`.",
+        "properties": {
+          "column_attribute": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnExplorationAttribute"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "foreign_key_column": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ColumnExplorationForeignKeyColumn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "referencing_columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnExplorationForeignKeyColumn"
+            },
+            "title": "Referencing Columns",
+            "type": "array"
+          },
+          "sql_queries": {
+            "items": {
+              "$ref": "#/components/schemas/TableSqlQuery"
+            },
+            "title": "Sql Queries",
+            "type": "array"
+          }
+        },
+        "title": "ColumnExplorationDetails",
+        "type": "object"
+      },
+      "ColumnExplorationForeignKeyColumn": {
+        "additionalProperties": true,
+        "description": "The Column a Column's own outgoing FOREIGN_KEY edge points at, if any.\n\nCarries the target Column's own owning Table/Schema/Database ids/names\n(like `ExplorationLinkPathNode` does for a link-path hop) so a client\ncan graft it onto the graph as a fully expandable Column node — see\n`expandColumnNode` in `ExplorationView.tsx`.",
+        "properties": {
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          }
+        },
+        "required": ["id"],
+        "title": "ColumnExplorationForeignKeyColumn",
         "type": "object"
       },
       "ColumnRef": {
@@ -6434,6 +7098,28 @@
         "title": "DataGraphNode",
         "type": "object"
       },
+      "DataResponse_ColumnAttributeExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ColumnAttributeExplorationDetails"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[ColumnAttributeExplorationDetails]",
+        "type": "object"
+      },
+      "DataResponse_ColumnExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ColumnExplorationDetails"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[ColumnExplorationDetails]",
+        "type": "object"
+      },
       "DataResponse_CustomAnalysis_": {
         "additionalProperties": true,
         "properties": {
@@ -6483,6 +7169,17 @@
         },
         "required": ["data"],
         "title": "DataResponse[EntityCoverageResult]",
+        "type": "object"
+      },
+      "DataResponse_ExplorationLinkPath_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExplorationLinkPath"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[ExplorationLinkPath]",
         "type": "object"
       },
       "DataResponse_ExplorationRelatedNodes_": {
@@ -6551,6 +7248,28 @@
         "title": "DataResponse[SqlAttribute]",
         "type": "object"
       },
+      "DataResponse_SqlAttributeExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlAttributeExplorationDetails"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[SqlAttributeExplorationDetails]",
+        "type": "object"
+      },
+      "DataResponse_SqlExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/SqlExplorationDetails"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[SqlExplorationDetails]",
+        "type": "object"
+      },
       "DataResponse_SqlExpressionValidationResult_": {
         "additionalProperties": true,
         "properties": {
@@ -6615,6 +7334,17 @@
         },
         "required": ["data"],
         "title": "DataResponse[TermDetail]",
+        "type": "object"
+      },
+      "DataResponse_TermExplorationDetails_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TermExplorationDetails"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[TermExplorationDetails]",
         "type": "object"
       },
       "DataResponse_Zone_": {
@@ -6756,7 +7486,7 @@
       },
       "ExplorationEdge": {
         "additionalProperties": true,
-        "description": "Two tables connected by a shared SQL query and/or a foreign key.\n\n``queries`` is empty for an edge that exists only because of a foreign\nkey; ``foreign_keys`` is empty for a SQL-only edge.",
+        "description": "Two tables connected by a shared SQL query and/or a foreign key.\n\n``queries`` is empty for an edge that exists only because of a foreign\nkey; ``foreign_keys`` is empty for a SQL-only edge. ``relationship_types``\nnames the underlying Neo4j relationship type(s) behind the edge (``SQL``\nand/or ``FOREIGN_KEY``), for labeling the connection in the graph.",
         "properties": {
           "foreign_keys": {
             "items": {
@@ -6770,6 +7500,13 @@
               "type": "string"
             },
             "title": "Queries",
+            "type": "array"
+          },
+          "relationship_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship Types",
             "type": "array"
           },
           "source": {
@@ -6788,6 +7525,134 @@
         },
         "required": ["source", "target"],
         "title": "ExplorationEdge",
+        "type": "object"
+      },
+      "ExplorationLinkPath": {
+        "additionalProperties": true,
+        "description": "The real ordered hop chain connecting two Terms, e.g. Term1\n<-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK-> ColumnAttribute\n-PROPERTY_OF-> Term2 — see `fetch_semantic_link_path`. ``hops`` is\nordered from the first term to the second; empty only for a stale/\nhand-crafted request naming two terms with no path connecting them.",
+        "properties": {
+          "hops": {
+            "items": {
+              "$ref": "#/components/schemas/ExplorationLinkPathHop"
+            },
+            "title": "Hops",
+            "type": "array"
+          }
+        },
+        "title": "ExplorationLinkPath",
+        "type": "object"
+      },
+      "ExplorationLinkPathHop": {
+        "additionalProperties": true,
+        "description": "One real Neo4j relationship traversed along a term↔term path.\n\n``relationship`` is the underlying type (``REPRESENTS``, ``CONTAINS``,\n``HAS_ATTRIBUTE``, ``SEMANTIC_FK`` or ``PROPERTY_OF``).",
+        "properties": {
+          "relationship": {
+            "title": "Relationship",
+            "type": "string"
+          },
+          "source": {
+            "$ref": "#/components/schemas/ExplorationLinkPathNode"
+          },
+          "target": {
+            "$ref": "#/components/schemas/ExplorationLinkPathNode"
+          }
+        },
+        "required": ["relationship", "source", "target"],
+        "title": "ExplorationLinkPathHop",
+        "type": "object"
+      },
+      "ExplorationLinkPathNode": {
+        "additionalProperties": true,
+        "description": "One Term/Table/Column/ColumnAttribute node along an `ExplorationLinkPathHop` chain.\n\n``type`` matches the Exploration graph's own node kinds (``term``,\n``table``, ``column``, ``columnAttribute``) so a client can graft/style\nthis node exactly like any other of that type — see\n`fetch_semantic_link_path`. The catalog fields are only ever set for a\n``table``/``column`` type node (see ``_enrich_catalog_path_nodes`` in\n``gsf/dal/attributes.py``) — the same ids a client needs to expand\neither one further, exactly like a Table/Column node grafted anywhere\nelse in the app, so neither is a dead end just because it came from a\nlink path instead. ``table_id``/``table_name`` are a ``column`` node's\nown owning Table, additionally.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["id", "type"],
+        "title": "ExplorationLinkPathNode",
         "type": "object"
       },
       "ExplorationRelatedNode": {
@@ -6968,8 +7833,15 @@
       },
       "GraphLink": {
         "additionalProperties": true,
-        "description": "An undirected term↔term link (two terms sharing at least one table).",
+        "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the underlying Neo4j relationship type(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
         "properties": {
+          "relationship_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship Types",
+            "type": "array"
+          },
           "source": {
             "title": "Source",
             "type": "string"
@@ -7773,6 +8645,58 @@
         "title": "SqlAttributeCreate",
         "type": "object"
       },
+      "SqlAttributeExplorationDetails": {
+        "additionalProperties": true,
+        "description": "A SqlAttribute's own Sql query and owning Term, for expanding it on the graph.\n\nBoth are `None` only when the attribute itself doesn't exist (or is out\nof scope) — see `fetch_sql_attribute_exploration_details`. `sql` alone\ncan be `None` when the attribute's SQL touches a table outside the\ncaller's zones even though the attribute/term are visible.",
+        "properties": {
+          "sql": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SqlAttributeExplorationSql"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "term": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TermSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SqlAttributeExplorationDetails",
+        "type": "object"
+      },
+      "SqlAttributeExplorationSql": {
+        "additionalProperties": true,
+        "description": "The Sql query node HAS_SQL-linked to a SqlAttribute.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "sql": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sql"
+          }
+        },
+        "required": ["id"],
+        "title": "SqlAttributeExplorationSql",
+        "type": "object"
+      },
       "SqlAttributeMetadataPatch": {
         "properties": {
           "certified": {
@@ -7898,6 +8822,325 @@
         },
         "required": ["expression"],
         "title": "SqlAttributeValidate",
+        "type": "object"
+      },
+      "SqlExplorationColumn": {
+        "additionalProperties": true,
+        "description": "One Column the Sql node's own `SQL` edge connects to directly.\n\nSame shape as `ColumnAttributeExplorationColumn` — enough for a client\nto graft it on as a fully expandable Column node.",
+        "properties": {
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Name"
+          }
+        },
+        "required": ["id"],
+        "title": "SqlExplorationColumn",
+        "type": "object"
+      },
+      "SqlExplorationCustomAnalysis": {
+        "additionalProperties": true,
+        "description": "A CustomAnalysis HAS_SQL-linked to the same Sql node as a SqlAttribute.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": ["id"],
+        "title": "SqlExplorationCustomAnalysis",
+        "type": "object"
+      },
+      "SqlExplorationDetails": {
+        "additionalProperties": true,
+        "description": "The CustomAnalysis, Column, Table and SqlAttribute nodes hanging off a Sql node.\n\n`custom_analyses` is empty for the common case of a Sql node with no\nCustomAnalysis sharing it; `columns` is every visible Column the Sql\nnode's own `SQL` edges reach directly; `tables` is every visible Table\nthe Sql node's own `SQL` edges reach directly (the same edge Neo4j\nBrowser itself shows expanding a `Sql` node); `sql_attributes` is every\nvisible SqlAttribute this same Sql node backs (the reverse of\n`SqlAttributeExplorationDetails.sql`) — see\n`fetch_sql_exploration_details`.",
+        "properties": {
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SqlExplorationColumn"
+            },
+            "title": "Columns",
+            "type": "array"
+          },
+          "custom_analyses": {
+            "items": {
+              "$ref": "#/components/schemas/SqlExplorationCustomAnalysis"
+            },
+            "title": "Custom Analyses",
+            "type": "array"
+          },
+          "sql_attributes": {
+            "items": {
+              "$ref": "#/components/schemas/SqlExplorationSqlAttribute"
+            },
+            "title": "Sql Attributes",
+            "type": "array"
+          },
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/SqlExplorationTable"
+            },
+            "title": "Tables",
+            "type": "array"
+          }
+        },
+        "title": "SqlExplorationDetails",
+        "type": "object"
+      },
+      "SqlExplorationSqlAttribute": {
+        "additionalProperties": true,
+        "description": "A SqlAttribute HAS_SQL-linked to the Sql node, with its owning Term.\n\n`term_id`/`term_name` are `None` only when the SqlAttribute has no\nowning Term at all — an out-of-scope owning Term instead drops the\nwhole row, same as `fetch_sql_attribute_exploration_details`'s own\n`term`.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          },
+          "term_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Name"
+          }
+        },
+        "required": ["id"],
+        "title": "SqlExplorationSqlAttribute",
+        "type": "object"
+      },
+      "SqlExplorationTable": {
+        "additionalProperties": true,
+        "description": "One Table the Sql node's own `SQL` edge connects to directly.\n\nMirrors what Neo4j Browser itself shows expanding a `Sql` node (e.g.\n`query_...-[:SQL]->orders`) — enough for a client to graft it on as a\nfully expandable Table node, same shape as `SqlExplorationColumn`\nminus the column-only fields.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          }
+        },
+        "required": ["id"],
+        "title": "SqlExplorationTable",
         "type": "object"
       },
       "SqlExpressionValidationResult": {
@@ -8058,7 +9301,7 @@
           },
           "terms": {
             "items": {
-              "$ref": "#/components/schemas/TermSummary"
+              "$ref": "#/components/schemas/TableExplorationTerm"
             },
             "title": "Terms",
             "type": "array"
@@ -8076,6 +9319,48 @@
           }
         },
         "title": "TableExplorationDetails",
+        "type": "object"
+      },
+      "TableExplorationTerm": {
+        "additionalProperties": true,
+        "description": "A Term linked to a table, with the Neo4j relationship type(s) reaching it.\n\n``relationship_types`` names how this term connects to the table —\n``REPRESENTS`` directly, and/or ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one\nof its columns — the same way ``ExplorationEdge``/``GraphLink`` name\ntheirs, so a client can label the connection the same way it would read\nin the graph itself.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship Types",
+            "type": "array"
+          }
+        },
+        "required": ["id"],
+        "title": "TableExplorationTerm",
         "type": "object"
       },
       "TableSqlQuery": {
@@ -8446,6 +9731,118 @@
         },
         "required": ["id"],
         "title": "TermDetail",
+        "type": "object"
+      },
+      "TermExplorationDetails": {
+        "additionalProperties": true,
+        "description": "One ordered page of Tables linked to a Term, for expanding it on the graph.",
+        "properties": {
+          "tables": {
+            "items": {
+              "$ref": "#/components/schemas/TermExplorationTable"
+            },
+            "title": "Tables",
+            "type": "array"
+          },
+          "tables_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tables Total"
+          }
+        },
+        "title": "TermExplorationDetails",
+        "type": "object"
+      },
+      "TermExplorationTable": {
+        "additionalProperties": true,
+        "description": "A Table linked to a term, with the Neo4j relationship type(s) reaching it.\n\nThe reverse of ``TableExplorationTerm``: ``relationship_types`` names how\nthis table connects to the term — ``REPRESENTS`` directly, and/or\n``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one of its columns — so a client can\nlabel an expansion edge from either end the same way.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "database_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Name"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "relationship_types": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Relationship Types",
+            "type": "array"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "schema_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Name"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          }
+        },
+        "required": ["id"],
+        "title": "TermExplorationTable",
         "type": "object"
       },
       "TermListItem": {

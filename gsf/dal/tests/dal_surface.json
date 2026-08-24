@@ -62,12 +62,18 @@
     "store_column_uniqueness": "(table_id: 'str', uniqueness: 'dict[str, bool]') -> 'None'"
   },
   "exploration": {
+    "fetch_column_attribute_exploration_details": "(attr_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'",
+    "fetch_column_exploration_details": "(column_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any]'",
     "fetch_data_exploration_edges": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_data_exploration_graph": "(zone_ids: 'list[str] | None' = None, limit: 'int' = 500) -> 'dict[str, list[dict[str, Any]]]'",
     "fetch_exploration_related_nodes": "(node_id: 'str', layer: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'",
     "fetch_semantic_exploration_graph": "(zone_ids: 'list[str] | None' = None, limit: 'int' = 500) -> 'dict[str, list[dict[str, Any]]]'",
+    "fetch_semantic_link_path": "(source_term_id: 'str', target_term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any]'",
+    "fetch_sql_attribute_exploration_details": "(attr_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any]'",
+    "fetch_sql_exploration_details": "(sql_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any]'",
     "fetch_table_exploration_details": "(table_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'",
-    "fetch_table_zones_map": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, table_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'"
+    "fetch_table_zones_map": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, table_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
+    "fetch_term_exploration_details": "(term_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'"
   },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",
@@ -76,6 +82,7 @@
     "apply_import_model": "(document: 'GsfModelDocument', *, replace: 'bool', embed_buffer: 'ImportEmbedBuffer | None' = None) -> 'dict[str, Any]'",
     "assemble_export_document": "(rows: 'dict[str, Any]', *, dialect_by_db_name: 'dict[str, str]', sql_column_resolver: 'Any') -> 'GsfModelDocument'",
     "fetch_export_rows": "(database_ids: 'list[str]') -> 'dict[str, Any]'",
+    "make_cached_sql_column_resolver": "() -> 'Callable[[str, str | None], list[str]]'",
     "resolve_sql_column_ids": "(sql: 'str', database_name: 'str | None') -> 'list[str]'",
     "validate_database_ids": "(database_ids: 'list[str]') -> 'None'"
   },
@@ -156,6 +163,7 @@
     "fetch_terms_by_ids": "(term_ids: 'list[str]', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_terms_with_sqls": "() -> 'list[dict[str, Any]]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
+    "find_term_link_path": "(term_a_id: 'str', term_b_id: 'str') -> 'list[dict[str, Any]]'",
     "get_full_term_by_id": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any] | None'",
     "get_slim_term_by_id": "(term_id: 'str') -> 'dict[str, str] | None'",
     "get_term_certification": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'str | None'",

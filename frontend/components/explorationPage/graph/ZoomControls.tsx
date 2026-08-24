@@ -5,12 +5,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Core } from 'cytoscape';
+import type { GraphController } from '@/components/explorationPage/graph/GraphCanvas';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 
 type ZoomControlsProps = {
-	controller: Core | null;
+	controller: GraphController | null;
 };
 
 export const ZoomControls = ({ controller }: ZoomControlsProps) => {
@@ -19,31 +19,37 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 	useEffect(() => {
 		if (controller == null) return undefined;
 
-		const updateZoom = () => setZoom(controller.zoom());
-		const animationFrame = requestAnimationFrame(updateZoom);
-		controller.on('zoom', updateZoom);
+		const camera = controller.getCamera();
+		const updateZoom = () => setZoom(1 / camera.ratio);
+		updateZoom();
+		camera.on('updated', updateZoom);
 		return () => {
-			cancelAnimationFrame(animationFrame);
-			controller.off('zoom', updateZoom);
+			camera.off('updated', updateZoom);
 		};
 	}, [controller]);
 
-	const changeZoom = (delta: number) => {
+	// Sigma's default zoom factor (1.5x per click) feels too subtle for this
+	// graph — use a steeper factor so a single click noticeably changes scale.
+	const ZOOM_FACTOR = 2.5;
+
+	const zoomIn = () => {
 		if (controller == null) return;
-		const nextZoom = Math.min(3, Math.max(0.2, controller.zoom() + delta));
-		controller.zoom({
-			level: nextZoom,
-			renderedPosition: {
-				x: controller.width() / 2,
-				y: controller.height() / 2,
-			},
-		});
+		void controller.getCamera().animatedZoom({ duration: 200, factor: ZOOM_FACTOR });
+	};
+
+	const zoomOut = () => {
+		if (controller == null) return;
+		void controller.getCamera().animatedUnzoom({ duration: 200, factor: ZOOM_FACTOR });
 	};
 
 	const resetView = () => {
 		if (controller == null) return;
-		controller.zoom(1);
-		controller.center();
+		// Re-derives the graph's frozen extent from every node's current
+		// position (see `resetExtent`'s own comment in `GraphCanvas.tsx`)
+		// before fitting, so a node dragged past the last-frozen box —
+		// which `refresh()` alone can't recover — comes back into frame too.
+		controller.resetExtent();
+		void controller.getCamera().animatedReset({ duration: 200 });
 	};
 
 	return (
@@ -54,7 +60,7 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 					size={Size.LARGE}
 					iconOnly
 					type="button"
-					onClick={() => changeZoom(-0.1)}
+					onClick={zoomOut}
 					aria-label="Zoom out"
 				>
 					−
@@ -67,7 +73,7 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 					size={Size.LARGE}
 					iconOnly
 					type="button"
-					onClick={() => changeZoom(0.1)}
+					onClick={zoomIn}
 					aria-label="Zoom in"
 				>
 					+

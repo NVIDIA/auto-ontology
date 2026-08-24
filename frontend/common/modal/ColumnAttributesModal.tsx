@@ -5,7 +5,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 
 import { termsApi } from '@/api/terms';
 import { Icon, IconName } from '@/common/icons';
@@ -14,6 +13,7 @@ import { Size, ButtonTheme } from '@/enums/button';
 import type { ColumnAttribute } from '@/types/terms';
 import type { TableColumn } from '@/types/table';
 import { LabelList } from '@/common/SinglePageComposer';
+import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
@@ -38,7 +38,10 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { skip, pageSize, pagination } = usePagination({ totalItems: total, resetKey: termId });
+	const { skip, pageSize, pageRowCount, pagination } = usePagination({
+		totalItems: total,
+		resetKey: termId,
+	});
 
 	useEffect(() => {
 		if (termId == null) return undefined;
@@ -113,8 +116,8 @@ export const ColumnAttributesModal = ({ term, onClose }: ColumnAttributesModalPr
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (
-					<div className="flex h-32 items-center justify-center">
-						<Spinner aria-label="Loading attribute columns" className="h-8 w-8" />
+					<div role="status" aria-label="Loading attribute columns">
+						<SkeletonTable columns={columns.length} rows={pageRowCount} />
 					</div>
 				) : error != null ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>

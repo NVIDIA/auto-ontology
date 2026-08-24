@@ -14,6 +14,12 @@ export type ChatMessage = {
 
 export type ChatRequest = {
 	question: string;
+	/**
+	 * Stable thread UUID. When supplied, prior completed turns are loaded and
+	 * the new turn — including the chart/table bubble, once ready — is
+	 * persisted to it. An unknown UUID creates the conversation. Omitting it
+	 * runs the question statelessly, with no chart step or history.
+	 */
 	conversationId?: string | null;
 	/** Scope retrieval/SQL to one connected database when multiple are loaded. */
 	target_db?: string | null;
@@ -44,28 +50,20 @@ export type ErrorEvent = {
 	message: string;
 };
 
-export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent;
-
 /**
- * Illumex-style step 2: POST /api/chat/visualize takes the question, SQL, and
- * already-executed result from step 1 and returns ResultChart specs, or an
- * empty/null list when visualization is disabled or was skipped.
- *
- * Snake-cased because it is the FastAPI payload, which the Next proxy forwards
- * as-is; `conversation_id` is read by the proxy alone, to persist the bubble
- * this step produces and to keep two clients on one run from computing (and
- * writing) it twice.
+ * Message 2 — the chart or fallback result table, generated and persisted
+ * server-side (see `gsf/server/chat/router.py`'s `_pump`) right after the SQL
+ * answer, using the same guarantee as Message 1: it exists whether or not a
+ * browser tab is still around to ask for it. Omitted entirely when there was
+ * no executed result to visualize.
  */
-export type VisualizeRequest = {
-	question: string;
-	sql: string;
-	result?: SqlResult;
-	conversation_id?: string;
+export type ChartsEvent = {
+	type: 'charts';
+	content: string;
+	sql_response?: string | null;
 };
 
-export type VisualizeResponse = {
-	charts: Record<string, unknown>[] | null;
-};
+export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent | ChartsEvent;
 
 export type GraphStep = {
 	node: string;

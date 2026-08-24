@@ -58,11 +58,14 @@ __all__ = [
     "SsoFederationState",
     "TableColumns",
     "TableExplorationDetails",
+    "TableExplorationTerm",
     "TableSqlQuery",
     "TableSummary",
     "Term",
     "TermCountEntry",
     "TermDetail",
+    "TermExplorationDetails",
+    "TermExplorationTable",
     "TermListItem",
     "TermSummary",
     "TermTable",
@@ -388,7 +391,9 @@ class ExplorationEdge(ApiModel):
     """Two tables connected by a shared SQL query and/or a foreign key.
 
     ``queries`` is empty for an edge that exists only because of a foreign
-    key; ``foreign_keys`` is empty for a SQL-only edge.
+    key; ``foreign_keys`` is empty for a SQL-only edge. ``relationship_types``
+    names the underlying Neo4j relationship type(s) behind the edge (``SQL``
+    and/or ``FOREIGN_KEY``), for labeling the connection in the graph.
     """
 
     source: str
@@ -396,6 +401,7 @@ class ExplorationEdge(ApiModel):
     queries: list[str] = Field(default_factory=list)
     via_foreign_key: bool = False
     foreign_keys: list[ForeignKeyRef] = Field(default_factory=list)
+    relationship_types: list[str] = Field(default_factory=list)
 
 
 class DataGraphNode(ApiModel):
@@ -428,10 +434,16 @@ class DataExplorationGraph(ApiModel):
 
 
 class GraphLink(ApiModel):
-    """An undirected term↔term link (two terms sharing at least one table)."""
+    """An undirected term↔term link (two terms sharing at least one table).
+
+    ``relationship_types`` names the underlying Neo4j relationship type(s)
+    (``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either
+    term to a table they share, for labeling the connection in the graph.
+    """
 
     source: str
     target: str
+    relationship_types: list[str] = Field(default_factory=list)
 
 
 class SemanticGraphNode(ApiModel):
@@ -467,12 +479,299 @@ class TableSqlQuery(ApiModel):
     sql: str | None = None
 
 
+class TableExplorationTerm(TermSummary):
+    """A Term linked to a table, with the Neo4j relationship type(s) reaching it.
+
+    ``relationship_types`` names how this term connects to the table —
+    ``REPRESENTS`` directly, and/or ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one
+    of its columns — the same way ``ExplorationEdge``/``GraphLink`` name
+    theirs, so a client can label the connection the same way it would read
+    in the graph itself.
+    """
+
+    relationship_types: list[str] = Field(default_factory=list)
+
+
 class TableExplorationDetails(ApiModel):
     """The table-detail modal: its SQL queries and one page of its Terms."""
 
     queries: list[TableSqlQuery] = Field(default_factory=list)
-    terms: list[TermSummary] = Field(default_factory=list)
+    terms: list[TableExplorationTerm] = Field(default_factory=list)
     terms_total: int | None = None
+
+
+class TermExplorationTable(ApiModel):
+    """A Table linked to a term, with the Neo4j relationship type(s) reaching it.
+
+    The reverse of ``TableExplorationTerm``: ``relationship_types`` names how
+    this table connects to the term — ``REPRESENTS`` directly, and/or
+    ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one of its columns — so a client can
+    label an expansion edge from either end the same way.
+    """
+
+    id: str
+    name: str | None = None
+    table_type: str | None = None
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+    relationship_types: list[str] = Field(default_factory=list)
+
+
+class TermExplorationDetails(ApiModel):
+    """One ordered page of Tables linked to a Term, for expanding it on the graph."""
+
+    tables: list[TermExplorationTable] = Field(default_factory=list)
+    tables_total: int | None = None
+
+
+class ColumnExplorationAttribute(ApiModel):
+    """The ColumnAttribute HAS_ATTRIBUTE/SEMANTIC_FK-linked to a Column, if any.
+
+    `relationship_type` names the underlying Neo4j relationship type
+    (``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) actually connecting the Column
+    to this ColumnAttribute — same rationale as `relationship_types` on
+    `TermExplorationTable`/`ExplorationLink` — so a client can label the
+    edge the same way it would read in the graph itself, distinguishing a
+    plain attribute from an FK-shaped one (like `user_id`).
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    relationship_type: str | None = None
+
+
+class ColumnExplorationForeignKeyColumn(ApiModel):
+    """The Column a Column's own outgoing FOREIGN_KEY edge points at, if any.
+
+    Carries the target Column's own owning Table/Schema/Database ids/names
+    (like `ExplorationLinkPathNode` does for a link-path hop) so a client
+    can graft it onto the graph as a fully expandable Column node — see
+    `expandColumnNode` in `ExplorationView.tsx`.
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    data_type: str | None = None
+    table_id: str | None = None
+    table_name: str | None = None
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+
+
+class ColumnExplorationDetails(ApiModel):
+    """A Column's own ColumnAttribute, outgoing FOREIGN_KEY target Column,
+    incoming FOREIGN_KEY source Columns, and referencing Sql queries, for
+    expanding it on the graph.
+
+    `column_attribute`/`foreign_key_column` are `None` for a column with no
+    ColumnAttribute/no outgoing FK; `referencing_columns` is empty when no
+    other Column's own FK points at this one (the reverse of
+    `foreign_key_column`); `sql_queries` is empty for a column no stored
+    query ever referenced directly — see `fetch_column_exploration_details`.
+    """
+
+    column_attribute: ColumnExplorationAttribute | None = None
+    foreign_key_column: ColumnExplorationForeignKeyColumn | None = None
+    referencing_columns: list[ColumnExplorationForeignKeyColumn] = Field(
+        default_factory=list
+    )
+    sql_queries: list[TableSqlQuery] = Field(default_factory=list)
+
+
+class ColumnAttributeExplorationColumn(ApiModel):
+    """One Column HAS_ATTRIBUTE/SEMANTIC_FK-linked to a ColumnAttribute.
+
+    Same shape as `ColumnExplorationForeignKeyColumn` — enough for a
+    client to graft it on as a fully expandable Column node.
+    `relationship_types` mirrors `TermExplorationTable.relationship_types`:
+    a Column reaching the same attribute via more than one edge type
+    collects both once grouped.
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    data_type: str | None = None
+    table_id: str | None = None
+    table_name: str | None = None
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+    relationship_types: list[str] = Field(default_factory=list)
+
+
+class ColumnAttributeExplorationDetails(ApiModel):
+    """A ColumnAttribute's own owning Term and every linked Column, for
+    expanding it on the graph.
+
+    `term` is `None` only when the attribute has no owning Term (or it's
+    out of scope). `columns` is one ordered page of *every* Column
+    HAS_ATTRIBUTE/SEMANTIC_FK-linked to this attribute — not just the
+    "primary" one whichever expansion grafted this attribute on already
+    knew about — since a shared attribute (e.g. a common `user_id`-shaped
+    one) can be linked from many Columns across many Tables at once. See
+    `fetch_column_attribute_exploration_details`.
+    """
+
+    term: TermSummary | None = None
+    columns: list[ColumnAttributeExplorationColumn] = Field(default_factory=list)
+    columns_total: int = 0
+
+
+class SqlAttributeExplorationSql(ApiModel):
+    """The Sql query node HAS_SQL-linked to a SqlAttribute."""
+
+    id: str
+    sql: str | None = None
+
+
+class SqlAttributeExplorationDetails(ApiModel):
+    """A SqlAttribute's own Sql query and owning Term, for expanding it on the graph.
+
+    Both are `None` only when the attribute itself doesn't exist (or is out
+    of scope) — see `fetch_sql_attribute_exploration_details`. `sql` alone
+    can be `None` when the attribute's SQL touches a table outside the
+    caller's zones even though the attribute/term are visible.
+    """
+
+    sql: SqlAttributeExplorationSql | None = None
+    term: TermSummary | None = None
+
+
+class SqlExplorationCustomAnalysis(ApiModel):
+    """A CustomAnalysis HAS_SQL-linked to the same Sql node as a SqlAttribute."""
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+
+
+class SqlExplorationColumn(ApiModel):
+    """One Column the Sql node's own `SQL` edge connects to directly.
+
+    Same shape as `ColumnAttributeExplorationColumn` — enough for a client
+    to graft it on as a fully expandable Column node.
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    data_type: str | None = None
+    table_id: str | None = None
+    table_name: str | None = None
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+
+
+class SqlExplorationTable(ApiModel):
+    """One Table the Sql node's own `SQL` edge connects to directly.
+
+    Mirrors what Neo4j Browser itself shows expanding a `Sql` node (e.g.
+    `query_...-[:SQL]->orders`) — enough for a client to graft it on as a
+    fully expandable Table node, same shape as `SqlExplorationColumn`
+    minus the column-only fields.
+    """
+
+    id: str
+    name: str | None = None
+    table_type: str | None = None
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+
+
+class SqlExplorationSqlAttribute(ApiModel):
+    """A SqlAttribute HAS_SQL-linked to the Sql node, with its owning Term.
+
+    `term_id`/`term_name` are `None` only when the SqlAttribute has no
+    owning Term at all — an out-of-scope owning Term instead drops the
+    whole row, same as `fetch_sql_attribute_exploration_details`'s own
+    `term`.
+    """
+
+    id: str
+    name: str | None = None
+    description: str | None = None
+    term_id: str | None = None
+    term_name: str | None = None
+
+
+class SqlExplorationDetails(ApiModel):
+    """The CustomAnalysis, Column, Table and SqlAttribute nodes hanging off a Sql node.
+
+    `custom_analyses` is empty for the common case of a Sql node with no
+    CustomAnalysis sharing it; `columns` is every visible Column the Sql
+    node's own `SQL` edges reach directly; `tables` is every visible Table
+    the Sql node's own `SQL` edges reach directly (the same edge Neo4j
+    Browser itself shows expanding a `Sql` node); `sql_attributes` is every
+    visible SqlAttribute this same Sql node backs (the reverse of
+    `SqlAttributeExplorationDetails.sql`) — see
+    `fetch_sql_exploration_details`.
+    """
+
+    custom_analyses: list[SqlExplorationCustomAnalysis] = Field(default_factory=list)
+    columns: list[SqlExplorationColumn] = Field(default_factory=list)
+    tables: list[SqlExplorationTable] = Field(default_factory=list)
+    sql_attributes: list[SqlExplorationSqlAttribute] = Field(default_factory=list)
+
+
+class ExplorationLinkPathNode(ApiModel):
+    """One Term/Table/Column/ColumnAttribute node along an `ExplorationLinkPathHop` chain.
+
+    ``type`` matches the Exploration graph's own node kinds (``term``,
+    ``table``, ``column``, ``columnAttribute``) so a client can graft/style
+    this node exactly like any other of that type — see
+    `fetch_semantic_link_path`. The catalog fields are only ever set for a
+    ``table``/``column`` type node (see ``_enrich_catalog_path_nodes`` in
+    ``gsf/dal/attributes.py``) — the same ids a client needs to expand
+    either one further, exactly like a Table/Column node grafted anywhere
+    else in the app, so neither is a dead end just because it came from a
+    link path instead. ``table_id``/``table_name`` are a ``column`` node's
+    own owning Table, additionally.
+    """
+
+    id: str
+    name: str | None = None
+    type: str
+    database_id: str | None = None
+    database_name: str | None = None
+    schema_id: str | None = None
+    schema_name: str | None = None
+    table_id: str | None = None
+    table_name: str | None = None
+
+
+class ExplorationLinkPathHop(ApiModel):
+    """One real Neo4j relationship traversed along a term↔term path.
+
+    ``relationship`` is the underlying type (``REPRESENTS``, ``CONTAINS``,
+    ``HAS_ATTRIBUTE``, ``SEMANTIC_FK`` or ``PROPERTY_OF``).
+    """
+
+    relationship: str
+    source: ExplorationLinkPathNode
+    target: ExplorationLinkPathNode
+
+
+class ExplorationLinkPath(ApiModel):
+    """The real ordered hop chain connecting two Terms, e.g. Term1
+    <-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK-> ColumnAttribute
+    -PROPERTY_OF-> Term2 — see `fetch_semantic_link_path`. ``hops`` is
+    ordered from the first term to the second; empty only for a stale/
+    hand-crafted request naming two terms with no path connecting them.
+    """
+
+    hops: list[ExplorationLinkPathHop] = Field(default_factory=list)
 
 
 class ExplorationRelatedNode(ApiModel):

@@ -350,6 +350,7 @@ body {
 	display: flex;
 	flex-direction: column;
 	gap: 0.125rem;
+	min-width: 0;
 	padding: 0.75rem;
 	border: 1px solid var(--result-chart-border);
 	border-radius: 0.5rem;
@@ -357,22 +358,34 @@ body {
 }
 
 .result-chart-kpi-k {
+	min-width: 0;
+	width: 100%;
 	font-size: 0.6875rem;
 	font-weight: 500;
 	letter-spacing: 0.02em;
 	text-transform: uppercase;
 	color: var(--result-chart-muted);
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .result-chart-kpi-v {
+	min-width: 0;
+	width: 100%;
 	font-size: 1.25rem;
 	font-weight: 600;
 	line-height: 1.2;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .result-chart-kpi-s {
+	min-width: 0;
+	width: 100%;
 	font-size: 0.75rem;
 	color: var(--result-chart-muted);
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .result-chart-kpi.tone-accent .result-chart-kpi-v {

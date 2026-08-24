@@ -101,3 +101,35 @@ def test_uuid_without_profiling_not_suggested(
 
     messages = _mock_invoke.call_args.args[1]
     assert "is_unique:" not in messages[1].content
+
+
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
+@patch(
+    "gsf.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
+)
+def test_declared_fk_target_is_not_suggested(
+    mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    table = {"id": "players", "name": "players", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {
+                "name": "playerID",
+                "data_type": "varchar",
+                "is_foreign_key_target": True,
+            },
+            {"name": "team_id", "data_type": "integer"},
+        ],
+        "fks": [],
+    }
+
+    result = suggest_potential_foreign_keys(table, ctx)
+
+    assert result.suggestions == []
+    prompt = mock_invoke.call_args.args[1][1].content
+    assert "playerID" not in prompt
+    assert "team_id" in prompt

@@ -63,7 +63,11 @@ def _candidate_columns(
     excluded: set[str],
 ) -> list[dict[str, Any]]:
     return [
-        col for col in columns if (name := col.get("name")) and name not in excluded
+        col
+        for col in columns
+        if (name := col.get("name"))
+        and name not in excluded
+        and not col.get("is_foreign_key_target")
     ]
 
 
@@ -110,7 +114,8 @@ def suggest_potential_foreign_keys(
 
     *columns_profiling_samples* maps each column to its profiling data
     (``{"sample_values": [...], "is_unique": bool}``) when a live sample was
-    available.
+    available. Columns referenced by declared foreign keys are not candidates:
+    they identify rows in this table rather than referencing another table.
     """
     columns = ctx.get("columns", [])
     fks = ctx.get("fks", [])

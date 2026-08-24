@@ -3,6 +3,22 @@
 from __future__ import annotations
 
 
+def qualify_table(database_name: str, schema_name: str, table_name: str) -> str:
+    """Build the qualified identifier the model is expected to copy verbatim.
+
+    Two-level dialects (MySQL/MariaDB) have no schema namespace: the catalog
+    reports ``TABLE_SCHEMA`` as the database itself, so naively joining all
+    three parts yields ``db.db.table``, which is a syntax error. Collapsing the
+    duplicate is also correct for three-level dialects, where a database and
+    schema may legitimately share a name — the connection is already scoped to
+    the database, so ``schema.table`` still resolves.
+    """
+    parts = [database_name, schema_name, table_name]
+    if database_name and schema_name and database_name.lower() == schema_name.lower():
+        parts = [schema_name, table_name]
+    return ".".join(part for part in parts if part)
+
+
 def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
     """Format a join-path endpoint as ``schema.table.column``."""
     schema = hop.get(f"{side}_schema", "")
@@ -79,12 +95,7 @@ def format_tables_for_prompt(
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        if database_name and schema_name:
-            full_name = f"{database_name}.{schema_name}.{table_name}"
-        elif schema_name:
-            full_name = f"{schema_name}.{table_name}"
-        else:
-            full_name = table_name
+        full_name = qualify_table(database_name, schema_name, table_name)
 
         table_parts.append(f"TABLE: {full_name}")
         if table_label and table_label != table_name:

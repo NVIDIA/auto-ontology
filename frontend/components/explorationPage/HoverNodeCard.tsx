@@ -22,7 +22,7 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 
 	return (
 		<aside
-			// Cytoscape positions are runtime canvas coordinates and cannot be static Tailwind classes.
+			// Graph canvas positions are runtime coordinates and cannot be static Tailwind classes.
 			// Read-only preview: pointer-events-none so it never intercepts hover/click
 			// on the graph beneath it. Actionable links only live in the click card.
 			style={{ left: x, top: y }}

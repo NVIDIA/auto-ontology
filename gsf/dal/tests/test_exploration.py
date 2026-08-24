@@ -480,7 +480,14 @@ def test_semantic_nodes_and_links(semantic) -> None:
     assert by_id[semantic.terms["Lonely"]]["relationship_count"] == 0
 
     key = tuple(sorted((semantic.terms["Order"], semantic.terms["Customer"])))
-    assert {"source": key[0], "target": key[1]} in payload["links"]
+    # Both terms reach the table they share by REPRESENTS, and the link says so:
+    # the type is what lets the client label the edge the way it reads in the
+    # graph rather than as a bare line.
+    assert {
+        "source": key[0],
+        "target": key[1],
+        "relationship_types": ["REPRESENTS"],
+    } in payload["links"]
 
 
 def test_semantic_degree_equals_the_related_page_total(semantic) -> None:

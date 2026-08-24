@@ -6,15 +6,21 @@ import { pageQuery, requests } from './requests';
 import { TableType } from '@/enums/datasources';
 import { ExplorationLayer } from '@/enums/exploration';
 import type {
+	ColumnAttributeExplorationDetails,
+	ColumnExplorationDetails,
 	DataExplorationGraph,
 	DataGraphEdgeDto,
 	ExplorationDataNode,
+	ExplorationLinkPathDto,
 	ExplorationNode,
 	ExplorationRelationshipsPageDto,
 	ExplorationTermNode,
 	ExplorationZonesMap,
 	SemanticExplorationGraph,
+	SqlAttributeExplorationDetails,
+	SqlExplorationDetails,
 	TableExplorationDetails,
+	TermExplorationDetails,
 } from '@/types/exploration';
 import type { PageParams, ResponseWithCount, ResponseWithError } from './types';
 
@@ -40,6 +46,35 @@ export const explorationApi = {
 		requests.get<{ data: TableExplorationDetails }>(
 			`exploration/tables/${tableId}/details`,
 			pageQuery(params),
+		),
+
+	getTermExplorationDetails: (termId: string, params?: PageParams) =>
+		requests.get<{ data: TermExplorationDetails }>(
+			`exploration/terms/${termId}/details`,
+			pageQuery(params),
+		),
+
+	getColumnExplorationDetails: (columnId: string) =>
+		requests.get<{ data: ColumnExplorationDetails }>(`exploration/columns/${columnId}/details`),
+
+	getColumnAttributeExplorationDetails: (attrId: string, params?: PageParams) =>
+		requests.get<{ data: ColumnAttributeExplorationDetails }>(
+			`exploration/column-attributes/${attrId}/details`,
+			pageQuery(params),
+		),
+
+	getSqlAttributeExplorationDetails: (attrId: string) =>
+		requests.get<{ data: SqlAttributeExplorationDetails }>(
+			`exploration/sql-attributes/${attrId}/details`,
+		),
+
+	getSqlExplorationDetails: (sqlId: string) =>
+		requests.get<{ data: SqlExplorationDetails }>(`exploration/sql/${sqlId}/details`),
+
+	/** The real hop chain connecting two Terms, for highlighting a clicked term↔term edge. */
+	getSemanticLinkPath: (termId: string, otherTermId: string) =>
+		requests.get<{ data: ExplorationLinkPathDto }>(
+			`exploration/terms/${termId}/path/${otherTermId}`,
 		),
 
 	getRelatedNodes: async (

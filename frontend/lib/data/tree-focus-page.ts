@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SinglePageFormat } from '@/common/SinglePageView';
+import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import {
 	ComposerColumnType,
@@ -149,7 +150,7 @@ export function buildTreeFocusPageFormat(
 		}
 		return {
 			sections,
-			header: { header: { title: 'All Data' } },
+			header: { header: { title: 'All Data', icon: IconName.Database } },
 		};
 	}
 
@@ -178,7 +179,13 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: { header: { title: database.name, entityId: database.id } },
+				header: {
+					header: {
+						title: database.name,
+						icon: catalogNodeInfo[DataModels.DB].icon,
+						entityId: database.id,
+					},
+				},
 			};
 		}
 		case DataModels.SCHEMA: {
@@ -214,7 +221,13 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: { header: { title: schema.schema_name, entityId: schema.id } },
+				header: {
+					header: {
+						title: schema.schema_name,
+						icon: catalogNodeInfo[DataModels.SCHEMA].icon,
+						entityId: schema.id,
+					},
+				},
 			};
 		}
 		case DataModels.TABLE: {
@@ -259,7 +272,13 @@ export function buildTreeFocusPageFormat(
 			});
 			return {
 				sections,
-				header: { header: { title: table.name, entityId: table.id } },
+				header: {
+					header: {
+						title: table.name,
+						icon: catalogNodeInfo[table.table_type].icon,
+						entityId: table.id,
+					},
+				},
 			};
 		}
 		case DataModels.COLUMN: {
@@ -297,7 +316,13 @@ export function buildTreeFocusPageFormat(
 			);
 			return {
 				sections,
-				header: { header: { title: column.column_name, entityId: column.id } },
+				header: {
+					header: {
+						title: column.column_name,
+						icon: catalogNodeInfo[DataModels.COLUMN].icon,
+						entityId: column.id,
+					},
+				},
 			};
 		}
 	}

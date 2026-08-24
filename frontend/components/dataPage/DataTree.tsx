@@ -34,33 +34,103 @@ function scheduleTreeDataNotify(
 	});
 }
 
-function columnSubtreeContainsFocus(columnFocusPath: string, focusId: string): boolean {
-	return focusId === columnFocusPath;
+// True only for a *descendant* of the node. Focus on the node itself must not
+// count: a branch that owns the focus has to be able to stay collapsed.
+function focusIsInsideSubtree(nodeFocusPath: string, focusId: string | undefined): boolean {
+	return focusId != null && focusId.startsWith(`${nodeFocusPath}|`);
 }
 
-function tableSubtreeContainsFocus(tableFocusPath: string, focusId: string): boolean {
-	return focusId === tableFocusPath || focusId.startsWith(`${tableFocusPath}|`);
+// Remembers which nodes the user has explicitly expanded/collapsed, so a
+// page refresh restores the tree as they left it instead of only ever
+// re-deriving it from the `focus` URL param (which stays put on collapse).
+const OPEN_STATE_STORAGE_KEY = 'gsf.dataTree.openState';
+
+function readPersistedOpenState(): Record<string, boolean> {
+	if (typeof window === 'undefined') return {};
+	try {
+		const raw = window.localStorage.getItem(OPEN_STATE_STORAGE_KEY);
+		return raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+	} catch {
+		return {};
+	}
 }
 
-function schemaSubtreeContainsFocus(schemaFocusPath: string, focusId: string): boolean {
-	return focusId === schemaFocusPath || focusId.startsWith(`${schemaFocusPath}|`);
+function writePersistedOpenState(nodeId: string, open: boolean): void {
+	if (typeof window === 'undefined') return;
+	try {
+		const state = readPersistedOpenState();
+		state[nodeId] = open;
+		window.localStorage.setItem(OPEN_STATE_STORAGE_KEY, JSON.stringify(state));
+	} catch {
+		// Storage can be unavailable (private mode, quota) — expand state
+		// just won't survive a refresh, which is a harmless degradation.
+	}
 }
 
-function databaseSubtreeContainsFocus(database: Database, focusId: string): boolean {
-	return focusId === database.id || focusId.startsWith(`${database.id}|`);
+// Collapsing a branch hides its whole subtree, so any previously-remembered
+// "expanded" state further down would otherwise silently resurface the next
+// time this branch is opened again. Force every descendant closed so
+// re-expanding starts fresh, the same as the first time the page was opened.
+function collapsePersistedDescendants(nodeId: string): void {
+	if (typeof window === 'undefined') return;
+	try {
+		const state = readPersistedOpenState();
+		const prefix = `${nodeId}|`;
+		let changed = false;
+		Object.keys(state).forEach((key) => {
+			if (key.startsWith(prefix) && state[key] !== false) {
+				state[key] = false;
+				changed = true;
+			}
+		});
+		if (changed) window.localStorage.setItem(OPEN_STATE_STORAGE_KEY, JSON.stringify(state));
+	} catch {
+		// Storage can be unavailable — same harmless degradation as above.
+	}
 }
 
 function useOpenBranch(
-	containsFocus: boolean,
+	nodeId: string,
+	focusInsideSubtree: boolean,
 	selectedId: string | undefined,
 	defaultOpen: boolean,
 ) {
-	const [open, setOpen] = useState(() => defaultOpen || containsFocus);
+	// Deliberately starts from `defaultOpen` rather than reading
+	// `readPersistedOpenState()` directly here — this initializer runs
+	// during SSR too, where `window` (and so any persisted state) is always
+	// unavailable, so reading it here would make the very first client
+	// render disagree with the server-rendered HTML and force React to
+	// reconcile a hydration mismatch. Persisted state is applied once below
+	// instead, using the same "adjust state during rendering" pattern
+	// `prevSelectedId` already uses further down — React re-renders before
+	// committing/hydrating, so the corrected value is what actually reaches
+	// the DOM, never a mismatch.
+	const [open, setOpenState] = useState(() => focusInsideSubtree || defaultOpen);
+	const [hasAppliedPersisted, setHasAppliedPersisted] = useState(false);
+	if (!hasAppliedPersisted) {
+		setHasAppliedPersisted(true);
+		const persisted = readPersistedOpenState()[nodeId];
+		if (persisted !== undefined) setOpenState(focusInsideSubtree || persisted);
+	}
 	const [prevSelectedId, setPrevSelectedId] = useState(selectedId);
 	if (selectedId !== prevSelectedId) {
 		setPrevSelectedId(selectedId);
-		if (containsFocus) setOpen(true);
+		// Reveal a descendant the focus moved to (deep link, detail panel). Since
+		// clicking a row also moves the focus onto that row, collapsing never
+		// leaves the focus below and never re-expands this branch.
+		if (focusInsideSubtree) setOpenState(true);
 	}
+	const setOpen = useCallback(
+		(value: boolean | ((prev: boolean) => boolean)) => {
+			setOpenState((prev) => {
+				const next = typeof value === 'function' ? value(prev) : value;
+				writePersistedOpenState(nodeId, next);
+				if (!next) collapsePersistedDescendants(nodeId);
+				return next;
+			});
+		},
+		[nodeId],
+	);
 	return [open, setOpen] as const;
 }
 
@@ -96,8 +166,10 @@ function Row({
 	onChevronFocusSync,
 }: {
 	depth: number;
-	open: boolean;
-	onToggle: () => void;
+	/** Only meaningful when `hasChildren` — leaf rows can omit it. */
+	open?: boolean;
+	/** Only called when `hasChildren` — leaf rows can omit it. */
+	onToggle?: () => void;
 	hasChildren: boolean;
 	loading?: boolean;
 	name: string;
@@ -106,7 +178,7 @@ function Row({
 	selected: boolean;
 	href?: string;
 	onClick?: () => void;
-	/** Branch rows: focus in URL + expand; repeat click on selected row collapses children only. */
+	/** Branch rows: toggle expand/collapse and move `focus` onto this node. */
 	onActivateBranch?: () => void;
 	/** After chevron toggles expand/collapse, sync `focus` to this node (same as row select). */
 	onChevronFocusSync?: () => void;
@@ -128,7 +200,7 @@ function Row({
 			onClick={(e) => {
 				e.stopPropagation();
 				if (!hasChildren) return;
-				onToggle();
+				onToggle?.();
 				onChevronFocusSync?.();
 			}}
 			onKeyDown={(e) => {
@@ -136,7 +208,7 @@ function Row({
 					e.preventDefault();
 					e.stopPropagation();
 					if (!hasChildren) return;
-					onToggle();
+					onToggle?.();
 					onChevronFocusSync?.();
 				}
 			}}
@@ -171,7 +243,7 @@ function Row({
 				if (onActivateBranch) {
 					onActivateBranch();
 				} else if (hasChildren) {
-					onToggle();
+					onToggle?.();
 				}
 				onClick?.();
 			}}
@@ -194,15 +266,10 @@ function ColumnBlock({
 	selectedId?: string;
 	pathBase: string;
 }) {
-	const containsFocus =
-		selectedId != null && columnSubtreeContainsFocus(columnFocusPath, selectedId);
-	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
 	return (
 		<div>
 			<Row
 				depth={depth}
-				open={open}
-				onToggle={() => setOpen((o) => !o)}
 				hasChildren={false}
 				name={column.column_name}
 				icon={catalogNodeInfo[DataModels.COLUMN].icon}
@@ -234,21 +301,16 @@ function TableBlock({
 	onLoadColumns: (tableCompoundId: string) => void;
 }) {
 	const router = useRouter();
-	const containsFocus =
-		selectedId != null && tableSubtreeContainsFocus(tableFocusPath, selectedId);
-	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
+	const focusInsideTable = focusIsInsideSubtree(tableFocusPath, selectedId);
+	const [open, setOpen] = useOpenBranch(tableFocusPath, focusInsideTable, selectedId, false);
 	const fetchedOnce = useRef(false);
 	const syncTableFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(tableFocusPath, pathBase), { scroll: false });
 	}, [router, pathBase, tableFocusPath]);
 	const activateTable = useCallback(() => {
-		if (selectedId === tableFocusPath) {
-			setOpen((o) => !o);
-			return;
-		}
-		setOpen(true);
+		setOpen((o) => !o);
 		syncTableFocus();
-	}, [selectedId, tableFocusPath, setOpen, syncTableFocus]);
+	}, [setOpen, syncTableFocus]);
 
 	const hasChildren = table.columns_count > 0;
 
@@ -262,7 +324,7 @@ function TableBlock({
 	const loading = open && table.columns.length === 0 && table.columns_count > 0;
 
 	return (
-		<div>
+		<div className="flex flex-col gap-y-1">
 			<Row
 				depth={depth}
 				open={open}
@@ -313,22 +375,17 @@ function SchemaBlock({
 	const router = useRouter();
 	const schemaFocusPath = `${databaseId}|${schema.id}`;
 	const schemaLoadRef = schemaFocusPath;
-	const containsFocus =
-		selectedId != null && schemaSubtreeContainsFocus(schemaFocusPath, selectedId);
-	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
+	const focusInsideSchema = focusIsInsideSubtree(schemaFocusPath, selectedId);
+	const [open, setOpen] = useOpenBranch(schemaFocusPath, focusInsideSchema, selectedId, false);
 	const hasChildren = (schema.tables_count ?? 0) > 0;
 	const [loadingTables, setLoadingTables] = useState(false);
 	const syncSchemaFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(schemaFocusPath, pathBase), { scroll: false });
 	}, [router, pathBase, schemaFocusPath]);
 	const activateSchemaBranch = useCallback(() => {
-		if (selectedId === schemaFocusPath) {
-			setOpen((o) => !o);
-			return;
-		}
-		setOpen(true);
+		setOpen((o) => !o);
 		syncSchemaFocus();
-	}, [selectedId, schemaFocusPath, setOpen, syncSchemaFocus]);
+	}, [setOpen, syncSchemaFocus]);
 
 	useEffect(() => {
 		if (!open || schema.tables.length > 0 || (schema.tables_count ?? 0) === 0) return;
@@ -349,7 +406,7 @@ function SchemaBlock({
 	}, [open, schemaLoadRef, schema.tables_count, schema.tables.length, onLoadTables]);
 
 	return (
-		<div>
+		<div className="flex flex-col gap-y-1">
 			<Row
 				depth={depth}
 				open={open}
@@ -401,21 +458,17 @@ function DatabaseBlock({
 	onLoadTables: (schemaCompoundId: string) => Promise<void>;
 }) {
 	const router = useRouter();
-	const containsFocus = selectedId != null && databaseSubtreeContainsFocus(database, selectedId);
-	const [open, setOpen] = useOpenBranch(containsFocus, selectedId, false);
+	const focusInsideDatabase = focusIsInsideSubtree(database.id, selectedId);
+	const [open, setOpen] = useOpenBranch(database.id, focusInsideDatabase, selectedId, false);
 	const hasChildren = database.schemas.length > 0 || !open;
 	const [loadingSchemas, setLoadingSchemas] = useState(false);
 	const syncDatabaseFocus = useCallback(() => {
 		router.replace(catalogPathFromFocusId(database.id, pathBase), { scroll: false });
 	}, [router, pathBase, database.id]);
 	const activateDatabaseBranch = useCallback(() => {
-		if (selectedId === database.id) {
-			setOpen((o) => !o);
-			return;
-		}
-		setOpen(true);
+		setOpen((o) => !o);
 		syncDatabaseFocus();
-	}, [selectedId, database.id, setOpen, syncDatabaseFocus]);
+	}, [setOpen, syncDatabaseFocus]);
 
 	useEffect(() => {
 		if (!open || database.schemas.length > 0) return;
@@ -436,7 +489,7 @@ function DatabaseBlock({
 	}, [open, database.id, database.schemas.length, onLoadSchemas]);
 
 	return (
-		<div>
+		<div className="flex flex-col gap-y-1">
 			<Row
 				depth={0}
 				open={open}

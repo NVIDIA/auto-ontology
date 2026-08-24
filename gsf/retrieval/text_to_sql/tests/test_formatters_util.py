@@ -1,0 +1,42 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+from gsf.retrieval.text_to_sql.formatters_util import (
+    format_tables_for_prompt,
+    qualify_table,
+)
+
+
+def test_collapses_duplicate_database_and_schema() -> None:
+    """MySQL reports TABLE_SCHEMA as the database, so db.db.table is invalid SQL."""
+    assert qualify_table("dw", "dw", "SIS_DEPARTMENT") == "dw.SIS_DEPARTMENT"
+
+
+def test_collapse_ignores_identifier_case() -> None:
+    assert qualify_table("analytics", "ANALYTICS", "orders") == "ANALYTICS.orders"
+
+
+def test_keeps_three_parts_for_distinct_schema() -> None:
+    assert qualify_table("mydb", "public", "orders") == "mydb.public.orders"
+
+
+def test_omits_missing_parts() -> None:
+    assert qualify_table("", "public", "orders") == "public.orders"
+    assert qualify_table("db", "", "orders") == "db.orders"
+    assert qualify_table("", "", "orders") == "orders"
+
+
+def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "SIS_DEPARTMENT",
+                "database_name": "dw",
+                "schema_name": "dw",
+                "columns": [{"name": "DEPARTMENT_NAME", "data_type": "varchar"}],
+            }
+        ]
+    )
+    assert "TABLE: dw.SIS_DEPARTMENT" in rendered
+    assert "dw.dw." not in rendered

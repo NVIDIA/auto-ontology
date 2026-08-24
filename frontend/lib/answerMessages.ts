@@ -6,16 +6,14 @@
 // Message 1 — prose + SQL; Message 2 — charts, or the raw result table when
 // visualization is off or produced nothing.
 //
-// The two bubbles land at different times, because charts are a separate
-// second step (POST /api/chat/visualize) rather than part of the agent's
-// answer: Message 1 ships as soon as the SQL pipeline resolves, Message 2 once
-// the chart step reports back. Each is therefore persisted by the route that
-// produces it — FastAPI writes Message 1 while the visualize proxy writes
-// Message 2 — so history matches the live view.
-//
-// The split lives here because those routes and `useChat.ts` (which renders it
-// live) all have to agree on it exactly. If they disagreed, reloading a
-// conversation would show a different layout than watching the answer arrive.
+// The two bubbles land at different times because charts are a separate step
+// run after the SQL pipeline resolves: Message 1 ships as soon as the answer
+// is ready, Message 2 once the chart step (run server-side, right inside
+// `_pump` — see gsf/server/chat/router.py) finishes and streams back as its
+// own `charts` SSE event. FastAPI builds and persists both (Message 2's
+// formatting lives in gsf/server/chat/helpers.py now — there is no client-side
+// equivalent to keep in sync anymore), so history always matches the live view
+// regardless of whether any browser tab stuck around to watch.
 
 import { stringifySqlResponse } from '@/lib/sqlResponse';
 
@@ -47,9 +45,6 @@ export const stripChartFences = (markdown: string): string =>
 		.replace(/\n{3,}/g, '\n\n')
 		.trim();
 
-export const chartsToFencedContent = (charts: Record<string, unknown>[]): string =>
-	charts.map((spec) => `\`\`\`chart\n${JSON.stringify(spec)}\n\`\`\``).join('\n\n');
-
 /**
  * Whether `message` is a Message 2 — the bubble carrying the charts or the
  * result table. Recognising it is what tells "this turn is fully written" from
@@ -77,20 +72,4 @@ export const buildSqlAnswerMessage = (answer: AgentAnswer): AnswerMessage | null
 		return { content: GENERIC_ANSWER_ERROR };
 	}
 	return null;
-};
-
-/**
- * Message 2 — the `charts` the visualize step came back with, or the raw result
- * table when that step is disabled, fails, or finds nothing worth plotting.
- * `charts` is required (and may be null): the agent's answer no longer carries
- * chart specs of its own, so there is nothing to fall back to and an absent
- * argument would silently mean "table" for a turn that does have charts.
- */
-export const buildResultMessage = (answer: AgentAnswer, charts: unknown): AnswerMessage | null => {
-	if (Array.isArray(charts) && charts.length > 0) {
-		return { content: chartsToFencedContent(charts as Record<string, unknown>[]) };
-	}
-
-	const sqlResponse = stringifySqlResponse(answer.sql_response_from_db);
-	return sqlResponse ? { content: '', sqlResponse } : null;
 };

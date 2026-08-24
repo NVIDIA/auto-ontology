@@ -277,7 +277,8 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
@@ -301,7 +302,8 @@ def test_export_model_filters_by_database_id(
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
@@ -319,7 +321,8 @@ def test_export_model_all_databases_uses_empty_filter(
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
@@ -342,7 +345,8 @@ def test_export_model_ossie_format_emits_ossie_document(
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
@@ -445,7 +449,8 @@ def _multi_table_term_rows() -> dict:
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")
@@ -476,7 +481,8 @@ def test_export_model_ossie_keeps_one_table_per_term(
 
 
 @patch(
-    "gsf.server.model_interchange.service.dal.resolve_sql_column_ids", return_value=[]
+    "gsf.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
 )
 @patch("gsf.server.model_interchange.service.dal.fetch_export_rows")
 @patch("gsf.server.model_interchange.service.dal.validate_database_ids")

@@ -389,7 +389,13 @@ def fetch_parent_table_id_for_column(column_id: str) -> str | None:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Column id → its database/schema/table names.
+    """Column id → its database/schema/table identity (ids + names).
+
+    Ids come back alongside names so a caller that needs to let a client expand
+    a Table/Column further (e.g. :func:`gsf.dal.terms.find_term_link_path`'s
+    catalog enrichment) can reuse this instead of re-running the same
+    database→schema→table→column join itself; a caller that only wants display
+    text (e.g. :func:`gsf.dal.attributes.find_join_path`) ignores the extra keys.
 
     Returns ``{}`` on failure rather than raising: callers use this to decorate
     results, and losing the decoration beats losing the result.
@@ -400,8 +406,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         rows = store().query_read(
             select(
                 s.catalog_column.c.id.label("col_id"),
+                s.catalog_table.c.id.label("table_id"),
                 s.catalog_table.c.name.label("table_name"),
+                s.catalog_schema.c.id.label("schema_id"),
                 s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_database.c.id.label("database_id"),
                 s.catalog_database.c.name.label("database_name"),
             )
             .select_from(_catalog_join())
@@ -413,8 +422,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
 
     return {
         r["col_id"]: {
+            "table_id": r.get("table_id") or "",
             "table_name": r.get("table_name") or "",
+            "schema_id": r.get("schema_id") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_id": r.get("database_id") or "",
             "database_name": r.get("database_name") or "",
         }
         for r in rows
@@ -899,7 +911,18 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
 
 
 def fetch_table_context(table_id: str) -> dict[str, Any]:
-    """``{columns, fks}`` for one table — what the SQL generator is handed."""
+    """``{columns, fks}`` for one table — what the SQL generator is handed.
+
+    ``is_foreign_key_target`` marks a column some *other* column already points
+    at; ``gsf.semantic.fk_suggester`` drops those from the columns it offers the
+    LLM, so it cannot propose an FK that inverts one the catalog already knows.
+    """
+    is_fk_target = (
+        select(literal(1))
+        .select_from(s.column_foreign_key)
+        .where(s.column_foreign_key.c.target_column_id == s.catalog_column.c.id)
+        .exists()
+    )
     columns = [
         {
             "id": r["id"],
@@ -908,6 +931,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r["description"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
+            "is_foreign_key_target": bool(r["is_foreign_key_target"]),
         }
         for r in store().query_read(
             select(
@@ -917,6 +941,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 column_description_expr().label("description"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
+                is_fk_target.label("is_foreign_key_target"),
             )
             .where(s.catalog_column.c.table_id == table_id)
             .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)

@@ -21,9 +21,4 @@ export {
 	type DataDetailsModalTarget,
 } from './DataDetailsModal';
 export { RelationshipsModal } from './RelationshipsModal';
-export {
-	SemanticRelationshipModal,
-	type SemanticRelationshipModalTerm,
-} from './SemanticRelationshipModal';
 export { SqlAttributesModal, type SqlAttributesModalTerm } from './SqlAttributesModal';
-export { QueryCarouselModal } from './QueryCarouselModal';
