@@ -243,3 +243,25 @@ def test_no_query_is_run_against_the_supplied_entity(table: str, ids) -> None:
     )
 
     assert indices == [1]
+
+
+def test_an_edge_inference_already_drew_still_counts_as_linked() -> None:
+    """The common path, where the entity would otherwise be withdrawn.
+
+    The rebuild infers metadata, which keys the supplied entity, so link
+    inference reads the join key as the foreign key it is and draws the edge
+    before anything asks it to. Counting only the edges drawn here would read
+    that as having linked nothing and take the entity back out.
+    """
+    frames = {"weekly_sales": _weekly()}
+    stranded = _stranded_tables(_built(frames))
+    _supply_global_entity(frames, stranded)
+    graph = _built(frames)
+    graph.infer_links(verbose=False)
+    drawn = [(e.src_table, e.dst_table) for e in graph.edges]
+    assert drawn == [("weekly_sales", GLOBAL_ENTITY_TABLE)], "fixture must pre-draw it"
+
+    _link_global_entity(graph, stranded)
+
+    assert GLOBAL_ENTITY_TABLE in graph.tables
+    assert [(e.src_table, e.dst_table) for e in graph.edges] == drawn
