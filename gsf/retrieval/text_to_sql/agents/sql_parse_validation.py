@@ -46,6 +46,7 @@ _SQLGLOT_DIALECTS = {
     "duckdb": "duckdb",
     "mysql": "mysql",
     "heavydb": "postgres",
+    "spark": "spark",
 }
 
 

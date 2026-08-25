@@ -21,6 +21,17 @@ import type { ConnectionInput } from '@/types/connection';
 const BASE_STEPS = ['Select Connector', 'Connect'] as const;
 const SCHEMA_STEP = 'Select Schemas';
 
+/**
+ * Connectors whose backend honours a `schemas` ingestion allowlist and returns a
+ * schema list from the connection test. Types absent here skip the picker step
+ * and ingest everything the credentials can see.
+ */
+const SCHEMA_SELECTION_TYPES: ReadonlySet<ConnectionType> = new Set([
+	ConnectionType.DATABRICKS,
+	ConnectionType.SNOWFLAKE,
+	ConnectionType.KYUUBI,
+]);
+
 type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
 
 export type NewConnectionsModalProps = {
@@ -44,8 +55,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	const [availableSchemas, setAvailableSchemas] = useState<string[]>([]);
 	const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
 
-	const supportsSchemaSelection =
-		connectionType === ConnectionType.DATABRICKS || connectionType === ConnectionType.SNOWFLAKE;
+	const supportsSchemaSelection = SCHEMA_SELECTION_TYPES.has(connectionType);
 
 	// Naming a schema on the form replaces picking one from a list: the test has
 	// already confirmed it exists, so there is nothing left to choose.

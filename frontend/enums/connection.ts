@@ -8,6 +8,7 @@ export enum ConnectionType {
 	POSTGRESQL = 'postgresql',
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
+	KYUUBI = 'kyuubi',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -15,6 +16,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.POSTGRESQL]: 'PostgreSQL',
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
+	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -32,6 +34,9 @@ export type ConnectionFieldKey =
 	| 'private_key_passphrase'
 	| 'database'
 	| 'protocol'
+	| 'ssa_url'
+	| 'truststore'
+	| 'truststore_password'
 	| 'schema'
 	| 'sso_federation';
 
@@ -139,5 +144,46 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'password', label: 'Password', secret: true },
 		{ key: 'database', label: 'Database', placeholder: 'heavyai' },
 		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
+	],
+	[ConnectionType.KYUUBI]: [
+		{
+			key: 'host',
+			label: 'Host',
+			placeholder: 'hive.pdx-aws.data.nvidia.com',
+		},
+		{ key: 'port', label: 'Port', placeholder: '10000', optional: true },
+		{
+			key: 'user',
+			label: 'Username',
+			placeholder: 'nvssa-prd-... or user@nvidia.com',
+			hint: 'The SSA client ID for a service account, or your account name when using a pasted token.',
+		},
+		{
+			key: 'password',
+			label: 'Client secret or token',
+			secret: true,
+			hint: 'The SSA client secret when a token URL is set below, otherwise a JWT copied from the data platform profile page.',
+		},
+		{
+			key: 'ssa_url',
+			label: 'SSA token URL',
+			placeholder: 'https://<service-id>.ssa.nvidia.com',
+			optional: true,
+			hint: 'Enables service-account auth. Tokens expire hourly, so this lets the connector mint fresh ones instead of failing after an hour.',
+		},
+		{ key: 'database', label: 'Catalog', placeholder: 'nvdp' },
+		{
+			key: 'truststore',
+			label: 'Truststore path (JKS)',
+			placeholder: '/etc/ssl/global_ca.jks',
+			optional: true,
+			hint: 'Path on the server to the NVIDIA CA truststore. Needed when the internal CA is not already trusted by the host.',
+		},
+		{
+			key: 'truststore_password',
+			label: 'Truststore password',
+			secret: true,
+			optional: true,
+		},
 	],
 };

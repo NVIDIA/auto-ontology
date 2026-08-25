@@ -23,6 +23,11 @@ dependencies = [
     "databricks-sql-connector>=4.3.0",
     "pyyaml>=6.0.3",
     "apache-ossie-gsf",
+    "pyhive[hive-pure-sasl]>=0.7.0",
+    "thrift>=0.16.0",
+    "thrift-sasl>=0.4.3",
+    "pure-sasl>=0.6.2",
+    "pyjks>=20.0.0",
 ]
 
 [build-system]
