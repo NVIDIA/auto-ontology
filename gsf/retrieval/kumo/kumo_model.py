@@ -15,8 +15,11 @@ from __future__ import annotations
 
 from typing import Any
 
-# The entity supplied for tables that name none of their own (see predictor).
+# The entity supplied for a time series that reaches none of its own, and the key
+# it is joined on. Defined here because the predictor builds it, the DDL names it
+# and the resolver has to recognise it.
 GLOBAL_ENTITY_TABLE = "__kumo_global"
+GLOBAL_ENTITY_KEY = "__kumo_global_id"
 
 # Per-call entity caps above which predict() switches to batch mode (from aiq-rfm).
 _PREDICT_CAP = 1_000

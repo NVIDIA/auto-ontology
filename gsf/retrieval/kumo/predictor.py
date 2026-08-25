@@ -28,7 +28,11 @@ from typing import Any
 
 import pandas as pd
 
-from gsf.retrieval.kumo.kumo_model import key_columns
+from gsf.retrieval.kumo.kumo_model import (
+    GLOBAL_ENTITY_KEY,
+    GLOBAL_ENTITY_TABLE,
+    key_columns,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -326,25 +330,55 @@ def _declare_primary_keys(
     return declared
 
 
-_KEY_SUFFIXES = ("id", "code", "key", "no", "num", "uuid", "guid")
-
-GLOBAL_ENTITY_TABLE = "__kumo_global"
-GLOBAL_ENTITY_KEY = "__kumo_global_id"
-
-
-def _time_column_of(frame: pd.DataFrame) -> str | None:
-    """The column a table is ordered by, if it has exactly one obvious candidate."""
-    stamps = [
-        c for c in frame.columns if pd.api.types.is_datetime64_any_dtype(frame[c])
-    ]
-    return stamps[0] if len(stamps) == 1 else None
-
-
-def _add_global_entity(
-    frames: dict[str, pd.DataFrame],
+def _key_and_link(
+    graph: Any,
     catalog_keys: dict[str, list[str]],
-) -> bool:
-    """Give a set of bare time series something to be predicted for each of.
+    join_paths: list[dict[str, Any]] | None,
+) -> None:
+    """Declare the keys the catalog recorded, then orient the edges.
+
+    Keys first: an edge is oriented towards a primary key, so a table whose key
+    is missing can take part in no relationship at all.
+    """
+    _declare_primary_keys(graph, catalog_keys)
+    covered = _apply_join_paths(graph, join_paths)
+    if covered:
+        logger.info("kumo: using %d catalog join edge(s)", covered)
+        return
+    # No usable catalog join paths — fall back to KumoRFM's link heuristics.
+    logger.info("kumo: no catalog join paths; inferring links heuristically")
+    try:
+        graph.infer_links()
+        _deduplicate_inferred_links(graph)
+    except Exception:
+        logger.exception("kumo: infer_links failed; proceeding without inferred links")
+
+
+def _stranded_tables(graph: Any) -> list[str]:
+    """Tables ordered by time that nothing can be predicted for.
+
+    Asked of the built graph rather than of the frames, because the graph is what
+    KumoRFM enforces. A key the catalog named but the graph could not hold, a
+    column that merely reads like an identity, and a time column inference picked
+    differently all resolve here, where the answer is already settled.
+
+    A table is stranded when it is ordered by time, holds no key of its own, and
+    no edge leads from it to a table that does.
+    """
+    keyed = {name for name, table in graph.tables.items() if key_columns(table)}
+    reachable = {edge.src_table for edge in graph.edges if edge.dst_table in keyed}
+    return sorted(
+        name
+        for name, table in graph.tables.items()
+        if table.time_column is not None and name not in keyed and name not in reachable
+    )
+
+
+def _supply_global_entity(
+    frames: dict[str, pd.DataFrame],
+    stranded: list[str],
+) -> None:
+    """Give the stranded tables an entity to be predicted for each of.
 
     A table like ``weekly_sales(week_date, sales)`` holds one row per period and
     names no entity. Its only candidate key is the very column that orders it, and
@@ -353,86 +387,59 @@ def _add_global_entity(
 
     Making the period the entity does not help either: each period would own a
     single row, leaving no history to learn from. The question such a table
-    answers is about the business as a whole observed over time, which is one
-    entity with a long history.
+    answers is about the whole observed over time, which is one entity with a
+    long history.
 
-    So one is supplied: a single-row table whose key is added to every time series
-    and linked back, letting the aggregation window do the slicing by period.
-
-    Only applies when nothing else could serve as the entity, so a warehouse that
-    declares its keys, or any table an edge could be oriented towards, is left
-    alone. Returns whether the entity was added.
+    Mutates *frames* so the caller can rebuild the graph from them: the key has to
+    be a column before ``from_data`` reads the schema.
     """
-    if any(catalog_keys.get(name) for name in frames):
-        return False
-    if GLOBAL_ENTITY_TABLE in frames:
-        return False
-
-    series = {
-        name: column
-        for name, frame in frames.items()
-        if (column := _time_column_of(frame)) is not None
-    }
-    if not series:
-        return False
-    if any(
-        _identifying_column(frame, skip=series.get(name))
-        for name, frame in frames.items()
-    ):
-        return False
-
     frames[GLOBAL_ENTITY_TABLE] = pd.DataFrame({GLOBAL_ENTITY_KEY: [1]})
-    for name in series:
-        frames[name] = frames[name].assign(**{GLOBAL_ENTITY_KEY: 1})
-    logger.info(
-        "kumo: no entity in %s; predicting for the whole as one entity over time",
-        ", ".join(sorted(series)),
-    )
-    return True
+    for name in stranded:
+        frames[name][GLOBAL_ENTITY_KEY] = 1
 
 
-def _identifying_column(frame: pd.DataFrame, skip: str | None) -> str | None:
-    """A column that names what a row is, rather than measuring it.
+def _link_global_entity(graph: Any, stranded: list[str]) -> None:
+    """Key the supplied entity and orient the stranded tables towards it.
 
-    Uniqueness alone does not make an identity: a measure is distinct whenever no
-    two periods happen to coincide, and adopting one would make every row its own
-    entity. So a candidate has to be spelled like an identity as well as hold a
-    distinct value on every row.
+    Guarded throughout: this entity is supplemental, so failing to add it must
+    leave the request no worse off than before rather than failing it outright.
     """
-    for column in frame.columns:
-        if column == skip:
-            continue
-        stem = "".join(c for c in str(column).lower() if c.isalnum())
-        if not (stem == "id" or stem.endswith(_KEY_SUFFIXES)):
-            continue
-        values = frame[column]
-        if pd.api.types.is_float_dtype(values):
-            continue
-        if not values.isna().any() and not values.duplicated().any():
-            return str(column)
-    return None
-
-
-def _link_global_entity(graph: Any) -> None:
-    """Key the supplied entity and orient every time series towards it."""
     from kumorfm.api.typing import Stype
 
-    table = graph[GLOBAL_ENTITY_TABLE]
-    table[GLOBAL_ENTITY_KEY].stype = Stype.ID
-    table.primary_key = GLOBAL_ENTITY_KEY
+    try:
+        table = graph[GLOBAL_ENTITY_TABLE]
+        table[GLOBAL_ENTITY_KEY].stype = Stype.ID
+        table.primary_key = GLOBAL_ENTITY_KEY
+    except Exception:
+        logger.warning("kumo: could not key the supplied entity", exc_info=True)
+        return
 
-    for name, other in graph.tables.items():
-        if name == GLOBAL_ENTITY_TABLE or GLOBAL_ENTITY_KEY not in other:
+    # The rebuild runs link inference, which reads the key as the foreign key it
+    # is and may already have drawn the edge.
+    existing = {
+        edge.src_table for edge in graph.edges if edge.dst_table == GLOBAL_ENTITY_TABLE
+    }
+    linked = len(existing)
+    for name in stranded:
+        if name in existing:
             continue
-        other[GLOBAL_ENTITY_KEY].stype = Stype.ID
         try:
+            graph[name][GLOBAL_ENTITY_KEY].stype = Stype.ID
             graph.link(
                 src_table=name,
                 fkey=GLOBAL_ENTITY_KEY,
                 dst_table=GLOBAL_ENTITY_TABLE,
             )
+            linked += 1
         except Exception:
-            logger.debug("kumo: could not link %s to the entity", name, exc_info=True)
+            logger.warning(
+                "kumo: could not link %s to the supplied entity", name, exc_info=True
+            )
+    if not linked:
+        logger.warning(
+            "kumo: the supplied entity reached no table; predictions against it "
+            "would see no history"
+        )
 
 
 def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
@@ -667,8 +674,6 @@ def build_prediction_context(
         len(frames),
     )
 
-    global_entity = _add_global_entity(frames, catalog_keys)
-
     _graph_start = time.perf_counter()
     # Passing an explicit empty edge list suppresses LocalGraph's automatic
     # relationship inference. This lets catalog join paths take precedence and
@@ -685,22 +690,25 @@ def build_prediction_context(
     )
     # Before any linking: an edge is oriented towards a primary key, so a table whose
     # key inference missed can take part in no relationship at all.
-    _declare_primary_keys(graph, catalog_keys)
-    if global_entity:
-        _link_global_entity(graph)
-    covered = _apply_join_paths(graph, join_paths)
-    if covered:
-        logger.info("kumo: using %d catalog join edge(s)", covered)
-    else:
-        # No usable catalog join paths — fall back to KumoRFM's link heuristics.
-        logger.info("kumo: no catalog join paths; inferring links heuristically")
-        try:
-            graph.infer_links()
-            _deduplicate_inferred_links(graph)
-        except Exception:
-            logger.exception(
-                "kumo: infer_links failed; proceeding without inferred links"
-            )
+    _key_and_link(graph, catalog_keys, join_paths)
+
+    # Judged once the graph is keyed and linked, since that is what KumoRFM
+    # enforces: a table still ordered by time with no way to reach an entity can
+    # be predicted for only if one is supplied. Supplying it changes the schema,
+    # so the graph is built again from the widened frames.
+    stranded = _stranded_tables(graph)
+    if stranded:
+        logger.info(
+            "kumo: %s reach no entity; predicting for the whole as one entity "
+            "over time",
+            ", ".join(stranded),
+        )
+        _supply_global_entity(frames, stranded)
+        graph = rfm.Graph.from_data(
+            frames, edges=[], infer_metadata=True, verbose=False
+        )
+        _key_and_link(graph, catalog_keys, join_paths)
+        _link_global_entity(graph, stranded)
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
     kumo_model = KumoModel(client.kumorfm(graph), graph)

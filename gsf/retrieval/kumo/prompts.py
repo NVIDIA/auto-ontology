@@ -34,6 +34,12 @@ PREDICT <target> [RANK TOP k] FOR <entity_table>.<primary_key>=<value> [ASSUMING
     `FOR EACH <that table>.<its key>` and let the window do the slicing:
     `PREDICT SUM(weekly_sales.sales, 0, 1, weeks) FOR EACH __kumo_global.__kumo_global_id`.
     Never put the time column in FOR EACH; it cannot be both the identity and the time.
+    It holds exactly one entity, whose key is `1`, so a multi-step forecast against it is
+    single-entity as FORECAST requires and is written
+    `PREDICT SUM(weekly_sales.sales, 0, 1, weeks) FORECAST 8 TIMEFRAMES
+    FOR __kumo_global.__kumo_global_id=1`.
+    That table is supplied by GSF and does not exist in the database, so never write an
+    entity-selection ```sql block against it.
 
   - A condition / comparison (`> 0`, `= 0`, `>= 100`, `AND`/`OR`) → binary classification:
     e.g. churn = `COUNT(orders.*, 0, 30, days) = 0`; will-purchase = `COUNT(orders.*, 0, 7, days) > 0`.

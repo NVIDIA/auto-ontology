@@ -1135,6 +1135,13 @@ def _resolve_indices(
         if available_entity_ids and entity
         else None
     )
+    from gsf.retrieval.kumo.kumo_model import GLOBAL_ENTITY_TABLE
+
+    if entity and entity[0].casefold() == GLOBAL_ENTITY_TABLE:
+        # GSF supplies this entity in memory; the warehouse holds no such table,
+        # so any query naming it would fail. It is a single entity by
+        # construction, so the answer needs no lookup either way.
+        return list(available) if available else [1]
     if entity_sql:
         df = connector.execute(_qualify_from_clauses(entity_sql, table_names))
         ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
