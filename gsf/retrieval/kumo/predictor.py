@@ -326,6 +326,115 @@ def _declare_primary_keys(
     return declared
 
 
+_KEY_SUFFIXES = ("id", "code", "key", "no", "num", "uuid", "guid")
+
+GLOBAL_ENTITY_TABLE = "__kumo_global"
+GLOBAL_ENTITY_KEY = "__kumo_global_id"
+
+
+def _time_column_of(frame: pd.DataFrame) -> str | None:
+    """The column a table is ordered by, if it has exactly one obvious candidate."""
+    stamps = [
+        c for c in frame.columns if pd.api.types.is_datetime64_any_dtype(frame[c])
+    ]
+    return stamps[0] if len(stamps) == 1 else None
+
+
+def _add_global_entity(
+    frames: dict[str, pd.DataFrame],
+    catalog_keys: dict[str, list[str]],
+) -> bool:
+    """Give a set of bare time series something to be predicted for each of.
+
+    A table like ``weekly_sales(week_date, sales)`` holds one row per period and
+    names no entity. Its only candidate key is the very column that orders it, and
+    KumoRFM will not let one column be both the identity and the time, so every
+    ``FOR EACH`` against it is refused.
+
+    Making the period the entity does not help either: each period would own a
+    single row, leaving no history to learn from. The question such a table
+    answers is about the business as a whole observed over time, which is one
+    entity with a long history.
+
+    So one is supplied: a single-row table whose key is added to every time series
+    and linked back, letting the aggregation window do the slicing by period.
+
+    Only applies when nothing else could serve as the entity, so a warehouse that
+    declares its keys, or any table an edge could be oriented towards, is left
+    alone. Returns whether the entity was added.
+    """
+    if any(catalog_keys.get(name) for name in frames):
+        return False
+    if GLOBAL_ENTITY_TABLE in frames:
+        return False
+
+    series = {
+        name: column
+        for name, frame in frames.items()
+        if (column := _time_column_of(frame)) is not None
+    }
+    if not series:
+        return False
+    if any(
+        _identifying_column(frame, skip=series.get(name))
+        for name, frame in frames.items()
+    ):
+        return False
+
+    frames[GLOBAL_ENTITY_TABLE] = pd.DataFrame({GLOBAL_ENTITY_KEY: [1]})
+    for name in series:
+        frames[name] = frames[name].assign(**{GLOBAL_ENTITY_KEY: 1})
+    logger.info(
+        "kumo: no entity in %s; predicting for the whole as one entity over time",
+        ", ".join(sorted(series)),
+    )
+    return True
+
+
+def _identifying_column(frame: pd.DataFrame, skip: str | None) -> str | None:
+    """A column that names what a row is, rather than measuring it.
+
+    Uniqueness alone does not make an identity: a measure is distinct whenever no
+    two periods happen to coincide, and adopting one would make every row its own
+    entity. So a candidate has to be spelled like an identity as well as hold a
+    distinct value on every row.
+    """
+    for column in frame.columns:
+        if column == skip:
+            continue
+        stem = "".join(c for c in str(column).lower() if c.isalnum())
+        if not (stem == "id" or stem.endswith(_KEY_SUFFIXES)):
+            continue
+        values = frame[column]
+        if pd.api.types.is_float_dtype(values):
+            continue
+        if not values.isna().any() and not values.duplicated().any():
+            return str(column)
+    return None
+
+
+def _link_global_entity(graph: Any) -> None:
+    """Key the supplied entity and orient every time series towards it."""
+    from kumorfm.api.typing import Stype
+
+    table = graph[GLOBAL_ENTITY_TABLE]
+    table[GLOBAL_ENTITY_KEY].stype = Stype.ID
+    table.primary_key = GLOBAL_ENTITY_KEY
+
+    for name, other in graph.tables.items():
+        if name == GLOBAL_ENTITY_TABLE or GLOBAL_ENTITY_KEY not in other:
+            continue
+        other[GLOBAL_ENTITY_KEY].stype = Stype.ID
+        try:
+            graph.link(
+                src_table=name,
+                fkey=GLOBAL_ENTITY_KEY,
+                dst_table=GLOBAL_ENTITY_TABLE,
+            )
+        except Exception:
+            logger.debug("kumo: could not link %s to the entity", name, exc_info=True)
+
+
 def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
     """Flatten a join-path entry into its ``(table, column)`` node sequence.
 
@@ -558,6 +667,8 @@ def build_prediction_context(
         len(frames),
     )
 
+    global_entity = _add_global_entity(frames, catalog_keys)
+
     _graph_start = time.perf_counter()
     # Passing an explicit empty edge list suppresses LocalGraph's automatic
     # relationship inference. This lets catalog join paths take precedence and
@@ -575,6 +686,8 @@ def build_prediction_context(
     # Before any linking: an edge is oriented towards a primary key, so a table whose
     # key inference missed can take part in no relationship at all.
     _declare_primary_keys(graph, catalog_keys)
+    if global_entity:
+        _link_global_entity(graph)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
