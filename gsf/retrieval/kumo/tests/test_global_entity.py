@@ -265,3 +265,31 @@ def test_an_edge_inference_already_drew_still_counts_as_linked() -> None:
 
     assert GLOBAL_ENTITY_TABLE in graph.tables
     assert [(e.src_table, e.dst_table) for e in graph.edges] == drawn
+
+
+def test_no_entity_is_invented_across_two_databases() -> None:
+    """One entity over unrelated data is not the whole of anything.
+
+    Retrieval only spans databases when the question was not scoped to one, and
+    joining a retail series to a factory series would make each the other's
+    history. Both are left as they were, which is no worse than before.
+    """
+    import gsf.retrieval.kumo.predictor as predictor
+
+    frames = {
+        "retail_weekly": _weekly(),
+        "factory_daily": pd.DataFrame(
+            {
+                "d": pd.date_range("2024-01-01", periods=50),
+                "units": range(50),
+            }
+        ),
+    }
+    graph = _built(frames)
+    assert _stranded_tables(graph) == ["factory_daily", "retail_weekly"]
+
+    databases = {"retail_weekly": "retail", "factory_daily": "factory"}
+    spanned = {databases[name] for name in _stranded_tables(graph)}
+
+    assert len(spanned) > 1
+    assert predictor.GLOBAL_ENTITY_TABLE not in frames

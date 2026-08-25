@@ -115,14 +115,17 @@ def _load_relevant_frames(
     (no full-catalog scan). Each table's connector is resolved by ``database_name``,
     falling back to the first connector.
 
-    Returns ``(frames, name_map, key_columns)`` where ``name_map`` maps each graph
+    Returns ``(frames, name_map, key_columns, databases)`` where ``name_map`` maps each graph
     table name to its schema-qualified SQL name (used to schema-qualify
     entity-selection SQL) and ``key_columns`` maps it to the catalog's primary-key
     columns (see :func:`_declare_primary_keys`). Both are keyed by the graph table
     name chosen here, so neither has to re-derive it.
+    ``databases`` maps it to the database it was read from, which is what
+    keeps an invented entity from spanning two.
+
     """
     if not connectors or not relevant_tables:
-        return {}, {}, {}
+        return {}, {}, {}, {}
 
     db_to_connector = {
         str(getattr(c, "database_name", "") or ""): c for c in connectors
@@ -132,6 +135,7 @@ def _load_relevant_frames(
     frames: dict[str, pd.DataFrame] = {}
     name_map: dict[str, str] = {}
     key_columns: dict[str, list[str]] = {}
+    databases: dict[str, str] = {}
     for t in relevant_tables:
         if len(frames) >= _MAX_TABLES:
             logger.warning(
@@ -173,12 +177,13 @@ def _load_relevant_frames(
             elapsed,
         )
         frames[name] = df
+        databases[name] = str(t.get("database_name") or "")
         if schema:
             name_map[name] = _quote(schema, table)
         catalog_keys = _catalog_key_columns(t)
         if catalog_keys:
             key_columns[name] = catalog_keys
-    return frames, name_map, key_columns
+    return frames, name_map, key_columns, databases
 
 
 def _error_response(message: str) -> dict[str, Any]:
@@ -672,7 +677,7 @@ def build_prediction_context(
         len(relevant_tables or []),
     )
     _load_start = time.perf_counter()
-    frames, name_map, catalog_keys = _load_relevant_frames(
+    frames, name_map, catalog_keys, databases = _load_relevant_frames(
         connectors, relevant_tables or []
     )
     if not frames:
@@ -703,6 +708,15 @@ def build_prediction_context(
     _key_and_link(graph, catalog_keys, join_paths)
 
     stranded = _stranded_tables(graph)
+    spanned = {databases.get(name, "") for name in stranded}
+    if len(spanned) > 1:
+        logger.info(
+            "kumo: %s reach no entity but span %d databases; leaving them, since "
+            "one entity over unrelated data is not the whole of anything",
+            ", ".join(stranded),
+            len(spanned),
+        )
+        stranded = []
     if stranded:
         logger.info(
             "kumo: %s no entity to be predicted for; predicting for the whole "
