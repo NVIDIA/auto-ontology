@@ -5,7 +5,6 @@
 'use client';
 
 import { useCallback } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 
 import { termsApi } from '@/api/terms';
 import { Icon, IconName } from '@/common/icons';
@@ -15,6 +14,7 @@ import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { Size, ButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
+import { SkeletonSqlBlocks } from '@/common/Skeleton';
 import { SqlBlock } from '@/common/SqlBlock';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
@@ -103,8 +103,8 @@ export const SqlAttributesModal = ({ term, onClose }: SqlAttributesModalProps) =
 				error={attributes.length > 0 ? error : null}
 			>
 				{loading ? (
-					<div className="flex h-32 items-center justify-center">
-						<Spinner aria-label="Loading SQL attributes" className="h-8 w-8" />
+					<div role="status" aria-label="Loading SQL attributes">
+						<SkeletonSqlBlocks withHeading />
 					</div>
 				) : error != null && attributes.length === 0 ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>

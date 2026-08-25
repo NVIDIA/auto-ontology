@@ -13,12 +13,18 @@ from fastapi import APIRouter, Path, Query
 from gsf.server.exploration import service
 from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.responses import (
+    ColumnAttributeExplorationDetailsResponse,
+    ColumnExplorationDetailsResponse,
     DataExplorationGraphResponse,
     ExplorationEdgeListResponse,
+    ExplorationLinkPathResponse,
     ExplorationRelatedNodesResponse,
     SemanticExplorationGraphResponse,
+    SqlAttributeExplorationDetailsResponse,
+    SqlExplorationDetailsResponse,
     TableExplorationDetailsResponse,
     TableZonesResponse,
+    TermExplorationDetailsResponse,
 )
 
 router = APIRouter()
@@ -66,6 +72,88 @@ def get_table_exploration_details(
         "data": service.fetch_table_exploration_details(
             table_id, zone_ids=None, skip=skip, limit=limit
         )
+    }
+
+
+@router.get(
+    "/exploration/terms/{term_id}/details",
+    response_model=TermExplorationDetailsResponse,
+)
+def get_term_exploration_details(
+    term_id: str,
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """One ordered page of Tables linked to a Term, for expanding it on the Exploration graph."""
+    return {
+        "data": service.fetch_term_exploration_details(
+            term_id, zone_ids=None, skip=skip, limit=limit
+        )
+    }
+
+
+@router.get(
+    "/exploration/columns/{column_id}/details",
+    response_model=ColumnExplorationDetailsResponse,
+)
+def get_column_exploration_details(column_id: str) -> dict:
+    """The Column's own ColumnAttribute, FK target, referencing FK Columns and Sql queries, for expanding it on the Exploration graph."""
+    return {"data": service.fetch_column_exploration_details(column_id, zone_ids=None)}
+
+
+@router.get(
+    "/exploration/column-attributes/{attr_id}/details",
+    response_model=ColumnAttributeExplorationDetailsResponse,
+)
+def get_column_attribute_exploration_details(
+    attr_id: str,
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """The ColumnAttribute's own owning Term and one ordered page of every
+    linked Column, for expanding it on the Exploration graph.
+    """
+    return {
+        "data": service.fetch_column_attribute_exploration_details(
+            attr_id, zone_ids=None, skip=skip, limit=limit
+        )
+    }
+
+
+@router.get(
+    "/exploration/sql-attributes/{attr_id}/details",
+    response_model=SqlAttributeExplorationDetailsResponse,
+)
+def get_sql_attribute_exploration_details(attr_id: str) -> dict:
+    """A SqlAttribute's own Sql query and owning Term, for expanding it on the Exploration graph."""
+    return {
+        "data": service.fetch_sql_attribute_exploration_details(attr_id, zone_ids=None)
+    }
+
+
+@router.get(
+    "/exploration/sql/{sql_id}/details",
+    response_model=SqlExplorationDetailsResponse,
+)
+def get_sql_exploration_details(sql_id: str) -> dict:
+    """CustomAnalysis, Column, Table and SqlAttribute nodes hanging off this Sql node, for expanding it on the Exploration graph."""
+    return {"data": service.fetch_sql_exploration_details(sql_id, zone_ids=None)}
+
+
+@router.get(
+    "/exploration/terms/{term_id}/path/{other_term_id}",
+    response_model=ExplorationLinkPathResponse,
+)
+def get_semantic_link_path(term_id: str, other_term_id: str) -> dict:
+    """The real hop chain(s) behind one term↔term Exploration graph edge.
+
+    Lets the client graft the actual Table (and, for a HAS_ATTRIBUTE/
+    SEMANTIC_FK hop, Column/ColumnAttribute) nodes on and highlight them
+    once the edge between ``term_id``/``other_term_id`` is clicked, instead
+    of just showing the collapsed `GraphLink.relationship_types` label.
+    """
+    return {
+        "data": service.fetch_semantic_link_path(term_id, other_term_id, zone_ids=None)
     }
 
 

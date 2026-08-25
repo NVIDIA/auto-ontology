@@ -92,6 +92,46 @@ export const SkeletonTable = ({ columns = 4, rows = 8 }: SkeletonTableProps) => 
 	</div>
 );
 
+type SkeletonSqlBlocksProps = {
+	items?: number;
+	/** Adds a name and description line above each block, as `SqlAttributesModal` shows. */
+	withHeading?: boolean;
+};
+
+/** Placeholder for a list of `SqlBlock`s: a label bar over a few lines of code. */
+export const SkeletonSqlBlocks = ({ items = 3, withHeading = false }: SkeletonSqlBlocksProps) => (
+	<div className="space-y-4" aria-hidden>
+		{Array.from({ length: items }).map((_, index) => (
+			<div
+				key={index}
+				className={
+					withHeading
+						? 'rounded-lg border border-zinc-200 p-3 dark:border-zinc-700'
+						: undefined
+				}
+			>
+				{withHeading ? (
+					<div className="mb-2 space-y-2">
+						<SkeletonBlock className="h-4 w-40" />
+						<SkeletonBlock className="h-3 w-64" />
+					</div>
+				) : null}
+				<div className="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700">
+					<div className="flex items-center justify-between border-b border-zinc-200 px-3 py-2 dark:border-zinc-700">
+						<SkeletonBlock className="h-3 w-16" />
+						<SkeletonBlock className="h-3 w-3" />
+					</div>
+					<div className="space-y-2 p-3">
+						<SkeletonBlock className="h-3 w-full" />
+						<SkeletonBlock className="h-3 w-5/6" />
+						<SkeletonBlock className="h-3 w-2/3" />
+					</div>
+				</div>
+			</div>
+		))}
+	</div>
+);
+
 export const SkeletonDetail = () => (
 	<div className="flex flex-1 flex-col gap-6 p-6" aria-hidden>
 		<div className="space-y-3">

@@ -5,7 +5,10 @@
 """Neo4j read/write for ColumnAttribute and SemanticFK entities.
 
 Also contains find_join_path, which traverses SEMANTIC_FK / HAS_ATTRIBUTE /
-CONTAINS edges to resolve multi-hop join routes at retrieval time.
+CONTAINS edges to resolve multi-hop join routes at retrieval time, and the
+shared find_shortest_labeled_path helper underneath it — reused by
+gsf.dal.terms.find_term_link_path for the same traversal one level up
+(Term-to-Term instead of Column-to-Column) for the Exploration graph.
 """
 
 from __future__ import annotations
@@ -95,8 +98,8 @@ def update_column_attribute(
         WITH attr, term
         OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
         RETURN attr.id AS id,
                attr.name AS name,
                attr.description AS description,
@@ -104,6 +107,10 @@ def update_column_attribute(
                attr.source_column AS source_column,
                col.id AS column_id,
                col.sample_values AS sample_values,
+               col.is_unique AS is_unique,
+               table.id AS table_id,
+               table.name AS table_name,
+               sch.name AS schema_name,
                term.id AS term_id,
                term.synonyms AS term_synonyms,
                head(collect(DISTINCT db.name)) AS database_name,
@@ -213,12 +220,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """,
             {"database_name": database_name},
         )
@@ -229,12 +239,15 @@ def find_unlinked_fk_columns(
             WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
               AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
             OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
+            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
             RETURN col.id          AS id,
                    col.name        AS name,
                    col.description AS description,
                    col.sample_values AS sample_values,
+                   t.id            AS table_id,
                    t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id
+                   tgt.id          AS fk_target_col_id,
+                   tgt_table.id    AS fk_target_table_id
             """
         )
     return result
@@ -332,6 +345,81 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
+def find_shortest_labeled_path(
+    anchor_id: str,
+    dest_id: str,
+    *,
+    node_label: str,
+    relationship_filter: str,
+    label_filter: str,
+    max_level: int,
+    log_label: str,
+) -> tuple[list[dict], list[str]]:
+    """Run `apoc.path.expandConfig` for the shortest path between two same-labeled nodes.
+
+    The actual Neo4j traversal shared by `find_join_path` below
+    (Column-to-Column) and `gsf.dal.terms.find_term_link_path`
+    (Term-to-Term) — apoc.path.expandConfig is used instead of a plain
+    Cypher variable-length pattern because a variable-length pattern
+    applies a single direction to every relationship type, whereas both
+    callers need one relationship type (SEMANTIC_FK) to behave differently
+    from the others (see each function's own docstring for *why* it picks
+    the direction it does). Everything else — which relationship types are
+    even walkable, which labels the path may pass through, how far it's
+    allowed to search, and what the raw node/relationship chain gets
+    turned into afterwards — differs enough between the two callers that
+    only this innermost "run the query, hand back the raw
+    nodes/relationship types" part is actually shared. Deliberately kept
+    here (rather than moved alongside `find_term_link_path` into
+    `gsf.dal.terms`) so `find_join_path` doesn't have to reach into that
+    module for it — `gsf.dal.terms` already imports from here for other
+    helpers (e.g. `fetch_column_attribute_columns_map`), so the dependency
+    only has to run one way. `bfs: true` + `limit: 1` yields the shortest
+    path; `uniqueness: 'NODE_GLOBAL'` keeps the search from revisiting a
+    node.
+
+    Returns `(path_nodes, path_rel_types)` — both empty when the two ids
+    are equal, either endpoint doesn't exist, no such path exists, or the
+    query itself fails (logged as a warning tagged with *log_label*).
+    """
+    if not anchor_id or not dest_id or anchor_id == dest_id:
+        return [], []
+
+    path_query = f"""
+    MATCH (anchor:{node_label} {{id: $anchor_id}})
+    MATCH (dest:{node_label} {{id: $dest_id}})
+    CALL apoc.path.expandConfig(anchor, {{
+        relationshipFilter: '{relationship_filter}',
+        labelFilter: '{label_filter}',
+        terminatorNodes: [dest],
+        bfs: true,
+        uniqueness: 'NODE_GLOBAL',
+        minLevel: 1,
+        maxLevel: {max_level},
+        limit: 1
+    }}) YIELD path
+    RETURN [n IN nodes(path) | {{id: n.id, name: n.name, label: labels(n)[0]}}] AS path_nodes,
+           [r IN relationships(path) | type(r)] AS path_rel_types
+    """
+    try:
+        rows = get_neo4j_conn().query_read(
+            path_query, {"anchor_id": anchor_id, "dest_id": dest_id}
+        )
+    except Exception:
+        logger.warning(
+            "%s: Neo4j query failed for %s -> %s",
+            log_label,
+            anchor_id,
+            dest_id,
+            exc_info=True,
+        )
+        return [], []
+
+    if not rows:
+        return [], []
+    return rows[0].get("path_nodes") or [], rows[0].get("path_rel_types") or []
+
+
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """Find the shortest semantic join path between two Column nodes.
 
@@ -347,52 +435,16 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
           target_schema, target_table, target_column}, ...]
     Returns [] when anchor == dest or no path exists.
     """
-    if anchor_col_id == dest_col_id:
-        return []
-
-    # apoc.path.expandConfig is used instead of shortestPath because Cypher's
-    # variable-length patterns apply a single direction to every relationship
-    # type, whereas we need SEMANTIC_FK outgoing-only (">") while keeping
-    # HAS_ATTRIBUTE and CONTAINS bidirectional. bfs + limit:1 yields the
-    # shortest path; labelFilter "-Schema" keeps Schema nodes out of the path.
-    path_query = """
-    MATCH (col_anchor:Column {id: $anchor_col_id})
-    MATCH (col_dest:Column {id: $dest_col_id})
-    CALL apoc.path.expandConfig(col_anchor, {
-        relationshipFilter: 'SEMANTIC_FK>|HAS_ATTRIBUTE|CONTAINS',
-        labelFilter: '-Schema',
-        terminatorNodes: [col_dest],
-        bfs: true,
-        uniqueness: 'NODE_GLOBAL',
-        minLevel: 1,
-        maxLevel: 30,
-        limit: 1
-    }) YIELD path
-    RETURN [n IN nodes(path) | {
-        id: n.id,
-        name: n.name,
-        label: labels(n)[0]
-    }] AS path_nodes
-    """
-    try:
-        rows = get_neo4j_conn().query_read(
-            path_query,
-            {"anchor_col_id": anchor_col_id, "dest_col_id": dest_col_id},
-        )
-    except Exception:
-        logger.warning(
-            "find_join_path: Neo4j query failed for %s -> %s",
-            anchor_col_id,
-            dest_col_id,
-            exc_info=True,
-        )
-        return []
-
-    if not rows:
-        return []
-
-    path_nodes: list[dict] = rows[0].get("path_nodes") or []
-    col_nodes = [n for n in path_nodes if n.get("label") == "Column"]
+    path_nodes, _ = find_shortest_labeled_path(
+        anchor_col_id,
+        dest_col_id,
+        node_label=Labels.COLUMN,
+        relationship_filter=f"{REL_SEMANTIC_FK}>|{REL_HAS_ATTRIBUTE}|{Edges.CONTAINS}",
+        label_filter=f"-{Labels.SCHEMA}",
+        max_level=30,
+        log_label="find_join_path",
+    )
+    col_nodes = [n for n in path_nodes if n.get("label") == Labels.COLUMN]
     if len(col_nodes) < 2:
         return []
 

@@ -359,6 +359,30 @@ def delete_custom_analysis_node(analysis_id: str) -> None:
     )
 
 
+def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
+    """Return the database whose tables an analysis's SQL references."""
+    query = f"""
+    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+          -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
+          <-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+          <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+    RETURN DISTINCT db.name AS database_name
+    LIMIT 1
+    """
+    try:
+        rows = graph().query_read(query, {"analysis_id": analysis_id})
+    except Exception:
+        logger.warning(
+            "fetch_database_name_for_analysis: Neo4j query failed", exc_info=True
+        )
+        return None
+    if not rows:
+        return None
+    database_name = rows[0].get("database_name")
+    return str(database_name) if database_name is not None else None
+
+
 def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
     """Fetch Tables referenced by CustomAnalysis nodes via HAS_SQL -> Sql -> SQL -> Table."""
     if not analysis_ids:
@@ -374,7 +398,7 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           db.name AS database_name, sch.name AS schema_name, cols
+           db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
     """
     try:
         rows = graph().query_read(query, {"ids": analysis_ids})
@@ -399,6 +423,9 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": Labels.TABLE,
+                # Keyless tables are unusable as a prediction entity, so this has
+                # to survive every path that reaches ``relevant_tables``.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )

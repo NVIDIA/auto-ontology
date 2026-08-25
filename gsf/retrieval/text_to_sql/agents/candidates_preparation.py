@@ -20,6 +20,7 @@ Design Decisions:
 - Stores fetched data in path_state for reusability across multiple SQL agents
 - Handles embeddings and conversation history lookup
 - LLM relevance filter removes noise tables before SQL construction
+- Extra table retrieve runs in parallel with the anchor-column LLM
 """
 
 import logging
@@ -45,6 +46,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables_from_candidates,
 )
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import qualify_table
 from gsf.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
@@ -64,10 +66,11 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 def _qualified_name(t: dict) -> str:
     """Build a database/schema-qualified table name for deduplication."""
-    database = t.get("database_name", "")
-    schema = t.get("schema_name", "")
-    name = t.get("name", "")
-    return ".".join(part for part in (database, schema, name) if part)
+    return qualify_table(
+        t.get("database_name", ""),
+        t.get("schema_name", ""),
+        t.get("name", ""),
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -159,132 +162,130 @@ class CandidatePreparationAgent(BaseAgent):
 
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
-        # --- 2. Enrich ColumnAttributes with Neo4j context and build join paths ---
-        primary_attribute: dict | None = None
-        attribute_join_paths: list[dict] = []
-        attr_contexts: dict[str, dict] = {}
-        term_synonyms: dict[str, list[str]] = {}
-
-        if column_attributes:
-            attr_ids = [
-                str(hit.get("id") or "") for hit in column_attributes if hit.get("id")
-            ]
-            attr_ids = list(dict.fromkeys(attr_ids))
-
-            attr_contexts = fetch_attr_column_contexts(
-                attr_ids,
-                database_name=target_db,
+        # Extra table retrieve only needs the question + entities. Kick it
+        # off before the anchor LLM so the two ~3s steps overlap.
+        extra_entities = path_state.get("entities") or []
+        with ThreadPoolExecutor(max_workers=1) as extra_pool:
+            extra_future = extra_pool.submit(
+                self._retrieve_additional_tables,
+                state.get("data_retriever"),
+                question,
+                extra_entities,
+                target_db,
             )
-            self.logger.info(
-                "Fetched Neo4j context for %d/%d column attributes",
-                len(attr_contexts),
-                len(attr_ids),
-            )
-            term_synonyms = fetch_term_synonyms(attr_ids)
-            self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
-            anchor_id, anchor_reasoning = self._identify_anchor(
-                state, question, attr_contexts
-            )
-            self.logger.info("Anchor attribute id: %s", anchor_id)
-            if anchor_reasoning:
-                record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
+            # --- 2. Enrich ColumnAttributes with Neo4j context and build join paths ---
+            primary_attribute: dict | None = None
+            attribute_join_paths: list[dict] = []
+            attr_contexts: dict[str, dict] = {}
+            term_synonyms: dict[str, list[str]] = {}
 
-            if anchor_id and anchor_id in attr_contexts:
-                anchor_ctx = attr_contexts[anchor_id]
-                primary_attribute = {
-                    "id": anchor_id,
-                    "attr_name": anchor_ctx["attr_name"],
-                    "col_name": anchor_ctx["col_name"],
-                    "table_name": anchor_ctx["table_name"],
-                    "schema_name": anchor_ctx["schema_name"],
-                    "database_name": anchor_ctx["database_name"],
-                }
-
-                dest_items = [
-                    (did, dctx)
-                    for did, dctx in attr_contexts.items()
-                    if did != anchor_id
+            if column_attributes:
+                attr_ids = [
+                    str(hit.get("id") or "")
+                    for hit in column_attributes
+                    if hit.get("id")
                 ]
-                with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
-                    futures = {
-                        pool.submit(
-                            find_join_path, anchor_ctx["col_id"], dctx["col_id"]
-                        ): (did, dctx)
-                        for did, dctx in dest_items
+                attr_ids = list(dict.fromkeys(attr_ids))
+
+                attr_contexts = fetch_attr_column_contexts(
+                    attr_ids,
+                    database_name=target_db,
+                )
+                self.logger.info(
+                    "Fetched Neo4j context for %d/%d column attributes",
+                    len(attr_contexts),
+                    len(attr_ids),
+                )
+                term_synonyms = fetch_term_synonyms(attr_ids)
+                self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
+
+                anchor_id, anchor_reasoning = self._identify_anchor(
+                    state, question, attr_contexts
+                )
+                self.logger.info("Anchor attribute id: %s", anchor_id)
+                if anchor_reasoning:
+                    record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
+
+                if anchor_id and anchor_id in attr_contexts:
+                    anchor_ctx = attr_contexts[anchor_id]
+                    primary_attribute = {
+                        "id": anchor_id,
+                        "attr_name": anchor_ctx["attr_name"],
+                        "col_name": anchor_ctx["col_name"],
+                        "table_name": anchor_ctx["table_name"],
+                        "schema_name": anchor_ctx["schema_name"],
+                        "database_name": anchor_ctx["database_name"],
                     }
-                    for future in as_completed(futures):
-                        dest_id, dest_ctx = futures[future]
-                        join_path = future.result()
-                        attribute_join_paths.append(
-                            {
-                                "id": dest_id,
-                                "attr_name": dest_ctx["attr_name"],
-                                "col_name": dest_ctx["col_name"],
-                                "table_name": dest_ctx["table_name"],
-                                "schema_name": dest_ctx["schema_name"],
-                                "database_name": dest_ctx["database_name"],
-                                "path": join_path,
-                            }
-                        )
-                        self.logger.info(
-                            "Join path to %s (%s): %d hop(s)",
-                            dest_ctx["attr_name"],
-                            dest_id,
-                            len(join_path),
-                        )
-            else:
-                self.logger.warning(
-                    "No valid anchor attribute found — skipping join path computation"
-                )
 
-        # --- 4. Retrieve relevant tables ---
-        relevant_tables = get_relevant_tables_from_candidates(candidates)
-
-        if attr_contexts:
-            ca_table_ids = list(
-                dict.fromkeys(
-                    ctx["table_id"]
-                    for ctx in attr_contexts.values()
-                    if ctx.get("table_id")
-                )
-            )
-            ca_tables = fetch_tables_by_ids(ca_table_ids)
-            existing_ids = {t.get("id") for t in relevant_tables}
-            for tbl in ca_tables:
-                if tbl.get("id") not in existing_ids:
-                    relevant_tables.append(tbl)
-                    existing_ids.add(tbl.get("id"))
-
-        self.logger.info(
-            "Tables from candidates: %s", [t["name"] for t in relevant_tables]
-        )
-
-        additional_tables = []
-        search_queries = [question] + path_state.get("entities", [])
-        k_per_query = max(1, 5 // len(search_queries))
-
-        def _fetch_tables_for_query(query: str) -> list[dict]:
-            return get_relevant_tables(
-                state["data_retriever"],
-                query,
-                k=k_per_query,
-                database_name=target_db,
-            )
-
-        with ThreadPoolExecutor(max_workers=len(search_queries)) as pool:
-            futures = {
-                pool.submit(_fetch_tables_for_query, q): q for q in search_queries
-            }
-            for future in as_completed(futures):
-                query = futures[future]
-                try:
-                    additional_tables.extend(future.result())
-                except Exception:
+                    dest_items = [
+                        (did, dctx)
+                        for did, dctx in attr_contexts.items()
+                        if did != anchor_id
+                    ]
+                    with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
+                        futures = {
+                            pool.submit(
+                                find_join_path, anchor_ctx["col_id"], dctx["col_id"]
+                            ): (did, dctx)
+                            for did, dctx in dest_items
+                        }
+                        for future in as_completed(futures):
+                            dest_id, dest_ctx = futures[future]
+                            join_path = future.result()
+                            attribute_join_paths.append(
+                                {
+                                    "id": dest_id,
+                                    "attr_name": dest_ctx["attr_name"],
+                                    "col_name": dest_ctx["col_name"],
+                                    "table_name": dest_ctx["table_name"],
+                                    "schema_name": dest_ctx["schema_name"],
+                                    "database_name": dest_ctx["database_name"],
+                                    "path": join_path,
+                                }
+                            )
+                            self.logger.info(
+                                "Join path to %s (%s): %d hop(s)",
+                                dest_ctx["attr_name"],
+                                dest_id,
+                                len(join_path),
+                            )
+                else:
                     self.logger.warning(
-                        "Table retrieval failed for query: %s", query, exc_info=True
+                        "No valid anchor attribute found — skipping join path computation"
                     )
-        additional_tables = dedupe_merge_relevant_tables(additional_tables)[:10]
+
+            # --- 4. Retrieve relevant tables ---
+            relevant_tables = get_relevant_tables_from_candidates(candidates)
+
+            if attr_contexts:
+                ca_table_ids = list(
+                    dict.fromkeys(
+                        ctx["table_id"]
+                        for ctx in attr_contexts.values()
+                        if ctx.get("table_id")
+                    )
+                )
+                ca_tables = fetch_tables_by_ids(ca_table_ids)
+                existing_ids = {t.get("id") for t in relevant_tables}
+                for tbl in ca_tables:
+                    if tbl.get("id") not in existing_ids:
+                        relevant_tables.append(tbl)
+                        existing_ids.add(tbl.get("id"))
+
+            self.logger.info(
+                "Tables from candidates: %s", [t["name"] for t in relevant_tables]
+            )
+
+            additional_tables: list[dict] = []
+            try:
+                additional_tables = extra_future.result()
+            except Exception:
+                self.logger.warning(
+                    "Additional table retrieval failed",
+                    exc_info=True,
+                )
+
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
         for t in relevant_tables + additional_tables:
@@ -412,6 +413,45 @@ class CandidatePreparationAgent(BaseAgent):
                 "term_synonyms": term_synonyms,
             }
         }
+
+    def _retrieve_additional_tables(
+        self,
+        retriever: Any,
+        question: str,
+        entities: Any,
+        target_db: str | None,
+    ) -> list[dict]:
+        """Embed the question and entities and search for extra Table hits.
+
+        Independent of the anchor LLM — intended to run in parallel with it.
+        """
+        search_queries = [question]
+        if isinstance(entities, list):
+            search_queries.extend(entities)
+        k_per_query = max(1, 5 // len(search_queries))
+        additional_tables: list[dict] = []
+
+        def _fetch_tables_for_query(query: str) -> list[dict]:
+            return get_relevant_tables(
+                retriever,
+                query,
+                k=k_per_query,
+                database_name=target_db,
+            )
+
+        with ThreadPoolExecutor(max_workers=len(search_queries) or 1) as pool:
+            futures = {
+                pool.submit(_fetch_tables_for_query, q): q for q in search_queries
+            }
+            for future in as_completed(futures):
+                query = futures[future]
+                try:
+                    additional_tables.extend(future.result())
+                except Exception:
+                    self.logger.warning(
+                        "Table retrieval failed for query: %s", query, exc_info=True
+                    )
+        return dedupe_merge_relevant_tables(additional_tables)[:10]
 
     def _filter_custom_analyses_by_relevance(
         self,

@@ -5,6 +5,11 @@
 """Neo4j read/write for Term nodes.
 
 ColumnAttribute and SemanticFK operations live in gsf/dal/attributes.py.
+Also contains find_term_link_path, which traverses REPRESENTS / CONTAINS /
+HAS_ATTRIBUTE / SEMANTIC_FK / PROPERTY_OF edges to resolve the real hop
+chain behind a term↔term Exploration edge — the same traversal one level
+down (Column-to-Column instead of Term-to-Term) as attributes.py's own
+find_join_path, whose shared find_shortest_labeled_path helper this reuses.
 """
 
 from __future__ import annotations
@@ -15,8 +20,12 @@ from typing import Any
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
 from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.attributes import fetch_column_attribute_columns_map
+from gsf.dal.attributes import (
+    fetch_column_attribute_columns_map,
+    find_shortest_labeled_path,
+)
 from gsf.dal.cypher_fragments import and_condition, paging_clause
+from gsf.dal.datasources import fetch_col_table_contexts
 from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
@@ -530,7 +539,10 @@ def fetch_all_terms_and_attributes(
                attr.source_column AS source_column,
                col.name AS column_name,
                col.sample_values AS sample_values,
+               col.is_unique AS is_unique,
                attr.id AS id,
+               t.id AS table_id,
+               t.name AS table_name,
                sch.name AS schema_name
         """,
         attr_params,
@@ -601,51 +613,14 @@ def get_full_term_by_id(
         return None
     result = dict(rows[0])
 
-    zone_filter = (
-        ""
-        if zone_ids is None
-        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+    # Reuses `fetch_term_zones_map`'s own two-path (ColumnAttribute and
+    # SqlAttribute) zone resolution rather than re-running the identical
+    # `CONTAINS*0..2` traversal here — this is just that function narrowed
+    # to one term, so the two can't drift apart the way this used to
+    # duplicate it verbatim.
+    result["zones"] = fetch_term_zones_map(zone_ids, term_ids=[term_id]).get(
+        term_id, []
     )
-    zone_params: dict[str, Any] = {"term_id": term_id}
-    if zone_ids is not None:
-        zone_params["zone_ids"] = zone_ids
-
-    # Each branch's zone MATCH is chained through `item` (found by walking
-    # CONTAINS backwards from `t`, 0..2 hops) rather than matched independently
-    # and filtered via WHERE afterwards — see fetch_table_zones_map in
-    # gsf/dal/exploration.py for why the disconnected-pattern version forces a
-    # cartesian product between every zone/item pair and every candidate `t`.
-    zone_rows = conn.query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
-              <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
-              <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT z.id    AS id,
-                        z.name  AS name,
-                        z.color AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-
-        UNION
-
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (term)<-[:{REL_PROPERTY_OF}]-(:{LABEL_SQL_ATTRIBUTE})
-              -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT z.id    AS id,
-                        z.name  AS name,
-                        z.color AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-        """,
-        zone_params,
-    )
-    result["zones"] = sorted((dict(r) for r in zone_rows), key=lambda z: z["name"])
     return result
 
 
@@ -821,7 +796,10 @@ def fetch_terms_and_attributes_for_table(
                attr.term_name AS term_name,
                attr.source_column AS source_column,
                col.sample_values AS sample_values,
+               col.is_unique AS is_unique,
                attr.id AS id,
+               t.id AS table_id,
+               t.name AS table_name,
                sch.name AS schema_name
         """,
         params,
@@ -858,13 +836,19 @@ def fetch_term_and_column_attributes_for_embedding(
         MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
               (term:{LABEL_TERM} {{id: $term_id}})
         // ColumnAttribute embeddings include sample values from the owning Column.
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
+        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->
+              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
         RETURN attr.name AS name,
                attr.description AS description,
                attr.term_name AS term_name,
                attr.source_column AS source_column,
                col.sample_values AS sample_values,
-               attr.id AS id
+               col.is_unique AS is_unique,
+               attr.id AS id,
+               table.id AS table_id,
+               table.name AS table_name,
+               sch.name AS schema_name
         """,
         params,
     )
@@ -881,8 +865,8 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
         MATCH (col:{Labels.COLUMN} {{id: $column_id}})-[:{REL_HAS_ATTRIBUTE}]->
               (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
+              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
         RETURN term.name AS term_name,
                term.description AS term_description,
                term.synonyms AS term_synonyms,
@@ -894,7 +878,11 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
                    term_name: attr.term_name,
                    source_column: attr.source_column,
                    sample_values: col.sample_values,
-                   id: attr.id
+                   is_unique: col.is_unique,
+                   id: attr.id,
+                   table_id: table.id,
+                   table_name: table.name,
+                   schema_name: sch.name
                }}) AS attrs
         """,
         {"column_id": column_id},
@@ -1282,15 +1270,21 @@ def fetch_term_table_pairs(
     term_ids: list[str] | None = None,
     table_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ``{term_id, table_id}`` rows linking Terms to their tables.
+    """Return ``{term_id, table_id, path}`` rows linking Terms to their tables.
 
     A term is linked to a table via REPRESENTS or via its ColumnAttribute
     (PROPERTY_OF, reached through HAS_ATTRIBUTE or SEMANTIC_FK) — the same
-    three paths used by ``fetch_related_terms``. Shared by
-    ``fetch_related_terms``, ``fetch_related_terms_counts`` and
-    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` so a term's
-    related list, its per-term count and the Exploration graph's term↔term
-    edges are always computed from one definition of "related".
+    three paths used by ``fetch_related_terms``. ``path`` names which of
+    those Neo4j relationship types actually connected this particular pair
+    (``REPRESENTS``, ``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) so callers that
+    care *why* a term and table are linked — not just *that* they are —
+    don't have to re-run the match themselves;
+    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` uses it to
+    label term↔term edges with the real relationship type(s) behind them.
+    Shared by ``fetch_related_terms``, ``fetch_related_terms_counts`` and
+    that graph builder so a term's related list, its per-term count and the
+    Exploration graph's term↔term edges are always computed from one
+    definition of "related".
 
     Both branches require ``source: SEMANTIC_SOURCE`` on the Term, matching
     ``fetch_all_terms``: a non-semantic Term never appears in the semantic
@@ -1328,13 +1322,14 @@ def fetch_term_table_pairs(
         f"""
         MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
         {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
+        RETURN term.id AS term_id, ta.id AS table_id, '{REL_REPRESENTS}' AS path
         UNION
         MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
+              -[attr_rel:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
+              (:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
               -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{source: $source}})
         {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id
+        RETURN term.id AS term_id, ta.id AS table_id, type(attr_rel) AS path
         """,
         params,
     )
@@ -1353,3 +1348,151 @@ def build_term_table_maps(
             term_tables.setdefault(tid, set()).add(tab)
             table_terms.setdefault(tab, set()).add(tid)
     return term_tables, table_terms
+
+
+# ---------------------------------------------------------------------------
+# Term link path traversal
+# ---------------------------------------------------------------------------
+
+
+def _enrich_catalog_path_nodes(path_nodes: list[dict]) -> None:
+    """Attach catalog ids/names onto each Table/Column node in *path_nodes*,
+    in place.
+
+    `find_term_link_path`'s own traversal excludes Schema/Database from the
+    path (see its own ``labelFilter``), so a Table/Column hop otherwise
+    carries nothing beyond a bare id/name — not enough for a client to
+    expand either one any further the way every other Table/Column
+    expansion does (see ``expandTableNode``/``expandColumnNode`` in
+    ``ExplorationView.tsx``, which need a Table's own database/schema ids,
+    or a Column's own owning Table id, respectively). Best-effort: a failed
+    lookup just leaves those nodes without the extra fields, same as if
+    this were never called.
+    """
+    table_ids = list(
+        {
+            node["id"]
+            for node in path_nodes
+            if node.get("label") == Labels.TABLE and node.get("id")
+        }
+    )
+    if table_ids:
+        try:
+            rows = get_neo4j_conn().query_read(
+                f"""
+                MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
+                      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
+                      (t:{Labels.TABLE})
+                WHERE t.id IN $table_ids
+                RETURN t.id AS table_id, db.id AS database_id, db.name AS database_name,
+                       s.id AS schema_id, s.name AS schema_name
+                """,
+                {"table_ids": table_ids},
+            )
+        except Exception:
+            logger.warning(
+                "find_term_link_path: table catalog lookup failed for %s",
+                table_ids,
+                exc_info=True,
+            )
+            rows = []
+
+        by_table_id = {row["table_id"]: row for row in rows if row.get("table_id")}
+        for node in path_nodes:
+            if node.get("label") != Labels.TABLE:
+                continue
+            info = by_table_id.get(node.get("id"))
+            if info is not None:
+                node["database_id"] = info.get("database_id")
+                node["database_name"] = info.get("database_name")
+                node["schema_id"] = info.get("schema_id")
+                node["schema_name"] = info.get("schema_name")
+
+    column_ids = list(
+        {
+            node["id"]
+            for node in path_nodes
+            if node.get("label") == Labels.COLUMN and node.get("id")
+        }
+    )
+    if column_ids:
+        col_ctx = fetch_col_table_contexts(column_ids)
+        for node in path_nodes:
+            if node.get("label") != Labels.COLUMN:
+                continue
+            info = col_ctx.get(node.get("id") or "")
+            if info is not None:
+                node["table_id"] = info.get("table_id")
+                node["table_name"] = info.get("table_name")
+                node["database_id"] = info.get("database_id")
+                node["database_name"] = info.get("database_name")
+                node["schema_id"] = info.get("schema_id")
+                node["schema_name"] = info.get("schema_name")
+
+
+def find_term_link_path(term_a_id: str, term_b_id: str) -> list[dict]:
+    """Find the shortest semantic path connecting two Term nodes.
+
+    One level up from ``find_join_path``'s (in ``gsf.dal.attributes``)
+    Column-to-Column traversal: this walks Term-to-Term across whichever of
+    REPRESENTS (Table-Term), CONTAINS (Table-Column),
+    HAS_ATTRIBUTE/SEMANTIC_FK (Column-ColumnAttribute) and PROPERTY_OF
+    (ColumnAttribute-Term) actually connects them — the same edges
+    ``fetch_semantic_exploration_graph`` folds into one term↔term edge's
+    collapsed ``relationship_types`` label, but returned here as the real
+    ordered hop chain a client can graft/highlight instead — e.g. Term1
+    <-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK-> ColumnAttribute
+    -PROPERTY_OF-> Term2 — rather than just the relationship type names
+    involved.
+
+    Unlike ``find_join_path``, SEMANTIC_FK is traversed *undirected* here
+    rather than outgoing-only: a term↔term edge already means the two
+    terms genuinely share a table under ``fetch_semantic_exploration_graph``'s
+    own rules, so tracing *some* real path between them can't fabricate a
+    join the way ``find_join_path``'s Column-to-Column search could — it
+    can only ever surface a real, already-existing relationship chain.
+    This matters for join-table-shaped connections where *both* terms
+    reach their shared table only via SEMANTIC_FK (e.g. a
+    ``request_attribute_values`` table with one FK column pointing at
+    Term1's own id attribute and another pointing at Term2's): tracing
+    that chain needs to step *against* one of the two SEMANTIC_FK edges'
+    stored (Column -> ColumnAttribute) direction no matter which term the
+    search starts from, which an outgoing-only filter would always reject
+    from one side or the other.
+
+    Returns a list of hop dicts, ordered from *term_a_id* to *term_b_id*:
+        [{relationship: str,
+          source: {id, name, label}, target: {id, name, label}}, ...]
+    Returns [] when the two ids are equal, either Term doesn't exist, or no
+    such path connects them (shouldn't happen for a real Exploration graph
+    edge, but guards a stale/hand-crafted request).
+    """
+    # `labelFilter` keeps Schema/Database out of the path (a Term never
+    # needs to walk through either to reach a Table/Column) — unlike
+    # `find_join_path`, SEMANTIC_FK carries no `>` direction marker here
+    # (see this function's own docstring for why that's safe).
+    path_nodes, path_rel_types = find_shortest_labeled_path(
+        term_a_id,
+        term_b_id,
+        node_label=LABEL_TERM,
+        relationship_filter=(
+            f"{REL_REPRESENTS}|{Edges.CONTAINS}|{REL_HAS_ATTRIBUTE}|"
+            f"{REL_SEMANTIC_FK}|{REL_PROPERTY_OF}"
+        ),
+        label_filter=f"-{Labels.SCHEMA}|-{Labels.DB}",
+        max_level=10,
+        log_label="find_term_link_path",
+    )
+    if len(path_nodes) < 2 or len(path_rel_types) != len(path_nodes) - 1:
+        return []
+
+    _enrich_catalog_path_nodes(path_nodes)
+
+    return [
+        {
+            "relationship": path_rel_types[i],
+            "source": path_nodes[i],
+            "target": path_nodes[i + 1],
+        }
+        for i in range(len(path_rel_types))
+    ]

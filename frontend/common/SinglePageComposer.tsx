@@ -67,6 +67,7 @@ export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
 export type ComposerPageHeader = {
 	/** Rendered as the page title. Every composed page names the entity it shows. */
 	title: string;
+	icon?: IconName;
 	/** Catalog node the default save path patches. Without it the Edit button stays hidden. */
 	entityId?: string;
 	titleEditable?: boolean;
@@ -707,7 +708,12 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			[router],
 		);
 
-		const { title, entityId = '', certification: headerCertification } = header.header;
+		const {
+			title,
+			icon: headerIcon,
+			entityId = '',
+			certification: headerCertification,
+		} = header.header;
 		const titleEditable = header.header.titleEditable === true;
 		const shouldAutofocusTitle = titleEditable;
 		const pdfPageName = header.header.pdfProps?.pageName;
@@ -967,27 +973,35 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						<div className="space-y-5">
 							<div className="flex items-start justify-between gap-3">
-								<div className="min-w-0 flex-1">
-									{isEditingActive && titleEditable ? (
-										<input
-											ref={titleInputRef}
-											key={title}
-											type="text"
-											autoFocus
-											defaultValue={title}
-											onChange={(e) => {
-												pendingEditsRef.current.name = e.target.value;
-											}}
-											className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
-											aria-label="Name"
+								<div className="flex min-w-0 flex-1 items-center gap-2">
+									{headerIcon ? (
+										<Icon
+											name={headerIcon}
+											className="h-6 w-6 shrink-0 text-[#76b900]"
 										/>
-									) : (
-										<Text
-											as="h1"
-											text={title}
-											variant={TextVariant.PageTitle}
-										/>
-									)}
+									) : null}
+									<div className="min-w-0 flex-1">
+										{isEditingActive && titleEditable ? (
+											<input
+												ref={titleInputRef}
+												key={title}
+												type="text"
+												autoFocus
+												defaultValue={title}
+												onChange={(e) => {
+													pendingEditsRef.current.name = e.target.value;
+												}}
+												className="w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-2xl font-semibold tracking-tight text-zinc-900 outline-none transition-colors focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100"
+												aria-label="Name"
+											/>
+										) : (
+											<Text
+												as="h1"
+												text={title}
+												variant={TextVariant.PageTitle}
+											/>
+										)}
+									</div>
 								</div>
 								{headerCertification ? (
 									<div className="shrink-0 pt-1">

@@ -29,6 +29,9 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
+from gsf.retrieval.text_to_sql.formatters_util import (
+    format_semantic_context,
+)
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     create_intent_validation_prompt,
@@ -173,12 +176,27 @@ class IntentValidationAgent(BaseAgent):
                 path_state.get("custom_analyses") or []
             )
 
+        join_paths_section = ""
+        primary_attribute = path_state.get("primary_attribute") or {}
+        attribute_join_paths = path_state.get("attribute_join_paths") or []
+        if primary_attribute and attribute_join_paths:
+            join_paths_section = (
+                "AUTHORITATIVE JOIN PATHS (keep joins that follow these verified paths):\n"
+                + format_semantic_context(
+                    primary_attribute,
+                    attribute_join_paths,
+                    target_db=path_state.get("target_db"),
+                )
+                + "\n\n"
+            )
+
         validation_prompt = create_intent_validation_prompt(
             original_question,
             sanitized_question,
             "",
             sql_code,
             custom_analyses=ca_section,
+            join_paths=join_paths_section,
         )
 
         messages = [

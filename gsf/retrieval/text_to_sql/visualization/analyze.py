@@ -76,6 +76,15 @@ def analyze_and_visualize(
             logger.info("analyze_and_visualize: no plot recommendations — skip")
             return None
 
+        # The prompt already tells the model to use "kpi" for a single-row
+        # result, but it doesn't always comply — so the exact same one-row
+        # result could come back as a KPI card one time and a one-bar chart
+        # the next. Enforce it here instead of trusting the model every time,
+        # so a single-row result renders identically on every run.
+        if len(df) == 1:
+            for plot in recommendation.plots:
+                plot.plot_type = "kpi"
+
         specs = generate_chart_specs(df, recommendation.plots)
         if not specs:
             logger.info("analyze_and_visualize: no valid chart specs built — skip")

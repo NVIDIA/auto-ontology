@@ -16,6 +16,8 @@ gsf/tests/test_postgres_connector.py
 # misc
 .DS_Store
 *.pem
+*.p8
+*.pub
 
 # debug
 npm-debug.log*

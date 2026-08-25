@@ -71,6 +71,11 @@ Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
 - Qualified entity phrases that combine a subject with its relevant action or attribute
   ("order shipment", "employee hire", "ticket resolution")
+- Aggregation-qualified metric rule: when "count", "total", "average", "sum", "min",
+  or "max" is attached to a domain noun as the name of a requested metric or column,
+  keep it as one entity phrase. This does not
+  apply when the aggregation is only how the user asks a question, such as
+  "How many shipments..."; in that case, extract the subject entity "shipment".
 - Filter-item rule: when several words together describe a single item the user wants to
   filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
   of the same filter item into separate entries.
@@ -89,7 +94,7 @@ Guidelines for what to exclude from required_entity_name:
 - Numeric values: counts, amounts, prices, years, and other number literals
 - Date/time values when they are numeric or calendar literals
 - Aggregation indicators ("count", "total", "average", "sum", "min", "max")
-  when standing alone
+  when standing alone; preserve them when the aggregation-qualified metric rule applies
 - Status and filter adjectives when standing alone ("open", "active", "high-priority")
 - Bare schema-generic words with no domain meaning on their own: "id", "name",
   "type", "code", "key", "value", "description", "label", "title", "flag",

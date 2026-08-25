@@ -580,7 +580,7 @@ def fetch_tables_from_sql_attributes(
     WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           db.name AS database_name, sch.name AS schema_name, cols
+           db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
     """
     try:
         rows = graph().query_read(query, {"ids": attr_ids})
@@ -606,6 +606,9 @@ def fetch_tables_from_sql_attributes(
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": Labels.TABLE,
+                # Keyless tables are unusable as a prediction entity, so this has
+                # to survive every path that reaches ``relevant_tables``.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )

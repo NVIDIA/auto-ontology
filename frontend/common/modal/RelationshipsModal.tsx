@@ -5,7 +5,6 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import NextLink from 'next/link';
 
 import { explorationApi } from '@/api/exploration';
@@ -17,6 +16,7 @@ import type { TableColumn } from '@/types/table';
 import { Icon, IconName } from '@/common/icons';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
+import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
@@ -59,7 +59,7 @@ export const RelationshipsModal = ({
 	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const { skip, pageSize, pagination } = usePagination({
+	const { skip, pageSize, pageRowCount, pagination } = usePagination({
 		totalItems: total,
 		resetKey: nodeId,
 	});
@@ -204,8 +204,8 @@ export const RelationshipsModal = ({
 			</header>
 			<div className="max-h-[70dvh] overflow-y-auto p-5">
 				{loading ? (
-					<div className="flex h-32 items-center justify-center">
-						<Spinner aria-label="Loading related entities" className="h-8 w-8" />
+					<div role="status" aria-label="Loading related entities">
+						<SkeletonTable columns={columns.length} rows={pageRowCount} />
 					</div>
 				) : error != null ? (
 					<p className="text-sm text-red-600 dark:text-red-300">{error}</p>

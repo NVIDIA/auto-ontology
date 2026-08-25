@@ -25,11 +25,14 @@ from gsf.server.models import (
 )
 from gsf.server.models import (
     ColumnAttribute,
+    ColumnAttributeExplorationDetails,
+    ColumnExplorationDetails,
     CustomAnalysis,
     DataExplorationGraph,
     DatabaseSummary,
     EntityCoverageResult,
     ExplorationEdge,
+    ExplorationLinkPath,
     ExplorationRelatedNodes,
     IdRef,
     PqlAnalysis,
@@ -37,15 +40,18 @@ from gsf.server.models import (
     SchemaSummary,
     SemanticExplorationGraph,
     SqlAttribute,
-    SsoFederationState,
+    SqlAttributeExplorationDetails,
+    SqlExplorationDetails,
     SqlExpressionValidationResult,
     SqlValidationResult,
+    SsoFederationState,
     TableColumns,
     TableExplorationDetails,
     TableSummary,
     Term,
     TermCountEntry,
     TermDetail,
+    TermExplorationDetails,
     TermListItem,
     Zone,
     ZoneChip,
@@ -56,11 +62,12 @@ T = TypeVar("T")
 JsonObject = dict[str, Any]
 
 __all__ = [
-    "ChartsResponse",
     "ChatCancelResponse",
+    "ColumnAttributeExplorationDetailsResponse",
     "ColumnAttributePageResponse",
     "ColumnAttributePatchResponse",
     "ColumnAttributeResponse",
+    "ColumnExplorationDetailsResponse",
     "ConnectionListResponse",
     "ConnectionResponse",
     "ConnectionTestResponse",
@@ -85,10 +92,12 @@ __all__ = [
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
     "SemanticStatusResponse",
+    "SqlAttributeExplorationDetailsResponse",
     "SqlAttributeListResponse",
     "SqlAttributePageResponse",
     "SqlAttributePatchResponse",
     "SqlAttributeResponse",
+    "SqlExplorationDetailsResponse",
     "SqlExpressionValidationResponse",
     "SqlValidationResponse",
     "SsoFederationResponse",
@@ -98,6 +107,7 @@ __all__ = [
     "TableListResponse",
     "TableZonesResponse",
     "TermDetailResponse",
+    "TermExplorationDetailsResponse",
     "TermResponse",
     "TermsPageResponse",
     "ZoneListResponse",
@@ -171,12 +181,6 @@ class ChatCancelResponse(_Payload):
 # ---------------------------------------------------------------------------
 # Route-specific shapes
 # ---------------------------------------------------------------------------
-
-
-class ChartsResponse(_Payload):
-    """``charts`` is null when the model declined to propose a chart."""
-
-    charts: list[JsonObject] | None
 
 
 class ConnectionTestResponse(_Payload):
@@ -274,6 +278,14 @@ ExplorationEdgeListResponse = ListResponse[ExplorationEdge]
 DataExplorationGraphResponse = DataResponse[DataExplorationGraph]
 SemanticExplorationGraphResponse = DataResponse[SemanticExplorationGraph]
 TableExplorationDetailsResponse = DataResponse[TableExplorationDetails]
+TermExplorationDetailsResponse = DataResponse[TermExplorationDetails]
+ColumnExplorationDetailsResponse = DataResponse[ColumnExplorationDetails]
+ColumnAttributeExplorationDetailsResponse = DataResponse[
+    ColumnAttributeExplorationDetails
+]
+SqlAttributeExplorationDetailsResponse = DataResponse[SqlAttributeExplorationDetails]
+SqlExplorationDetailsResponse = DataResponse[SqlExplorationDetails]
+ExplorationLinkPathResponse = DataResponse[ExplorationLinkPath]
 ExplorationRelatedNodesResponse = DataResponse[ExplorationRelatedNodes]
 TableZonesResponse = DataResponse[dict[str, list[ZoneChip]]]
 

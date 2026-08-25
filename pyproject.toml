@@ -21,6 +21,7 @@ dependencies = [
     "uvicorn[standard]>=0.32.0",
     "nvidia-sdfm[kumorfm]>=0.1.0",
     "databricks-sql-connector>=4.3.0",
+    "mysql-connector-python>=9.7.0",
     "pyyaml>=6.0.3",
     "apache-ossie-gsf",
     "pyhive[hive-pure-sasl]>=0.7.0",

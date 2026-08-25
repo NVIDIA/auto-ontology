@@ -34,6 +34,15 @@ export type PostgresConnectionParams = {
 	database: string;
 };
 
+export type MySqlConnectionParams = {
+	type: ConnectionType.MYSQL;
+	host: string;
+	port: string;
+	user: string;
+	password: string;
+	database: string;
+};
+
 export type SnowflakeConnectionParams = {
 	type: ConnectionType.SNOWFLAKE;
 	account: string;
@@ -68,6 +77,7 @@ export type HeavyDBConnectionParams = {
 export type ConnectionParams =
 	| DatabricksConnectionParams
 	| PostgresConnectionParams
+	| MySqlConnectionParams
 	| SnowflakeConnectionParams
 	| HeavyDBConnectionParams;
 

@@ -36,6 +36,7 @@ import CloseSvg from './svg/close.svg';
 import PlusSvg from './svg/plus.svg';
 import DownloadSvg from './svg/download.svg';
 import UploadSvg from './svg/upload.svg';
+import CodeBracketSvg from './svg/code-bracket.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -70,6 +71,7 @@ export enum IconName {
 	Certification = 'certification',
 	Download = 'download',
 	Upload = 'upload',
+	CodeBracket = 'code-bracket',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -105,6 +107,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Certification]: CertificationSvg,
 	[IconName.Download]: DownloadSvg,
 	[IconName.Upload]: UploadSvg,
+	[IconName.CodeBracket]: CodeBracketSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

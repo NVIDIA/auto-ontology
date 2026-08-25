@@ -13,10 +13,13 @@ export const openapi: OpenApiRoute = {
 	post: {
 		body: {
 			description:
-				'Step 1 of a chat turn: SQL plus a formatted answer. Charts are a separate ' +
-				'`POST /api/chat/visualize` call. Reuse one `conversation_id` for follow-up ' +
-				'turns; an unknown UUID creates a conversation, while an ID owned by another ' +
-				'user returns 404.',
+				'SQL plus a formatted answer, streamed as SSE. When the answer has an ' +
+				'executed result, the backend also generates and persists a chart (or ' +
+				'fallback table) and streams it back on this same connection as its own ' +
+				'`charts` event — no follow-up call needed. Reuse one `conversation_id` for ' +
+				'follow-up turns; an unknown UUID creates a conversation, while an ID owned ' +
+				'by another user returns 404. Omitting `conversation_id` runs the question ' +
+				'statelessly, with no history and no chart step.',
 			schema: z.object({
 				question: z.string().min(1),
 				conversation_id: z.string().uuid().nullish(),

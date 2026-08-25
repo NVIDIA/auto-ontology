@@ -34,6 +34,13 @@ export type UsePaginationResult = {
 	pageSize: number;
 	/** Rows before the current page: it covers `[skip, skip + pageSize)`. */
 	skip: number;
+	/**
+	 * Rows the current page holds — `pageSize`, or fewer on a last page that
+	 * doesn't fill up. Sizes a loading placeholder to the rows it stands in for,
+	 * so the list doesn't resize once they arrive. Falls back to `pageSize`
+	 * while the total is still unknown.
+	 */
+	pageRowCount: number;
 	setPage: (page: number) => void;
 	/** Ready to hand to `Table`'s `pagination` prop. */
 	pagination: TablePagination;
@@ -78,10 +85,14 @@ export function usePagination({
 		[page, pageSize, totalItems, setPage],
 	);
 
+	const skip = (page - 1) * pageSize;
+
 	return {
 		page,
 		pageSize,
-		skip: (page - 1) * pageSize,
+		skip,
+		pageRowCount:
+			totalItems > 0 ? Math.max(1, Math.min(pageSize, totalItems - skip)) : pageSize,
 		setPage,
 		pagination,
 	};

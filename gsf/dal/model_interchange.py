@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
@@ -111,6 +111,7 @@ RETURN coalesce(db.imported_id, db.id) AS db_id,
        tbl.pk AS pk,
        tbl.table_type AS table_type,
        coalesce(col.imported_id, col.id) AS column_id,
+       col.id AS column_live_id,
        col.name AS column_name,
        col.description AS column_description,
        col.data_type AS column_type,
@@ -272,6 +273,7 @@ def assemble_export_document(
     """
     databases = _assemble_databases(rows["catalog"], dialect_by_db_name)
     table_ids, column_ids = _catalog_ids(databases)
+    live_to_catalog_column_id = _column_live_id_map(rows["catalog"])
     foreign_keys = [
         ModelForeignKey(
             source_column_id=str(row["source_column_id"]),
@@ -327,6 +329,7 @@ def assemble_export_document(
         sql_column_resolver,
         term_ids=term_ids,
         column_ids=column_ids,
+        live_to_catalog_column_id=live_to_catalog_column_id,
     )
     custom_analyses = [
         ModelCustomAnalysis(
@@ -334,11 +337,12 @@ def assemble_export_document(
             name=row.get("name") or "",
             description=row.get("description") or "",
             sql=row.get("sql") or "",
-            sql_column_is=_scoped_ids(
+            sql_column_is=_scoped_column_ids(
                 sql_column_resolver(
                     row.get("sql") or "",
                     row.get("database_name"),
                 ),
+                live_to_catalog_column_id,
                 column_ids,
             ),
         )
@@ -378,6 +382,41 @@ def _catalog_ids(databases: list[ModelDatabase]) -> tuple[set[str], set[str]]:
 def _scoped_ids(values: Iterable[Any], known: set[str]) -> list[str]:
     """Keep the ids present in the exported catalog, in their original order."""
     return [str(value) for value in values if str(value) in known]
+
+
+def _column_live_id_map(catalog_rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Map live Neo4j column ids to the id used in the exported catalog.
+
+    The catalog exports ``coalesce(col.imported_id, col.id)`` so a
+    re-exported, previously-imported model keeps stable ids. The SQL parser
+    behind ``sql_column_resolver`` (:func:`gsf.server.sql_utils.get_schemas`)
+    knows nothing about ``imported_id`` and always resolves columns by their
+    live ``id``, so those two id spaces diverge for any column that has gone
+    through an import. See :func:`_scoped_column_ids`.
+    """
+    return {
+        str(row["column_live_id"]): str(row["column_id"])
+        for row in catalog_rows
+        if row.get("column_id") and row.get("column_live_id")
+    }
+
+
+def _scoped_column_ids(
+    values: Iterable[Any],
+    live_to_catalog_column_id: dict[str, str],
+    known: set[str],
+) -> list[str]:
+    """Translate SQL-resolver column ids into catalog ids, then scope them.
+
+    Without the translation, every column belonging to a previously
+    imported table would fail the membership check below (its live id is
+    never a key of *known*), and ``sql_column_is`` would silently come back
+    empty for the vast majority of SQL attributes/custom analyses.
+    """
+    translated = (
+        live_to_catalog_column_id.get(str(value), str(value)) for value in values
+    )
+    return _scoped_ids(translated, known)
 
 
 def _assemble_databases(
@@ -466,6 +505,7 @@ def _assemble_sql_attributes(
     *,
     term_ids: set[str],
     column_ids: set[str],
+    live_to_catalog_column_id: dict[str, str],
 ) -> ModelSqlAttributesBySource:
     grouped: dict[str, list[ModelSqlAttribute]] = {
         "manual": [],
@@ -486,8 +526,9 @@ def _assemble_sql_attributes(
                 name=row.get("name") or "",
                 description=row.get("description") or "",
                 sql=sql_text,
-                sql_column_is=_scoped_ids(
+                sql_column_is=_scoped_column_ids(
                     sql_column_resolver(sql_text, row.get("database_name")),
+                    live_to_catalog_column_id,
                     column_ids,
                 ),
                 term_id=term_id,
@@ -496,21 +537,60 @@ def _assemble_sql_attributes(
     return ModelSqlAttributesBySource(**grouped)
 
 
-def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
-    """Parse SQL against the scoped catalog and return referenced column ids."""
-    if not sql.strip():
-        return []
+def _column_ids_from_sql(
+    sql: str, dialects: list[str], schemas: dict[str, Any]
+) -> list[str]:
     try:
-        query_obj = validate_sql(
-            sql,
-            get_dialects(database_name),
-            get_schemas(database_name),
-        )
+        query_obj = validate_sql(sql, dialects, schemas)
     except Exception:
         logger.debug("Could not resolve sql_column_is for SQL snippet", exc_info=True)
         return []
     column_ids = query_obj.get_column_ids()
     return [str(col_id) for col_id in column_ids if col_id]
+
+
+def resolve_sql_column_ids(sql: str, database_name: str | None) -> list[str]:
+    """Parse SQL against the scoped catalog and return referenced column ids.
+
+    ``sql_column_is`` is a best-effort enrichment: a broken connector or a
+    transient catalog-lookup failure for *database_name* must not raise out
+    of here, or callers assembling an export/import document would fail
+    entirely over what is, at worst, a missing cross-reference.
+    """
+    if not sql.strip():
+        return []
+    try:
+        dialects = get_dialects(database_name)
+        schemas = get_schemas(database_name)
+    except Exception:
+        logger.debug(
+            "Could not build dialects/schemas for database %r; skipping "
+            "sql_column_is for this SQL snippet",
+            database_name,
+            exc_info=True,
+        )
+        return []
+    return _column_ids_from_sql(sql, dialects, schemas)
+
+
+def make_cached_sql_column_resolver() -> Callable[[str, str | None], list[str]]:
+    """Build a ``sql_column_resolver`` that reuses ``(dialects, schemas)`` per database.
+
+    A single export calls this once per sql_attribute/custom_analysis, and
+    those usually share a handful of database names. Unlike
+    :func:`resolve_sql_column_ids`, which rebuilds the whole catalog snapshot
+    on every call (see :func:`_cached_dialects_and_schemas`), the resolver
+    returned here caches that snapshot for the lifetime of one export.
+    """
+    cache: dict[str | None, tuple[list[str], dict[str, Any]]] = {}
+
+    def _resolve(sql: str, database_name: str | None) -> list[str]:
+        if not sql.strip():
+            return []
+        dialects, schemas = _safe_cached_dialects_and_schemas(cache, database_name)
+        return _column_ids_from_sql(sql, dialects, schemas)
+
+    return _resolve
 
 
 _IMPORTED_ID_INDEX_LABELS = (
@@ -1137,7 +1217,9 @@ def _import_catalog(
                         description=column.description,
                         data_type=column.type,
                         sample_values=column.sample_values,
+                        is_unique=column.is_unique,
                         table_yaml_id=table.id,
+                        table_name=table.name,
                         schema_name=schema.name,
                         database_name=schema_db_name,
                     )
@@ -1494,6 +1576,7 @@ def _import_column_attributes(
                 "term": term,
                 "col_ctx": col_ctx,
                 "live_term_id": live_term_id,
+                "live_table_id": live_table_id,
             }
 
     attr_results = _resolve_entities_batch(LABEL_COLUMN_ATTRIBUTE, attr_items)
@@ -1539,6 +1622,9 @@ def _import_column_attributes(
                     description=attr.description,
                     term_name=term.name,
                     source_column=col_ctx.name,
+                    table_id=ctx["live_table_id"],
+                    table_name=col_ctx.table_name,
+                    is_unique=col_ctx.is_unique,
                     sample_values=col_ctx.sample_values,
                     schema_name=col_ctx.schema_name,
                 ),
@@ -1596,6 +1682,36 @@ def _cached_dialects_and_schemas(
     """
     if database_name not in cache:
         cache[database_name] = (get_dialects(database_name), get_schemas(database_name))
+    return cache[database_name]
+
+
+def _safe_cached_dialects_and_schemas(
+    cache: dict[str | None, tuple[list[str], dict[str, Any]]],
+    database_name: str | None,
+) -> tuple[list[str], dict[str, Any]]:
+    """Like :func:`_cached_dialects_and_schemas`, but never raises.
+
+    Used by the export path's ``sql_column_resolver``, where
+    ``sql_column_is`` is a best-effort cross-reference: a broken connector
+    or a transient catalog-lookup error for one database must not fail the
+    whole export. The failure is cached too (as empty dialects/schemas), so
+    a persistently broken *database_name* doesn't re-raise on every
+    sql_attribute/custom_analysis that references it.
+    """
+    if database_name not in cache:
+        try:
+            cache[database_name] = (
+                get_dialects(database_name),
+                get_schemas(database_name),
+            )
+        except Exception:
+            logger.debug(
+                "Could not build dialects/schemas for database %r; "
+                "sql_column_is will be empty for SQL referencing it",
+                database_name,
+                exc_info=True,
+            )
+            cache[database_name] = ([], {})
     return cache[database_name]
 
 

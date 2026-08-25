@@ -16,6 +16,7 @@ from typing import Any, Mapping
 from urllib.parse import quote
 
 DEFAULT_POSTGRES_PORT = "5432"
+DEFAULT_MYSQL_PORT = "3306"
 DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
@@ -60,6 +61,14 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         return (
             f"postgresql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
         )
+
+    if conn_type == "mysql":
+        host = _require(connection, "host").rstrip("/")
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        database = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_MYSQL_PORT
+        return f"mysql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
 
     if conn_type == "snowflake":
         account = _require(connection, "account")

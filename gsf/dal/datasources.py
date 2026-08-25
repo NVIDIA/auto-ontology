@@ -268,7 +268,7 @@ MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
 WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                          description: {column_description_expr("col")}}}) AS cols
 RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, cols
+       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
 """
 
 _APPLY_TABLE_METADATA = f"""
@@ -413,6 +413,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": "Table",
+                # The prediction graph keys its entities on this: a table that
+                # arrives without it reaches KumoRFM with no identity, which
+                # costs it every edge and makes it unusable in `FOR EACH`.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )
@@ -487,7 +491,10 @@ RETURN c.id AS id,
        {column_description_expr("c")} AS description,
        c.ordinal_position AS ordinal_position,
        c.sample_values AS sample_values,
-       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key
+       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
+       EXISTS {{
+           (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
+       }} AS is_foreign_key_target
 ORDER BY c.ordinal_position
 """
 
@@ -506,8 +513,9 @@ UNWIND $col_ids AS col_id
 MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
       <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
       <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
-RETURN col.id AS col_id, tbl.name AS table_name, sch.name AS schema_name,
-       db.name AS database_name
+RETURN col.id AS col_id, tbl.id AS table_id, tbl.name AS table_name,
+       sch.id AS schema_id, sch.name AS schema_name,
+       db.id AS database_id, db.name AS database_name
 """
 
 
@@ -610,6 +618,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r.get("description"),
             "ordinal_position": r.get("ordinal_position"),
             "sample_values": r.get("sample_values"),
+            "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
         }
         for r in rows
         if r.get("id") is not None
@@ -619,7 +628,14 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
 
 
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → database/schema/table identity."""
+    """Batch lookup: Column id → database/schema/table identity (ids + names).
+
+    Ids are included alongside names so a caller that needs to let a client
+    expand a Table/Column further (e.g. `find_term_link_path`'s catalog
+    enrichment) can reuse this instead of re-running the same
+    Database→Schema→Table→Column traversal itself; a caller that only wants
+    display text (e.g. `find_join_path`) simply ignores the extra keys.
+    """
     if not col_ids:
         return {}
     try:
@@ -629,8 +645,11 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
         return {}
     return {
         r["col_id"]: {
+            "table_id": r.get("table_id") or "",
             "table_name": r.get("table_name") or "",
+            "schema_id": r.get("schema_id") or "",
             "schema_name": r.get("schema_name") or "",
+            "database_id": r.get("database_id") or "",
             "database_name": r.get("database_name") or "",
         }
         for r in rows
