@@ -103,7 +103,7 @@ PREDICT <target> [RANK TOP k] FOR <entity_table>.<primary_key>=<value> [ASSUMING
 - `FOR EACH` MUST name the entity by a primary-key column (`FOR EACH customers.customer_id`), never just the
   table. Where the graph marks a table as keyed on several columns TOGETHER (`PRIMARY KEY (`Customer ID`,
   REGION)`), name any ONE of those columns — that identifies the whole key, so do not list them all.
-- `FORECAST` is single-entity: forecast ONE entity by its primary key and scope to it with the entity-selection SQL (a single primary-key row). A forecast framed over many entities ("for each" / "per"), or keyed on a non-primary-key column, is wrong.
+- `FORECAST` is single-entity: forecast ONE entity by its primary key and scope to it with the entity-selection SQL (a single primary-key row), except against the supplied whole-dataset entity, which is already one entity and needs no SQL. A forecast framed over many entities ("for each" / "per"), or keyed on a non-primary-key column, is wrong.
 - Inside an aggregation `WHERE`, qualify the column with its table: `COUNT(payments.* WHERE payments.days_late > 0, 0, 30, days)`.
 - Add entity filters ONLY for subset values explicitly named in the user question. Never copy or infer filters
   from verified examples or dataset/domain wording; generic nouns like "business", "customer", "account", or

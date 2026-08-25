@@ -348,7 +348,7 @@ def _key_and_link(
     # No usable catalog join paths — fall back to KumoRFM's link heuristics.
     logger.info("kumo: no catalog join paths; inferring links heuristically")
     try:
-        graph.infer_links()
+        graph.infer_links(verbose=False)
         _deduplicate_inferred_links(graph)
     except Exception:
         logger.exception("kumo: infer_links failed; proceeding without inferred links")
@@ -412,6 +412,7 @@ def _link_global_entity(graph: Any, stranded: list[str]) -> None:
         table.primary_key = GLOBAL_ENTITY_KEY
     except Exception:
         logger.warning("kumo: could not key the supplied entity", exc_info=True)
+        _drop_global_entity(graph)
         return
 
     # The rebuild runs link inference, which reads the key as the foreign key it
@@ -436,10 +437,19 @@ def _link_global_entity(graph: Any, stranded: list[str]) -> None:
                 "kumo: could not link %s to the supplied entity", name, exc_info=True
             )
     if not linked:
-        logger.warning(
-            "kumo: the supplied entity reached no table; predictions against it "
-            "would see no history"
-        )
+        # Advertised but unreachable, it would send the model at an entity with no
+        # history and cost it the whole repair budget. Better never to offer it.
+        logger.warning("kumo: the supplied entity reached no table; dropping it")
+        _drop_global_entity(graph)
+
+
+def _drop_global_entity(graph: Any) -> None:
+    """Take the entity back out, leaving the request as it was without it."""
+    try:
+        if GLOBAL_ENTITY_TABLE in graph:
+            del graph[GLOBAL_ENTITY_TABLE]
+    except Exception:
+        logger.warning("kumo: could not remove the supplied entity", exc_info=True)
 
 
 def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
@@ -688,8 +698,6 @@ def build_prediction_context(
         "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
         time.perf_counter() - _graph_start,
     )
-    # Before any linking: an edge is oriented towards a primary key, so a table whose
-    # key inference missed can take part in no relationship at all.
     _key_and_link(graph, catalog_keys, join_paths)
 
     # Judged once the graph is keyed and linked, since that is what KumoRFM
@@ -699,9 +707,11 @@ def build_prediction_context(
     stranded = _stranded_tables(graph)
     if stranded:
         logger.info(
-            "kumo: %s reach no entity; predicting for the whole as one entity "
-            "over time",
-            ", ".join(stranded),
+            "kumo: %s no entity to be predicted for; predicting for the whole "
+            "as one entity over time",
+            f"{stranded[0]} has"
+            if len(stranded) == 1
+            else f"{', '.join(stranded)} have",
         )
         _supply_global_entity(frames, stranded)
         graph = rfm.Graph.from_data(

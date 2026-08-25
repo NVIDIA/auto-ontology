@@ -117,6 +117,10 @@ def build_graph_context(
     * ``col_stypes`` — ``{table_lower: {col_lower: stype}}`` for the ordinal-comparison lint.
     * ``time_columns`` — ``{table: time_column_name | None}`` for forecast anchoring.
 
+    The key joining a table to the supplied entity is shown on that entity alone.
+    On the tables it links to it names an entity of one, so offering it there only
+    invites a query that has to be repaired.
+
     Names are quoted the way PQL has to spell them, so a column called ``Customer ID``
     reaches the model as ``` `Customer ID` ``` and comes back written that way. The
     surrogate column standing in for a composite key is left out throughout: it names
@@ -144,7 +148,12 @@ def build_graph_context(
     ddl_lines: list[str] = []
 
     for name, table in graph.tables.items():
-        columns = [c for c in table.columns if not is_synthetic_key(c.name)]
+        columns = [
+            c
+            for c in table.columns
+            if not is_synthetic_key(c.name)
+            and not (c.name == GLOBAL_ENTITY_KEY and name != GLOBAL_ENTITY_TABLE)
+        ]
         col_stypes[name.lower()] = {c.name.lower(): str(c.stype) for c in columns}
         pk_cols = key_columns(table)
         time_col = _col_name(table.time_column)

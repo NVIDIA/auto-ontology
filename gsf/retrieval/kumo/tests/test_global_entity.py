@@ -85,10 +85,22 @@ def test_a_table_with_two_timestamps_is_still_a_series() -> None:
     assert _stranded_tables(_built(frames)) == ["weekly_sales"]
 
 
-def test_a_keyed_table_is_left_alone() -> None:
-    frames = {"stores": pd.DataFrame({"store_id": [1, 2, 3], "city": [*"abc"]})}
+def test_a_keyed_series_is_left_alone() -> None:
+    """Keyed AND ordered by time: the guard that says a key is enough.
 
-    assert _stranded_tables(_built(frames, {"stores": ["store_id"]})) == []
+    Without this the time-column clause alone decides, and every keyed series in
+    every dataset would be handed the supplied entity instead of its own.
+    """
+    frames = {"visits": _weekly().assign(visit_id=range(60))}
+
+    assert _stranded_tables(_built(frames, {"visits": ["visit_id"]})) == []
+
+
+def test_a_table_with_neither_key_nor_time_is_left_alone() -> None:
+    """Nothing to observe over time, so nothing to supply an entity for."""
+    frames = {"lookup": pd.DataFrame({"code": [*"abc"], "label": [*"xyz"]})}
+
+    assert _stranded_tables(_built(frames)) == []
 
 
 def test_a_keyed_table_elsewhere_does_not_strand_an_unrelated_series() -> None:
@@ -156,6 +168,22 @@ def test_the_query_the_engine_refused_now_validates() -> None:
     assert validated.entity_column == f"{GLOBAL_ENTITY_TABLE}.{GLOBAL_ENTITY_KEY}"
 
 
+def test_an_entity_that_reaches_nothing_is_withdrawn() -> None:
+    """The production shape of the failure, not a graph that never had it.
+
+    Left in place it would still be advertised as the whole dataset while
+    reaching no history, sending the model at it and spending the repair budget
+    on an entity that can answer nothing.
+    """
+    frames = {"weekly_sales": _weekly()}
+    _supply_global_entity(frames, ["weekly_sales"])
+    graph = _built(frames)
+    # Named as stranded but never joined, so the entity reaches no table.
+    _link_global_entity(graph, [])
+
+    assert GLOBAL_ENTITY_TABLE not in graph.tables
+
+
 def test_keying_the_entity_never_fails_the_request() -> None:
     """It is supplemental, so a graph that cannot take it is left as it was."""
     frames = {"weekly_sales": _weekly()}
@@ -164,6 +192,24 @@ def test_keying_the_entity_never_fails_the_request() -> None:
     _link_global_entity(graph, ["weekly_sales"])
 
     assert GLOBAL_ENTITY_TABLE not in graph.tables
+
+
+def test_the_join_key_is_offered_on_the_entity_alone() -> None:
+    """On a table it links to it names an entity of one, so it is only bait."""
+    from gsf.retrieval.kumo.kumo_model import build_graph_context
+
+    frames = {"weekly_sales": _weekly()}
+    stranded = _stranded_tables(_built(frames))
+    _supply_global_entity(frames, stranded)
+    graph = _built(frames)
+    _link_global_entity(graph, stranded)
+
+    ddl, _edges, col_stypes, _times = build_graph_context(graph)
+    series = next(line for line in ddl.splitlines() if line.startswith("weekly_sales("))
+
+    assert GLOBAL_ENTITY_KEY not in series
+    assert GLOBAL_ENTITY_KEY not in col_stypes["weekly_sales"]
+    assert GLOBAL_ENTITY_KEY in col_stypes[GLOBAL_ENTITY_TABLE]
 
 
 @pytest.mark.parametrize(
