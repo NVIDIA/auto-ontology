@@ -15,9 +15,6 @@ from __future__ import annotations
 
 from typing import Any
 
-# The entity supplied for a time series that reaches none of its own, and the key
-# it is joined on. Defined here because the predictor builds it, the DDL names it
-# and the resolver has to recognise it.
 GLOBAL_ENTITY_TABLE = "__kumo_global"
 GLOBAL_ENTITY_KEY = "__kumo_global_id"
 

@@ -173,12 +173,12 @@ def test_an_entity_that_reaches_nothing_is_withdrawn() -> None:
 
     Left in place it would still be advertised as the whole dataset while
     reaching no history, sending the model at it and spending the repair budget
-    on an entity that can answer nothing.
+    on an entity that can answer nothing. Passing no stranded tables is how the
+    entity ends up joined to nothing.
     """
     frames = {"weekly_sales": _weekly()}
     _supply_global_entity(frames, ["weekly_sales"])
     graph = _built(frames)
-    # Named as stranded but never joined, so the entity reaches no table.
     _link_global_entity(graph, [])
 
     assert GLOBAL_ENTITY_TABLE not in graph.tables

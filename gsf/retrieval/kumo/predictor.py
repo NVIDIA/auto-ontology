@@ -338,14 +338,14 @@ def _key_and_link(
     """Declare the keys the catalog recorded, then orient the edges.
 
     Keys first: an edge is oriented towards a primary key, so a table whose key
-    is missing can take part in no relationship at all.
+    is missing can take part in no relationship at all. Without a usable catalog
+    join path, KumoRFM's own link heuristics stand in.
     """
     _declare_primary_keys(graph, catalog_keys)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
         return
-    # No usable catalog join paths — fall back to KumoRFM's link heuristics.
     logger.info("kumo: no catalog join paths; inferring links heuristically")
     try:
         graph.infer_links(verbose=False)
@@ -402,7 +402,13 @@ def _link_global_entity(graph: Any, stranded: list[str]) -> None:
     """Key the supplied entity and orient the stranded tables towards it.
 
     Guarded throughout: this entity is supplemental, so failing to add it must
-    leave the request no worse off than before rather than failing it outright.
+    leave the request no worse off than before rather than failing it outright,
+    and an entity that reaches nothing is taken back out rather than left
+    advertising history it does not have.
+
+    The rebuild runs link inference, which reads the key as the foreign key it is
+    and may already have drawn the edge, so that is not counted as a failure to
+    draw it.
     """
     from kumorfm.api.typing import Stype
 
@@ -415,8 +421,6 @@ def _link_global_entity(graph: Any, stranded: list[str]) -> None:
         _drop_global_entity(graph)
         return
 
-    # The rebuild runs link inference, which reads the key as the foreign key it
-    # is and may already have drawn the edge.
     existing = {
         edge.src_table for edge in graph.edges if edge.dst_table == GLOBAL_ENTITY_TABLE
     }
@@ -437,8 +441,6 @@ def _link_global_entity(graph: Any, stranded: list[str]) -> None:
                 "kumo: could not link %s to the supplied entity", name, exc_info=True
             )
     if not linked:
-        # Advertised but unreachable, it would send the model at an entity with no
-        # history and cost it the whole repair budget. Better never to offer it.
         logger.warning("kumo: the supplied entity reached no table; dropping it")
         _drop_global_entity(graph)
 
@@ -700,10 +702,6 @@ def build_prediction_context(
     )
     _key_and_link(graph, catalog_keys, join_paths)
 
-    # Judged once the graph is keyed and linked, since that is what KumoRFM
-    # enforces: a table still ordered by time with no way to reach an entity can
-    # be predicted for only if one is supplied. Supplying it changes the schema,
-    # so the graph is built again from the widened frames.
     stranded = _stranded_tables(graph)
     if stranded:
         logger.info(
