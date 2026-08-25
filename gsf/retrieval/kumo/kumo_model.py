@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from typing import Any
 
+# The entity supplied for tables that name none of their own (see predictor).
+GLOBAL_ENTITY_TABLE = "__kumo_global"
+
 # Per-call entity caps above which predict() switches to batch mode (from aiq-rfm).
 _PREDICT_CAP = 1_000
 _LINK_PREDICT_CAP = 200
@@ -150,6 +153,12 @@ def build_graph_context(
             markers.append(f"PRIMARY KEY ({', '.join(quote_name(c) for c in pk_cols)})")
         if time_col:
             markers.append(f"TIME COLUMN ({quote_name(time_col)})")
+        if name == GLOBAL_ENTITY_TABLE:
+            markers.append(
+                "THE WHOLE DATASET AS ONE ENTITY. The tables it links to name no "
+                "entity of their own, so predict FOR EACH this key to ask about "
+                "the total over time"
+            )
         suffix = f"  -- {'; '.join(markers)}" if markers else ""
         ddl_lines.append(f"{quote_name(name)}({col_txt}){suffix}")
 

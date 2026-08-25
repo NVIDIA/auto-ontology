@@ -28,6 +28,13 @@ PREDICT <target> [RANK TOP k] FOR <entity_table>.<primary_key>=<value> [ASSUMING
     `AGG(<table>.<column> [WHERE ...], <start>, <end>, <time_unit>)` where AGG ∈ COUNT, SUM, AVG, MIN, MAX.
     The window `(anchor+start, anchor+end]` is relative to the prediction "anchor" time; time_unit ∈
     seconds, minutes, hours, days, weeks, months. Use `*` to count rows: `COUNT(orders.*, 0, 30, days)`.
+  - A table marked THE WHOLE DATASET AS ONE ENTITY has been supplied because the tables
+    it links to name no entity of their own (a weekly or daily aggregate, say). For a
+    question about a total over time rather than about each customer or store, use
+    `FOR EACH <that table>.<its key>` and let the window do the slicing:
+    `PREDICT SUM(weekly_sales.sales, 0, 1, weeks) FOR EACH __kumo_global.__kumo_global_id`.
+    Never put the time column in FOR EACH; it cannot be both the identity and the time.
+
   - A condition / comparison (`> 0`, `= 0`, `>= 100`, `AND`/`OR`) → binary classification:
     e.g. churn = `COUNT(orders.*, 0, 30, days) = 0`; will-purchase = `COUNT(orders.*, 0, 7, days) > 0`.
   - To predict whether a future event MATCHING A CONDITION occurs, put the condition in a `WHERE` *inside*
