@@ -38,6 +38,7 @@ export type ConnectionFieldKey =
 	| 'protocol'
 	| 'ssa_url'
 	| 'truststore'
+	| 'truststore_file'
 	| 'truststore_password'
 	| 'schema'
 	| 'sso_federation';
@@ -55,6 +56,10 @@ export type ConnectionField = {
 	boolean?: boolean;
 	/** Rendered as a textarea. Needed for pasted PEM keys, which span many lines. */
 	multiline?: boolean;
+	/** Rendered as a file picker; the value is the file's base64-encoded bytes. */
+	file?: boolean;
+	/** `accept` attribute for a file field. */
+	fileAccept?: string;
 	/** Helper text shown under the field. */
 	hint?: string;
 };
@@ -155,38 +160,33 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{ key: 'protocol', label: 'Protocol', placeholder: 'binary', optional: true },
 	],
 	[ConnectionType.KYUUBI]: [
-		{
-			key: 'host',
-			label: 'Host',
-			placeholder: 'hive.pdx-aws.data.nvidia.com',
-		},
-		{ key: 'port', label: 'Port', placeholder: '10000', optional: true },
+		{ key: 'host', label: 'Host' },
+		{ key: 'port', label: 'Port', optional: true },
 		{
 			key: 'user',
-			label: 'Username',
-			placeholder: 'nvssa-prd-... or user@nvidia.com',
+			label: 'Generate Token Client ID',
 			hint: 'The SSA client ID for a service account, or your account name when using a pasted token.',
 		},
 		{
 			key: 'password',
-			label: 'Client secret or token',
+			label: 'Generate Token Client Secret',
 			secret: true,
 			hint: 'The SSA client secret when a token URL is set below, otherwise a JWT copied from the data platform profile page.',
 		},
 		{
 			key: 'ssa_url',
-			label: 'SSA token URL',
-			placeholder: 'https://<service-id>.ssa.nvidia.com',
+			label: 'Generate Token URL',
 			optional: true,
 			hint: 'Enables service-account auth. Tokens expire hourly, so this lets the connector mint fresh ones instead of failing after an hour.',
 		},
-		{ key: 'database', label: 'Catalog', placeholder: 'nvdp' },
+		{ key: 'database', label: 'Catalog' },
 		{
-			key: 'truststore',
-			label: 'Truststore path (JKS)',
-			placeholder: '/etc/ssl/global_ca.jks',
+			key: 'truststore_file',
+			label: 'Truststore (JKS)',
+			file: true,
+			fileAccept: '.jks,.keystore,.truststore',
 			optional: true,
-			hint: 'Path on the server to the NVIDIA CA truststore. Needed when the internal CA is not already trusted by the host.',
+			hint: 'Upload the NVIDIA CA truststore. Needed when the server does not already trust the internal CA.',
 		},
 		{
 			key: 'truststore_password',

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -44,7 +45,14 @@ def _redact(connection_string: str) -> str:
 
     Connection strings carry a PAT (or, with per-user auth, a caller's exchanged
     Databricks token), so the raw value must never reach the logs.
+
+    An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
+    and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
+    on every connector failure.
     """
+    connection_string = re.sub(
+        r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
+    )
     parsed = urlparse(connection_string)
     if not parsed.password:
         return connection_string

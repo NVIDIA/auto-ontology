@@ -43,6 +43,7 @@ Example
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import logging
 import os
@@ -206,8 +207,26 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
         "verify_ssl": _is_true(_first(query, "verify_ssl"), default=True),
         "ca_bundle": _first(query, "ca_bundle"),
         "truststore": _first(query, "truststore"),
+        "truststore_data": _first(query, "truststore_data"),
         "truststore_password": _first(query, "truststore_password"),
     }
+
+
+def _write_temp_jks(encoded: str) -> str:
+    """Decode a base64 keystore to a temp file and return its path."""
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("Kyuubi truststore_data is not valid base64") from exc
+    if not raw:
+        raise ValueError("Kyuubi truststore_data is empty")
+
+    handle = tempfile.NamedTemporaryFile(
+        suffix=".jks", prefix="kyuubi-truststore-", delete=False
+    )
+    with handle:
+        handle.write(raw)
+    return handle.name
 
 
 def _jks_to_pem(jks_path: str, password: str | None) -> str:
@@ -341,12 +360,25 @@ class KyuubiDatabase(SQLDatabase):
 
         bundle = self._settings["ca_bundle"]
         truststore = self._settings["truststore"]
+        truststore_data = self._settings["truststore_data"]
+        password = self._settings["truststore_password"]
         if bundle:
             self._ca_pem = str(bundle)
+        elif truststore_data:
+            # Uploaded through the UI: the keystore travels with the connection,
+            # so write it out before pyjks reads it. A path on the server would
+            # have to exist in every pod that runs a query.
+            jks_path = _write_temp_jks(str(truststore_data))
+            try:
+                self._ca_pem = _jks_to_pem(jks_path, password)
+            finally:
+                try:
+                    os.unlink(jks_path)
+                except OSError:
+                    logger.debug("Failed to remove %s", jks_path, exc_info=True)
+            self._ca_pem_is_temporary = True
         elif truststore:
-            self._ca_pem = _jks_to_pem(
-                str(truststore), self._settings["truststore_password"]
-            )
+            self._ca_pem = _jks_to_pem(str(truststore), password)
             self._ca_pem_is_temporary = True
         return self._ca_pem
 

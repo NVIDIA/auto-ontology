@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import base64
 import json
 from urllib.parse import parse_qs, urlparse
 
@@ -414,3 +415,49 @@ def test_execute_does_not_retry_a_rejected_statement() -> None:
         db.execute("SELECT * FROM nope")
 
     assert len(calls) == 1, "a SQL error must surface, not trigger a reconnect"
+
+
+# ----------------------------------------------------------------------
+# Uploaded truststore
+# ----------------------------------------------------------------------
+
+
+def test_uploaded_truststore_travels_as_data_not_a_path() -> None:
+    """A path would have to exist on every pod; the bytes ride along instead."""
+    encoded = base64.b64encode(b"fake-keystore-bytes").decode()
+    built = build_connection_string(
+        _connection(truststore_file=encoded, truststore_password="pw")
+    )
+
+    settings = _parse_connection_string(built)
+    assert settings["truststore_data"] == encoded
+    assert settings["truststore"] is None
+    assert settings["truststore_password"] == "pw"
+
+
+def test_uploaded_truststore_wins_over_a_path() -> None:
+    built = build_connection_string(
+        _connection(truststore_file="QUJD", truststore="/etc/ssl/ca.jks")
+    )
+
+    settings = _parse_connection_string(built)
+    assert settings["truststore_data"] == "QUJD"
+    assert settings["truststore"] is None
+
+
+def test_keystore_bytes_are_kept_out_of_the_logs() -> None:
+    """The blob is hundreds of KB; logging it verbatim on failure is unusable."""
+    from gsf.connectors.registry import _redact
+
+    built = build_connection_string(_connection(truststore_file="A" * 5000))
+
+    redacted = _redact(built)
+    assert "truststore_data=<keystore>" in redacted
+    assert "A" * 100 not in redacted
+
+
+def test_invalid_uploaded_keystore_is_rejected_clearly() -> None:
+    from gsf.connectors.kyuubi import _write_temp_jks
+
+    with pytest.raises(ValueError, match="not valid base64"):
+        _write_temp_jks("not!base64!")
