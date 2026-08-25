@@ -186,7 +186,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			file: true,
 			fileAccept: '.jks,.keystore,.truststore',
 			optional: true,
-			hint: 'Upload the NVIDIA CA truststore. Needed when the server does not already trust the internal CA.',
+			hint: 'Upload the CA truststore. Needed when the server does not already trust the internal CA.',
 		},
 		{
 			key: 'truststore_password',
