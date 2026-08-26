@@ -186,6 +186,36 @@ def fetch_custom_analyses() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 
+def custom_analysis_exists(database_name: str | None = None) -> bool:
+    """Return True if at least one CustomAnalysis node exists in the graph.
+
+    When *database_name* is supplied the check is scoped to analyses whose SQL
+    references tables belonging to that database.  When omitted (or ``None``)
+    any CustomAnalysis node satisfies the check.
+
+    This is a cheap ``LIMIT 1`` existence probe — callers use it to skip the
+    VDB search entirely when the graph has no candidates for the target database.
+    """
+    if database_name:
+        query = f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+              -[:{Edges.SQL}]->(:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+              <-[:{Edges.CONTAINS}]-(db:{Labels.DB} {{name: $db}})
+        RETURN ca.id LIMIT 1
+        """
+        params: dict = {"db": database_name}
+    else:
+        query = f"MATCH (ca:{Labels.CUSTOM_ANALYSIS}) RETURN ca.id LIMIT 1"
+        params = {}
+
+    try:
+        rows = graph().query_read(query, params)
+        return bool(rows)
+    except Exception:
+        logger.warning("custom_analysis_exists: Neo4j query failed", exc_info=True)
+        return True  # fail-open: don't suppress the search on error
+
+
 def embed_custom_analyses(
     embed_params: "EmbedParams",
     vdb: "VDB",

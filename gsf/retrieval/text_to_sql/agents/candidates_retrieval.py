@@ -33,6 +33,7 @@ from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
 )
 
+from gsf.dal.custom_analyses import custom_analysis_exists
 from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
@@ -471,16 +472,29 @@ class CandidateRetrievalAgent(BaseAgent):
         if semantic_retriever is not None:
             clean_entities = entities
 
+            has_custom = custom_analysis_exists(target_db)
+            if not has_custom:
+                self.logger.info(
+                    "No CustomAnalysis nodes found for database %r — skipping VDB search",
+                    target_db,
+                )
+
             search_tasks: list[tuple[str, Any]] = [
-                (
-                    "custom",
-                    (
-                        semantic_retriever,
-                        question,
-                        Labels.CUSTOM_ANALYSIS,
-                        3,
-                        target_db,
-                    ),
+                *(
+                    [
+                        (
+                            "custom",
+                            (
+                                semantic_retriever,
+                                question,
+                                Labels.CUSTOM_ANALYSIS,
+                                3,
+                                target_db,
+                            ),
+                        )
+                    ]
+                    if has_custom
+                    else []
                 ),
                 (
                     "sql_attr",
