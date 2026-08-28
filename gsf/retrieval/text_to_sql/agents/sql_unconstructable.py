@@ -11,6 +11,8 @@ This agent generates a response when SQL cannot be constructed from available da
 import logging
 from typing import Dict, Any
 
+from langchain_core.messages import AIMessage
+
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -28,7 +30,8 @@ class SQLUnconstructableAgent(BaseAgent):
     - path_state["unconstructable_explanation"]: Optional explanation text
 
     Output:
-    - messages: Unconstructable response message
+    - path_state["final_response"]: complete response dict
+    - messages: appended AIMessage with the explanation
     """
 
     def __init__(self):
@@ -41,11 +44,21 @@ class SQLUnconstructableAgent(BaseAgent):
         Returns a message explaining that SQL cannot be constructed,
         using the explanation from path_state if available.
 
+        The explanation goes into ``path_state["final_response"]``, the same
+        channel :class:`ResponseAgent` uses, because that is what
+        ``_extract_answer`` reads. Returning it under ``messages`` instead lost
+        it entirely: ``AgentState.messages`` is a list with no reducer, so a
+        bare dict replaced the list, ``_extract_answer``'s ``isinstance(...,
+        list)`` check then failed, and the run finished with an empty response
+        -- which the server declines to persist and the client renders as a
+        generic "something went wrong".
+
         Args:
             state: Current agent state
 
         Returns:
             Dictionary with:
+            - path_state: Contains the final response dict
             - messages: Unconstructable response message
         """
         path_state = state.get("path_state", {})
@@ -57,12 +70,25 @@ class SQLUnconstructableAgent(BaseAgent):
             else "SQL can't be constructed from the data."
         )
 
+        # Same keys as a successful answer so consumers (persistence, the chart
+        # step, the client) can read it without special-casing this path.
         response = {
             "response": response_text,
+            "sql_code": "",
+            "sql_columns": [],
+            "custom_analyses_used": [],
+            "sql_response_from_db": None,
         }
 
         self.logger.info(
             f"Generated unconstructable SQL response: {response_text[:50]}..."
         )
 
-        return {"messages": response}
+        return {
+            "messages": list(state.get("messages") or [])
+            + [AIMessage(content=response_text)],
+            "path_state": {
+                **path_state,
+                "final_response": response,
+            },
+        }

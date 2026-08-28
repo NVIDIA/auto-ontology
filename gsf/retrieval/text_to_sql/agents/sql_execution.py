@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
+from gsf.connectors.db_errors import is_infrastructure_error
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
@@ -19,6 +20,16 @@ from gsf.retrieval.text_to_sql.state import AgentState
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+# Shown when the database could not be reached. The user cannot act on a driver
+# stack trace, but "the question was fine, the connection was not" tells them
+# retrying is worthwhile and that nothing is wrong with how they asked.
+_INFRASTRUCTURE_MESSAGE = (
+    "I couldn't reach the database, so the query never ran. This is a "
+    "connection problem, not a problem with your question — please try again "
+    "in a moment. If it keeps happening, the database connection needs "
+    "attention."
+)
 
 
 class QueryResponse:
@@ -103,6 +114,18 @@ class SQLExecutionAgent(BaseAgent):
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)
             path_state["error"] = response_from_db.error
+            if is_infrastructure_error(response_from_db.error):
+                # Rewriting the query cannot reach an unreachable database, so
+                # the reconstruction loop would spend every one of its attempts
+                # re-issuing statements that fail identically and then give up
+                # anyway. Stop now and say what actually happened.
+                self.logger.error(
+                    "SQL execution failed for infrastructure reasons; "
+                    "not attempting reconstruction: %s",
+                    response_from_db.error,
+                )
+                path_state["unconstructable_explanation"] = _INFRASTRUCTURE_MESSAGE
+                return {"decision": "unconstructable", "path_state": path_state}
             return {"decision": "invalid_sql", "path_state": path_state}
 
         return {

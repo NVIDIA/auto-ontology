@@ -1,0 +1,116 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+"""An unreachable database fails once, with a message, instead of looping.
+
+Rewriting SQL cannot reach a database that is down, so the reconstruction loop
+would spend every attempt re-issuing statements that fail identically and give
+up anyway -- and, before this, give up silently.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+import pytest
+
+from gsf.retrieval.text_to_sql.agents.sql_execution import (
+    _INFRASTRUCTURE_MESSAGE,
+    QueryResponse,
+    SQLExecutionAgent,
+)
+from gsf.retrieval.text_to_sql.agents.sql_unconstructable import (
+    SQLUnconstructableAgent,
+)
+from gsf.retrieval.text_to_sql.text_to_sql_graph import route_sql_validation
+
+_SESSION_LOST = "Invalid SessionHandle: 1f9c2c1e-0000-4c1e-9f00-2b0d5a7c9e11"
+_BAD_COLUMN = "cannot resolve 'activity_typ' given input columns: [activity_type]"
+
+
+def _state(**overrides: Any) -> dict:
+    state = {
+        "path_state": {"sql_code": "SELECT 1", "relevant_tables": []},
+        "connectors": [],
+        "messages": [],
+        "decision": "",
+    }
+    state.update(overrides)
+    return state
+
+
+def _run_with_error(monkeypatch: pytest.MonkeyPatch, error: str) -> dict:
+    monkeypatch.setattr(
+        "gsf.retrieval.text_to_sql.agents.sql_execution._run_sql",
+        lambda sql, connector: QueryResponse(result=None, sliced=False, error=error),
+    )
+    return SQLExecutionAgent().execute(_state())
+
+
+def test_unreachable_database_gives_up_immediately(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_with_error(monkeypatch, _SESSION_LOST)
+
+    assert result["decision"] == "unconstructable"
+    assert result["path_state"]["unconstructable_explanation"] == (
+        _INFRASTRUCTURE_MESSAGE
+    )
+    # Kept for the logs even though it is not shown to the user.
+    assert result["path_state"]["error"] == _SESSION_LOST
+
+
+def test_a_bad_column_still_goes_round_the_reconstruction_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fast path must not swallow errors a rewrite can genuinely fix."""
+    result = _run_with_error(monkeypatch, _BAD_COLUMN)
+
+    assert result["decision"] == "invalid_sql"
+    assert "unconstructable_explanation" not in result["path_state"]
+
+
+def test_router_honours_a_decision_to_give_up() -> None:
+    """Without the pass-through, "not invalid_sql" was read as usable SQL."""
+    state = _state(decision="unconstructable", path_state={})
+
+    assert route_sql_validation(state) == "unconstructable"
+
+
+def test_router_still_retries_invalid_sql() -> None:
+    state = _state(decision="invalid_sql", path_state={"sql_attempts": 0})
+
+    assert route_sql_validation(state) == "invalid_sql"
+
+
+def test_router_gives_up_past_the_attempt_limit() -> None:
+    """Counts above the limit must route, not fall through returning None."""
+    for attempts in (8, 9, 20):
+        state = _state(decision="invalid_sql", path_state={"sql_attempts": attempts})
+
+        assert route_sql_validation(state) == "unconstructable"
+
+
+def test_the_explanation_reaches_the_final_response() -> None:
+    """``_extract_answer`` reads ``final_response``; ``messages`` was a dead end."""
+    state = _state(
+        path_state={"unconstructable_explanation": _INFRASTRUCTURE_MESSAGE},
+    )
+
+    result = SQLUnconstructableAgent().execute(state)
+
+    final = result["path_state"]["final_response"]
+    assert final["response"] == _INFRASTRUCTURE_MESSAGE
+    # A non-empty response is what makes the server persist the turn at all.
+    assert final["response"].strip()
+    assert isinstance(result["messages"], list), "a dict here replaces the list"
+    assert result["messages"][-1].content == _INFRASTRUCTURE_MESSAGE
+
+
+def test_falls_back_to_a_generic_explanation() -> None:
+    state = _state(path_state={})
+
+    final = SQLUnconstructableAgent().execute(state)["path_state"]["final_response"]
+
+    assert final["response"] == "SQL can't be constructed from the data."

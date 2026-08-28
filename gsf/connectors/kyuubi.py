@@ -59,6 +59,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pandas as pd
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.connectors.db_errors import is_session_lost
+
 if TYPE_CHECKING:
     from pyhive.hive import Connection
 
@@ -519,19 +521,33 @@ class KyuubiDatabase(SQLDatabase):
             return pd.DataFrame(cursor.fetchall(), columns=columns)
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        """Run *sql*, reopening the session once if the socket has gone away.
+        """Run *sql*, reopening the session once if it has gone away.
 
         The retry lives here rather than around ``cursor()`` because
         ``hive.Connection.cursor()`` only constructs a local object -- it never
         touches the socket, so a session the server has already discarded looks
-        healthy until a statement is sent and the write fails with
-        ``BrokenPipeError``. Kyuubi retires an idle Spark engine after a few
-        hours, so any connector cached longer than that hits this on its next
-        query.
+        healthy until a statement is sent. Kyuubi retires an idle Spark engine
+        after a few hours, so any connector cached longer than that hits this on
+        its next query.
 
-        Only transport failures are retried; a rejected statement is a real SQL
-        error and is raised unchanged. The failed statement never reached the
-        server, so re-running it cannot double-apply anything.
+        A retired session surfaces in one of two shapes, and both have to be
+        handled:
+
+        * the socket is gone, and the write fails with ``BrokenPipeError`` or a
+          ``TTransportException``; or
+        * the Kyuubi server is still up and answers normally, reporting
+          ``Invalid SessionHandle`` for the handle it no longer knows. That
+          arrives as an ordinary driver error on a perfectly healthy
+          connection, so it is recognised by message rather than by type.
+
+        Missing the second shape is not a degraded retry but a permanent
+        failure: nothing else clears ``self._connection``, so a connector cached
+        in a long-lived worker would keep replaying the dead handle for every
+        subsequent query until the process restarted.
+
+        A statement the server actually rejected is a real SQL error and is
+        raised unchanged. Retrying is safe because the failed statement never
+        reached an engine, so re-running it cannot double-apply anything.
         """
         with self._lock:
             try:
@@ -541,8 +557,16 @@ class KyuubiDatabase(SQLDatabase):
                     "Kyuubi session lost (%s); reopening and retrying once",
                     type(exc).__name__,
                 )
-                self._reset_connection()
-                return self._execute_once(sql, parameters)
+            except Exception as exc:
+                if not is_session_lost(exc):
+                    raise
+                logger.info(
+                    "Kyuubi rejected the session handle (%s); "
+                    "reopening and retrying once",
+                    type(exc).__name__,
+                )
+            self._reset_connection()
+            return self._execute_once(sql, parameters)
 
     # ------------------------------------------------------------------
     # Schema introspection

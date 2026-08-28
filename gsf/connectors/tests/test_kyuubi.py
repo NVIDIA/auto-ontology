@@ -400,6 +400,39 @@ def test_execute_reopens_after_a_broken_pipe() -> None:
     assert opened == [1], "the dead session should be dropped before retrying"
 
 
+def test_execute_reopens_after_an_invalid_session_handle() -> None:
+    """A retired engine usually leaves the socket up and the handle unknown.
+
+    Kyuubi answers the next statement normally, reporting ``Invalid
+    SessionHandle`` for a session it no longer has. That is an ordinary driver
+    error on a healthy connection, so recognising it by exception type is not
+    enough. Nothing else clears the cached connection, so missing this case
+    strands the connector on a dead handle for every later query.
+    """
+    db = _database()
+    calls: list[str] = []
+    opened: list[int] = []
+
+    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+        calls.append(sql)
+        if len(calls) == 1:
+            raise RuntimeError(
+                "TExecuteStatementResp(status=TStatus(statusCode=3, "
+                "errorMessage='Invalid SessionHandle: "
+                "1f9c2c1e-0000-4c1e-9f00-2b0d5a7c9e11'))"
+            )
+        return pd.DataFrame({"ok": [1]})
+
+    db._execute_once = fake_execute_once  # type: ignore[method-assign]
+    db._reset_connection = lambda: opened.append(1)  # type: ignore[method-assign]
+
+    frame = db.execute("SELECT 1")
+
+    assert frame.to_dict("records") == [{"ok": 1}]
+    assert len(calls) == 2, "the statement should be retried once"
+    assert opened == [1], "the stale session should be dropped before retrying"
+
+
 def test_execute_does_not_retry_a_rejected_statement() -> None:
     """A SQL error is the server answering, not the transport failing."""
     db = _database()
@@ -415,6 +448,24 @@ def test_execute_does_not_retry_a_rejected_statement() -> None:
         db.execute("SELECT * FROM nope")
 
     assert len(calls) == 1, "a SQL error must surface, not trigger a reconnect"
+
+
+def test_execute_surfaces_a_session_error_that_survives_the_retry() -> None:
+    """If reopening does not help, the error is reported rather than looped on."""
+    db = _database()
+    calls: list[str] = []
+
+    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+        calls.append(sql)
+        raise RuntimeError("Invalid SessionHandle: deadbeef")
+
+    db._execute_once = fake_execute_once  # type: ignore[method-assign]
+    db._reset_connection = lambda: None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="Invalid SessionHandle"):
+        db.execute("SELECT 1")
+
+    assert len(calls) == 2, "exactly one retry, then give up"
 
 
 # ----------------------------------------------------------------------
