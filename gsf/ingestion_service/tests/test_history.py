@@ -2,61 +2,59 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The history table is declared twice, and the two have to agree.
+"""Semantic compilation history.
 
-``history.py`` creates it at service startup (``CREATE TABLE IF NOT EXISTS``)
-so a deployment gets it without waiting on a migration; ``gsf.dal.schema``
-declares it so Alembic's autogenerate doesn't read it as drift and propose
-``drop_table`` for it — which is what ``include_object`` in ``alembic/env.py``
-warns any stray ``public`` table invites.
-
-Two declarations of one table is a duplication that can drift silently: the
-column list disagreeing costs nothing at startup (the CREATE is skipped once
-the table exists) and shows up later as a write failing against a column that
-isn't there. So they are compared here rather than trusted.
+The table is declared in :mod:`gsf.dal.schema` and created by a migration, like
+every other GSF table. It used to create itself at service startup instead,
+which is worth remembering only because this module must not go back to it: a
+`public` table the schema does not declare reads as drift to Alembic, and
+autogenerate proposes ``drop_table`` for it (see ``include_object`` in
+``alembic/env.py``). ``test_the_module_does_not_create_its_own_table`` is that
+rule, written down.
 """
 
 from __future__ import annotations
 
-import re
+import inspect
 
 import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import CheckConstraint  # noqa: E402
+
 from gsf.dal import schema as s  # noqa: E402
 from gsf.ingestion_service import history  # noqa: E402
 
 
-def test_status_values_match_the_schemas_check_constraint() -> None:
-    """`schema.py` restates these rather than importing them from here."""
-    assert (s.RUN_SUCCEEDED, s.RUN_FAILED) == (
-        history.RUN_SUCCEEDED,
-        history.RUN_FAILED,
-    )
+def test_the_module_does_not_create_its_own_table() -> None:
+    """Creating it here would put it back outside the schema's source of truth."""
+    assert "CREATE TABLE" not in inspect.getsource(history).upper()
 
 
-def test_the_startup_create_matches_the_declared_table() -> None:
-    """Same columns, same order, same nullability."""
-    columns = re.findall(
-        r"^\s+(\w+)\s+(BIGSERIAL|TIMESTAMPTZ|TEXT)(.*)$",
-        history._CREATE_TABLE_SQL,
-        re.MULTILINE,
-    )
-    assert [name for name, _, _ in columns] == [
-        column.name for column in s.semantic_compilation_history.columns
-    ]
+def test_status_values_come_from_the_check_constraint() -> None:
+    """One definition, imported — not two that agree today.
 
-    not_null = {name for name, _, rest in columns if "NOT NULL" in rest.upper()}
-    assert not_null == {
-        column.name
-        for column in s.semantic_compilation_history.columns
-        if not column.nullable and not column.primary_key
-    }
-
-
-def test_the_startup_create_names_the_same_status_values() -> None:
-    """The CHECK is spelled out in SQL on one side and a constraint on the other."""
-    for value in (history.RUN_SUCCEEDED, history.RUN_FAILED):
-        assert f"'{value}'" in history._CREATE_TABLE_SQL
+    A write of a value the constraint doesn't permit fails at runtime, so these
+    being the same object is what keeps the writer honest.
+    """
+    assert history.RUN_SUCCEEDED is s.RUN_SUCCEEDED
+    assert history.RUN_FAILED is s.RUN_FAILED
     assert history._VALID_OUTCOMES == {s.RUN_SUCCEEDED, s.RUN_FAILED}
+
+
+def test_the_check_constraint_permits_exactly_those_values() -> None:
+    """The constraint is written as SQL text, so it can drift from the values."""
+    # Selected by type, not by name: the schema's naming convention rewrites
+    # "status_value" into "ck_semantic_compilation_history_status_value".
+    constraint = next(
+        c
+        for c in s.semantic_compilation_history.constraints
+        if isinstance(c, CheckConstraint)
+    )
+    condition = str(constraint.sqltext)
+    for value in (s.RUN_SUCCEEDED, s.RUN_FAILED):
+        assert f"'{value}'" in condition
+    # NULL is the third permitted state — an unfinished pass — and dropping it
+    # from the constraint would make `record_run_start` fail on insert.
+    assert "IS NULL" in condition.upper()

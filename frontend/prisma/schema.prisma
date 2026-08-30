@@ -68,8 +68,9 @@ model Configuration {
 }
 
 // Owned and written by GSF (Python) via psycopg — see
-// gsf/ingestion_service/history.py, which creates this table itself
-// (`CREATE TABLE IF NOT EXISTS`) rather than through a Prisma migration.
+// gsf/ingestion_service/history.py. It is declared in gsf/dal/schema.py and
+// created by an Alembic migration, like every other GSF table, so nothing on
+// this side creates it.
 //
 // Declared here purely so `prisma db push` recognizes it as part of the
 // desired schema and leaves it alone. Without this, `db push` treats it as

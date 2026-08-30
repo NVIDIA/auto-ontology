@@ -48,10 +48,12 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 
 #: The two terminal outcomes of a semantic compilation pass, for the check
-#: constraint below. Spelled out rather than imported from
-#: ``gsf.ingestion_service.history``, which defines them: the DAL does not
-#: depend on a service module. ``test_history_status_values_match_the_schema``
-#: is what keeps the two copies honest.
+#: constraint on :data:`semantic_compilation_history` below.
+#:
+#: Defined here rather than in ``gsf.ingestion_service.history``, which writes
+#: them: they are part of the column's definition, and the module that writes
+#: the values importing them from the constraint that permits them is the only
+#: arrangement in which the two cannot disagree.
 RUN_SUCCEEDED = "succeeded"
 RUN_FAILED = "failed"
 
@@ -763,13 +765,11 @@ zone_target = Table(
 # One row per semantic compilation pass, written by the ingestion service (see
 # `gsf.ingestion_service.history`) and read back by the settings page.
 #
-# Declared here, and not only by that module's own `CREATE TABLE IF NOT EXISTS`,
-# because this schema is what autogenerate diffs against: a `public` table
-# missing from it is indistinguishable from one deleted from the model, and
-# Alembic emits `drop_table` for it (see `include_object` in `alembic/env.py`,
-# which says as much). The module keeps creating it at startup regardless --
-# that is a no-op once the migration has run, and it is what makes the table
-# appear for a deployment that has not.
+# It arrived creating itself at service startup instead of through a migration.
+# That is why it is worth a note: a `public` table this schema does not declare
+# is indistinguishable from one deleted from the model, so autogenerate emitted
+# `drop_table` for it on every run -- exactly what `include_object` in
+# `alembic/env.py` warns a stray table invites.
 semantic_compilation_history = Table(
     "semantic_compilation_history",
     METADATA,

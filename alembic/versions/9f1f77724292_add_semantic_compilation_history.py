@@ -20,15 +20,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Upgrade schema."""
-    # `if_not_exists`, because this table predates its own migration: it has
-    # been created at service startup by `ensure_history_table` in
-    # `gsf/ingestion_service/history.py` since it was introduced, so every
-    # environment already running that code has it. A plain CREATE would fail
-    # there on "relation already exists" and block the upgrade.
+    # `if_not_exists`, because this table predates its own migration. It was
+    # created at ingestion-service startup by a `CREATE TABLE IF NOT EXISTS` in
+    # `gsf/ingestion_service/history.py` (removed in the same change as this
+    # migration), so every environment already running that code has it, with
+    # rows in it. A plain CREATE would fail there on "relation already exists"
+    # and block the upgrade.
     #
-    # The column definitions below match that CREATE exactly. They are declared
-    # in `gsf/dal/schema.py` now as well, which is what stops autogenerate from
-    # reading the table as drift and proposing `drop_table` for it.
+    # The definition below is that CREATE, column for column.
     op.create_table('semantic_compilation_history',
     sa.Column('id', sa.BigInteger(), autoincrement=True, nullable=False),
     sa.Column('started_at', sa.DateTime(timezone=True), nullable=False),

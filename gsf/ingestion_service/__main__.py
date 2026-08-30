@@ -40,7 +40,6 @@ from gsf.ingestion_service.config import (  # noqa: E402
     is_semantic_compilation_enabled,
 )
 from gsf.ingestion_service.data_scheduler import DataScheduler  # noqa: E402
-from gsf.ingestion_service.history import ensure_history_table  # noqa: E402
 from gsf.ingestion_service.router import router  # noqa: E402
 from gsf.ingestion_service.semantic_scheduler import SemanticScheduler  # noqa: E402
 from gsf.version import get_app_version  # noqa: E402
@@ -57,14 +56,10 @@ async def lifespan(app: FastAPI):
     # Waits for the ingest scheduler's first pass before compiling (see
     # semantic_scheduler.py) so the two starting at the same moment on boot
     # can't race — otherwise the very first compile could run against a
-    # catalog that ingest hasn't written to Neo4j yet.
+    # catalog that ingest hasn't written yet.
     semantic_scheduler = SemanticScheduler(depends_on=data_scheduler)
     app.state.data_scheduler = data_scheduler
     app.state.semantic_scheduler = semantic_scheduler
-
-    # GSF owns this table (unlike `configurations`, which Prisma declares), so
-    # it's created here rather than assumed to already exist.
-    ensure_history_table()
 
     data_scheduler.start()
     # Only start semantic compilation if it's enabled in settings. When a user
