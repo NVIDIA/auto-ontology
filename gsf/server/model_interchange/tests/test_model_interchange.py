@@ -29,7 +29,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_gsf import GSFConversionError, convert_gsf_to_ossie
+from ossie_nvidia_gsf import GSFConversionError, convert_gsf_to_ossie
 
 from gsf.dal.model_interchange import (
     assemble_export_document,

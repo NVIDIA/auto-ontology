@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from ossie_gsf import GSFConversionError
+from ossie_nvidia_gsf import GSFConversionError
 from pydantic import ValidationError
 
 from gsf.dal.model_interchange import (

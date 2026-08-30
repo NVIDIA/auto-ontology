@@ -95,7 +95,6 @@ def include_object(obj, name, type_, reflected, compare_to) -> bool:
     return schema is None
 
 
-
 def _configure(**kwargs) -> None:
     context.configure(
         target_metadata=target_metadata,
