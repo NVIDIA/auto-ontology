@@ -31,6 +31,7 @@ from sqlalchemy import select  # noqa: E402
 from gsf.dal import schema as s  # noqa: E402
 from gsf.dal import sql_attributes as sa  # noqa: E402
 from gsf.dal.session import store  # noqa: E402
+from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -618,8 +619,22 @@ def test_doc_text_format_is_reproduced_exactly(world) -> None:
             "name": f"{world.prefix}-revenue",
             "label": "SqlAttribute",
             "id": attr,
+            # No source set, and the empty string is deliberate: it rides into
+            # the VDB metadata, where a None would have to be special-cased by
+            # every reader.
+            "source": "",
         }
     ]
+
+
+def test_doc_carries_the_attribute_source(world) -> None:
+    """Retrieval filters bridge-table joins on this without a second read."""
+    world.term("Revenue")
+    attr = world.attribute(
+        "bridge", "Revenue", sql="SELECT 1", source=SQL_ATTR_SOURCE_BRIDGE
+    )
+
+    assert sa.fetch_sql_attribute_docs(attr)[0]["source"] == SQL_ATTR_SOURCE_BRIDGE
 
 
 def test_a_blank_description_is_omitted_not_rendered_empty(world) -> None:

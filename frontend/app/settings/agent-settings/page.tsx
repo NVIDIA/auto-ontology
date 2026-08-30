@@ -7,6 +7,7 @@
 import { useEffect, useState } from 'react';
 import { visualizationApi } from '@/api/settings';
 import { Toast } from '@/common/Toast';
+import { ToastVariant } from '@/enums/toast';
 
 export default function AgentSettingsPage() {
 	// Defaults to on (matches a missing `visualization_enabled` configuration)
@@ -85,7 +86,7 @@ export default function AgentSettingsPage() {
 			<Toast
 				open={error !== null}
 				message={error ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 		</main>

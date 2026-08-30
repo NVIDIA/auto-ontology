@@ -34,6 +34,7 @@ import { Label } from '@/common/Label';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
+import { ToastVariant } from '@/enums/toast';
 
 export type ComposerEditValue = string | string[];
 
@@ -1160,7 +1161,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				<Toast
 					open={saveError != null}
 					message={saveError ?? ''}
-					variant="error"
+					variant={ToastVariant.Error}
 					onClose={() => setSaveError(null)}
 				/>
 			</div>

@@ -11,6 +11,7 @@ import { EmptyState } from '@/common/EmptyState';
 import { IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { ToastVariant } from '@/enums/toast';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import type { ComposerEditValue } from '@/common/SinglePageComposer';
@@ -299,7 +300,7 @@ export function DataWorkspaceView() {
 			<Toast
 				open={certError != null}
 				message={certError ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setCertError(null)}
 			/>
 		</BackPanelLayout>

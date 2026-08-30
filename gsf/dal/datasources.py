@@ -489,6 +489,25 @@ def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
     )
 
 
+def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> None:
+    """Write inferred value notations onto Column ``format``.
+
+    ``format`` is generic storage notation (how values are written), not a
+    date-specific property. Today only date inference fills it (``YYMMDD``,
+    ``YYYY-MM-DD``, …); an address or id profiler would write the same field.
+    The column's type/name/description say *what* the values are.
+
+    A column whose notation could not be inferred is left alone rather than
+    written as NULL: the inference declines to guess on a mixed column, and
+    that is not a reason to discard what a previous run established.
+    """
+    _set_column_property(
+        table_id,
+        {name: str(fmt) for name, fmt in date_formats.items() if fmt},
+        "format",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Metadata writes
 # ---------------------------------------------------------------------------
@@ -864,6 +883,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.name.label("column_name"),
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
+                s.catalog_column.c.format,
             )
             .select_from(
                 _table_join().join(
@@ -905,6 +925,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "name": row["column_name"],
                     "data_type": row["data_type"],
                     "description": row["column_description"],
+                    "format": row["format"],
                 }
             )
     return list(tables.values())
@@ -931,6 +952,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "description": r["description"],
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
+            "format": r["format"],
             "is_foreign_key_target": bool(r["is_foreign_key_target"]),
         }
         for r in store().query_read(
@@ -941,6 +963,7 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 column_description_expr().label("description"),
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
+                s.catalog_column.c.format,
                 is_fk_target.label("is_foreign_key_target"),
             )
             .where(s.catalog_column.c.table_id == table_id)

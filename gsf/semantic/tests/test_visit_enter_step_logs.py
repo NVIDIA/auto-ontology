@@ -59,9 +59,6 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
         "fetch_terms_and_attributes_for_table",
         lambda _id: ([{"id": "term1", "name": "Order"}], []),
     )
-    monkeypatch.setattr(
-        visit_enter, "_extract_sql_attrs_for_terms", lambda *_a, **_k: []
-    )
 
 
 def _run(embedder: Any = None) -> None:
@@ -87,7 +84,6 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
         "[orders] Checking 1 proposed term(s) for duplicates…",
         "[orders] Writing 1 term(s) to the graph…",
         "[orders] Embedding 1 term(s)…",
-        "[orders] Extracting SQL attributes…",
     ):
         assert expected in messages, f"missing step log: {expected}"
 
@@ -115,7 +111,6 @@ def test_steps_are_logged_in_pipeline_order(
         "Checking 1 proposed term(s) for duplicates",
         "Writing 1 term(s) to the graph",
         "Embedding 1 term(s)",
-        "Extracting SQL attributes",
     ]
     assert [s.split("] ", 1)[1].rstrip("…") for s in starts] == order
 

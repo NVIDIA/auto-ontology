@@ -49,11 +49,6 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
-_SQLGLOT_DIALECTS = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-}
-
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
 description and a list of candidate primary-key columns retrieved from a \
@@ -394,9 +389,8 @@ def _sample_match_sql(
         )
         .limit(len(samples))
     )
-    dialect_name = _SQLGLOT_DIALECTS.get((dialect or "").lower(), dialect or None)
     try:
-        return query.sql(dialect=dialect_name, identify=True)
+        return query.sql(dialect=dialect or None, identify=True)
     except ValueError:
         return query.sql(identify=True)
 

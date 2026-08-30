@@ -265,6 +265,16 @@ catalog_column = Table(
     # A JSON string, read back as a string by callers. Promoting it to jsonb is
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
+    # How the values are *written*, not what they are: 'YYMMDD', 'YYYY-MM-DD'.
+    # Generic storage notation despite only date inference filling it today
+    # (`gsf.semantic.date_format`) -- an address or id profiler would write the
+    # same field. `data_type`/`name`/`description` say what the values mean.
+    #
+    # It exists because date columns are held out of sample-value profiling, so
+    # nothing else in the prompt tells the model what form to compare against:
+    # `950324` and `1995-03-24` are the same day and share no predicate, and a
+    # wrong guess yields SQL that runs, returns nothing, and looks right.
+    Column("format", Text, nullable=True),
     Column("is_unique", Boolean, nullable=True),
     # A real Boolean. It used to hold the *strings* `information_schema`
     # reports, 'YES' and 'NO', which read back as truthy either way -- so

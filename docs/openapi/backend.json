@@ -2694,10 +2694,39 @@
           "calculated": {
             "title": "Calculated",
             "type": "boolean"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
           }
         },
         "required": [
-          "calculated"
+          "calculated",
+          "running",
+          "last_success_at",
+          "last_failure_at"
         ],
         "title": "SemanticStatusResponse",
         "type": "object"
@@ -6561,7 +6590,7 @@
     },
     "/api/semantic-compilation/status": {
       "get": {
-        "description": "Report whether the semantic layer has been calculated (any Term exists).",
+        "description": "Report whether the semantic layer has been calculated (any Term exists),\nwhether the ingestion service is compiling it right now, when the last\npass completed successfully, and when it last failed.\n\n``running`` needs the live ingestion process, so it goes through the HTTP\nproxy and degrades to ``False`` if that's unreachable. ``last_success_at``\nand ``last_failure_at`` are read straight from the ``semantic_compilation_history``\ntable instead \u2014 a temporarily unreachable ingestion service has no bearing\non Postgres, so history stays visible even while it's down (see\n``gsf/server/ingestion/proxy.py``).",
         "operationId": "semantic_status_api_semantic_compilation_status_get",
         "responses": {
           "200": {

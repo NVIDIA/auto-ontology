@@ -88,6 +88,7 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
             s.catalog_column.c.name,
             s.catalog_column.c.data_type,
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.format,
             column_description_expr().label("description"),
         )
         .where(s.catalog_column.c.table_id.in_(table_ids))
@@ -104,6 +105,7 @@ def _table_payloads(table_ids: list[str]) -> dict[str, dict[str, Any]]:
                 # this, so a null must become an empty string, not "None".
                 "data_type": str(row["data_type"] or ""),
                 "description": row["description"],
+                "format": row["format"],
                 "sample_values": sample_values if sample_values else None,
             }
         )

@@ -7,9 +7,9 @@
 import { useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { Button } from '@/common/Button';
+import { Spinner } from '@/common/Spinner';
 import { Size, ButtonTheme } from '@/enums/button';
-
-type ToastVariant = 'error' | 'success' | 'info' | 'pending';
+import { ToastVariant } from '@/enums/toast';
 
 type ToastProps = {
 	open: boolean;
@@ -25,10 +25,10 @@ type ToastProps = {
 // the viewport (matches `Snackbar` from omnichat's Alert/styled.tsx).
 
 const iconColorClass: Record<ToastVariant, string> = {
-	error: 'text-red-600 dark:text-red-400',
-	success: 'text-emerald-600 dark:text-emerald-400',
-	info: 'text-sky-600 dark:text-sky-400',
-	pending: 'text-[#76b900]',
+	[ToastVariant.Error]: 'text-red-600 dark:text-red-400',
+	[ToastVariant.Success]: 'text-emerald-600 dark:text-emerald-400',
+	[ToastVariant.Info]: 'text-sky-600 dark:text-sky-400',
+	[ToastVariant.Loading]: 'text-[#76b900]',
 };
 
 const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
@@ -44,7 +44,7 @@ const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
 		className,
 	};
 
-	if (variant === 'success') {
+	if (variant === ToastVariant.Success) {
 		return (
 			<svg {...stroke}>
 				<circle cx="12" cy="12" r="10" />
@@ -52,7 +52,7 @@ const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
 			</svg>
 		);
 	}
-	if (variant === 'info') {
+	if (variant === ToastVariant.Info) {
 		return (
 			<svg {...stroke}>
 				<circle cx="12" cy="12" r="10" />
@@ -61,13 +61,8 @@ const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
 			</svg>
 		);
 	}
-	if (variant === 'pending') {
-		return (
-			<svg {...stroke} className={`${className} animate-spin`}>
-				<circle cx="12" cy="12" r="10" opacity="0.25" />
-				<path d="M22 12a10 10 0 0 0-10-10" />
-			</svg>
-		);
+	if (variant === ToastVariant.Loading) {
+		return <Spinner className={className} />;
 	}
 	return (
 		<svg {...stroke}>
@@ -79,10 +74,10 @@ const VariantIcon = ({ variant }: { variant: ToastVariant }) => {
 };
 
 const defaultTitle: Record<ToastVariant, string | undefined> = {
-	error: 'Error',
-	success: undefined,
-	info: undefined,
-	pending: undefined,
+	[ToastVariant.Error]: 'Error',
+	[ToastVariant.Success]: undefined,
+	[ToastVariant.Info]: undefined,
+	[ToastVariant.Loading]: undefined,
 };
 
 const capitalizeFirst = (value: string): string =>
@@ -94,7 +89,13 @@ const subscribeHydration = () => () => {};
 const getHydratedSnapshot = () => true;
 const getHydratedServerSnapshot = () => false;
 
-export const Toast = ({ open, message, title, variant = 'error', onClose }: ToastProps) => {
+export const Toast = ({
+	open,
+	message,
+	title,
+	variant = ToastVariant.Error,
+	onClose,
+}: ToastProps) => {
 	const mounted = useSyncExternalStore(
 		subscribeHydration,
 		getHydratedSnapshot,

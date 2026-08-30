@@ -26,6 +26,11 @@ dependencies = [
     "alembic>=1.19.1",
     "apache-ossie-gsf",
     "pgvector>=0.5.0",
+    "pyhive[hive-pure-sasl]>=0.7.0",
+    "thrift>=0.16.0",
+    "thrift-sasl>=0.4.3",
+    "pure-sasl>=0.6.2",
+    "pyjks>=20.0.0",
 ]
 
 [build-system]

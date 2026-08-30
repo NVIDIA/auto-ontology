@@ -10,6 +10,7 @@ import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { ToastVariant } from '@/enums/toast';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
 import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
 import { ConfirmModal } from '@/common/modal';
@@ -217,7 +218,7 @@ export const ConnectionsView = () => {
 			<Toast
 				open={ssoError !== null}
 				message={ssoError ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setSsoError(null)}
 			/>
 		</div>

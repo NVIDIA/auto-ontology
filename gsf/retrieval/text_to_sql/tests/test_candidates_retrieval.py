@@ -21,6 +21,7 @@ def _hit(
     score: float,
     *,
     query_entity: str | None = None,
+    source: str | None = None,
 ) -> dict[str, Any]:
     hit: dict[str, Any] = {
         "id": hit_id,
@@ -31,6 +32,8 @@ def _hit(
         hit["database_name"] = database_name
     if query_entity is not None:
         hit["query_entity"] = query_entity
+    if source is not None:
+        hit["source"] = source
     return hit
 
 
@@ -164,6 +167,7 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
 
     monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
     monkeypatch.setattr(candidates_retrieval, "_llm_filter_both", fake_filter)
+    monkeypatch.setattr(candidates_retrieval, "custom_analysis_exists", lambda *_: True)
 
     result = CandidateRetrievalAgent().execute(
         _state(["revenue", "region", "customer"])
@@ -195,6 +199,84 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
     assert "missing-db" not in column_by_id
 
 
+def test_all_bridge_sourced_true_when_every_hit_is_bridge() -> None:
+    hits = [
+        _hit("bridge-1", "db-a", 0.1, source="bridgeTable"),
+        _hit("bridge-2", "db-a", 0.2, source="bridgeTable"),
+    ]
+
+    assert candidates_retrieval._all_bridge_sourced(hits) is True
+
+
+@pytest.mark.parametrize(
+    "sources",
+    [
+        ("bridgeTable", "sql"),
+        ("sql", "sql"),
+        (None, None),
+    ],
+)
+def test_all_bridge_sourced_false_for_mixed_missing_or_non_bridge(
+    sources: tuple[str | None, str | None],
+) -> None:
+    hits = [
+        _hit("a", "db-a", 0.1, source=sources[0]),
+        _hit("b", "db-a", 0.2, source=sources[1]),
+    ]
+
+    assert candidates_retrieval._all_bridge_sourced(hits) is False
+
+
+def test_all_bridge_sourced_false_for_empty_hits() -> None:
+    assert candidates_retrieval._all_bridge_sourced([]) is False
+
+
+def test_bridge_sourced_sql_attrs_skip_llm_filter_but_custom_still_filtered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_search(
+        _retriever: object,
+        entity: str,
+        label: str,
+        _k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        if label == LABEL_SQL_ATTRIBUTE:
+            return [_hit("bridge-1", "db-a", 0.1, source="bridgeTable")]
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            return [_hit(f"a-{entity}", "db-a", 0.1)]
+        return [_hit("a-custom", "db-a", 0.2)]
+
+    both_calls: list[object] = []
+    single_calls: list[tuple[list[dict], str]] = []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda *args: both_calls.append(args) or (args[2], args[3]),
+    )
+
+    def fake_single_filter(
+        _llm: object, _question: str, candidates: list[dict], candidate_type: str
+    ) -> list[dict]:
+        single_calls.append((candidates, candidate_type))
+        return candidates
+
+    monkeypatch.setattr(
+        candidates_retrieval, "_llm_filter_candidates", fake_single_filter
+    )
+
+    result = CandidateRetrievalAgent().execute(_state(["revenue"], target_db="db-a"))
+
+    assert not both_calls
+    assert len(single_calls) == 1
+    assert single_calls[0][1] == "custom analyses"
+    assert [h["id"] for h in result["path_state"]["retrieved_sql_attributes"]] == [
+        "bridge-1"
+    ]
+
+
 def test_explicit_target_db_preserves_existing_search_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -216,6 +298,7 @@ def test_explicit_target_db_preserves_existing_search_behavior(
         "_llm_filter_both",
         lambda _llm, _question, custom, sql: (custom, sql),
     )
+    monkeypatch.setattr(candidates_retrieval, "custom_analysis_exists", lambda *_: True)
 
     result = CandidateRetrievalAgent().execute(
         _state(["revenue", "region"], target_db="db-a")

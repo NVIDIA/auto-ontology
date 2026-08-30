@@ -91,6 +91,7 @@ __all__ = [
     "PqlAnalysisResponse",
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
+    "SemanticRunningResponse",
     "SemanticStatusResponse",
     "SqlAttributeExplorationDetailsResponse",
     "SqlAttributeListResponse",
@@ -171,6 +172,19 @@ class HealthResponse(_Payload):
 
 class SemanticStatusResponse(_Payload):
     calculated: bool
+    running: bool
+    last_success_at: str | None
+    last_failure_at: str | None
+
+
+class SemanticRunningResponse(_Payload):
+    """The ingestion service's own status endpoint: whether a compilation pass
+    is executing right now, when the last one finished successfully, and when
+    it last failed (only set if more recent than the last success)."""
+
+    running: bool
+    last_success_at: str | None
+    last_failure_at: str | None
 
 
 class ChatCancelResponse(_Payload):

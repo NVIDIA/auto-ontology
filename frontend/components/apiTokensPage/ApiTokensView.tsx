@@ -16,6 +16,7 @@ import { Table } from '@/common/Table';
 import { Toast } from '@/common/Toast';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { ToastVariant } from '@/enums/toast';
 import type { TableColumn } from '@/types/table';
 
 // `undefined` days = never expires, which is what an unattended script wants.
@@ -346,7 +347,7 @@ export const ApiTokensView = () => {
 			<Toast
 				open={error !== null}
 				message={error ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 		</main>

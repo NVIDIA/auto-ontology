@@ -13,7 +13,6 @@ class ProcessTableResult:
 
     term_names: list[str] = field(default_factory=list)
     attr_names: list[str] = field(default_factory=list)
-    sql_attr_names: list[str] = field(default_factory=list)
 
 
 class TermColumnRef(BaseModel):
@@ -194,56 +193,3 @@ class FkHitSelection(BaseModel):
         ),
     )
     rationale: str = Field(default="")
-
-
-# ---------------------------------------------------------------------------
-# Auto SqlAttribute extraction
-# ---------------------------------------------------------------------------
-
-
-class SqlAttributeProposal(BaseModel):
-    """LLM output: one derived business metric built from table columns."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    question: str = Field(
-        ...,
-        description=(
-            "A realistic natural-language question a business user would ask "
-            'that this metric answers (e.g. "What is the profit margin?").'
-        ),
-    )
-    name: str = Field(
-        ...,
-        description=(
-            "User-friendly metric name with spaces between words "
-            "(e.g. Net Revenue, Profit Margin)."
-        ),
-    )
-    description: str = Field(
-        ...,
-        description="Short business definition of this metric.",
-    )
-    expression: str = Field(
-        ...,
-        description=(
-            "A valid SQL SELECT statement that computes the metric using "
-            "qualified column references (schema.table.column). "
-            "Must reference columns from the provided table only."
-        ),
-    )
-
-
-class SqlAttributeExtractionResult(BaseModel):
-    """LLM output: derived metrics for a single table."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    metrics: list[SqlAttributeProposal] = Field(
-        default_factory=list,
-        description=(
-            "Non-trivial derived business metrics that combine two or more columns. "
-            "Return an empty list when no meaningful metrics can be derived. "
-            "Only include metrics that are genuinely useful for business analysis."
-        ),
-    )

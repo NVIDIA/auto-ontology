@@ -18,6 +18,7 @@ from urllib.parse import quote
 DEFAULT_POSTGRES_PORT = "5432"
 DEFAULT_MYSQL_PORT = "3306"
 DEFAULT_HEAVYDB_PORT = "6274"
+DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
 
 
@@ -113,6 +114,46 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
         if federated:
             url += "&auth=sso"
         return url
+
+    if conn_type == "kyuubi":
+        host = _require(connection, "host").rstrip("/")
+        if host.startswith(("https://", "http://")):
+            host = host.split("://", 1)[1]
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        catalog = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_KYUUBI_PORT
+
+        # An SSA client mints a fresh token per hour, so the connector needs the
+        # token endpoint alongside the credentials. Without ``ssa_url`` the
+        # password is treated as a JWT that nothing can refresh.
+        ssa_url = str(connection.get("ssa_url") or "").strip().rstrip("/")
+        params = [f"auth={'ssa' if ssa_url else 'token'}"]
+        if ssa_url:
+            params.append(f"ssa_url={_enc(ssa_url)}")
+
+        # NVIDIA ships its internal CAs as a Java truststore; the connector
+        # converts it to PEM since Python's ssl module cannot read a JKS. The
+        # keystore can arrive either as base64 bytes uploaded through the UI --
+        # which keeps it with the connection instead of requiring a file to
+        # exist on every pod -- or as a path, for env-var connection strings.
+        truststore_file = str(connection.get("truststore_file") or "").strip()
+        truststore = str(connection.get("truststore") or "").strip()
+        if truststore_file:
+            params.append(f"truststore_data={_enc(truststore_file)}")
+        elif truststore:
+            params.append(f"truststore={_enc(truststore)}")
+        if truststore_file or truststore:
+            truststore_password = str(
+                connection.get("truststore_password") or ""
+            ).strip()
+            if truststore_password:
+                params.append(f"truststore_password={_enc(truststore_password)}")
+
+        return (
+            f"kyuubi://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(catalog)}"
+            f"?{'&'.join(params)}"
+        )
 
     if conn_type == "heavydb":
         host = _require(connection, "host").rstrip("/")

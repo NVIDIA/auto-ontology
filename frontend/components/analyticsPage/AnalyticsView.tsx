@@ -9,6 +9,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
+import { ToastVariant } from '@/enums/toast';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
@@ -203,7 +204,7 @@ export const AnalyticsView = () => {
 				open={error !== null}
 				message={error ?? ''}
 				title="Couldn't load analytics"
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 
@@ -211,7 +212,7 @@ export const AnalyticsView = () => {
 				open={downloadError !== null}
 				message={downloadError ?? ''}
 				title="Couldn't download analytics"
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setDownloadError(null)}
 			/>
 		</div>

@@ -64,8 +64,9 @@ create_sql_user_prompt = (
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
-    "- Time windows: 'last week/month/year' means the most recent "
-    "completed calendar period, not a rolling window.\n"
+    "- Time windows: apply a date/year filter ONLY when the question's data "
+    "request names a period; 'last week/month/year' then means the most "
+    "recent completed calendar period, not a rolling window.\n"
     "- Infer LIMIT from the question's intent: "
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
@@ -135,6 +136,25 @@ _SNOWFLAKE_DIALECT_RULES = (
 # bare name. Everything else (Postgres, Snowflake, HeavyDB) namespaces tables
 # under a schema that MUST be kept in the identifier (``schema.table``).
 _SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
+
+
+# Shared output-field spec for SQL-generation prompts (candidates-based and
+# table-based) — kept as a single source so the two call sites can't drift.
+_SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): zero/missing values
+  (included, excluded, or coerced to 0; how division guards a zero
+  denominator), and ties (what breaks a tie in a ranking/superlative
+  query).
+- sql_code: the complete SQL, no comments or delimiters.
+- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
+  being calculated, WHICH tables and columns are used, any FILTERS or time
+  windows applied, and the GROUPING/ORDERING.
+  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
+  or meta-commentary about your reasoning. Refer to tables
+  and columns by their human-readable names.
+- All fields are required."""
 
 
 def format_dialect_rules(dialect: str | None) -> str:
@@ -254,21 +274,7 @@ ORDER BY total_sales DESC;"""
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
-Output (fill fields in this exact order):
-- thought: briefly explain your approach and state every assumption the
-  request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): time window (the
-  boundary for vague/relative phrases), zero/missing values (included,
-  excluded, or coerced to 0; how division guards a zero denominator), and
-  ties (what breaks a tie in a ranking/superlative query).
-- sql_code: the complete SQL, no comments or delimiters.
-- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
-  being calculated, WHICH tables and columns are used, any FILTERS or time
-  windows applied, and the GROUPING/ORDERING.
-  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
-  or meta-commentary about your reasoning. Refer to tables
-  and columns by their human-readable names.
-- All fields are required.
+{_SQL_GENERATION_OUTPUT_SPEC}
 
 Example:
 
@@ -289,27 +295,13 @@ total sales.
 """
 
 
-create_sql_general_prompt = """You are an expert SQL query builder.
+create_sql_general_prompt = f"""You are an expert SQL query builder.
 You will receive a user question and a list of relevant tables.
 
 If no tables are relevant, explain politely and suggest rephrasing.
 Otherwise, construct an optimized SQL query to answer the question.
 
-Output (fill fields in this exact order):
-- thought: briefly explain your approach and state every assumption the
-  request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): time window (the
-  boundary for vague/relative phrases), zero/missing values (included,
-  excluded, or coerced to 0; how division guards a zero denominator), and
-  ties (what breaks a tie in a ranking/superlative query).
-- sql_code: the complete SQL, no comments or delimiters.
-- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
-  being calculated, WHICH tables and columns are used, any FILTERS or time
-  windows applied, and the GROUPING/ORDERING.
-  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
-  or meta-commentary about your reasoning. Refer to tables
-  and columns by their human-readable names.
-- All fields are required.
+{_SQL_GENERATION_OUTPUT_SPEC}
 
 Do NOT mention corrected errors.
 Do NOT force a match if the tables are not relevant to the question."""

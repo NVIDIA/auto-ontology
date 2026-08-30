@@ -9,12 +9,16 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
+from gsf.ingestion_service.history import (
+    get_last_failure_if_most_recent,
+    get_last_successful_run,
+)
 from gsf.ingestion_service.ingest import (
     trigger_delete_ingest,
     trigger_ingest,
     trigger_reset_semantic,
 )
-from gsf.server.responses import StatusResponse
+from gsf.server.responses import SemanticRunningResponse, StatusResponse
 
 router = APIRouter()
 
@@ -85,6 +89,24 @@ async def semantic_compile(request: Request) -> dict[str, str]:
     if not scheduler.start():
         scheduler.trigger()
     return {"status": "accepted"}
+
+
+@router.get("/semantic/status", response_model=SemanticRunningResponse)
+async def semantic_status(request: Request) -> dict[str, bool | str | None]:
+    """Report whether a compilation pass is executing right now, when the last
+    one finished successfully, and when it last failed (if that's more recent
+    than the last success).
+
+    Backed by the ``semantic_compilation_history`` table (see ``history.py``),
+    which this service owns — the GSF API server relays this response rather
+    than reading that table itself.
+    """
+    scheduler = request.app.state.semantic_scheduler
+    return {
+        "running": scheduler.running,
+        "last_success_at": get_last_successful_run(),
+        "last_failure_at": get_last_failure_if_most_recent(),
+    }
 
 
 @router.post("/semantic/stop", status_code=202, response_model=StatusResponse)

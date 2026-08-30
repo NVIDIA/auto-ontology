@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
+import { ToastVariant } from '@/enums/toast';
 import { Toast } from '@/common/Toast';
 
 // Only one provider is supported; its id is a fixed constant. It's the DB key
@@ -192,13 +193,13 @@ export const SsoConfigForm = ({ initialProviders }: { initialProviders: SsoProvi
 			<Toast
 				open={error !== null}
 				message={error ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 			<Toast
 				open={message !== null}
 				message={message ?? ''}
-				variant="success"
+				variant={ToastVariant.Success}
 				onClose={() => setMessage(null)}
 			/>
 		</div>

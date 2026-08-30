@@ -69,7 +69,13 @@ export const acronymsApi = {
 export const semanticCompilationApi = {
 	get: () => json<{ enabled: boolean }>('/api/configurations/semantic-compilation'),
 
-	getStatus: () => json<{ calculated: boolean }>('/api/semantic-compilation/status'),
+	getStatus: () =>
+		json<{
+			calculated: boolean;
+			running: boolean;
+			last_success_at: string | null;
+			last_failure_at: string | null;
+		}>('/api/semantic-compilation/status'),
 
 	setEnabled: (enabled: boolean) =>
 		json<{ enabled: boolean }>('/api/configurations/semantic-compilation', {

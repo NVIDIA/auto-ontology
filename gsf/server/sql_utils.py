@@ -9,7 +9,6 @@ from __future__ import annotations
 from typing import Any
 
 from gsf.catalog.sql_parse import parse_query_single
-from sqlglot.dialects import DIALECTS
 
 from gsf.connectors import get_connectors
 from gsf.dal.datasources import fetch_schema_ids_for_database
@@ -17,8 +16,6 @@ from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
 )
-
-_KNOWN_DIALECTS = {name.lower() for name in DIALECTS}
 
 # sqlglot's default dialect is the generic ANSI parser, so try it before
 # falling back to postgres.
@@ -29,16 +26,6 @@ class SqlParseError(Exception):
     """SQL could not be parsed or resolved against the catalog."""
 
 
-def _known_dialect(dialect: Any) -> bool:
-    """Report whether sqlglot can parse with *dialect*.
-
-    The parser tries each dialect in turn but only recovers from syntax
-    errors: an unrecognised dialect *name* raises before any candidate is
-    attempted, so one bad name discards the whole list.
-    """
-    return bool(dialect) and str(dialect).lower() in _KNOWN_DIALECTS
-
-
 def get_dialects(database_name: str | None = None) -> list[str]:
     """Return SQL dialects from active connectors.
 
@@ -46,17 +33,17 @@ def get_dialects(database_name: str | None = None) -> list[str]:
     ``database_name`` matches is considered. Falls back to the generic
     parser when no connector supplies a usable dialect, which is the case
     for a database whose connection has not been configured yet.
+
+    Connector dialects are passed through as-is: every connector is
+    required to report a sqlglot-compatible name (see
+    ``CONNECTOR_REGISTRY``), which the parser tries in turn.
     """
     connectors = get_connectors()
     if database_name is not None:
         connectors = [
             c for c in connectors if getattr(c, "database_name", None) == database_name
         ]
-    dialects = [
-        str(c.dialect)
-        for c in connectors
-        if _known_dialect(getattr(c, "dialect", None))
-    ]
+    dialects = [c.dialect for c in connectors]
     if not dialects:
         return list(_DEFAULT_DIALECTS)
     return dialects

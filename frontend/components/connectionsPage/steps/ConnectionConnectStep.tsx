@@ -87,6 +87,53 @@ export const ConnectionConnectStep = ({
 						);
 					}
 
+					// File fields carry the picked file's bytes as base64 so the
+					// keystore travels with the connection instead of having to
+					// exist at a path on the server.
+					if (field.file) {
+						const onFile = async ({ target }: ChangeEvent<HTMLInputElement>) => {
+							const picked = target.files?.[0];
+							if (!picked) {
+								onFieldChange(field.key, '');
+								return;
+							}
+							const bytes = new Uint8Array(await picked.arrayBuffer());
+							let binary = '';
+							bytes.forEach((byte) => {
+								binary += String.fromCharCode(byte);
+							});
+							onFieldChange(field.key, window.btoa(binary));
+						};
+						const encoded = values[field.key] ?? '';
+						return (
+							<label key={field.key} className="flex flex-col gap-1.5">
+								<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+									{field.label}
+									{field.optional ? null : (
+										<span className="ml-0.5 text-red-500">*</span>
+									)}
+								</span>
+								<input
+									type="file"
+									accept={field.fileAccept}
+									onChange={onFile}
+									data-testid={`connection-field-${field.key}`}
+									className={`${inputClassName} file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1 file:text-sm dark:file:bg-zinc-800 dark:file:text-zinc-200`}
+								/>
+								{encoded !== '' && (
+									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+										{`Loaded ${Math.round((encoded.length * 3) / 4 / 1024)} KB`}
+									</span>
+								)}
+								{field.hint != null && (
+									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+										{field.hint}
+									</span>
+								)}
+							</label>
+						);
+					}
+
 					return (
 						<label key={field.key} className="flex flex-col gap-1.5">
 							<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">

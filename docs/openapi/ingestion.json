@@ -14,6 +14,45 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "SemanticRunningResponse": {
+        "additionalProperties": true,
+        "description": "The ingestion service's own status endpoint: whether a compilation pass\nis executing right now, when the last one finished successfully, and when\nit last failed (only set if more recent than the last success).",
+        "properties": {
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "running",
+          "last_success_at",
+          "last_failure_at"
+        ],
+        "title": "SemanticRunningResponse",
+        "type": "object"
+      },
       "StatusResponse": {
         "additionalProperties": true,
         "description": "``{\"status\": \"ok\"}`` or ``{\"status\": \"accepted\"}`` for async triggers.",
@@ -241,6 +280,25 @@
           }
         },
         "summary": "Semantic Reset"
+      }
+    },
+    "/semantic/status": {
+      "get": {
+        "description": "Report whether a compilation pass is executing right now, when the last\none finished successfully, and when it last failed (if that's more recent\nthan the last success).\n\nBacked by the ``semantic_compilation_history`` table (see ``history.py``),\nwhich this service owns \u2014 the GSF API server relays this response rather\nthan reading that table itself.",
+        "operationId": "semantic_status_semantic_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SemanticRunningResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Semantic Status"
       }
     },
     "/semantic/stop": {

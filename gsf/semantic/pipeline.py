@@ -67,10 +67,9 @@ def compile_semantic_layer(
             if result is not None:
                 count += 1
                 logger.debug(
-                    "  terms=%s attrs=%s sql_attrs=%s",
+                    "  terms=%s attrs=%s",
                     result.term_names,
                     result.attr_names,
-                    result.sql_attr_names,
                 )
 
     logger.info("Compilation complete — %d table(s) processed", count)

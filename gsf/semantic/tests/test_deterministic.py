@@ -56,6 +56,31 @@ def test_llm_description_used_as_fallback(_mock_desc) -> None:
     assert specs["amount"].description == "The monetary amount of the order."
 
 
+@patch("gsf.semantic.deterministic._generate_column_descriptions", return_value={})
+def test_date_column_description_states_stored_notation(_mock_desc) -> None:
+    columns = [
+        {
+            "name": "game_date",
+            "data_type": "text",
+            "description": "Date the match was played.",
+        }
+    ]
+    profiling = {"game_date": {"format": "YYMMDD", "sample_values": []}}
+    specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
+    assert specs[0].description == ("Date the match was played. — format: YYMMDD")
+
+
+@patch(
+    "gsf.semantic.deterministic._generate_column_descriptions",
+    return_value={"game_date": "When the match took place."},
+)
+def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
+    columns = [{"name": "game_date", "data_type": "date"}]
+    profiling = {"game_date": {"format": "YYYY-MM-DD"}}
+    specs = column_attribute_specs(columns, [], columns_profiling_samples=profiling)
+    assert specs[0].description == ("When the match took place. — format: YYYY-MM-DD")
+
+
 def test_to_term_name() -> None:
     assert to_term_name("purchase_orders") == "PurchaseOrders"
 

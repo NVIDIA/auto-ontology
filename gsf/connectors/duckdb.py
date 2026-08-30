@@ -65,6 +65,11 @@ class DuckDBDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+        """
         return "duckdb"
 
     @property

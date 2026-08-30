@@ -40,3 +40,24 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     )
     assert "TABLE: dw.SIS_DEPARTMENT" in rendered
     assert "dw.dw." not in rendered
+
+
+def test_prompt_renders_date_format_when_present() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "matches",
+                "database_name": "cricket",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "Match_Date",
+                        "data_type": "text",
+                        "description": "Date the match was played.",
+                        "format": "YYMMDD",
+                    }
+                ],
+            }
+        ]
+    )
+    assert "format: YYMMDD" in rendered

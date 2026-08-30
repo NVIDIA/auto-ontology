@@ -693,6 +693,7 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
             s.sql_attribute.c.id,
             s.sql_attribute.c.name,
             s.sql_attribute.c.description,
+            s.sql_attribute.c.source,
             s.term.c.name.label("term_name"),
             _SQL_TEXT.label("sql_text"),
         )
@@ -720,6 +721,7 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
                 "name": row["name"],
                 "label": "SqlAttribute",
                 "id": row["id"],
+                "source": row["source"] or "",
             }
         )
     return docs

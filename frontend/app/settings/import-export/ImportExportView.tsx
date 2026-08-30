@@ -16,6 +16,7 @@ import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
 import { ButtonTheme, Size } from '@/enums/button';
 import { ModelFormat } from '@/enums/modelInterchange';
+import { ToastVariant } from '@/enums/toast';
 import type { Database } from '@/types/datasources';
 import type { ImportEntityCounts, ImportSummary } from '@/types/modelInterchange';
 
@@ -405,7 +406,7 @@ export const ImportExportView = () => {
 			<Toast
 				open={exportMessage !== null}
 				message={exportMessage ?? ''}
-				variant="success"
+				variant={ToastVariant.Success}
 				onClose={() => setExportMessage(null)}
 			/>
 		</div>

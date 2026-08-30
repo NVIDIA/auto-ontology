@@ -1,6 +1,11 @@
+// `public` is listed only so a model can name it in `@@schema`: GSF's own
+// tables live there, and the one declared below has to be nameable for
+// `db push` to leave it alone. Prisma owns nothing in `public` — every model
+// Prisma actually manages carries `@@schema("frontend")`, which
+// `test_all_prisma_models_declare_the_frontend_schema` enforces.
 datasource db {
   provider = "postgresql"
-  schemas  = ["frontend"]
+  schemas  = ["frontend", "public"]
 }
 
 generator client {
@@ -60,6 +65,25 @@ model Configuration {
 
   @@map("configurations")
   @@schema("frontend")
+}
+
+// Owned and written by GSF (Python) via psycopg — see
+// gsf/ingestion_service/history.py, which creates this table itself
+// (`CREATE TABLE IF NOT EXISTS`) rather than through a Prisma migration.
+//
+// Declared here purely so `prisma db push` recognizes it as part of the
+// desired schema and leaves it alone. Without this, `db push` treats it as
+// drift (an "unknown" table) and offers to drop it on every `pnpm dev`
+// restart — which is exactly what wiped its history previously. The
+// frontend does not read or write this table directly.
+model SemanticCompilationHistory {
+  id          BigInt    @id @default(autoincrement())
+  started_at  DateTime  @db.Timestamptz
+  finished_at DateTime? @db.Timestamptz
+  status      String?
+
+  @@map("semantic_compilation_history")
+  @@schema("public")
 }
 
 model Acronym {

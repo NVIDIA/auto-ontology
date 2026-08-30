@@ -52,6 +52,36 @@ def trigger_semantic_compile() -> None:
         logger.exception("Failed to trigger semantic compile via %s", url)
 
 
+def is_semantic_compilation_running() -> bool:
+    """Ask the ingestion service whether a compilation pass is executing right now.
+
+    This is the *only* part of semantic compilation status that genuinely
+    requires the live ingestion process — "running" is in-memory state on its
+    scheduler. ``last_success_at``/``last_failure_at`` are plain Postgres reads
+    (see ``gsf/ingestion_service/history.py``) that the API server does
+    directly instead of relaying through here, precisely so a temporarily
+    unreachable ingestion service doesn't also wipe out history that has
+    nothing to do with it.
+
+    Best-effort: if the ingestion service can't be reached, this reports
+    ``False`` rather than raising, so a transient outage makes the settings
+    page look idle instead of stuck. Failures are logged as a one-line warning
+    rather than ``logger.exception`` — this is called on every settings-page
+    load, so a full traceback each time would flood the logs whenever the
+    ingestion service is simply not running (e.g. local dev).
+    """
+    url = f"{_base_url()}/semantic/status"
+    try:
+        response = httpx.get(url, timeout=_REQUEST_TIMEOUT)
+        response.raise_for_status()
+        return bool(response.json().get("running", False))
+    except Exception as exc:
+        logger.warning(
+            "Failed to query semantic compilation status via %s: %s", url, exc
+        )
+        return False
+
+
 def trigger_semantic_reset(database_name: str | None = None) -> None:
     """Ask the ingestion service to delete the semantic layer (best-effort).
 

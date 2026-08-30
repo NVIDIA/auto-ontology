@@ -9,6 +9,7 @@ import { Role } from '@/enums/auth';
 import { usersApi } from '@/api/users';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
+import { ToastVariant } from '@/enums/toast';
 import { Table } from '@/common/Table';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
@@ -150,7 +151,7 @@ export const UsersManager = () => {
 			<Toast
 				open={error !== null}
 				message={error ?? ''}
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
 			/>
 		</div>

@@ -40,6 +40,14 @@ PRISMA_TABLES = (
     "conversation_analytics",
 )
 
+#: Models in `schema.prisma` that Prisma does **not** own.
+#:
+#: A GSF-owned table declared there only so `prisma db push` recognises it and
+#: leaves it alone -- without the declaration `db push` reads it as drift and
+#: offers to drop it on every `pnpm dev`. These stay in `public` with the rest
+#: of GSF's tables, so the frontend-schema rule below does not apply to them.
+DECLARED_NOT_OWNED = {"SemanticCompilationHistory"}
+
 _GSF_ROOT = Path(__file__).resolve().parents[2]
 
 #: `FROM foo`, `INTO foo`, `UPDATE foo`, `JOIN foo` — the places a bare table
@@ -126,22 +134,41 @@ def test_prisma_table_list_matches_the_prisma_schema() -> None:
 
 
 def test_all_prisma_models_declare_the_frontend_schema() -> None:
-    """Every model must carry @@schema("frontend").
+    """Every model Prisma owns must carry @@schema("frontend").
 
     A model without it lands wherever Prisma's default points, which is how the
-    tables would drift back apart.
+    tables would drift back apart. The exceptions in `DECLARED_NOT_OWNED` are
+    GSF's own tables, which belong in `public` with the rest of them — named
+    one by one so a genuinely new frontend model cannot land there quietly.
     """
     schema_file = _GSF_ROOT.parent / "frontend" / "prisma" / "schema.prisma"
     if not schema_file.exists():
         pytest.skip("frontend/prisma/schema.prisma not present")
 
     text = schema_file.read_text()
-    models = re.findall(r"^model\s+(\w+)\s*\{", text, re.MULTILINE)
-    annotations = re.findall(r'@@schema\("([^"]+)"\)', text)
-    assert len(annotations) == len(models), (
-        f"{len(models)} model(s) but {len(annotations)} @@schema annotation(s)"
+    # Each model, paired with the `@@schema` inside its own block. Matched
+    # together rather than as two separate scans: counting them separately says
+    # a model is missing its annotation but never which one.
+    declared = re.findall(
+        r'^model\s+(\w+)\s*\{(?:[^{}]|\{[^{}]*\})*?@@schema\("([^"]+)"\)',
+        text,
+        re.MULTILINE,
     )
-    assert set(annotations) == {FRONTEND_SCHEMA}, (
-        f"models declare schemas other than {FRONTEND_SCHEMA!r}: "
-        f"{sorted(set(annotations))}"
+    models = re.findall(r"^model\s+(\w+)\s*\{", text, re.MULTILINE)
+    assert len(declared) == len(models), (
+        f"{len(models)} model(s) but {len(declared)} @@schema annotation(s): "
+        f"{sorted(set(models) - {name for name, _ in declared})} missing one"
+    )
+
+    misplaced = {
+        name: schema
+        for name, schema in declared
+        if schema != FRONTEND_SCHEMA and name not in DECLARED_NOT_OWNED
+    }
+    assert not misplaced, (
+        f"models declare schemas other than {FRONTEND_SCHEMA!r}: {misplaced}"
+    )
+    unowned = {name: schema for name, schema in declared if name in DECLARED_NOT_OWNED}
+    assert all(schema == "public" for schema in unowned.values()), (
+        f"GSF-owned tables must stay in 'public': {unowned}"
     )

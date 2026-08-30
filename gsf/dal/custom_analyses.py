@@ -346,6 +346,53 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     return list(tables.values())
 
 
+def custom_analysis_exists(database_name: str | None = None) -> bool:
+    """Is there at least one custom analysis, optionally in *database_name*?
+
+    Scoped by *database_name* to analyses whose statement references a table in
+    that database; any analysis at all satisfies the unscoped check.
+
+    A ``LIMIT 1`` existence probe, so retrieval can skip the embedding search
+    outright when nothing could match. **Fails open** — a failed probe returns
+    ``True`` rather than silently suppressing a search that might have hit.
+    """
+    statement = select(literal(1)).select_from(s.custom_analysis).limit(1)
+    if database_name:
+        statement = statement.where(
+            select(literal(1))
+            .select_from(
+                s.custom_analysis_sql.join(
+                    s.sql_query_table,
+                    s.sql_query_table.c.sql_query_id
+                    == s.custom_analysis_sql.c.sql_query_id,
+                )
+                .join(
+                    s.catalog_table,
+                    s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                )
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+                .join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
+            )
+            .where(
+                s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id,
+                s.catalog_database.c.name == database_name,
+            )
+            .correlate(s.custom_analysis)
+            .exists()
+        )
+    try:
+        return bool(store().query_read(statement))
+    except Exception:
+        logger.warning("custom_analysis_exists: query failed", exc_info=True)
+        return True
+
+
 # ---------------------------------------------------------------------------
 # Writes
 # ---------------------------------------------------------------------------

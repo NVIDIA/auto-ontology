@@ -37,17 +37,6 @@ from gsf.retrieval.data_access.graph_schemas import (
 
 logger = logging.getLogger(__name__)
 
-# sqlglot dialect names differ slightly from our connector dialect strings.
-_SQLGLOT_DIALECTS = {
-    "sqlite": "sqlite",
-    "postgres": "postgres",
-    "postgresql": "postgres",
-    "snowflake": "snowflake",
-    "duckdb": "duckdb",
-    "mysql": "mysql",
-    "heavydb": "postgres",
-}
-
 
 def _unwrap_projection(e: exp.Expression) -> exp.Expression:
     """Strip an alias wrapper so ``NULL AS x`` is seen as ``NULL``."""
@@ -85,9 +74,8 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     if not sql or not sql.strip():
         return "the generated SQL is empty"
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         # Unparseable here → let the normal parse validator handle it.
         return ""

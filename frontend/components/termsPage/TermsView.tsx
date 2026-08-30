@@ -28,6 +28,7 @@ import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
+import { ToastVariant } from '@/enums/toast';
 import { attributeStatus } from '@/lib/certification';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
@@ -1186,7 +1187,7 @@ export const TermsView = () => {
 				<Toast
 					open={sqlAttrEditError != null || certError != null}
 					message={sqlAttrEditError ?? certError ?? ''}
-					variant="error"
+					variant={ToastVariant.Error}
 					onClose={() => {
 						setSqlAttrEditError(null);
 						setCertError(null);
@@ -1302,7 +1303,7 @@ export const TermsView = () => {
 				<Toast
 					open={columnAttrEditError != null || certError != null}
 					message={columnAttrEditError ?? certError ?? ''}
-					variant="error"
+					variant={ToastVariant.Error}
 					onClose={() => {
 						setColumnAttrEditError(null);
 						setCertError(null);
@@ -1371,7 +1372,7 @@ export const TermsView = () => {
 				<Toast
 					open={certError != null}
 					message={certError ?? ''}
-					variant="error"
+					variant={ToastVariant.Error}
 					onClose={() => setCertError(null)}
 				/>
 				<ModalCreateNewItem
