@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 target_metadata = METADATA
 
 #: Prefix of the vector indexes that migrations own rather than the MetaData.
-#: Kept in step with `90329895161c_add_halfvec_hnsw_indexes.py`.
+#: Kept in step with `HNSW_INDEX_PREFIX` in the baseline migration.
 HNSW_INDEX_PREFIX = "ix_hnsw_"
 
 #: Sentinel for "this object did not carry a schema at all", distinct from the
