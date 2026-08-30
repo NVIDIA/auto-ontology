@@ -69,12 +69,14 @@ endpoints, are still a hard error.)
 
 ## 2. ERD
 
-Everything lives in the `public` schema — never `frontend`, which is Prisma's.
-Every foreign key below is `ON DELETE CASCADE`.
+Everything lives in the `public` schema — never `frontend` (Prisma's) and never
+`vdb` (langchain_postgres'). Every foreign key below is `ON DELETE CASCADE`.
 
-Embeddings are columns on the entities themselves (`embedding`,
-`embedding_text`, `embedding_database_name`) rather than a separate vector
-store, so a vector cannot outlive the row it describes.
+Embeddings are **not** here: they live in the `vdb` schema, in the two
+langchain_postgres collections `PostgresVDB` creates and indexes at runtime. A
+vector is linked to its entity by an id inside that collection's metadata, so
+deleting an entity does not delete its vector — see `delete_by_database` and
+`delete_all` on the store for how a stale collection is cleared.
 
 ```
                         ┌──────────────────┐
@@ -155,7 +157,7 @@ scoped to its own Postgres schema (`public` vs `frontend`) rather than sharing o
 Two pieces of `alembic/env.py` are load-bearing and easy to break:
 
 **`include_object` filters to the `public` schema.** The same database also holds
-Prisma's tables (`frontend`).
+Prisma's tables (`frontend`) and langchain_postgres' vector tables (`vdb`).
 Without the filter, autogenerate sees them as untracked and proposes dropping
 them — verified, not assumed: putting a table Alembic does not know about into
 the filtered schema makes the next `--autogenerate` emit `op.drop_table` for it.

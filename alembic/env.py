@@ -45,10 +45,6 @@ logger = logging.getLogger(__name__)
 
 target_metadata = METADATA
 
-#: Prefix of the vector indexes that migrations own rather than the MetaData.
-#: Kept in step with `HNSW_INDEX_PREFIX` in the baseline migration.
-HNSW_INDEX_PREFIX = "ix_hnsw_"
-
 #: Sentinel for "this object did not carry a schema at all", distinct from the
 #: schema *being* None (which means the default schema, i.e. ours).
 _MISSING = object()
@@ -80,15 +76,6 @@ def include_object(obj, name, type_, reflected, compare_to) -> bool:
     not ours, and letting it through risks autogenerate proposing a drop against
     somebody else's tables — the one outcome this filter exists to prevent.
     """
-    # The HNSW indexes are built on an expression -- `(embedding::halfvec(2048))
-    # halfvec_cosine_ops` -- which is not expressible in the MetaData, so they
-    # live in a migration instead. Autogenerate reflects them, cannot find them
-    # in the model, and proposes `drop_index` for all seven on every run. Same
-    # situation as the `join_path_edge` view, same answer: this is a thing
-    # migrations own, so it is filtered out here.
-    if type_ == "index" and name and str(name).startswith(HNSW_INDEX_PREFIX):
-        return False
-
     # `_MISSING`, not None: None is a *meaningful* schema here -- it is how both
     # SQLAlchemy and Alembic spell "the default schema", which is ours. Using
     # None as the not-found marker too would make an object with no schema at all
@@ -108,25 +95,11 @@ def include_object(obj, name, type_, reflected, compare_to) -> bool:
     return schema is None
 
 
-def render_item(type_, obj, autogen_context):
-    """Emit the import pgvector's rendered type needs.
-
-    Autogenerate renders `pgvector.sqlalchemy.vector.VECTOR(dim=N)` for a vector
-    column but never adds the corresponding import, so the generated file raises
-    NameError on import and `alembic upgrade` fails before running anything.
-    Registering the import here fixes every future autogenerate rather than
-    leaving it to be re-diagnosed each time.
-    """
-    if type_ == "type" and obj.__class__.__module__.startswith("pgvector"):
-        autogen_context.imports.add("import pgvector.sqlalchemy")
-    return False  # False = fall back to the default rendering
-
 
 def _configure(**kwargs) -> None:
     context.configure(
         target_metadata=target_metadata,
         include_object=include_object,
-        render_item=render_item,
         include_schemas=True,
         version_table="alembic_version",
         # Deliberately no `version_table_schema`. Naming the default schema while the
