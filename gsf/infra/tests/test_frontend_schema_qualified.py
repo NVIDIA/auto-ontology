@@ -40,14 +40,6 @@ PRISMA_TABLES = (
     "conversation_analytics",
 )
 
-#: Models in `schema.prisma` that Prisma does **not** own.
-#:
-#: A GSF-owned table declared there only so `prisma db push` recognises it and
-#: leaves it alone -- without the declaration `db push` reads it as drift and
-#: offers to drop it on every `pnpm dev`. These stay in `public` with the rest
-#: of GSF's tables, so the frontend-schema rule below does not apply to them.
-DECLARED_NOT_OWNED = {"SemanticCompilationHistory"}
-
 _GSF_ROOT = Path(__file__).resolve().parents[2]
 
 #: `FROM foo`, `INTO foo`, `UPDATE foo`, `JOIN foo` — the places a bare table
@@ -134,12 +126,16 @@ def test_prisma_table_list_matches_the_prisma_schema() -> None:
 
 
 def test_all_prisma_models_declare_the_frontend_schema() -> None:
-    """Every model Prisma owns must carry @@schema("frontend").
+    """Every model must carry @@schema("frontend").
 
     A model without it lands wherever Prisma's default points, which is how the
-    tables would drift back apart. The exceptions in `DECLARED_NOT_OWNED` are
-    GSF's own tables, which belong in `public` with the rest of them — named
-    one by one so a genuinely new frontend model cannot land there quietly.
+    tables would drift back apart.
+
+    No model may name any other schema either, and that is the load-bearing
+    half: `db push` reconciles every schema the datasource lists, so a model
+    declaring `public` means the datasource has to list `public`, and Prisma
+    then treats GSF's own tables as drift. It proposed dropping
+    `alembic_version` the one time this was tried.
     """
     schema_file = _GSF_ROOT.parent / "frontend" / "prisma" / "schema.prisma"
     if not schema_file.exists():
@@ -160,15 +156,31 @@ def test_all_prisma_models_declare_the_frontend_schema() -> None:
         f"{sorted(set(models) - {name for name, _ in declared})} missing one"
     )
 
-    misplaced = {
-        name: schema
-        for name, schema in declared
-        if schema != FRONTEND_SCHEMA and name not in DECLARED_NOT_OWNED
-    }
+    misplaced = {name: schema for name, schema in declared if schema != FRONTEND_SCHEMA}
     assert not misplaced, (
         f"models declare schemas other than {FRONTEND_SCHEMA!r}: {misplaced}"
     )
-    unowned = {name: schema for name, schema in declared if name in DECLARED_NOT_OWNED}
-    assert all(schema == "public" for schema in unowned.values()), (
-        f"GSF-owned tables must stay in 'public': {unowned}"
+
+
+def test_the_datasource_manages_only_the_frontend_schema() -> None:
+    """`db push` reconciles every schema the datasource names.
+
+    Naming `public` there hands Prisma GSF's own tables: the first `db push`
+    after it was added stopped with "You are about to drop the
+    `alembic_version` table", and would have taken the rest with
+    `--accept-data-loss`.
+    """
+    schema_file = _GSF_ROOT.parent / "frontend" / "prisma" / "schema.prisma"
+    if not schema_file.exists():
+        pytest.skip("frontend/prisma/schema.prisma not present")
+
+    block = re.search(r"datasource\s+db\s*\{(.*?)\}", schema_file.read_text(), re.S)
+    assert block, "no datasource block in schema.prisma"
+    schemas = re.findall(
+        r'"([^"]+)"', re.search(r"schemas\s*=\s*\[([^\]]*)\]", block.group(1)).group(1)
+    )
+    assert schemas == [FRONTEND_SCHEMA], (
+        f"the Prisma datasource manages {schemas}; it must manage only "
+        f"[{FRONTEND_SCHEMA!r}] — anything else is a GSF schema Prisma will "
+        f"propose dropping tables from"
     )
