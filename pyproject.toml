@@ -29,6 +29,7 @@ dependencies = [
     "thrift-sasl>=0.4.3",
     "pure-sasl>=0.6.2",
     "pyjks>=20.0.0",
+    "trino>=0.339.0",
 ]
 
 [build-system]

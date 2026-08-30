@@ -22,6 +22,7 @@ from gsf.connectors.mysql import MySQLDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
 from gsf.connectors.sqlite import SQLiteDatabase
+from gsf.connectors.trino import TrinoDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
     "sqlite": SQLiteDatabase,
+    "trino": TrinoDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
@@ -105,7 +107,7 @@ def create_connector(
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
     connectors that support schema filtering (currently Databricks, Snowflake,
-    and Kyuubi); for others it is ignored so their behaviour is unchanged.
+    Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
     """
     try:
         parsed = urlparse(connection_string)
@@ -127,6 +129,7 @@ def create_connector(
             DatabricksDatabase,
             SnowflakeDatabase,
             KyuubiDatabase,
+            TrinoDatabase,
         ):
             return connector_class(connection_string, schemas=schemas)
         return connector_class(connection_string)
@@ -218,7 +221,7 @@ def get_connectors() -> list[SQLDatabase]:
 
         # Each spec is (connection_string, schema_allowlist). The schema filter
         # is honoured only during ingestion introspection (Databricks,
-        # Snowflake, and Kyuubi); it is inert for retrieval, which executes SQL
+        # Snowflake, Kyuubi, and Trino); it is inert for retrieval, which executes SQL
         # rather than introspecting.
         try:
             specs: list[tuple[str, list[str] | None]] = [

@@ -13,6 +13,7 @@ from gsf.connectors.mysql import MySQLDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
 from gsf.connectors.snowflake import SnowflakeDatabase
+from gsf.connectors.trino import TrinoDatabase
 
 __all__ = [
     "SQLDatabase",
@@ -23,6 +24,7 @@ __all__ = [
     "MySQLDatabase",
     "PostgresDatabase",
     "SnowflakeDatabase",
+    "TrinoDatabase",
     "get_connectors",
     "invalidate_connectors_cache",
 ]
