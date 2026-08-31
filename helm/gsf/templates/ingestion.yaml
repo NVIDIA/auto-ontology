@@ -54,24 +54,22 @@ spec:
             # App version, logged at startup. Sourced from the Helm chart version.
             - name: APP_VERSION
               value: {{ .Chart.Version | quote }}
+          # Same paths and same meanings as the backend's, deliberately: these
+          # two blocks should be copyable between the charts without changing
+          # what they test.
           readinessProbe:
-            # /health/ready, not /health: the latter checks no dependencies, so
-            # as a readiness probe it can never fail and the pod reports Ready
-            # whether or not an ingest could actually run. This one probes
-            # Postgres and the schema revision, same as the backend's.
             httpGet:
-              path: /health/ready
+              path: /health
               port: 3002
             initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
-            # Deliberately the dependency-free endpoint: restarting this process
-            # cannot fix an unreachable database, so a liveness probe gated on
-            # one turns a database blip into a rolling restart. Without any
-            # liveness probe at all — which is what this was — a wedged process
-            # is never restarted either.
+            # Deliberately not /health: that one probes Postgres, and a liveness
+            # probe gated on an external dependency restarts a healthy service
+            # whenever the database is slow. Without any liveness probe at all —
+            # which is what this was — a wedged process is never restarted.
             httpGet:
-              path: /health
+              path: /health/live
               port: 3002
             initialDelaySeconds: 20
             periodSeconds: 20

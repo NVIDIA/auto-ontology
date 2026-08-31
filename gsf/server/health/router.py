@@ -27,6 +27,10 @@ router = APIRouter()
 
 @router.get(
     "/health",
+    # Infrastructure, not API surface: Kubernetes and Docker poll these URLs
+    # directly and never read the spec, so publishing them only adds noise a
+    # client might mistake for something to call.
+    include_in_schema=False,
     responses={
         200: {"model": HealthResponse, "description": "All dependencies reachable"},
         503: {"model": HealthResponse, "description": "Postgres unreachable"},
@@ -64,6 +68,7 @@ def health() -> JSONResponse:
 
 @router.get(
     "/health/live",
+    include_in_schema=False,
     responses={200: {"description": "The process is serving requests"}},
 )
 def liveness() -> JSONResponse:

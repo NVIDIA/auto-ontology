@@ -1998,37 +1998,6 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
-      "HealthResponse": {
-        "additionalProperties": true,
-        "description": "Readiness body \u2014 200 when healthy, 503 when degraded.\n\n``postgres`` reports whether the database answers; ``migrations`` whether it\nholds the revision this build expects. Both matter and they fail\nindependently: a reachable database carrying no tables at all satisfies the\nfirst and not the second, and reporting only the first is how a health\ncheck comes to say ``ok`` about a server that 500s on every catalog call.\n\nNamed ``migrations`` rather than the more obvious ``schema`` because that\nname shadows an attribute on Pydantic's ``BaseModel`` and the field would\nship with a ``UserWarning`` on every import.",
-        "properties": {
-          "migrations": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Migrations",
-            "type": "object"
-          },
-          "postgres": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "title": "Postgres",
-            "type": "object"
-          },
-          "status": {
-            "title": "Status",
-            "type": "string"
-          }
-        },
-        "required": [
-          "status",
-          "postgres",
-          "migrations"
-        ],
-        "title": "HealthResponse",
-        "type": "object"
-      },
       "IdRef": {
         "additionalProperties": true,
         "description": "``{\"id\": ...}`` \u2014 echoed by the delete endpoints to confirm the target.",
@@ -6096,58 +6065,6 @@
         "summary": "Get Semantic Link Path",
         "tags": [
           "exploration"
-        ]
-      }
-    },
-    "/api/health": {
-      "get": {
-        "description": "Readiness probe for the API service.\n\nTwo independent checks, because they fail independently and only one of\nthem used to be made:\n\n* **postgres** \u2014 can this process get a usable connection out of its pool.\n* **migrations** \u2014 is that database at the revision this build expects.\n\nA reachable database with no tables in it passes the first and fails the\nsecond, and until the second existed this endpoint answered\n``200 {\"status\": \"ok\"}`` for exactly that state while every catalog\nendpoint returned 500. A readiness probe that a load balancer believes has\nto be right about the second case too.\n\nThis backs **readiness** only. Liveness is /health/live, which checks\nnothing: restarting the process cannot fix an unreachable database, so a\nliveness probe gated on one turns a database blip into a rolling restart.",
-        "operationId": "health_api_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            },
-            "description": "All dependencies reachable"
-          },
-          "503": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HealthResponse"
-                }
-              }
-            },
-            "description": "Postgres unreachable"
-          }
-        },
-        "summary": "Health",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/api/health/live": {
-      "get": {
-        "description": "Liveness only: no dependency is checked, and this must never fail.\n\nRestarting the process cannot fix an unreachable database, so making this\ndepend on one converts a database blip into a rolling restart.",
-        "operationId": "liveness_api_health_live_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            },
-            "description": "The process is serving requests"
-          }
-        },
-        "summary": "Liveness",
-        "tags": [
-          "health"
         ]
       }
     },

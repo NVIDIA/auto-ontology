@@ -74,13 +74,15 @@ services:
     command: ["ingestion_service"]
     ports:
       - "3002:3002"
-    # The image healthcheck targets the backend (:3001/api/health/live);
-    # the ingestion service serves /health on :3002.
+    # The image healthcheck targets the backend (:3001/api/health/live); the
+    # ingestion service serves its own on :3002. Liveness, not /health — that
+    # one probes Postgres, and a container healthcheck gated on a dependency
+    # marks this unhealthy over a blip a restart cannot fix.
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3002/health', timeout=3).status == 200 else 1)\"",
+          "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:3002/health/live', timeout=3).status == 200 else 1)\"",
         ]
       interval: 30s
       timeout: 5s

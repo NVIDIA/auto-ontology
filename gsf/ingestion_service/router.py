@@ -29,40 +29,25 @@ from gsf.server.responses import (
 router = APIRouter()
 
 
-@router.get("/health", response_model=StatusResponse)
-async def health() -> dict[str, str]:
-    """Liveness probe for the ingestion service.
-
-    Answers ``{"status": "ok"}`` as soon as the process is serving. It checks no
-    dependencies, so it reports nothing about whether an ingest can currently
-    succeed — only that the service is up. **Readiness is /health/ready.**
-
-    Wire this to a ``livenessProbe`` and nothing else. Used as a readiness probe
-    it can never fail, so it reports Ready unconditionally — which is what the
-    chart used to do here.
-    """
-    return {"status": "ok"}
-
-
 @router.get(
-    "/health/ready",
+    "/health",
+    include_in_schema=False,
     responses={
         200: {"model": HealthResponse, "description": "All dependencies reachable"},
         503: {"model": HealthResponse, "description": "Postgres or schema unusable"},
     },
 )
-async def readiness() -> JSONResponse:
+async def health() -> JSONResponse:
     """Readiness probe: can this service actually ingest right now?
 
-    The same two checks the API server reports, from the same helpers, because
-    both services depend on the same database and the same migrated schema and
-    should not be able to disagree about them.
+    Same path and same meaning as the API server's ``/api/health``, on purpose.
+    The two used to disagree — bare ``/health`` was liveness here and readiness
+    there — so the same-looking path meant opposite things and a probe config
+    copied between the two charts would have been silently wrong.
 
-    Separate from ``/health`` because the two answer different questions and
-    failing them means different things: this one failing should stop traffic,
-    ``/health`` failing should restart the process. Restarting cannot fix an
-    unreachable database, which is why the dependency check lives here and not
-    there.
+    Reports the same two checks the API server does, from the same helpers,
+    because both services depend on the same database and the same migrated
+    schema and should not be able to disagree about them.
     """
     postgres = check_store()
     migrations = check_schema()
@@ -73,6 +58,17 @@ async def readiness() -> JSONResponse:
         "migrations": migrations,
     }
     return JSONResponse(status_code=200 if ready else 503, content=body)
+
+
+@router.get("/health/live", include_in_schema=False, response_model=StatusResponse)
+async def liveness() -> dict[str, str]:
+    """Liveness only: no dependency is checked, and this must never fail.
+
+    Restarting the process cannot fix an unreachable database, so making this
+    depend on one converts a database blip into a rolling restart. Mirrors the
+    API server's ``/api/health/live`` exactly.
+    """
+    return {"status": "ok"}
 
 
 @router.post("/ingest", status_code=202, response_model=StatusResponse)
