@@ -343,10 +343,10 @@ embed the table OID and differ between any two databases.
 
 ### Fixtures
 
-The original 16-line smoke fixture was replaced with **Pagila** and **Chinook**. Pagila is
-the only fixture with a partitioned table and a materialized view — the two
-relation kinds bug #1 dropped. Chinook provides a self-referential FK
-(`Employee.ReportsTo`) for join-path testing.
+The fixtures are **Pagila** and **Chinook**. Pagila is the only one with a
+partitioned table and a materialized view — the two relation kinds bug #1
+dropped. Chinook provides a self-referential FK (`Employee.ReportsTo`) for
+join-path testing.
 
 ### Surface freezing
 
