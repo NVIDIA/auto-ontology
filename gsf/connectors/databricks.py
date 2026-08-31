@@ -20,6 +20,8 @@ from databricks.sql.exc import Error
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.connectors.db_errors import is_session_lost
+
 logger = logging.getLogger(__name__)
 
 # The SQL connector logs several INFO lines per operation (session opened,
@@ -202,18 +204,40 @@ class DatabricksDatabase(SQLDatabase):
             # Already inside a block; the outermost one owns the connection.
             yield
             return
-        connection = sql.connect(**self._connect_kwargs)
-        self._shared_connection = connection
+        self._shared_connection = sql.connect(**self._connect_kwargs)
         try:
             yield
         finally:
+            # Whatever is held now, which is not necessarily what was opened
+            # above: a statement that met a discarded session replaced it.
+            held = self._shared_connection
             self._shared_connection = None
+            if held is not None:
+                try:
+                    held.close()
+                except Exception:  # noqa: BLE001 - a failed close must not fail the run
+                    logger.debug(
+                        "databricks: shared connection close failed", exc_info=True
+                    )
+
+    def _reopen_shared_connection(self) -> Connection:
+        """Replace the connection held by :meth:`reuse_connection`, returning it.
+
+        Stored back on the instance rather than handed out alone, because the
+        statements after this one have to reach a live session too, and the
+        enclosing block's ``finally`` is what eventually closes it.
+        """
+        stale = self._shared_connection
+        self._shared_connection = None
+        if stale is not None:
             try:
-                connection.close()
+                stale.close()
             except Exception:  # noqa: BLE001 - a failed close must not fail the run
                 logger.debug(
-                    "databricks: shared connection close failed", exc_info=True
+                    "databricks: stale shared connection close failed", exc_info=True
                 )
+        self._shared_connection = sql.connect(**self._connect_kwargs)
+        return self._shared_connection
 
     @contextmanager
     def _connect(self, timeout_s: int | None = None) -> Iterator[Connection]:
@@ -351,13 +375,37 @@ class DatabricksDatabase(SQLDatabase):
 
         Ingestion leaves the cap off: metadata scans over a large
         ``information_schema`` legitimately take minutes.
+
+        Inside :meth:`reuse_connection` the session outlives the statement, so
+        the warehouse may have discarded it in the meantime. That comes back as
+        an ordinary statement error on a healthy connection, so it is reopened
+        and retried once rather than failing the whole batch.
         """
         started = time.perf_counter()
         with self._connect(timeout_s) as connection:
             connect_seconds = time.perf_counter() - started
-            return self._run(
-                connection, sql_text, parameters, connect_seconds=connect_seconds
-            )
+            shared = connection is self._shared_connection
+            try:
+                return self._run(
+                    connection, sql_text, parameters, connect_seconds=connect_seconds
+                )
+            except Exception as exc:
+                # Only a shared connection outlives its statement, so only it can
+                # be holding a session the warehouse has since dropped. A
+                # per-statement connection was opened moments ago, and reopening
+                # it would just repeat whatever went wrong.
+                if not shared or not is_session_lost(exc, sql_text):
+                    raise
+                logger.info(
+                    "databricks: shared session was rejected; "
+                    "reopening and retrying once"
+                )
+                return self._run(
+                    self._reopen_shared_connection(),
+                    sql_text,
+                    parameters,
+                    connect_seconds=connect_seconds,
+                )
 
     def get_schemas(self) -> list[str]:
         frame = self.execute(

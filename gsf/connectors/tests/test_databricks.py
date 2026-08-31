@@ -625,6 +625,106 @@ def test_reuse_connection_opens_once_for_every_statement(
     assert opened[0].closed  # ...and the block closes it on exit
 
 
+def test_a_discarded_shared_session_is_reopened_mid_batch(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Ingestion holds one session for the whole scan, so it can be retired under it.
+
+    Without this the first table to meet a dropped session fails the entire
+    ingest run, even though reconnecting costs one connect.
+    """
+    opened: list[Any] = []
+    executed: list[str] = []
+
+    class FakeCursor:
+        def __init__(self, connection: "FakeConnection") -> None:
+            self._connection = connection
+            self.description = [("n",)]
+
+        def __enter__(self) -> "FakeCursor":
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+        def execute(self, sql_text: str, _parameters: Any = None) -> None:
+            executed.append(sql_text)
+            if self._connection is opened[0]:
+                raise RuntimeError("Invalid SessionHandle: 5f0c9e2a")
+
+        def fetchall(self) -> list[tuple[int, ...]]:
+            return [(1,)]
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def cursor(self) -> FakeCursor:
+            return FakeCursor(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fake_connect(**_kwargs: Any) -> FakeConnection:
+        connection = FakeConnection()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr("gsf.connectors.databricks.sql.connect", fake_connect)
+    db = DatabricksDatabase(_connection_string())
+
+    with db.reuse_connection():
+        frame = db.execute("SELECT 1")
+        assert frame.to_dict("records") == [{"n": 1}]
+        assert len(opened) == 2, "the dead session should have been reopened"
+        assert opened[0].closed, "the dead session should be closed"
+        # Later statements in the batch have to reach the replacement.
+        assert db.execute("SELECT 2").to_dict("records") == [{"n": 1}]
+        assert len(opened) == 2, "one reopen, not one per statement"
+
+    assert executed == ["SELECT 1", "SELECT 1", "SELECT 2"]
+    assert opened[1].closed, "the block must close the replacement it now holds"
+
+
+def test_a_rejected_statement_is_not_retried_on_the_shared_session(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A SQL error is the warehouse answering, so reopening would change nothing."""
+    executed: list[str] = []
+
+    class FakeCursor:
+        description = None
+
+        def __enter__(self) -> "FakeCursor":
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+        def execute(self, sql_text: str, _parameters: Any = None) -> None:
+            executed.append(sql_text)
+            raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND: nope")
+
+    class FakeConnection:
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "gsf.connectors.databricks.sql.connect",
+        lambda **_kwargs: FakeConnection(),
+    )
+    db = DatabricksDatabase(_connection_string())
+
+    with db.reuse_connection():
+        with pytest.raises(RuntimeError, match="TABLE_OR_VIEW_NOT_FOUND"):
+            db.execute("SELECT * FROM nope")
+
+    assert len(executed) == 1, "a SQL error must surface, not trigger a reconnect"
+
+
 def test_reuse_connection_nests_without_reopening(monkeypatch: MonkeyPatch) -> None:
     opened = []
 
