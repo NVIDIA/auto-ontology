@@ -7,9 +7,9 @@
 Creates each demo database if it doesn't exist, then applies its SQL from
 ``dev_tools/sql/``. Idempotent — safe to re-run.
 
-``testdb`` is a 2-table smoke fixture. ``pagila`` is the real one: two schemas,
-views, a materialized view, a partitioned table, arrays, an enum and a tsvector
-column — see ``dev_tools/sql/README.md`` for why each of those matters.
+``pagila`` is the Postgres fixture: two schemas, views, a materialized view, a
+partitioned table, arrays, an enum and a tsvector column — see
+``dev_tools/sql/README.md`` for why each of those matters.
 
 The SQLite fixture (Chinook) is built by ``dev_tools.build_sqlite_fixtures``;
 run both, or just ``dev_tools.seed_fixtures`` which calls each in turn.
@@ -59,7 +59,6 @@ class Fixture:
 
 
 FIXTURES: tuple[Fixture, ...] = (
-    Fixture(name="testdb", sentinel="customers"),
     Fixture(
         name="pagila",
         sentinel="film",

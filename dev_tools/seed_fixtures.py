@@ -4,9 +4,9 @@
 
 """Build every fixture database in one command.
 
-Postgres fixtures (``testdb``, ``pagila``) and SQLite fixtures (``chinook``)
-have nothing in common beyond being fixtures, so each has its own module. This
-is the entry point that runs both, so setup is one command rather than two.
+The Postgres fixture (``pagila``) and the SQLite one (``chinook``) have nothing
+in common beyond being fixtures, so each has its own module. This is the entry
+point that runs both, so setup is one command rather than two.
 
 Usage::
 

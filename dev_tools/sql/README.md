@@ -13,7 +13,6 @@ fixture from scratch, drop the database first; for SQLite, delete the
 
 | Fixture | Engine | Source | Licence |
 |---|---|---|---|
-| `testdb` | Postgres | GSF-authored | — |
 | `pagila` | Postgres | [devrimgunduz/pagila] `pagila-v3.1.0`, trimmed | MIT |
 | `pagila_analytics` | Postgres | GSF-authored addendum to `pagila` | — |
 | `chinook` | SQLite | [lerocha/chinook-database], unmodified | MIT |
@@ -24,8 +23,9 @@ fixture from scratch, drop the database first; for SQLite, delete the
 ## Why these, and not a small hand-written schema
 
 The catalog tests are graded almost entirely on fidelity: does the code find
-the same tables, columns, types, and foreign keys? `testdb.sql` — 2 tables,
-1 FK, no views — cannot answer that. Pagila can, because it has the shapes the code special-cases:
+the same tables, columns, types, and foreign keys? A hand-written toy schema —
+a couple of tables, one FK, no views — cannot answer that. Pagila can, because
+it has the shapes the code special-cases:
 
 | Feature | What it exercises |
 |---|---|
@@ -46,8 +46,6 @@ per-database pgvector collection resets, and zones spanning databases. It also
 drives `gsf/connectors/sqlite.py` and a second sqlglot dialect through the
 parsers, and carries a self-referencing FK (`Employee.ReportsTo`) that Pagila
 has nowhere.
-
-`testdb` is kept as a fast smoke fixture for tests that don't need breadth.
 
 ## How `pagila.sql` was produced
 

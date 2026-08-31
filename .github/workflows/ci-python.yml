@@ -138,7 +138,7 @@ jobs:
       # dev_tools/sql/README.md, in the same order. No credentials: the fixture
       # SQL is committed, and the graph fixture is hand-authored with embedding
       # stubbed out precisely so it needs no LLM or embedding endpoint.
-      - name: Seed the fixture databases (pagila, testdb, chinook)
+      - name: Seed the fixture databases (pagila, chinook)
         run: uv run --no-sync python -m dev_tools.seed_fixtures
 
       - name: Migrate the GSF schema
