@@ -14,6 +14,7 @@ import uvicorn
 from gsf.env import load_env
 
 import logging
+import os
 
 logging.basicConfig(
     level=logging.INFO,
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 from gsf.version import get_app_version  # noqa: E402
 from gsf.dal import close_store  # noqa: E402
+from gsf.dal.schema_version import require_current_schema  # noqa: E402
 from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.connections.router import router as connections_router  # noqa: E402
@@ -46,6 +48,15 @@ from gsf.server.model_interchange.router import (  # noqa: E402
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Before anything else: refuse to serve against a schema this build does not
+    # expect. Here rather than in `create_app` deliberately — the OpenAPI spec
+    # generator builds the app with no database at all (see that docstring), so
+    # requiring one to construct it would break the spec check in CI. The
+    # lifespan runs only when the app is actually served, which covers both
+    # documented commands: `python -m gsf.server` and `uvicorn ... --factory`.
+    if os.environ.get("GSF_SKIP_SCHEMA_CHECK") != "1":
+        require_current_schema()
+
     # Kick off the chat worker pool's initial warm spawn at boot. The pool
     # itself is lazy on first use, but eagerly initialising here means the
     # very first chat request doesn't pay a cold start.

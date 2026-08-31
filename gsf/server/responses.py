@@ -164,10 +164,22 @@ class StatusResponse(_Payload):
 
 
 class HealthResponse(_Payload):
-    """Liveness/readiness body — 200 when healthy, 503 when degraded."""
+    """Readiness body — 200 when healthy, 503 when degraded.
+
+    ``postgres`` reports whether the database answers; ``migrations`` whether it
+    holds the revision this build expects. Both matter and they fail
+    independently: a reachable database carrying no tables at all satisfies the
+    first and not the second, and reporting only the first is how a health
+    check comes to say ``ok`` about a server that 500s on every catalog call.
+
+    Named ``migrations`` rather than the more obvious ``schema`` because that
+    name shadows an attribute on Pydantic's ``BaseModel`` and the field would
+    ship with a ``UserWarning`` on every import.
+    """
 
     status: str
     postgres: dict[str, str]
+    migrations: dict[str, str]
 
 
 class SemanticStatusResponse(_Payload):

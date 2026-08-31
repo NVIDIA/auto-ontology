@@ -107,6 +107,14 @@
     "delete_semantic_layer": "(database_name: 'str | None' = None) -> 'int'"
   },
   "schema": {},
+  "schema_version": {
+    "SchemaOutOfDateError": "class(RuntimeError)",
+    "SchemaState": "class(object)",
+    "applied_revision": "() -> 'tuple[str | None, str | None]'",
+    "head_revision": "() -> 'str | None'",
+    "require_current_schema": "() -> 'None'",
+    "schema_state": "() -> 'SchemaState'"
+  },
   "session": {
     "StoreConn": "class(object)",
     "dispose_engine": "() -> 'None'",
