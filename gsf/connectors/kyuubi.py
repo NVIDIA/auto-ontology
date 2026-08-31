@@ -558,7 +558,7 @@ class KyuubiDatabase(SQLDatabase):
                     type(exc).__name__,
                 )
             except Exception as exc:
-                if not is_session_lost(exc):
+                if not is_session_lost(exc, sql):
                     raise
                 logger.info(
                     "Kyuubi rejected the session handle (%s); "

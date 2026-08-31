@@ -68,3 +68,43 @@ def test_accepts_an_exception_as_well_as_a_string() -> None:
 
     assert is_session_lost(error)
     assert is_infrastructure_error(error)
+
+
+# ----------------------------------------------------------------------
+# Markers echoed back inside the caller's own statement
+# ----------------------------------------------------------------------
+
+
+def test_a_marker_in_the_echoed_statement_is_not_a_diagnosis() -> None:
+    """Spark pastes the statement it rejected after ``== SQL ==``.
+
+    A filter on the literal 'connection reset' would otherwise be read as a
+    verdict on the connection, abandoning a query a rewrite could have fixed.
+    """
+    statement = "SELECT * FROM logs WHERE error_msg = 'connection reset'"
+    error = (
+        "org.apache.spark.sql.catalyst.parser.ParseException: "
+        "[PARSE_SYNTAX_ERROR] Syntax error at or near 'FORM'\n"
+        f"== SQL ==\n{statement}"
+    )
+
+    assert not is_infrastructure_error(error, statement)
+    assert not is_infrastructure_error(error), "the delimiter alone should be enough"
+
+
+def test_a_marker_in_an_inline_echo_is_not_a_diagnosis() -> None:
+    """Kyuubi often inlines the statement instead of using the delimiter."""
+    statement = "SELECT id FROM t WHERE msg = 'Invalid SessionHandle'"
+    error = f"Error operating ExecuteStatement: cannot resolve 'msg' in {statement}"
+
+    assert not is_session_lost(error, statement)
+    assert not is_infrastructure_error(error, statement)
+
+
+def test_a_real_diagnosis_survives_an_echoed_statement() -> None:
+    """Stripping the echo must not hide what the server said on its own behalf."""
+    statement = "SELECT activity_type FROM nvdp.nvdp_telemetry_bot.tbl_CodeActivity"
+    error = f"Invalid SessionHandle: deadbeef (while running: {statement})"
+
+    assert is_session_lost(error, statement)
+    assert is_infrastructure_error(error, statement)

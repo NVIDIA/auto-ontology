@@ -56,13 +56,12 @@ def route_sql_validation(state: AgentState) -> str:
     Route based on SQL validation result.
 
     Handles SQL validation attempts and fallback logic:
-    - "unconstructable" if a node already gave up (e.g. the database is
-      unreachable, which no rewrite can fix)
     - "skip_intent_validation" if SQL is valid but reconstruction_count > 5 (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
     - "fallback" after 4 attempts (try constructing from tables)
-    - "unconstructable" after 8 attempts (give up)
+    - "unconstructable" after 8 attempts, or when a node already gave up
+      (e.g. an unreachable database, which no rewrite can fix)
 
     Args:
         state: Current agent state
@@ -88,8 +87,6 @@ def route_sql_validation(state: AgentState) -> str:
         elif attempts < 8:
             return "invalid_sql"
         else:
-            # ">=" rather than "== 8": returning None for a count this function
-            # never expected would fail the run with an opaque routing error.
             logger.error("SQL construction failed after 8 attempts")
             return "unconstructable"
 

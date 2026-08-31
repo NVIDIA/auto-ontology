@@ -34,6 +34,10 @@ _SESSION_LOST_MARKERS = (
     "session not found",
 )
 
+# Spark reports a statement it could not parse by echoing it after this
+# delimiter, and Kyuubi passes that message through untouched.
+_SQL_ECHO_DELIMITER = "== sql =="
+
 # The statement never reached a working engine. Distinct from a lost session in
 # that reopening is not necessarily enough, so these are surfaced rather than
 # retried -- but they are still not something a different query would fix.
@@ -54,21 +58,37 @@ _CONNECTIVITY_MARKERS = (
 )
 
 
-def _text(error: BaseException | str) -> str:
-    return (error if isinstance(error, str) else str(error)).lower()
+def _diagnosis(error: BaseException | str, statement: str | None = None) -> str:
+    """Reduce *error* to what the server said about itself, lowercased.
+
+    The echoed statement is removed first. A marker that appears inside the SQL
+    the caller sent is not a diagnosis: a filter on the literal ``'connection
+    reset'`` says nothing about the connection, and reading it as one would
+    abandon a query that a rewrite could have fixed. Pass *statement* whenever
+    it is known -- an exact echo is far more precise to strip than a guess at
+    where the message ends.
+    """
+    text = (error if isinstance(error, str) else str(error)).lower()
+    text = text.split(_SQL_ECHO_DELIMITER, 1)[0]
+    if statement:
+        text = text.replace(statement.strip().lower(), " ")
+    return text
 
 
-def is_session_lost(error: BaseException | str) -> bool:
+def is_session_lost(error: BaseException | str, statement: str | None = None) -> bool:
     """Whether *error* is the server rejecting a session we think is still open.
 
     Callers use this to reopen and retry once. It deliberately does not cover
     dead sockets: those raise recognisable transport exceptions and are caught
     by type instead.
     """
-    return any(marker in _text(error) for marker in _SESSION_LOST_MARKERS)
+    text = _diagnosis(error, statement)
+    return any(marker in text for marker in _SESSION_LOST_MARKERS)
 
 
-def is_infrastructure_error(error: BaseException | str) -> bool:
+def is_infrastructure_error(
+    error: BaseException | str, statement: str | None = None
+) -> bool:
     """Whether *error* is about reaching the database, not about the SQL.
 
     True for a lost session or a connection that could not be established.
@@ -76,9 +96,9 @@ def is_infrastructure_error(error: BaseException | str) -> bool:
     join, a syntax error -- so a caller that retries on False keeps retrying
     exactly the cases where retrying has a point.
     """
-    text = _text(error)
-    return is_session_lost(text) or any(
-        marker in text for marker in _CONNECTIVITY_MARKERS
+    text = _diagnosis(error, statement)
+    return any(
+        marker in text for marker in _SESSION_LOST_MARKERS + _CONNECTIVITY_MARKERS
     )
 
 

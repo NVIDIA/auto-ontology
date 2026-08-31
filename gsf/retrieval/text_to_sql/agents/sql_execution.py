@@ -113,8 +113,8 @@ class SQLExecutionAgent(BaseAgent):
 
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)
-            path_state["error"] = response_from_db.error
-            if is_infrastructure_error(response_from_db.error):
+            path_state = {**path_state, "error": response_from_db.error}
+            if is_infrastructure_error(response_from_db.error, sql_code):
                 # Rewriting the query cannot reach an unreachable database, so
                 # the reconstruction loop would spend every one of its attempts
                 # re-issuing statements that fail identically and then give up
@@ -124,8 +124,13 @@ class SQLExecutionAgent(BaseAgent):
                     "not attempting reconstruction: %s",
                     response_from_db.error,
                 )
-                path_state["unconstructable_explanation"] = _INFRASTRUCTURE_MESSAGE
-                return {"decision": "unconstructable", "path_state": path_state}
+                return {
+                    "decision": "unconstructable",
+                    "path_state": {
+                        **path_state,
+                        "unconstructable_explanation": _INFRASTRUCTURE_MESSAGE,
+                    },
+                }
             return {"decision": "invalid_sql", "path_state": path_state}
 
         return {

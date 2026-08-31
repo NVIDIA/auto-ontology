@@ -46,12 +46,9 @@ class SQLUnconstructableAgent(BaseAgent):
 
         The explanation goes into ``path_state["final_response"]``, the same
         channel :class:`ResponseAgent` uses, because that is what
-        ``_extract_answer`` reads. Returning it under ``messages`` instead lost
-        it entirely: ``AgentState.messages`` is a list with no reducer, so a
-        bare dict replaced the list, ``_extract_answer``'s ``isinstance(...,
-        list)`` check then failed, and the run finished with an empty response
-        -- which the server declines to persist and the client renders as a
-        generic "something went wrong".
+        ``_extract_answer`` reads. An empty response reaches the user as a
+        generic "something went wrong", and the server declines to persist the
+        turn at all, so this node has to fill that field to say anything.
 
         Args:
             state: Current agent state
