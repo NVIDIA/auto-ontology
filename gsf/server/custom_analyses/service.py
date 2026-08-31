@@ -132,6 +132,8 @@ def create_custom_analysis(
     name: str,
     description: str,
     sql: str,
+    *,
+    embed: bool = True,
 ) -> dict[str, Any]:
     """Create a fresh ``CustomAnalysis`` linked to its ``Sql`` node.
 
@@ -139,6 +141,20 @@ def create_custom_analysis(
     Raises :class:`CustomAnalysisSqlConflict` when ``sql`` is already attached.
     Raises :class:`CustomAnalysisSqlError` when the SQL can't be resolved.
     Returns ``{id, name, description, sql}``.
+
+    *embed* exists for bulk loaders, and defaults to the interactive
+    behaviour. Embedding inline is right when a user creates one analysis --
+    it has to be searchable when the request returns. It is wrong when a
+    seeder creates nineteen: each embed is its own network round trip, so the
+    load costs one latency per analysis (~2s each, ~40s for nineteen)
+    regardless of how little work the database does.
+
+    Passing ``embed=False`` makes the caller responsible for embedding, via
+    :func:`gsf.dal.custom_analyses.embed_custom_analyses` over the whole set.
+    A caller that batches must pass it: embedding here *and* batching
+    afterwards writes every analysis into the semantic index twice, and the
+    index has no uniqueness constraint to catch it -- retrieval simply starts
+    returning the same analysis in two of its top-k slots.
     """
     name_conflict = find_analysis_by_name(name, exclude_id=None)
     if name_conflict is not None:
@@ -164,7 +180,8 @@ def create_custom_analysis(
 
     row = _persist_analysis_with_sql(analysis_node, sql, query_obj)
 
-    _embed_analysis(row["id"])
+    if embed:
+        _embed_analysis(row["id"])
 
     return row
 
