@@ -72,9 +72,6 @@ def test_require_current_schema_raises_with_an_actionable_message() -> None:
     message = str(excinfo.value)
     assert "Refusing to start" in message
     assert "alembic upgrade head" in message
-    # The escape hatch has to be discoverable from the error itself, or the
-    # only way past it is reading the source.
-    assert "GSF_SKIP_SCHEMA_CHECK" in message
 
 
 def test_missing_table_is_distinguished_from_other_failures() -> None:

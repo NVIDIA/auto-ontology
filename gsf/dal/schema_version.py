@@ -165,11 +165,7 @@ def _raise_for(state: SchemaState) -> None:
     that matters — it is the only thing an operator sees — and asserting on it
     should not require standing up a database in each of the failing states.
     """
-    raise SchemaOutOfDateError(
-        f"Refusing to start: {state.detail}\n"
-        "Set GSF_SKIP_SCHEMA_CHECK=1 to start anyway (the catalog endpoints "
-        "will fail until the schema is current)."
-    )
+    raise SchemaOutOfDateError(f"Refusing to start: {state.detail}")
 
 
 def require_current_schema() -> None:

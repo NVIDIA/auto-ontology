@@ -14,7 +14,6 @@ import uvicorn
 from gsf.env import load_env
 
 import logging
-import os
 
 logging.basicConfig(
     level=logging.INFO,
@@ -54,8 +53,7 @@ async def lifespan(_app: FastAPI):
     # requiring one to construct it would break the spec check in CI. The
     # lifespan runs only when the app is actually served, which covers both
     # documented commands: `python -m gsf.server` and `uvicorn ... --factory`.
-    if os.environ.get("GSF_SKIP_SCHEMA_CHECK") != "1":
-        require_current_schema()
+    require_current_schema()
 
     # Kick off the chat worker pool's initial warm spawn at boot. The pool
     # itself is lazy on first use, but eagerly initialising here means the

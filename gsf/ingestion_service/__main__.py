@@ -36,6 +36,7 @@ from gsf.env import load_env
 
 load_env()
 
+from gsf.dal.schema_version import require_current_schema  # noqa: E402
 from gsf.ingestion_service.config import (  # noqa: E402
     is_semantic_compilation_enabled,
 )
@@ -49,6 +50,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Same gate as the API server: this service writes the catalog, so against a
+    # schema it does not expect every ingest fails partway through instead of
+    # not starting. Worse here than there, because a scheduler runs unattended —
+    # nobody is watching a request come back 500, so the failure surfaces as an
+    # empty catalog hours later.
+    require_current_schema()
+
     # uvicorn owns SIGINT/SIGTERM; each scheduler exposes a stop() that unwinds
     # its in-flight wait promptly on shutdown. Schedulers are stored on
     # app.state so the router can trigger them on demand.
