@@ -126,8 +126,20 @@ USER gsf
 
 EXPOSE 3001
 
+# `/api/health/live`, not `/api/health`. The latter is the *readiness* probe:
+# it queries Postgres and returns 503 when the database is unreachable. Docker
+# has no notion of readiness -- HEALTHCHECK produces one binary container state
+# -- so pointing it there makes a database blip mark this container unhealthy,
+# and anything gating on `condition: service_healthy` (the frontend, in
+# docker-compose.yml) then refuses to start behind a backend that is running
+# perfectly well.
+#
+# Restarting this process cannot fix an unreachable database, which is the whole
+# reason the health router splits the two and the Helm chart points its
+# livenessProbe at /api/health/live and only its readinessProbe at /api/health.
+# Readiness stays available on /api/health for the things that can act on it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{__import__(\"os\").environ.get(\"PORT\",\"3001\")}/api/health', timeout=3).status == 200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{__import__(\"os\").environ.get(\"PORT\",\"3001\")}/api/health/live', timeout=3).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["server"]

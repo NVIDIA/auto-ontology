@@ -74,7 +74,7 @@ services:
     command: ["ingestion_service"]
     ports:
       - "3002:3002"
-    # The image healthcheck targets the backend (:3001/api/health);
+    # The image healthcheck targets the backend (:3001/api/health/live);
     # the ingestion service serves /health on :3002.
     healthcheck:
       test:
