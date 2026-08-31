@@ -72,9 +72,10 @@ NAMING_CONVENTION = {
 # metadata reports ``referent_schema='public'`` for every foreign key while
 # reflection reports the default schema as ``None``, so Alembic sees 33 changed
 # constraints and proposes dropping and recreating all of them, on every run,
-# forever. Leaving it unset makes both sides agree. Placement is guaranteed by
-# the ``search_path`` pinned on every connection (see ``gsf/dal/session.py``),
-# not by luck.
+# forever. Leaving it unset makes both sides agree. Placement is then decided by
+# ``search_path``, which ``get_engine`` pins to ``public`` on every connection
+# (see ``gsf/dal/session.py``) -- so it is guaranteed there, not here, and not
+# by luck.
 METADATA = MetaData(naming_convention=NAMING_CONVENTION)
 
 #: ``gen_random_uuid()`` is built into Postgres from 13; no pgcrypto needed.

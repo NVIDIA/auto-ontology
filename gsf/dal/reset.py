@@ -30,7 +30,7 @@ from dataclasses import dataclass
 from sqlalchemy import delete, select, union
 
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.vdb import get_data_vdb, get_semantic_vdb
 
 logger = logging.getLogger(__name__)
@@ -193,6 +193,13 @@ def delete_semantic_layer(database_name: str | None = None) -> int:
     Returns the number of **pgvector rows** deleted, not database rows — the
     caller reports it as "embeddings removed". The row count is logged.
     """
+    with write_transaction():
+        _delete_semantic_rows(database_name)
+    return _delete_semantic_vectors(database_name)
+
+
+def _delete_semantic_rows(database_name: str | None) -> int:
+    """The transactional half: semantic rows only, no embeddings."""
     if database_name is None:
         deleted = _delete_all_semantic()
     else:
@@ -202,7 +209,18 @@ def delete_semantic_layer(database_name: str | None = None) -> int:
         deleted,
         database_name or "<all>",
     )
+    return deleted
 
+
+def _delete_semantic_vectors(database_name: str | None) -> int:
+    """The non-transactional half.
+
+    pgvector lives in its own schema behind ``langchain_postgres``, on its own
+    connection, so it cannot join the DAL's transaction. Run after the rows
+    commit rather than before: a vector whose row is gone is dead weight the
+    next embed pass overwrites, whereas a row whose vector is gone is a hit
+    retrieval can no longer explain.
+    """
     semantic_vdb = get_semantic_vdb()
     if database_name is None:
         semantic_deleted = semantic_vdb.delete_all()
@@ -217,7 +235,7 @@ def delete_semantic_layer(database_name: str | None = None) -> int:
     return semantic_deleted
 
 
-def _delete_orphaned_statements() -> int:
+def _delete_orphaned_statements(candidate_ids: list[str] | None = None) -> int:
     """Delete ``sql_query`` rows nothing references any more.
 
     "Orphan" is defined as having no link left in *any* of the four tables that
@@ -225,6 +243,17 @@ def _delete_orphaned_statements() -> int:
     statement can also be owned by a SqlAttribute or a CustomAnalysis, and those
     survive a data-layer reset — deleting on the catalog links alone would take
     the semantic tier's statements with it.
+
+    *candidate_ids* narrows the sweep to statements the caller just unlinked.
+    Without it this is a **global** delete of every unreferenced statement, and
+    a statement is unreferenced for a moment during any ingest: ``add_query``
+    inserts the ``sql_query`` row before its links, so a scoped reset running
+    concurrently with an ingest of a *different* database would delete that
+    in-flight row and the ingest would fail on a vanished foreign key. Scoped,
+    the sweep can only touch rows the reset itself orphaned.
+
+    ``None`` keeps the global behaviour, which is what a whole-store reset
+    wants — there is no other database left to race with.
     """
     referenced = union(
         select(s.sql_query_table.c.sql_query_id),
@@ -232,13 +261,12 @@ def _delete_orphaned_statements() -> int:
         select(s.sql_attribute_sql.c.sql_query_id),
         select(s.custom_analysis_sql.c.sql_query_id),
     )
-    removed = len(
-        store().query_write(
-            delete(s.sql_query)
-            .where(s.sql_query.c.id.not_in(referenced))
-            .returning(s.sql_query.c.id)
-        )
-    )
+    statement = delete(s.sql_query).where(s.sql_query.c.id.not_in(referenced))
+    if candidate_ids is not None:
+        if not candidate_ids:
+            return 0
+        statement = statement.where(s.sql_query.c.id.in_(candidate_ids))
+    removed = len(store().query_write(statement.returning(s.sql_query.c.id)))
     if removed:
         logger.info("delete_data_layer: removed %d orphaned statement rows", removed)
     return removed
@@ -246,6 +274,18 @@ def _delete_orphaned_statements() -> int:
 
 def delete_data_layer(database_name: str | None = None) -> int:
     """Delete a database's catalog rows and its pgvector embeddings.
+
+    Returns the number of pgvector rows deleted. The row deletes run as one
+    transaction; the embeddings follow it, for the reason given on
+    :func:`_delete_semantic_vectors`.
+    """
+    with write_transaction():
+        _delete_data_rows(database_name)
+    return _delete_data_vectors(database_name)
+
+
+def _delete_data_rows(database_name: str | None = None) -> int:
+    """The transactional half: catalog rows and the statements they orphaned.
 
     One ``DELETE`` on ``catalog_database``. Schemas, tables, columns, foreign
     keys, joins, statement links and zone targets all follow by cascade — which
@@ -260,6 +300,33 @@ def delete_data_layer(database_name: str | None = None) -> int:
 
     Returns the number of pgvector rows deleted.
     """
+    # The statements this database's tables reference, captured *before* the
+    # cascade removes those links — afterwards there is no way back to them.
+    candidates: list[str] | None = None
+    if database_name is not None:
+        candidates = [
+            row["sql_query_id"]
+            for row in store().query_read(
+                select(s.sql_query_table.c.sql_query_id)
+                .select_from(
+                    s.sql_query_table.join(
+                        s.catalog_table,
+                        s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                    )
+                    .join(
+                        s.catalog_schema,
+                        s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                    )
+                    .join(
+                        s.catalog_database,
+                        s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                    )
+                )
+                .where(s.catalog_database.c.name == database_name)
+                .distinct()
+            )
+        ]
+
     statement = delete(s.catalog_database)
     if database_name is not None:
         statement = statement.where(s.catalog_database.c.name == database_name)
@@ -269,8 +336,12 @@ def delete_data_layer(database_name: str | None = None) -> int:
         deleted,
         database_name or "<all>",
     )
-    _delete_orphaned_statements()
+    _delete_orphaned_statements(candidates)
+    return deleted
 
+
+def _delete_data_vectors(database_name: str | None) -> int:
+    """The non-transactional half — see :func:`_delete_semantic_vectors`."""
     data_vdb = get_data_vdb()
     if database_name is None:
         data_deleted = data_vdb.delete_all()
@@ -293,8 +364,21 @@ def delete_all_data(database_name: str | None = None) -> ResetResult:
     first and those links are already gone, so the semantic pass would find
     nothing to scope and leave every Term behind.
     """
-    semantic_rows = delete_semantic_layer(database_name)
-    data_rows = delete_data_layer(database_name)
+    # Both layers in one transaction. Previously each delete autocommitted, so
+    # a failure part-way through left the semantic layer gone and the catalog
+    # intact -- and the semantic layer is user-authored, so nothing recompiles
+    # it. That is exactly the half-state this function's ordering rule exists
+    # to avoid, and the ordering alone could not prevent it.
+    with write_transaction():
+        _delete_semantic_rows(database_name)
+        _delete_data_rows(database_name)
+
+    # Outside the transaction on purpose: pgvector is reached over its own
+    # connection and cannot be rolled back with the rows. Doing it after the
+    # commit means a crash here leaves orphaned vectors, which the next embed
+    # pass overwrites -- the tolerable direction of the two.
+    semantic_rows = _delete_semantic_vectors(database_name)
+    data_rows = _delete_data_vectors(database_name)
 
     result = ResetResult(
         database_name=database_name,

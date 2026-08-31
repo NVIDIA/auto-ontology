@@ -25,17 +25,20 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import (
     ColumnElement,
+    Text,
     and_,
     case,
+    column,
     distinct,
     func,
     literal,
     select,
     update,
 )
+from sqlalchemy import values as sa_values
 
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr, table_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
@@ -522,60 +525,95 @@ def apply_metadata_batch(
 
     ``coalesce(new, existing)``, and the direction matters: a curated
     description survives a batch that has nothing to say about it.
-    """
-    for row in table_rows or []:
-        store().query_write(
-            update(s.catalog_table)
-            .where(
-                and_(
-                    s.catalog_table.c.name == row["table_name"],
-                    s.catalog_table.c.schema_id.in_(
-                        select(s.catalog_schema.c.id)
-                        .select_from(
-                            s.catalog_schema.join(
-                                s.catalog_database,
-                                s.catalog_schema.c.database_id
-                                == s.catalog_database.c.id,
-                            )
-                        )
-                        .where(s.catalog_database.c.name == database_name)
-                    ),
-                )
-            )
-            .values(
-                description=func.coalesce(
-                    row.get("description"), s.catalog_table.c.description
-                )
-            )
-        )
 
-    for row in column_rows or []:
-        store().query_write(
-            update(s.catalog_column)
-            .where(
-                and_(
-                    s.catalog_column.c.name == row["column_name"],
-                    s.catalog_column.c.table_id.in_(
-                        select(s.catalog_table.c.id)
-                        .select_from(_table_join())
-                        .where(
-                            and_(
-                                s.catalog_database.c.name == database_name,
-                                s.catalog_table.c.name == row["table_name"],
+    Two statements, both ``UPDATE ... FROM (VALUES ...)``, in one transaction.
+    A row-at-a-time loop was one autocommitted round trip per table *and* per
+    column -- thousands for a warehouse-sized profiling run, each paying the
+    network latency in full, and each leaving a partial batch behind for good
+    if the run died halfway. The set-based form also evaluates the
+    database-scoping subquery once instead of once per row.
+
+    Note this makes a duplicated key within one batch indeterminate rather than
+    last-wins: Postgres updates a target row at most once per statement, so of
+    two rows naming the same column, one is applied and the other dropped.
+    Callers build these from a catalog read, where the names are already unique.
+    """
+    with write_transaction():
+        if table_rows:
+            incoming = sa_values(
+                column("table_name", Text),
+                column("description", Text),
+                name="incoming",
+            ).data([(row["table_name"], row.get("description")) for row in table_rows])
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    and_(
+                        s.catalog_table.c.name == incoming.c.table_name,
+                        s.catalog_table.c.schema_id.in_(
+                            select(s.catalog_schema.c.id)
+                            .select_from(
+                                s.catalog_schema.join(
+                                    s.catalog_database,
+                                    s.catalog_schema.c.database_id
+                                    == s.catalog_database.c.id,
+                                )
                             )
-                        )
+                            .where(s.catalog_database.c.name == database_name)
+                        ),
+                    )
+                )
+                .values(
+                    description=func.coalesce(
+                        incoming.c.description, s.catalog_table.c.description
+                    )
+                )
+            )
+
+        if column_rows:
+            incoming = sa_values(
+                column("table_name", Text),
+                column("column_name", Text),
+                column("description", Text),
+                column("sample_values", Text),
+                name="incoming",
+            ).data(
+                [
+                    (
+                        row["table_name"],
+                        row["column_name"],
+                        row.get("description"),
+                        row.get("sample_values"),
+                    )
+                    for row in column_rows
+                ]
+            )
+            store().query_write(
+                update(s.catalog_column)
+                .where(
+                    and_(
+                        s.catalog_column.c.name == incoming.c.column_name,
+                        s.catalog_column.c.table_id.in_(
+                            select(s.catalog_table.c.id)
+                            .select_from(_table_join())
+                            .where(
+                                and_(
+                                    s.catalog_database.c.name == database_name,
+                                    s.catalog_table.c.name == incoming.c.table_name,
+                                )
+                            )
+                        ),
+                    )
+                )
+                .values(
+                    description=func.coalesce(
+                        incoming.c.description, s.catalog_column.c.description
+                    ),
+                    sample_values=func.coalesce(
+                        incoming.c.sample_values, s.catalog_column.c.sample_values
                     ),
                 )
             )
-            .values(
-                description=func.coalesce(
-                    row.get("description"), s.catalog_column.c.description
-                ),
-                sample_values=func.coalesce(
-                    row.get("sample_values"), s.catalog_column.c.sample_values
-                ),
-            )
-        )
 
 
 # ---------------------------------------------------------------------------

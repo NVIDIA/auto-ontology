@@ -15,8 +15,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import and_, bindparam, func, literal, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Text, all_, and_, any_, bindparam, func, literal, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 
 from gsf.dal import schema as s
 from gsf.dal.datasources import fetch_col_table_contexts
@@ -524,9 +524,22 @@ def fetch_column_attribute_columns_map(
 # ---------------------------------------------------------------------------
 
 #: One BFS level: every node reachable in one edge from the frontier, minus the
-#: nodes already seen. Compiled once; the frontier and visited set are bound per
-#: call. Two round trips per level would be needed to do the exclusion in
-#: Python, and the visited set is small enough to send.
+#: nodes already seen. Two round trips per level would be needed to do the
+#: exclusion in Python, so both sets are sent.
+#:
+#: They go as **two array parameters**, ``= ANY(:frontier)`` and
+#: ``<> ALL(:visited)``, rather than as ``IN``/``NOT IN`` over expanding
+#: bindparams. Expanding bindparams render one placeholder per element, so the
+#: parameter count grows with the reachable component -- and the visited set
+#: only ever grows, one level feeding the next. On a hub attribute like
+#: ``customer id``, fanning out across hundreds of columns, that means a SQL
+#: string of a different shape on every level (so a fresh parse and plan each
+#: time, and the statement cache never hits) and, far enough out, Postgres'
+#: 65535-parameter ceiling. Passing arrays makes the statement one fixed shape
+#: with two parameters, whatever the search costs.
+#:
+#: ``= ANY(array)`` is still an index lookup on ``src_id``; this trades nothing
+#: away for it.
 _EXPAND_LEVEL = (
     select(
         s.join_path_edge.c.src_kind,
@@ -535,8 +548,8 @@ _EXPAND_LEVEL = (
         s.join_path_edge.c.dst_id,
     )
     .where(
-        s.join_path_edge.c.src_id.in_(bindparam("frontier", expanding=True)),
-        s.join_path_edge.c.dst_id.notin_(bindparam("visited", expanding=True)),
+        s.join_path_edge.c.src_id == any_(bindparam("frontier", type_=ARRAY(Text))),
+        s.join_path_edge.c.dst_id != all_(bindparam("visited", type_=ARRAY(Text))),
     )
     .distinct()
 )

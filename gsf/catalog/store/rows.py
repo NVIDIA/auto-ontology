@@ -31,7 +31,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import and_, select
+from sqlalchemy import Text, and_, literal, select
 from sqlalchemy.dialects.postgresql import insert
 
 from gsf.catalog.store import registry
@@ -50,8 +50,23 @@ def _natural_key_predicate(
             if spec.parent_column is None:
                 raise ValueError(f"{spec.label} has no parent column to match on")
             clauses.append(spec.table.c[spec.parent_column] == parent_id)
+            continue
+
+        column = spec.table.c[part]
+        value = values.get(part)
+        transform = spec.key_expressions.get(part)
+        if transform is not None and value is not None:
+            # Both sides through the same function, so the expression index is
+            # usable -- Postgres matches an expression index syntactically, and
+            # `col = $1` does not match an index on `md5(col)`. The `md5` on the
+            # bind side is a per-row cost, not a per-table one.
+            #
+            # `value is not None` because `md5(NULL) = md5(NULL)` is NULL, not
+            # true; the direct comparison below renders `IS NULL`, which is what
+            # a caller matching on a missing value means.
+            clauses.append(transform(column) == transform(literal(value, Text)))
         else:
-            clauses.append(spec.table.c[part] == values.get(part))
+            clauses.append(column == value)
     return and_(*clauses)
 
 
@@ -147,7 +162,22 @@ def upsert_row(
         rows = store().query_write(statement.returning(spec.table.c.id))
         if rows:
             return rows[0]["id"]
-        return resolve_id(label, match_props, parent_id=parent_id)
+        # No RETURNING row means DO NOTHING fired: someone else won the race
+        # and their row is the one that exists. Read it back.
+        raced_id = resolve_id(label, match_props, parent_id=parent_id)
+        if raced_id is None:
+            # Not reachable through a race -- the conflict proves a row is
+            # there. It means the natural key cannot find what the conflict
+            # target matched, i.e. the two disagree in the registry. Returning
+            # None here would satisfy the `-> str` annotation in name only and
+            # surface as a NOT NULL violation on the *next* insert, pointing at
+            # an innocent child row.
+            raise RuntimeError(
+                f"{label}: insert conflicted but the row is not resolvable by "
+                f"its natural key {sorted(spec.natural_key)} -- the ON CONFLICT "
+                "target and the natural key disagree"
+            )
+        return raced_id
 
     incoming_id = properties.get("id")
     if incoming_id and incoming_id != existing_id:

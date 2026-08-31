@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from sqlalchemy import delete, literal, select
 
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
@@ -419,13 +419,20 @@ def delete_custom_analysis_node(analysis_id: str) -> None:
     owned = select(s.custom_analysis_sql.c.sql_query_id).where(
         s.custom_analysis_sql.c.analysis_id == analysis_id
     )
-    sql_ids = [r["sql_query_id"] for r in store().query_read(owned)]
 
-    store().query_write(
-        delete(s.custom_analysis).where(s.custom_analysis.c.id == analysis_id)
-    )
-    if sql_ids:
-        store().query_write(delete(s.sql_query).where(s.sql_query.c.id.in_(sql_ids)))
+    # One unit: deleting the analysis first drops the link rows by cascade, so
+    # a failure before the second delete loses the only route back to those
+    # statements. They then survive as exactly the unreachable rows this
+    # function exists to prevent.
+    with write_transaction():
+        sql_ids = [r["sql_query_id"] for r in store().query_read(owned)]
+        store().query_write(
+            delete(s.custom_analysis).where(s.custom_analysis.c.id == analysis_id)
+        )
+        if sql_ids:
+            store().query_write(
+                delete(s.sql_query).where(s.sql_query.c.id.in_(sql_ids))
+            )
 
 
 # ---------------------------------------------------------------------------

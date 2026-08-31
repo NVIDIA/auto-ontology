@@ -7,8 +7,10 @@
 import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+from itertools import repeat
 from gsf.catalog.normalize import chunks
 from gsf.catalog.store.schemas import (
+    PendingRows,
     add_schemas_edge,
     merge_schema_edges,
     merge_schema_nodes,
@@ -19,8 +21,8 @@ from gsf.catalog.model.schema import Schema
 logger = logging.getLogger(__name__)
 
 
-def add_table(table_edges):
-    merge_schema_edges(table_edges, Labels.TABLE, Labels.COLUMN)
+def add_table(table_edges, pending: PendingRows):
+    merge_schema_edges(table_edges, Labels.TABLE, Labels.COLUMN, pending)
 
 
 def add_schema(
@@ -35,6 +37,10 @@ def add_schema(
     remaining nodes - the latest_timestamp will be updated.
     missing nodes - the property delete=True will be added to these nodes.
     """
+    # Scoped to this call: the column rows staged below are claimed by the edge
+    # passes further down, and anything left over dies with this frame.
+    pending = PendingRows()
+
     try:
         db_schema_edge = schema.get_db_schema_edge()
         add_schemas_edge(db_schema_edge, latest_timestamp)
@@ -65,11 +71,11 @@ def add_schema(
             )
         )
         for table_column_nodes in table_column_nodes_chunks:
-            merge_schema_nodes(table_column_nodes, latest_timestamp)
+            merge_schema_nodes(table_column_nodes, latest_timestamp, pending)
 
         edges_chunks = list(chunks(schema.get_schema_to_tables_edges(), 500))
         for edges in edges_chunks:
-            merge_schema_edges(edges, Labels.SCHEMA, Labels.TABLE)
+            merge_schema_edges(edges, Labels.SCHEMA, Labels.TABLE, pending)
 
         edges_per_table = schema.get_edges_per_table()
         with ThreadPoolExecutor(num_workers) as executor:
@@ -77,7 +83,7 @@ def add_schema(
             # its future and re-raised only when consumed. Left unconsumed,
             # every failure to write a table's columns is discarded in silence
             # and this function reports success having written nothing.
-            list(executor.map(add_table, edges_per_table))
+            list(executor.map(add_table, edges_per_table, repeat(pending)))
 
     except Exception as err:
         logger.error(f"Failed adding schema: {schema.get_schema_name()}")

@@ -40,7 +40,9 @@ relational vocabulary a *relation* is a table — the opposite of what is meant.
 
 from __future__ import annotations
 
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
+from typing import Any
 
 from sqlalchemy import Table, func
 
@@ -74,6 +76,13 @@ class EntitySpec:
     #: limit — so the conflict target has to name the same expression or
     #: Postgres cannot match it to an index.
     conflict_expression: object | None = None
+    #: Natural-key parts compared through a function instead of directly, for
+    #: the same reason as ``conflict_expression`` and it must agree with it: an
+    #: index on ``md5(sql_full_query)`` cannot serve ``sql_full_query = $1``.
+    #: Postgres falls back to a sequential scan, which turns statement ingest
+    #: quadratic -- every upsert reads the whole table, and query ingestion
+    #: fans that out across a thread pool.
+    key_expressions: Mapping[str, Callable[[Any], Any]] = field(default_factory=dict)
 
 
 def _cols(table: Table) -> frozenset[str]:
@@ -117,6 +126,7 @@ ENTITIES: dict[str, EntitySpec] = {
         columns=_cols(s.sql_query),
         natural_key=("sql_full_query",),
         conflict_expression=func.md5(s.sql_query.c.sql_full_query),
+        key_expressions={"sql_full_query": func.md5},
     ),
     Labels.CUSTOM_ANALYSIS: EntitySpec(
         label=Labels.CUSTOM_ANALYSIS,

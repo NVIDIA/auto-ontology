@@ -26,6 +26,7 @@ from gsf.catalog.store.schemas import (
     reset_pks,
 )
 from gsf.catalog.services.schema import add_schema
+from gsf.dal.session import write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -145,14 +146,25 @@ def populate_db(tables_df, columns_df, database, num_workers):
 def populate_fks(fks, database_name: str):
     logger.info("Adding FKs.")
     last_seen = datetime.now(timezone.utc)
-    add_fks(fks, last_seen, database_name)
-    delete_old_fks(last_seen, database_name)
+    # One unit: between the insert and the sweep, the catalog holds both the
+    # new FKs and the superseded ones. Failing there is less destructive than
+    # the pk case below -- a re-ingest corrects it -- but the window is the
+    # same and so is the fix.
+    with write_transaction():
+        add_fks(fks, last_seen, database_name)
+        delete_old_fks(last_seen, database_name)
 
 
 def populate_pks(pks, database_name: str):
     logger.info("Adding PKs.")
-    reset_pks(database_name)
-    add_pks(pks, database_name)
+    # `reset_pks` NULLs the pk of every table in the database before `add_pks`
+    # writes the new ones. Autocommitted separately, a failure in between --
+    # a dropped connection, a bad row -- leaves *every* table with pk = NULL
+    # and nothing to recover it but a full re-ingest. The prediction graph keys
+    # its entities on pk, so those tables silently stop being usable.
+    with write_transaction():
+        reset_pks(database_name)
+        add_pks(pks, database_name)
 
 
 def _update_schema(schema, latest_timestamp):

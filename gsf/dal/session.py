@@ -44,12 +44,14 @@ from gsf.infra.postgres import get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
-# GSF's tables are unqualified and live in the connection's default schema
-# (`public`, unless a deployment changes the role's search_path). There is
-# deliberately no schema constant: naming the default schema is what produced
-# permanent autogenerate drift and made Alembic stop recognising its own version
-# table, and a name that appears in one place inevitably has to be repeated in
-# every raw query, view definition, ops probe and chart comment.
+# GSF's tables are unqualified and resolve through `search_path`, which
+# `get_engine` pins to `public` on every connection. There is deliberately no
+# schema constant: naming the default schema is what produced permanent
+# autogenerate drift and made Alembic stop recognising its own version table,
+# and a name that appears in one place inevitably has to be repeated in every
+# raw query, view definition, ops probe and chart comment. The pin is the one
+# exception, and it is an assertion about the connection rather than a name the
+# model reads.
 
 _engine: Engine | None = None
 _active: ContextVar[StoreConn | None] = ContextVar("_active_pg_conn", default=None)
@@ -102,7 +104,32 @@ def get_engine() -> Engine:
             #
             # 3 seconds to match every other Postgres consumer in the repo
             # (gsf/server/chat/*_dal.py, gsf/ingestion_service/history.py).
-            connect_args={"connect_timeout": 3},
+            #
+            # `search_path` is pinned here, per connection, and not inherited.
+            # Every table in this metadata is unqualified, so `search_path` is
+            # the only thing deciding where a query lands, and the default is
+            # `"$user", public` -- where `"$user"` is inert only for as long as
+            # no schema shares the role's name. Create one and every unqualified
+            # statement silently retargets to it; that is not hypothetical, it
+            # is what happened when GSF's tables lived in a `gsf` schema.
+            #
+            # `alembic/env.py` issues an `ALTER ROLE ... SET search_path` too,
+            # but that is not this guarantee and cannot stand in for it: it
+            # applies to whichever role runs the migration, which need not be
+            # the role the application connects as, and it deliberately swallows
+            # `insufficient_privilege` -- so on a managed database it may have
+            # done nothing at all, silently. This pin needs no privileges and
+            # covers the connections that actually serve requests.
+            #
+            # Safe to hardcode: `public` is the default anyway, and the two
+            # other schemas in the database are reached by owners that name
+            # theirs explicitly -- Prisma through `?schema=frontend` in its own
+            # URL, langchain_postgres through the `vdb` it is handed. Neither
+            # goes through this engine.
+            connect_args={
+                "connect_timeout": 3,
+                "options": "-c search_path=public",
+            },
             future=True,
         )
     return _engine

@@ -29,8 +29,8 @@ from __future__ import annotations
 import logging
 
 import pandas as pd
-from sqlalchemy import distinct, func, select, update
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import Text, cast, distinct, func, literal, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 
 from gsf.catalog.constants import Edges, Props
 from gsf.catalog.model.node import CatalogNode
@@ -43,7 +43,7 @@ from gsf.catalog.query_stats import (  # noqa: F401
 from gsf.catalog.store import registry
 from gsf.catalog.store.rows import upsert_row
 from gsf.dal import schema as s
-from gsf.dal.session import store
+from gsf.dal.session import store, write_transaction
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,14 @@ def add_query(edges) -> None:
 
 
 def _write_link(source: CatalogNode, target: CatalogNode, properties: dict) -> None:
-    """Upsert both endpoint rows and the association between them."""
+    """Upsert both endpoint rows and the association between them.
+
+    All three writes are one unit. Committed separately, a failure on the
+    association leaves two endpoint rows with nothing joining them -- which no
+    reader here can detect, because every read starts from the link and a
+    missing one is indistinguishable from a statement that never referenced
+    that table.
+    """
     for endpoint in (source, target):
         _reject_nested(endpoint.get_properties())
         if endpoint.get_override_existing_props():
@@ -129,47 +136,48 @@ def _write_link(source: CatalogNode, target: CatalogNode, properties: dict) -> N
         _link_kind(properties), source.get_label(), target.get_label()
     )
 
-    source_id = upsert_row(
-        source.get_label(),
-        source.get_match_props(),
-        source.get_properties(),
-        on_match=source.get_override_existing_props() or {},
-    )
-    # For a foreign key link the child's row *carries* the relationship, so the
-    # parent id goes in with the child rather than as a separate write.
-    target_id = upsert_row(
-        target.get_label(),
-        target.get_match_props(),
-        target.get_properties(),
-        parent_id=source_id if spec.is_parent_link else None,
-        on_match=target.get_override_existing_props() or {},
-    )
-
-    if spec.is_parent_link:
-        return
-
-    values = {spec.source_column: source_id, spec.target_column: target_id}
-    payload = {k: v for k, v in properties.items() if k in spec.property_columns}
-    values.update(payload)
-
-    statement = insert(spec.table).values(**values)
-    conflict = [spec.source_column, spec.target_column]
-    if not payload:
-        statement = statement.on_conflict_do_nothing(index_elements=conflict)
-    else:
-        updates = {}
-        for key, value in payload.items():
-            column = spec.table.c[key]
-            if key in _ACCUMULATING:
-                # Append, then de-duplicate: re-ingesting the same statement
-                # must not grow the array without bound.
-                updates[key] = _dedupe(column + getattr(statement.excluded, key))
-            else:
-                updates[key] = getattr(statement.excluded, key)
-        statement = statement.on_conflict_do_update(
-            index_elements=conflict, set_=updates
+    with write_transaction():
+        source_id = upsert_row(
+            source.get_label(),
+            source.get_match_props(),
+            source.get_properties(),
+            on_match=source.get_override_existing_props() or {},
         )
-    store().query_write(statement)
+        # For a foreign key link the child's row *carries* the relationship, so
+        # the parent id goes in with the child rather than as a separate write.
+        target_id = upsert_row(
+            target.get_label(),
+            target.get_match_props(),
+            target.get_properties(),
+            parent_id=source_id if spec.is_parent_link else None,
+            on_match=target.get_override_existing_props() or {},
+        )
+
+        if spec.is_parent_link:
+            return
+
+        values = {spec.source_column: source_id, spec.target_column: target_id}
+        payload = {k: v for k, v in properties.items() if k in spec.property_columns}
+        values.update(payload)
+
+        statement = insert(spec.table).values(**values)
+        conflict = [spec.source_column, spec.target_column]
+        if not payload:
+            statement = statement.on_conflict_do_nothing(index_elements=conflict)
+        else:
+            updates = {}
+            for key, value in payload.items():
+                column = spec.table.c[key]
+                if key in _ACCUMULATING:
+                    # Append, then de-duplicate: re-ingesting the same statement
+                    # must not grow the array without bound.
+                    updates[key] = _dedupe(column + getattr(statement.excluded, key))
+                else:
+                    updates[key] = getattr(statement.excluded, key)
+            statement = statement.on_conflict_do_update(
+                index_elements=conflict, set_=updates
+            )
+        store().query_write(statement)
 
 
 def _dedupe(array):
@@ -184,15 +192,45 @@ def _dedupe(array):
     inline instead makes SQLAlchemy infer the FROM from the array expression
     and emit ``FROM column_union, column_union AS excluded``, which Postgres
     rejects.
+
+    The ``coalesce`` guards a case that is unreachable today but cheap to hold
+    shut. ``array_agg`` over *zero* rows returns ``NULL``, not ``'{}'``, and
+    ``refs`` is ``NOT NULL``, so an empty accumulated array would abort the
+    ingest on the *second* pass over a link -- the first inserts, only the
+    second reaches ON CONFLICT:
+
+        null value in column "refs" of relation "column_join"
+        violates not-null constraint
+
+    Nothing produces an empty one now: both writers are in ``sql_parse`` and
+    each emits exactly one ``"<sql id>|<condition>"``. But that is a property
+    of a caller two modules away, it is not checked anywhere, and the cost of
+    not relying on it is one ``coalesce``.
+
+    Only the aggregate needs guarding. ``refs`` is ``NOT NULL`` on both tables
+    that have it, so the concatenation's operands cannot be ``NULL`` and
+    ``NULL || anything`` never arises.
     """
     return select(
-        func.array_agg(distinct(func.unnest(array).column_valued("ref")))
+        func.coalesce(
+            func.array_agg(distinct(func.unnest(array).column_valued("ref"))),
+            cast(literal([]), ARRAY(Text)),
+        )
     ).scalar_subquery()
 
 
 def get_sql_by_full_query(sql_full_query: str):
+    """The statement's id, or None.
+
+    Matched through ``md5`` on both sides so the ``uq_sql_query_text_md5``
+    expression index applies; comparing the column directly is a sequential
+    scan. See ``registry.EntitySpec.key_expressions``.
+    """
     rows = store().query_read(
-        select(s.sql_query.c.id).where(s.sql_query.c.sql_full_query == sql_full_query)
+        select(s.sql_query.c.id).where(
+            func.md5(s.sql_query.c.sql_full_query)
+            == func.md5(literal(sql_full_query, Text))
+        )
     )
     return rows[0]["id"] if rows else None
 
