@@ -10,7 +10,15 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # Not just `gsf/**`: the fixtures, the migrations and the lockfile all
+      # change what the suite does, and a green run that skipped them because
+      # only `alembic/` changed would be worthless.
       - 'gsf/**'
+      - 'dev_tools/**'
+      - 'alembic/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-python.yml'
 
 jobs:
   lint_and_format:
@@ -26,14 +34,14 @@ jobs:
       - name: Ruff lint
         uses: astral-sh/ruff-action@v3
         with:
-          version: '0.15.9'
+          version: '0.16.5'
           args: check
           src: './gsf'
 
       - name: Ruff format check
         uses: astral-sh/ruff-action@v3
         with:
-          version: '0.15.9'
+          version: '0.16.5'
           args: format --check
           src: './gsf'
 
@@ -80,3 +88,86 @@ jobs:
           cache-from: type=gha,scope=server
           cache-to: type=gha,mode=max,scope=server
           provenance: false
+
+  tests:
+    name: Pytest (with Postgres fixtures)
+    runs-on: ubuntu-latest
+
+    # pgvector, not plain postgres: the vector store creates its collections
+    # with `CREATE EXTENSION vector`, and `stock postgres` fails there in a way
+    # that looks like a GSF bug. Pinned to the same tag as docker-compose.yml so
+    # CI and a developer's laptop disagree about nothing.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: gsf
+          POSTGRES_PASSWORD: gsf
+          POSTGRES_DB: gsf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U gsf -d gsf"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      POSTGRES_HOST: localhost
+      POSTGRES_PORT: '5432'
+      POSTGRES_USER: gsf
+      POSTGRES_PASSWORD: gsf
+      POSTGRES_DATABASE: gsf
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # Everything below is the documented local setup from
+      # dev_tools/sql/README.md, in the same order. No credentials: the fixture
+      # SQL is committed, and the graph fixture is hand-authored with embedding
+      # stubbed out precisely so it needs no LLM or embedding endpoint.
+      - name: Seed the fixture databases (pagila, testdb, chinook)
+        run: uv run --no-sync python -m dev_tools.seed_fixtures
+
+      - name: Migrate the GSF schema
+        run: uv run --no-sync alembic upgrade head
+
+      - name: Seed the deterministic graph fixture
+        env:
+          CONNECTION_STRINGS: >-
+            postgresql://gsf:gsf@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/sql/chinook.sqlite
+        run: uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+
+      # `-p no:randomly` is not set and no `-x`: the point of this job is the
+      # whole picture, including how many of the fixture-backed tests ran.
+      - name: Run the test suite
+        run: uv run --no-sync pytest gsf -q --durations=10
+
+      # A skip guard naming the wrong dependency turns a suite off silently and
+      # still reports green -- which is how the golden replay and the live
+      # connector tests sat unrun. Only the two live-warehouse tests
+      # (GSF_LIVE_DATABRICKS / GSF_LIVE_MYSQL) may skip here.
+      - name: Fail if the fixture-backed tests silently skipped
+        run: |
+          skipped=$(uv run --no-sync pytest gsf -q -rs 2>/dev/null \
+            | grep -c '^SKIPPED' || true)
+          echo "skipped: $skipped"
+          if [ "$skipped" -gt 2 ]; then
+            echo "::error::$skipped tests skipped; expected at most 2 (live" \
+                 "Databricks and MySQL). A fixture is probably unreachable, so" \
+                 "this run proved less than it appears to."
+            uv run --no-sync pytest gsf -q -rs 2>/dev/null | grep '^SKIPPED' || true
+            exit 1
+          fi
