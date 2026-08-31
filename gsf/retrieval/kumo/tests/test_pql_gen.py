@@ -88,7 +88,7 @@ def test_resolve_indices_queries_canonical_snowflake_identifier() -> None:
         connector,
         10,
         {"JOBS": '"GPU_FLEET"."JOBS"'},
-    ) == ["job-1"]
+    ) == (["job-1"], 1)
     assert connector.sql == (
         'SELECT DISTINCT "JOB_ID" FROM "GPU_FLEET"."JOBS" '
         'WHERE "JOB_ID" IS NOT NULL LIMIT 10'
@@ -104,7 +104,7 @@ def test_resolve_indices_uses_ids_loaded_into_graph() -> None:
         available_entity_ids={
             "jobs": ["job-in-graph-1", "job-in-graph-2", "job-in-graph-3"]
         },
-    ) == ["job-in-graph-1", "job-in-graph-2"]
+    ) == (["job-in-graph-1", "job-in-graph-2"], 3)
 
 
 def test_row_limit_rejection_is_a_context_capacity_error() -> None:

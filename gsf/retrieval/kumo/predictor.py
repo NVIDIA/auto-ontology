@@ -19,6 +19,8 @@ dict in the same shape as the SQL path, so the chat never hard-errors.
 
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import logging
 import os
 import threading
@@ -28,15 +30,33 @@ from typing import Any
 
 import pandas as pd
 
+from gsf.retrieval.kumo.budget import Budget, BudgetExceeded, Spend
+from gsf.retrieval.kumo.column_reference import build_column_reference
+from gsf.retrieval.kumo.graph_cache import (
+    BuildTimedOut,
+    CacheKey,
+    GraphCache,
+    built_graph_fingerprint,
+    catalog_fingerprint,
+    join_fingerprint,
+)
+from gsf.retrieval.kumo.pql_gen import quote_ident
 from gsf.retrieval.kumo.kumo_model import key_columns
+from gsf.retrieval.kumo.telemetry import (
+    CACHE_DISABLED,
+    CACHE_HIT,
+    CACHE_MISS,
+    GraphIdentity,
+    RunRecord,
+    emit,
+    llm_model_name,
+    redact_literals,
+)
 
 logger = logging.getLogger(__name__)
 
 # Bounds so building the graph on a large database stays tractable. The whole
 # (capped) dataset is uploaded to the hosted KumoRFM service.
-_MAX_TABLES = int(os.environ.get("KUMO_MAX_TABLES", "20"))
-# Rows sampled per table into the graph. Unlimited by default; set
-# KUMO_MAX_ROWS_PER_TABLE to a positive integer to cap it.
 _raw_max_rows = os.environ.get("KUMO_MAX_ROWS_PER_TABLE")
 _MAX_ROWS_PER_TABLE: int | None = (
     int(_raw_max_rows) if _raw_max_rows and int(_raw_max_rows) > 0 else None
@@ -44,9 +64,15 @@ _MAX_ROWS_PER_TABLE: int | None = (
 _MAX_PREVIEW_ROWS = int(os.environ.get("KUMO_MAX_PREVIEW_ROWS", "50"))
 _MAX_ENTITIES = int(os.environ.get("KUMO_MAX_ENTITIES", "2000"))
 
+_GRAPH_CACHE = GraphCache(
+    max_entries=int(os.environ.get("KUMO_GRAPH_CACHE_ENTRIES", "8")),
+    ttl_seconds=float(os.environ.get("KUMO_GRAPH_CACHE_TTL", "300")),
+    wait_seconds=Budget.from_env().max_seconds,
+)
+PROMPT_VERSION = "1"
+
 _init_lock = threading.Lock()
 _initialized = False
-
 
 _client: Any = None
 
@@ -101,9 +127,31 @@ def _catalog_key_columns(entry: dict[str, Any]) -> list[str]:
     return []
 
 
+def _projection(table: dict[str, Any]) -> str:
+    """The columns to read, or ``*`` when the catalog does not name them.
+
+    Reading every column costs memory and warehouse time for data no prediction
+    can reach: the graph is built from the columns the catalog knows, and a
+    column absent from it is invisible to the model whether or not it was read.
+
+    Falls back to ``*`` rather than guessing. A projection that misses a column
+    the graph needs would build a different graph, which is worse than reading
+    more than necessary.
+    """
+    names = [
+        str(column.get("name")).strip()
+        for column in table.get("columns") or []
+        if isinstance(column, dict) and str(column.get("name") or "").strip()
+    ]
+    if not names:
+        return "*"
+    return ", ".join(quote_ident(name) for name in names)
+
+
 def _load_relevant_frames(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]],
+    spend: Spend,
 ) -> tuple[dict[str, pd.DataFrame], dict[str, str], dict[str, list[str]]]:
     """Load a bounded sample of each relevant table into a DataFrame.
 
@@ -129,12 +177,7 @@ def _load_relevant_frames(
     name_map: dict[str, str] = {}
     key_columns: dict[str, list[str]] = {}
     for t in relevant_tables:
-        if len(frames) >= _MAX_TABLES:
-            logger.warning(
-                "kumo: reached table cap (%d); remaining tables skipped",
-                _MAX_TABLES,
-            )
-            break
+        spend.check_deadline("reading tables")
         table = str(t.get("name") or "").strip()
         if not table:
             continue
@@ -152,7 +195,9 @@ def _load_relevant_frames(
         )
         t_start = time.perf_counter()
         try:
-            df = connector.execute(f"SELECT * FROM {_quote(schema, table)}{limit}")
+            df = connector.execute(
+                f"SELECT {_projection(t)} FROM {_quote(schema, table)}{limit}"
+            )
         except Exception:
             logger.exception("kumo: failed to load rows for %s.%s", schema, table)
             continue
@@ -168,6 +213,7 @@ def _load_relevant_frames(
             table,
             elapsed,
         )
+        spend.add_table(name, df)
         frames[name] = df
         if schema:
             name_map[name] = _quote(schema, table)
@@ -228,11 +274,17 @@ def _format_result(result: Any) -> dict[str, Any]:
         parts.append(f"PQL: `{result.pql}`")
     if result.note:
         parts.append(result.note)
-    parts.append(
-        f"KumoRFM scored {result.num_entities} entit"
-        f"{'y' if result.num_entities == 1 else 'ies'}."
-        + (" (truncated preview)" if result.truncated else "")
-    )
+    if result.truncated and result.population > result.num_entities:
+        parts.append(
+            f"KumoRFM scored {result.num_entities:,} of {result.population:,} "
+            f"entities. These results cover only those scored, not the whole "
+            f"population."
+        )
+    else:
+        parts.append(
+            f"KumoRFM scored {result.num_entities:,} entit"
+            f"{'y' if result.num_entities == 1 else 'ies'}."
+        )
     return {
         "response": "\n\n".join(parts),
         "sql_code": result.pql or "",
@@ -263,6 +315,8 @@ class PredictionContext:
     # single-column key, one tuple per row for a composite one.
     entity_ids: dict[str, list[Any]]
     examples: list[dict[str, str]]
+    column_reference: str
+    identity: GraphIdentity
 
 
 def _fkey_name(fkey: Any) -> str:
@@ -529,24 +583,150 @@ def build_prediction_context(
     success, or a graceful error response dict when there is nothing to build a graph
     from.
     """
-    logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
-    client = _ensure_init()
+    logger.info("kumo: build_prediction_context start")
 
+    if not connectors:
+        return _error_response("No database connection is configured.")
+
+    key = _cache_key(connectors, relevant_tables or [], join_paths)
+    if key is not None:
+        try:
+            cached, built_here = _GRAPH_CACHE.get_or_build(
+                key,
+                lambda: _build_context(connectors, relevant_tables, join_paths, []),
+            )
+        except BuildTimedOut as waited:
+            logger.info("kumo: gave up waiting for a build in progress: %s", waited)
+            return _error_response(str(waited))
+        if isinstance(cached, PredictionContext):
+            return dataclasses.replace(
+                cached,
+                examples=examples or [],
+                identity=dataclasses.replace(
+                    cached.identity,
+                    cache=CACHE_MISS if built_here else CACHE_HIT,
+                ),
+            )
+        _GRAPH_CACHE.invalidate(key)
+        return cached
+
+    return _build_context(connectors, relevant_tables, join_paths, examples)
+
+
+def _cache_key(
+    connectors: list[Any],
+    relevant_tables: list[dict[str, Any]],
+    join_paths: list[dict[str, Any]] | None,
+) -> "CacheKey | None":
+    """What two requests must share before one may reuse the other's graph.
+
+    None when the tables name no database, or when the connectors cannot say
+    which physical source they read: an entry that could not say where its data
+    came from would be shared with a question about different data.
+    """
+    databases = {
+        str(t.get("database_name") or "")
+        for t in relevant_tables
+        if isinstance(t, dict)
+    }
+    if not relevant_tables or len(databases) != 1 or not next(iter(databases)):
+        return None
+    connector = _connector_identity(connectors)
+    if connector is None:
+        return None
+    import kumorfm
+
+    return CacheKey(
+        connector=connector,
+        database=next(iter(databases)),
+        tables=tuple(
+            sorted(
+                str(t.get("name") or "") for t in relevant_tables if isinstance(t, dict)
+            )
+        ),
+        schema_fingerprint=catalog_fingerprint(relevant_tables),
+        join_fingerprint=join_fingerprint(join_paths),
+        prompt_version=PROMPT_VERSION,
+        engine_version=str(getattr(kumorfm, "__version__", "")),
+    )
+
+
+_CONNECTION_ATTRIBUTES = (
+    "_connection_string",
+    "_connect_kwargs",
+    "_settings",
+    "_warehouse",
+    "_host",
+    "_account",
+    "_catalog",
+    "_http_path",
+    "_db_path",
+)
+
+
+def _connector_identity(connectors: list[Any]) -> str | None:
+    """Which physical sources a request reads from, or ``None`` if unknowable.
+
+    Two deployments can describe the same catalog while pointing at different
+    warehouses, accounts, or files, so a key naming only the database would
+    answer one from the other's data. Two DuckDB files both named ``sales``
+    report the same ``database_name``.
+
+    Returns ``None`` when a connector exposes nothing that distinguishes its
+    source, which disables caching for that request rather than serving it from
+    another deployment's graph. A connector added later inherits that refusal
+    until it is taught to say where it points.
+
+    Hashed rather than kept, because what distinguishes two connections is also
+    what authenticates them: a connection string carries a password, and a cache
+    key is written to logs.
+    """
+    identities = []
+    for connector in connectors:
+        distinguishing = [
+            repr(getattr(connector, attribute))
+            for attribute in _CONNECTION_ATTRIBUTES
+            if getattr(connector, attribute, None) is not None
+        ]
+        if not distinguishing:
+            logger.debug(
+                "Not caching: %s exposes no connection identity.",
+                type(connector).__name__,
+            )
+            return None
+        terms = [type(connector).__name__, str(getattr(connector, "database_name", ""))]
+        identities.append("\x1f".join(terms + distinguishing))
+    digest = hashlib.sha256("\x1e".join(sorted(identities)).encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _build_context(
+    connectors: list[Any],
+    relevant_tables: list[dict[str, Any]] | None,
+    join_paths: list[dict[str, Any]] | None,
+    examples: list[dict[str, str]] | None,
+) -> "PredictionContext | dict[str, Any]":
+    """Read the tables and build the graph and model over them."""
+    import kumorfm
     import kumorfm.rfm as rfm
 
     from gsf.retrieval.kumo.kumo_model import KumoModel, build_graph_context
 
-    if not connectors:
-        return _error_response("No database connection is configured.")
+    client = _ensure_init()
 
     logger.info(
         "kumo: loading sample rows for %d relevant table(s)...",
         len(relevant_tables or []),
     )
     _load_start = time.perf_counter()
-    frames, name_map, catalog_keys = _load_relevant_frames(
-        connectors, relevant_tables or []
-    )
+    spend = Spend(Budget.from_env())
+    try:
+        frames, name_map, catalog_keys = _load_relevant_frames(
+            connectors, relevant_tables or [], spend
+        )
+    except BudgetExceeded as exceeded:
+        logger.info("kumo: refused, over budget: %s", exceeded)
+        return _error_response(str(exceeded))
     if not frames:
         return _error_response(
             "No relevant tables were available to build a prediction graph."
@@ -606,6 +786,19 @@ def build_prediction_context(
         table_names=name_map,
         entity_ids=entity_ids,
         examples=examples or [],
+        column_reference=build_column_reference(relevant_tables or [], col_stypes),
+        identity=GraphIdentity(
+            fingerprint=built_graph_fingerprint(graph),
+            engine_version=str(getattr(kumorfm, "__version__", "")),
+            prompt_version=PROMPT_VERSION,
+            tables=len(frames),
+            rows=int(sum(len(frame) for frame in frames.values())),
+            bytes=spend.nbytes,
+            edges=len(edges),
+            edges_from="catalog" if covered else "inferred",
+            build_seconds=round(time.perf_counter() - _load_start, 3),
+            cache=CACHE_DISABLED,
+        ),
     )
 
 
@@ -615,6 +808,29 @@ def run_prediction(
     """Generate + repair the PQL, predict, and format — given a prepared context."""
     from gsf.retrieval.kumo.pql_gen import generate_pql
 
+    started = time.perf_counter()
+    record = RunRecord(
+        outcome="failed",
+        llm_model=llm_model_name(llm),
+        graph=context.identity,
+    )
+    try:
+        return _run_prediction(question, llm, context, generate_pql, record)
+    except Exception as error:
+        record.error = f"{type(error).__name__}: {error}"
+        raise
+    finally:
+        record.seconds = round(time.perf_counter() - started, 3)
+        emit(record)
+
+
+def _run_prediction(
+    question: str,
+    llm: Any,
+    context: PredictionContext,
+    generate_pql: Any,
+    record: RunRecord,
+) -> dict[str, Any]:
     result = generate_pql(
         question,
         llm=llm,
@@ -629,6 +845,14 @@ def run_prediction(
         max_entities=_MAX_ENTITIES,
         max_preview_rows=_MAX_PREVIEW_ROWS,
         examples=context.examples,
+        column_reference=context.column_reference,
     )
+
+    record.pql = redact_literals(getattr(result, "pql", "") or "")
+    record.attempts = int(getattr(result, "attempts", 0) or 0)
+    record.entities = int(getattr(result, "num_entities", 0) or 0)
+    record.rows_returned = len(getattr(result, "rows", []) or [])
+    record.error = str(getattr(result, "error", "") or "")
+    record.outcome = "answered" if getattr(result, "success", False) else "refused"
 
     return _format_result(result)

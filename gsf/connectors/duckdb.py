@@ -24,7 +24,7 @@ Example
 
 from __future__ import annotations
 
-
+import itertools
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -35,6 +35,8 @@ from typing import Optional
 from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+_EPHEMERAL_COUNTER = itertools.count()
 
 
 class DuckDBDatabase(SQLDatabase):
@@ -56,6 +58,11 @@ class DuckDBDatabase(SQLDatabase):
         if db_path.startswith("duckdb://"):
             db_path = db_path[len("duckdb://") :]
         self.conn = duckdb.connect(database=db_path, read_only=read_only)
+        self._connection_string: str = (
+            f":memory:{next(_EPHEMERAL_COUNTER)}"
+            if db_path in ("", ":memory:")
+            else str(Path(db_path).resolve())
+        )
         self._database_name: str = self.execute("SELECT current_database()").iloc[0, 0]
         logger.debug(
             "DuckDB connected (database=%r, read_only=%s).",
