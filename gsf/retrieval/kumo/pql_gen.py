@@ -560,7 +560,7 @@ _TRANSIENT_EXEC_MARKERS = (
 # neighbourhood is the last resort to salvage *a* prediction when full settings cannot complete.
 #
 # The SDK's per-table row cap ("... contains 32,000 rows, exceeding the 10,000-row limit",
-# kumorfm.rfm.payload.MAX_TABLE_ROWS) is the same kind of DETERMINISTIC rejection: it is raised
+# kumo_relational_engine.rfm.payload.MAX_TABLE_ROWS) is the same kind of DETERMINISTIC rejection: it is raised
 # client-side while serializing the request, before anything is sent, and the row count is a direct
 # product of the neighbourhood (FAST samples 1,000 context anchors x 32 first-hop neighbours = 32,000
 # rows in one related table), so only a smaller neighbourhood clears it. Without this marker the

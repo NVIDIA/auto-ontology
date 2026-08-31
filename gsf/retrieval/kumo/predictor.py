@@ -2,11 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""KumoRFM prediction pipeline (GSF entry point).
+"""Relational prediction pipeline (GSF entry point).
 
 Wires the ingested-catalog data into the ported text-to-PQL pipeline:
   1. Load a bounded sample of each ingested-catalog table into DataFrames.
-  2. Build a KumoRFM ``LocalGraph`` (metadata + links inferred) and a DuckDB
+  2. Build a relational ``Graph`` (metadata + links inferred) and a DuckDB
      mirror of the same frames (so the entity-selection SQL resolves).
   3. Run :func:`gsf.retrieval.kumo.pql_gen.generate_pql` — LLM writes the PQL,
      the static lint + cheap parse validate it, an entity-selection SQL scopes
@@ -80,7 +80,7 @@ _client: Any = None
 def _ensure_init() -> Any:
     """Open the SDFM client once, from env vars, and return it.
 
-    The client is the only supported entry point to the engine: kumorfm refuses
+    The client is the only supported entry point to the engine, which refuses
     direct use. Opening it makes no request, so a bad URL surfaces on the first
     prediction rather than here.
     """
@@ -95,12 +95,12 @@ def _ensure_init() -> Any:
             raise RuntimeError("KUMO_RFM_API_URL is not set")
         api_key = os.environ.get("KUMO_RFM_API_KEY") or None
 
-        from nvidia_sdfm import SDFMClient
+        from kumo_relational_client import RelationalClient
 
         before = time.perf_counter()
-        _client = SDFMClient(url, api_key=api_key)
+        _client = RelationalClient(url, api_key=api_key)
         logger.info(
-            "KumoRFM client opened (url=%s) in %.2fs",
+            "Relational client opened (url=%s) in %.2fs",
             url,
             time.perf_counter() - before,
         )
@@ -634,7 +634,7 @@ def _cache_key(
     connector = _connector_identity(connectors)
     if connector is None:
         return None
-    import kumorfm
+    import kumo_relational_engine
 
     return CacheKey(
         connector=connector,
@@ -647,7 +647,7 @@ def _cache_key(
         schema_fingerprint=catalog_fingerprint(relevant_tables),
         join_fingerprint=join_fingerprint(join_paths),
         prompt_version=PROMPT_VERSION,
-        engine_version=str(getattr(kumorfm, "__version__", "")),
+        engine_version=str(getattr(kumo_relational_engine, "__version__", "")),
     )
 
 
@@ -707,8 +707,8 @@ def _build_context(
     examples: list[dict[str, str]] | None,
 ) -> "PredictionContext | dict[str, Any]":
     """Read the tables and build the graph and model over them."""
-    import kumorfm
-    import kumorfm.rfm as rfm
+    import kumo_relational_engine
+    from kumo_relational_client import relational as rfm
 
     from gsf.retrieval.kumo.kumo_model import KumoModel, build_graph_context
 
@@ -770,7 +770,7 @@ def _build_context(
             )
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
-    kumo_model = KumoModel(client.kumorfm(graph), graph)
+    kumo_model = KumoModel(client.relational(graph), graph)
     entity_ids = _entity_ids(graph, frames)
 
     # Entity-selection SQL runs against the live GSF database connection (the
@@ -789,7 +789,7 @@ def _build_context(
         column_reference=build_column_reference(relevant_tables or [], col_stypes),
         identity=GraphIdentity(
             fingerprint=built_graph_fingerprint(graph),
-            engine_version=str(getattr(kumorfm, "__version__", "")),
+            engine_version=str(getattr(kumo_relational_engine, "__version__", "")),
             prompt_version=PROMPT_VERSION,
             tables=len(frames),
             rows=int(sum(len(frame) for frame in frames.values())),

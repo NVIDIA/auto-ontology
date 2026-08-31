@@ -87,7 +87,7 @@ def _offline(monkeypatch: pytest.MonkeyPatch) -> None:
     """No live NIM. What is under test is the wiring, not the model."""
 
     class Client:
-        def kumorfm(self, graph: Any) -> object:
+        def relational(self, graph: Any) -> object:
             return object()
 
     monkeypatch.setattr(predictor, "_ensure_init", Client)

@@ -23,7 +23,9 @@ from gsf.retrieval.kumo.predictor import (
     _entity_ids,
 )
 
-rfm = pytest.importorskip("kumorfm.rfm", reason="KumoRFM SDK is not installed")
+rfm = pytest.importorskip(
+    "kumo_relational_client.relational", reason="Relational engine is not installed"
+)
 
 
 PEOPLE = pd.DataFrame(
