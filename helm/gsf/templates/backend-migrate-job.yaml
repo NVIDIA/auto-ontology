@@ -1,11 +1,12 @@
 {{/*
-Applies the backend's Alembic migrations, which own the `gsf` Postgres schema
-(catalog + semantic tier).
+Applies the backend's Alembic migrations, which own the `public` Postgres
+schema (catalog + semantic tier).
 
 Separate from frontend-migrate because the two own different schemas and
-neither may touch the other's: Prisma owns `frontend`, and this owns
-`vdb`, and this owns `gsf`. Alembic's autogenerate is filtered to `gsf` in
-alembic/env.py precisely so it can never propose dropping a Prisma table.
+neither may touch the other's: Alembic owns `public`, Prisma owns `frontend`,
+and langchain_postgres owns `vdb`. Alembic's autogenerate is filtered to
+`public` in alembic/env.py precisely so it can never propose dropping a Prisma
+table -- and Prisma's datasource lists only `frontend` for the mirror reason.
 The two Jobs are independent and may run in either order.
 
 Ordering follows frontend-migrate: a normal release resource, NOT a Helm hook.

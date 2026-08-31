@@ -91,7 +91,7 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=gsf:gsf gsf/ ./gsf/
 COPY --chown=gsf:gsf pyproject.toml ./
-# Schema migrations for the `gsf` schema, run by the `migrate` mode below.
+# Schema migrations for the `public` schema, run by the `migrate` mode below.
 COPY --chown=gsf:gsf alembic/ ./alembic/
 COPY --chown=gsf:gsf alembic.ini ./
 
@@ -110,8 +110,8 @@ case "$mode" in
     exec python -m gsf.ingestion_service
     ;;
   migrate)
-    # Owns the `gsf` schema only. Prisma owns `public` and migrates
-    # separately; the two are independent and may run in either order.
+    # Owns `public` only. Prisma owns `frontend` and migrates separately;
+    # the two are independent and may run in either order.
     exec alembic upgrade head
     ;;
   *)

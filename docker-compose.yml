@@ -99,11 +99,12 @@ services:
       gsf-migrate:
         condition: service_completed_successfully
 
-  # One-shot Job: apply the backend's Alembic migrations, which own the `gsf`
-  # schema (catalog + semantic tier). Separate from frontend-migrate because
-  # the two own different schemas: Prisma owns `public`, this owns `gsf`, and
-  # Alembic's autogenerate is filtered so it can never propose changes to
-  # Prisma's tables. Ordering between the two does not matter.
+  # One-shot Job: apply the backend's Alembic migrations, which own the
+  # `public` schema (catalog + semantic tier). Separate from frontend-migrate
+  # because the two own different schemas: Alembic owns `public`, Prisma owns
+  # `frontend`, and Alembic's autogenerate is filtered to its own so it can
+  # never propose dropping a Prisma table. Ordering between the two does not
+  # matter.
   gsf-migrate:
     build:
       context: .

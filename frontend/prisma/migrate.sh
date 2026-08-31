@@ -16,8 +16,9 @@
 #
 # The cleanup is idempotent: it only fires when conversation_analytics exists
 # WITHOUT user_id, so it is a no-op on fresh installs (table absent) and on
-# every deploy after the column has been added. It touches only the `public`
-# schema, matching the scope `db push` operates on.
+# every deploy after the column has been added. It touches only the `frontend`
+# schema -- as the SQL above shows -- matching the scope `db push` operates on,
+# which is the one schema Prisma's datasource lists.
 set -eu
 
 # Both subcommands read the schema path and datasource url from
