@@ -85,11 +85,23 @@ def get_engine() -> Engine:
             # request rather than as a reconnect.
             pool_recycle=1800,
             pool_pre_ping=True,
-            # A TCP connect must not hang forever. Every other Postgres consumer
-            # in the repo passes connect_timeout=3; without it here, a
-            # blackholed database makes the health endpoint -- which is the
-            # *liveness* probe as well as readiness -- hang until the kubelet
-            # kills a backend that is otherwise fine.
+            # A TCP connect must not hang forever, and the case that matters is
+            # a *blackholed* database -- packets dropped with no RST -- which
+            # hangs rather than failing fast the way a refused connection does.
+            # Without a timeout every request that touches Postgres waits
+            # indefinitely and holds its worker, so the pool drains and the
+            # process stops serving requests that need no database at all.
+            #
+            # `/api/health` is the readiness probe, and it cannot report
+            # "degraded" if it never returns: it would time out, so the signal
+            # degrades from "the database is unreachable" to "the probe failed".
+            # Liveness (`/api/health/live`) touches nothing and keeps answering,
+            # which is correct -- a restart cannot fix someone else's network --
+            # but it also means nothing here self-heals, so the bound has to
+            # come from the connect itself.
+            #
+            # 3 seconds to match every other Postgres consumer in the repo
+            # (gsf/server/chat/*_dal.py, gsf/ingestion_service/history.py).
             connect_args={"connect_timeout": 3},
             future=True,
         )
