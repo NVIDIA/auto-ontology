@@ -40,7 +40,9 @@ logger = logging.getLogger(__name__)
 class ResetResult:
     """Summary of what a :func:`delete_all_data` call removed."""
 
-    database_name: str
+    #: ``None`` when the reset covered every database, matching
+    #: ``delete_all_data``'s own optional argument.
+    database_name: str | None
     data_rows: int
     semantic_rows: int
 
