@@ -31,19 +31,23 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Every directory holding Python, not just `gsf/`. The migrations and the
+      # fixture tooling are as easy to break as anything else, and they were
+      # unchecked here while passing locally — so the first thing to land badly
+      # formatted would have been the thing nobody ran ruff over.
       - name: Ruff lint
         uses: astral-sh/ruff-action@v3
         with:
           version: '0.16.5'
           args: check
-          src: './gsf'
+          src: './gsf ./alembic ./dev_tools'
 
       - name: Ruff format check
         uses: astral-sh/ruff-action@v3
         with:
           version: '0.16.5'
           args: format --check
-          src: './gsf'
+          src: './gsf ./alembic ./dev_tools'
 
   build_image:
     name: Build GSF Server image
@@ -149,6 +153,14 @@ jobs:
           CONNECTION_STRINGS: >-
             postgresql://gsf:gsf@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/sql/chinook.sqlite
         run: uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+
+      # `make migrate-check` — the migrations must describe the models. Placed
+      # after the upgrade because `alembic check` compares a live database
+      # against gsf/dal/schema.py, so it needs one at the head revision. Catches
+      # a model edited without a matching revision, which otherwise surfaces as
+      # an UndefinedColumn in whichever environment deploys first.
+      - name: Fail if the schema has drifted from the models
+        run: uv run --no-sync alembic check
 
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
