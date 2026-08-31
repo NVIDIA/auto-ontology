@@ -19,39 +19,10 @@ from typing import Any
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from gsf.dal.connections import verify_connectivity
-from gsf.dal.schema_version import schema_state
+from gsf.server.health.checks import check_schema, check_store
 from gsf.server.responses import HealthResponse
 
 router = APIRouter()
-
-
-def _check_store() -> dict[str, str]:
-    """Probe the pooled connection the application actually uses.
-
-    Through the DAL rather than a fresh ``psycopg.connect``: a raw connection
-    proves the server is reachable, which is not the same as proving this
-    process can get a usable connection out of its pool — and the pool is what
-    every request depends on.
-    """
-    try:
-        verify_connectivity()
-        return {"status": "ok"}
-    except Exception as exc:
-        return {"status": "error", "detail": (str(exc) or type(exc).__name__)[:200]}
-
-
-def _check_schema() -> dict[str, str]:
-    """Report whether the database carries the revision this build expects.
-
-    Never raises: an unreachable database makes this unknowable, and the
-    endpoint still has to answer — the `postgres` check is what describes that
-    case, and this one should not turn it into a 500.
-    """
-    state = schema_state()
-    if state.current:
-        return {"status": "ok", "revision": state.applied or ""}
-    return {"status": "error", "detail": state.detail[:200]}
 
 
 @router.get(
@@ -80,8 +51,8 @@ def health() -> JSONResponse:
     nothing: restarting the process cannot fix an unreachable database, so a
     liveness probe gated on one turns a database blip into a rolling restart.
     """
-    postgres = _check_store()
-    migrations = _check_schema()
+    postgres = check_store()
+    migrations = check_schema()
     healthy = postgres["status"] == "ok" and migrations["status"] == "ok"
     body: dict[str, Any] = {
         "status": "ok" if healthy else "degraded",

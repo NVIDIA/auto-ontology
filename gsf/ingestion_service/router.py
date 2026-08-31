@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Body, Request
+from fastapi.responses import JSONResponse
 from gsf.ingestion_service.history import (
     get_last_failure_if_most_recent,
     get_last_successful_run,
@@ -18,7 +19,12 @@ from gsf.ingestion_service.ingest import (
     trigger_ingest,
     trigger_reset_semantic,
 )
-from gsf.server.responses import SemanticRunningResponse, StatusResponse
+from gsf.server.health.checks import check_schema, check_store
+from gsf.server.responses import (
+    HealthResponse,
+    SemanticRunningResponse,
+    StatusResponse,
+)
 
 router = APIRouter()
 
@@ -29,9 +35,44 @@ async def health() -> dict[str, str]:
 
     Answers ``{"status": "ok"}`` as soon as the process is serving. It checks no
     dependencies, so it reports nothing about whether an ingest can currently
-    succeed — only that the service is up.
+    succeed — only that the service is up. **Readiness is /health/ready.**
+
+    Wire this to a ``livenessProbe`` and nothing else. Used as a readiness probe
+    it can never fail, so it reports Ready unconditionally — which is what the
+    chart used to do here.
     """
     return {"status": "ok"}
+
+
+@router.get(
+    "/health/ready",
+    responses={
+        200: {"model": HealthResponse, "description": "All dependencies reachable"},
+        503: {"model": HealthResponse, "description": "Postgres or schema unusable"},
+    },
+)
+async def readiness() -> JSONResponse:
+    """Readiness probe: can this service actually ingest right now?
+
+    The same two checks the API server reports, from the same helpers, because
+    both services depend on the same database and the same migrated schema and
+    should not be able to disagree about them.
+
+    Separate from ``/health`` because the two answer different questions and
+    failing them means different things: this one failing should stop traffic,
+    ``/health`` failing should restart the process. Restarting cannot fix an
+    unreachable database, which is why the dependency check lives here and not
+    there.
+    """
+    postgres = check_store()
+    migrations = check_schema()
+    ready = postgres["status"] == "ok" and migrations["status"] == "ok"
+    body: dict[str, Any] = {
+        "status": "ok" if ready else "degraded",
+        "postgres": postgres,
+        "migrations": migrations,
+    }
+    return JSONResponse(status_code=200 if ready else 503, content=body)
 
 
 @router.post("/ingest", status_code=202, response_model=StatusResponse)

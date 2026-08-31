@@ -55,10 +55,25 @@ spec:
             - name: APP_VERSION
               value: {{ .Chart.Version | quote }}
           readinessProbe:
+            # /health/ready, not /health: the latter checks no dependencies, so
+            # as a readiness probe it can never fail and the pod reports Ready
+            # whether or not an ingest could actually run. This one probes
+            # Postgres and the schema revision, same as the backend's.
             httpGet:
-              path: /health
+              path: /health/ready
               port: 3002
             initialDelaySeconds: 15
             periodSeconds: 10
+          livenessProbe:
+            # Deliberately the dependency-free endpoint: restarting this process
+            # cannot fix an unreachable database, so a liveness probe gated on
+            # one turns a database blip into a rolling restart. Without any
+            # liveness probe at all — which is what this was — a wedged process
+            # is never restarted either.
+            httpGet:
+              path: /health
+              port: 3002
+            initialDelaySeconds: 20
+            periodSeconds: 20
           resources:
             {{- toYaml .Values.ingestion.resources | nindent 12 }}

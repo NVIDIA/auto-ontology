@@ -14,6 +14,37 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthResponse": {
+        "additionalProperties": true,
+        "description": "Readiness body \u2014 200 when healthy, 503 when degraded.\n\n``postgres`` reports whether the database answers; ``migrations`` whether it\nholds the revision this build expects. Both matter and they fail\nindependently: a reachable database carrying no tables at all satisfies the\nfirst and not the second, and reporting only the first is how a health\ncheck comes to say ``ok`` about a server that 500s on every catalog call.\n\nNamed ``migrations`` rather than the more obvious ``schema`` because that\nname shadows an attribute on Pydantic's ``BaseModel`` and the field would\nship with a ``UserWarning`` on every import.",
+        "properties": {
+          "migrations": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Migrations",
+            "type": "object"
+          },
+          "postgres": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Postgres",
+            "type": "object"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "postgres",
+          "migrations"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
       "SemanticRunningResponse": {
         "additionalProperties": true,
         "description": "The ingestion service's own status endpoint: whether a compilation pass\nis executing right now, when the last one finished successfully, and when\nit last failed (only set if more recent than the last success).",
@@ -118,7 +149,7 @@
   "paths": {
     "/health": {
       "get": {
-        "description": "Liveness probe for the ingestion service.\n\nAnswers ``{\"status\": \"ok\"}`` as soon as the process is serving. It checks no\ndependencies, so it reports nothing about whether an ingest can currently\nsucceed \u2014 only that the service is up.",
+        "description": "Liveness probe for the ingestion service.\n\nAnswers ``{\"status\": \"ok\"}`` as soon as the process is serving. It checks no\ndependencies, so it reports nothing about whether an ingest can currently\nsucceed \u2014 only that the service is up. **Readiness is /health/ready.**\n\nWire this to a ``livenessProbe`` and nothing else. Used as a readiness probe\nit can never fail, so it reports Ready unconditionally \u2014 which is what the\nchart used to do here.",
         "operationId": "health_health_get",
         "responses": {
           "200": {
@@ -133,6 +164,35 @@
           }
         },
         "summary": "Health"
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "description": "Readiness probe: can this service actually ingest right now?\n\nThe same two checks the API server reports, from the same helpers, because\nboth services depend on the same database and the same migrated schema and\nshould not be able to disagree about them.\n\nSeparate from ``/health`` because the two answer different questions and\nfailing them means different things: this one failing should stop traffic,\n``/health`` failing should restart the process. Restarting cannot fix an\nunreachable database, which is why the dependency check lives here and not\nthere.",
+        "operationId": "readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "All dependencies reachable"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Postgres or schema unusable"
+          }
+        },
+        "summary": "Readiness"
       }
     },
     "/ingest": {
