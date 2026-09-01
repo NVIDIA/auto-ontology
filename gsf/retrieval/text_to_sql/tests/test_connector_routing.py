@@ -10,6 +10,7 @@ from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
 from gsf.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
+    resolve_target_database_name,
 )
 
 
@@ -32,19 +33,6 @@ def test_routes_all_tables_to_their_database() -> None:
     assert resolved is second
 
 
-def test_rejects_cross_database_tables() -> None:
-    connectors = [_connector("first"), _connector("second")]
-
-    with pytest.raises(ValueError, match="span multiple databases"):
-        resolve_connector_from_tables(
-            [
-                {"name": "orders", "database_name": "first"},
-                {"name": "customers", "database_name": "second"},
-            ],
-            connectors,
-        )
-
-
 def test_rejects_missing_database_with_multiple_connectors() -> None:
     connectors = [_connector("first"), _connector("second")]
 
@@ -56,3 +44,22 @@ def test_allows_missing_database_with_one_connector() -> None:
     connector = _connector("only")
 
     assert resolve_connector_from_tables([{"name": "orders"}], [connector]) is connector
+
+
+def test_resolves_target_database_to_canonical_connector_name() -> None:
+    connectors = [_connector("wideworldimporters")]
+
+    assert (
+        resolve_target_database_name("WIDEWORLDIMPORTERS", connectors)
+        == "wideworldimporters"
+    )
+
+
+def test_rejects_unknown_target_database() -> None:
+    connectors = [_connector("wideworldimporters")]
+
+    with pytest.raises(ValueError, match="does not match a configured database"):
+        resolve_target_database_name(
+            "42d62c22-b1c4-4ed7-8173-6aec9e2bd432",
+            connectors,
+        )

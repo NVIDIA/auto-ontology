@@ -4,14 +4,17 @@
 
 'use client';
 
-import { useState } from 'react';
-
-import { Icon } from '@/common/icons';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { Icon, IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
 import { getTableType } from '@/components/dataPage/get-table-type';
 import { ExplorationLayer } from '@/enums/exploration';
 import { TableType } from '@/enums/datasources';
 import { DetailLinkButton } from '@/common/DetailLinkButton';
+import { PropertyRow } from '@/common/PropertyRow';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import type {
 	DataExplorationGraph,
 	ExplorationDataNode,
@@ -19,6 +22,7 @@ import type {
 	ExplorationLink,
 } from '@/types/exploration';
 import { ZonesRow } from '@/common/SinglePageComposer';
+import { parseSampleValues } from '@/lib/data/sample-values';
 
 /** Build the data-layer graph (Tables/Views + their relationships) from the server DTO. */
 export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
@@ -28,7 +32,7 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 		description: table.description ?? null,
 		layer: ExplorationLayer.Data,
 		nodeType: getTableType(table.table_type) as TableType,
-		relationshipCount: 0,
+		relationshipCount: table.relationship_count ?? 0,
 		databaseId: table.database_id,
 		databaseName: table.database_name,
 		schemaId: table.schema_id,
@@ -55,24 +59,17 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 			foreignKeys: (link.foreign_keys ?? []).map((fk) => ({
 				sourceColumn: fk.source_column,
 				targetColumn: fk.target_column,
-				sourceSampleValues: fk.source_sample_values,
-				targetSampleValues: fk.target_sample_values,
+				sourceSampleValues: parseSampleValues(fk.source_sample_values),
+				targetSampleValues: parseSampleValues(fk.target_sample_values),
 			})),
+			relationshipTypes: link.relationship_types ?? [],
 		}));
 
-	const relationshipCountById = new Map<string, number>();
-	links.forEach(({ source, target }) => {
-		relationshipCountById.set(source, (relationshipCountById.get(source) ?? 0) + 1);
-		relationshipCountById.set(target, (relationshipCountById.get(target) ?? 0) + 1);
-	});
-
-	return {
-		nodes: nodes.map((node) => ({
-			...node,
-			relationshipCount: relationshipCountById.get(node.id) ?? 0,
-		})),
-		links,
-	};
+	// `relationshipCount` is taken from the server rather than counted off
+	// `links`: the graph is capped at a fixed number of nodes, so a table can
+	// have neighbours that were never drawn — counting the drawn ones would
+	// disagree with the related-entities modal the card opens.
+	return { nodes, links };
 };
 
 type ActiveDataCardProps = {
@@ -94,103 +91,86 @@ export const ActiveDataCard = ({
 	onShowColumns,
 	onShowQueries,
 	onShowTerms,
-}: ActiveDataCardProps) => {
-	const [minimized, setMinimized] = useState(false);
-
-	return (
-		<section className="absolute bottom-4 left-4 z-20 w-[min(26rem,calc(100%-2rem))] rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
-			<header className="flex items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-				<p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
-					Showing info on this Data Object
-				</p>
-				<div className="flex items-center gap-1">
-					<button
-						type="button"
-						onClick={() => setMinimized((value) => !value)}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-						aria-label={
-							minimized
-								? 'Expand data object details'
-								: 'Minimize data object details'
-						}
-					>
-						{minimized ? '+' : '−'}
-					</button>
-					<button
-						type="button"
-						onClick={onClose}
-						className="cursor-pointer rounded p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
-						aria-label="Close data object details"
-					>
-						×
-					</button>
+}: ActiveDataCardProps) => (
+	<section className="absolute right-4 top-20 bottom-28 z-20 flex w-[380px] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
+		<header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+			<p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+				Showing info on this Data Object
+			</p>
+			<Button
+				theme={ButtonTheme.IconNeutral}
+				size={Size.SMALL}
+				iconOnly
+				type="button"
+				onClick={onClose}
+				aria-label="Close data object details"
+			>
+				<Icon name={IconName.Close} className="h-4 w-4" />
+			</Button>
+		</header>
+		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+			<div className="flex items-start gap-3">
+				<Icon
+					name={catalogNodeInfo[node.nodeType].icon}
+					className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
+				/>
+				<div className="min-w-0 flex-1 space-y-1">
+					<Text as="h2" text={node.name} variant={TextVariant.Heading} />
+					<Text as="p" variant={TextVariant.Caption}>
+						{node.databaseName} • {node.schemaName}
+					</Text>
 				</div>
-			</header>
-			{!minimized && (
-				<div className="space-y-3 p-4">
-					<div className="flex items-start gap-3">
-						<Icon
-							name={catalogNodeInfo[node.nodeType].icon}
-							className="mt-0.5 h-5 w-5 shrink-0 text-[#3b82b6]"
-						/>
-						<div className="min-w-0 flex-1">
-							<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-								{node.name}
-							</h2>
-							<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
-								{node.databaseName} • {node.schemaName}
-							</p>
-							<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
-								{node.description || 'No Description'}
-							</p>
-						</div>
-						<div className="flex shrink-0 items-center gap-1">
-							<button
-								type="button"
-								onClick={onView}
-								className="cursor-pointer rounded-lg bg-[#76b900] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#5e9400]"
-							>
-								View in Data
-							</button>
-						</div>
-					</div>
-					<div className="grid grid-cols-2 gap-2">
-						<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-							Columns: {node.columnsCount}
-							<DetailLinkButton
-								count={node.columnsCount}
-								onClick={onShowColumns}
-								label="View columns"
-							/>
-						</span>
-						<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-							SQL Queries: {node.sqlCount}
-							<DetailLinkButton
-								count={node.sqlCount}
-								onClick={onShowQueries}
-								label="View SQL queries"
-							/>
-						</span>
-						<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-							Terms: {node.termsCount}
-							<DetailLinkButton
-								count={node.termsCount}
-								onClick={onShowTerms}
-								label="View Terms"
-							/>
-						</span>
-						<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
-							Related Tables: {node.relationshipCount}
-							<DetailLinkButton
-								count={node.relationshipCount}
-								onClick={onShowRelationships}
-								label="View related tables"
-							/>
-						</span>
-					</div>
-					<ZonesRow zones={node.zones} />
-				</div>
-			)}
-		</section>
-	);
-};
+			</div>
+			<div className="self-start">
+				<Button
+					theme={ButtonTheme.Primary}
+					size={Size.SMALL}
+					type="button"
+					onClick={onView}
+				>
+					View in Data
+				</Button>
+			</div>
+			<div className="flex flex-col gap-2">
+				<PropertyRow label="Name" value={node.name} />
+				<PropertyRow label="Description" value={node.description ?? ''} />
+				<PropertyRow label="ID" value={node.id} monospace />
+			</div>
+			<div className="grid grid-cols-2 gap-2">
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+					Columns: {node.columnsCount}
+					<DetailLinkButton
+						count={node.columnsCount}
+						onClick={onShowColumns}
+						label="View columns"
+					/>
+				</span>
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+					SQL Queries: {node.sqlCount}
+					<DetailLinkButton
+						count={node.sqlCount}
+						onClick={onShowQueries}
+						label="View SQL queries"
+					/>
+				</span>
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+					Terms: {node.termsCount}
+					<DetailLinkButton
+						count={node.termsCount}
+						onClick={onShowTerms}
+						label="View Terms"
+					/>
+				</span>
+				<span className="flex items-center justify-between gap-1.5 rounded-lg border border-zinc-200 px-2.5 py-1.5 text-xs text-zinc-600 dark:border-zinc-700 dark:text-zinc-300">
+					Related Tables: {node.relationshipCount}
+					<DetailLinkButton
+						count={node.relationshipCount}
+						onClick={onShowRelationships}
+						label="View related tables"
+					/>
+				</span>
+			</div>
+			<ZonesRow zones={node.zones} />
+		</div>
+	</section>
+);

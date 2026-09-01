@@ -22,6 +22,15 @@ dependencies = [
     "nvidia-sdfm[kumorfm]>=0.1.0; sys_platform != 'linux' or platform_machine != 'aarch64'",
     "nvidia-sdfm>=0.1.0; sys_platform == 'linux' and platform_machine == 'aarch64'",
     "databricks-sql-connector>=4.3.0",
+    "mysql-connector-python>=9.7.0",
+    "pyyaml>=6.0.3",
+    "apache-ossie-gsf",
+    "pyhive[hive-pure-sasl]>=0.7.0",
+    "thrift>=0.16.0",
+    "thrift-sasl>=0.4.3",
+    "pure-sasl>=0.6.2",
+    "pyjks>=20.0.0",
+    "trino>=0.339.0",
 ]
 
 [build-system]
@@ -44,6 +53,10 @@ package = true
 name = "vendored-sdfm"
 url = "vendor/wheels"
 format = "flat"
+
+[tool.uv.sources]
+apache-ossie-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/gsf" }
+# apache-ossie-gsf = { path = "../ossie/converters/gsf", editable = true }
 
 [dependency-groups]
 dev = [

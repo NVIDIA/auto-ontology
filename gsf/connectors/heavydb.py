@@ -232,9 +232,16 @@ class HeavyDBDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
-        # sqlglot has no dedicated HeavyDB dialect. HeavyDB's SQL is a
-        # Calcite-based, largely PostgreSQL-compatible dialect, so "postgres"
-        # is the closest fit for the text-to-SQL agent's SQL generation.
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+
+        sqlglot has no dedicated HeavyDB dialect. HeavyDB's SQL is a
+        Calcite-based, largely PostgreSQL-compatible dialect, so ``postgres``
+        is the closest fit for the text-to-SQL agent's SQL generation, and
+        substituting it here keeps the substitution in one place.
+        """
         return "postgres"
 
     @property

@@ -4,6 +4,7 @@
 
 'use client';
 
+import { OptionCard } from '@/components/connectionsPage/steps/OptionCard';
 import { Icon, IconName } from '@/common/icons';
 import { ConnectionType, connectionDisplayName } from '@/enums/connection';
 
@@ -19,18 +20,12 @@ export const ConnectionTypeStep = ({ onSelect }: ConnectionTypeStepProps) => (
 	<div className="flex flex-col gap-3 p-2">
 		<div className="grid grid-cols-2 gap-3">
 			{CONNECTOR_TYPES.map((type) => (
-				<button
-					key={type}
-					type="button"
-					data-testid={`connection-type-${type}`}
-					onClick={() => onSelect(type)}
-					className="flex h-[150px] cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border border-zinc-200 bg-white px-4 py-6 shadow-sm transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-[#76b900]/40"
-				>
+				<OptionCard key={type} onClick={() => onSelect(type)}>
 					<Icon name={IconName.Database} className="h-8 w-8 text-[#76b900]" />
 					<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
 						{connectionDisplayName[type]}
 					</span>
-				</button>
+				</OptionCard>
 			))}
 		</div>
 	</div>

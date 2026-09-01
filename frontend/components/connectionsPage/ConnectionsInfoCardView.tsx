@@ -4,33 +4,34 @@
 
 'use client';
 
-import { Placeholders } from '@/assets/images/placeholders';
 import { ConnectionInfoCard } from '@/components/connectionsPage/ConnectionInfoCard';
+import { EmptyState } from '@/common/EmptyState';
+import { IconName } from '@/common/icons';
+import { SkeletonCard } from '@/common/Skeleton';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import type { Connection } from '@/types/connection';
 
 type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
 	onDelete?: (databaseName: string) => void;
+	onSsoFederationChange?: (databaseName: string, enabled: boolean) => void;
+	/** Database name whose SSO-federation request is currently in flight. */
+	ssoFederationPending?: string | null;
 };
-
-const SkeletonCard = () => (
-	<div
-		className="h-[148px] animate-pulse rounded-lg border border-zinc-200/90 bg-zinc-100/80 dark:border-zinc-700/90 dark:bg-zinc-800/50"
-		aria-hidden
-	/>
-);
 
 export const ConnectionsInfoCardView = ({
 	connections,
 	loading = false,
 	onDelete,
+	onSsoFederationChange,
+	ssoFederationPending = null,
 }: ConnectionsInfoCardViewProps) => {
 	if (loading) {
 		return (
 			<div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
 				{Array.from({ length: 9 }, (_, i) => (
-					<SkeletonCard key={i} />
+					<SkeletonCard key={i} className="min-h-[148px]" />
 				))}
 			</div>
 		);
@@ -38,9 +39,11 @@ export const ConnectionsInfoCardView = ({
 
 	if (connections.length === 0) {
 		return (
-			<div className="flex w-full flex-col items-center justify-center py-12">
-				<Placeholders.NoResults />
-			</div>
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				icon={IconName.Connection}
+				title="No Results"
+			/>
 		);
 	}
 
@@ -51,6 +54,8 @@ export const ConnectionsInfoCardView = ({
 					key={connection.database_name}
 					connection={connection}
 					onDelete={onDelete}
+					onSsoFederationChange={onSsoFederationChange}
+					ssoFederationPending={ssoFederationPending === connection.database_name}
 				/>
 			))}
 		</div>

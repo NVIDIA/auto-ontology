@@ -17,6 +17,10 @@ from gsf.retrieval.data_access.graph_schemas import (
     get_schemas_by_ids,
 )
 
+# sqlglot's default dialect is the generic ANSI parser, so try it before
+# falling back to postgres.
+_DEFAULT_DIALECTS = ["", "postgres"]
+
 
 class SqlParseError(Exception):
     """SQL could not be parsed or resolved against the catalog."""
@@ -26,16 +30,22 @@ def get_dialects(database_name: str | None = None) -> list[str]:
     """Return SQL dialects from active connectors.
 
     When *database_name* is given, only the connector whose
-    ``database_name`` matches is considered.
+    ``database_name`` matches is considered. Falls back to the generic
+    parser when no connector supplies a usable dialect, which is the case
+    for a database whose connection has not been configured yet.
+
+    Connector dialects are passed through as-is: every connector is
+    required to report a sqlglot-compatible name (see
+    ``CONNECTOR_REGISTRY``), which the parser tries in turn.
     """
     connectors = get_connectors()
     if database_name is not None:
         connectors = [
             c for c in connectors if getattr(c, "database_name", None) == database_name
         ]
-    dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
+    dialects = [c.dialect for c in connectors]
     if not dialects:
-        return ["generic", "ansi", "postgres"]
+        return list(_DEFAULT_DIALECTS)
     return dialects
 
 

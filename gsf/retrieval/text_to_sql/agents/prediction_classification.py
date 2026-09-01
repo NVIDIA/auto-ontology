@@ -49,6 +49,17 @@ class PredictionClassificationAgent(BaseAgent):
         super().__init__("prediction_classification")
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
+        # A caller that already knows which flow it wants (the ``prediction``
+        # field on /chat/completions) skips the classifier entirely — no LLM
+        # call, no chance of the classifier disagreeing.
+        override = state.get("prediction_override")
+        if override is not None:
+            decision = "prediction" if override else "sql"
+            self.logger.info(
+                "Prediction classification skipped — caller forced %s", decision
+            )
+            return {"decision": decision}
+
         # Classify on the raw question (per requirement), not the sanitized one.
         question = get_original_question(state)
         if not question:

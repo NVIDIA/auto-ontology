@@ -4,6 +4,12 @@ from __future__ import annotations
 
 SEMANTIC_SOURCE = "semantic"
 
+# Source values stored on SqlAttribute nodes.
+SQL_ATTR_SOURCE_MANUAL = "manual"
+SQL_ATTR_SOURCE_SQL = "sql"
+SQL_ATTR_SOURCE_TABLE = "table"
+SQL_ATTR_SOURCE_BRIDGE = "bridgeTable"
+
 # Semantic node labels
 LABEL_TERM = "Term"
 LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"

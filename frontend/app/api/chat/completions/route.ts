@@ -8,10 +8,16 @@
 // We use a hand-rolled handler (instead of Next.js `rewrites`) because the
 // dev-server rewrites buffer streaming responses — the browser would receive
 // nothing until the upstream connection closed, defeating SSE.
+//
+// FastAPI owns completion persistence so web and Agent API callers share one
+// history implementation. This route authenticates the caller, forwards its
+// GSF user identity over the private upstream hop, and otherwise preserves SSE.
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
-import { getPrisma } from '@/lib/prisma';
+import { userCan } from '@/auth/permissions';
+import { resolveSubjectToken } from '@/auth/sso-token';
+import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
@@ -19,71 +25,55 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 const SOURCE_HEADER = 'x-gsf-source';
 
-const extractQuestion = (rawBody: string): string => {
+const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {
-		const parsed = JSON.parse(rawBody) as { question?: unknown };
-		return typeof parsed.question === 'string' ? parsed.question : '';
+		const parsed: unknown = JSON.parse(rawBody);
+		return typeof parsed === 'object' && parsed !== null
+			? (parsed as Record<string, unknown>)
+			: {};
 	} catch {
-		return '';
+		return {};
 	}
 };
 
-// Consume a teed copy of the SSE stream, returning the final answer's response
-// text and SQL. Mirrors the parsing the browser does in `frontend/api/chat.ts`
-// (data: lines, `[DONE]` sentinel, JSON `result`/`error` events).
-const readFinalAnswer = async (
-	stream: ReadableStream<Uint8Array>,
-): Promise<{ response: string | null; sql: string | null }> => {
-	const reader = stream.getReader();
-	const decoder = new TextDecoder();
-	let buffer = '';
-	let response: string | null = null;
-	let sql: string | null = null;
+// Ask a question and stream the answer back as Server-Sent Events.
+//
+// FastAPI emits the SQL plus the formatted answer first (`result`), then —
+// when that answer has an executed result — generates and persists the
+// chart/table bubble itself and streams it back as its own `charts` event
+// before the stream closes. No second request needed from this route or the
+// browser. Passing `conversation_id` persists the turn and additionally
+// requires `conversation: ['write']`; the route answers 409 while that
+// conversation already has a run in flight. Omitting it runs the question
+// statelessly, with no history and no chart step.
+export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
+	const payload = parseBody(await req.text());
+	const hasConversationId =
+		typeof payload.conversation_id === 'string' && payload.conversation_id.trim() !== '';
+	if (hasConversationId && !userCan(user, { conversation: ['write'] })) {
+		return new Response('Forbidden', { status: 403 });
+	}
 
-	const handleData = (data: string): void => {
-		if (!data || data === '[DONE]') return;
-		try {
-			const event = JSON.parse(data) as {
-				type?: string;
-				answer?: { response?: string; sql_code?: string };
-			};
-			if (event.type === 'result') {
-				response = event.answer?.response ?? null;
-				sql = event.answer?.sql_code ?? null;
-			}
-		} catch {
-			// Skip heartbeats / malformed lines.
-		}
+	// Forwarded verbatim to FastAPI, which streams the SQL/answer and then the
+	// chart/table bubble on this same connection — see the module docstring.
+	const body = JSON.stringify(payload);
+
+	// Forward the caller's SSO token whenever we have one. Only the backend knows
+	// which connections are configured to authenticate as the signed-in user, so
+	// it owns the fail-closed decision; sending the token is a no-op otherwise.
+	const upstreamHeaders: Record<string, string> = {
+		'Content-Type': 'application/json',
+		Accept: 'text/event-stream',
+		[SOURCE_HEADER]: req.headers.get(SOURCE_HEADER) ?? 'api',
+		...buildInternalIdentityHeaders(user.id),
 	};
 
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			buffer += decoder.decode(value, { stream: true });
-			const lines = buffer.split('\n');
-			buffer = lines.pop() ?? '';
-			for (const line of lines) {
-				const trimmed = line.trim();
-				if (trimmed.startsWith('data:')) handleData(trimmed.slice(5).trim());
-			}
-		}
-	} finally {
-		reader.releaseLock();
-	}
-
-	return { response, sql };
-};
-
-export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
-	const body = await req.text();
+	const subjectToken = await resolveSubjectToken(req.headers, user.id);
+	if (subjectToken) upstreamHeaders.Authorization = `Bearer ${subjectToken}`;
 
 	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
 		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			Accept: 'text/event-stream',
-		},
+		headers: upstreamHeaders,
 		body,
 		// Disable Node's transparent decompression so we can pipe bytes 1:1.
 		// @ts-expect-error — `duplex` is required by Node's fetch when
@@ -109,10 +99,6 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 		});
 	}
 
-	// Source label for the analytics row: the web app tags itself `app`; any
-	// other caller (the NAT plugin / direct API) defaults to `api`.
-	const source = req.headers.get(SOURCE_HEADER) ?? 'api';
-
 	const responseHeaders = {
 		'Content-Type': 'text/event-stream; charset=utf-8',
 		'Cache-Control': 'no-cache, no-transform',
@@ -120,31 +106,13 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 		'X-Accel-Buffering': 'no',
 	};
 
-	// Single writer for analytics, for every caller. Create the row up front,
-	// then tee the stream — one branch flows to the client untouched, the other
-	// is parsed after the response to backfill the final answer. `user` is the
-	// resolved GSF user (session or SSO bearer), injected by withPermission.
-	const question = extractQuestion(body);
-
-	const prisma = getPrisma();
-	const row = await prisma.conversationAnalytics.create({
-		data: { question, source, userId: user.id },
-	});
-
-	const [toClient, toCapture] = upstream.body.tee();
-
+	const [toClient, toKeepAlive] = upstream.body.tee();
 	after(async () => {
 		try {
-			const { response, sql } = await readFinalAnswer(toCapture);
-			await prisma.conversationAnalytics.update({
-				where: { id: row.id },
-				data: { response, sql, responseTimestamp: new Date() },
-			});
+			await toKeepAlive.pipeTo(new WritableStream());
 		} catch {
-			// Best-effort analytics — never let capture failures affect the
-			// already-delivered chat response.
+			// The browser-facing stream is already independent of this drain.
 		}
 	});
-
 	return new Response(toClient, { status: 200, headers: responseHeaders });
 });

@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 
-from gsf.retrieval.kumo.predictor import _deduplicate_inferred_links
+from gsf.retrieval.kumo.predictor import (
+    _deduplicate_inferred_links,
+)
 
 
 @dataclass(frozen=True)

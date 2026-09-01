@@ -8,12 +8,21 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 
 from gsf.dal import sql_attributes as sql_attr_dal
 from gsf.dal import terms as terms_dal
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.terms import service as term_service
+from gsf.server.responses import (
+    ColumnAttributePageResponse,
+    ColumnAttributePatchResponse,
+    SqlAttributePageResponse,
+    TermDetailResponse,
+    TermResponse,
+    TermsPageResponse,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -22,75 +31,90 @@ logger = logging.getLogger(__name__)
 class TermUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
+    name_certified: bool | None = None
+    description_certified: bool | None = None
 
 
 class ColumnAttributeUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
     sample_values: list[str] | None = None
+    certified: bool | None = None
 
 
-@router.get("/terms")
+@router.get("/terms", response_model=TermsPageResponse)
 def list_terms(
-    zone_ids: list[str] | None = Query(default=None),
-    q: str | None = Query(default=None),
+    q: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the term name.",
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
-    """Return Term nodes zone-scoped to the provided zones.
+    """Return Term nodes.
 
-    ``None`` (param absent) → no filter, return all (admin callers).
-    ``[]`` (empty list) → viewer with no zone access, returns empty.
-    ``[id, ...]`` → filter to terms reachable through those zones.
-
-    *q*, when given, additionally filters to terms whose name contains it
+    *q*, when given, filters to terms whose name contains it
     (case-insensitive).
+
+    Terms come back ordered by name, and *skip*/*limit* select one page of
+    that order; ``total`` reports how many match in full, so a caller knows
+    when to stop asking. Omitting *limit* returns every matching term.
 
     Each returned term carries its resolved ``zones``, so the Terms list
     and the Exploration graph can render Zone chips from this single
     response without a separate per-page zones request.
+
+    ``column_attribute_counts``, ``sql_attribute_counts`` and
+    ``related_counts`` are per-term breakdowns (``[{term_id, count}, ...]``)
+    that let the Terms list render per-card badges without an N+1 fetch, and
+    cover the terms on this page (see ``service.list_terms_page``). The
+    underlying ColumnAttribute/SqlAttribute nodes are fetched separately, only
+    for the focused Term, via ``/terms/{term_id}/column-attributes`` and
+    ``/terms/{term_id}/sql-attributes`` below — this endpoint stays
+    counts-only so the Terms list never pulls attribute nodes it won't show.
     """
-    terms = terms_dal.fetch_all_terms(zone_ids=zone_ids, search=q)
-    # These three are per-term breakdowns (``[{term_id, count}, ...]``), used
-    # by the Terms list to render per-card badges without an N+1 fetch. They
-    # are plain lists (not a ``{data, count}`` envelope) — an outer ``count``
-    # here would mean "terms with a nonzero count", not a useful total, and
-    # the frontend never reads it. The underlying ColumnAttribute/SqlAttribute
-    # nodes themselves are fetched separately, only for the focused Term, via
-    # ``/terms/{term_id}/column-attributes`` and ``/terms/{term_id}/sql-attributes``
-    # below — this endpoint stays counts-only so the Terms list doesn't pull
-    # every attribute node in the graph on every load.
-    column_attribute_counts = terms_dal.fetch_column_attribute_counts(zone_ids=zone_ids)
-    sql_attribute_counts = sql_attr_dal.fetch_sql_attribute_counts(zone_ids=zone_ids)
-    related_counts = terms_dal.fetch_related_terms_counts(zone_ids=zone_ids)
-    return {
-        "terms": terms,
-        "column_attribute_counts": column_attribute_counts,
-        "sql_attribute_counts": sql_attribute_counts,
-        "related_counts": related_counts,
-    }
+    return term_service.list_terms_page(zone_ids=None, search=q, skip=skip, limit=limit)
 
 
-@router.get("/terms/{term_id}/column-attributes")
+@router.get(
+    "/terms/{term_id}/column-attributes", response_model=ColumnAttributePageResponse
+)
 def list_term_column_attributes_by_id(
     term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
     """Return ColumnAttribute nodes for a single Term.
 
-    Zone-scoped when zone_ids are provided, so a viewer can't see attributes
-    of out-of-zone tables just because they belong to a term they can see.
+    Attributes come back ordered by name, and *skip*/*limit* select one page
+    of that order. ``count`` is the length of ``data`` (this page), ``total``
+    the number of attributes the term has in full.
 
     Each attribute includes ``primary_column`` and ``referenced_columns``
     (catalog path ids + names) for navigation from the detail page.
     """
-    attrs = terms_dal.fetch_column_attributes_by_term_id(term_id, zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
+    attrs = terms_dal.fetch_column_attributes_by_term_id(
+        term_id, zone_ids=None, skip=skip, limit=limit
+    )
+    # `len(attrs)` only equals the term's full count when neither paging
+    # argument was given — a `skip` alone (no `limit`) still returns a
+    # partial read, so it needs the same separate count query.
+    total = (
+        terms_dal.count_column_attributes_by_term_id(term_id, zone_ids=None)
+        if skip or limit is not None
+        else len(attrs)
+    )
+    return {"data": attrs, "count": len(attrs), "total": total}
 
 
-@router.patch("/terms/{term_id}/column-attributes/{attr_id}")
+@router.patch(
+    "/terms/{term_id}/column-attributes/{attr_id}",
+    response_model=ColumnAttributePatchResponse,
+)
 def update_column_attribute(
     term_id: str,
-    attr_id: str,
     body: ColumnAttributeUpdate,
+    attr_id: str = Path(description="ColumnAttribute id, not a SqlAttribute id."),
 ) -> dict:
     """Update ColumnAttribute name/description/sample_values and refresh embeddings.
 
@@ -118,6 +142,7 @@ def update_column_attribute(
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
             sample_values=patch.get("sample_values"),
+            certified=patch.get("certified"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -130,25 +155,42 @@ def update_column_attribute(
             "name": row["name"],
             "description": row.get("description"),
             "sample_values": row.get("sample_values"),
-        }
+            "certified": row.get("certified", False),
+        },
+        # The owning Term's aggregate badge depends on this attribute's flag,
+        # so hand back the recomputed value rather than making the client
+        # re-derive it (see terms_dal.get_term_certification).
+        "term_certification": terms_dal.get_term_certification(term_id),
     }
 
 
-@router.get("/terms/{term_id}/sql-attributes")
+@router.get("/terms/{term_id}/sql-attributes", response_model=SqlAttributePageResponse)
 def list_term_sql_attributes_by_id(
     term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
 ) -> dict:
     """Return SqlAttribute nodes for a single Term.
 
-    Zone-scoped when zone_ids are provided, matching the term visibility
-    rules used by the single-term detail endpoint.
+    Attributes come back ordered by name, and *skip*/*limit* select one page
+    of that order. ``count`` is the length of ``data`` (this page), ``total``
+    the number of attributes the term has in full.
     """
-    attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(term_id, zone_ids=zone_ids)
-    return {"data": attrs, "count": len(attrs)}
+    attrs = sql_attr_dal.fetch_sql_attributes_by_term_id(
+        term_id, zone_ids=None, skip=skip, limit=limit
+    )
+    # `len(attrs)` only equals the term's full count when neither paging
+    # argument was given — a `skip` alone (no `limit`) still returns a
+    # partial read, so it needs the same separate count query.
+    total = (
+        sql_attr_dal.count_sql_attributes_by_term_id(term_id, zone_ids=None)
+        if skip or limit is not None
+        else len(attrs)
+    )
+    return {"data": attrs, "count": len(attrs), "total": total}
 
 
-@router.patch("/terms/{term_id}")
+@router.patch("/terms/{term_id}", response_model=TermResponse)
 def update_term(term_id: str, body: TermUpdate) -> dict:
     """Update a Term and invalidate dependent SqlAttribute suggestions."""
     patch = body.model_dump(exclude_unset=True)
@@ -165,45 +207,48 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
         term_id,
         name=name if isinstance(name, str) else None,
         description=patch.get("description"),
+        name_certified=patch.get("name_certified"),
+        description_certified=patch.get("description_certified"),
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Term not found")
 
-    name_changed = (row.get("old_name") or "").strip() != row["name"].strip()
+    # Certification flags carry no embedding content; only name/description
+    # changes need suggestion invalidation and a VDB refresh.
+    content_changed = "name" in patch or "description" in patch
+    name_changed = (
+        content_changed and (row.get("old_name") or "").strip() != row["name"].strip()
+    )
     if name_changed:
         sql_attr_dal.clear_sql_attribute_description_suggestions_for_term(term_id)
 
-    try:
-        term_service.refresh_term_embeddings(
-            term_id, refresh_dependent_attrs=name_changed
-        )
-    except Exception:
-        logger.warning(
-            "Failed to refresh Term embeddings for %r", term_id, exc_info=True
-        )
+    if content_changed:
+        try:
+            term_service.refresh_term_embeddings(
+                term_id, refresh_dependent_attrs=name_changed
+            )
+        except Exception:
+            logger.warning(
+                "Failed to refresh Term embeddings for %r", term_id, exc_info=True
+            )
 
     return {
         "data": {
             "id": row["id"],
             "name": row["name"],
             "description": row.get("description"),
+            "name_certified": row.get("name_certified", False),
+            "description_certified": row.get("description_certified", False),
+            "certification": terms_dal.get_term_certification(term_id),
         }
     }
 
 
-@router.get("/terms/{term_id}")
-def get_term(
-    term_id: str,
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """Return a single Term node by id, including zones and related terms.
-
-    Zone-scoped when zone_ids are provided: a term that also represents an
-    out-of-zone table is treated as not found, so a viewer can't bypass the
-    ``/terms`` list's zone scoping by requesting a term directly by id.
-    """
-    term = terms_dal.get_full_term_by_id(term_id, zone_ids=zone_ids)
+@router.get("/terms/{term_id}", response_model=TermDetailResponse)
+def get_term(term_id: str) -> dict:
+    """Return a single Term node by id, including zones and related terms."""
+    term = terms_dal.get_full_term_by_id(term_id, zone_ids=None)
     if term is None:
         raise HTTPException(status_code=404, detail="Term not found")
-    term["related_terms"] = terms_dal.fetch_related_terms(term_id, zone_ids=zone_ids)
+    term["related_terms"] = terms_dal.fetch_related_terms(term_id, zone_ids=None)
     return {"data": term}

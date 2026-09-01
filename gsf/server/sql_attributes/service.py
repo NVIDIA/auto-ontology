@@ -126,6 +126,7 @@ def _persist_attr_with_sql(
         "source": props.get("source", ""),
         "sql_id": query_obj.sql_node.get_id(),
         "sql": sql,
+        "certified": props.get("certified", False),
     }
 
 
@@ -289,6 +290,7 @@ def update_sql_attribute(
     term_id: str | None = None,
     connector: str | None = None,
     source: str = "manual",
+    certified: bool | None = None,
 ) -> dict[str, Any] | None:
     """Update a SqlAttribute.
 
@@ -296,7 +298,9 @@ def update_sql_attribute(
     re-links the Term, and re-embeds. *name* and *term_id* are required in
     that case.
 
-    When *expression* is omitted, patches name/description only.
+    When *expression* is omitted, patches name/description and/or the
+    certification flag only. The certification flag carries no embedding
+    content, so a certification-only patch skips the VDB refresh.
 
     The connector is resolved server-side (see
     :func:`_resolve_database_name`) — callers never need to pass one.
@@ -380,6 +384,7 @@ def update_sql_attribute(
             "term_name": term["name"],
             "term_id": term_id,
             "sql": expression,
+            "certified": existing.get("certified", False),
         }
 
     next_name = name.strip() if name is not None else existing.get("name", "")
@@ -392,7 +397,8 @@ def update_sql_attribute(
 
     name_changed = (existing.get("name") or "").strip() != next_name
     description_changed = (existing.get("description") or "") != next_description
-    if not name_changed and not description_changed:
+    certification_changed = certified is not None
+    if not name_changed and not description_changed and not certification_changed:
         return existing
 
     if name_changed:
@@ -408,8 +414,10 @@ def update_sql_attribute(
         attr_id,
         name=next_name if name_changed else None,
         description=next_description if description_changed else None,
+        certified=certified,
     )
-    _reembed_sql_attribute(attr_id, existing.get("database_name"))
+    if name_changed or description_changed:
+        _reembed_sql_attribute(attr_id, existing.get("database_name"))
 
     return get_full_sql_attribute_by_id(attr_id)
 

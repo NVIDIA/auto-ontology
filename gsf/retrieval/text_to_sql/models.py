@@ -101,7 +101,7 @@ class CandidateFilterModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(..., description="1-2 sentence reasoning.")
+    reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
     best_id: str | None = Field(
         ...,
         description="ID of the single best candidate that matches the user's intent. Null if none match.",
@@ -139,10 +139,26 @@ class AnchorColumnModel(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    reasoning: str = Field(..., description="Brief reasoning for the choice.")
+    reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
     anchor_id: str | None = Field(
         ...,
         description="The id of the ColumnAttribute that is the primary focus of the question.",
+    )
+
+
+class FollowUpResolutionModel(StrictModel):
+    """Contextualize the current user question against completed prior turns."""
+
+    is_follow_up: bool = Field(
+        ...,
+        description="Whether the current question depends on prior conversation context.",
+    )
+    standalone_question: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A complete standalone question. It must equal the current question "
+            "when the question is independent."
+        ),
     )
 
 
@@ -159,9 +175,16 @@ class SQLGenerationModel(StrictModel):
     thought: str = Field(
         ...,
         description=(
-            "Internal reasoning (2-3 sentences): briefly explain your approach "
-            "and key decisions. If the question was AMBIGUOUS, explicitly state "
-            "the assumption made to resolve it. This is NOT shown to the user."
+            "Briefly explain the SQL approach and explicitly state every assumption "
+            "made where the user's request or available schema does not uniquely "
+            "determine the query. Do not omit assumptions. For each of the following "
+            'that applies, state the choice AND the reason ("X, because Y"): '
+            "(1) time window — the concrete boundary for any vague/relative time "
+            "phrase (e.g. 'recently'); (2) zero/missing values — whether zero-count "
+            "or NULL groups are included, excluded, or coerced to 0, and how any "
+            "division guards against a zero denominator; (3) ties — what breaks a "
+            "tie in a ranking/superlative query. If none were needed, state that "
+            "explicitly."
         ),
     )
     sql_code: NonEmptyStr = Field(

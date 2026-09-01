@@ -4,12 +4,13 @@
 
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
+import { EmptyState } from '@/common/EmptyState';
 import { Table } from '@/common/Table';
+import { EmptyStateVariant } from '@/enums/emptyState';
+import { usePagination } from '@/hooks/usePagination';
 import type { TableColumn } from '@/types/table';
-
-const PAGE_SIZE = 10;
 
 type DynamicTableProps = {
 	table: ParsedTable;
@@ -17,15 +18,10 @@ type DynamicTableProps = {
 
 export const DynamicTable = ({ table }: DynamicTableProps) => {
 	const { columns, rows } = table;
-	const [page, setPage] = useState(1);
-
-	const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-	const currentPage = Math.min(page, pageCount);
-
-	const paginatedRows = useMemo(() => {
-		const start = (currentPage - 1) * PAGE_SIZE;
-		return rows.slice(start, start + PAGE_SIZE);
-	}, [rows, currentPage]);
+	const { skip, pageSize, pagination } = usePagination({ totalItems: rows.length });
+	// A fresh array every render would re-render `Table` on every parent render,
+	// which chat result sets are large enough to feel.
+	const pageRows = useMemo(() => rows.slice(skip, skip + pageSize), [rows, skip, pageSize]);
 
 	const tableColumns = useMemo<TableColumn<TableRow>[]>(
 		() =>
@@ -42,13 +38,13 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 	);
 
 	if (columns.length === 0 || rows.length === 0) {
-		return <p className="text-xs text-zinc-400">No data available</p>;
+		return <EmptyState variant={EmptyStateVariant.Inline} title="No data available" />;
 	}
 
 	return (
 		<Table
 			columns={tableColumns}
-			rows={paginatedRows}
+			rows={pageRows}
 			rowKey={(_, index) => String(index)}
 			layout="auto"
 			textClassName="text-xs"
@@ -58,12 +54,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 			bodyClassName="text-zinc-700 dark:text-zinc-300"
 			rowClassName="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
 			scrollClassName="max-h-[478px] overflow-auto"
-			pagination={{
-				page: currentPage,
-				pageSize: PAGE_SIZE,
-				totalItems: rows.length,
-				onPageChange: setPage,
-			}}
+			pagination={pagination}
 		/>
 	);
 };

@@ -3,18 +3,23 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { Suspense } from 'react';
-import { TermsView } from '@/components/termsPage';
+import { Icon, IconName } from '@/common/icons';
+import { TermsLoadingSkeleton, TermsView } from '@/components/termsPage';
 
 export default function TermsPage() {
 	return (
 		<Suspense
 			fallback={
-				<div className="flex h-screen items-center justify-center">
-					<div
-						className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-						role="status"
-						aria-label="Loading"
-					/>
+				<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
+					<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
+						<Icon name={IconName.Terms} className="h-5 w-5 text-[#76b900]" />
+						<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
+							Terms
+						</h1>
+					</header>
+					<div className="flex-1 px-6 py-6">
+						<TermsLoadingSkeleton />
+					</div>
 				</div>
 			}
 		>

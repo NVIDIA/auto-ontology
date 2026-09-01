@@ -11,11 +11,15 @@ so this module converts the structured form into the URL the connectors expect.
 
 from __future__ import annotations
 
+import base64
 from typing import Any, Mapping
 from urllib.parse import quote
 
 DEFAULT_POSTGRES_PORT = "5432"
+DEFAULT_MYSQL_PORT = "3306"
 DEFAULT_HEAVYDB_PORT = "6274"
+DEFAULT_KYUUBI_PORT = "10000"
+DEFAULT_TRINO_PORT = "8080"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
 
 
@@ -29,6 +33,20 @@ def _require(connection: Mapping[str, Any], key: str) -> str:
 def _enc(value: str) -> str:
     """Percent-encode a URL component, escaping reserved chars like ``/`` and ``@``."""
     return quote(value, safe="")
+
+
+def _encode_private_key(pem: str) -> str:
+    """Return URL-safe base64 for a PEM private key.
+
+    A PEM cannot travel through a query string as-is: its newlines and its ``+``
+    and ``/`` characters get mangled, and ``parse_qs`` decodes ``+`` as a space,
+    which corrupts the key silently rather than failing. Base64 sidesteps all of
+    that. An already-encoded value is passed through so re-building a connection
+    string is idempotent.
+    """
+    if "BEGIN" not in pem:
+        return pem
+    return base64.urlsafe_b64encode(pem.encode()).decode()
 
 
 def build_connection_string(connection: Mapping[str, Any]) -> str:
@@ -45,28 +63,128 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             f"postgresql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
         )
 
+    if conn_type == "mysql":
+        host = _require(connection, "host").rstrip("/")
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        database = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_MYSQL_PORT
+        return f"mysql://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(database)}"
+
     if conn_type == "snowflake":
         account = _require(connection, "account")
         warehouse = _require(connection, "warehouse")
         user = _require(connection, "user")
-        password = _require(connection, "password")
         database = _require(connection, "database")
-        return (
-            f"snowflake://{_enc(user)}:{_enc(password)}@{account}"
-            f"?warehouse={_enc(warehouse)}&database={_enc(database)}"
-        )
+        params = f"warehouse={_enc(warehouse)}&database={_enc(database)}"
+
+        # Snowflake accounts that enforce MFA reject passwords for PERSON users and
+        # forbid them on SERVICE users, so a key pair is the only credential an
+        # unattended service can use. Password auth stays supported for accounts
+        # that still permit it.
+        private_key = str(connection.get("private_key") or "").strip()
+        if private_key:
+            params += f"&private_key={_enc(_encode_private_key(private_key))}"
+            passphrase = str(connection.get("private_key_passphrase") or "").strip()
+            if passphrase:
+                params += f"&private_key_passphrase={_enc(passphrase)}"
+            return f"snowflake://{_enc(user)}@{account}?{params}"
+
+        password = _require(connection, "password")
+        return f"snowflake://{_enc(user)}:{_enc(password)}@{account}?{params}"
 
     if conn_type == "databricks":
         host = _require(connection, "host").rstrip("/")
         if host.startswith(("https://", "http://")):
             host = host.split("://", 1)[1]
         http_path = _require(connection, "http_path")
-        access_token = _require(connection, "password")
+        # ``access_token_override`` carries a Databricks token exchanged from the
+        # caller's SSO identity, so the query runs with that user's privileges
+        # instead of the connection's stored PAT.
+        access_token = str(connection.get("access_token_override") or "").strip()
+        federated = bool(access_token)
+        if not access_token:
+            access_token = _require(connection, "password")
         catalog = _require(connection, "database")
-        return (
+        url = (
             f"databricks://token:{_enc(access_token)}@{host}/{_enc(catalog)}"
             f"?http_path={_enc(http_path)}"
         )
+        # The token itself is opaque, so record which credential it is. The
+        # connector logs this alongside every statement it runs.
+        if federated:
+            url += "&auth=sso"
+        return url
+
+    if conn_type == "kyuubi":
+        host = _require(connection, "host").rstrip("/")
+        if host.startswith(("https://", "http://")):
+            host = host.split("://", 1)[1]
+        user = _require(connection, "user")
+        password = _require(connection, "password")
+        catalog = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_KYUUBI_PORT
+
+        # An SSA client mints a fresh token per hour, so the connector needs the
+        # token endpoint alongside the credentials. Without ``ssa_url`` the
+        # password is treated as a JWT that nothing can refresh.
+        ssa_url = str(connection.get("ssa_url") or "").strip().rstrip("/")
+        params = [f"auth={'ssa' if ssa_url else 'token'}"]
+        if ssa_url:
+            params.append(f"ssa_url={_enc(ssa_url)}")
+
+        # NVIDIA ships its internal CAs as a Java truststore; the connector
+        # converts it to PEM since Python's ssl module cannot read a JKS. The
+        # keystore can arrive either as base64 bytes uploaded through the UI --
+        # which keeps it with the connection instead of requiring a file to
+        # exist on every pod -- or as a path, for env-var connection strings.
+        truststore_file = str(connection.get("truststore_file") or "").strip()
+        truststore = str(connection.get("truststore") or "").strip()
+        if truststore_file:
+            params.append(f"truststore_data={_enc(truststore_file)}")
+        elif truststore:
+            params.append(f"truststore={_enc(truststore)}")
+        if truststore_file or truststore:
+            truststore_password = str(
+                connection.get("truststore_password") or ""
+            ).strip()
+            if truststore_password:
+                params.append(f"truststore_password={_enc(truststore_password)}")
+
+        return (
+            f"kyuubi://{_enc(user)}:{_enc(password)}@{host}:{port}/{_enc(catalog)}"
+            f"?{'&'.join(params)}"
+        )
+
+    if conn_type == "trino":
+        host = _require(connection, "host").rstrip("/")
+        if host.startswith(("https://", "http://")):
+            host = host.split("://", 1)[1]
+        user = _require(connection, "user")
+        catalog = _require(connection, "database")
+        port = str(connection.get("port") or "").strip() or DEFAULT_TRINO_PORT
+
+        # The password is optional: an unauthenticated cluster -- the usual shape
+        # for a development Trino -- takes the username as a plain identity label
+        # and rejects any credential, so an empty password must produce a URL with
+        # no password rather than an empty one.
+        password = str(connection.get("password") or "").strip()
+        credentials = f"{_enc(user)}:{_enc(password)}" if password else _enc(user)
+
+        params = []
+        schema = str(connection.get("schema") or "").strip()
+        if schema:
+            params.append(f"schema={_enc(schema)}")
+        # Left to the connector when unset: it picks https for a password or a
+        # TLS port, http otherwise. See ``gsf.connectors.trino``.
+        http_scheme = str(connection.get("http_scheme") or "").strip().lower()
+        if http_scheme:
+            params.append(f"http_scheme={_enc(http_scheme)}")
+
+        url = f"trino://{credentials}@{host}:{port}/{_enc(catalog)}"
+        if params:
+            url += f"?{'&'.join(params)}"
+        return url
 
     if conn_type == "heavydb":
         host = _require(connection, "host").rstrip("/")

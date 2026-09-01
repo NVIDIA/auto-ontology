@@ -21,6 +21,7 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 )
 
 from gsf.dal.datasources import (
+    count_columns_for_table,
     fetch_parent_table_id_for_column,
     fetch_tables_and_columns_by_node_ids,
     fetch_columns_for_table,
@@ -35,6 +36,7 @@ from gsf.semantic.embed import build_semantic_embedder
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "count_columns_for_table",
     "fetch_databases",
     "fetch_schemas_for_database",
     "fetch_tables_for_schema",

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { requests } from './requests';
+import type { CertificationStatus } from '@/enums/certification';
 import type { SqlAttribute } from '@/types/terms';
 import type { ResponseWithError } from './types';
 
@@ -26,8 +27,14 @@ export type SqlAttributeValidatePayload = {
 export type SqlAttributePatchPayload = {
 	name?: string;
 	description?: string | null;
+	certified?: boolean;
 };
 
+type PatchResult = SingleResult & {
+	/** Owning term's aggregate status, recomputed server-side after the write. */
+	term_certification: CertificationStatus | null;
+};
+type PatchResponse = ResponseWithError<PatchResult>;
 type ValidateResult = { data: { valid: boolean; expression: string } };
 type ValidateResponse = ResponseWithError<ValidateResult>;
 type CreateResponse = ResponseWithError<SingleResult>;
@@ -45,8 +52,8 @@ export const sqlAttributesApi = {
 		requests.post<SingleResult>('sql-attributes', payload),
 	update: (id: string, payload: SqlAttributeCreatePayload): Promise<UpdateResponse> =>
 		requests.put<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
-	patch: (id: string, payload: SqlAttributePatchPayload): Promise<UpdateResponse> =>
-		requests.patch<SingleResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
+	patch: (id: string, payload: SqlAttributePatchPayload): Promise<PatchResponse> =>
+		requests.patch<PatchResult>(`sql-attributes/${encodeURIComponent(id)}`, payload),
 	delete: (id: string): Promise<DeleteResponse> =>
 		requests.delete<{ data: { id: string } }>(`sql-attributes/${encodeURIComponent(id)}`),
 	suggestDescription: (id: string): Promise<SuggestDescriptionResponse> =>

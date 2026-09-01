@@ -20,6 +20,10 @@ async function checkPostgres(): Promise<CheckResult> {
 	}
 }
 
+// Liveness/readiness probe for the Next.js tier, unauthenticated by design.
+//
+// Probes Postgres and answers 200 `{ status: 'ok' }`, or 503
+// `{ status: 'degraded' }` carrying the failing check's error detail.
 export const GET = withPublic(async () => {
 	const postgres = await checkPostgres();
 	const healthy = postgres.status === 'ok';

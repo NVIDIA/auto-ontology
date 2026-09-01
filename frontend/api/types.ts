@@ -18,6 +18,18 @@ export type ResponseWithCount<T> = {
 
 export type ApiResponse<T> = ResponseWithError<ResponseWithCount<T>>;
 
+/** `ApiResponse` for one page: `count` is this page, `total` the whole list. */
+export type ApiPagedResponse<T> = ResponseWithError<ResponseWithCount<T> & { total: number }>;
+
+/**
+ * Window into a list endpoint. Omit `limit` for the whole list — the backend
+ * caps a requested page at 100 rows.
+ */
+export type PageParams = {
+	skip?: number;
+	limit?: number;
+};
+
 /** Schemas endpoint returns a non-standard envelope (not {data,count}). */
 export type SchemasResponse = {
 	schemas_count: number;
@@ -28,6 +40,7 @@ export type SchemasResponse = {
 export type NodePatch = {
 	description?: string;
 	sample_values?: string[];
+	description_certified?: boolean;
 };
 
 /** Response from the node update endpoint. */
@@ -43,6 +56,12 @@ export type ColumnsEnvelope = {
 	columns_count: number;
 	columns: Pick<
 		Column,
-		'id' | 'ordinal_position' | 'column_name' | 'data_type' | 'description' | 'sample_values'
+		| 'id'
+		| 'ordinal_position'
+		| 'column_name'
+		| 'data_type'
+		| 'description'
+		| 'description_certified'
+		| 'sample_values'
 	>[];
 };

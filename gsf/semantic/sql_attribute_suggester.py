@@ -28,9 +28,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel
 
-from gsf.dal.sql_attributes import SQL_ATTR_SOURCE_SQL
 from gsf.dal.terms import fetch_table_schema_map, fetch_terms_with_sqls
-from gsf.semantic.constants import SEMANTIC_SOURCE
+from gsf.semantic.constants import SQL_ATTR_SOURCE_SQL
 from gsf.server.sql_attributes.service import (
     SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,

@@ -5,23 +5,21 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { Spinner } from '@nvidia/foundations-react-core';
 import {
 	SinglePageComposer,
 	type ComposerEditValue,
 	type SinglePageComposerProps,
 } from '@/common/SinglePageComposer';
+import { SkeletonDetail } from '@/common/Skeleton';
 
 export type SinglePageFormat = SinglePageComposerProps;
 
 export type SinglePageViewProps = {
 	dataId: string;
-	title: string;
 	getSinglePage: (dataId: string, treeFocusId: string | null) => Promise<SinglePageFormat>;
 	treeFocusId?: string | null;
 	/** Increment when explorer tree merges API data so details re-render without changing focus. */
 	treeDataEpoch?: number;
-	parentId?: string;
 	isEditing?: boolean;
 	onPatchEdits?: (
 		edits: Record<string, ComposerEditValue>,
@@ -31,14 +29,18 @@ export type SinglePageViewProps = {
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
+	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
 };
 
 export const SinglePageView = ({
 	dataId,
-	parentId,
-	title,
 	getSinglePage,
 	treeFocusId = null,
 	treeDataEpoch = 0,
@@ -49,6 +51,8 @@ export const SinglePageView = ({
 	onDataTableRowClick,
 	onEditSql,
 	onSuggestDescription,
+	onCertificationChange,
+	onDataTableCertificationChange,
 	inlineSaveSectionId,
 	hideEditToolbar,
 }: SinglePageViewProps): React.JSX.Element | null => {
@@ -92,11 +96,8 @@ export const SinglePageView = ({
 
 	if (loading) {
 		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-4" role="status">
-				<Spinner aria-label="Loading" />
-				<p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-					Loading details…
-				</p>
+			<div className="flex flex-1" role="status" aria-label="Loading details">
+				<SkeletonDetail />
 			</div>
 		);
 	}
@@ -112,12 +113,10 @@ export const SinglePageView = ({
 			<SinglePageComposer
 				header={{
 					header: {
-						...(hasTreeFocus ? { entityId: dataId, parentId } : {}),
-						title,
-						withBorder: true,
-						...props.header?.header,
+						...(hasTreeFocus ? { entityId: dataId } : {}),
+						...props.header.header,
 					},
-					errorBanner: props.header?.errorBanner,
+					errorBanner: props.header.errorBanner,
 				}}
 				sections={props.sections}
 				rightPanel={props?.rightPanel}
@@ -130,6 +129,8 @@ export const SinglePageView = ({
 				onDataTableRowClick={onDataTableRowClick}
 				onEditSql={onEditSql}
 				onSuggestDescription={onSuggestDescription}
+				onCertificationChange={onCertificationChange}
+				onDataTableCertificationChange={onDataTableCertificationChange}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
 			/>

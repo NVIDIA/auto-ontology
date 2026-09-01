@@ -4,8 +4,13 @@
 
 import type { CSSProperties } from 'react';
 
+import { Text } from '@/common/Text';
+
+// A label carries a name, so it is capped and clipped rather than allowed to
+// grow: one oversized value (a description that ended up in a name field, say)
+// would otherwise take over the whole chip list.
 const LABEL_BASE =
-	'inline-flex max-w-full items-center rounded-full border px-3 py-1 text-xs font-medium';
+	'inline-flex max-w-[min(24rem,100%)] items-center rounded-full border px-3 py-1 text-xs font-medium';
 const LABEL_GREEN =
 	'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-[#76b900]/30 dark:bg-[#76b900]/15 dark:text-[#a3d63a]';
 const LABEL_GREEN_HOVER =
@@ -21,25 +26,15 @@ function zoneLabelStyle(color: string): CSSProperties {
 
 export type LabelProps = {
 	label: string;
-	title?: string;
 	/** When provided the label becomes an interactive button; otherwise it is read-only. */
 	onClick?: () => void;
 	/** Accent color (hex) for zone labels; falls back to the brand-green palette when omitted. */
 	color?: string | null;
 	/** Muted grey style used for disabled zones. */
 	muted?: boolean;
-	/** Optional max-width utility class that truncates overflowing labels. */
-	maxWidthClass?: string;
 };
 
-export const Label = ({
-	label,
-	title,
-	onClick,
-	color,
-	muted = false,
-	maxWidthClass,
-}: LabelProps) => {
+export const Label = ({ label, onClick, color, muted = false }: LabelProps) => {
 	const usesZoneColor = !muted && color != null && color !== '';
 	const interactive = onClick != null;
 	const palette = muted ? LABEL_MUTED : usesZoneColor ? LABEL_NEUTRAL : LABEL_GREEN;
@@ -52,29 +47,19 @@ export const Label = ({
 		.filter(Boolean)
 		.join(' ');
 	const style = usesZoneColor ? zoneLabelStyle(color as string) : undefined;
-	const content = maxWidthClass ? (
-		<span className={`${maxWidthClass} truncate`} title={title ?? label}>
-			{label}
-		</span>
-	) : (
-		label
-	);
+	// Clipping is what makes the cap above win over a long value, and a clipped
+	// chip reveals itself in the same tooltip the tags elsewhere use.
+	const content = <Text text={label} />;
 
 	if (interactive) {
 		return (
-			<button
-				type="button"
-				onClick={onClick}
-				title={title ?? label}
-				className={className}
-				style={style}
-			>
+			<button type="button" onClick={onClick} className={className} style={style}>
 				{content}
 			</button>
 		);
 	}
 	return (
-		<span title={title} className={className} style={style}>
+		<span className={className} style={style}>
 			{content}
 		</span>
 	);

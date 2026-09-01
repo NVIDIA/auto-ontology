@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from urllib.parse import urlparse
 
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
@@ -16,23 +17,61 @@ from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
+from gsf.connectors.kyuubi import KyuubiDatabase
+from gsf.connectors.mysql import MySQLDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
 from gsf.connectors.sqlite import SQLiteDatabase
+from gsf.connectors.trino import TrinoDatabase
 
 logger = logging.getLogger(__name__)
 
+# Every connector here MUST expose a ``dialect`` that sqlglot recognises
+# (one of ``sqlglot.dialects.DIALECTS``). Callers pass ``connector.dialect``
+# straight into ``sqlglot.parse_one(read=...)`` / ``Expression.sql(dialect=...)``
+# with no translation layer in between, and sqlglot raises on an unknown
+# dialect *name* before it ever looks at the SQL — so a bad name is a hard
+# error, not a silent fall back to the generic parser.
+#
+# An engine sqlglot has no dialect for must map itself onto the closest one it
+# does have; see ``HeavyDBDatabase.dialect``, which reports ``"postgres"``.
+# ``test_registry_dialects.py`` enforces this.
+#
+# Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
+# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
+    "mysql": MySQLDatabase,
     "databricks": DatabricksDatabase,
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
     "heavydb": HeavyDBDatabase,
+    "kyuubi": KyuubiDatabase,
     "sqlite": SQLiteDatabase,
+    "trino": TrinoDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
+
+
+def _redact(connection_string: str) -> str:
+    """Mask the password/token in a connection string before logging it.
+
+    Connection strings carry a PAT (or, with per-user auth, a caller's exchanged
+    Databricks token), so the raw value must never reach the logs.
+
+    An uploaded Kyuubi truststore is also collapsed: it is base64 keystore bytes
+    and runs to hundreds of kilobytes, which would otherwise be emitted verbatim
+    on every connector failure.
+    """
+    connection_string = re.sub(
+        r"(truststore_data=)[^&]+", r"\1<keystore>", connection_string
+    )
+    parsed = urlparse(connection_string)
+    if not parsed.password:
+        return connection_string
+    return connection_string.replace(parsed.password, "***", 1)
 
 
 def _schema_filter(connection: dict) -> list[str] | None:
@@ -67,8 +106,8 @@ def create_connector(
     """Parse *connection_string*, select a connector class, and return an instance.
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
-    connectors that support schema filtering (currently Databricks and
-    Snowflake); for others it is ignored so their behaviour is unchanged.
+    connectors that support schema filtering (currently Databricks, Snowflake,
+    Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
     """
     try:
         parsed = urlparse(connection_string)
@@ -86,16 +125,84 @@ def create_connector(
                 f"Connection string: {connection_string}"
             )
 
-        if schemas and connector_class in (DatabricksDatabase, SnowflakeDatabase):
+        if schemas and connector_class in (
+            DatabricksDatabase,
+            SnowflakeDatabase,
+            KyuubiDatabase,
+            TrinoDatabase,
+        ):
             return connector_class(connection_string, schemas=schemas)
         return connector_class(connection_string)
 
     except Exception:
         logger.exception(
             "Failed to initialize connector for connection string: %s",
-            connection_string,
+            _redact(connection_string),
         )
         raise
+
+
+def get_connectors_for_subject_token(
+    subject_token: str | None,
+) -> list[SQLDatabase]:
+    """Build connectors, authenticating federated connections as the caller.
+
+    Connections with "Authenticate as signed-in user" enabled get their stored
+    PAT replaced by a token exchanged from *subject_token* (the caller's SSO
+    JWT), so SQL runs under that user's Unity Catalog grants. Every other
+    connection is untouched and reuses the shared cache.
+
+    Fail-closed: a federated connection with no usable subject token raises
+    rather than falling back to the stored PAT — otherwise the query would
+    silently run with the PAT's broader privileges.
+
+    Raises:
+        DatabricksOAuthError: no subject token, or the exchange was rejected.
+    """
+    from gsf.connectors.databricks_oauth import (
+        DatabricksOAuthError,
+        exchange_subject_token,
+        uses_sso_federation,
+    )
+    from gsf.dal.connections import list_connections
+
+    try:
+        connections = list_connections()
+    except Exception:
+        logger.exception("Failed to load connections for per-user Databricks auth")
+        raise
+
+    federated = [conn for conn in connections if uses_sso_federation(conn)]
+    if not federated:
+        return get_connectors()
+
+    if not subject_token:
+        raise DatabricksOAuthError(
+            "This connection authenticates as the signed-in user, but the "
+            "request carried no SSO token"
+        )
+
+    loaded: list[SQLDatabase] = []
+    federated_names: set[str] = set()
+    for conn in federated:
+        access_token = exchange_subject_token(
+            str(conn.get("host") or ""), subject_token
+        )
+        connection_string = build_connection_string(
+            {**conn, "access_token_override": access_token}
+        )
+        connector = create_connector(connection_string, schemas=_schema_filter(conn))
+        federated_names.add(connector.database_name)
+        loaded.append(connector)
+
+    # Non-federated connections keep their own credentials; reuse the shared
+    # cache rather than rebuilding them per request.
+    loaded.extend(
+        connector
+        for connector in get_connectors()
+        if connector.database_name not in federated_names
+    )
+    return loaded
 
 
 def get_connectors() -> list[SQLDatabase]:
@@ -113,9 +220,9 @@ def get_connectors() -> list[SQLDatabase]:
         from gsf.dal.connections import list_connections
 
         # Each spec is (connection_string, schema_allowlist). The schema filter
-        # is honoured only during ingestion introspection (Databricks and
-        # Snowflake); it is inert for retrieval, which executes SQL rather than
-        # introspecting.
+        # is honoured only during ingestion introspection (Databricks,
+        # Snowflake, Kyuubi, and Trino); it is inert for retrieval, which executes SQL
+        # rather than introspecting.
         try:
             specs: list[tuple[str, list[str] | None]] = [
                 (build_connection_string(conn), _schema_filter(conn))

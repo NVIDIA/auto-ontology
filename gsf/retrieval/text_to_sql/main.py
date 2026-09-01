@@ -9,12 +9,19 @@ from typing import Generator
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.retrieval.text_to_sql.text_to_sql_graph import create_graph
+from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    _prediction_enabled,
+    create_graph,
+)
+from gsf.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
+from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from gsf.retrieval.text_to_sql.prompts import main_system_prompt_template
 from gsf.retrieval.text_to_sql.node_labels import NODE_LABELS
 from gsf.retrieval.data_access.custom_analyses import fetch_custom_analyses
-from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
+from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
@@ -23,14 +30,6 @@ try:
 except ValueError as e:
     logger.error("Failed to initialize LLM client: %s", e)
     llm_client = None
-
-try:
-    non_reasoning_llm_client = get_non_reasoning_llm_client(max_tokens=2048)
-    logger.info("Entity extraction will use the non-reasoning model")
-except (ValueError, EnvironmentError) as e:
-    logger.warning("Failed to init non-reasoning LLM: %s", e)
-    non_reasoning_llm_client = None
-
 
 graph = create_graph()
 app = graph.compile()
@@ -62,15 +61,32 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
     domain_rules = fetch_custom_analyses() + list(acronyms or [])
 
+    # ``prediction=True`` only means something when the KumoRFM branch was built
+    # into the graph at startup; without KUMO_RFM_API_KEY the classify node does
+    # not exist, so honouring the override is impossible. Fail loudly rather than
+    # silently answering with SQL.
+    prediction_override = payload.get("prediction")
+    if prediction_override is True and not _prediction_enabled():
+        raise ValueError(
+            "prediction=true was requested but the prediction flow is not "
+            "configured on this deployment (KUMO_RFM_API_KEY is unset)."
+        )
+
     initial_path_state = dict(payload.get("path_state") or {})
 
     target_db = payload.get("target_db")
     if target_db:
-        initial_path_state["target_db"] = target_db
+        initial_path_state["target_db"] = resolve_target_database_name(
+            target_db, connectors
+        )
     elif len(connectors) == 1:
         connector_db = getattr(connectors[0], "database_name", None)
         if connector_db:
             initial_path_state["target_db"] = connector_db
+
+    processing_question = (
+        payload.get("processing_question") or payload["question"]
+    ).strip()
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
@@ -78,12 +94,12 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     )
     messages = [
         SystemMessage(content=main_system_prompt),
-        HumanMessage(content=payload["question"]),
+        HumanMessage(content=processing_question),
     ]
 
     state: dict = {
         "llm": llm_client,
-        "initial_question": payload["question"],
+        "initial_question": processing_question,
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,
@@ -91,9 +107,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "semantic_retriever": semantic_retriever,
         "decision": "",
         "domain_rules": domain_rules,
+        "glossary": list(acronyms or []),
+        "prediction_override": prediction_override,
     }
-    if non_reasoning_llm_client is not None:
-        state["non_reasoning_llm"] = non_reasoning_llm_client
     return state
 
 
@@ -150,10 +166,10 @@ def stream_agent_response(
                 logger.info("Node: %s", node_name)
 
                 # A node records its own thought (if any) at the tail of
-                # path_state["thoughts_log"] — see base.record_thought. Only
-                # surface it here when this node is the one that just added
-                # it, so a step event never shows a stale entry left over
-                # from an earlier node.
+                # path_state["thoughts_log"] — see BaseAgent.record_thought.
+                # Only surface it here when this node is the one that just
+                # added it, so a step event never shows a stale entry left
+                # over from an earlier node.
                 thought = None
                 node_path_state = (node_output or {}).get("path_state") or {}
                 thoughts_log = node_path_state.get("thoughts_log") or []
@@ -291,7 +307,6 @@ __all__ = [
     "get_agent_response",
     "get_agent_response_with_state",
     "stream_agent_response",
-    "run_until_node",
     "app",
     "graph",
     "llm_client",

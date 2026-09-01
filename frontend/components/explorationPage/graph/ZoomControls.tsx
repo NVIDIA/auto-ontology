@@ -5,10 +5,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { Core } from 'cytoscape';
+import type { GraphController } from '@/components/explorationPage/graph/GraphCanvas';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 
 type ZoomControlsProps = {
-	controller: Core | null;
+	controller: GraphController | null;
 };
 
 export const ZoomControls = ({ controller }: ZoomControlsProps) => {
@@ -17,72 +19,86 @@ export const ZoomControls = ({ controller }: ZoomControlsProps) => {
 	useEffect(() => {
 		if (controller == null) return undefined;
 
-		const updateZoom = () => setZoom(controller.zoom());
-		const animationFrame = requestAnimationFrame(updateZoom);
-		controller.on('zoom', updateZoom);
+		const camera = controller.getCamera();
+		const updateZoom = () => setZoom(1 / camera.ratio);
+		updateZoom();
+		camera.on('updated', updateZoom);
 		return () => {
-			cancelAnimationFrame(animationFrame);
-			controller.off('zoom', updateZoom);
+			camera.off('updated', updateZoom);
 		};
 	}, [controller]);
 
-	const changeZoom = (delta: number) => {
+	// Sigma's default zoom factor (1.5x per click) feels too subtle for this
+	// graph — use a steeper factor so a single click noticeably changes scale.
+	const ZOOM_FACTOR = 2.5;
+
+	const zoomIn = () => {
 		if (controller == null) return;
-		const nextZoom = Math.min(3, Math.max(0.2, controller.zoom() + delta));
-		controller.zoom({
-			level: nextZoom,
-			renderedPosition: {
-				x: controller.width() / 2,
-				y: controller.height() / 2,
-			},
-		});
+		void controller.getCamera().animatedZoom({ duration: 200, factor: ZOOM_FACTOR });
+	};
+
+	const zoomOut = () => {
+		if (controller == null) return;
+		void controller.getCamera().animatedUnzoom({ duration: 200, factor: ZOOM_FACTOR });
 	};
 
 	const resetView = () => {
 		if (controller == null) return;
-		controller.zoom(1);
-		controller.center();
+		// Re-derives the graph's frozen extent from every node's current
+		// position (see `resetExtent`'s own comment in `GraphCanvas.tsx`)
+		// before fitting, so a node dragged past the last-frozen box —
+		// which `refresh()` alone can't recover — comes back into frame too.
+		controller.resetExtent();
+		void controller.getCamera().animatedReset({ duration: 200 });
 	};
 
 	return (
 		<div className="flex items-center gap-2">
 			<div className="flex h-10 items-center rounded-lg border border-zinc-200 bg-white shadow-md dark:border-zinc-700 dark:bg-zinc-900">
-				<button
+				<Button
+					theme={ButtonTheme.Icon}
+					size={Size.LARGE}
+					iconOnly
 					type="button"
-					onClick={() => changeZoom(-0.1)}
-					className="h-full cursor-pointer px-3 text-lg text-zinc-600 hover:text-[#76b900] dark:text-zinc-300"
+					onClick={zoomOut}
 					aria-label="Zoom out"
 				>
 					−
-				</button>
+				</Button>
 				<span className="w-12 text-center text-xs text-zinc-600 dark:text-zinc-300">
 					{Math.round(zoom * 100)}%
 				</span>
-				<button
+				<Button
+					theme={ButtonTheme.Icon}
+					size={Size.LARGE}
+					iconOnly
 					type="button"
-					onClick={() => changeZoom(0.1)}
-					className="h-full cursor-pointer px-3 text-lg text-zinc-600 hover:text-[#76b900] dark:text-zinc-300"
+					onClick={zoomIn}
 					aria-label="Zoom in"
 				>
 					+
-				</button>
+				</Button>
 			</div>
-			<button
-				type="button"
-				onClick={resetView}
-				className="flex h-10 w-10 cursor-pointer items-center justify-center rounded-lg border border-zinc-200 bg-white text-zinc-600 shadow-md transition-colors hover:text-[#76b900] dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
-				aria-label="Reset view to initial position"
-				title="Reset view to initial position"
-			>
-				<svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor">
-					<path
-						d="M7 3H3v4M13 3h4v4M7 17H3v-4m10 4h4v-4"
-						strokeWidth="1.5"
-						strokeLinecap="round"
-						strokeLinejoin="round"
-					/>
-				</svg>
-			</button>
+			<div className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-md dark:border-zinc-700 dark:bg-zinc-900">
+				<Button
+					theme={ButtonTheme.Icon}
+					size={Size.LARGE}
+					iconOnly
+					type="button"
+					onClick={resetView}
+					aria-label="Reset view to initial position"
+					title="Reset view to initial position"
+				>
+					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="none" stroke="currentColor">
+						<path
+							d="M7 3H3v4M13 3h4v4M7 17H3v-4m10 4h4v-4"
+							strokeWidth="1.5"
+							strokeLinecap="round"
+							strokeLinejoin="round"
+						/>
+					</svg>
+				</Button>
+			</div>
 		</div>
 	);
 };

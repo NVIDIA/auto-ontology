@@ -168,6 +168,25 @@ _POSTGRES_DIALECT_RULES = (
 )
 
 
+# Shared output-field spec for SQL-generation prompts (candidates-based and
+# table-based) — kept as a single source so the two call sites can't drift.
+_SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
+- thought: briefly explain your approach and state every assumption the
+  request or schema doesn't uniquely determine. For each that applies,
+  state the choice AND the reason ("X, because Y"): zero/missing values
+  (included, excluded, or coerced to 0; how division guards a zero
+  denominator), and ties (what breaks a tie in a ranking/superlative
+  query).
+- sql_code: the complete SQL, no comments or delimiters.
+- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
+  being calculated, WHICH tables and columns are used, any FILTERS or time
+  windows applied, and the GROUPING/ORDERING.
+  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
+  or meta-commentary about your reasoning. Refer to tables
+  and columns by their human-readable names.
+- All fields are required."""
+
+
 def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
 
@@ -287,21 +306,7 @@ ORDER BY total_sales DESC;"""
 - If the question filters by a single constant value on a column,
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
-Output (fill fields in this exact order):
-- thought: briefly explain your approach and state every assumption the
-  request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): zero/missing values
-  (included, excluded, or coerced to 0; how division guards a zero
-  denominator), and ties (what breaks a tie in a ranking/superlative
-  query).
-- sql_code: the complete SQL, no comments or delimiters.
-- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
-  being calculated, WHICH tables and columns are used, any FILTERS or time
-  windows applied, and the GROUPING/ORDERING.
-  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
-  or meta-commentary about your reasoning. Refer to tables
-  and columns by their human-readable names.
-- All fields are required.
+{_SQL_GENERATION_OUTPUT_SPEC}
 
 Example:
 
@@ -322,27 +327,13 @@ total sales.
 """
 
 
-create_sql_general_prompt = """You are an expert SQL query builder.
+create_sql_general_prompt = f"""You are an expert SQL query builder.
 You will receive a user question and a list of relevant tables.
 
 If no tables are relevant, explain politely and suggest rephrasing.
 Otherwise, construct an optimized SQL query to answer the question.
 
-Output (fill fields in this exact order):
-- thought: briefly explain your approach and state every assumption the
-  request or schema doesn't uniquely determine. For each that applies,
-  state the choice AND the reason ("X, because Y"): zero/missing values
-  (included, excluded, or coerced to 0; how division guards a zero
-  denominator), and ties (what breaks a tie in a ranking/superlative
-  query).
-- sql_code: the complete SQL, no comments or delimiters.
-- response: 2-4 sentences for the end user, in plain English. Describe WHAT is
-  being calculated, WHICH tables and columns are used, any FILTERS or time
-  windows applied, and the GROUPING/ORDERING.
-  Do NOT include SQL and code fences, raw identifiers like ``schema.table``,
-  or meta-commentary about your reasoning. Refer to tables
-  and columns by their human-readable names.
-- All fields are required.
+{_SQL_GENERATION_OUTPUT_SPEC}
 
 Do NOT mention corrected errors.
 Do NOT force a match if the tables are not relevant to the question."""
@@ -382,6 +373,11 @@ definitions. Fragments that look unusual, incomplete, or
 nonstandard in isolation are still valid if they follow
 those custom analyses — do NOT mark them as critical issues
 solely for that reason.
+
+When AUTHORITATIVE JOIN PATHS are provided, they come from
+the verified semantic model. If the generated SQL uses a
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
 
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
@@ -716,3 +712,34 @@ Candidate tables:
 
 Provide brief reasoning (1-2 sentences) then return the names of tables that can be safely REMOVED.
 Only remove a table if you are confident it is not needed. When in doubt, do NOT remove."""
+
+
+def create_follow_up_resolution_prompt(
+    *, question: str, conversation_history: str
+) -> str:
+    """Build the prompt that turns a contextual follow-up into a standalone query."""
+
+    return f"""
+You resolve conversational follow-up questions for a text-to-SQL agent.
+
+Use only the completed conversation turns below. Never invent a table, filter,
+entity, metric, date range, or other constraint that is not present in the
+current question or the history.
+
+Return:
+- is_follow_up=true only when the current question depends on prior context,
+  such as pronouns, omitted subjects, "same", "also", "instead", "what about",
+  or a modification to the preceding request.
+- standalone_question as a complete, natural-language question containing all
+  context needed to answer the current request.
+- For an independent question, set is_follow_up=false and copy the current
+  question unchanged into standalone_question.
+
+Do not answer the question and do not generate SQL.
+
+COMPLETED CONVERSATION HISTORY:
+{conversation_history}
+
+CURRENT QUESTION:
+{question}
+""".strip()

@@ -11,6 +11,7 @@ import TrashSvg from './svg/trash.svg';
 import SendSvg from './svg/send.svg';
 import StopSvg from './svg/stop.svg';
 import CheckSvg from './svg/check.svg';
+import CopySvg from './svg/copy.svg';
 import ChatBubbleSvg from './svg/chat-bubble.svg';
 import ChevronRightSvg from './svg/chevron-right.svg';
 import NvidiaLogoSvg from './svg/nvidia-logo.svg';
@@ -30,8 +31,16 @@ import ExplorationSvg from './svg/exploration.svg';
 import LinkSvg from './svg/link.svg';
 import ExternalLinkSvg from './svg/external-link.svg';
 import ConnectionSvg from './svg/connection.svg';
+import CertificationSvg from './svg/certification.svg';
+import CloseSvg from './svg/close.svg';
+import PlusSvg from './svg/plus.svg';
+import DownloadSvg from './svg/download.svg';
+import UploadSvg from './svg/upload.svg';
+import CodeBracketSvg from './svg/code-bracket.svg';
 
 export enum IconName {
+	Close = 'close',
+	Plus = 'plus',
 	Menu = 'menu',
 	DotsVertical = 'dots-vertical',
 	Pencil = 'pencil',
@@ -39,6 +48,7 @@ export enum IconName {
 	Send = 'send',
 	Stop = 'stop',
 	Check = 'check',
+	Copy = 'copy',
 	ChatBubble = 'chat-bubble',
 	ChevronRight = 'chevron-right',
 	NvidiaLogo = 'nvidia-logo',
@@ -58,9 +68,15 @@ export enum IconName {
 	Link = 'link',
 	ExternalLink = 'external-link',
 	Connection = 'connection',
+	Certification = 'certification',
+	Download = 'download',
+	Upload = 'upload',
+	CodeBracket = 'code-bracket',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
+	[IconName.Close]: CloseSvg,
+	[IconName.Plus]: PlusSvg,
 	[IconName.Menu]: MenuSvg,
 	[IconName.DotsVertical]: DotsVerticalSvg,
 	[IconName.Pencil]: PencilSvg,
@@ -68,6 +84,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Send]: SendSvg,
 	[IconName.Stop]: StopSvg,
 	[IconName.Check]: CheckSvg,
+	[IconName.Copy]: CopySvg,
 	[IconName.ChatBubble]: ChatBubbleSvg,
 	[IconName.ChevronRight]: ChevronRightSvg,
 	[IconName.NvidiaLogo]: NvidiaLogoSvg,
@@ -87,6 +104,10 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Link]: LinkSvg,
 	[IconName.ExternalLink]: ExternalLinkSvg,
 	[IconName.Connection]: ConnectionSvg,
+	[IconName.Certification]: CertificationSvg,
+	[IconName.Download]: DownloadSvg,
+	[IconName.Upload]: UploadSvg,
+	[IconName.CodeBracket]: CodeBracketSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

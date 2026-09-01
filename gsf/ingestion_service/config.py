@@ -7,6 +7,10 @@
 The frontend manages these via Prisma (the ``configurations`` key/value table in
 the same Postgres instance the backend uses). We read them here with psycopg so
 the ingestion service can gate behaviour on them without a frontend round-trip.
+
+The history of individual compilation passes (start/end, success) is *not*
+kept here — it lives in the GSF-owned ``semantic_compilation_history`` table,
+see ``history.py``.
 """
 
 from __future__ import annotations

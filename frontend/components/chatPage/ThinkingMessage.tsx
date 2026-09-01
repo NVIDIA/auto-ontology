@@ -49,25 +49,37 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 						{completedSteps.map((step, i) => (
 							<li
 								key={`${step.node}-${i}`}
-								className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400"
+								className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400"
 							>
 								<Icon
 									name={IconName.Check}
-									className="h-3 w-3 shrink-0 text-[#76b900]"
+									className="mt-0.5 h-3 w-3 shrink-0 text-[#76b900]"
 								/>
-								<span>{step.label}</span>
+								<span>
+									<span>{step.label}</span>
+									{step.thought && (
+										<span className="block text-zinc-400 dark:text-zinc-500">
+											{step.thought}
+										</span>
+									)}
+								</span>
 							</li>
 						))}
 					</ul>
 				)}
 
-				<div className="flex items-center gap-2">
+				<div className="flex flex-col items-start gap-2">
 					{activeStep && (
 						<span className="text-sm text-zinc-800 dark:text-zinc-100">
-							{activeStep.label}
+							<span>{activeStep.label}</span>
+							{activeStep.thought && (
+								<span className="block text-xs font-normal text-zinc-500 dark:text-zinc-400">
+									{activeStep.thought}
+								</span>
+							)}
 						</span>
 					)}
-					<span className="flex items-end gap-1 pb-0.5">
+					<span className="flex items-end gap-1">
 						<Dot delay="0s" />
 						<Dot delay="0.2s" />
 						<Dot delay="0.4s" />

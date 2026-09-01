@@ -52,7 +52,6 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
-
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
 description and a list of candidate primary-key columns retrieved from a \
@@ -83,12 +82,23 @@ def resolve_semantic_fks(database_name: str) -> int:
     )
 
     declared_written = 0
-    llm_queue: list[dict[str, Any]] = []
+    total_candidates = len(candidates)
+    llm_queue: list[tuple[int, dict[str, Any]]] = []
 
-    for col in candidates:
+    def _log_start(index: int, col: dict[str, Any]) -> None:
+        logger.info(
+            "Resolving semantic FK edges… (%d/%d): %s.%s",
+            index,
+            total_candidates,
+            col.get("table_name"),
+            col.get("name"),
+        )
+
+    for index, col in enumerate(candidates, start=1):
         fk_target_col_id: str | None = col.get("fk_target_col_id")
         if fk_target_col_id:
             if col.get("fk_target_table_id") == col.get("table_id"):
+                _log_start(index, col)
                 logger.debug(
                     "resolve_semantic_fks [declared]: %s.%s declared FK targets its "
                     "own table — rejecting self-reference",
@@ -98,6 +108,7 @@ def resolve_semantic_fks(database_name: str) -> int:
                 continue
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
+                _log_start(index, col)
                 merge_semantic_fk(col["id"], attr_id)
                 declared_written += 1
                 logger.debug(
@@ -111,12 +122,12 @@ def resolve_semantic_fks(database_name: str) -> int:
                     "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
                     fk_target_col_id,
                 )
-                llm_queue.append(col)
+                llm_queue.append((index, col))
         else:
-            llm_queue.append(col)
+            llm_queue.append((index, col))
 
     logger.info(
-        "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for LLM",
+        "resolve_semantic_fks: %d declared FK(s) resolved; %d queued for inference",
         declared_written,
         len(llm_queue),
     )
@@ -134,15 +145,16 @@ def resolve_semantic_fks(database_name: str) -> int:
         return declared_written
     connector = _resolve_connector(database_name)
 
-    llm_written = 0
+    inferred_written = 0
 
-    def _resolve_one(col: dict[str, Any]) -> bool:
+    def _resolve_one(index: int, col: dict[str, Any]) -> bool:
+        _log_start(index, col)
         try:
             attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
                 logger.debug(
-                    "resolve_semantic_fks [llm]: %s.%s → attr %s",
+                    "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
                     col.get("name"),
                     attr_id,
@@ -156,16 +168,19 @@ def resolve_semantic_fks(database_name: str) -> int:
         return False
 
     with ThreadPoolExecutor(max_workers=_WORKERS) as pool:
-        futures = {pool.submit(_resolve_one, col): col for col in llm_queue}
+        futures = {
+            pool.submit(_resolve_one, index, col): col for index, col in llm_queue
+        }
         for future in as_completed(futures):
             if future.result():
-                llm_written += 1
+                inferred_written += 1
 
-    total = declared_written + llm_written
+    total = declared_written + inferred_written
     logger.info(
-        "resolve_semantic_fks: done — %d declared + %d LLM = %d total SEMANTIC_FK edge(s)",
+        "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
+        "SEMANTIC_FK edge(s)",
         declared_written,
-        llm_written,
+        inferred_written,
         total,
     )
     return total
@@ -352,10 +367,11 @@ def _match_hit_by_sample_values(
     if selected:
         logger.info(
             "resolve_semantic_fks [sql-fallback]: %s.%s matched %d sample value(s) "
-            "in %s.%s",
+            "in %s.%s.%s",
             col.get("table_name"),
             col.get("name"),
             len(samples),
+            metadata.get("schema_name") or "",
             metadata.get("table_name") or "",
             metadata.get("source_column") or "",
         )

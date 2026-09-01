@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
@@ -36,6 +35,7 @@ class TextToSQLPayload(TypedDict):
     """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
 
     question: str
+    processing_question: NotRequired[str]
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]
     path_state: NotRequired[dict]
@@ -43,21 +43,29 @@ class TextToSQLPayload(TypedDict):
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
     target_db: NotRequired[str]
+    # Force the branch instead of classifying: True -> prediction, False -> SQL,
+    # None/absent -> classify.
+    prediction: NotRequired[bool | None]
 
 
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
-    non_reasoning_llm: NotRequired[BaseChatModel]
     initial_question: str
     messages: list[HumanMessage]
     decision: str
+    # Caller-supplied branch override; see TextToSQLPayload.prediction.
+    prediction_override: NotRequired[bool | None]
     connectors: list[SQLDatabase]
     path_state: dict
     data_retriever: Retriever
     semantic_retriever: Retriever
     domain_rules: list[dict[str, str]]
+    # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
+    # domain_rules so prompts can inject them without the custom-analysis SQL.
+    # After ``question_extraction``, this is narrowed to the entries the LLM used.
+    glossary: NotRequired[list[dict[str, str]]]
 
 
 def get_original_question(state: AgentState) -> str:

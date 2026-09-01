@@ -290,6 +290,38 @@ class PostgresVDB(VDB):
         store.delete(filter=filter)
         return ids
 
+    def delete_all(self) -> int:
+        """Delete every row in the collection.
+
+        Returns the number of rows deleted (``0`` when the collection table
+        doesn't exist yet).
+        """
+        if not self._table_exists():
+            logger.info(
+                "PostgresVDB.delete_all: collection %s not found, nothing to delete",
+                self.collection_name,
+            )
+            return 0
+
+        with psycopg.connect(self.connection_string) as conn:
+            with conn.cursor() as cur:
+                # `schema_name`/`collection_name` are internal config; psycopg
+                # can't parameterise identifiers, so they're composed via the
+                # identifier-safe API. Not user input.
+                cur.execute(
+                    sql.SQL("DELETE FROM {table}").format(
+                        table=sql.Identifier(self.schema_name, self.collection_name)
+                    )
+                )
+                deleted = cur.rowcount
+
+        logger.info(
+            "PostgresVDB.delete_all: deleted %d rows from %s",
+            deleted,
+            self.collection_name,
+        )
+        return deleted
+
     def delete_by_id(self, node_id: str) -> int:
         """Delete every row whose metadata ``id`` matches ``node_id``.
 

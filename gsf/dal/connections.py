@@ -78,33 +78,6 @@ def insert_connection(
     return dict(rows[0]["props"])
 
 
-def delete_database_subgraph(database_name: str) -> None:
-    """Delete a Database node and its entire connected subgraph in batches.
-
-    Traverses every node reachable from the Database node (regardless of
-    relationship type) and deletes them. Deletion is batched with
-    ``apoc.periodic.iterate`` so very large graphs do not exhaust transaction
-    memory.
-    """
-    conn = get_neo4j_conn()
-    conn.query_write(
-        f"""
-        CALL apoc.periodic.iterate(
-            "
-            MATCH (db:{Labels.DB} {{name: $database_name}})
-            CALL apoc.path.subgraphNodes(db, {{}}) YIELD node AS n
-            RETURN n
-            ",
-            "DETACH DELETE n",
-            {{batchSize: 1000, params: {{database_name: $database_name}}}}
-        )
-        YIELD batches, total
-        RETURN batches, total
-        """,
-        {"database_name": database_name},
-    )
-
-
 def verify_connectivity() -> None:
     """Probe the Neo4j connection. Raises if the database is unreachable."""
     get_neo4j_conn().verify_connectivity()

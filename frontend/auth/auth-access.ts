@@ -34,6 +34,17 @@ const statement = {
 	zone: ['read', 'manage'],
 	// Semantic compilation (settings): admin-only toggle + manual trigger.
 	semanticCompilation: ['read', 'manage'],
+	// Agent settings: instance-wide visualization toggle, admin-only like the
+	// other settings flags. The chat pipeline resolves it server-side, so
+	// viewers never need to read it.
+	visualization: ['read', 'manage'],
+	// Model import/export (settings): admin-only YAML backup/restore of the
+	// catalog + semantic layer.
+	modelInterchange: ['export', 'import'],
+	// API tokens for scripting. Self-service for every role — the routes scope
+	// each call to the caller's own tokens, and a token can never exceed the
+	// permissions its owner already has.
+	apiToken: ['manage'],
 } as const;
 
 export const ac = createAccessControl(statement);
@@ -53,6 +64,9 @@ export const roles = {
 		connection: ['read', 'manage'],
 		zone: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
+		visualization: ['read', 'manage'],
+		modelInterchange: ['export', 'import'],
+		apiToken: ['manage'],
 	}),
 	// Viewer: read-only on glossary/prompts, full control of their own
 	// conversations, may run chat, may view custom analyses (not add/edit them),
@@ -70,6 +84,7 @@ export const roles = {
 		chat: ['use'],
 		catalog: ['read', 'edit'],
 		zone: ['read'],
+		apiToken: ['manage'],
 	}),
 };
 

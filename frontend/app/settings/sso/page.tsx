@@ -10,9 +10,17 @@ const AdminSsoPage = async () => {
 	await requireAdmin();
 	// Fetch on the server so the form renders with the correct state on first
 	// paint (no flash of the empty registration form before the client fetch).
-	const providers = await getPrisma().ssoProvider.findMany({
+	const rows = await getPrisma().ssoProvider.findMany({
 		select: { providerId: true, issuer: true, domain: true },
 	});
+	// Mapped to the `SsoProvider` shape `GET /api/sso-providers` returns, so the
+	// form reads the same field names whether it renders from this server fetch
+	// or from a later client refresh.
+	const providers = rows.map(({ providerId, issuer, domain }) => ({
+		provider_id: providerId,
+		issuer,
+		domain,
+	}));
 	return <SsoConfigForm initialProviders={providers} />;
 };
 

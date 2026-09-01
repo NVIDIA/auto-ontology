@@ -4,7 +4,7 @@
 
 """Neo4j data access for CustomAnalysis / Sql subgraph.
 
-Contains only functions that call ``get_neo4j_conn()`` directly.
+Contains only functions that call ``graph()`` directly.
 
 Non-Neo4j helpers remain in their original locations:
   - get_custom_analyses_ids, build_custom_analyses_section,
@@ -18,9 +18,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
 from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
 
@@ -80,7 +80,7 @@ def list_custom_analyses(
     else:
         zone_filter = ""
 
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
         {zone_filter}
@@ -103,7 +103,7 @@ def find_analysis_by_name(
     name: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (other:{Labels.CUSTOM_ANALYSIS} {{name: $name}})
         WHERE $exclude_id IS NULL OR other.id <> $exclude_id
@@ -121,7 +121,7 @@ def find_analysis_by_sql(
     sql: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (other:{Labels.CUSTOM_ANALYSIS})
               -[:{Edges.HAS_SQL}]->(:{Labels.SQL} {{sql_full_query: $sql}})
@@ -138,7 +138,7 @@ def find_analysis_by_sql(
 
 def detach_existing_sql_edges(analysis_id: str) -> None:
     """Drop every ``HAS_SQL`` edge leaving the given CustomAnalysis."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
               -[r:{Edges.HAS_SQL}]->(:{Labels.SQL})
@@ -158,7 +158,7 @@ def fetch_custom_analyses() -> list[dict[str, str]]:
         "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
     )
     try:
-        results = get_neo4j_conn().query_read(query=query, parameters={})
+        results = graph().query_read(query=query, parameters={})
     except Exception as e:
         logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
         return []
@@ -184,6 +184,36 @@ def fetch_custom_analyses() -> list[dict[str, str]]:
 # ---------------------------------------------------------------------------
 # Embedding helper (called by server/custom_analyses/service.py write path)
 # ---------------------------------------------------------------------------
+
+
+def custom_analysis_exists(database_name: str | None = None) -> bool:
+    """Return True if at least one CustomAnalysis node exists in the graph.
+
+    When *database_name* is supplied the check is scoped to analyses whose SQL
+    references tables belonging to that database.  When omitted (or ``None``)
+    any CustomAnalysis node satisfies the check.
+
+    This is a cheap ``LIMIT 1`` existence probe — callers use it to skip the
+    VDB search entirely when the graph has no candidates for the target database.
+    """
+    if database_name:
+        query = f"""
+        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+              -[:{Edges.SQL}]->(:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+              <-[:{Edges.CONTAINS}]-(db:{Labels.DB} {{name: $db}})
+        RETURN ca.id LIMIT 1
+        """
+        params: dict = {"db": database_name}
+    else:
+        query = f"MATCH (ca:{Labels.CUSTOM_ANALYSIS}) RETURN ca.id LIMIT 1"
+        params = {}
+
+    try:
+        rows = graph().query_read(query, params)
+        return bool(rows)
+    except Exception:
+        logger.warning("custom_analysis_exists: Neo4j query failed", exc_info=True)
+        return True  # fail-open: don't suppress the search on error
 
 
 def embed_custom_analyses(
@@ -220,7 +250,7 @@ def embed_custom_analyses(
             id: ca.id
         }}) AS docs
     """
-    result = get_neo4j_conn().query_read(
+    result = graph().query_read(
         query,
         parameters={"analysis_id": analysis_id},
     )
@@ -309,7 +339,7 @@ def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, st
            sql.sql_full_query AS sql_text
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
+        rows = graph().query_read(query, {"ids": analysis_ids})
     except Exception:
         logger.warning(
             "fetch_custom_analyses_with_sql: Neo4j query failed", exc_info=True
@@ -336,7 +366,7 @@ def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, st
 
 def get_custom_analysis_by_id(analysis_id: str) -> str | None:
     """Return the id of the CustomAnalysis, or None if it doesn't exist."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
         RETURN ca.id AS id
@@ -349,7 +379,7 @@ def get_custom_analysis_by_id(analysis_id: str) -> str | None:
 
 def delete_custom_analysis_node(analysis_id: str) -> None:
     """DETACH DELETE the CustomAnalysis and its linked Sql node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
               -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
@@ -357,6 +387,30 @@ def delete_custom_analysis_node(analysis_id: str) -> None:
         """,
         {"analysis_id": analysis_id},
     )
+
+
+def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
+    """Return the database whose tables an analysis's SQL references."""
+    query = f"""
+    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
+          -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
+          <-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
+          <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
+    RETURN DISTINCT db.name AS database_name
+    LIMIT 1
+    """
+    try:
+        rows = graph().query_read(query, {"analysis_id": analysis_id})
+    except Exception:
+        logger.warning(
+            "fetch_database_name_for_analysis: Neo4j query failed", exc_info=True
+        )
+        return None
+    if not rows:
+        return None
+    database_name = rows[0].get("database_name")
+    return str(database_name) if database_name is not None else None
 
 
 def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
@@ -374,10 +428,10 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
     WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           db.name AS database_name, sch.name AS schema_name, cols
+           db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
+        rows = graph().query_read(query, {"ids": analysis_ids})
     except Exception:
         logger.warning(
             "fetch_tables_from_custom_analyses: Neo4j query failed", exc_info=True
@@ -399,6 +453,9 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": Labels.TABLE,
+                # Keyless tables are unusable as a prediction entity, so this has
+                # to survive every path that reaches ``relevant_tables``.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )

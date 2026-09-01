@@ -101,9 +101,8 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     if not sql or not sql.strip():
         return "the generated SQL is empty"
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         # Unparseable here → let the normal parse validator handle it.
         return ""

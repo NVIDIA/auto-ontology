@@ -221,11 +221,24 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     permitted"), but they support tool calling — so force ``function_calling``
     for them. Everything else keeps langchain's default (json_schema for
     OpenAI), which is preferred where supported.
+
+    ``tool_choice=None`` suppresses the tool-choice langchain would otherwise set.
+    Bedrock behind LiteLLM rejects the request when one is present, because the gateway
+    both maps it into ``toolConfig.toolChoice`` and forwards the original
+    ``tool_choice.type``::
+
+        The additional field tool_choice/type conflicts with the existing field
+        toolConfig.toolChoice.tool. Remove tool_choice/type and try again.
+
+    Measured against the live endpoint: every explicit value ("auto", "any",
+    "required", and langchain's default of naming the tool) hits that conflict, and only
+    omitting it succeeds. The model still calls the tool without being forced to, and
+    the caller retries if it ever answers without one.
     """
     model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
     lowered = model.lower()
     if "anthropic" in lowered or "claude" in lowered:
-        return {"method": "function_calling"}
+        return {"method": "function_calling", "tool_choice": None}
     return {}
 
 

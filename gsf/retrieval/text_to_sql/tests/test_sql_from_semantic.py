@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_tables_for_prompt
+from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 
 
 def test_prompt_renders_date_format_when_present() -> None:

@@ -5,6 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Spinner } from '@nvidia/foundations-react-core';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useChat } from '@/lib/useChat';
 import type { Conversation } from '@/types/chat';
@@ -33,10 +34,19 @@ export const ChatView = () => {
 	const [sidebarLoading, setSidebarLoading] = useState(true);
 	const [messageListLoading, setMessageListLoading] = useState<boolean>(focusId != null);
 	// null = still checking; false = semantic layer missing (block the chat area).
-	const [semanticReady, setSemanticReady] = useState<boolean>(false);
+	const [semanticReady, setSemanticReady] = useState<boolean | null>(null);
 	const loadedFocusRef = useRef<string | null>(null);
 
-	const { messages, setMessages, steps, isLoading, sendMessage, clearConversation } = useChat();
+	const {
+		messages,
+		setMessages,
+		steps,
+		isLoading,
+		sendMessage,
+		resumeIfRunning,
+		stopGeneration,
+		clearConversation,
+	} = useChat();
 
 	const updateFocusInUrl = useCallback(
 		(id: string | null) => {
@@ -60,7 +70,7 @@ export const ChatView = () => {
 					id: s.id,
 					title: s.title || 'New conversation',
 					messages: [],
-					createdAt: new Date(s.createdAt).getTime(),
+					createdAt: new Date(s.created_at).getTime(),
 				})),
 			);
 		} catch {
@@ -69,42 +79,14 @@ export const ChatView = () => {
 	}, []);
 
 	useEffect(() => {
-		let active = true;
 		setSidebarLoading(true);
-		conversationsApi
-			.list()
-			.then((summaries: ConversationSummary[]) => {
-				if (!active) return;
-				setConversations(
-					summaries.map((s) => ({
-						id: s.id,
-						title: s.title || 'New conversation',
-						messages: [],
-						createdAt: new Date(s.createdAt).getTime(),
-					})),
-				);
-			})
-			.catch(() => {})
-			.finally(() => {
-				if (active) setSidebarLoading(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, []);
+		refreshConversations().finally(() => setSidebarLoading(false));
 
-	useEffect(() => {
-		let active = true;
-		semanticCompilationApi.getStatus().then((res) => {
-			debugger;
-			if (active) {
-				setSemanticReady(res.calculated);
-			}
-		});
-		return () => {
-			active = false;
-		};
-	}, []);
+		semanticCompilationApi
+			.getStatus()
+			.then((res) => setSemanticReady(res.calculated))
+			.catch(() => setSemanticReady(false));
+	}, [refreshConversations]);
 
 	useEffect(() => {
 		if (!focusId) {
@@ -114,6 +96,8 @@ export const ChatView = () => {
 		}
 		if (loadedFocusRef.current === focusId) return;
 		loadedFocusRef.current = focusId;
+		clearConversation();
+
 		let active = true;
 		setMessageListLoading(true);
 		conversationsApi
@@ -123,6 +107,7 @@ export const ChatView = () => {
 				const conv = toConversation(detail);
 				setActiveConvId(detail.id);
 				setMessages(conv.messages);
+				resumeIfRunning(detail.id);
 			})
 			.catch(() => {
 				if (!active) return;
@@ -135,7 +120,7 @@ export const ChatView = () => {
 		return () => {
 			active = false;
 		};
-	}, [focusId, setMessages, updateFocusInUrl]);
+	}, [focusId, setMessages, resumeIfRunning, clearConversation, updateFocusInUrl]);
 
 	const handleNewChat = useCallback(async () => {
 		clearConversation();
@@ -153,6 +138,8 @@ export const ChatView = () => {
 				updateFocusInUrl(id);
 				return;
 			}
+
+			clearConversation();
 			setMessageListLoading(true);
 			try {
 				const detail: ConversationDetail = await conversationsApi.get(id);
@@ -160,6 +147,7 @@ export const ChatView = () => {
 				loadedFocusRef.current = id;
 				setActiveConvId(id);
 				setMessages(conv.messages);
+				resumeIfRunning(id);
 				setSidebarOpen(false);
 				updateFocusInUrl(id);
 			} catch {
@@ -168,7 +156,7 @@ export const ChatView = () => {
 				setMessageListLoading(false);
 			}
 		},
-		[activeConvId, setMessages, updateFocusInUrl],
+		[activeConvId, setMessages, resumeIfRunning, clearConversation, updateFocusInUrl],
 	);
 
 	const handleRename = useCallback(
@@ -202,7 +190,7 @@ export const ChatView = () => {
 	);
 
 	const handleSend = useCallback(
-		async (text: string) => {
+		async (text: string): Promise<boolean> => {
 			let convId = activeConvId;
 			if (!convId) {
 				try {
@@ -214,10 +202,10 @@ export const ChatView = () => {
 					updateFocusInUrl(convId);
 					refreshConversations();
 				} catch {
-					return;
+					return false;
 				}
 			}
-			sendMessage(text, convId);
+			return sendMessage(text, convId);
 		},
 		[activeConvId, sendMessage, refreshConversations, updateFocusInUrl],
 	);
@@ -237,7 +225,11 @@ export const ChatView = () => {
 			/>
 
 			<main className="flex min-w-0 flex-1 flex-col">
-				{!semanticReady ? (
+				{semanticReady == null ? (
+					<div className="flex flex-1 items-center justify-center">
+						<Spinner aria-label="Checking semantic layer" className="h-10 w-10" />
+					</div>
+				) : !semanticReady ? (
 					<SemanticNotReady />
 				) : (
 					<>
@@ -250,7 +242,7 @@ export const ChatView = () => {
 
 						<ChatInput
 							onSend={handleSend}
-							onStop={clearConversation}
+							onStop={stopGeneration}
 							isLoading={isLoading}
 						/>
 					</>

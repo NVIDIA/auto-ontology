@@ -16,10 +16,13 @@ retriever/connector singletons once, then loops on an input queue:
 again. The cold-start cost is paid at server boot and at each cancel
 (when we kill+respawn), not per request.
 
-Because the product spec is "one conversation at a time", the pool size
-is hard-coded to 1: a single warm worker ready to be acquired, plus
-async replenishment after acquire/cancel so the next question almost
-always finds the slot prewarmed.
+The router (see ``router.py``) now allows one in-flight stream *per
+conversation* rather than one globally, so any number of conversations may
+run concurrently. This pool still only keeps a single warm standby: the
+first conversation to ask finds it prewarmed, and any additional concurrent
+conversations simply pay a cold start (``acquire()`` spawns a fresh
+subprocess on demand) — there is no cap on how many can run at once, just
+no more than one pre-warmed spare at a time.
 """
 
 from __future__ import annotations
@@ -76,8 +79,13 @@ def _worker_loop(
         from gsf.retrieval.text_to_sql.main import (
             stream_agent_response,
         )
+        from gsf.retrieval.text_to_sql.follow_up import resolve_follow_up
 
         from gsf.connectors import get_connectors
+        from gsf.utils.llm_invoke import (
+            get_llm_client,
+            get_non_reasoning_llm_client,
+        )
         from gsf.utils import (
             get_data_objects_retriever,
             get_semantic_objects_retriever,
@@ -91,6 +99,16 @@ def _worker_loop(
         data_retriever = get_data_objects_retriever()
         semantic_retriever = get_semantic_objects_retriever()
         connectors = get_connectors()
+        try:
+            follow_up_llm = get_non_reasoning_llm_client(max_tokens=1024)
+        except Exception:
+            try:
+                follow_up_llm = get_llm_client(max_tokens=1024)
+            except Exception:
+                logger.exception(
+                    "No LLM available for follow-up resolution; using raw questions"
+                )
+                follow_up_llm = None
     except BaseException as exc:  # noqa: BLE001 — surface init failure to parent
         logger.exception("Worker init failed")
         try:
@@ -116,15 +134,58 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
+        question, prediction, target_db, subject_token, conversation_history = payload
         try:
+            # Connections are resolved from Neo4j once at worker init. If that
+            # lookup came back empty — Neo4j not yet reachable when this
+            # subprocess booted, or the first connection created afterwards —
+            # the snapshot would stay empty for the life of the process and
+            # every question would fail with "missing required 'connectors'"
+            # until the pod restarted. Re-resolve lazily so the worker heals
+            # itself; get_connectors() caches a non-empty result and only
+            # retries while there is nothing to cache, so this costs nothing
+            # on the normal path.
+            #
+            # This has to run BEFORE ``ask_connectors`` is bound: binding first
+            # would capture the stale empty list, and rebinding ``connectors``
+            # here would not update it, leaving the healing ineffective.
+            if not connectors:
+                connectors = get_connectors()
+
+            # Per-user Databricks auth trades the prewarmed connectors for ones
+            # bound to the caller's exchanged token. Databricks connectors open
+            # connections per operation, so rebuilding them here is cheap.
+            if subject_token is not None:
+                from gsf.connectors.registry import get_connectors_for_subject_token
+
+                ask_connectors = get_connectors_for_subject_token(subject_token)
+            else:
+                ask_connectors = connectors
+
+            is_follow_up, processing_question = resolve_follow_up(
+                question=question,
+                history=conversation_history,
+                llm=follow_up_llm,
+            )
+            logger.info(
+                "Conversation context resolution: follow_up=%s processing_question=%s",
+                is_follow_up,
+                processing_question,
+            )
+            custom_prompts = fetch_custom_prompts()
+
             agent_payload = {
-                "question": payload,
+                "question": question,
+                "processing_question": processing_question,
+                "prediction": prediction,
                 "data_retriever": data_retriever,
                 "semantic_retriever": semantic_retriever,
-                "connectors": connectors,
+                "connectors": ask_connectors,
                 "acronyms": fetch_acronyms(),
-                "custom_prompts": fetch_custom_prompts(),
+                "custom_prompts": custom_prompts,
             }
+            if target_db:
+                agent_payload["target_db"] = target_db
             for event in stream_agent_response(agent_payload):
                 out_q.put((_TAG_EVENT, event))
         except BaseException as exc:  # noqa: BLE001 — surface to parent
@@ -167,8 +228,35 @@ class PrewarmedWorker:
     def is_alive(self) -> bool:
         return self._proc.is_alive()
 
-    def submit(self, question: str) -> None:
-        self._in_q.put((_MSG_ASK, question))
+    def submit(
+        self,
+        question: str,
+        prediction: bool | None = None,
+        target_db: str | None = None,
+        subject_token: str | None = None,
+        conversation_history: list[dict[str, str | None]] | None = None,
+    ) -> None:
+        """Ask *question*, optionally forcing the prediction/SQL branch.
+
+        *prediction* mirrors the API parameter: True or False skips the
+        classification step, None classifies as usual.
+        *target_db* scopes the run to one connected database when set.
+        *subject_token* is the caller's SSO JWT. When present the worker builds
+        per-user connectors for this question instead of using the prewarmed
+        ones, so SQL executes under that user's own Databricks grants.
+        """
+        self._in_q.put(
+            (
+                _MSG_ASK,
+                (
+                    question,
+                    prediction,
+                    target_db,
+                    subject_token,
+                    conversation_history or [],
+                ),
+            )
+        )
 
     def events(self) -> Generator[dict[str, Any] | None, None, None]:
         """Yield agent events for the current question.

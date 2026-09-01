@@ -46,9 +46,12 @@ defaultModelsModel: ""
 nvidiaApiKey: ""
 baseUrl: ""
 modelName: ""
-# KumoRFM (predictions). Leave the key empty to disable the prediction tool.
+# KumoRFM (predictions). Set the URL to a Universal TFM NIM serving the
+# 'kumo-rfm' model; leave it empty to disable the prediction tool. NIMs are
+# unauthenticated by contract, so the key is only needed when a deployment
+# fronts the NIM with an authenticating gateway.
 kumoRfmApiKey: ""
-kumoRfmApiUrl: "https://kumorfm.ai/api"
+kumoRfmApiUrl: ""
 # Embedding endpoint/model. Leave empty to inherit from the default triplet /
 # auto-derive from the API key prefix; set to override just the embedder.
 embedEndpoint: ""

@@ -11,11 +11,15 @@ export type TableColumn<T> = {
 	header: ReactNode;
 	/** Renders the body cell for a given row. */
 	cell: (row: T) => ReactNode;
-	/** Optional tooltip text, shown on hover (handy with `truncate`). */
+	/**
+	 * Value revealed in the tooltip of a `truncate` column, for cells whose
+	 * rendered content differs from the value worth reading. Defaults to the
+	 * cell's own text. Ignored on other columns.
+	 */
 	title?: (row: T) => string;
 	/** Tailwind width class for the column, e.g. `w-44`. */
 	width?: string;
-	/** Truncate overflowing content to a single line with an ellipsis. */
+	/** Clips content to a single line and reveals it in a tooltip on hover, only when clipped. */
 	truncate?: boolean;
 	/** Width cap for a truncated cell. Defaults to `max-w-0` (table-fixed). */
 	maxWidthClass?: string;
@@ -74,6 +78,6 @@ export type TableProps<T> = {
 	className?: string;
 	/** When set, rows become clickable and receive pointer/hover affordances. */
 	onRowClick?: (row: T, index: number) => void;
-	/** Shown instead of the table (columns included) when `rows` is empty. Defaults to `—`. */
-	emptyMessage?: string;
+	/** Empty-state title shown instead of the table when `rows` is empty. Defaults to `—`. */
+	emptyMessage?: ReactNode;
 };

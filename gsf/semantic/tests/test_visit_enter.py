@@ -7,7 +7,55 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
-from gsf.semantic.visit_enter import calculate_columns_profiling, process_table
+import pytest
+
+from gsf.semantic.visit_enter import (
+    _quoted_identifier,
+    calculate_columns_profiling,
+    process_table,
+)
+
+
+@pytest.mark.parametrize(
+    ("dialect", "expected"),
+    [
+        ("sqlite", '"Sales Orders"'),
+        ("postgres", '"Sales Orders"'),
+        ("mysql", "`Sales Orders`"),
+        ("spark", "`Sales Orders`"),
+        (None, '"Sales Orders"'),
+        ("not-a-dialect", '"Sales Orders"'),
+    ],
+)
+def test_quoted_identifier_per_dialect(dialect: str | None, expected: str) -> None:
+    # Backticks on MySQL/Spark, double quotes elsewhere; an unknown dialect
+    # still quotes, since a bare identifier is what loses the table.
+    assert _quoted_identifier("Sales Orders", dialect) == expected
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_quotes_name_with_space(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    # Unquoted "main.Sales Orders" parses as table main.Sales, so the probe
+    # raised "no such table" and every column of the table was dropped.
+    df = pd.DataFrame({"OrderDate": ["5/31/18", "6/1/18", "12/4/18"]})
+    connector = MagicMock()
+    connector.dialect = "sqlite"
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "Sales Orders", "schema_name": "main"}
+    columns = [{"name": "OrderDate", "data_type": "TEXT"}]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    sql = connector.execute.call_args_list[0][0][0]
+    assert '"main"."Sales Orders"' in sql
+    assert result["OrderDate"]["format"] == "M/D/YY"
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -76,6 +124,7 @@ def test_calculate_columns_profiling(
         return pd.DataFrame({col: df[col].dropna().unique().tolist()})
 
     connector = MagicMock()
+    connector.dialect = "postgres"
     connector.execute.side_effect = _fake_execute
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
@@ -94,6 +143,7 @@ def test_calculate_columns_profiling(
     sql = connector.execute.call_args_list[0][0][0]
     assert '"public"."orders"' in sql
     assert "LIMIT 1000" in sql
+    assert connector.execute.call_count == 3
 
     # Returned dict includes every column (dates, long strings included),
     # each with its top-5 sample values and is_unique flag.
@@ -104,6 +154,9 @@ def test_calculate_columns_profiling(
     assert result["status"]["is_unique"] is False
     assert result["created_at"]["is_unique"] is True
     assert result["token"]["is_unique"] is False
+    assert result["created_at"]["format"] == "YYYY-MM-DD"
+    mock_store_dates.assert_called_once()
+    assert mock_store_dates.call_args[0][1] == {"created_at": "YYYY-MM-DD"}
 
     # Uniqueness persisted for every column.
     uniqueness = mock_store_unique.call_args[0][1]
@@ -198,6 +251,48 @@ def test_text_column_with_date_format_keeps_sample_values(
         "2020-01-03",
         "2020-01-04",
     }
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_distinct_only_when_under_top_n(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """DISTINCT probes run only for text columns with fewer than 5 sample values."""
+    sample_df = pd.DataFrame(
+        {
+            # 5+ distinct values in the sample → no DISTINCT probe.
+            "city": ["a", "b", "c", "d", "e", "a"],
+            # Fewer than 5 distinct values → DISTINCT probe for rare enums.
+            "status": ["open", "open", "closed", "open", "open", "open"],
+        }
+    )
+    status_distinct_df = pd.DataFrame({"status": ["open", "closed", "banned"]})
+
+    connector = MagicMock()
+    connector.execute.side_effect = [sample_df, status_distinct_df]
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "city", "data_type": "string"},
+        {"name": "status", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert connector.execute.call_count == 2
+    distinct_sql = connector.execute.call_args_list[1][0][0]
+    assert "SELECT DISTINCT" in distinct_sql
+    assert '"status"' in distinct_sql
+    assert '"city"' not in distinct_sql
+
+    assert result["city"]["sample_values"] == ["a", "b", "c", "d", "e"]
+    assert "banned" in result["status"]["sample_values"]
+    assert "open" in result["status"]["sample_values"]
+    assert "closed" in result["status"]["sample_values"]
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")

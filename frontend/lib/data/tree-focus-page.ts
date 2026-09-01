@@ -3,13 +3,18 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { SinglePageFormat } from '@/common/SinglePageView';
+import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
-import { ComposerSectionKind, DataModels, TreeFocusState } from '@/enums/datasources';
+import {
+	ComposerColumnType,
+	ComposerSectionKind,
+	DataModels,
+	TreeFocusState,
+} from '@/enums/datasources';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
-import type { ComposerSection } from '@/types/composer-section';
+import type { ComposerCertification, ComposerSection } from '@/types/composer-section';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
-
-export const WORKSPACE_ROOT_PARENT_ID = 'workspace-root';
+import { fieldStatus } from '@/lib/certification';
 
 export type TreeResolved =
 	| { type: TreeFocusState.NONE }
@@ -76,6 +81,7 @@ export function resolveTreeNode(focusId: string | null, databases: Database[]): 
 function baseCardsForEntity(
 	description: string,
 	items: { label: string; value: string }[],
+	certification?: ComposerCertification,
 ): ComposerSection[] {
 	return [
 		{
@@ -84,6 +90,7 @@ function baseCardsForEntity(
 			title: 'Description',
 			body: description,
 			editable: true,
+			certification,
 		},
 		{
 			type: ComposerSectionKind.INFO_GRID,
@@ -97,7 +104,6 @@ function baseCardsForEntity(
 export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
-	workspaceDataId: string,
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -111,12 +117,7 @@ export function buildTreeFocusPageFormat(
 		];
 		return {
 			sections,
-			header: {
-				header: {
-					title: 'Loading…',
-					label: 'Catalog',
-				},
-			},
+			header: { header: { title: 'Loading…' } },
 		};
 	}
 
@@ -149,12 +150,7 @@ export function buildTreeFocusPageFormat(
 		}
 		return {
 			sections,
-			header: {
-				header: {
-					title: 'All Data',
-					label: 'Select a database, schema, table, or column in the tree.',
-				},
-			},
+			header: { header: { title: 'All Data', icon: IconName.Database } },
 		};
 	}
 
@@ -186,9 +182,8 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: database.name,
-						label: catalogNodeInfo[DataModels.DB].title,
+						icon: catalogNodeInfo[DataModels.DB].icon,
 						entityId: database.id,
-						parentId: workspaceDataId,
 					},
 				},
 			};
@@ -206,13 +201,22 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-tables',
 				title: `Tables (${schema.tables.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'columns', label: 'Columns' },
+					{
+						key: 'certification',
+						label: 'Certification',
+						type: ComposerColumnType.CERTIFICATION,
+						align: 'center',
+					},
 				],
 				rows: schema.tables.map((table) => ({
+					id: table.id,
 					name: table.name,
 					columns: String(table.columns_count),
+					certification: fieldStatus(table.description_certified === true),
 				})),
 			});
 			return {
@@ -220,38 +224,50 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: schema.schema_name,
-						label: `${catalogNodeInfo[DataModels.SCHEMA].title} · ${database.name}`,
+						icon: catalogNodeInfo[DataModels.SCHEMA].icon,
 						entityId: schema.id,
-						parentId: database.id,
 					},
 				},
 			};
 		}
 		case DataModels.TABLE: {
-			const { database, schema, table } = resolvedFocus;
+			const { table } = resolvedFocus;
 			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
 			sections.push(
-				...baseCardsForEntity(table.description ?? '', [
-					{ label: 'Type', value: tableTypeLabel },
-					{ label: 'Name', value: table.name },
-					{ label: 'Schema', value: table.schema_name },
-					{ label: 'Database', value: table.database_name },
-					{ label: 'Columns', value: String(table.columns_count) },
-				]),
+				...baseCardsForEntity(
+					table.description ?? '',
+					[
+						{ label: 'Type', value: tableTypeLabel },
+						{ label: 'Name', value: table.name },
+						{ label: 'Schema', value: table.schema_name },
+						{ label: 'Database', value: table.database_name },
+						{ label: 'Columns', value: String(table.columns_count) },
+					],
+					{ certified: table.description_certified === true },
+				),
 			);
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
 				title: `Columns (${table.columns.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'ordinal_position', label: '#' },
 					{ key: 'name', label: 'Name' },
 					{ key: 'data_type', label: 'Type' },
+					{
+						key: 'certification',
+						label: 'Certification',
+						type: ComposerColumnType.CERTIFICATION,
+						align: 'center',
+					},
 				],
 				rows: table.columns.map((column) => ({
+					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
 					data_type: column.data_type,
+					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
 			return {
@@ -259,15 +275,14 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						label: `${tableTypeLabel} · ${schema.schema_name} · ${database.name}`,
+						icon: catalogNodeInfo[table.table_type].icon,
 						entityId: table.id,
-						parentId: schema.id,
 					},
 				},
 			};
 		}
 		case DataModels.COLUMN: {
-			const { table, column } = resolvedFocus;
+			const { column } = resolvedFocus;
 			sections.push(
 				{
 					type: ComposerSectionKind.TEXT_CARD,
@@ -275,6 +290,7 @@ export function buildTreeFocusPageFormat(
 					title: 'Description',
 					body: column.description ?? '',
 					editable: true,
+					certification: { certified: column.description_certified === true },
 				},
 				{
 					type: ComposerSectionKind.TAG_LIST,
@@ -303,9 +319,8 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: column.column_name,
-						label: `${catalogNodeInfo[DataModels.COLUMN].title} · ${column.table_name}`,
+						icon: catalogNodeInfo[DataModels.COLUMN].icon,
 						entityId: column.id,
-						parentId: table.id,
 					},
 				},
 			};

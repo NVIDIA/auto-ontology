@@ -8,16 +8,22 @@ import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } 
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
-import { ComposerSectionKind } from '@/enums/datasources';
+import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import {
 	isComposerSection,
 	type ComposerSection,
 	type ComposerZonesSection,
+	type ComposerCertification,
 } from '@/types/composer-section';
+import { CertificationStatus } from '@/enums/certification';
+import { fieldStatus } from '@/lib/certification';
+import { CertificationBadge } from '@/common/CertificationBadge';
+import { CertificationSelect } from '@/common/CertificationSelect';
+import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
 import { TagInput } from '@/common/TagInput';
 import { Table } from '@/common/Table';
-import { TruncatedText } from '@/common/TruncatedText';
+import { Text } from '@/common/Text';
 import { SqlBlock } from '@/common/SqlBlock';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
@@ -25,6 +31,10 @@ import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+import { TextVariant } from '@/enums/text';
+import { ToastVariant } from '@/enums/toast';
 
 export type ComposerEditValue = string | string[];
 
@@ -35,7 +45,7 @@ export const LabelList = ({ values }: { values: string[] }) => {
 		<ul className="flex flex-wrap gap-1">
 			{nonEmptyValues.map((v, i) => (
 				<li key={`${v}-${i}`}>
-					<Label label={v} maxWidthClass="max-w-[16rem]" />
+					<Label label={v} />
 				</li>
 			))}
 		</ul>
@@ -55,10 +65,24 @@ export const ZonesRow = ({ zones }: { zones: TermZone[] }) => (
 	</div>
 );
 
+export type ComposerPageHeader = {
+	/** Rendered as the page title. Every composed page names the entity it shows. */
+	title: string;
+	icon?: IconName;
+	/** Catalog node the default save path patches. Without it the Edit button stays hidden. */
+	entityId?: string;
+	titleEditable?: boolean;
+	certification?: ComposerCertification;
+	pdfProps?: {
+		pageName?: string;
+		handleIsPDF?: (isPDF: boolean) => void;
+	};
+};
+
 export type SinglePageComposerProps = {
 	sections: unknown[];
-	header?: {
-		header?: Record<string, unknown>;
+	header: {
+		header: ComposerPageHeader;
 		errorBanner?: unknown;
 	};
 	leftPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
@@ -78,6 +102,25 @@ export type SinglePageComposerProps = {
 	onCancel?: () => void;
 	onDataTableRowClick?: (sectionId: string, rowId: string) => void;
 	onEditSql?: (sectionId: string, sql: string) => void;
+	/**
+	 * Called when a certification dropdown changes. `id` is `'name'` for the
+	 * title/header field or the section id (e.g. `'description'`) for a text card.
+	 * When provided (and in edit mode), certification fields render an editable
+	 * dropdown instead of a read-only badge. A returned promise drives the
+	 * dropdown's saving spinner.
+	 */
+	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
+	/**
+	 * Called when a certification dropdown inside a DATA_TABLE row changes.
+	 * When provided (and in edit mode), the certification cell renders an
+	 * editable dropdown instead of a read-only badge. `rowId` is the row's
+	 * `rowIdKey` value. A returned promise drives the dropdown's saving spinner.
+	 */
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>;
 	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
@@ -149,13 +192,14 @@ const DescriptionSuggestion = ({
 					Description Suggestion
 				</h3>
 				{suggestion != null && (
-					<button
+					<Button
+						theme={ButtonTheme.Soft}
+						size={Size.SMALL}
 						type="button"
 						onClick={() => onApply(suggestion)}
-						className="shrink-0 cursor-pointer rounded-md border border-[#76b900]/60 bg-white px-2.5 py-1 text-xs font-medium text-[#4d7a00] transition-colors hover:bg-[#76b900]/10 dark:border-[#76b900]/50 dark:bg-zinc-950 dark:text-[#a3d63a] dark:hover:bg-[#76b900]/15"
 					>
 						Apply as Description
-					</button>
+					</Button>
 				)}
 			</div>
 			<div className="mt-2 text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
@@ -181,6 +225,7 @@ const EditableTextCard = ({
 	saving = false,
 	autoFocus = false,
 	onSuggest,
+	certificationSlot,
 }: {
 	section: { id: string; title: string; body: string; suggestable?: boolean };
 	onChange: (sectionId: string, value: string) => void;
@@ -188,6 +233,7 @@ const EditableTextCard = ({
 	saving?: boolean;
 	autoFocus?: boolean;
 	onSuggest?: () => Promise<string | null>;
+	certificationSlot?: ReactNode;
 }) => {
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const [value, setValue] = useState(section.body);
@@ -208,9 +254,12 @@ const EditableTextCard = ({
 
 	return (
 		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
-			<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-				{section.title}
-			</h2>
+			<div className="flex items-start justify-between gap-3">
+				<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					{section.title}
+				</h2>
+				{certificationSlot}
+			</div>
 			<textarea
 				ref={textareaRef}
 				value={value}
@@ -223,11 +272,13 @@ const EditableTextCard = ({
 			)}
 			{onSave != null && (
 				<div className="mt-3 flex justify-end">
-					<button
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.SMALL}
 						type="button"
 						disabled={saving}
 						onClick={onSave}
-						className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+						iconPosition="left"
 					>
 						{saving ? (
 							<>
@@ -237,7 +288,7 @@ const EditableTextCard = ({
 						) : (
 							'Save'
 						)}
-					</button>
+					</Button>
 				</div>
 			)}
 		</div>
@@ -304,7 +355,7 @@ const ReadOnlyTagList = ({
 				<ul className="mt-3 flex flex-wrap gap-1.5">
 					{nonEmptyValues.map((v, i) => (
 						<li key={`${v}-${i}`}>
-							<Label label={v} maxWidthClass="max-w-[24rem]" />
+							<Label label={v} />
 						</li>
 					))}
 				</ul>
@@ -343,20 +394,31 @@ function renderComposerSection(
 	isEditingActive = false,
 	onEditSql?: (sectionId: string, sql: string) => void,
 	onEntityClick?: (focusId: string) => void,
+	onDataTableCertificationChange?: (
+		sectionId: string,
+		rowId: string,
+		certified: boolean,
+	) => void | Promise<void>,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
 			return (
 				<div
 					id={section.id === 'description' ? 'description-section' : undefined}
-					className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+					className="space-y-3 rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
 				>
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-						{section.title}
-					</h2>
-					<p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
-						{section.body}
-					</p>
+					<div className="flex items-start justify-between gap-3">
+						<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+							{section.title}
+						</h2>
+						{section.certification ? (
+							<CertificationBadge
+								status={fieldStatus(section.certification.certified)}
+								iconOnly
+							/>
+						) : null}
+					</div>
+					<Text as="p" text={section.body} lines={3} variant={TextVariant.Body} />
 				</div>
 			);
 		case ComposerSectionKind.TAG_LIST:
@@ -401,29 +463,84 @@ function renderComposerSection(
 					<Table
 						className="mt-4"
 						containerClassName="overflow-x-auto rounded-md border border-zinc-200/90 dark:border-zinc-700"
-						layout="auto"
+						layout={section.layout ?? 'auto'}
 						minWidthClass="min-w-[28rem]"
 						cellClassName="px-3 py-2"
 						theadClassName="border-b border-zinc-200 bg-zinc-100/95 text-left text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:border-zinc-700 dark:bg-zinc-800/90 dark:text-zinc-300"
 						bodyClassName="text-zinc-800 dark:text-zinc-200"
 						rowClassName="border-b border-zinc-100 transition-colors hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50"
-						columns={section.columns.map((col) => ({
-							key: col.key,
-							header: col.label,
-							cell: (row: Record<string, string | string[]>) => {
-								const value = row[col.key];
-								if (col.kind === 'tags') {
-									return <LabelList values={Array.isArray(value) ? value : []} />;
-								}
-								const text = typeof value === 'string' ? value : '';
-								if (!text) return '—';
-								return col.truncate ? (
-									<TruncatedText text={text} maxWidthClass={col.maxWidthClass} />
-								) : (
-									text
-								);
-							},
-						}))}
+						columns={section.columns.map((col) => {
+							const alignClass =
+								col.align === 'center'
+									? 'text-center'
+									: col.align === 'right'
+										? 'text-right'
+										: undefined;
+							const textColumn =
+								col.type == null || col.type === ComposerColumnType.TEXT
+									? col
+									: undefined;
+							return {
+								key: col.key,
+								header: col.label,
+								width: col.width,
+								headerClassName: alignClass,
+								className: alignClass,
+								truncate: textColumn?.truncate,
+								maxWidthClass: textColumn?.maxWidthClass,
+								cell: (row: Record<string, string | string[]>) => {
+									const value = row[col.key];
+									if (col.type === ComposerColumnType.TAGS) {
+										return (
+											<LabelList values={Array.isArray(value) ? value : []} />
+										);
+									}
+									if (col.type === ComposerColumnType.CERTIFICATION) {
+										const status =
+											typeof value === 'string'
+												? (value as CertificationStatus)
+												: CertificationStatus.Pending;
+										const rowId = section.rowIdKey
+											? row[section.rowIdKey]
+											: undefined;
+										const control =
+											isEditingActive &&
+											onDataTableCertificationChange != null &&
+											typeof rowId === 'string' &&
+											rowId !== '' ? (
+												// Stop propagation so toggling certification
+												// never triggers the row's navigation click.
+												<span
+													role="presentation"
+													onClick={(e) => e.stopPropagation()}
+												>
+													<CertificationSelect
+														certified={
+															status === CertificationStatus.Certified
+														}
+														onChange={(next) =>
+															onDataTableCertificationChange(
+																section.id,
+																rowId,
+																next,
+															)
+														}
+													/>
+												</span>
+											) : (
+												<CertificationBadge status={status} iconOnly />
+											);
+										return col.align === 'center' ? (
+											<span className="flex justify-center">{control}</span>
+										) : (
+											control
+										);
+									}
+									const text = typeof value === 'string' ? value : '';
+									return text || '—';
+								},
+							};
+						})}
 						rows={section.rows}
 						rowKey={(row, index) => {
 							const rowId = section.rowIdKey ? row[section.rowIdKey] : undefined;
@@ -472,7 +589,6 @@ function renderComposerSection(
 								<li key={term.id}>
 									<Label
 										label={term.name}
-										title={term.description ?? undefined}
 										onClick={
 											onTermClick ? () => onTermClick(term.id) : undefined
 										}
@@ -497,7 +613,6 @@ function renderComposerSection(
 								<li key={entity.id}>
 									<Label
 										label={entity.name}
-										title={entity.name}
 										onClick={
 											onEntityClick
 												? () => onEntityClick(entity.focusId)
@@ -516,7 +631,10 @@ function renderComposerSection(
 					{isEditingActive && section.editable === true && (
 						<div className="mb-3 flex justify-end">
 							<div className="flex shrink-0 items-center gap-1">
-								<button
+								<Button
+									theme={ButtonTheme.Icon}
+									size={Size.SMALL}
+									iconOnly
 									type="button"
 									onClick={() => {
 										if (onEditSql) {
@@ -527,10 +645,9 @@ function renderComposerSection(
 									}}
 									aria-label={`Edit ${section.title}`}
 									title="Edit"
-									className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
 								>
 									<Icon name={IconName.Pencil} className="h-4 w-4" />
-								</button>
+								</Button>
 							</div>
 						</div>
 					)}
@@ -571,6 +688,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onDataTableRowClick,
 			onEditSql,
 			onSuggestDescription,
+			onCertificationChange,
+			onDataTableCertificationChange,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 		} = props;
@@ -590,14 +709,16 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			[router],
 		);
 
-		const hh = header?.header;
-		const title = (hh?.title as string) ?? 'Untitled';
-		const entityId = (hh?.entityId as string) ?? '';
-		const showContentHeader = hh?.showContentHeader === true;
-		const titleEditable = hh?.titleEditable === true;
-		const shouldAutofocusTitle = showContentHeader && titleEditable;
-		const pdfPageName = (hh?.pdfProps as { pageName?: string } | undefined)?.pageName;
-		const handleIsPDF = (hh?.pdfProps as { handleIsPDF?: (v: boolean) => void })?.handleIsPDF;
+		const {
+			title,
+			icon: headerIcon,
+			entityId = '',
+			certification: headerCertification,
+		} = header.header;
+		const titleEditable = header.header.titleEditable === true;
+		const shouldAutofocusTitle = titleEditable;
+		const pdfPageName = header.header.pdfProps?.pageName;
+		const handleIsPDF = header.header.pdfProps?.handleIsPDF;
 
 		const firstEditableId =
 			sections.find(
@@ -612,6 +733,20 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
 		const isEditingActive = controlledEditingMode || localEditingMode;
+
+		const renderCertControl = (id: string, cert: ComposerCertification): ReactNode =>
+			onCertificationChange && isEditingActive ? (
+				<CertificationSelect
+					certified={cert.certified}
+					showLabel={cert.showLabel}
+					onChange={(next) => onCertificationChange(id, next)}
+				/>
+			) : (
+				<CertificationBadge
+					status={fieldStatus(cert.certified)}
+					iconOnly={cert.showLabel !== true}
+				/>
+			);
 
 		const titleInputRef = useRef<HTMLInputElement>(null);
 		const pendingEditsRef = useRef<Record<string, ComposerEditValue>>({});
@@ -723,13 +858,16 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						))}
 					</ol>
 					{handleIsPDF ? (
-						<button
-							type="button"
-							className="self-start rounded-md bg-zinc-200 px-3 py-1.5 text-sm font-medium text-zinc-900 hover:bg-zinc-300 dark:bg-zinc-800 dark:text-zinc-100 dark:hover:bg-zinc-700"
-							onClick={() => handleIsPDF(false)}
-						>
-							Close PDF preview
-						</button>
+						<div className="self-start">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.REGULAR}
+								type="button"
+								onClick={() => handleIsPDF(false)}
+							>
+								Close PDF preview
+							</Button>
+						</div>
 					) : null}
 				</div>
 			);
@@ -740,7 +878,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				ref={ref}
 				className="box-border flex h-full min-h-0 w-full min-w-0 flex-1 flex-col gap-0 overflow-hidden bg-white dark:bg-zinc-950"
 			>
-				{header?.errorBanner ? (
+				{header.errorBanner ? (
 					<div className="border-b border-amber-200/90 bg-amber-50 px-7 py-4 text-sm text-amber-950 sm:px-10 dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-100">
 						{String(header.errorBanner)}
 					</div>
@@ -750,22 +888,26 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				((hasEditableSections && entityId && !isEditingActive) || isEditingActive) ? (
 					<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
 						{hasEditableSections && entityId && !isEditingActive && (
-							<button
+							<Button
+								theme={ButtonTheme.Primary}
+								size={Size.REGULAR}
 								type="button"
 								onClick={() => {
 									pendingEditsRef.current = {};
 									setSaveError(null);
 									setLocalEditingMode(true);
 								}}
-								className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500]"
+								iconPosition="left"
 							>
 								<Icon name={IconName.Pencil} className="h-3.5 w-3.5" />
 								Edit
-							</button>
+							</Button>
 						)}
 						{isEditingActive && (
 							<div className="flex items-center gap-2">
-								<button
+								<Button
+									theme={ButtonTheme.Secondary}
+									size={Size.REGULAR}
 									type="button"
 									disabled={saving}
 									onClick={() => {
@@ -774,18 +916,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										setSaveError(null);
 										onCancel?.();
 									}}
-									className="rounded-lg border border-zinc-300 px-3 py-1.5 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-800"
 								>
 									Cancel
-								</button>
+								</Button>
 								{inlineSaveSectionId == null && (
-									<button
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
 										type="button"
 										disabled={saving}
 										onClick={() => {
 											void handleSave();
 										}}
-										className="flex items-center gap-1.5 rounded-lg bg-[#76b900] px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-[#6aa500] disabled:cursor-not-allowed disabled:opacity-70"
+										iconPosition="left"
 									>
 										{saving ? (
 											<>
@@ -798,7 +941,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										) : (
 											'Save'
 										)}
-									</button>
+									</Button>
 								)}
 							</div>
 						)}
@@ -828,27 +971,17 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						</aside>
 					) : null}
 
-					<main className="min-h-0 min-w-0 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
-						{sections.length === 0 ? (
-							<div className="flex min-h-[14rem] flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-zinc-300/90 bg-white/70 px-8 py-12 text-center dark:border-zinc-600 dark:bg-zinc-900/30">
-								<div
-									className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
-									aria-hidden
-								>
-									◇
-								</div>
-								<p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
-									Nothing selected yet
-								</p>
-								<p className="max-w-sm text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-									Pick a database, schema, table, column, or field in the explorer
-									to load metadata, descriptions, and related entities.
-								</p>
-							</div>
-						) : (
-							<div className="space-y-5">
-								{showContentHeader ? (
-									<div>
+					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
+						<div className="space-y-5">
+							<div className="flex items-start justify-between gap-3">
+								<div className="flex min-w-0 flex-1 items-center gap-2">
+									{headerIcon ? (
+										<Icon
+											name={headerIcon}
+											className="h-6 w-6 shrink-0 text-[#76b900]"
+										/>
+									) : null}
+									<div className="min-w-0 flex-1">
 										{isEditingActive && titleEditable ? (
 											<input
 												ref={titleInputRef}
@@ -863,13 +996,35 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 												aria-label="Name"
 											/>
 										) : (
-											<h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-												{title}
-											</h1>
+											<Text
+												as="h1"
+												text={title}
+												variant={TextVariant.PageTitle}
+											/>
 										)}
 									</div>
+								</div>
+								{headerCertification ? (
+									<div className="shrink-0 pt-1">
+										{renderCertControl('name', headerCertification)}
+									</div>
 								) : null}
-								{sections.map((section, i) => {
+							</div>
+							{sections.length === 0 ? (
+								<EmptyState
+									illustration={
+										<div
+											className="flex h-12 w-12 items-center justify-center rounded-lg bg-[#76b900]/15 text-xl"
+											aria-hidden
+										>
+											◇
+										</div>
+									}
+									title="Nothing selected yet"
+									description="Pick a database, schema, table, column, or field in the explorer to load metadata, descriptions, and related entities."
+								/>
+							) : (
+								sections.map((section, i) => {
 									if (!isComposerSection(section)) {
 										return (
 											<section
@@ -926,6 +1081,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 															? () => onSuggestDescription(section.id)
 															: undefined
 													}
+													certificationSlot={
+														section.certification
+															? renderCertControl(
+																	section.id,
+																	section.certification,
+																)
+															: undefined
+													}
 												/>
 											) : isEditableTagList ? (
 												<EditableTagListCard
@@ -946,13 +1109,14 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													isEditingActive,
 													onEditSql,
 													handleEntityClick,
+													onDataTableCertificationChange,
 												)
 											)}
 										</div>
 									);
-								})}
-							</div>
-						)}
+								})
+							)}
+						</div>
 
 						{entityUpdatingProperties &&
 						Object.keys(entityUpdatingProperties).length > 0 ? (
@@ -997,7 +1161,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 				<Toast
 					open={saveError != null}
 					message={saveError ?? ''}
-					variant="error"
+					variant={ToastVariant.Error}
 					onClose={() => setSaveError(null)}
 				/>
 			</div>

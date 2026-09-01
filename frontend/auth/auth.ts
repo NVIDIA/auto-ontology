@@ -7,6 +7,7 @@ import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
 import { sso } from '@better-auth/sso';
+import { apiKey } from '@better-auth/api-key';
 import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/auth/auth-access';
 import { Role } from '@/enums/auth';
@@ -27,6 +28,15 @@ export const auth = betterAuth({
 	secret: process.env.AUTH_SECRET ?? (isBuildPhase ? 'next-build-time-placeholder' : undefined),
 	baseURL: process.env.APP_URL,
 	database: prismaAdapter(prisma, { provider: 'postgresql' }),
+	// Better Auth caps any /sign-in* path at 3 requests per 10s by default, which
+	// rejects legitimate bursts: several parallel sessions for one account, or many
+	// users behind one egress IP (the bucket is keyed by IP + path). Raise just that
+	// path; the global default (100/10s) still applies everywhere else.
+	rateLimit: {
+		customRules: {
+			'/sign-in/*': { window: 10, max: 20 },
+		},
+	},
 	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
 	// the only credential account is the bootstrap admin seeded from
 	// GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
@@ -39,6 +49,30 @@ export const auth = betterAuth({
 		// This resolves to /api/auth/sso/callback
 		// the `ssoProvider` table — there are no SSO env vars.
 		sso({ redirectURI: '/sso/callback' }),
+		// Machine-to-machine credentials: long-lived API tokens users mint for
+		// scripts. The plugin owns hashing (SHA-256), expiry, and revocation; we
+		// only pin the ergonomics. Tokens are verified explicitly in
+		// auth/api-token.ts rather than via `enableSessionForAPIKeys` (left off,
+		// its default), so a token never silently becomes a browser session.
+		apiKey({
+			// `gsf_` makes a leaked token greppable in logs and recognisable to
+			// secret scanners; `start` keeps the first few characters so the UI can
+			// identify a token it can no longer read.
+			defaultPrefix: 'gsf_',
+			defaultKeyLength: 48,
+			startingCharactersConfig: { shouldStore: true, charactersLength: 10 },
+			// A token without a name is unidentifiable in the revoke list.
+			requireName: true,
+			minimumNameLength: 1,
+			maximumNameLength: 64,
+			// The plugin's default is 10 requests per day, which would break any
+			// real script. Throttling is the app-wide rateLimit's job, not the
+			// token's.
+			rateLimit: { enabled: false },
+			// Non-expiring by default (a script's credential should not silently
+			// die), but callers may opt into an expiry up to a year out.
+			keyExpiration: { defaultExpiresIn: null, maxExpiresIn: 365 },
+		}),
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],

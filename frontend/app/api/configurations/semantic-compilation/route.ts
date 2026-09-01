@@ -12,12 +12,19 @@ const CONFIG_KEY = 'semantic_compilation_enabled';
 
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
+// Report whether scheduled semantic compilation is enabled instance-wide.
 export const GET = withPermission({ semanticCompilation: ['read'] })(async () => {
 	const prisma = getPrisma();
 	const row = await prisma.configuration.findUnique({ where: { key: CONFIG_KEY } });
 	return NextResponse.json({ enabled: row?.value === 'true' });
 });
 
+// Turn scheduled semantic compilation on or off instance-wide (admin-only).
+//
+// Enabling also kicks off a compilation run immediately and starts the ingestion
+// service's scheduler, so the change takes effect without a restart. That
+// trigger is best-effort: the setting is still saved if the service is down, and
+// the scheduler picks the flag up on its next boot.
 export const PUT = withPermission({ semanticCompilation: ['manage'] })(async (req) => {
 	const prisma = getPrisma();
 	const body = await req.json();

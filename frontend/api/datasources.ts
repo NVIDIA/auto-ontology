@@ -2,17 +2,22 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { requests } from './requests';
+import { pageQuery, requests } from './requests';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { Params } from '@/types/params';
 import type {
+	ApiPagedResponse,
 	ApiResponse,
 	ColumnsEnvelope,
 	NodePatch,
 	NodeUpdateResponse,
+	PageParams,
 	ResponseWithCount,
 	SchemasResponse,
 } from './types';
+
+/** What the columns endpoint sends: the envelope, plus the table's full count. */
+type ColumnsPageResult = ResponseWithCount<ColumnsEnvelope> & { total: number };
 
 // ---------------------------------------------------------------------------
 // Request dedup caches
@@ -20,7 +25,7 @@ import type {
 
 const schemasByDbMap = new Map<string, Promise<ApiResponse<Schema[]>>>();
 const tablesBySchemaMap = new Map<string, Promise<ApiResponse<Table[]>>>();
-const columnsByTableMap = new Map<string, Promise<ApiResponse<Column[]>>>();
+const columnsByTableMap = new Map<string, Promise<ApiPagedResponse<Column[]>>>();
 
 export const datasources = {
 	getDBs: () => requests.get<ResponseWithCount<Database[]>>('datasources/dbs'),
@@ -75,15 +80,23 @@ export const datasources = {
 		return promise;
 	},
 
-	/** Columns for one table; parallel callers with the same key share one HTTP request. */
-	getColumnsForTable: (tableId: string): Promise<ApiResponse<Column[]>> => {
-		const pending = columnsByTableMap.get(tableId);
+	/**
+	 * Columns for one table, or one page of them when a window is given;
+	 * parallel callers reading the same window share one HTTP request.
+	 * `total` is what the table has in full, which a pager compares against.
+	 */
+	getColumnsForTable: (
+		tableId: string,
+		params: PageParams = {},
+	): Promise<ApiPagedResponse<Column[]>> => {
+		const key = [tableId, params.skip ?? 0, params.limit ?? ''].join('\0');
+		const pending = columnsByTableMap.get(key);
 		if (pending != null) return pending;
 
 		const promise = requests
-			.get<ResponseWithCount<ColumnsEnvelope>>(`columns/${tableId}`)
-			.then((res): ApiResponse<Column[]> => {
-				if (res.error) return res as unknown as ApiResponse<Column[]>;
+			.get<ColumnsPageResult>(`columns/${tableId}`, pageQuery(params))
+			.then((res): ApiPagedResponse<Column[]> => {
+				if (res.error) return res as unknown as ApiPagedResponse<Column[]>;
 				const envelope = res.data as unknown as ColumnsEnvelope;
 				const columns: Column[] = (envelope.columns ?? []).map((c) => ({
 					...c,
@@ -91,13 +104,13 @@ export const datasources = {
 					schema_name: envelope.schema_name,
 					table_name: envelope.table_name,
 				}));
-				return { data: columns, count: columns.length };
+				return { data: columns, count: columns.length, total: res.total ?? 0 };
 			})
 			.finally(() => {
-				columnsByTableMap.delete(tableId);
+				columnsByTableMap.delete(key);
 			});
 
-		columnsByTableMap.set(tableId, promise);
+		columnsByTableMap.set(key, promise);
 		return promise;
 	},
 

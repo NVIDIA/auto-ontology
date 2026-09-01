@@ -2,6 +2,8 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { CertificationStatus } from '@/enums/certification';
+
 export type TermZone = {
 	id: string;
 	name: string;
@@ -15,6 +17,17 @@ export type Term = {
 	description: string | null;
 	synonyms: string[];
 	zones: TermZone[];
+	name_certified: boolean;
+	description_certified: boolean;
+	/**
+	 * Aggregate three-state certification status: the term's own
+	 * name/description flags plus every column & sql attribute flag, rolled up
+	 * server-side (see `_certification_flags_clause` in gsf/dal/terms.py) and
+	 * zone-scoped to the same boundary as the attribute list endpoints. Both
+	 * `/terms` and `/terms/{id}` return it, and every certification PATCH
+	 * returns the recomputed value — never derive it on the client.
+	 */
+	certification: CertificationStatus;
 };
 
 export type TermTable = {
@@ -54,6 +67,7 @@ export type ColumnAttribute = {
 	primary_column: AttributeColumnRef | null;
 	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
 	referenced_columns: AttributeColumnRef[];
+	certified: boolean;
 };
 
 export type SqlAttribute = {
@@ -66,6 +80,7 @@ export type SqlAttribute = {
 	term_id: string;
 	term_name: string;
 	zones?: TermZone[];
+	certified: boolean;
 };
 
 export type RelatedTerm = {

@@ -5,14 +5,11 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Modal } from './Modal';
 
 type Tone = 'danger' | 'default';
-
-const CONFIRM_CLASSES: Record<Tone, string> = {
-	danger: 'bg-red-600 text-white hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-500',
-	default: 'bg-[#76b900] text-white hover:bg-[#5e9400]',
-};
 
 export type ConfirmModalProps = {
 	open: boolean;
@@ -53,45 +50,48 @@ export const ConfirmModal = ({
 				<h3 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
 					{title}
 				</h3>
-				<button
-					type="button"
+				<Button
 					onClick={onCancel}
 					disabled={confirming}
-					className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 disabled:cursor-default disabled:opacity-50 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+					theme={ButtonTheme.Icon}
+					size={Size.SMALL}
+					iconOnly
 					aria-label="Close"
 				>
 					<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 						<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
 					</svg>
-				</button>
+				</Button>
 			</div>
 			<div className="space-y-4 p-6">
-				<div className="text-sm text-zinc-700 dark:text-zinc-300">{message}</div>
+				<div className="wrap-anywhere text-sm text-zinc-700 dark:text-zinc-300">
+					{message}
+				</div>
 				{error != null && (
 					<p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-300">
 						{error}
 					</p>
 				)}
 				<div className="flex justify-end gap-2">
-					<button
+					<Button
 						ref={cancelRef}
-						type="button"
 						onClick={onCancel}
 						disabled={confirming}
-						className="cursor-pointer rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 disabled:cursor-default disabled:opacity-50 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-200 dark:hover:bg-zinc-800"
+						theme={ButtonTheme.Secondary}
+						size={Size.REGULAR}
 					>
 						{cancelLabel}
-					</button>
-					<button
-						type="button"
+					</Button>
+					<Button
 						onClick={() => {
 							void onConfirm();
 						}}
-						disabled={confirming}
-						className={`cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors ${confirming ? 'cursor-default bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : CONFIRM_CLASSES[tone]}`}
+						loading={confirming}
+						theme={tone === 'danger' ? ButtonTheme.Danger : ButtonTheme.Primary}
+						size={Size.REGULAR}
 					>
 						{confirming ? `${confirmLabel}…` : confirmLabel}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</Modal>

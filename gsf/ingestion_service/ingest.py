@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Iterator
 
 from gsf.utils import get_embed_params
 from nemo_retriever.graph import Graph
@@ -19,12 +20,32 @@ from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator imp
 from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 from nemo_retriever.common.params.models import TabularExtractParams
-from gsf.vdb import get_data_vdb, get_semantic_vdb
-from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
-from gsf.dal.connections import delete_database_subgraph
 from nemo_retriever.tabular_data.sql_database import SQLDatabase
 
+from gsf.vdb import get_data_vdb
+from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
+from gsf.dal.reset import delete_all_data, delete_semantic_layer
+
 logger = logging.getLogger("ingestion_service.ingest")
+
+
+@contextmanager
+def _shared_connection(connector: SQLDatabase) -> Iterator[None]:
+    """Hold one connection open for the whole extraction, where supported.
+
+    Introspection issues a statement per table, and on Databricks opening a connection
+    is both the slowest step (~0.9s) and the flakiest — measured hanging for minutes,
+    and sometimes never completing. Paying that once per run instead of once per
+    statement removes the dominant cost and the dominant failure mode.
+
+    Connectors without the hook are used unchanged.
+    """
+    reuse = getattr(connector, "reuse_connection", None)
+    if reuse is None:
+        yield
+        return
+    with reuse():
+        yield
 
 
 def run_ingest(connector: SQLDatabase) -> None:
@@ -49,7 +70,8 @@ def run_ingest(connector: SQLDatabase) -> None:
         >> _BatchEmbedActor(params=embed_params)
     )
 
-    results = graph.execute(None)
+    with _shared_connection(connector):
+        results = graph.execute(None)
     result_df = results[0] if results else None
 
     if result_df is not None and not result_df.empty:
@@ -100,39 +122,42 @@ def trigger_ingest(connection: dict[str, Any]) -> None:
     ).start()
 
 
-def trigger_ingest_delete(database_name: str) -> None:
-    """Remove ingested database graph and embeddings without blocking the caller."""
+def trigger_delete_ingest(database_name: str | None = None) -> None:
+    """Delete a database's ingested graph and embeddings without blocking."""
 
     def _run() -> None:
         try:
-            run_ingest_delete(database_name)
+            delete_all_data(database_name)
         except Exception:
             logger.exception(
-                "Background ingest delete failed for database %s",
+                "Background delete-ingest failed for database %s",
                 database_name,
             )
 
     threading.Thread(
         target=_run,
         daemon=True,
-        name=f"ingest-delete-{database_name}",
+        name=f"delete-ingest-{database_name}",
     ).start()
 
 
-def run_ingest_delete(database_name: str) -> None:
-    """Remove ingested database graph and embeddings for a database."""
-    database_name = database_name.strip()
-    if not database_name:
-        raise ValueError("Database name is required")
+def trigger_reset_semantic(database_name: str | None = None) -> None:
+    """Delete a database's semantic layer without blocking.
 
-    delete_database_subgraph(database_name)
+    Passing ``None`` resets the semantic layer of every database.
+    """
 
-    data_vdb = get_data_vdb()
-    deleted_data_objects = data_vdb.delete_by_database(database_name)
+    def _run() -> None:
+        try:
+            delete_semantic_layer(database_name)
+        except Exception:
+            logger.exception(
+                "Background reset-semantic failed for database %s",
+                database_name or "<all>",
+            )
 
-    semantic_vdb = get_semantic_vdb()
-    deleted_semantic = semantic_vdb.delete_by_database(database_name)
-    logger.info(
-        f"Tabular and semantic ingest delete: removed {len(deleted_data_objects) + len(deleted_semantic)} pgvector rows "
-        f"for database {database_name}",
-    )
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"reset-semantic-{database_name or 'all'}",
+    ).start()

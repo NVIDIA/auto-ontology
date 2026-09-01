@@ -6,6 +6,10 @@
 
 import type { ChangeEvent } from 'react';
 
+import { EmptyState } from '@/common/EmptyState';
+import { IconName } from '@/common/icons';
+import { EmptyStateVariant } from '@/enums/emptyState';
+
 export type ConnectionSelectDataStepProps = {
 	availableDatabases: string[];
 	selectedDatabases: string[];
@@ -19,15 +23,13 @@ export const ConnectionSelectDataStep = ({
 }: ConnectionSelectDataStepProps) => {
 	if (availableDatabases.length === 0) {
 		return (
-			<div className="flex min-h-[360px] flex-col items-center justify-center gap-2 p-6 text-center">
-				<p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-					No databases to select
-				</p>
-				<p className="max-w-sm text-sm text-zinc-500 dark:text-zinc-400">
-					No databases were discovered for this connection. You can still create it and
-					run ingest later.
-				</p>
-			</div>
+			<EmptyState
+				variant={EmptyStateVariant.Borderless}
+				icon={IconName.Database}
+				title="No databases to select"
+				description="No databases were discovered for this connection. You can still create it and run ingest later."
+				className="min-h-[360px]"
+			/>
 		);
 	}
 

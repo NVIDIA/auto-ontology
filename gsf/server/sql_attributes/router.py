@@ -6,10 +6,19 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from gsf.dal import terms as terms_dal
 from gsf.server.sql_attributes import service as dal
+from gsf.server.responses import (
+    DescriptionSuggestionResponse,
+    IdResponse,
+    SqlAttributeListResponse,
+    SqlAttributeResponse,
+    SqlAttributePatchResponse,
+    SqlExpressionValidationResponse,
+)
 
 router = APIRouter()
 
@@ -39,27 +48,20 @@ class SqlAttributeUpdate(BaseModel):
 class SqlAttributeMetadataPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
+    certified: bool | None = None
 
 
-@router.get("/sql-attributes")
+@router.get("/sql-attributes", response_model=SqlAttributeListResponse)
 def list_sql_attributes() -> dict:
     """All SqlAttribute nodes with their linked Term."""
     rows = dal.list_sql_attributes()
     return {"data": rows, "count": len(rows)}
 
 
-@router.get("/sql-attributes/{attr_id}")
-def get_sql_attribute(
-    attr_id: str,
-    zone_ids: list[str] | None = Query(default=None),
-) -> dict:
-    """One SqlAttribute by id, including its resolved zones.
-
-    Zone-scoped when zone_ids are provided: an attribute whose parent term
-    also represents an out-of-zone table is treated as not found, matching
-    the single-term detail endpoint's zone rules.
-    """
-    row = dal.get_full_sql_attribute_by_id(attr_id, zone_ids=zone_ids)
+@router.get("/sql-attributes/{attr_id}", response_model=SqlAttributeResponse)
+def get_sql_attribute(attr_id: str) -> dict:
+    """One SqlAttribute by id, including its resolved zones."""
+    row = dal.get_full_sql_attribute_by_id(attr_id, zone_ids=None)
     if row is None:
         raise HTTPException(
             status_code=404,
@@ -68,7 +70,10 @@ def get_sql_attribute(
     return {"data": row}
 
 
-@router.get("/sql-attributes/{attr_id}/description-suggestion")
+@router.get(
+    "/sql-attributes/{attr_id}/description-suggestion",
+    response_model=DescriptionSuggestionResponse,
+)
 def get_sql_attribute_description_suggestion(attr_id: str) -> dict:
     """LLM-generated (or cached) description suggestion for a SqlAttribute.
 
@@ -84,7 +89,7 @@ def get_sql_attribute_description_suggestion(attr_id: str) -> dict:
     return {"data": dal.suggest_sql_attribute_description(attr_id)}
 
 
-@router.post("/sql-attributes/validate")
+@router.post("/sql-attributes/validate", response_model=SqlExpressionValidationResponse)
 def validate_sql_attribute(body: SqlAttributeValidate) -> dict:
     """Validate a SQL expression against the catalog.
 
@@ -104,7 +109,7 @@ def validate_sql_attribute(body: SqlAttributeValidate) -> dict:
     return {"data": result}
 
 
-@router.post("/sql-attributes", status_code=201)
+@router.post("/sql-attributes", status_code=201, response_model=SqlAttributeResponse)
 def create_sql_attribute(body: SqlAttributeCreate) -> dict:
     """Create a SqlAttribute with its Sql node, linked to a Term.
 
@@ -130,7 +135,7 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
     return {"data": row}
 
 
-@router.put("/sql-attributes/{attr_id}")
+@router.put("/sql-attributes/{attr_id}", response_model=SqlAttributeResponse)
 def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
     """Replace a SqlAttribute, re-parse SQL, and re-link to a Term.
 
@@ -162,7 +167,7 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
     return {"data": row}
 
 
-@router.patch("/sql-attributes/{attr_id}")
+@router.patch("/sql-attributes/{attr_id}", response_model=SqlAttributePatchResponse)
 def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
     """Patch SqlAttribute name/description without touching SQL expression."""
     patch = body.model_dump(exclude_unset=True)
@@ -182,6 +187,7 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
             attr_id=attr_id,
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
+            certified=patch.get("certified"),
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -193,10 +199,19 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
             status_code=404,
             detail=f"SqlAttribute {attr_id!r} not found",
         )
-    return {"data": row}
+    term_id = row.get("term_id")
+    return {
+        "data": row,
+        # The owning Term's aggregate badge depends on this attribute's flag,
+        # so hand back the recomputed value rather than making the client
+        # re-derive it (see terms_dal.get_term_certification).
+        "term_certification": (
+            terms_dal.get_term_certification(term_id) if term_id else None
+        ),
+    }
 
 
-@router.delete("/sql-attributes/{attr_id}")
+@router.delete("/sql-attributes/{attr_id}", response_model=IdResponse)
 def delete_sql_attribute(attr_id: str) -> dict:
     """Delete a SqlAttribute and its edges."""
     row = dal.delete_sql_attribute(attr_id)

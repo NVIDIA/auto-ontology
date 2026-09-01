@@ -2,6 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { requests } from './requests';
+import type { ResponseWithError } from './types';
+
 export type Prompt = {
 	id: string;
 	content: string;
@@ -11,8 +14,8 @@ export type Acronym = {
 	id: string;
 	name: string;
 	description: string;
-	createdAt: string;
-	updatedAt: string;
+	created_at: string;
+	updated_at: string;
 };
 
 async function json<T>(input: RequestInfo, init?: RequestInit): Promise<T> {
@@ -66,7 +69,13 @@ export const acronymsApi = {
 export const semanticCompilationApi = {
 	get: () => json<{ enabled: boolean }>('/api/configurations/semantic-compilation'),
 
-	getStatus: () => json<{ calculated: boolean }>('/api/semantic-compilation/status'),
+	getStatus: () =>
+		json<{
+			calculated: boolean;
+			running: boolean;
+			last_success_at: string | null;
+			last_failure_at: string | null;
+		}>('/api/semantic-compilation/status'),
 
 	setEnabled: (enabled: boolean) =>
 		json<{ enabled: boolean }>('/api/configurations/semantic-compilation', {
@@ -74,4 +83,15 @@ export const semanticCompilationApi = {
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),
 		}),
+
+	reset: () => json<{ status: string }>('/api/semantic-compilation/reset', { method: 'POST' }),
+};
+
+// Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
+export const visualizationApi = {
+	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.get('configurations/visualization'),
+
+	setEnabled: (enabled: boolean): Promise<ResponseWithError<{ enabled: boolean }>> =>
+		requests.put('configurations/visualization', { enabled }),
 };

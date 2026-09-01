@@ -7,10 +7,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import type { Conversation } from '@/types/chat';
+import { Button, SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonRows } from '@/common/Skeleton';
 import { ConfirmModal } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { Text } from '@/common/Text';
 
 type ChatSidebarProps = {
 	conversations: Conversation[];
@@ -84,23 +90,19 @@ function ConversationItem({
 
 	return (
 		<li className="group relative">
-			<button
-				type="button"
+			<SelectButton
+				theme={SelectButtonTheme.ListItemTwoLine}
+				selected={isActive}
 				onClick={onSelect}
-				className={`w-full rounded-lg px-3 py-2 pr-8 text-left text-sm transition-colors ${
-					isActive
-						? 'bg-zinc-100 font-medium text-black dark:bg-zinc-800 dark:text-zinc-100'
-						: 'text-zinc-700 hover:bg-zinc-100 hover:text-black dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'
-				}`}
 			>
-				<span className="line-clamp-1">{conv.title}</span>
+				<Text text={conv.title} />
 				<span className="mt-0.5 block text-[10px] text-zinc-500 dark:text-zinc-400">
 					{formatDate(conv.createdAt, '(DD.MM.YY)')}
 				</span>
-			</button>
+			</SelectButton>
 
 			<PopoverMenu
-				className="absolute right-1 top-1.5"
+				className="absolute right-1 top-1.5 opacity-0 transition-opacity group-hover:opacity-100"
 				items={[
 					{
 						label: 'Rename',
@@ -118,14 +120,16 @@ function ConversationItem({
 					},
 				]}
 				trigger={({ toggle }) => (
-					<button
+					<Button
+						theme={ButtonTheme.IconNeutral}
+						size={Size.SMALL}
+						iconOnly
 						type="button"
 						onClick={toggle}
-						className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-200 hover:text-zinc-700 group-hover:opacity-100 dark:hover:bg-zinc-700 dark:hover:text-zinc-200"
 						aria-label="Conversation options"
 					>
 						<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-					</button>
+					</Button>
 				)}
 			/>
 
@@ -157,14 +161,18 @@ export const ChatSidebar = ({
 	return (
 		<>
 			{/* Mobile toggle */}
-			<button
-				type="button"
-				onClick={onToggle}
-				className="fixed top-3 left-3 z-30 rounded-lg bg-white p-2 shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden"
-				aria-label="Toggle sidebar"
-			>
-				<Icon name={IconName.Menu} className="h-5 w-5 text-zinc-700 dark:text-zinc-200" />
-			</button>
+			<div className="fixed top-3 left-3 z-30 overflow-hidden rounded-lg bg-white shadow-md dark:bg-zinc-800 dark:shadow-zinc-900/50 lg:hidden">
+				<Button
+					theme={ButtonTheme.IconNeutral}
+					size={Size.LARGE}
+					iconOnly
+					type="button"
+					onClick={onToggle}
+					aria-label="Toggle sidebar"
+				>
+					<Icon name={IconName.Menu} className="h-5 w-5" />
+				</Button>
+			</div>
 
 			{/* Backdrop for mobile */}
 			{isOpen && (
@@ -191,29 +199,29 @@ export const ChatSidebar = ({
 				</div>
 
 				<div className="px-3 py-3">
-					<button
+					<Button
+						theme={ButtonTheme.Secondary}
+						size={Size.REGULAR}
 						type="button"
 						onClick={onNewChat}
-						className="flex w-full items-center gap-2 rounded-lg border border-zinc-300 px-3 py-2 text-sm font-medium text-black transition-colors hover:border-zinc-400 hover:bg-zinc-100 dark:border-zinc-700 dark:text-zinc-100 dark:hover:border-zinc-600 dark:hover:bg-zinc-800"
+						iconPosition="left"
+						full
 					>
 						<span className="text-lg leading-none text-[#76b900]">+</span>
 						New Chat
-					</button>
+					</Button>
 				</div>
 
 				<nav className="flex-1 overflow-y-auto px-2 pb-2">
 					{sidebarLoading ? (
-						<div className="flex h-full items-center justify-center py-6">
-							<div
-								className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-								role="status"
-								aria-label="Loading conversations"
-							/>
+						<div className="py-2" role="status" aria-label="Loading conversations">
+							<SkeletonRows rows={8} />
 						</div>
 					) : conversations.length === 0 ? (
-						<p className="px-2 py-4 text-center text-xs text-zinc-500 dark:text-zinc-400">
-							No conversations yet
-						</p>
+						<EmptyState
+							variant={EmptyStateVariant.Inline}
+							title="No conversations yet"
+						/>
 					) : (
 						<ul className="space-y-0.5">
 							{conversations.map((conv) => (

@@ -54,7 +54,10 @@ def embed_docs_into_vdb(
 
     Each doc must have at least ``id``, ``name``, ``label``, and ``text`` keys
     (the shape returned by ``fetch_sql_attribute_docs`` and
-    ``fetch_suggested_sql_attribute_docs``).
+    ``fetch_suggested_sql_attribute_docs``). An optional ``source`` key is
+    carried through to the metadata unchanged (empty string when absent) —
+    used by SqlAttribute docs so retrieval hits know their provenance
+    (``"sql"``, ``"bridgeTable"``, …) without an extra lookup.
 
     Returns the number of rows successfully embedded and ingested.
     Raises ``RuntimeError`` when the embedding call produces zero embedded rows
@@ -80,6 +83,7 @@ def embed_docs_into_vdb(
             "name": item.get("name", ""),
             "source_path": path,
             "database_name": database_name,
+            "source": item.get("source", ""),
         }
         rows.append(
             {

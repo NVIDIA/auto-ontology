@@ -241,7 +241,7 @@ def _fetch_distinct(
     ``None`` when the column isn't in this table, the probe fails, or the column
     is high-cardinality (so we never judge a free-text/name column).
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     # Bare column (drop table qualifier) so it works regardless of alias scoping.
     col_ref = exp.column(col.this).sql(dialect=d)
     table_ref = table_node.sql(dialect=d)
@@ -629,7 +629,7 @@ def find_literal_mismatches(
     and the empty result is legitimate.
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("literal_check: could not parse SQL (%s)", exc)
         return []

@@ -4,66 +4,64 @@
 
 'use client';
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { type ReactNode } from 'react';
+import { SelectButton } from '@/common/Button';
+import { Popover } from '@/common/Popover';
+import { SelectButtonTheme } from '@/enums/button';
 
 export type PopoverMenuItem = {
 	label: string;
 	icon?: ReactNode;
 	onClick: () => void;
 	danger?: boolean;
+	disabled?: boolean;
 };
 
 type PopoverMenuProps = {
 	items: PopoverMenuItem[];
 	trigger: (props: { open: boolean; toggle: (e: React.MouseEvent) => void }) => ReactNode;
+	/**
+	 * Non-interactive block above the items, for a menu that has to name what
+	 * its actions apply to. Its own width sets the menu's, since the panel
+	 * otherwise shrinks to the widest item.
+	 */
+	header?: ReactNode;
 	className?: string;
 };
 
-export const PopoverMenu = ({ items, trigger, className = '' }: PopoverMenuProps) => {
-	const [open, setOpen] = useState(false);
-	const ref = useRef<HTMLDivElement>(null);
-
-	useEffect(() => {
-		if (!open) return;
-		const handleClick = (e: MouseEvent) => {
-			if (ref.current && !ref.current.contains(e.target as Node)) {
-				setOpen(false);
-			}
-		};
-		document.addEventListener('mousedown', handleClick);
-		return () => document.removeEventListener('mousedown', handleClick);
-	}, [open]);
-
-	const toggle = (e: React.MouseEvent) => {
-		e.stopPropagation();
-		setOpen((o) => !o);
-	};
-
-	return (
-		<div ref={ref} className={className}>
-			{trigger({ open, toggle })}
-			{open && (
-				<div className="absolute right-0 top-full z-30 mt-1 w-32 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
-					{items.map((item) => (
-						<button
-							key={item.label}
-							type="button"
-							onClick={() => {
-								setOpen(false);
-								item.onClick();
-							}}
-							className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm ${
-								item.danger
-									? 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/40'
-									: 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700'
-							}`}
-						>
-							{item.icon}
-							{item.label}
-						</button>
-					))}
-				</div>
-			)}
-		</div>
-	);
-};
+/**
+ * List of actions anchored under the right edge of its trigger. See `Popover`
+ * for the positioning and dismissal it is built on.
+ */
+export const PopoverMenu = ({ items, trigger, header, className = '' }: PopoverMenuProps) => (
+	<Popover
+		trigger={trigger}
+		className={className}
+		panelClassName="w-max min-w-32 whitespace-nowrap py-1"
+	>
+		{({ close }) => (
+			<>
+				{header != null && (
+					<div className="mb-1 border-b border-zinc-100 pb-1 dark:border-zinc-800">
+						{header}
+					</div>
+				)}
+				{items.map((item) => (
+					<SelectButton
+						theme={SelectButtonTheme.ListItem}
+						danger={item.danger}
+						disabled={item.disabled}
+						key={item.label}
+						onClick={() => {
+							close();
+							item.onClick();
+						}}
+					>
+						{item.icon}
+						{item.label}
+					</SelectButton>
+				))}
+			</>
+		)}
+	</Popover>
+);

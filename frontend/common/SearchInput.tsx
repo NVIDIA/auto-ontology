@@ -4,6 +4,9 @@
 
 'use client';
 
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
+
 export type SearchInputProps = {
 	value: string;
 	onChange: (value: string) => void;
@@ -46,16 +49,19 @@ export const SearchInput = ({
 			className="flex-1 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 		/>
 		{value !== '' && (
-			<button
+			<Button
+				theme={ButtonTheme.IconNeutral}
+				size={Size.SMALL}
+				iconOnly
+				rounded
 				type="button"
 				onClick={() => onChange('')}
 				aria-label="Clear search"
-				className="shrink-0 cursor-pointer rounded-full p-0.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
 			>
 				<svg className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 					<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
 				</svg>
-			</button>
+			</Button>
 		)}
 	</div>
 );

@@ -5,6 +5,8 @@
 'use client';
 
 import { useEffect, useRef, type ReactNode } from 'react';
+import { Button } from '@/common/Button';
+import { Size, ButtonTheme } from '@/enums/button';
 import { Icon, IconName } from '@/common/icons';
 import { Modal } from './Modal';
 
@@ -82,16 +84,17 @@ export const ModalWithSteps = ({
 						{title}
 					</h3>
 				</div>
-				<button
-					type="button"
+				<Button
 					onClick={onClose}
-					className="cursor-pointer rounded-md p-1 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-700 dark:hover:text-zinc-300"
+					theme={ButtonTheme.Icon}
+					size={Size.SMALL}
+					iconOnly
 					aria-label="Close"
 				>
 					<svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
 						<path d="M6.28 5.22a.75.75 0 0 0-1.06 1.06L8.94 10l-3.72 3.72a.75.75 0 1 0 1.06 1.06L10 11.06l3.72 3.72a.75.75 0 1 0 1.06-1.06L11.06 10l3.72-3.72a.75.75 0 0 0-1.06-1.06L10 8.94 6.28 5.22Z" />
 					</svg>
-				</button>
+				</Button>
 			</div>
 
 			<nav
@@ -110,7 +113,7 @@ export const ModalWithSteps = ({
 										onActiveStepChange?.(index);
 									}
 								}}
-								className={`px-2 py-1 text-sm capitalize ${stepStatusClass[status]}`}
+								className={`rounded-lg px-2 py-1 text-sm capitalize transition-colors ${stepStatusClass[status]}`}
 							>
 								{label}
 							</button>
@@ -146,22 +149,17 @@ export const ModalWithSteps = ({
 				<div className={`flex flex-1 justify-end gap-2 ${alert == null ? '' : 'shrink-0'}`}>
 					{footerActions.map((action) => {
 						const isPrimary = action.variant !== 'outline';
-						const disabled = action.disabled || action.loading;
 						return (
-							<button
+							<Button
 								key={action.label}
-								type="button"
-								data-testid={`stepper-button-${action.label}`}
 								onClick={action.onClick}
-								disabled={disabled}
-								className={
-									isPrimary
-										? `cursor-pointer rounded-lg px-4 py-2 text-sm font-medium transition-colors ${disabled ? 'cursor-default bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white hover:bg-[#5e9400]'}`
-										: `cursor-pointer rounded-lg border border-[#76b900] bg-white px-4 py-2 text-sm font-medium text-[#5e9400] transition-colors hover:bg-[#76b900]/10 disabled:cursor-default disabled:border-zinc-300 disabled:text-zinc-400 dark:border-[#76b900] dark:bg-zinc-900 dark:hover:bg-[#76b900]/20 disabled:dark:border-zinc-600`
-								}
+								loading={action.loading}
+								disabled={action.disabled}
+								theme={isPrimary ? ButtonTheme.Primary : ButtonTheme.Outline}
+								size={Size.REGULAR}
 							>
 								{action.loading ? `${action.label}…` : action.label}
-							</button>
+							</Button>
 						);
 					})}
 				</div>

@@ -4,15 +4,20 @@
 
 import { authClient } from '@/auth/auth-client';
 
-export type SsoProvider = { providerId: string; issuer: string; domain: string };
+export type SsoProvider = { provider_id: string; issuer: string; domain: string };
 
+/**
+ * `GET /api/sso-discovery`, which relays the OpenID Connect Discovery document
+ * under its standard field names. Better Auth's `oidcConfig` spells the same
+ * fields in camelCase — `register` below maps between the two.
+ */
 export type SsoDiscovery = {
 	issuer: string;
-	authorizationEndpoint: string;
-	tokenEndpoint: string;
-	userInfoEndpoint: string | null;
-	jwksEndpoint: string | null;
-	discoveryEndpoint: string;
+	authorization_endpoint: string;
+	token_endpoint: string;
+	userinfo_endpoint: string | null;
+	jwks_uri: string | null;
+	discovery_endpoint: string;
 };
 
 type DiscoverResult = { discovery: SsoDiscovery; error: null } | { discovery: null; error: string };
@@ -62,11 +67,11 @@ export const authApi = {
 				clientId,
 				clientSecret,
 				skipDiscovery: true,
-				authorizationEndpoint: discovery.authorizationEndpoint,
-				tokenEndpoint: discovery.tokenEndpoint,
-				userInfoEndpoint: discovery.userInfoEndpoint ?? undefined,
-				jwksEndpoint: discovery.jwksEndpoint ?? undefined,
-				discoveryEndpoint: discovery.discoveryEndpoint,
+				authorizationEndpoint: discovery.authorization_endpoint,
+				tokenEndpoint: discovery.token_endpoint,
+				userInfoEndpoint: discovery.userinfo_endpoint ?? undefined,
+				jwksEndpoint: discovery.jwks_uri ?? undefined,
+				discoveryEndpoint: discovery.discovery_endpoint,
 				scopes: ['openid', 'profile', 'email'],
 				pkce: true,
 			},

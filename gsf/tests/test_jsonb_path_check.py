@@ -11,7 +11,7 @@ from gsf.retrieval.text_to_sql.db_probe.jsonb_path_check import (
     build_jsonb_path_repair_error,
     find_jsonb_path_mismatches,
 )
-from gsf.retrieval.text_to_sql.agents.sql_from_semantic import format_semantic_context
+from gsf.retrieval.text_to_sql.formatters_util import format_semantic_context
 
 
 def _dead_executor() -> ProbeExecutor:

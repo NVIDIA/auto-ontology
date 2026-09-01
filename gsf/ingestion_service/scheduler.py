@@ -9,7 +9,11 @@ measured from the *end* of the previous run. An API-triggered run happens
 immediately and, because the loop always reschedules from "now" after any run,
 resets that interval timer.
 
-Subclasses implement :meth:`_run_once`.
+Subclasses implement :meth:`_run_once`. A subclass whose work depends on
+another scheduler's data (e.g. semantic compilation reading the catalog that
+data ingestion writes) should await that scheduler's :meth:`wait_first_pass`
+at the top of its own ``_run_once`` — see ``SemanticScheduler`` — so its
+startup run can never race the dependency's startup run.
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ class IntervalScheduler:
         self._interval = interval
         self._stop = asyncio.Event()
         self._trigger = asyncio.Event()
+        self._abort = asyncio.Event()
+        self._running = False
+        self._first_pass_done = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> bool:
@@ -65,9 +72,61 @@ class IntervalScheduler:
         """
         self._trigger.set()
 
+    def abort(self) -> None:
+        """Ask the in-flight pass to stop at its next safe point.
+
+        Only the current pass is cut short: the loop keeps running and the next
+        automatic run happens on schedule. A queued trigger is dropped as well,
+        so aborting cannot be followed immediately by another pass.
+        """
+        self._abort.set()
+        self._trigger.clear()
+
+    @property
+    def aborting(self) -> bool:
+        """Whether the pass currently running was asked to stop."""
+        return self._abort.is_set()
+
+    @property
+    def running(self) -> bool:
+        """Whether a pass is executing right now, as opposed to idling between ticks."""
+        return self._running
+
+    @property
+    def first_pass_done(self) -> bool:
+        """Whether this scheduler's first pass has finished yet.
+
+        Lets a dependent scheduler log only when :meth:`wait_first_pass` is
+        actually going to block, instead of on every one of its own passes.
+        """
+        return self._first_pass_done.is_set()
+
+    async def wait_first_pass(self) -> None:
+        """Wait until this scheduler's first pass — successful or not — has
+        finished.
+
+        Stays satisfied forever once that pass ends, so only a caller racing
+        the very first pass ever blocks here; every call after that returns
+        immediately. Meant for a dependent scheduler to await before doing any
+        work of its own — see the module docstring.
+        """
+        await self._first_pass_done.wait()
+
     async def _run_once(self) -> None:
         """Perform one pass of the job. Implemented by subclasses."""
         raise NotImplementedError
+
+    async def _run_pass(self) -> None:
+        """Run one pass with a fresh abort flag, surviving unhandled errors."""
+        self._abort.clear()
+        self._running = True
+        try:
+            await self._run_once()
+        except Exception:
+            logger.exception("%s: unhandled error; will retry on next tick", self.name)
+        finally:
+            self._running = False
+            self._first_pass_done.set()
 
     async def _wait_for_next(self, next_run: datetime) -> None:
         """Sleep until ``next_run``, returning early on stop or trigger."""
@@ -92,10 +151,7 @@ class IntervalScheduler:
     async def _run_forever(self) -> None:
         # Run once at startup so a fresh deploy refreshes existing connections
         # without waiting for the next scheduled slot.
-        try:
-            await self._run_once()
-        except Exception:
-            logger.exception("%s: unhandled error; will retry on next tick", self.name)
+        await self._run_pass()
 
         while not self._stop.is_set():
             # Schedule the next run one interval out from now, so a long run or a
@@ -108,9 +164,4 @@ class IntervalScheduler:
 
             # A trigger fired (or the interval elapsed) — consume it and run now.
             self._trigger.clear()
-            try:
-                await self._run_once()
-            except Exception:
-                logger.exception(
-                    "%s: unhandled error; will retry on next tick", self.name
-                )
+            await self._run_pass()

@@ -14,6 +14,7 @@ export type Column = {
 	ordinal_position: number;
 	description?: string;
 	sample_values?: string[];
+	description_certified?: boolean;
 };
 
 export type Table = {
@@ -27,6 +28,7 @@ export type Table = {
 	columns: Column[];
 	table_type: TableType;
 	description?: string;
+	description_certified?: boolean;
 };
 
 export type Schema = {

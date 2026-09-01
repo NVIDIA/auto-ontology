@@ -6,9 +6,17 @@
 
 import { useEffect, useState } from 'react';
 
+import { Button, SelectButton } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
+import { PopoverMenu } from '@/common/PopoverMenu';
+import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
+import { Text } from '@/common/Text';
+import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
 
@@ -25,12 +33,29 @@ const FIELD_INPUT_CLASSNAME =
 const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
 
 const MODE_LABEL: Record<AnalysisMode, string> = { sql: 'SQL', pql: 'PQL' };
+const SKELETON_CARD_HEIGHT = 184;
+const SKELETON_CARD_GAP = 16;
+const LOADING_AREA_RESERVED_HEIGHT = 112;
+const MAX_LOADING_SKELETON_COUNT = 4;
+
+const getLoadingSkeletonCount = () =>
+	Math.max(
+		1,
+		Math.min(
+			MAX_LOADING_SKELETON_COUNT,
+			Math.floor(
+				(window.innerHeight - LOADING_AREA_RESERVED_HEIGHT + SKELETON_CARD_GAP) /
+					(SKELETON_CARD_HEIGHT + SKELETON_CARD_GAP),
+			),
+		),
+	);
 
 export const AnalysisView = () => {
 	const [mode, setMode] = useState<AnalysisMode>('sql');
 	const [items, setItems] = useState<AnalysisItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+	const [loadingSkeletonCount, setLoadingSkeletonCount] = useState(3);
 
 	const [modalOpen, setModalOpen] = useState(false);
 	const [editingId, setEditingId] = useState<string | null>(null);
@@ -51,6 +76,15 @@ export const AnalysisView = () => {
 
 	const isEditing = editingId !== null;
 	const isPql = mode === 'pql';
+
+	useEffect(() => {
+		const updateLoadingSkeletonCount = () => setLoadingSkeletonCount(getLoadingSkeletonCount());
+
+		updateLoadingSkeletonCount();
+		window.addEventListener('resize', updateLoadingSkeletonCount);
+
+		return () => window.removeEventListener('resize', updateLoadingSkeletonCount);
+	}, []);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -263,13 +297,6 @@ export const AnalysisView = () => {
 		setModalOpen(false);
 	};
 
-	const modeButtonClass = (target: AnalysisMode) =>
-		`cursor-pointer rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-			mode === target
-				? 'bg-white text-zinc-900 shadow-sm dark:bg-zinc-700 dark:text-zinc-100'
-				: 'text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-		}`;
-
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -278,41 +305,45 @@ export const AnalysisView = () => {
 					{isPql ? 'PQL analyses' : 'Custom analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
-					<button
-						type="button"
+					<SelectButton
+						theme={SelectButtonTheme.Switcher}
+						selected={mode === 'sql'}
 						onClick={() => setMode('sql')}
-						className={modeButtonClass('sql')}
 					>
 						SQL
-					</button>
-					<button
-						type="button"
+					</SelectButton>
+					<SelectButton
+						theme={SelectButtonTheme.Switcher}
+						selected={mode === 'pql'}
 						onClick={() => setMode('pql')}
-						className={modeButtonClass('pql')}
 					>
 						PQL
-					</button>
+					</SelectButton>
 				</div>
-				<button
-					type="button"
-					onClick={openCreateModal}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400]"
-				>
-					<svg className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden>
-						<path d="M10 3.75a.75.75 0 0 1 .75.75v4.75h4.75a.75.75 0 0 1 0 1.5h-4.75v4.75a.75.75 0 0 1-1.5 0V10.75H4.5a.75.75 0 0 1 0-1.5h4.75V4.5a.75.75 0 0 1 .75-.75Z" />
-					</svg>
-					Create new analysis
-				</button>
+				<div className="ml-auto">
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
+						onClick={openCreateModal}
+						iconPosition="left"
+						shadow
+					>
+						<Icon name={IconName.Plus} className="h-4 w-4" />
+						Create new analysis
+					</Button>
+				</div>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
 				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label={`Loading ${MODE_LABEL[mode]} analyses`}
-						/>
+					<div
+						className="flex min-h-[calc(100dvh-7rem)] flex-col gap-4"
+						role="status"
+						aria-label={`Loading ${MODE_LABEL[mode]} analyses`}
+					>
+						{Array.from({ length: loadingSkeletonCount }).map((_, index) => (
+							<SkeletonCard key={index} rows={4} />
+						))}
 					</div>
 				)}
 
@@ -328,11 +359,10 @@ export const AnalysisView = () => {
 				)}
 
 				{!loading && error == null && items.length === 0 && (
-					<div className="flex h-full flex-1 items-center justify-center">
-						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No {MODE_LABEL[mode]} Analyses found
-						</p>
-					</div>
+					<EmptyState
+						variant={EmptyStateVariant.Borderless}
+						title={`No ${MODE_LABEL[mode]} Analyses found`}
+					/>
 				)}
 
 				{!loading && error == null && items.length > 0 && (
@@ -343,34 +373,58 @@ export const AnalysisView = () => {
 								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
 							>
 								<div className="flex items-start justify-between gap-3">
-									<h2 className="text-base font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-										{a.name}
-									</h2>
-									<div className="flex shrink-0 items-center gap-1">
-										<button
-											type="button"
-											onClick={() => openEditModal(a)}
-											aria-label={`Edit ${a.name}`}
-											title="Edit"
-											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:text-zinc-400 dark:hover:bg-zinc-800"
-										>
-											<Icon name={IconName.Pencil} className="h-4 w-4" />
-										</button>
-										<button
-											type="button"
-											onClick={() => openDeleteModal(a)}
-											aria-label={`Delete ${a.name}`}
-											title="Delete"
-											className="cursor-pointer rounded-md p-1.5 text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-zinc-800"
-										>
-											<Icon name={IconName.Trash} className="h-4 w-4" />
-										</button>
-									</div>
+									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
+									<PopoverMenu
+										className="shrink-0"
+										items={[
+											{
+												label: 'Edit',
+												icon: (
+													<Icon
+														name={IconName.Pencil}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openEditModal(a),
+											},
+											{
+												label: 'Delete',
+												icon: (
+													<Icon
+														name={IconName.Trash}
+														className="h-3.5 w-3.5"
+													/>
+												),
+												onClick: () => openDeleteModal(a),
+												danger: true,
+											},
+										]}
+										trigger={({ toggle }) => (
+											<Button
+												theme={ButtonTheme.IconNeutral}
+												size={Size.SMALL}
+												iconOnly
+												type="button"
+												onClick={toggle}
+												aria-label={`Actions for ${a.name}`}
+											>
+												<Icon
+													name={IconName.DotsVertical}
+													className="h-4 w-4"
+												/>
+											</Button>
+										)}
+									/>
 								</div>
 								{a.description.trim() !== '' && (
-									<p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
-										{a.description}
-									</p>
+									<div className="mt-2">
+										<Text
+											as="p"
+											text={a.description}
+											lines={3}
+											variant={TextVariant.Body}
+										/>
+									</div>
 								)}
 								{a.code.trim() !== '' && (
 									<SqlBlock

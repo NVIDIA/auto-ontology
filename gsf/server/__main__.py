@@ -39,6 +39,9 @@ from gsf.server.semantic_compilation.router import (  # noqa: E402
 from gsf.server.sql_attributes.router import router as sql_attributes_router  # noqa: E402
 from gsf.server.zones.router import router as zones_router  # noqa: E402
 from gsf.server.terms.router import router as terms_router  # noqa: E402
+from gsf.server.model_interchange.router import (  # noqa: E402
+    router as model_interchange_router,
+)
 
 
 @asynccontextmanager
@@ -57,9 +60,13 @@ async def lifespan(_app: FastAPI):
             neo4j_connection._conn = None
 
 
-def main() -> None:
-    logger.info("Starting GSF API server — app version %s", get_app_version())
+def create_app() -> FastAPI:
+    """Build the API app without serving it.
 
+    Kept separate from ``main`` so tooling — the OpenAPI spec generator,
+    tests — can construct the app and read ``app.openapi()`` without
+    starting uvicorn.
+    """
     app = FastAPI(title="GSF API", lifespan=lifespan)
 
     app.add_middleware(
@@ -87,6 +94,17 @@ def main() -> None:
     )
     app.include_router(zones_router, prefix="/api", tags=["zones"])
     app.include_router(terms_router, prefix="/api", tags=["terms"])
+    app.include_router(
+        model_interchange_router, prefix="/api", tags=["model-interchange"]
+    )
+
+    return app
+
+
+def main() -> None:
+    logger.info("Starting GSF API server — app version %s", get_app_version())
+
+    app = create_app()
 
     uvicorn.run(
         app,

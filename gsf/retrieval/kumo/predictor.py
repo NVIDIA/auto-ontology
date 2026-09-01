@@ -28,6 +28,8 @@ from typing import Any
 
 import pandas as pd
 
+from gsf.retrieval.kumo.kumo_model import key_columns
+
 logger = logging.getLogger(__name__)
 
 # Bounds so building the graph on a large database stays tractable. The whole
@@ -46,29 +48,37 @@ _init_lock = threading.Lock()
 _initialized = False
 
 
-def _ensure_init() -> None:
-    """Authenticate the KumoRFM SDK once, from env vars."""
-    global _initialized
-    if _initialized:
-        return
+_client: Any = None
+
+
+def _ensure_init() -> Any:
+    """Open the SDFM client once, from env vars, and return it.
+
+    The client is the only supported entry point to the engine: kumorfm refuses
+    direct use. Opening it makes no request, so a bad URL surfaces on the first
+    prediction rather than here.
+    """
+    global _client
+    if _client is not None:
+        return _client
     with _init_lock:
-        if _initialized:
-            return
+        if _client is not None:
+            return _client
         url = os.environ.get("KUMO_RFM_API_URL")
         if not url:
             raise RuntimeError("KUMO_RFM_API_URL is not set")
         api_key = os.environ.get("KUMO_RFM_API_KEY") or None
 
-        import kumorfm.rfm as rfm
+        from nvidia_sdfm import SDFMClient
 
         before = time.perf_counter()
-        rfm.init(url=url, api_key=api_key)
-        _initialized = True
+        _client = SDFMClient(url, api_key=api_key)
         logger.info(
-            "KumoRFM initialized (url=%s) in %.2fs",
-            url or "<default>",
+            "KumoRFM client opened (url=%s) in %.2fs",
+            url,
             time.perf_counter() - before,
         )
+        return _client
 
 
 def _quote(schema: str, table: str) -> str:
@@ -76,21 +86,39 @@ def _quote(schema: str, table: str) -> str:
     return f'"{schema}"."{table}"' if schema else f'"{table}"'
 
 
+def _catalog_key_columns(entry: dict[str, Any]) -> list[str]:
+    """Primary-key columns the catalog recorded for a table.
+
+    Every path spells the field ``pk``, the catalog's own name for it — both
+    retrieval (see ``relevant_tables``) and the PQL-example enrichment. It may
+    hold a single name or several for a composite key.
+    """
+    raw = entry.get("pk")
+    if isinstance(raw, str):
+        return [raw.strip()] if raw.strip() else []
+    if isinstance(raw, (list, tuple)):
+        return [str(c).strip() for c in raw if str(c or "").strip()]
+    return []
+
+
 def _load_relevant_frames(
     connectors: list[Any],
     relevant_tables: list[dict[str, Any]],
-) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
+) -> tuple[dict[str, pd.DataFrame], dict[str, str], dict[str, list[str]]]:
     """Load a bounded sample of each relevant table into a DataFrame.
 
     Iterates only the tables the candidate-preparation step already found relevant
     (no full-catalog scan). Each table's connector is resolved by ``database_name``,
     falling back to the first connector.
 
-    Returns ``(frames, name_map)`` where ``name_map`` maps each graph table name
-    to its schema-qualified SQL name (used to schema-qualify entity-selection SQL).
+    Returns ``(frames, name_map, key_columns)`` where ``name_map`` maps each graph
+    table name to its schema-qualified SQL name (used to schema-qualify
+    entity-selection SQL) and ``key_columns`` maps it to the catalog's primary-key
+    columns (see :func:`_declare_primary_keys`). Both are keyed by the graph table
+    name chosen here, so neither has to re-derive it.
     """
     if not connectors or not relevant_tables:
-        return {}, {}
+        return {}, {}, {}
 
     db_to_connector = {
         str(getattr(c, "database_name", "") or ""): c for c in connectors
@@ -99,6 +127,7 @@ def _load_relevant_frames(
 
     frames: dict[str, pd.DataFrame] = {}
     name_map: dict[str, str] = {}
+    key_columns: dict[str, list[str]] = {}
     for t in relevant_tables:
         if len(frames) >= _MAX_TABLES:
             logger.warning(
@@ -142,7 +171,10 @@ def _load_relevant_frames(
         frames[name] = df
         if schema:
             name_map[name] = _quote(schema, table)
-    return frames, name_map
+        catalog_keys = _catalog_key_columns(t)
+        if catalog_keys:
+            key_columns[name] = catalog_keys
+    return frames, name_map, key_columns
 
 
 def _error_response(message: str) -> dict[str, Any]:
@@ -227,14 +259,20 @@ class PredictionContext:
     graph_col_stypes: Any
     time_columns: Any
     table_names: dict[str, str]
+    # Per table (casefolded), the identity of every loaded row: bare values for a
+    # single-column key, one tuple per row for a composite one.
     entity_ids: dict[str, list[Any]]
     examples: list[dict[str, str]]
 
 
-def _col_name_lower(col: Any) -> str | None:
-    """Lowercased name of a KumoRFM primary-key/column object (``None`` if unset)."""
-    name = getattr(col, "name", None)
-    return name.lower() if name else None
+def _fkey_name(fkey: Any) -> str:
+    """Comparable text for an edge's foreign key.
+
+    A composite key reads back as the single surrogate column rather than the tuple
+    that declared it, so this is normally already a string; the tuple branch keeps
+    the comparison total if a later SDK reports the columns themselves.
+    """
+    return ", ".join(str(c) for c in fkey) if isinstance(fkey, tuple) else str(fkey)
 
 
 def _resolve_column(table: Any, col: str) -> str | None:
@@ -244,6 +282,48 @@ def _resolve_column(table: Any, col: str) -> str | None:
         if c.name.lower() == target:
             return c.name
     return None
+
+
+def _declare_primary_keys(
+    graph: Any, key_columns_by_table: dict[str, list[str]]
+) -> int:
+    """Set each table's primary key from the catalog, as a tuple when composite.
+
+    Metadata inference picks no key at all when several columns are ``stype=ID`` and
+    none resembles the table name, and it never infers a composite key. A table keyed
+    on ``('Customer ID', 'REGION')`` would therefore reach KumoRFM with no identity,
+    which costs it every edge (nothing can be oriented towards a key that isn't
+    there) and leaves it unusable as a prediction entity.
+
+    Declaring only what the catalog actually recorded: a table whose key columns are
+    absent from the loaded frame is left to inference. Returns the number of tables
+    whose key was declared.
+    """
+    declared = 0
+    for name, table in graph.tables.items():
+        wanted = key_columns_by_table.get(name) or []
+        if not wanted:
+            continue
+        resolved = [c for c in (_resolve_column(table, w) for w in wanted) if c]
+        if len(resolved) != len(wanted):
+            logger.debug(
+                "kumo: catalog key %s not fully present in %s; leaving inference",
+                wanted,
+                name,
+            )
+            continue
+        if [c.lower() for c in key_columns(table)] == [c.lower() for c in resolved]:
+            continue
+        try:
+            table.primary_key = resolved[0] if len(resolved) == 1 else tuple(resolved)
+        except Exception:
+            logger.debug(
+                "kumo: could not declare key %s on %s", resolved, name, exc_info=True
+            )
+            continue
+        declared += 1
+        logger.info("kumo: declared %s primary key %s from catalog", name, resolved)
+    return declared
 
 
 def _path_columns(entry: dict[str, Any]) -> list[tuple[str, str]]:
@@ -282,12 +362,20 @@ def _apply_join_paths(graph: Any, join_paths: list[dict[str, Any]] | None) -> in
     counts as covered, so the caller doesn't fall back to heuristic inference for a
     relationship the catalog already describes.
 
-    Returns the number of distinct cross-table joins covered (added or pre-existing).
+    A composite destination key is linked once with the whole tuple: KumoRFM rejects
+    a link that names only part of an identity, and each part arrives here as its own
+    single-column join, so the parts are collected per table pair before linking. A
+    part the join paths never mention is taken from the source's same-named column
+    when it has one, which is what a sharded warehouse looks like (``ORDERS`` and
+    ``PEOPLE`` both carrying ``REGION``).
+
+    Returns the number of distinct relationships covered (added or pre-existing).
     """
     lookup = {name.lower(): name for name in graph.tables}
     existing = {(e.src_table, e.fkey, e.dst_table) for e in graph.edges}
-    covered = 0
-    processed: set[tuple[str, str, str]] = set()
+    existing_pairs = {(e.src_table, e.dst_table) for e in graph.edges}
+    # (src, dst) -> {destination key column (lowercased): source column}
+    pending: dict[tuple[str, str], dict[str, str]] = {}
     for entry in join_paths or []:
         seq = _path_columns(entry)
         for (a_tbl, a_col_raw), (b_tbl, b_col_raw) in zip(seq, seq[1:]):
@@ -300,33 +388,55 @@ def _apply_join_paths(graph: Any, join_paths: list[dict[str, Any]] | None) -> in
             b_col = _resolve_column(b_graph, b_col_raw)
             if not a_col or not b_col:
                 continue
-            # Orient the edge FK(src) -> PK(dst): the side whose join column is that
-            # table's primary key is the destination.
-            if _col_name_lower(b_graph.primary_key) == b_col.lower():
-                src, fkey, dst = a_name, a_col, b_name
-            elif _col_name_lower(a_graph.primary_key) == a_col.lower():
-                src, fkey, dst = b_name, b_col, a_name
+            # Orient the edge FK(src) -> PK(dst): the side whose join column is part
+            # of that table's primary key is the destination.
+            a_keys = {c.lower() for c in key_columns(a_graph)}
+            b_keys = {c.lower() for c in key_columns(b_graph)}
+            if b_col.lower() in b_keys:
+                src, src_col, dst, dst_col = a_name, a_col, b_name, b_col
+            elif a_col.lower() in a_keys:
+                src, src_col, dst, dst_col = b_name, b_col, a_name, a_col
             else:
                 continue
-            key = (src, fkey, dst)
-            if key in processed:
-                continue
-            processed.add(key)
-            if key in existing:
-                covered += 1
-                continue
-            try:
-                graph.link(src, fkey, dst)
-            except Exception:
+            pending.setdefault((src, dst), {}).setdefault(dst_col.lower(), src_col)
+
+    covered = 0
+    for (src, dst), mapping in pending.items():
+        dst_keys = key_columns(graph[dst])
+        fkey: Any
+        if len(dst_keys) > 1:
+            parts = [
+                mapping.get(k.lower()) or _resolve_column(graph[src], k)
+                for k in dst_keys
+            ]
+            if not all(parts):
                 logger.debug(
-                    "kumo: skipped join-path link %s.%s -> %s",
+                    "kumo: %s cannot reference all of %s's identity %s; skipped",
                     src,
-                    fkey,
                     dst,
-                    exc_info=True,
+                    dst_keys,
                 )
                 continue
+            fkey = tuple(parts)
+        else:
+            fkey = next(iter(mapping.values()))
+        if (src, fkey, dst) in existing or (
+            isinstance(fkey, tuple) and (src, dst) in existing_pairs
+        ):
             covered += 1
+            continue
+        try:
+            graph.link(src, fkey, dst)
+        except Exception:
+            logger.debug(
+                "kumo: skipped join-path link %s.%s -> %s",
+                src,
+                fkey,
+                dst,
+                exc_info=True,
+            )
+            continue
+        covered += 1
     return covered
 
 
@@ -348,13 +458,17 @@ def _deduplicate_inferred_links(graph: Any) -> int:
     for (_src, dst), edges in grouped.items():
         if len(edges) < 2:
             continue
-        primary_key = _col_name_lower(graph[dst].primary_key) or ""
+        # Only a single-column key gives a name worth matching against; a composite
+        # one reads back as the surrogate column on both ends, so such edges fall
+        # through to the shortest/lexicographically-first tie-break.
+        dst_keys = key_columns(graph[dst])
+        primary_key = dst_keys[0].lower() if len(dst_keys) == 1 else ""
         keep = min(
             edges,
             key=lambda edge: (
-                edge.fkey.lower() != primary_key,
-                len(edge.fkey),
-                edge.fkey.lower(),
+                _fkey_name(edge.fkey).lower() != primary_key,
+                len(_fkey_name(edge.fkey)),
+                _fkey_name(edge.fkey).lower(),
             ),
         )
         for edge in edges:
@@ -373,6 +487,28 @@ def _deduplicate_inferred_links(graph: Any) -> int:
                 keep.dst_table,
             )
     return removed
+
+
+def _entity_ids(graph: Any, frames: dict[str, pd.DataFrame]) -> dict[str, list[Any]]:
+    """Identity of every loaded row, per table, for scoping a prediction.
+
+    A composite identity is one tuple per row: naming a single one of its columns
+    picks out no row. The surrogate column KumoRFM adds for such a key is absent from
+    the frame, so the real key columns are read instead.
+    """
+    entity_ids: dict[str, list[Any]] = {}
+    for name, table in graph.tables.items():
+        keys = key_columns(table)
+        frame = frames.get(name)
+        if not keys or frame is None or any(k not in frame.columns for k in keys):
+            continue
+        rows = frame[keys].dropna().drop_duplicates()
+        entity_ids[name.casefold()] = (
+            rows[keys[0]].tolist()
+            if len(keys) == 1
+            else [tuple(r) for r in rows.to_numpy().tolist()]
+        )
+    return entity_ids
 
 
 def build_prediction_context(
@@ -394,7 +530,7 @@ def build_prediction_context(
     from.
     """
     logger.info("kumo: build_prediction_context start (initializing KumoRFM)")
-    _ensure_init()
+    client = _ensure_init()
 
     import kumorfm.rfm as rfm
 
@@ -408,7 +544,9 @@ def build_prediction_context(
         len(relevant_tables or []),
     )
     _load_start = time.perf_counter()
-    frames, name_map = _load_relevant_frames(connectors, relevant_tables or [])
+    frames, name_map, catalog_keys = _load_relevant_frames(
+        connectors, relevant_tables or []
+    )
     if not frames:
         return _error_response(
             "No relevant tables were available to build a prediction graph."
@@ -424,7 +562,7 @@ def build_prediction_context(
     # Passing an explicit empty edge list suppresses LocalGraph's automatic
     # relationship inference. This lets catalog join paths take precedence and
     # avoids inferring the same links twice.
-    graph = rfm.LocalGraph.from_data(
+    graph = rfm.Graph.from_data(
         frames,
         edges=[],
         infer_metadata=True,
@@ -434,6 +572,9 @@ def build_prediction_context(
         "kumo: LocalGraph.from_data (metadata inferred) in %.2fs",
         time.perf_counter() - _graph_start,
     )
+    # Before any linking: an edge is oriented towards a primary key, so a table whose
+    # key inference missed can take part in no relationship at all.
+    _declare_primary_keys(graph, catalog_keys)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
         logger.info("kumo: using %d catalog join edge(s)", covered)
@@ -449,15 +590,8 @@ def build_prediction_context(
             )
 
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
-    kumo_model = KumoModel(rfm.KumoRFM(graph, verbose=False))
-    entity_ids: dict[str, list[Any]] = {}
-    for name, table in graph.tables.items():
-        primary_key = getattr(table.primary_key, "name", None)
-        frame = frames.get(name)
-        if primary_key and frame is not None and primary_key in frame.columns:
-            entity_ids[name.casefold()] = (
-                frame[primary_key].dropna().drop_duplicates().tolist()
-            )
+    kumo_model = KumoModel(client.kumorfm(graph), graph)
+    entity_ids = _entity_ids(graph, frames)
 
     # Entity-selection SQL runs against the live GSF database connection (the
     # first configured connector — the source of the catalog tables). ``table_names``

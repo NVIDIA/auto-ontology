@@ -243,7 +243,7 @@ def get_relevant_tables_from_candidates(
 def get_relevant_tables(
     retriever: "Retriever",
     initial_question,
-    k: int | None = None,
+    k: int = 1,
     database_name: str | None = None,
     schema_name: str | None = None,
 ) -> list[dict]:

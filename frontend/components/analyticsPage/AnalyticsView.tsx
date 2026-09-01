@@ -6,27 +6,31 @@
 
 import { useEffect, useState } from 'react';
 
+import { Button } from '@/common/Button';
+import { EmptyState } from '@/common/EmptyState';
+import { Size, ButtonTheme } from '@/enums/button';
+import { ToastVariant } from '@/enums/toast';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { Toast } from '@/common/Toast';
 import { analyticsApi } from '@/api/analytics';
 import { formatDate } from '@/common/date';
+import { usePagination } from '@/hooks/usePagination';
 import type { ConversationAnalytics } from '@/types/analytics';
 import type { TableColumn } from '@/types/table';
-
-const PAGE_SIZE = 10;
 
 const CSV_HEADERS = ['Timestamp', 'User', 'Source', 'Question', 'Reasoning', 'SQL'];
 const escapeCsv = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 	{
-		key: 'questionTimestamp',
+		key: 'question_timestamp',
 		header: 'Timestamp',
 		width: 'w-44',
 		nowrap: true,
 		className: 'text-zinc-600 dark:text-zinc-300',
-		cell: (row) => formatDate(row.questionTimestamp),
+		cell: (row) => formatDate(row.question_timestamp),
 	},
 	{
 		key: 'user',
@@ -74,23 +78,31 @@ const COLUMNS: TableColumn<ConversationAnalytics>[] = [
 
 export const AnalyticsView = () => {
 	const [rows, setRows] = useState<ConversationAnalytics[]>([]);
+	const [total, setTotal] = useState(0);
 	const [loading, setLoading] = useState(true);
+	const [downloading, setDownloading] = useState(false);
 	const [error, setError] = useState<string | null>(null);
-	const [page, setPage] = useState(1);
+	// Kept apart from `error`: the table below only renders while `error` is
+	// null, so a failed export must not take the rows already on screen with it.
+	const [downloadError, setDownloadError] = useState<string | null>(null);
+	const { skip, pageSize, pagination } = usePagination({ totalItems: total });
 
 	useEffect(() => {
 		let cancelled = false;
 
 		(async () => {
 			setLoading(true);
-			const res = await analyticsApi.list();
+			const res = await analyticsApi.list({ skip, limit: pageSize });
 			if (cancelled) return;
 			if (res.error) {
+				// The page already on screen is left alone: dropping the total
+				// would collapse the pager to page one and send the request for
+				// it, so a single failed request would cost two.
 				setError(res.message ?? 'Failed to load analytics');
-				setRows([]);
 			} else {
 				setError(null);
 				setRows(res.data ?? []);
+				setTotal(res.total);
 			}
 			setLoading(false);
 		})();
@@ -98,18 +110,14 @@ export const AnalyticsView = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [skip, pageSize]);
 
-	const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-	const currentPage = Math.min(page, pageCount);
-	const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-	const handleDownload = () => {
+	const downloadRows = (analytics: ConversationAnalytics[]) => {
 		const lines = [
 			CSV_HEADERS.join(','),
-			...rows.map((row) =>
+			...analytics.map((row) =>
 				[
-					formatDate(row.questionTimestamp),
+					formatDate(row.question_timestamp),
 					row.user.name || row.user.email,
 					row.source ?? '',
 					row.question ?? '',
@@ -134,6 +142,18 @@ export const AnalyticsView = () => {
 		URL.revokeObjectURL(url);
 	};
 
+	const handleDownload = async () => {
+		setDownloading(true);
+		setDownloadError(null);
+		const res = await analyticsApi.list();
+		setDownloading(false);
+		if (res.error) {
+			setDownloadError(res.message ?? 'Failed to download analytics');
+			return;
+		}
+		downloadRows(res.data ?? []);
+	};
+
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
@@ -141,54 +161,41 @@ export const AnalyticsView = () => {
 				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
 					Analytics
 				</h1>
-				<button
-					type="button"
-					onClick={handleDownload}
-					disabled={rows.length === 0}
-					className="ml-auto flex cursor-pointer items-center gap-2 rounded-lg bg-[#76b900] px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#5e9400] disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					Download
-				</button>
+				<div className="ml-auto">
+					<Button
+						theme={ButtonTheme.Primary}
+						size={Size.REGULAR}
+						type="button"
+						onClick={handleDownload}
+						disabled={total === 0 || downloading}
+						shadow
+					>
+						{downloading ? 'Preparing download…' : 'Download'}
+					</Button>
+				</div>
 			</header>
 
 			<div className="flex-1 overflow-y-auto px-6 py-6">
 				{loading && (
-					<div className="flex h-full items-center justify-center">
-						<div
-							className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-							role="status"
-							aria-label="Loading analytics"
-						/>
+					<div role="status" aria-label="Loading analytics">
+						<SkeletonTable columns={6} rows={10} />
 					</div>
 				)}
 
-				{!loading && error == null && rows.length === 0 && (
-					<div className="flex h-full min-h-[40dvh] flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-zinc-300/80 bg-white/60 p-12 text-center dark:border-zinc-600 dark:bg-zinc-950/40">
-						<Icon
-							name={IconName.ChartLine}
-							className="h-8 w-8 text-zinc-300 dark:text-zinc-600"
-						/>
-						<p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-							No analytics recorded yet
-						</p>
-						<p className="text-xs text-zinc-500 dark:text-zinc-500">
-							Analytics are captured automatically when you send messages in a
-							conversation.
-						</p>
-					</div>
+				{!loading && error == null && total === 0 && (
+					<EmptyState
+						icon={IconName.ChartLine}
+						title="No analytics recorded yet"
+						description="Analytics are captured automatically when you send messages in a conversation."
+					/>
 				)}
 
 				{!loading && error == null && rows.length > 0 && (
 					<Table
 						columns={COLUMNS}
-						rows={pageRows}
+						rows={rows}
 						rowKey={(row) => row.id}
-						pagination={{
-							page: currentPage,
-							pageSize: PAGE_SIZE,
-							totalItems: rows.length,
-							onPageChange: setPage,
-						}}
+						pagination={pagination}
 					/>
 				)}
 			</div>
@@ -197,8 +204,16 @@ export const AnalyticsView = () => {
 				open={error !== null}
 				message={error ?? ''}
 				title="Couldn't load analytics"
-				variant="error"
+				variant={ToastVariant.Error}
 				onClose={() => setError(null)}
+			/>
+
+			<Toast
+				open={downloadError !== null}
+				message={downloadError ?? ''}
+				title="Couldn't download analytics"
+				variant={ToastVariant.Error}
+				onClose={() => setDownloadError(null)}
 			/>
 		</div>
 	);

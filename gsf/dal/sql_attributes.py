@@ -4,7 +4,7 @@
 
 """Neo4j data access for SqlAttribute / Sql subgraph.
 
-Contains only functions that call ``get_neo4j_conn()`` directly.
+Contains only functions that call ``graph()`` directly.
 
 Orchestration (SQL validation, connector resolution, VDB lifecycle)
 lives in ``gsf/server/sql_attributes/service.py``.
@@ -16,9 +16,13 @@ import logging
 from typing import Any
 
 from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
 
-from gsf.dal.cypher_fragments import column_description_expr
+from gsf.dal.cypher_fragments import (
+    and_condition,
+    column_description_expr,
+    paging_clause,
+)
+from gsf.dal.neo4j_tx import graph
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import (
     LABEL_SQL_ATTRIBUTE,
@@ -33,10 +37,6 @@ from gsf.server.zones.constants import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Source values stored on SqlAttribute nodes.
-SQL_ATTR_SOURCE_MANUAL = "manual"
-SQL_ATTR_SOURCE_SQL = "sql"
 
 
 # ---------------------------------------------------------------------------
@@ -62,7 +62,8 @@ _SQL_ATTRIBUTE_FIELDS = """attr.id            AS id,
                attr.description_suggestion AS description_suggestion,
                attr.expression    AS expression,
                attr.source        AS source,
-               sql.sql_full_query AS sql"""
+               sql.sql_full_query AS sql,
+               coalesce(attr.certified, false) AS certified"""
 
 
 def _sql_attr_zone_filter(
@@ -100,22 +101,15 @@ def _sql_attr_zone_filter(
 # ---------------------------------------------------------------------------
 
 
-def _query_sql_attributes(
-    *,
-    attr_id: str | None = None,
-    term_id: str | None = None,
-    zone_ids: list[str] | None = None,
-    order_by: str | None = None,
-) -> list[dict[str, Any]]:
-    """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
+def _sql_attribute_anchor(
+    attr_id: str | None,
+    term_id: str | None,
+    zone_ids: list[str] | None,
+) -> tuple[str, dict[str, Any]]:
+    """Build the MATCH prefix + params shared by every SqlAttribute read.
 
-    Every SqlAttribute read joins the same three things: the SqlAttribute
-    itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
-    this factors that join, the zone scoping (``_sql_attr_zone_filter``), and
-    the shared RETURN projection into one place. Anchor on *attr_id* or
-    *term_id* (mutually exclusive) to scope to one attribute/term, or leave
-    both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
-    BY`` expression (e.g. ``"attr.name"``); omitted when ``None``.
+    Anchor on *attr_id* or *term_id* (mutually exclusive) to scope to one
+    attribute/term, or pass ``None`` for both to select every SqlAttribute.
     """
     extra_params: dict[str, Any] = {}
     if attr_id is not None:
@@ -141,15 +135,52 @@ def _query_sql_attributes(
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {attr_filter}
         """
+    return anchor, params
 
-    return get_neo4j_conn().query_read(
+
+def _query_sql_attributes(
+    *,
+    attr_id: str | None = None,
+    term_id: str | None = None,
+    zone_ids: list[str] | None = None,
+    order_by: str | None = None,
+    skip: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Run the shared SqlAttribute ↔ Term ↔ Sql traversal behind every read below.
+
+    Every SqlAttribute read joins the same three things: the SqlAttribute
+    itself, its Term (via PROPERTY_OF), and its SQL text (via HAS_SQL) —
+    this factors that join, the zone scoping (``_sql_attr_zone_filter``), and
+    the shared RETURN projection into one place. Anchor on *attr_id* or
+    *term_id* (mutually exclusive) to scope to one attribute/term, or leave
+    both ``None`` for every SqlAttribute. Pass *order_by* as a raw ``ORDER
+    BY`` expression (e.g. ``"attr.name"``); omitted when ``None``.
+
+    *skip* and *limit* read one page of *order_by*; only pass them together
+    with an *order_by* that fully determines the row order, or a page's
+    contents won't be stable between requests.
+
+    One row per attribute, even for an attribute carrying several HAS_SQL
+    edges: the SQL text comes from the lowest-id Sql node. Without that
+    collapse the rows would outnumber the ``count(DISTINCT attr)`` total
+    ``count_sql_attributes_by_term_id`` hands the pager, putting the last
+    attributes out of its reach.
+    """
+    anchor, params = _sql_attribute_anchor(attr_id, term_id, zone_ids)
+    paging = paging_clause(skip, limit, params)
+
+    return graph().query_read(
         f"""
         {anchor}
         MATCH (attr)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
+        WITH term, attr, sql ORDER BY sql.id
+        WITH term, attr, head(collect(sql)) AS sql
         RETURN {_SQL_ATTRIBUTE_FIELDS},
                term.id   AS term_id,
                term.name AS term_name
         {f"ORDER BY {order_by}" if order_by else ""}
+        {paging}
         """,
         params,
     )
@@ -163,6 +194,7 @@ def list_sql_attributes() -> list[dict[str, Any]]:
 def fetch_sql_attribute_counts(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    term_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return per-term SqlAttribute counts, zone-scoped when zone_ids are provided.
 
@@ -172,16 +204,29 @@ def fetch_sql_attribute_counts(
     (see ``resolve_accessible_catalog_ids``) when the caller already
     resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
 
+    *term_ids* narrows the scan to those terms — the paged Terms list passes
+    the ids on the page it is about to render, so the response doesn't carry
+    counts for the rest of the glossary. ``None`` counts every term.
+
+    The ``HAS_SQL`` match mirrors ``_query_sql_attributes``, which drops
+    attributes with no Sql node: a count that included them would show a
+    badge larger than the list behind it (and larger than
+    ``count_sql_attributes_by_term_id``, which applies the same match).
+
     Each entry is ``{term_id: str, count: int}``. Terms with zero
     SqlAttributes are omitted.
     """
     attr_filter, params = _sql_attr_zone_filter(
         zone_ids, data_ids_by_zone=data_ids_by_zone
     )
-    return get_neo4j_conn().query_read(
+    if term_ids is not None:
+        params["term_ids"] = term_ids
+        attr_filter = and_condition(attr_filter, "term.id IN $term_ids")
+    return graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
         {attr_filter}
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
         RETURN term.id AS term_id, count(DISTINCT attr) AS count
         """,
         params,
@@ -206,7 +251,7 @@ def get_full_sql_attribute_by_id(
     disabled zones (with ``enabled: False``) so admins can see and manage
     them.
     """
-    conn = get_neo4j_conn()
+    conn = graph()
     rows = _query_sql_attributes(attr_id=attr_id, zone_ids=zone_ids)
     if not rows:
         return None
@@ -245,21 +290,57 @@ def get_full_sql_attribute_by_id(
 def fetch_sql_attributes_by_term_id(
     term_id: str,
     zone_ids: list[str] | None = None,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
     """Return SqlAttribute nodes linked to a single Term via PROPERTY_OF.
 
     When *zone_ids* is supplied, each attribute is scoped independently via
     ``_sql_attr_zone_filter`` — an attribute of an otherwise-visible term is
     still excluded when its own SQL touches a table outside *zone_ids*.
+
+    Rows are ordered by name (then id, to break ties between same-named
+    attributes), so *skip* and *limit* read one page of that order; pair them
+    with ``count_sql_attributes_by_term_id`` for the total. Omit *limit* for
+    every attribute of the term.
     """
     return _query_sql_attributes(
-        term_id=term_id, zone_ids=zone_ids, order_by="attr.name"
+        term_id=term_id,
+        zone_ids=zone_ids,
+        order_by="attr.name, attr.id",
+        skip=skip,
+        limit=limit,
     )
+
+
+def count_sql_attributes_by_term_id(
+    term_id: str,
+    zone_ids: list[str] | None = None,
+) -> int:
+    """Return how many SqlAttributes one Term has, under the same zone scoping.
+
+    Companion to ``fetch_sql_attributes_by_term_id`` when it is called with a
+    *limit*: Neo4j won't report the unpaged size of a ``LIMIT``-ed result, so
+    the caller's pager needs this second query. The ``HAS_SQL`` match is
+    repeated here because that read drops attributes with no Sql node, and a
+    total that counted them would exceed the rows the pager can reach.
+    """
+    anchor, params = _sql_attribute_anchor(None, term_id, zone_ids)
+    rows = graph().query_read(
+        f"""
+        {anchor}
+        MATCH (attr)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
+        RETURN count(DISTINCT attr) AS total
+        """,
+        params,
+    )
+    return rows[0]["total"] if rows else 0
 
 
 def find_attr_by_name(name: str, exclude_id: str | None) -> dict[str, str] | None:
     """Return ``{id, name}`` of a SqlAttribute using *name*, or None."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{name: $name}})
         WHERE $exclude_id IS NULL OR a.id <> $exclude_id
@@ -283,7 +364,7 @@ def find_attr_by_expression(
     collapsing whitespace before comparison.
     """
     normalized_expression = " ".join(expression.split()).lower()
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(:{LABEL_TERM} {{id: $term_id}})
         WHERE $exclude_id IS NULL OR attr.id <> $exclude_id
@@ -304,7 +385,7 @@ def find_attr_by_expression(
 
 def get_sql_attribute_by_id(attr_id: str) -> str | None:
     """Return the id of the SqlAttribute, or None if it doesn't exist."""
-    rows = get_neo4j_conn().query_read(
+    rows = graph().query_read(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         RETURN a.id AS id
@@ -322,7 +403,7 @@ def get_sql_attribute_by_id(attr_id: str) -> str | None:
 
 def detach_existing_sql_edges(attr_id: str) -> None:
     """Drop every HAS_SQL edge leaving the SqlAttribute."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (a:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
               -[r:{Edges.HAS_SQL}]->(:{Labels.SQL})
@@ -334,7 +415,7 @@ def detach_existing_sql_edges(attr_id: str) -> None:
 
 def link_to_term(attr_id: str, term_id: str) -> None:
     """Set the PROPERTY_OF edge from SqlAttribute to Term, replacing any prior link."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
         OPTIONAL MATCH (attr)-[old:{REL_PROPERTY_OF}]->(existing)
@@ -355,18 +436,20 @@ def update_sql_attribute(
     description: str | None = None,
     expression: str | None = None,
     source: str | None = None,
+    certified: bool | None = None,
 ) -> None:
     """SET properties on an existing SqlAttribute node.
 
     Omitted fields (``None``) are left unchanged.
     """
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         SET attr.name        = coalesce($name, attr.name),
             attr.description = coalesce($description, attr.description),
             attr.expression  = coalesce($expression, attr.expression),
-            attr.source      = coalesce($source, attr.source)
+            attr.source      = coalesce($source, attr.source),
+            attr.certified   = coalesce($certified, attr.certified)
         """,
         {
             "id": attr_id,
@@ -374,6 +457,7 @@ def update_sql_attribute(
             "description": description,
             "expression": expression,
             "source": source,
+            "certified": certified,
         },
     )
 
@@ -383,7 +467,7 @@ def set_sql_attribute_description_suggestion(
     description_suggestion: str,
 ) -> None:
     """SET the cached LLM description suggestion on a SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         SET attr.description_suggestion = $description_suggestion
@@ -394,7 +478,7 @@ def set_sql_attribute_description_suggestion(
 
 def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
     """REMOVE the cached LLM description suggestion from a SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         REMOVE attr.description_suggestion
@@ -405,7 +489,7 @@ def clear_sql_attribute_description_suggestion(attr_id: str) -> None:
 
 def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
     """REMOVE cached LLM suggestions from every SqlAttribute of a Term."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
               (term:{LABEL_TERM} {{id: $term_id}})
@@ -417,7 +501,7 @@ def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
 
 def delete_sql_attribute_node(attr_id: str) -> None:
     """DETACH DELETE the SqlAttribute node."""
-    get_neo4j_conn().query_write(
+    graph().query_write(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $id}})
         DETACH DELETE attr
@@ -451,7 +535,7 @@ def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
            term.name AS term_name
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+        rows = graph().query_read(query, {"ids": attr_ids})
     except Exception:
         logger.warning(
             "fetch_sql_attributes_with_sql: Neo4j query failed",
@@ -496,10 +580,10 @@ def fetch_tables_from_sql_attributes(
     WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
                              description: {column_description_expr("col")}}}) AS cols
     RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           db.name AS database_name, sch.name AS schema_name, cols
+           db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
     """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": attr_ids})
+        rows = graph().query_read(query, {"ids": attr_ids})
     except Exception:
         logger.warning(
             "fetch_tables_from_sql_attributes: Neo4j query failed",
@@ -522,6 +606,9 @@ def fetch_tables_from_sql_attributes(
                 "database_name": row.get("database_name") or "",
                 "schema_name": row.get("schema_name") or "",
                 "label": Labels.TABLE,
+                # Keyless tables are unusable as a prediction entity, so this has
+                # to survive every path that reaches ``relevant_tables``.
+                "pk": row.get("pk") or [],
                 "columns": cols,
             }
         )
@@ -536,10 +623,13 @@ def fetch_tables_from_sql_attributes(
 def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
     """Fetch one SqlAttribute from Neo4j as embedding-ready docs.
 
-    Returns a list of dicts with keys: text, name, label, id.
+    Returns a list of dicts with keys: text, name, label, id, source. The
+    ``source`` (e.g. ``"bridgeTable"``, ``"sql"``) is carried through to the
+    VDB metadata so retrieval hits can distinguish structural bridge-table
+    joins from other SqlAttributes without a second Neo4j round-trip.
     Empty list when the attribute or its Sql node is missing.
     """
-    result = get_neo4j_conn().query_read(
+    result = graph().query_read(
         f"""
         MATCH (attr:{LABEL_SQL_ATTRIBUTE} {{id: $attr_id}})
               -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
@@ -556,7 +646,8 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
                   ', sql: ' + sql.sql_full_query,
             name: attr.name,
             label: labels(attr)[0],
-            id: attr.id
+            id: attr.id,
+            source: coalesce(attr.source, '')
         }}) AS docs
         """,
         {"attr_id": attr_id},

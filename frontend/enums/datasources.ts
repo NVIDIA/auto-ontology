@@ -37,6 +37,13 @@ export enum ComposerSectionKind {
 	SQL_BLOCK = 'sqlBlock',
 }
 
+/** How a DATA_TABLE column renders its cells. */
+export enum ComposerColumnType {
+	TEXT = 'text',
+	TAGS = 'tags',
+	CERTIFICATION = 'certification',
+}
+
 export enum Usage {
 	HIGH = 'high',
 	MEDIUM = 'medium',

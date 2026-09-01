@@ -6,7 +6,10 @@
 
 import { useEffect, useRef } from 'react';
 import type { ChatMessage, GraphStep } from '@/types/chat';
+import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
+import { SkeletonBlock } from '@/common/Skeleton';
+import { EmptyStateVariant } from '@/enums/emptyState';
 import { MessageBubble } from './MessageBubble';
 import { ThinkingMessage } from './ThinkingMessage';
 
@@ -31,30 +34,30 @@ export const MessageList = ({
 
 	if (messageListLoading) {
 		return (
-			<div className="flex flex-1 items-center justify-center">
-				<div
-					className="h-10 w-10 animate-spin rounded-full border-2 border-zinc-200 border-t-[#76b900] dark:border-zinc-700"
-					role="status"
-					aria-label="Loading messages"
-				/>
+			<div
+				className="flex flex-1 flex-col gap-4 p-6"
+				role="status"
+				aria-label="Loading messages"
+			>
+				<SkeletonBlock className="h-16 w-2/3" />
+				<SkeletonBlock className="ml-auto h-12 w-1/2" />
+				<SkeletonBlock className="h-20 w-3/5" />
 			</div>
 		);
 	}
 
 	if (messages.length === 0 && !isLoading) {
 		return (
-			<div className="flex flex-1 flex-col items-center justify-center gap-3 px-4">
-				<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#76b900]/15">
-					<Icon name={IconName.ChatBubble} className="h-7 w-7 text-[#76b900]" />
-				</div>
-				<h2 className="text-lg font-semibold text-zinc-800 dark:text-zinc-200">
-					Ask a question
-				</h2>
-				<p className="max-w-sm text-center text-sm text-zinc-500 dark:text-zinc-400">
-					Type a natural-language question and the system will search your data, construct
-					a SQL query, and return results.
-				</p>
-			</div>
+			<EmptyState
+				variant={EmptyStateVariant.Welcome}
+				illustration={
+					<div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-[#76b900]/15">
+						<Icon name={IconName.ChatBubble} className="h-7 w-7 text-[#76b900]" />
+					</div>
+				}
+				title="Ask a question"
+				description="Type a natural-language question and the system will search your data, construct a SQL query, and return results."
+			/>
 		);
 	}
 

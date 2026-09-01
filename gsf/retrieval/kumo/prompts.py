@@ -84,8 +84,12 @@ PREDICT <target> [RANK TOP k] FOR <entity_table>.<primary_key>=<value> [ASSUMING
   purchase history are next-best-product recommendations: treat them as the link-prediction case above — rank
   the future product/item FK on the timestamped purchase/order-line event for each customer/account entity,
   when the graph has a customer→product purchase edge (see the verified examples below).
-- Write BARE, unquoted identifiers (`payments.days_late`), NEVER quoted or backticked names.
-- `FOR EACH` MUST name the entity's full primary key (`FOR EACH customers.customer_id`), never just the table.
+- Spell every identifier exactly as the graph above spells it. Write a name bare when it can be written bare
+  (`payments.days_late`); backtick-quote one that cannot, such as a name containing a space — the graph shows
+  those already quoted, so copy that form (`people.`Customer ID``). NEVER use double quotes or square brackets.
+- `FOR EACH` MUST name the entity by a primary-key column (`FOR EACH customers.customer_id`), never just the
+  table. Where the graph marks a table as keyed on several columns TOGETHER (`PRIMARY KEY (`Customer ID`,
+  REGION)`), name any ONE of those columns — that identifies the whole key, so do not list them all.
 - `FORECAST` is single-entity: forecast ONE entity by its primary key and scope to it with the entity-selection SQL (a single primary-key row). A forecast framed over many entities ("for each" / "per"), or keyed on a non-primary-key column, is wrong.
 - Inside an aggregation `WHERE`, qualify the column with its table: `COUNT(payments.* WHERE payments.days_late > 0, 0, 30, days)`.
 - Add entity filters ONLY for subset values explicitly named in the user question. Never copy or infer filters
@@ -121,10 +125,12 @@ _REPAIR_BODY = (
 
 _SNOWFLAKE_CASE_NOTE = (
     "## Identifier casing (Snowflake)\n"
-    "This warehouse is Snowflake, where unquoted identifiers are stored UPPERCASE. Write every table AND column\n"
-    "name in the PQL in UPPERCASE, exactly as it appears in the Graph section above (e.g. `GPU_ALLOCATIONS.*`,\n"
-    "not `gpu_allocations.*`; `FOR EACH GPUS.GPU_ID`, not `GPUS.gpu_id`). A lowercased identifier fails against\n"
-    "the graph and the live database."
+    "This warehouse is Snowflake, where an identifier created WITHOUT quotes is stored UPPERCASE. Write every\n"
+    "table AND column name exactly as the Graph section above spells it: uppercase for the bare ones (e.g.\n"
+    "`GPU_ALLOCATIONS.*`, not `gpu_allocations.*`; `FOR EACH GPUS.GPU_ID`, not `GPUS.gpu_id`). A name the graph\n"
+    "shows backtick-quoted was created quoted and keeps its own mixed case: copy it character for character\n"
+    "(`people.`Customer ID``, never `PEOPLE.`CUSTOMER ID``). A mis-cased identifier fails against the graph and\n"
+    "the live database."
 )
 
 _ENTITY_SQL_INSTRUCTION = (
