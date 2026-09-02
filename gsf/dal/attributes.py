@@ -528,9 +528,7 @@ def column_participates_in_semantic_fk(col_id: str) -> bool:
     if not col_id:
         return False
     direct = (
-        select(literal(1))
-        .where(s.column__semantic_fk.c.column_id == col_id)
-        .exists()
+        select(literal(1)).where(s.column__semantic_fk.c.column_id == col_id).exists()
     )
     via_attribute = (
         select(literal(1))
@@ -1020,9 +1018,7 @@ def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:
                 s.catalog_column,
                 s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
-            .join(
-                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
-            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
         )
         .where(
             fk_a.c.column_id == col_a_id,
