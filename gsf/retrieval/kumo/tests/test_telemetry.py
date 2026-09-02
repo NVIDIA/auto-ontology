@@ -349,3 +349,24 @@ def test_the_recorded_error_goes_through_redaction() -> None:
 
     assert "redact_error(" in inspect.getsource(predictor._run_prediction)
     assert "redact_error(" in inspect.getsource(predictor.run_prediction)
+
+
+def test_an_equality_against_an_id_is_redacted() -> None:
+    """An equality against a bare number names one row."""
+    redacted = redact_literals(
+        "PREDICT COUNT(orders.*, 0, 30) FOR EACH customers.cid "
+        "WHERE customers.customer_id = 883421"
+    )
+
+    assert "883421" not in redacted
+    assert "customers.customer_id = ?" in redacted
+
+
+def test_thresholds_and_windows_still_survive() -> None:
+    """A threshold says how big and a window how long; neither names anybody."""
+    kept = redact_literals(
+        "PREDICT SUM(orders.amt, 0, 90) FOR EACH customers.cid WHERE orders.amt > 5000"
+    )
+
+    assert kept.endswith("orders.amt > 5000")
+    assert "0, 90" in kept

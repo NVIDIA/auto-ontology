@@ -36,6 +36,10 @@ logger = logging.getLogger(__name__)
 
 _STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 _IN_LIST = re.compile(r"\bIN\s*\(([^()]*)\)", re.IGNORECASE)
+# An equality against a bare number. A threshold is written with an inequality
+# and says how big, which is query shape; an equality against a number names one
+# row, which is an identity.
+_EQUALS_NUMBER = re.compile(r"(=\s*)-?\d+(?:\.\d+)?\b")
 
 # Bumped when a field in RunRecord is renamed or removed, so a reader can tell
 # which shape it is looking at rather than discovering the change by breaking.
@@ -91,9 +95,12 @@ def redact_literals(pql: str) -> str:
     """The query without the values it names, which are the warehouse's data.
 
     An entity list is a list of real identities and a quoted filter is whatever
-    the question named, both of which the log is not the place for. Numbers
-    outside an entity list are left alone: they are the aggregation windows and
-    thresholds that give the query its shape, and they name nobody.
+    the question named, both of which the log is not the place for.
+
+    An equality against a bare number goes too, since that names one row.
+    Inequalities and aggregation arguments stay: a threshold says how big and a
+    window says how long, which is the shape of the question rather than an
+    answer to it, and neither names anybody.
     """
     if not pql:
         return ""
@@ -104,7 +111,8 @@ def redact_literals(pql: str) -> str:
         values = len([v for v in inner.split(",") if v.strip()]) if inner else 0
         return f"IN ({values} values)"
 
-    return _IN_LIST.sub(_count, redacted)
+    redacted = _IN_LIST.sub(_count, redacted)
+    return _EQUALS_NUMBER.sub(r"\g<1>?", redacted)
 
 
 def redact_error(message: str) -> str:

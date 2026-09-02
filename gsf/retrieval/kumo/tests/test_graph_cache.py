@@ -627,11 +627,16 @@ def test_a_budget_is_the_deployments_not_the_callers() -> None:
 
     from gsf.retrieval.kumo import predictor
 
-    assert "budget" not in inspect.signature(predictor._build_context).parameters
+    assert (
+        "budget"
+        not in inspect.signature(predictor._build_context_within_budget).parameters
+    )
     assert (
         "budget" not in inspect.signature(predictor.build_prediction_context).parameters
     )
-    assert "Spend(Budget.from_env())" in inspect.getsource(predictor._build_context)
+    assert "Spend(Budget.from_env())" in inspect.getsource(
+        predictor._build_context_within_budget
+    )
 
 
 def test_the_order_the_catalog_lists_columns_in_is_part_of_the_schema() -> None:

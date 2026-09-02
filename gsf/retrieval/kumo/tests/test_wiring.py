@@ -470,3 +470,32 @@ def test_a_refusal_record_carries_no_unredacted_values(caplog: Any) -> None:
     import inspect
 
     assert "redact_error(" in inspect.getsource(predictor._refused)
+
+
+def test_the_deadline_is_checked_after_the_reads_finish() -> None:
+    """A build that overran during graph construction used to run on unchecked."""
+    import inspect
+
+    source = inspect.getsource(predictor._build_context_within_budget)
+
+    for phase in ("declaring keys", "building the graph", "creating the model"):
+        assert f'check_deadline("{phase}")' in source, phase
+
+
+def test_a_build_that_overruns_after_reading_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KUMO_MAX_BUILD_SECONDS", "1")
+    predictor._GRAPH_CACHE.clear()
+
+    class Slow(_Warehouse):
+        def execute(self, sql: str) -> pd.DataFrame:
+            import time
+
+            time.sleep(0.7)
+            return super().execute(sql)
+
+    answer = _build(Slow(), [])
+
+    assert isinstance(answer, dict)
+    assert "passed" in answer["response"] or "narrower" in answer["response"]

@@ -32,7 +32,6 @@ import pandas as pd
 
 from gsf.retrieval.kumo.budget import (
     Budget,
-    BudgetExceeded,
     RefusedForCapacity,
     Spend,
 )
@@ -759,6 +758,27 @@ def _build_context(
     join_paths: list[dict[str, Any]] | None,
     examples: list[dict[str, str]] | None,
 ) -> "PredictionContext | dict[str, Any]":
+    """Read the tables and build the graph and model over them.
+
+    Every way this can be refused for what it would cost is answered here, so
+    a refusal raised by a later phase reaches the asker as an answer rather
+    than escaping as an exception.
+    """
+    try:
+        return _build_context_within_budget(
+            connectors, relevant_tables, join_paths, examples
+        )
+    except RefusedForCapacity as refusal:
+        logger.info("kumo: refused, %s", refusal)
+        return _refused(str(refusal))
+
+
+def _build_context_within_budget(
+    connectors: list[Any],
+    relevant_tables: list[dict[str, Any]] | None,
+    join_paths: list[dict[str, Any]] | None,
+    examples: list[dict[str, str]] | None,
+) -> "PredictionContext | dict[str, Any]":
     """Read the tables and build the graph and model over them."""
     import kumo_relational_client
     from kumo_relational_client import relational as rfm
@@ -773,16 +793,9 @@ def _build_context(
     )
     _load_start = time.perf_counter()
     spend = Spend(Budget.from_env())
-    try:
-        frames, name_map, catalog_keys = _load_relevant_frames(
-            connectors, relevant_tables or [], spend
-        )
-    except BudgetExceeded as exceeded:
-        logger.info("kumo: refused, over budget: %s", exceeded)
-        return _refused(str(exceeded))
-    except TableUnavailable as unavailable:
-        logger.info("kumo: refused, a table could not be read: %s", unavailable)
-        return _refused(str(unavailable))
+    frames, name_map, catalog_keys = _load_relevant_frames(
+        connectors, relevant_tables or [], spend
+    )
     if not frames:
         return _refused(
             "No relevant tables were available to build a prediction graph."
@@ -810,6 +823,7 @@ def _build_context(
     )
     # Before any linking: an edge is oriented towards a primary key, so a table whose
     # key inference missed can take part in no relationship at all.
+    spend.check_deadline("declaring keys")
     _declare_primary_keys(graph, catalog_keys)
     covered = _apply_join_paths(graph, join_paths)
     if covered:
@@ -825,7 +839,9 @@ def _build_context(
                 "kumo: infer_links failed; proceeding without inferred links"
             )
 
+    spend.check_deadline("building the graph")
     graph_ddl, edges, col_stypes, time_columns = build_graph_context(graph)
+    spend.check_deadline("creating the model")
     kumo_model = KumoModel(client.relational(graph), graph)
     entity_ids = _entity_ids(graph, frames)
 

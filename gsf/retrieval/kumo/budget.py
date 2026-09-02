@@ -101,7 +101,16 @@ class Spend:
         return time.monotonic() - self._started
 
     def check_deadline(self, doing: str) -> None:
-        """Stop before starting more work than the request has time for."""
+        """Stop before starting more work than the request has time for.
+
+        Checked between phases rather than enforced within one. A single
+        warehouse query that never returns runs as long as the connector lets
+        it, because cancelling it needs a per-statement timeout the connectors
+        do not uniformly offer. What this bounds is everything after that: the
+        remaining reads, the graph build, the link inference and the model.
+        A request waiting on someone else's build is bounded separately, by the
+        cache's own wait.
+        """
         if self.elapsed > self.budget.max_seconds:
             raise BudgetExceeded(
                 f"Preparing this prediction passed {self.budget.max_seconds:.0f}s "
