@@ -392,8 +392,8 @@ class ExplorationEdge(ApiModel):
 
     ``queries`` is empty for an edge that exists only because of a foreign
     key; ``foreign_keys`` is empty for a SQL-only edge. ``relationship_types``
-    names the underlying Neo4j relationship type(s) behind the edge (``SQL``
-    and/or ``FOREIGN_KEY``), for labeling the connection in the graph.
+    names the relationship kind(s) behind the edge (``SQL`` and/or
+    ``FOREIGN_KEY``), for labeling the connection in the graph.
     """
 
     source: str
@@ -436,7 +436,7 @@ class DataExplorationGraph(ApiModel):
 class GraphLink(ApiModel):
     """An undirected term↔term link (two terms sharing at least one table).
 
-    ``relationship_types`` names the underlying Neo4j relationship type(s)
+    ``relationship_types`` names the relationship kind(s)
     (``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either
     term to a table they share, for labeling the connection in the graph.
     """
@@ -480,7 +480,7 @@ class TableSqlQuery(ApiModel):
 
 
 class TableExplorationTerm(TermSummary):
-    """A Term linked to a table, with the Neo4j relationship type(s) reaching it.
+    """A Term linked to a table, with the relationship kind(s) reaching it.
 
     ``relationship_types`` names how this term connects to the table —
     ``REPRESENTS`` directly, and/or ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one
@@ -501,7 +501,7 @@ class TableExplorationDetails(ApiModel):
 
 
 class TermExplorationTable(ApiModel):
-    """A Table linked to a term, with the Neo4j relationship type(s) reaching it.
+    """A Table linked to a term, with the relationship kind(s) reaching it.
 
     The reverse of ``TableExplorationTerm``: ``relationship_types`` names how
     this table connects to the term — ``REPRESENTS`` directly, and/or
@@ -529,7 +529,7 @@ class TermExplorationDetails(ApiModel):
 class ColumnExplorationAttribute(ApiModel):
     """The ColumnAttribute HAS_ATTRIBUTE/SEMANTIC_FK-linked to a Column, if any.
 
-    `relationship_type` names the underlying Neo4j relationship type
+    `relationship_type` names the relationship kind
     (``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) actually connecting the Column
     to this ColumnAttribute — same rationale as `relationship_types` on
     `TermExplorationTable`/`ExplorationLink` — so a client can label the
@@ -675,10 +675,9 @@ class SqlExplorationColumn(ApiModel):
 class SqlExplorationTable(ApiModel):
     """One Table the Sql node's own `SQL` edge connects to directly.
 
-    Mirrors what Neo4j Browser itself shows expanding a `Sql` node (e.g.
-    `query_...-[:SQL]->orders`) — enough for a client to graft it on as a
-    fully expandable Table node, same shape as `SqlExplorationColumn`
-    minus the column-only fields.
+    One hop out from the statement along its own `SQL` edge — enough for a
+    client to graft it on as a fully expandable Table node, same shape as
+    `SqlExplorationColumn` minus the column-only fields.
     """
 
     id: str
@@ -712,8 +711,7 @@ class SqlExplorationDetails(ApiModel):
     `custom_analyses` is empty for the common case of a Sql node with no
     CustomAnalysis sharing it; `columns` is every visible Column the Sql
     node's own `SQL` edges reach directly; `tables` is every visible Table
-    the Sql node's own `SQL` edges reach directly (the same edge Neo4j
-    Browser itself shows expanding a `Sql` node); `sql_attributes` is every
+    the Sql node's own `SQL` edges reach directly; `sql_attributes` is every
     visible SqlAttribute this same Sql node backs (the reverse of
     `SqlAttributeExplorationDetails.sql`) — see
     `fetch_sql_exploration_details`.
@@ -752,7 +750,7 @@ class ExplorationLinkPathNode(ApiModel):
 
 
 class ExplorationLinkPathHop(ApiModel):
-    """One real Neo4j relationship traversed along a term↔term path.
+    """One relationship traversed along a term↔term path.
 
     ``relationship`` is the underlying type (``REPRESENTS``, ``CONTAINS``,
     ``HAS_ATTRIBUTE``, ``SEMANTIC_FK`` or ``PROPERTY_OF``).

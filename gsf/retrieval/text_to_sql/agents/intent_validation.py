@@ -162,7 +162,7 @@ class IntentValidationAgent(BaseAgent):
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
 
-        # Prefer Neo4j-enriched snippets (name/description/sql) from preparation.
+        # Prefer the enriched snippets (name/description/sql) from preparation.
         # Fall back to the VDB custom_analyses list when enrichment is absent.
         ca_str_list = path_state.get("custom_analyses_str") or []
         if ca_str_list:

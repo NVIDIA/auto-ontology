@@ -573,8 +573,8 @@ export const ExplorationView = () => {
 				});
 
 				// The reverse of `expandSqlNode`'s own `Sql-[SQL]->Table` graft —
-				// every Sql query that referenced this table directly, the same
-				// real edge Neo4j Browser itself shows expanding a Sql node.
+				// every Sql query that referenced this table directly — the same
+				// edge, walked from the table's end.
 				// Reuses the `sql:${id}` node id `expandColumnNode`/
 				// `expandSqlAttributeNode` give a Sql node, so one already on
 				// the graph is shared instead of duplicated.
@@ -867,7 +867,7 @@ export const ExplorationView = () => {
 	);
 
 	// Grafts a double-clicked ColumnAttribute's own owning Term *and* every
-	// Column that shares it onto the live graph — the real Neo4j edges are
+	// Column that shares it onto the live graph — the edges are
 	// `(Column)-[:HAS_ATTRIBUTE|SEMANTIC_FK]->(ColumnAttribute)-[:PROPERTY_OF]->
 	// (Term)`, both drawn from the attribute regardless of direction, same
 	// convention as every other expansion edge. Unlike the Term half, the
@@ -875,8 +875,7 @@ export const ExplorationView = () => {
 	// already carrying (`columnId`/etc. — set by `expandTermNode`/
 	// `expandColumnNode`, whichever grafted this attribute on in the first
 	// place): a shared attribute (e.g. a common `user_id`-shaped one) is
-	// typically linked from many Columns across many Tables at once, same
-	// as Neo4j Browser would show expanding the node directly — so both
+	// typically linked from many Columns across many Tables at once — so both
 	// halves need the one request below. Reuses the same `column:${id}`/
 	// real term id node ids a Table's/Term's own expansion would use for
 	// the same Column/Term, so either is shared instead of duplicated.
@@ -1294,8 +1293,7 @@ export const ExplorationView = () => {
 	// `Sql-[SQL]->Column` edge the ingestion pipeline draws for every
 	// column a parsed query references, and the Table half is the
 	// identical `Sql-[SQL]->Table` edge `fetch_data_exploration_edges`
-	// already reads elsewhere — the very edge Neo4j Browser itself shows
-	// expanding a `Sql` node (e.g. `query_...-[:SQL]->orders`) — unlike the
+	// already reads elsewhere — unlike the
 	// CustomAnalysis half, most Sql nodes *do* have at least one of these,
 	// so this is what actually makes a Sql node's expansion show something
 	// in the common case. The SqlAttribute half is the reverse of the same
@@ -1388,8 +1386,7 @@ export const ExplorationView = () => {
 					// Reuses the real table id as the node id — like a Term's own
 					// Table neighbours in `expandTermNode` — so a table already on
 					// the base graph (almost always the case) is shared instead of
-					// duplicated, mirroring the real `Sql-[SQL]->Table` edge Neo4j
-					// Browser itself shows expanding a Sql node.
+					// duplicated, mirroring the real `Sql-[SQL]->Table` edge.
 					expansionNodes.push({ id: table.id, kind: 'table', label: table.name ?? '' });
 					expansionEdges.push({ source: sqlEntity.id, target: table.id });
 					newEntities.set(table.id, {
@@ -1516,7 +1513,7 @@ export const ExplorationView = () => {
 	// what opens the node's side panel. Double-clicking a node toggles its
 	// own expansion on top of that (the click starting a double click
 	// already selects it via `onClickNode` before this fires), exactly one
-	// real Neo4j hop further out each time (collapsing back down the next
+	// hop further out each time (collapsing back down the next
 	// double-click) — never reaching past a node's own direct neighbours
 	// into their neighbours' own neighbours in a single double-click:
 	// a Data-layer Table expands to its Schema/Columns/Terms/referencing Sql
@@ -1531,7 +1528,7 @@ export const ExplorationView = () => {
 	// query node; and a
 	// Sql node (from a SqlAttribute's expansion) expands to the Columns and
 	// Tables its query references plus any CustomAnalysis nodes sharing
-	// that same query — the same chain the Neo4j graph itself models
+	// that same query — the same chain the graph itself models
 	// (Table-CONTAINS->Column-HAS_ATTRIBUTE->ColumnAttribute-PROPERTY_OF->Term,
 	// SqlAttribute-PROPERTY_OF->Term, SqlAttribute-HAS_SQL->Sql,
 	// CustomAnalysis-HAS_SQL->Sql, Sql-SQL->Table). A Column's own ColumnAttribute (a

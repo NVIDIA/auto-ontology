@@ -461,7 +461,7 @@
       },
       "ColumnExplorationAttribute": {
         "additionalProperties": true,
-        "description": "The ColumnAttribute HAS_ATTRIBUTE/SEMANTIC_FK-linked to a Column, if any.\n\n`relationship_type` names the underlying Neo4j relationship type\n(``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) actually connecting the Column\nto this ColumnAttribute \u2014 same rationale as `relationship_types` on\n`TermExplorationTable`/`ExplorationLink` \u2014 so a client can label the\nedge the same way it would read in the graph itself, distinguishing a\nplain attribute from an FK-shaped one (like `user_id`).",
+        "description": "The ColumnAttribute HAS_ATTRIBUTE/SEMANTIC_FK-linked to a Column, if any.\n\n`relationship_type` names the relationship kind\n(``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) actually connecting the Column\nto this ColumnAttribute \u2014 same rationale as `relationship_types` on\n`TermExplorationTable`/`ExplorationLink` \u2014 so a client can label the\nedge the same way it would read in the graph itself, distinguishing a\nplain attribute from an FK-shaped one (like `user_id`).",
         "properties": {
           "description": {
             "anyOf": [
@@ -1601,7 +1601,7 @@
       },
       "ExplorationEdge": {
         "additionalProperties": true,
-        "description": "Two tables connected by a shared SQL query and/or a foreign key.\n\n``queries`` is empty for an edge that exists only because of a foreign\nkey; ``foreign_keys`` is empty for a SQL-only edge. ``relationship_types``\nnames the underlying Neo4j relationship type(s) behind the edge (``SQL``\nand/or ``FOREIGN_KEY``), for labeling the connection in the graph.",
+        "description": "Two tables connected by a shared SQL query and/or a foreign key.\n\n``queries`` is empty for an edge that exists only because of a foreign\nkey; ``foreign_keys`` is empty for a SQL-only edge. ``relationship_types``\nnames the relationship kind(s) behind the edge (``SQL`` and/or\n``FOREIGN_KEY``), for labeling the connection in the graph.",
         "properties": {
           "foreign_keys": {
             "items": {
@@ -1662,7 +1662,7 @@
       },
       "ExplorationLinkPathHop": {
         "additionalProperties": true,
-        "description": "One real Neo4j relationship traversed along a term\u2194term path.\n\n``relationship`` is the underlying type (``REPRESENTS``, ``CONTAINS``,\n``HAS_ATTRIBUTE``, ``SEMANTIC_FK`` or ``PROPERTY_OF``).",
+        "description": "One relationship traversed along a term\u2194term path.\n\n``relationship`` is the underlying type (``REPRESENTS``, ``CONTAINS``,\n``HAS_ATTRIBUTE``, ``SEMANTIC_FK`` or ``PROPERTY_OF``).",
         "properties": {
           "relationship": {
             "title": "Relationship",
@@ -1960,7 +1960,7 @@
       },
       "GraphLink": {
         "additionalProperties": true,
-        "description": "An undirected term\u2194term link (two terms sharing at least one table).\n\n``relationship_types`` names the underlying Neo4j relationship type(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
+        "description": "An undirected term\u2194term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
         "properties": {
           "relationship_types": {
             "items": {
@@ -3237,7 +3237,7 @@
       },
       "SqlExplorationDetails": {
         "additionalProperties": true,
-        "description": "The CustomAnalysis, Column, Table and SqlAttribute nodes hanging off a Sql node.\n\n`custom_analyses` is empty for the common case of a Sql node with no\nCustomAnalysis sharing it; `columns` is every visible Column the Sql\nnode's own `SQL` edges reach directly; `tables` is every visible Table\nthe Sql node's own `SQL` edges reach directly (the same edge Neo4j\nBrowser itself shows expanding a `Sql` node); `sql_attributes` is every\nvisible SqlAttribute this same Sql node backs (the reverse of\n`SqlAttributeExplorationDetails.sql`) \u2014 see\n`fetch_sql_exploration_details`.",
+        "description": "The CustomAnalysis, Column, Table and SqlAttribute nodes hanging off a Sql node.\n\n`custom_analyses` is empty for the common case of a Sql node with no\nCustomAnalysis sharing it; `columns` is every visible Column the Sql\nnode's own `SQL` edges reach directly; `tables` is every visible Table\nthe Sql node's own `SQL` edges reach directly; `sql_attributes` is every\nvisible SqlAttribute this same Sql node backs (the reverse of\n`SqlAttributeExplorationDetails.sql`) \u2014 see\n`fetch_sql_exploration_details`.",
         "properties": {
           "columns": {
             "items": {
@@ -3332,7 +3332,7 @@
       },
       "SqlExplorationTable": {
         "additionalProperties": true,
-        "description": "One Table the Sql node's own `SQL` edge connects to directly.\n\nMirrors what Neo4j Browser itself shows expanding a `Sql` node (e.g.\n`query_...-[:SQL]->orders`) \u2014 enough for a client to graft it on as a\nfully expandable Table node, same shape as `SqlExplorationColumn`\nminus the column-only fields.",
+        "description": "One Table the Sql node's own `SQL` edge connects to directly.\n\nOne hop out from the statement along its own `SQL` edge \u2014 enough for a\nclient to graft it on as a fully expandable Table node, same shape as\n`SqlExplorationColumn` minus the column-only fields.",
         "properties": {
           "database_id": {
             "anyOf": [
@@ -3604,7 +3604,7 @@
       },
       "TableExplorationTerm": {
         "additionalProperties": true,
-        "description": "A Term linked to a table, with the Neo4j relationship type(s) reaching it.\n\n``relationship_types`` names how this term connects to the table \u2014\n``REPRESENTS`` directly, and/or ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one\nof its columns \u2014 the same way ``ExplorationEdge``/``GraphLink`` name\ntheirs, so a client can label the connection the same way it would read\nin the graph itself.",
+        "description": "A Term linked to a table, with the relationship kind(s) reaching it.\n\n``relationship_types`` names how this term connects to the table \u2014\n``REPRESENTS`` directly, and/or ``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one\nof its columns \u2014 the same way ``ExplorationEdge``/``GraphLink`` name\ntheirs, so a client can label the connection the same way it would read\nin the graph itself.",
         "properties": {
           "description": {
             "anyOf": [
@@ -4055,7 +4055,7 @@
       },
       "TermExplorationTable": {
         "additionalProperties": true,
-        "description": "A Table linked to a term, with the Neo4j relationship type(s) reaching it.\n\nThe reverse of ``TableExplorationTerm``: ``relationship_types`` names how\nthis table connects to the term \u2014 ``REPRESENTS`` directly, and/or\n``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one of its columns \u2014 so a client can\nlabel an expansion edge from either end the same way.",
+        "description": "A Table linked to a term, with the relationship kind(s) reaching it.\n\nThe reverse of ``TableExplorationTerm``: ``relationship_types`` names how\nthis table connects to the term \u2014 ``REPRESENTS`` directly, and/or\n``HAS_ATTRIBUTE``/``SEMANTIC_FK`` via one of its columns \u2014 so a client can\nlabel an expansion edge from either end the same way.",
         "properties": {
           "database_id": {
             "anyOf": [

@@ -32,7 +32,7 @@ export type HoveredNode = {
 // A node's border reuses its own icon accent color (rather than a single
 // neutral outline for every kind) so the ring reads as "this node's own
 // color, just more saturated" instead of a generic UI chrome line — the same
-// pastel-fill/vivid-accent pairing Neo4j Browser uses for its node styling.
+// pastel-fill/vivid-accent pairing this file uses throughout.
 // `NODE_TYPE_ACCENT_COLOR` lives in `nodeTypeColors.ts` (rather than here)
 // so `ExplorationView.tsx`'s own "Viewing: ..." legend can color its
 // per-kind swatches with these exact same values too, without a
@@ -69,8 +69,8 @@ const NodeCircleBorderProgram = createNodeCompoundProgram([NodeCircleProgram, No
 // drawn on — purely so a hovered node visually sits in front of any
 // overlapping siblings. For Sigma's own default label placement (beside the
 // node) that second draw doesn't matter, but `drawNodeLabel` below instead
-// draws each caption centered *inside* its own node's circle (à la Neo4j
-// Browser) — so redrawing that same opaque disc a second time, on a layer
+// draws each caption centered *inside* its own node's circle — so
+// redrawing that same opaque disc a second time, on a layer
 // above the one the caption was just drawn on, blots it right back out, in
 // the exact place users look right when they mouse over a node. Bringing
 // hovered/active nodes to the front is already handled by the `zIndex`
@@ -103,8 +103,8 @@ class NoopNodeProgram {
 // `dark:` variants — node/label colors have to be swapped by hand based on
 // the OS-level color scheme instead. Light values are pale tints of each
 // type's own `NODE_TYPE_ACCENT_COLOR` hue (the same pastel-fill/vivid-accent
-// node styling Neo4j Browser uses, just with this file's own more evenly
-// spread hues — see that module's own doc comment); dark values are muted
+// node styling used throughout, with evenly spread hues — see that module's
+// own doc comment); dark values are muted
 // tints of the same hues (rather than that same near-white pastel) so nodes
 // read as colored shapes instead of glowing white blobs against a black
 // canvas.
@@ -709,8 +709,8 @@ export const GraphCanvas = ({
 		};
 
 		// The persistent (non-hover) caption: always drawn, centered *inside*
-		// the node's own circle (à la Neo4j Browser) rather than Sigma's
-		// default placement to the right of it. A stroked halo behind the
+		// the node's own circle rather than Sigma's default placement to
+		// the right of it. A stroked halo behind the
 		// fill keeps the caption legible over the node's own color and icon
 		// artwork underneath, the same trick used for text labels on maps.
 		const drawNodeLabel: NodeLabelDrawingFunction<GraphNodeAttributes, GraphEdgeAttributes> = (
@@ -730,8 +730,7 @@ export const GraphCanvas = ({
 			context.textBaseline = 'middle';
 
 			// Truncated with an ellipsis instead of letting long names spill
-			// past the node's own circle, mirroring how Neo4j clips captions
-			// that don't fit inside their node.
+			// past the node's own circle.
 			const maxWidth = data.size * 1.6;
 			let { label } = data;
 			if (context.measureText(label).width > maxWidth) {
@@ -1122,7 +1121,7 @@ export const GraphCanvas = ({
 			event.preventSigmaDefault();
 			draggedNode = node;
 			// Pin *every* node at its current position and stop the simulation
-			// for the whole drag. The previous Neo4j-style reheat let link /
+			// for the whole drag. The previous reheat-on-drag let link /
 			// charge forces pull neighbours (and, transitively, the rest of
 			// the graph) along with the dragged node — first-degree children
 			// of a Term especially, since they're on a short, strong edge.

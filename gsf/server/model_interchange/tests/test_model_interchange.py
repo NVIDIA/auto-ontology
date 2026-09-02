@@ -4,23 +4,12 @@
 
 """Model-interchange service tests.
 
-Thirteen tests from the Neo4j era were dropped in the Postgres migration.
-They patched module internals that no longer exist (``graph``,
-``_ensure_import_indexes``, ``_custom_analysis_ids_with_changed_payload``,
-``_resolve_entity``) or asserted Neo4j-shaped storage — ``join_columns`` was a
-JSON *string* because Neo4j properties cannot hold a list of maps, and is now a
-``jsonb`` column holding the structure directly.
+Unit tests for GSF model YAML export/import, run against mocks.
 
-Their behaviour is covered against a live database by the DAL suite in
-``gsf/dal/tests/test_model_interchange.py``, and by the 122 recorded golden
-reads. Specifically:
-``test_export_queries_use_portable_ids`` and
-``test_changed_entity_ids_returns_only_modified_payloads`` asserted the text of
-Cypher query constants that no longer exist, and the two ``_resolve_entity``
-tests covered a helper the batch resolver replaced. The behaviour they guarded
-— portable ``imported_id`` matching — is covered by the DAL suite in
-``gsf/dal/tests/test_model_interchange.py`` against a live database.
-Unit tests for GSF model YAML export/import."""
+The storage-level behaviour these do not reach — portable ``imported_id``
+matching, and the export/import round-trip — is covered against a live database
+by ``gsf/dal/tests/test_model_interchange.py`` and by the recorded golden
+reads."""
 
 from __future__ import annotations
 
@@ -57,7 +46,7 @@ from gsf.server.model_interchange.schemas import (
 
 @contextmanager
 def _null_transaction():
-    """Stand in for ``write_transaction`` so unit tests need no live Neo4j."""
+    """Stand in for ``write_transaction`` so unit tests need no live database."""
     yield
 
 
