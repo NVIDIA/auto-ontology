@@ -21,7 +21,6 @@ from gsf.dal.datasources import (
 )
 from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
-from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder

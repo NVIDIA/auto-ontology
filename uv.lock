@@ -3,10 +3,12 @@ revision = 3
 requires-python = ">=3.12, <3.14"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
-    "python_full_version >= '3.13' and sys_platform == 'linux'",
+    "python_full_version >= '3.13' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version >= '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version >= '3.13' and sys_platform != 'linux' and sys_platform != 'win32'",
     "python_full_version < '3.13' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and platform_machine != 'aarch64' and sys_platform == 'linux'",
+    "python_full_version < '3.13' and platform_machine == 'aarch64' and sys_platform == 'linux'",
     "python_full_version < '3.13' and sys_platform != 'linux' and sys_platform != 'win32'",
 ]
 
@@ -998,7 +1000,8 @@ dependencies = [
     { name = "mysql-connector-python" },
     { name = "nemo-retriever", extra = ["tabular"] },
     { name = "neo4j" },
-    { name = "nvidia-sdfm", extra = ["kumorfm"] },
+    { name = "nvidia-sdfm" },
+    { name = "nvidia-sdfm", extra = ["kumorfm"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'" },
     { name = "pandas" },
     { name = "psycopg", extra = ["binary"] },
     { name = "psycopg-pool" },
@@ -1035,7 +1038,8 @@ requires-dist = [
     { name = "mysql-connector-python", specifier = ">=9.7.0" },
     { name = "nemo-retriever", extras = ["tabular"], git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever" },
     { name = "neo4j", specifier = ">=6.1.0" },
-    { name = "nvidia-sdfm", extras = ["kumorfm"], specifier = ">=0.1.0" },
+    { name = "nvidia-sdfm", marker = "platform_machine == 'aarch64' and sys_platform == 'linux'", specifier = ">=0.1.0" },
+    { name = "nvidia-sdfm", extras = ["kumorfm"], marker = "platform_machine != 'aarch64' or sys_platform != 'linux'", specifier = ">=0.1.0" },
     { name = "pandas", specifier = ">=2.0,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
     { name = "psycopg-pool", specifier = ">=3.3.1" },
@@ -1930,7 +1934,7 @@ wheels = [
 
 [[package]]
 name = "nemo-retriever"
-version = "2026.6.23.dev20260623113708"
+version = "2026.7.26.dev20260726115509"
 source = { git = "https://github.com/NVIDIA/NeMo-Retriever.git?subdirectory=nemo_retriever#ee3230910b7d25a267386a11a8a4fec2882ac324" }
 dependencies = [
     { name = "backoff" },
@@ -3364,8 +3368,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform == 'linux'" },
-    { name = "jeepney", marker = "sys_platform == 'linux'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [
