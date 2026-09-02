@@ -114,9 +114,7 @@ class CombinedPrecheckAgent(BaseAgent):
             # reconstruction sees several unrelated-looking blocks of text
             # back to back and, in practice, tends to fix only the first one
             # it recognizes rather than treating them as a joint requirement.
-            header = (
-                f"{len(sections)} separate issues were found in this SQL. Fix all."
-            )
+            header = f"{len(sections)} separate issues were found in this SQL. Fix all."
             path_state["error"] = header + "\n\n" + "\n\n".join(sections)
         else:
             path_state["error"] = "\n\n".join(sections)

@@ -112,7 +112,7 @@ def _parse_gaps(
     seen: set[str] = set()
     for line in response.splitlines():
         if line.upper().startswith("INCOMPLETE:"):
-            body = line[len("INCOMPLETE:"):].strip()
+            body = line[len("INCOMPLETE:") :].strip()
             if "|" in body:
                 term, missing = body.split("|", 1)
                 term = term.strip()
@@ -155,7 +155,8 @@ def detect_incomplete_formulas(
     if last_turn is None:
         vdb_section = (
             "\n".join(f"- {e}" for e in vdb_only_entities)
-            if vdb_only_entities else "None"
+            if vdb_only_entities
+            else "None"
         )
         prompt = _COMPLETENESS_PROMPT_KB_ONLY.format(
             working_question=working_question,
@@ -164,7 +165,11 @@ def detect_incomplete_formulas(
             resolved_schema_terms=resolved_schema_terms or "None",
         )
     else:
-        prior_text = "\n".join(f"- {t}: {m}" for t, m in current_gaps) if current_gaps else "None"
+        prior_text = (
+            "\n".join(f"- {t}: {m}" for t, m in current_gaps)
+            if current_gaps
+            else "None"
+        )
         prompt = _COMPLETENESS_PROMPT.format(
             working_question=working_question,
             prior_gaps=prior_text,
@@ -179,5 +184,3 @@ def detect_incomplete_formulas(
     gaps = _parse_gaps(response, current_gaps)
     logger.info("Completeness — gaps found: %s", gaps)
     return gaps
-
-

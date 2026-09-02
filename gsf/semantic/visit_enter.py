@@ -475,7 +475,8 @@ def calculate_columns_profiling(
                             short = "[WARNING mixed date formats observed]"
                             date_ann = (
                                 full
-                                if len(f"{base} {full}") <= _MAX_EMBEDDED_JSON_SAMPLE_LEN
+                                if len(f"{base} {full}")
+                                <= _MAX_EMBEDDED_JSON_SAMPLE_LEN
                                 else short
                             )
                         elif shapes:

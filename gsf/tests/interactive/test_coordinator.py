@@ -67,7 +67,9 @@ def test_step_routes_exec_error_through_debug_path():
     coordinator.step() and gets the real error seeded, not the generic
     wrong-result hint."""
     sess = _make_session()
-    sess.path_state["sql_code"] = "SELECT bad_column FROM aliens"  # prior failed attempt
+    sess.path_state["sql_code"] = (
+        "SELECT bad_column FROM aliens"  # prior failed attempt
+    )
 
     actual_error = 'column "bad_column" does not exist'
 

@@ -801,7 +801,9 @@ def _resolve_collisions(
             )
             best_hit_per_entity.pop(e, None)
         entities = [
-            e for e in entities if e not in kb_covered_here or e in kb_formula_candidates
+            e
+            for e in entities
+            if e not in kb_covered_here or e in kb_formula_candidates
         ]
         if len(entities) < 2:
             # Not a real multi-entity collision anymore. A lone competitive
@@ -858,9 +860,7 @@ def _resolve_collisions(
                 hit_verdicts[shared_id] = False
                 continue
             by_id = {
-                str(h.get("id")): h
-                for hits in entity_candidates.values()
-                for h in hits
+                str(h.get("id")): h for hits in entity_candidates.values() for h in hits
             }
             for entity, chosen_id in decision.items():
                 if chosen_id == "KB_FORMULA":
@@ -880,7 +880,9 @@ def _resolve_collisions(
                     best_hit_per_entity.pop(entity, None)
                 else:
                     best_hit_per_entity[entity] = by_id[chosen_id]
-            logger.info("Clarify — collision LLM-resolved (KB-formula variant): %s", decision)
+            logger.info(
+                "Clarify — collision LLM-resolved (KB-formula variant): %s", decision
+            )
             # This shared_id's fate was decided alongside a KB-formula
             # question specific to these entities, not a general "is this
             # column a legitimate shared target" fact — don't cache it for

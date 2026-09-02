@@ -136,18 +136,19 @@ def _null_jsonb_aliases(sql: str, db_result: Any) -> list[str]:
     """
     if not sql or "->>" not in sql:
         return []
-    aliases = list(dict.fromkeys(
-        m.group(1).lower()
-        for m in _JSONB_ALIAS_RE.finditer(sql)
-        if m.group(1)
-    ))
+    aliases = list(
+        dict.fromkeys(
+            m.group(1).lower() for m in _JSONB_ALIAS_RE.finditer(sql) if m.group(1)
+        )
+    )
     if not aliases:
         return []
     rows = _parse_db_rows(db_result)
     if not rows:
         return []
     return [
-        alias for alias in aliases
+        alias
+        for alias in aliases
         if (vals := [row.get(alias) for row in rows if alias in row])
         and all(v is None for v in vals)
     ]

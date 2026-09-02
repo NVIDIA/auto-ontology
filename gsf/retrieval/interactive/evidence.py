@@ -60,20 +60,25 @@ def build_grounded_terms_hint(session: InteractiveSessionState) -> str:
     if not best:
         return ""
 
-    lines = [f'  "{norm}" → {hit_text}' for norm, (hit_text, _score, _hit_id) in best.items()]
+    lines = [
+        f'  "{norm}" → {hit_text}' for norm, (hit_text, _score, _hit_id) in best.items()
+    ]
     return (
         "\nConfirmed schema mappings for terms VDB-matched to the question "
-        "(terms not listed here have no confirmed mapping):\n"
-        + "\n".join(lines) + "\n"
+        "(terms not listed here have no confirmed mapping):\n" + "\n".join(lines) + "\n"
     )
 
 
-def generate_evidence(question: str, grounded_kg: str, resolved_terms_section: str = "") -> str:
+def generate_evidence(
+    question: str, grounded_kg: str, resolved_terms_section: str = ""
+) -> str:
     """Convert grounded KB text into a short Evidence string for the SQL generator."""
     if not grounded_kg:
         return ""
     prompt = _EVIDENCE_PROMPT.format(
-        question=question, grounded_kg=grounded_kg, resolved_terms_section=resolved_terms_section
+        question=question,
+        grounded_kg=grounded_kg,
+        resolved_terms_section=resolved_terms_section,
     )
     response = safe_invoke_text_nr(prompt).strip()
     logger.debug("SQL gen — Evidence raw response: %s", response)
@@ -99,12 +104,16 @@ def generate_evidence(question: str, grounded_kg: str, resolved_terms_section: s
         else:
             joined_lines.append(line)
     valid_lines = [
-        ln for ln in joined_lines
+        ln
+        for ln in joined_lines
         if ln.strip()
         and not ln.lstrip().startswith("#")
         and len(ln) <= _MAX_EVIDENCE_LINE_CHARS
     ]
     if not valid_lines:
-        logger.warning("SQL gen — Evidence generation returned prose, discarding: %s", response[:100])
+        logger.warning(
+            "SQL gen — Evidence generation returned prose, discarding: %s",
+            response[:100],
+        )
         return ""
     return "\n".join(valid_lines)

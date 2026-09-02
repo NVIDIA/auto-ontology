@@ -7,6 +7,7 @@ Run with:
 Each case checks whether the merge LLM invents a formula from a vague answer
 (bad) vs preserving the user's description in their own words (good).
 """
+
 import pytest
 
 from gsf.retrieval.interactive.merge import merge_clarification
@@ -40,7 +41,12 @@ CASES = [
             "for each site is rounded to 2 decimal places for reporting purposes."
         ),
         "relevant_kg": "None",
-        "should_not_contain": ["pointdense / scanresolmm", "PointDense / ScanResolMm", "1 / NoiseDb", "1/NoiseDb"],
+        "should_not_contain": [
+            "pointdense / scanresolmm",
+            "PointDense / ScanResolMm",
+            "1 / NoiseDb",
+            "1/NoiseDb",
+        ],
         # Neither model currently signals incompleteness — both just embed the vague description.
         # A formula-completeness detector is needed to flag these for re-asking.
         "preserves_ambiguity": False,  # set True if model explicitly marks formula as unresolved
@@ -71,16 +77,27 @@ def test_merge_comparison(case):
 
     turn = {"q": case["new_q"], "a": case["new_a"]}
 
-    r_result = merge_clarification(case["current_question"], turn, reasoning, case["relevant_kg"])
-    nr_result = merge_clarification(case["current_question"], turn, non_reasoning, case["relevant_kg"])
+    r_result = merge_clarification(
+        case["current_question"], turn, reasoning, case["relevant_kg"]
+    )
+    nr_result = merge_clarification(
+        case["current_question"], turn, non_reasoning, case["relevant_kg"]
+    )
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"Case: {case['id']}")
     print(f"Description: {case['description']}")
     print(f"\n--- Reasoning ---\n{r_result}")
     print(f"\n--- Non-reasoning ---\n{nr_result}")
 
-    _AMBIGUITY_SIGNALS = ["exact formula", "not specified", "unresolved", "unclear", "not provided", "needs clarification"]
+    _AMBIGUITY_SIGNALS = [
+        "exact formula",
+        "not specified",
+        "unresolved",
+        "unclear",
+        "not provided",
+        "needs clarification",
+    ]
 
     for result, label in [(r_result, "reasoning"), (nr_result, "non-reasoning")]:
         if "should_not_contain" in case:
@@ -96,6 +113,10 @@ def test_merge_comparison(case):
         if "preserves_ambiguity" in case:
             signals = [s for s in _AMBIGUITY_SIGNALS if s.lower() in result.lower()]
             preserved = bool(signals)
-            print(f"  [{label}] ambiguity preserved: {preserved} (signals found: {signals or 'none'})")
+            print(
+                f"  [{label}] ambiguity preserved: {preserved} (signals found: {signals or 'none'})"
+            )
             if case["preserves_ambiguity"]:
-                assert preserved, f"[{label}] expected merged question to signal unresolved formula"
+                assert preserved, (
+                    f"[{label}] expected merged question to signal unresolved formula"
+                )

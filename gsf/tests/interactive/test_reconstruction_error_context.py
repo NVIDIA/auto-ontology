@@ -1,9 +1,12 @@
 """Test that _analyze_error includes path_state['error'] in its prompt."""
+
 from unittest.mock import MagicMock
 
 
 def test_analyze_error_includes_path_state_error():
-    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
+    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import (
+        SQLReconstructionAgent,
+    )
 
     agent = SQLReconstructionAgent.__new__(SQLReconstructionAgent)
 
@@ -48,7 +51,9 @@ def test_analyze_error_includes_path_state_error():
 
 def test_analyze_error_without_path_state_error_still_works():
     """Regression: when path_state has no 'error' key, _analyze_error must not crash."""
-    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
+    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import (
+        SQLReconstructionAgent,
+    )
 
     agent = SQLReconstructionAgent.__new__(SQLReconstructionAgent)
 
@@ -81,7 +86,9 @@ def test_analyze_error_includes_hedged_known_columns():
     the reconstruction LLM is allowed to rewrite (see _format_known_columns_
     for_classification's docstring).
     """
-    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
+    from gsf.retrieval.text_to_sql.agents.sql_reconstruction import (
+        SQLReconstructionAgent,
+    )
 
     agent = SQLReconstructionAgent.__new__(SQLReconstructionAgent)
 

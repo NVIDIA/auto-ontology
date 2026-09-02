@@ -409,6 +409,7 @@ def invoke_with_structured_output(
 # retries (e.g. persistent Azure connection errors), they transparently fall
 # back to the reasoning LLM for that single call rather than crashing.
 
+
 def safe_invoke_text_nr(prompt: str) -> str:
     """invoke_text using non-reasoning LLM; falls back to reasoning on persistent failure."""
     try:
@@ -417,7 +418,9 @@ def safe_invoke_text_nr(prompt: str) -> str:
     except Exception as e:
         logger.warning(
             "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS, type(e).__name__, str(e)[:120],
+            RETRY_MAX_ATTEMPTS,
+            type(e).__name__,
+            str(e)[:120],
         )
         return safe_invoke_text(get_llm_client(), prompt)
 
@@ -434,13 +437,20 @@ def safe_invoke_structured_nr(
         schema_name = getattr(schema, "__name__", str(schema))
         logger.warning(
             "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS, schema_name, type(e).__name__, str(e)[:120],
+            RETRY_MAX_ATTEMPTS,
+            schema_name,
+            type(e).__name__,
+            str(e)[:120],
         )
         try:
-            return safe_invoke_with_structured_output(get_llm_client(), messages, schema)
+            return safe_invoke_with_structured_output(
+                get_llm_client(), messages, schema
+            )
         except Exception as e2:
             logger.error(
                 "Reasoning LLM also failed for %s: %s: %s",
-                schema_name, type(e2).__name__, str(e2)[:120],
+                schema_name,
+                type(e2).__name__,
+                str(e2)[:120],
             )
             return None

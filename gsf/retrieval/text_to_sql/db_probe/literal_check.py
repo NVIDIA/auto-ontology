@@ -390,7 +390,17 @@ _INTEGER_TYPES = frozenset(
 # Casting an operand to any of these makes that operand non-integer, so a
 # division against it won't truncate regardless of the other side.
 _NON_INTEGER_CAST_TYPES = frozenset(
-    {"numeric", "decimal", "float", "float4", "float8", "double precision", "double", "real", "money"}
+    {
+        "numeric",
+        "decimal",
+        "float",
+        "float4",
+        "float8",
+        "double precision",
+        "double",
+        "real",
+        "money",
+    }
 )
 
 
@@ -450,7 +460,9 @@ def _confident_integer_divisions(
         numerator, denominator = div.this, div.expression
         if _has_non_integer_cast(numerator) or _has_non_integer_cast(denominator):
             continue  # one side already explicitly non-integer — safe
-        num_is_int = _resolves_to_known_integer(numerator, known_types, all_nodes, by_key)
+        num_is_int = _resolves_to_known_integer(
+            numerator, known_types, all_nodes, by_key
+        )
         den_is_int = _resolves_to_known_integer(
             denominator, known_types, all_nodes, by_key
         )
@@ -552,9 +564,7 @@ def try_self_apply_integer_division_fixes(
     try:
         tree = sqlglot.parse_one(sql, read="postgres")
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
-        logger.info(
-            "integer_division_check self-apply: could not parse SQL (%s)", exc
-        )
+        logger.info("integer_division_check self-apply: could not parse SQL (%s)", exc)
         return sql, mismatches
     if tree is None:
         return sql, mismatches

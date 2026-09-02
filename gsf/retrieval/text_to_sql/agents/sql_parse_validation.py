@@ -707,7 +707,9 @@ class SQLValidationAgent(BaseAgent):
         response = path_state.get("sql_generation_result")
         connectors = state.get("connectors") or []
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
-        connector = resolve_connector_from_tables(path_state.get("relevant_tables"), connectors)
+        connector = resolve_connector_from_tables(
+            path_state.get("relevant_tables"), connectors
+        )
         schemas_ids = fetch_all_schema_ids()
         schemas = get_schemas_by_ids(schemas_ids)
         degenerate_dialect = getattr(connector, "dialect", None)

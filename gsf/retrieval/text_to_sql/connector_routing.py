@@ -80,7 +80,6 @@ def resolve_connector_from_tables(
         if database_name:
             table_database_names.add(database_name)
 
-
     if table_database_names:
         database_name = next(iter(table_database_names))
         connector = db_to_connector.get(database_name)

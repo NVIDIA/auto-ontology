@@ -60,7 +60,9 @@ def merge_follow_up_question(
     )
     merged = safe_invoke_text_nr(prompt).strip()
     if not merged:
-        logger.warning("Follow-up merge returned empty; falling back to raw follow-up question")
+        logger.warning(
+            "Follow-up merge returned empty; falling back to raw follow-up question"
+        )
         return p2_question
     logger.info("Follow-up merged question: %s", merged)
     return merged

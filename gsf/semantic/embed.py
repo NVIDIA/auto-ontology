@@ -255,9 +255,7 @@ def _format_sample_values(
             else _MAX_EMBEDDED_SAMPLE_LEN
         )
         values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [
-            str(v) for v in values if v is not None and len(str(v)) <= max_len
-        ]
+        non_null = [str(v) for v in values if v is not None and len(str(v)) <= max_len]
         if not non_null:
             return ""
         return " Sample values: " + ", ".join(non_null) + "."
