@@ -49,10 +49,35 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-from gsf.dal.schema import (
-    DROP_JOIN_PATH_EDGE_VIEW_SQL,
-    JOIN_PATH_EDGE_VIEW_SQL,
-)
+# Inlined, not imported from `gsf.dal.schema`.
+#
+# This revision creates these tables under their original names; the view reads
+# three of them. Importing the constant meant this revision emitted whatever the
+# application currently defines, so the later rename to `column__has_attribute`
+# turned a fresh `upgrade head` into an UndefinedTable error at *this* step --
+# a revision failing because of a change made two revisions later.
+#
+# A migration is a record of what ran. It should not be able to change.
+JOIN_PATH_EDGE_VIEW_SQL = """
+CREATE OR REPLACE VIEW join_path_edge AS
+    SELECT 'column'::text AS src_kind, c.id       AS src_id,
+           'table'::text  AS dst_kind, c.table_id AS dst_id
+      FROM catalog_column c
+    UNION ALL
+    SELECT 'table', c.table_id, 'column', c.id
+      FROM catalog_column c
+    UNION ALL
+    SELECT 'column', h.column_id, 'column_attribute', h.attribute_id
+      FROM column_has_attribute h
+    UNION ALL
+    SELECT 'column_attribute', h.attribute_id, 'column', h.column_id
+      FROM column_has_attribute h
+    UNION ALL
+    SELECT 'column', f.column_id, 'column_attribute', f.attribute_id
+      FROM column_semantic_fk f
+"""
+
+DROP_JOIN_PATH_EDGE_VIEW_SQL = "DROP VIEW IF EXISTS join_path_edge"
 
 # revision identifiers, used by Alembic.
 revision: str = "57abbbf6ff90"
