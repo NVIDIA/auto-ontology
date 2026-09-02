@@ -824,6 +824,45 @@ def _walk_back(
     return path
 
 
+def _extract_column_hops(path: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Reconstruct real crossings (column -> column_attribute -> column) from a BFS path.
+
+    A BFS path over ``join_path_edge`` can interleave ``column <-> table`` edges
+    (purely structural containment — a table has many columns) with the actual
+    semantic crossings (``column <-> column_attribute``, via HAS_ATTRIBUTE /
+    SEMANTIC_FK). Filtering the path down to column-kind nodes and pairing them
+    by position (0&1, 2&3, ...) silently discards what actually connects each
+    pair — so two columns that merely share a table (column -> table -> column,
+    no attribute in between at all) would be asserted as a join. Confirmed
+    live in the Neo4j-era code this replaces: two columns sharing a table with
+    zero FK relationship between them were reported as a "1 hop" join.
+
+    This walks the path in order and only emits a hop where a column reaches a
+    column_attribute, and that same attribute is reached by another column —
+    i.e. an actual FK crossing, not co-location. A ``table`` node is still
+    needed and still used, just never as the crossing itself: it's how the
+    path steps from a crossing's landing column, through its table, to a
+    *different* column that continues the next crossing (e.g. bridging two
+    hops through a shared pivot table).
+
+    Returns a list of (source_column_id, target_column_id) pairs, in path order.
+    """
+    hops: list[tuple[str, str]] = []
+    pending_src: str | None = None
+    for i in range(len(path) - 1):
+        cur, nxt = path[i], path[i + 1]
+        if cur["kind"] == "column" and nxt["kind"] == "column_attribute":
+            pending_src = cur["id"]
+        elif (
+            pending_src is not None
+            and cur["kind"] == "column_attribute"
+            and nxt["kind"] == "column"
+        ):
+            hops.append((pending_src, nxt["id"]))
+            pending_src = None
+    return hops
+
+
 def _name_columns(node_ids: list[str]) -> dict[str, str]:
     if not node_ids:
         return {}
@@ -864,10 +903,12 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     other. That is a wrong answer that looks entirely reasonable, which is why
     it gets a test of its own.
 
-    After the traversal: keep the column nodes, pair them ``(0,1), (2,3), …``,
-    and reject the path if it spans more than one database. The pairing is
-    subtle — the intermediate table and attribute nodes are dropped first,
-    leaving columns in join-partner order.
+    After the traversal, hops are extracted by :func:`_extract_column_hops`,
+    which only counts a pair of columns as joined when they're actually linked
+    through a column_attribute node — not merely by both belonging to the same
+    table. See its docstring for why: naively pairing every column-kind node on
+    the path by position would report two unrelated columns that happen to
+    share a table as a false "1 hop" join.
     """
     if anchor_col_id == dest_col_id:
         return []
@@ -886,11 +927,11 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     if not path:
         return []
 
-    col_nodes = [n for n in path if n["kind"] == "column"]
-    if len(col_nodes) < 2:
+    hop_pairs = _extract_column_hops(path)
+    if not hop_pairs:
         return []
 
-    col_ids = [n["id"] for n in col_nodes]
+    col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
 
@@ -911,20 +952,19 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         return []
 
     hops: list[dict] = []
-    for i in range(0, len(col_nodes) - 1, 2):
-        source, target = col_nodes[i], col_nodes[i + 1]
-        source_context = contexts.get(source["id"], {})
-        target_context = contexts.get(target["id"], {})
+    for source_id, target_id in hop_pairs:
+        source_context = contexts.get(source_id, {})
+        target_context = contexts.get(target_id, {})
         hops.append(
             {
                 "source_database": source_context.get("database_name", ""),
                 "source_schema": source_context.get("schema_name", ""),
                 "source_table": source_context.get("table_name", ""),
-                "source_column": names.get(source["id"], ""),
+                "source_column": names.get(source_id, ""),
                 "target_database": target_context.get("database_name", ""),
                 "target_schema": target_context.get("schema_name", ""),
                 "target_table": target_context.get("table_name", ""),
-                "target_column": names.get(target["id"], ""),
+                "target_column": names.get(target_id, ""),
             }
         )
     return hops
@@ -1238,14 +1278,14 @@ def find_table_bridge(
             )
             continue
 
-        # Only the real SEMANTIC_FK/HAS_ATTRIBUTE crossings (kind == "column")
-        # count as join hops -- a bridge table with fewer than two column
-        # nodes on the path has no real crossing at all, just co-location
-        # (see find_join_path, which pairs the same way), and is rejected
-        # rather than handed back as a table we can't actually explain how
-        # to join.
-        col_nodes = [n for n in path if n["kind"] == "column"]
-        if len(col_nodes) < 2:
+        # Only the real SEMANTIC_FK/HAS_ATTRIBUTE crossings count as join hops
+        # -- a bridge table with no column reaching another column through a
+        # column_attribute node has no real crossing at all, just co-location
+        # (see find_join_path and _extract_column_hops, which this reuses),
+        # and is rejected rather than handed back as a table we can't
+        # actually explain how to join.
+        hop_pairs = _extract_column_hops(path)
+        if not hop_pairs:
             logger.warning(
                 "find_table_bridge: path %s -> %s found bridge table(s) but "
                 "no real FK crossing — discarding (co-location, not a join)",
@@ -1254,7 +1294,7 @@ def find_table_bridge(
             )
             continue
 
-        col_ids = [n["id"] for n in col_nodes]
+        col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
         names = _name_columns(col_ids)
         col_ctx = fetch_col_table_contexts(col_ids)
         databases = {
@@ -1272,18 +1312,17 @@ def find_table_bridge(
             continue
 
         hops: list[dict] = []
-        for i in range(0, len(col_nodes) - 1, 2):
-            source, target = col_nodes[i], col_nodes[i + 1]
-            source_context = col_ctx.get(source["id"], {})
-            target_context = col_ctx.get(target["id"], {})
+        for source_id, target_id in hop_pairs:
+            source_context = col_ctx.get(source_id, {})
+            target_context = col_ctx.get(target_id, {})
             hops.append(
                 {
                     "source_schema": source_context.get("schema_name", ""),
                     "source_table": source_context.get("table_name", ""),
-                    "source_column": names.get(source["id"], ""),
+                    "source_column": names.get(source_id, ""),
                     "target_schema": target_context.get("schema_name", ""),
                     "target_table": target_context.get("table_name", ""),
-                    "target_column": names.get(target["id"], ""),
+                    "target_column": names.get(target_id, ""),
                 }
             )
         table_names = _name_tables(bridge_ids)

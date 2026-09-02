@@ -32,6 +32,58 @@ from gsf.dal.session import store  # noqa: E402
 from gsf.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
+# --------------------------------------------------------------------------
+# _extract_column_hops -- pure, no DB needed
+# --------------------------------------------------------------------------
+
+
+def test_extract_column_hops_pairs_a_single_crossing() -> None:
+    path = [
+        {"id": "c1", "kind": "column"},
+        {"id": "attr1", "kind": "column_attribute"},
+        {"id": "c2", "kind": "column"},
+    ]
+    assert a._extract_column_hops(path) == [("c1", "c2")]
+
+
+def test_extract_column_hops_ignores_co_location_through_a_table() -> None:
+    """Two columns reachable only via a shared `table` node yield no hop.
+
+    This is the exact shape a "same table, no FK" false positive takes:
+    `column -> table -> column` with no `column_attribute` node between them.
+    """
+    path = [
+        {"id": "c1", "kind": "column"},
+        {"id": "t1", "kind": "table"},
+        {"id": "c2", "kind": "column"},
+    ]
+    assert a._extract_column_hops(path) == []
+
+
+def test_extract_column_hops_pairs_a_multi_hop_bridge_through_a_table() -> None:
+    """A table node between two crossings is still used to bridge them.
+
+    `c1 -> attr1 -> c2 -> t1 -> c3 -> attr2 -> c4`: `c2` and `c3` share a
+    table (a legitimate bridge/pivot table), but the table node itself never
+    counts as a crossing -- only the two column_attribute-mediated hops do.
+    """
+    path = [
+        {"id": "c1", "kind": "column"},
+        {"id": "attr1", "kind": "column_attribute"},
+        {"id": "c2", "kind": "column"},
+        {"id": "t1", "kind": "table"},
+        {"id": "c3", "kind": "column"},
+        {"id": "attr2", "kind": "column_attribute"},
+        {"id": "c4", "kind": "column"},
+    ]
+    assert a._extract_column_hops(path) == [("c1", "c2"), ("c3", "c4")]
+
+
+def test_extract_column_hops_empty_path_yields_no_hops() -> None:
+    assert a._extract_column_hops([]) == []
+    assert a._extract_column_hops([{"id": "c1", "kind": "column"}]) == []
+
+
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
     if not os.environ.get("POSTGRES_USER"):
@@ -292,6 +344,34 @@ def test_two_schemas_are_not_connected_through_their_schema(world) -> None:
         == world.schemas["shopdb"]
     )
     assert a.find_join_path(world.columns["alpha.x"], world.columns["beta.y"]) == []
+
+
+def test_two_columns_in_the_same_table_are_not_joined_by_co_location(world) -> None:
+    """Two columns sharing a table, with no HAS_ATTRIBUTE/SEMANTIC_FK between
+    them, must not be reported as a "1 hop" join just because they're both
+    reachable from the same table node.
+
+    `join_path_edge` has unconditional `column <-> table` edges for every
+    column in a table (that's just "this column belongs to this table", not a
+    semantic relationship) -- so naively pairing every column-kind node on the
+    path by position would find the 2-edge path `column -> table -> column`
+    and mistake co-location for a real crossing. Regression test for the same
+    bug this project's earlier Neo4j-era code fixed via `_extract_fk_hops`
+    (confirmed live case: `therapy_details`/`medchg`, no FK between them,
+    reported as a false "1 hop" join).
+    """
+    world.table("orders")
+    world.column("orders", "customer_id")
+    world.column("orders", "notes")
+    assert (
+        a.find_join_path(
+            world.columns["orders.customer_id"], world.columns["orders.notes"]
+        )
+        == []
+    )
+    _assert_agrees_with_oracle(
+        world.columns["orders.customer_id"], world.columns["orders.notes"]
+    )
 
 
 def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
