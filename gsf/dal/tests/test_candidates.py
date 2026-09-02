@@ -79,7 +79,7 @@ class World:
     def statement(self, label: str) -> str:
         qid = _add(s.sql_query, sql_full_query=f"SELECT 1 -- {self.prefix}-{label}")
         self.queries.append(qid)
-        _link(s.sql_query_table, sql_query_id=qid, table_id=self.table)
+        _link(s.sql_query__table, sql_query_id=qid, table_id=self.table)
         return qid
 
 
@@ -195,9 +195,9 @@ def test_two_columns_of_one_table_are_both_expanded(world) -> None:
 def test_a_sql_attribute_carries_its_sql_term_and_tables(world) -> None:
     attribute = _add(s.sql_attribute, name=f"{world.prefix}-revenue")
     term = _add(s.term, name=f"{world.prefix}-Revenue")
-    _link(s.sql_attribute_term, attribute_id=attribute, term_id=term)
+    _link(s.sql_attribute__term, attribute_id=attribute, term_id=term)
     query = world.statement("revenue")
-    _link(s.sql_attribute_sql, attribute_id=attribute, sql_query_id=query)
+    _link(s.sql_attribute__sql, attribute_id=attribute, sql_query_id=query)
 
     entry = c.expand_info([{"id": attribute, "label": "SqlAttribute"}])[attribute]
 
@@ -215,7 +215,7 @@ def test_a_sql_attribute_without_a_statement_does_not_appear(world) -> None:
     """
     attribute = _add(s.sql_attribute, name=f"{world.prefix}-orphan")
     term = _add(s.term, name=f"{world.prefix}-Revenue")
-    _link(s.sql_attribute_term, attribute_id=attribute, term_id=term)
+    _link(s.sql_attribute__term, attribute_id=attribute, term_id=term)
 
     assert c.expand_info([{"id": attribute, "label": "SqlAttribute"}]) == {}
 
@@ -228,7 +228,7 @@ def test_a_sql_attribute_without_a_statement_does_not_appear(world) -> None:
 def test_an_analysis_carries_its_sql_and_tables(world) -> None:
     analysis = _add(s.custom_analysis, name=f"{world.prefix}-revenue")
     query = world.statement("analysis")
-    _link(s.custom_analysis_sql, analysis_id=analysis, sql_query_id=query)
+    _link(s.custom_analysis__sql, analysis_id=analysis, sql_query_id=query)
 
     entry = c.expand_info([{"id": analysis, "label": Labels.CUSTOM_ANALYSIS}])[analysis]
 

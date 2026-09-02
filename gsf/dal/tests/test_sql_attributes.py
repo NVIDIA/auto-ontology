@@ -100,13 +100,13 @@ class World:
             source=source,
         )
         self.attributes[name] = aid
-        _link(s.sql_attribute_term, attribute_id=aid, term_id=self.terms[term])
+        _link(s.sql_attribute__term, attribute_id=aid, term_id=self.terms[term])
         if sql is not None:
             qid = _add(s.sql_query, sql_full_query=sql)
             self.queries.append(qid)
-            _link(s.sql_attribute_sql, attribute_id=aid, sql_query_id=qid)
+            _link(s.sql_attribute__sql, attribute_id=aid, sql_query_id=qid)
             for table in tables:
-                _link(s.sql_query_table, sql_query_id=qid, table_id=self.tables[table])
+                _link(s.sql_query__table, sql_query_id=qid, table_id=self.tables[table])
         return aid
 
     def zone(self, name: str, *, table: str, enabled: bool = True) -> str:
@@ -234,7 +234,7 @@ def test_zone_chips_come_from_the_sql_not_the_term(world) -> None:
     world.table("customers")
     world.term("Customer")
     _link(
-        s.table_term,
+        s.table__term,
         table_id=world.tables["customers"],
         term_id=world.terms["Customer"],
     )
@@ -326,7 +326,7 @@ def test_several_statements_still_yield_one_row(world) -> None:
     attr = world.attribute("revenue", "Revenue", sql="SELECT 1")
     second = _add(s.sql_query, sql_full_query="SELECT 2")
     world.queries.append(second)
-    _link(s.sql_attribute_sql, attribute_id=attr, sql_query_id=second)
+    _link(s.sql_attribute__sql, attribute_id=attr, sql_query_id=second)
 
     rows = sa.fetch_sql_attributes_by_term_id(world.terms["Revenue"], None)
     assert len(rows) == 1
@@ -425,8 +425,8 @@ def test_detaching_sql_leaves_the_statement_alone(world) -> None:
 
     assert (
         store().query_read(
-            select(s.sql_attribute_sql.c.sql_query_id).where(
-                s.sql_attribute_sql.c.attribute_id == attr
+            select(s.sql_attribute__sql.c.sql_query_id).where(
+                s.sql_attribute__sql.c.attribute_id == attr
             )
         )
         == []
@@ -444,8 +444,8 @@ def test_link_to_term_replaces_the_previous_link(world) -> None:
     sa.link_to_term(attr, world.terms["Profit"])
 
     linked = store().query_read(
-        select(s.sql_attribute_term.c.term_id).where(
-            s.sql_attribute_term.c.attribute_id == attr
+        select(s.sql_attribute__term.c.term_id).where(
+            s.sql_attribute__term.c.attribute_id == attr
         )
     )
     assert [r["term_id"] for r in linked] == [world.terms["Profit"]]
@@ -458,8 +458,8 @@ def test_link_to_term_is_idempotent(world) -> None:
     sa.link_to_term(attr, world.terms["Revenue"])
 
     linked = store().query_read(
-        select(s.sql_attribute_term.c.term_id).where(
-            s.sql_attribute_term.c.attribute_id == attr
+        select(s.sql_attribute__term.c.term_id).where(
+            s.sql_attribute__term.c.attribute_id == attr
         )
     )
     assert len(linked) == 1
@@ -543,8 +543,8 @@ def test_delete_cascades_its_links(world) -> None:
 
     assert sa.get_sql_attribute_by_id(attr) is None
     for table, column in (
-        (s.sql_attribute_term, s.sql_attribute_term.c.attribute_id),
-        (s.sql_attribute_sql, s.sql_attribute_sql.c.attribute_id),
+        (s.sql_attribute__term, s.sql_attribute__term.c.attribute_id),
+        (s.sql_attribute__sql, s.sql_attribute__sql.c.attribute_id),
     ):
         assert store().query_read(select(column).where(column == attr)) == []
 

@@ -127,7 +127,7 @@ class Database:
 
     def term(self, label: str) -> str:
         term_id = _add(s.term, name=f"{self.prefix}-{label}")
-        _link(s.table_term, table_id=self.table, term_id=term_id)
+        _link(s.table__term, table_id=self.table, term_id=term_id)
         return term_id
 
     def column_attribute(self, label: str) -> str:
@@ -143,7 +143,7 @@ class Database:
         owner = _add(owner_table, name=f"{self.prefix}-{label}")
         query = _add(s.sql_query, sql_full_query=f"SELECT 1 -- {self.prefix}-{label}")
         _link(link_table, **{owner_column: owner, "sql_query_id": query})
-        _link(s.sql_query_table, sql_query_id=query, table_id=self.table)
+        _link(s.sql_query__table, sql_query_id=query, table_id=self.table)
         return owner, query
 
 
@@ -222,7 +222,7 @@ def test_a_term_shared_with_another_database_survives(world) -> None:
     prefix, make = world
     shop, warehouse = make("shop"), make("warehouse")
     shared = shop.term("Product")
-    _link(s.table_term, table_id=warehouse.table, term_id=shared)
+    _link(s.table__term, table_id=warehouse.table, term_id=shared)
     own = shop.term("Order")
 
     r.delete_semantic_layer(shop.name)
@@ -238,11 +238,11 @@ def test_an_analysis_spanning_two_databases_survives(world) -> None:
     shop, warehouse = make("shop"), make("warehouse")
     analysis, query = shop.sql_owner(
         s.custom_analysis,
-        s.custom_analysis_sql,
+        s.custom_analysis__sql,
         "analysis_id",
         "cross-database",
     )
-    _link(s.sql_query_table, sql_query_id=query, table_id=warehouse.table)
+    _link(s.sql_query__table, sql_query_id=query, table_id=warehouse.table)
 
     r.delete_semantic_layer(shop.name)
 
@@ -257,7 +257,7 @@ def test_a_single_database_analysis_does_not_survive(world) -> None:
     _, make = world
     shop = make("shop")
     analysis, _ = shop.sql_owner(
-        s.custom_analysis, s.custom_analysis_sql, "analysis_id", "local"
+        s.custom_analysis, s.custom_analysis__sql, "analysis_id", "local"
     )
 
     r.delete_semantic_layer(shop.name)
@@ -269,12 +269,12 @@ def test_a_sql_attribute_is_scoped_the_same_way(world) -> None:
     _, make = world
     shop, warehouse = make("shop"), make("warehouse")
     local, _ = shop.sql_owner(
-        s.sql_attribute, s.sql_attribute_sql, "attribute_id", "local"
+        s.sql_attribute, s.sql_attribute__sql, "attribute_id", "local"
     )
     crossing, query = shop.sql_owner(
-        s.sql_attribute, s.sql_attribute_sql, "attribute_id", "crossing"
+        s.sql_attribute, s.sql_attribute__sql, "attribute_id", "crossing"
     )
-    _link(s.sql_query_table, sql_query_id=query, table_id=warehouse.table)
+    _link(s.sql_query__table, sql_query_id=query, table_id=warehouse.table)
 
     r.delete_semantic_layer(shop.name)
 

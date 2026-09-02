@@ -111,13 +111,13 @@ class World:
         self.created.append((s.column_attribute, aid))
         if owner:
             _link(
-                s.column_has_attribute, column_id=self.columns[owner], attribute_id=aid
+                s.column__has_attribute, column_id=self.columns[owner], attribute_id=aid
             )
         return aid
 
     def references(self, column: str, attribute: str) -> None:
         _link(
-            s.column_semantic_fk,
+            s.column__semantic_fk,
             column_id=self.columns[column],
             attribute_id=self.attributes[attribute],
         )
@@ -472,8 +472,8 @@ def test_merge_creates_and_links(world) -> None:
         a.find_column_attribute_by_column_id(world.columns["customers.id"]) == attr_id
     )
     linked = store().query_read(
-        select(s.column_attribute_term.c.term_id).where(
-            s.column_attribute_term.c.attribute_id == attr_id
+        select(s.column_attribute__term.c.term_id).where(
+            s.column_attribute__term.c.attribute_id == attr_id
         )
     )
     assert len(linked) == 1
@@ -556,7 +556,7 @@ def attributed(world):
     world.column("customers", "id")
     term = world.term("Customer")
     attr = world.attribute("customer-id", owner="customers.id")
-    _link(s.column_attribute_term, attribute_id=attr, term_id=term)
+    _link(s.column_attribute__term, attribute_id=attr, term_id=term)
     world.term_id = term
     world.attr_id = attr
     return world
@@ -619,7 +619,7 @@ def test_contexts_read_semantic_fk_backwards(joined) -> None:
     """Binds the attribute and finds the column pointing *at* it.
 
     This is the traversal `join_path_edge` deliberately omits, which is why this
-    function queries `column_semantic_fk` directly. If it ever starts reading
+    function queries `column__semantic_fk` directly. If it ever starts reading
     the view, this test is what fails.
     """
     contexts = a.fetch_attr_column_contexts(
@@ -684,7 +684,7 @@ def test_unlinked_reports_a_declared_fk_target_when_there_is_one(world) -> None:
     world.table("orders")
     world.column("orders", "customer_id")
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=world.columns["orders.customer_id"],
         target_column_id=world.columns["customers.id"],
     )
@@ -751,8 +751,8 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
         a.merge_semantic_fk(world.columns["orders.customer_id"], attr)
 
     rows = store().query_read(
-        select(s.column_semantic_fk.c.column_id).where(
-            s.column_semantic_fk.c.attribute_id == attr
+        select(s.column__semantic_fk.c.column_id).where(
+            s.column__semantic_fk.c.attribute_id == attr
         )
     )
     assert len(rows) == 1

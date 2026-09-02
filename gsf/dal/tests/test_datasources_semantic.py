@@ -122,17 +122,17 @@ def world():
     w.column("tags", "tag_id", 1)
 
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=w.columns["orders.customer_id"],
         target_column_id=w.columns["customers.customer_id"],
     )
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=w.columns["order_tag.order_id"],
         target_column_id=w.columns["orders.order_id"],
     )
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=w.columns["order_tag.tag_id"],
         target_column_id=w.columns["tags.tag_id"],
     )
@@ -165,24 +165,24 @@ def test_tables_for_schema_counts_columns_and_terms(world) -> None:
     """
     shared = world.term("Customer", "a buyer")
     other = world.term("Contact")
-    _link(s.table_term, table_id=world.tables["customers"], term_id=shared)
+    _link(s.table__term, table_id=world.tables["customers"], term_id=shared)
 
     attribute = world.attribute("customer-name")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["customers.name"],
         attribute_id=attribute,
     )
     # Same Term as the direct link -> must not count twice.
-    _link(s.column_attribute_term, attribute_id=attribute, term_id=shared)
+    _link(s.column_attribute__term, attribute_id=attribute, term_id=shared)
     # A second, distinct Term via the SEMANTIC_FK route.
     fk_attribute = world.attribute("customer-ref")
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         column_id=world.columns["customers.customer_id"],
         attribute_id=fk_attribute,
     )
-    _link(s.column_attribute_term, attribute_id=fk_attribute, term_id=other)
+    _link(s.column_attribute__term, attribute_id=fk_attribute, term_id=other)
 
     rows = _by_name(d.fetch_tables_for_schema(world.schema))
     assert rows["customers"]["terms_count"] == 2
@@ -193,7 +193,7 @@ def test_tables_for_schema_counts_columns_and_terms(world) -> None:
 
 def test_tables_for_schema_counts_sql(world) -> None:
     query = _add(s.sql_query, sql_full_query=f"SELECT 1 -- {world.prefix}")
-    _link(s.sql_query_table, sql_query_id=query, table_id=world.tables["orders"])
+    _link(s.sql_query__table, sql_query_id=query, table_id=world.tables["orders"])
 
     rows = _by_name(d.fetch_tables_for_schema(world.schema))
     assert rows["orders"]["sql_count"] == 1
@@ -205,7 +205,7 @@ def test_tables_for_schema_counts_sql(world) -> None:
 def test_tables_for_schema_uses_the_description_fallback(world) -> None:
     """`orders` has no description of its own; its Term supplies one."""
     term = world.term("Order", "a purchase")
-    _link(s.table_term, table_id=world.tables["orders"], term_id=term)
+    _link(s.table__term, table_id=world.tables["orders"], term_id=term)
 
     rows = _by_name(d.fetch_tables_for_schema(world.schema))
     assert rows["orders"]["description"] == "a purchase"
@@ -254,7 +254,7 @@ def test_tables_without_term_excludes_termed_tables(world) -> None:
     assert before == {"customers", "orders", "order_tag", "tags"}
 
     term = world.term("Order")
-    _link(s.table_term, table_id=world.tables["orders"], term_id=term)
+    _link(s.table__term, table_id=world.tables["orders"], term_id=term)
 
     after = {r["name"] for r in d.fetch_all_tables_without_term(world.prefix)}
     assert after == before - {"orders"}
@@ -339,7 +339,7 @@ def test_columns_for_table_returns_none_for_a_missing_table() -> None:
 def test_columns_for_table_uses_the_description_fallback(world) -> None:
     attribute = world.attribute("order-total", "money, in cents")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["orders.total"],
         attribute_id=attribute,
     )
@@ -478,11 +478,11 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
     table fallback here too — would shift retrieval results with no test
     anywhere failing.
     """
-    table_term = world.term("Order", "a purchase")
-    _link(s.table_term, table_id=world.tables["orders"], term_id=table_term)
+    table__term = world.term("Order", "a purchase")
+    _link(s.table__term, table_id=world.tables["orders"], term_id=table__term)
     attribute = world.attribute("order-total", "money, in cents")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["orders.total"],
         attribute_id=attribute,
     )
@@ -533,7 +533,7 @@ def test_an_existing_attribute_disqualifies_the_table(world) -> None:
     """A column already carrying meaning is not raw join plumbing."""
     attribute = world.attribute("tag-ref")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["order_tag.tag_id"],
         attribute_id=attribute,
     )
@@ -543,13 +543,13 @@ def test_an_existing_attribute_disqualifies_the_table(world) -> None:
 def test_an_existing_bridge_disqualifies_the_table(world) -> None:
     """Without this the suggester re-proposes a bridge it already created."""
     query = _add(s.sql_query, sql_full_query=f"SELECT 2 -- {world.prefix}")
-    _link(s.sql_query_table, sql_query_id=query, table_id=world.tables["order_tag"])
+    _link(s.sql_query__table, sql_query_id=query, table_id=world.tables["order_tag"])
     attribute = _add(
         s.sql_attribute,
         name=f"{world.prefix}-bridge",
         source=SQL_ATTR_SOURCE_BRIDGE,
     )
-    _link(s.sql_attribute_sql, attribute_id=attribute, sql_query_id=query)
+    _link(s.sql_attribute__sql, attribute_id=attribute, sql_query_id=query)
 
     assert d.fetch_bridge_table_candidates(world.prefix) == []
 
@@ -559,11 +559,11 @@ def test_an_existing_bridge_disqualifies_the_table(world) -> None:
 def test_a_bridge_from_some_other_source_does_not_disqualify(world) -> None:
     """The source filter is load-bearing; any SqlAttribute would over-exclude."""
     query = _add(s.sql_query, sql_full_query=f"SELECT 3 -- {world.prefix}")
-    _link(s.sql_query_table, sql_query_id=query, table_id=world.tables["order_tag"])
+    _link(s.sql_query__table, sql_query_id=query, table_id=world.tables["order_tag"])
     attribute = _add(
         s.sql_attribute, name=f"{world.prefix}-manual", source=SQL_ATTR_SOURCE_MANUAL
     )
-    _link(s.sql_attribute_sql, attribute_id=attribute, sql_query_id=query)
+    _link(s.sql_attribute__sql, attribute_id=attribute, sql_query_id=query)
 
     assert [r["table_name"] for r in d.fetch_bridge_table_candidates(world.prefix)] == [
         "order_tag"
@@ -585,19 +585,19 @@ def test_a_semantic_fk_counts_as_a_foreign_key(world) -> None:
     world.column("order_note", "tag_ref", 2)
 
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=world.columns["order_note.order_ref"],
         target_column_id=world.columns["orders.order_id"],
     )
     # No real constraint for tag_ref -- only a semantic one, owned by tags.tag_id.
     attribute = world.attribute("tag-identity")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["tags.tag_id"],
         attribute_id=attribute,
     )
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         column_id=world.columns["order_note.tag_ref"],
         attribute_id=attribute,
     )
@@ -618,7 +618,7 @@ def test_a_self_referential_bridge_is_allowed(world) -> None:
     world.column("also_order", "also_order_id", 2)
     for column in ("order_id", "also_order_id"):
         _link(
-            s.column_foreign_key,
+            s.column__foreign_key,
             source_column_id=world.columns[f"also_order.{column}"],
             target_column_id=world.columns["orders.order_id"],
         )
@@ -634,7 +634,7 @@ def test_a_single_column_table_is_not_a_bridge(world) -> None:
     world.table("solo", table_type="base table")
     world.column("solo", "order_id", 1)
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=world.columns["solo.order_id"],
         target_column_id=world.columns["orders.order_id"],
     )
@@ -645,7 +645,7 @@ def test_a_single_column_table_is_not_a_bridge(world) -> None:
 def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
     """The second of the two size checks, and the reason both exist.
 
-    A column with a `column_foreign_key` row whose target column is gone passes
+    A column with a `column__foreign_key` row whose target column is gone passes
     "every column has an outgoing edge" and fails "every edge lands somewhere".
     Here the target column is deleted after the fact, which is what a partial
     ingest leaves behind.
@@ -655,12 +655,12 @@ def test_an_fk_pointing_outside_the_catalog_disqualifies(world) -> None:
     world.column("tag_link", "tag_id", 1)
     world.column("tag_link", "other_id", 2)
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=world.columns["tag_link.tag_id"],
         target_column_id=world.columns["tags.tag_id"],
     )
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         source_column_id=world.columns["tag_link.other_id"],
         target_column_id=orphan,
     )

@@ -102,9 +102,9 @@ def _delete_scoped_semantic(database_name: str) -> int:
         )
         return owner_column.in_(inside) & owner_column.notin_(outside)
 
-    # Term: reached through table_term.
-    term_ids = select(s.table_term.c.term_id).where(
-        only_ours(s.table_term, s.table_term.c.term_id, s.table_term.c.table_id)
+    # Term: reached through table__term.
+    term_ids = select(s.table__term.c.term_id).where(
+        only_ours(s.table__term, s.table__term.c.term_id, s.table__term.c.table_id)
     )
     deleted += len(
         store().query_write(
@@ -123,19 +123,19 @@ def _delete_scoped_semantic(database_name: str) -> int:
 
     # SqlAttribute and CustomAnalysis: reached through the tables their SQL hits.
     for owner_table, link_table, owner_column in (
-        (s.sql_attribute, s.sql_attribute_sql, s.sql_attribute_sql.c.attribute_id),
+        (s.sql_attribute, s.sql_attribute__sql, s.sql_attribute__sql.c.attribute_id),
         (
             s.custom_analysis,
-            s.custom_analysis_sql,
-            s.custom_analysis_sql.c.analysis_id,
+            s.custom_analysis__sql,
+            s.custom_analysis__sql.c.analysis_id,
         ),
     ):
         touched = (
-            select(owner_column, s.sql_query_table.c.table_id)
+            select(owner_column, s.sql_query__table.c.table_id)
             .select_from(
                 link_table.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id == link_table.c.sql_query_id,
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id == link_table.c.sql_query_id,
                 )
             )
             .subquery("touched")
@@ -256,10 +256,10 @@ def _delete_orphaned_statements(candidate_ids: list[str] | None = None) -> int:
     wants — there is no other database left to race with.
     """
     referenced = union(
-        select(s.sql_query_table.c.sql_query_id),
-        select(s.sql_query_column.c.sql_query_id),
-        select(s.sql_attribute_sql.c.sql_query_id),
-        select(s.custom_analysis_sql.c.sql_query_id),
+        select(s.sql_query__table.c.sql_query_id),
+        select(s.sql_query__column.c.sql_query_id),
+        select(s.sql_attribute__sql.c.sql_query_id),
+        select(s.custom_analysis__sql.c.sql_query_id),
     )
     statement = delete(s.sql_query).where(s.sql_query.c.id.not_in(referenced))
     if candidate_ids is not None:
@@ -307,11 +307,11 @@ def _delete_data_rows(database_name: str | None = None) -> int:
         candidates = [
             row["sql_query_id"]
             for row in store().query_read(
-                select(s.sql_query_table.c.sql_query_id)
+                select(s.sql_query__table.c.sql_query_id)
                 .select_from(
-                    s.sql_query_table.join(
+                    s.sql_query__table.join(
                         s.catalog_table,
-                        s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                        s.catalog_table.c.id == s.sql_query__table.c.table_id,
                     )
                     .join(
                         s.catalog_schema,

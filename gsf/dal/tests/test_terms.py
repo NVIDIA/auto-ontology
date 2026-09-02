@@ -97,7 +97,7 @@ class World:
         )
         self.terms[name] = tid
         for table in represents:
-            _link(s.table_term, table_id=self.tables[table], term_id=tid)
+            _link(s.table__term, table_id=self.tables[table], term_id=tid)
         return tid
 
     def column_attribute(
@@ -118,10 +118,10 @@ class World:
             certified=certified,
         )
         self.attributes[key] = aid
-        _link(s.column_attribute_term, attribute_id=aid, term_id=self.terms[term])
+        _link(s.column_attribute__term, attribute_id=aid, term_id=self.terms[term])
         if column:
             _link(
-                s.column_has_attribute,
+                s.column__has_attribute,
                 column_id=self.columns[f"{table}.{column}"],
                 attribute_id=aid,
             )
@@ -137,12 +137,12 @@ class World:
     ) -> str:
         aid = _add(s.sql_attribute, name=f"{self.prefix}-{key}", certified=certified)
         self.attributes[key] = aid
-        _link(s.sql_attribute_term, attribute_id=aid, term_id=self.terms[term])
+        _link(s.sql_attribute__term, attribute_id=aid, term_id=self.terms[term])
         qid = _add(s.sql_query, sql_full_query=f"SELECT 1 -- {self.prefix}-{key}")
         self.queries.append(qid)
-        _link(s.sql_attribute_sql, attribute_id=aid, sql_query_id=qid)
+        _link(s.sql_attribute__sql, attribute_id=aid, sql_query_id=qid)
         for table in tables:
-            _link(s.sql_query_table, sql_query_id=qid, table_id=self.tables[table])
+            _link(s.sql_query__table, sql_query_id=qid, table_id=self.tables[table])
         return aid
 
     def zone(self, name: str, *, table: str, enabled: bool = True) -> str:
@@ -413,7 +413,7 @@ def test_merge_term_is_idempotent_and_links_the_table(world) -> None:
     assert first == second
 
     links = store().query_read(
-        select(s.table_term.c.table_id).where(s.table_term.c.term_id == first)
+        select(s.table__term.c.table_id).where(s.table__term.c.term_id == first)
     )
     assert len(links) == 1
     store().query_write(s.term.delete().where(s.term.c.id == first))
@@ -594,7 +594,7 @@ def test_an_attribute_on_several_columns_still_yields_one_row(world) -> None:
     term = world.term("Order", represents=("orders",))
     attr = world.column_attribute("order-id", "Order", table="orders", column="id")
     _link(
-        s.column_has_attribute,
+        s.column__has_attribute,
         column_id=world.columns["orders.alt_id"],
         attribute_id=attr,
     )
@@ -609,7 +609,7 @@ def test_attributes_carry_their_columns_and_zones(world) -> None:
     term = world.term("Order", represents=("orders",))
     attr = world.column_attribute("order-id", "Order", table="orders", column="id")
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         column_id=world.columns["invoices.order_id"],
         attribute_id=attr,
     )
@@ -655,7 +655,7 @@ def related(world):
         "customer-id", "Customer", table="customers", column="id"
     )
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         column_id=world.columns["orders.customer_id"],
         attribute_id=attr,
     )
@@ -704,7 +704,7 @@ def test_related_terms_respect_the_zone_boundary(related) -> None:
     """
     related.table("secrets")
     _link(
-        s.table_term,
+        s.table__term,
         table_id=related.tables["secrets"],
         term_id=related.terms["Customer"],
     )
@@ -746,7 +746,7 @@ def test_terms_with_sqls_excludes_generated_statements(world) -> None:
 
     ingestion = _add(s.sql_query, sql_full_query=f"SELECT ingested -- {world.prefix}")
     world.queries.append(ingestion)
-    _link(s.sql_query_table, sql_query_id=ingestion, table_id=world.tables["orders"])
+    _link(s.sql_query__table, sql_query_id=ingestion, table_id=world.tables["orders"])
     # An attribute-owned statement over the same table must not come back.
     world.sql_attribute("revenue", "Order", tables=("orders",))
 

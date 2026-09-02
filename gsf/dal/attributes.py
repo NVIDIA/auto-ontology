@@ -107,11 +107,11 @@ def merge_column_attribute(
 
         for table, values in (
             (
-                s.column_has_attribute,
+                s.column__has_attribute,
                 {"column_id": column_id, "attribute_id": attribute_id},
             ),
             (
-                s.column_attribute_term,
+                s.column_attribute__term,
                 {"attribute_id": attribute_id, "term_id": term_id},
             ),
         ):
@@ -147,8 +147,8 @@ def update_column_attribute(
     owned = (
         select(literal(1))
         .where(
-            s.column_attribute_term.c.attribute_id == attr_id,
-            s.column_attribute_term.c.term_id == term_id,
+            s.column_attribute__term.c.attribute_id == attr_id,
+            s.column_attribute__term.c.term_id == term_id,
         )
         .exists()
     )
@@ -183,17 +183,17 @@ def update_column_attribute(
         )
         .select_from(
             s.column_attribute.join(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
-            .join(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
             .outerjoin(
-                s.column_has_attribute,
-                s.column_has_attribute.c.attribute_id == s.column_attribute.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
             )
             .outerjoin(
                 s.catalog_column,
-                s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
             .outerjoin(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
@@ -222,13 +222,13 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     rows = store().query_read(
         select(s.column_attribute.c.id)
         .select_from(
-            s.column_has_attribute.join(
+            s.column__has_attribute.join(
                 s.column_attribute,
-                s.column_attribute.c.id == s.column_has_attribute.c.attribute_id,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
             )
         )
         .where(
-            s.column_has_attribute.c.column_id == column_id,
+            s.column__has_attribute.c.column_id == column_id,
             s.column_attribute.c.source == SEMANTIC_SOURCE,
         )
         .order_by(s.column_attribute.c.id)
@@ -247,7 +247,7 @@ def fetch_attr_column_contexts(
     **Reads SEMANTIC_FK backwards**, and is the reason the stored direction and
     the traversal direction have to be kept apart: it binds an attribute and
     finds the columns pointing *at* it. ``join_path_edge`` deliberately omits
-    that row, so this queries :data:`~gsf.dal.schema.column_semantic_fk`
+    that row, so this queries :data:`~gsf.dal.schema.column__semantic_fk`
     directly.
 
     Returns ``{}`` on failure rather than raising — this decorates results, and
@@ -278,14 +278,14 @@ def fetch_attr_column_contexts(
     # "which column describes this attribute" a decision rather than an accident.
     link = (
         select(
-            s.column_has_attribute.c.attribute_id,
-            s.column_has_attribute.c.column_id,
+            s.column__has_attribute.c.attribute_id,
+            s.column__has_attribute.c.column_id,
             literal(0).label("rank"),
         )
         .union(
             select(
-                s.column_semantic_fk.c.attribute_id,
-                s.column_semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
+                s.column__semantic_fk.c.column_id,
                 literal(1).label("rank"),
             )
         )
@@ -317,10 +317,10 @@ def fetch_attr_column_contexts(
             )
             .outerjoin(s.catalog_database, database_join)
             .outerjoin(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
-            .outerjoin(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
+            .outerjoin(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
         )
         .where(s.column_attribute.c.id.in_(list(attr_ids)))
         .order_by(s.column_attribute.c.id, link.c.rank, s.catalog_column.c.id)
@@ -388,7 +388,7 @@ def find_unlinked_fk_columns(
             s.catalog_column.c.is_unique,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
-            s.column_foreign_key.c.target_column_id.label("fk_target_col_id"),
+            s.column__foreign_key.c.target_column_id.label("fk_target_col_id"),
             # The FK target's *table*, not just its column: `resolve_semantic_fks`
             # skips a candidate whose target table is the source table, which it
             # cannot tell without this.
@@ -399,12 +399,12 @@ def find_unlinked_fk_columns(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
             )
             .outerjoin(
-                s.column_foreign_key,
-                s.column_foreign_key.c.source_column_id == s.catalog_column.c.id,
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
             )
             .outerjoin(
                 _fk_target_column,
-                _fk_target_column.c.id == s.column_foreign_key.c.target_column_id,
+                _fk_target_column.c.id == s.column__foreign_key.c.target_column_id,
             )
             .outerjoin(
                 _fk_target_table,
@@ -412,11 +412,11 @@ def find_unlinked_fk_columns(
             )
         )
         .where(
-            ~select(s.column_semantic_fk.c.attribute_id)
-            .where(s.column_semantic_fk.c.column_id == s.catalog_column.c.id)
+            ~select(s.column__semantic_fk.c.attribute_id)
+            .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
             .exists(),
-            ~select(s.column_has_attribute.c.attribute_id)
-            .where(s.column_has_attribute.c.column_id == s.catalog_column.c.id)
+            ~select(s.column__has_attribute.c.attribute_id)
+            .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
             .exists(),
         )
     )
@@ -437,7 +437,7 @@ def find_unlinked_fk_columns(
 def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
     """Point a column at the attribute it references. Idempotent."""
     store().query_write(
-        insert(s.column_semantic_fk)
+        insert(s.column__semantic_fk)
         .values(column_id=src_column_id, attribute_id=tgt_attr_id)
         .on_conflict_do_nothing()
     )
@@ -495,13 +495,13 @@ def fetch_column_attribute_columns_map(
 
     ids = list(attr_ids)
     primary = store().query_read(
-        _column_path_select(s.column_has_attribute)
-        .where(s.column_has_attribute.c.attribute_id.in_(ids))
+        _column_path_select(s.column__has_attribute)
+        .where(s.column__has_attribute.c.attribute_id.in_(ids))
         .order_by(s.catalog_column.c.id)
     )
     referenced = store().query_read(
-        _column_path_select(s.column_semantic_fk)
-        .where(s.column_semantic_fk.c.attribute_id.in_(ids))
+        _column_path_select(s.column__semantic_fk)
+        .where(s.column__semantic_fk.c.attribute_id.in_(ids))
         .order_by(s.catalog_table.c.name, s.catalog_column.c.name)
     )
 

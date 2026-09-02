@@ -116,7 +116,7 @@ def test_a_join_link_records_its_reference(db_name) -> None:
 
     add_query([(node(left), node(right), {Props.JOIN: True, "refs": ["sql-1|a = b"]})])
     rows = store().query_read(
-        select(s.column_join.c.refs).where(s.column_join.c.source_column_id == left)
+        select(s.column__join.c.refs).where(s.column__join.c.source_column_id == left)
     )
     assert rows and rows[0]["refs"] == ["sql-1|a = b"]
 
@@ -141,7 +141,7 @@ def test_repeated_joins_accumulate_and_deduplicate(db_name) -> None:
         add_query([(node(left), node(right), {Props.JOIN: True, "refs": [ref]})])
 
     rows = store().query_read(
-        select(s.column_join.c.refs).where(s.column_join.c.source_column_id == left)
+        select(s.column__join.c.refs).where(s.column__join.c.source_column_id == left)
     )
     assert sorted(rows[0]["refs"]) == ["sql-1|a = b", "sql-2|a = b"]
 
@@ -161,7 +161,7 @@ def test_a_reset_takes_the_statements_with_it(db_name) -> None:
         "Sql", {"sql_full_query": statement}, {"sql_full_query": statement}
     )
     store().query_write(
-        insert(s.sql_query_table)
+        insert(s.sql_query__table)
         .values(sql_query_id=sql_id, table_id=tid)
         .on_conflict_do_nothing()
     )
@@ -198,7 +198,7 @@ def test_a_statement_owned_by_an_attribute_survives_the_sweep(db_name) -> None:
         .returning(s.sql_attribute.c.id)
     )[0]["id"]
     store().query_write(
-        insert(s.sql_attribute_sql)
+        insert(s.sql_attribute__sql)
         .values(attribute_id=attr_id, sql_query_id=sql_id)
         .on_conflict_do_nothing()
     )

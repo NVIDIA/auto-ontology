@@ -84,10 +84,10 @@ def _in_scope(table_ids: list[str] | None):
         return None
     return ~(
         select(literal(1))
-        .select_from(s.table_term)
+        .select_from(s.table__term)
         .where(
-            s.table_term.c.term_id == s.term.c.id,
-            s.table_term.c.table_id.notin_(table_ids),
+            s.table__term.c.term_id == s.term.c.id,
+            s.table__term.c.table_id.notin_(table_ids),
         )
         .correlate(s.term)
         .exists()
@@ -110,7 +110,7 @@ def _represented():
     """
     return (
         select(literal(1))
-        .where(s.table_term.c.term_id == s.term.c.id)
+        .where(s.table__term.c.term_id == s.term.c.id)
         .correlate(s.term)
         .exists()
     )
@@ -194,25 +194,25 @@ def _certification(table_ids: list[str] | None):
         sql_visible = ~(
             select(literal(1))
             .select_from(
-                s.sql_attribute_sql.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id
-                    == s.sql_attribute_sql.c.sql_query_id,
+                s.sql_attribute__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.sql_attribute__sql.c.sql_query_id,
                 )
             )
             .where(
-                s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id,
-                s.sql_query_table.c.table_id.notin_(table_ids),
+                s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_query__table.c.table_id.notin_(table_ids),
             )
             .correlate(s.sql_attribute)
             .exists()
         )
 
     column_total, column_certified = counts(
-        s.column_attribute_term, s.column_attribute, column_visible
+        s.column_attribute__term, s.column_attribute, column_visible
     )
     sql_total, sql_certified = counts(
-        s.sql_attribute_term, s.sql_attribute, sql_visible
+        s.sql_attribute__term, s.sql_attribute, sql_visible
     )
 
     own_certified = case((s.term.c.name_certified, 1), else_=0) + case(
@@ -294,9 +294,9 @@ def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
             s.term.c.name,
             func.coalesce(s.term.c.description, "").label("description"),
         )
-        .select_from(s.table_term.join(s.term, s.term.c.id == s.table_term.c.term_id))
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
         .where(
-            s.table_term.c.table_id == table_id,
+            s.table__term.c.table_id == table_id,
             s.term.c.source == SEMANTIC_SOURCE,
         )
         .order_by(s.term.c.id)
@@ -380,8 +380,8 @@ def update_term(
             update(s.column_attribute)
             .where(
                 s.column_attribute.c.id.in_(
-                    select(s.column_attribute_term.c.attribute_id).where(
-                        s.column_attribute_term.c.term_id == term_id
+                    select(s.column_attribute__term.c.attribute_id).where(
+                        s.column_attribute__term.c.term_id == term_id
                     )
                 )
             )
@@ -414,7 +414,7 @@ def merge_term(
         description=description,
         synonyms=synonyms or [],
     )
-    # One transaction, as `update_term` above. A term with no `table_term` link
+    # One transaction, as `update_term` above. A term with no `table__term` link
     # is excluded by `_represented()`, so it is invisible to every read while
     # still occupying `uq_term_name_source` -- it blocks its own name forever.
     with write_transaction():
@@ -429,7 +429,7 @@ def merge_term(
         )
         term_id = rows[0]["id"]
         store().query_write(
-            insert(s.table_term)
+            insert(s.table__term)
             .values(table_id=table_id, term_id=term_id)
             .on_conflict_do_nothing()
         )
@@ -448,12 +448,12 @@ def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
         rows = store().query_read(
             select(s.term.c.name, s.term.c.synonyms)
             .select_from(
-                s.column_attribute_term.join(
-                    s.term, s.term.c.id == s.column_attribute_term.c.term_id
+                s.column_attribute__term.join(
+                    s.term, s.term.c.id == s.column_attribute__term.c.term_id
                 )
             )
             .where(
-                s.column_attribute_term.c.attribute_id.in_(list(attr_ids)),
+                s.column_attribute__term.c.attribute_id.in_(list(attr_ids)),
                 s.term.c.synonyms.isnot(None),
                 func.array_length(s.term.c.synonyms, 1) > 0,
             )
@@ -503,13 +503,13 @@ def fetch_all_terms(
     schema_names = (
         select(func.array_agg(func.distinct(s.catalog_schema.c.name)))
         .select_from(
-            s.table_term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
             ).join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
             )
         )
-        .where(s.table_term.c.term_id == s.term.c.id)
+        .where(s.table__term.c.term_id == s.term.c.id)
         .correlate(s.term)
         .scalar_subquery()
     )
@@ -585,12 +585,12 @@ def fetch_all_terms_and_attributes(
         )
         .select_from(
             s.column_attribute.join(
-                s.column_has_attribute,
-                s.column_has_attribute.c.attribute_id == s.column_attribute.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
             )
             .join(
                 s.catalog_column,
-                s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
             .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
             .join(
@@ -649,8 +649,8 @@ def get_full_term_by_id(
             s.catalog_database.c.id.label("db_id"),
         )
         .select_from(
-            s.table_term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
             )
             .join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
@@ -660,7 +660,7 @@ def get_full_term_by_id(
                 s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
         )
-        .where(s.table_term.c.term_id == term_id)
+        .where(s.table__term.c.term_id == term_id)
         .order_by(s.catalog_table.c.id)
     )
     result["tables"] = [dict(r) for r in tables]
@@ -705,17 +705,17 @@ def fetch_term_zones_map(
 
     column_path = (
         s.term.join(
-            s.column_attribute_term,
-            s.column_attribute_term.c.term_id == s.term.c.id,
+            s.column_attribute__term,
+            s.column_attribute__term.c.term_id == s.term.c.id,
         )
         .join(
-            s.column_has_attribute,
-            s.column_has_attribute.c.attribute_id
-            == s.column_attribute_term.c.attribute_id,
+            s.column__has_attribute,
+            s.column__has_attribute.c.attribute_id
+            == s.column_attribute__term.c.attribute_id,
         )
         .join(
             s.catalog_column,
-            s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+            s.catalog_column.c.id == s.column__has_attribute.c.column_id,
         )
         .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
         .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
@@ -723,16 +723,18 @@ def fetch_term_zones_map(
         .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
     )
     sql_path = (
-        s.term.join(s.sql_attribute_term, s.sql_attribute_term.c.term_id == s.term.c.id)
-        .join(
-            s.sql_attribute_sql,
-            s.sql_attribute_sql.c.attribute_id == s.sql_attribute_term.c.attribute_id,
+        s.term.join(
+            s.sql_attribute__term, s.sql_attribute__term.c.term_id == s.term.c.id
         )
         .join(
-            s.sql_query_table,
-            s.sql_query_table.c.sql_query_id == s.sql_attribute_sql.c.sql_query_id,
+            s.sql_attribute__sql,
+            s.sql_attribute__sql.c.attribute_id == s.sql_attribute__term.c.attribute_id,
         )
-        .join(s.catalog_table, s.catalog_table.c.id == s.sql_query_table.c.table_id)
+        .join(
+            s.sql_query__table,
+            s.sql_query__table.c.sql_query_id == s.sql_attribute__sql.c.sql_query_id,
+        )
+        .join(s.catalog_table, s.catalog_table.c.id == s.sql_query__table.c.table_id)
         .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
         .join(s.zone_target, zone_covers_table())
         .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
@@ -817,12 +819,12 @@ def fetch_terms_with_sqls() -> list[dict[str, Any]]:
     """
     owned = (
         select(literal(1))
-        .where(s.sql_attribute_sql.c.sql_query_id == s.sql_query.c.id)
+        .where(s.sql_attribute__sql.c.sql_query_id == s.sql_query.c.id)
         .correlate(s.sql_query)
         .exists()
     ) | (
         select(literal(1))
-        .where(s.custom_analysis_sql.c.sql_query_id == s.sql_query.c.id)
+        .where(s.custom_analysis__sql.c.sql_query_id == s.sql_query.c.id)
         .correlate(s.sql_query)
         .exists()
     )
@@ -835,12 +837,12 @@ def fetch_terms_with_sqls() -> list[dict[str, Any]]:
             s.sql_query,
         )
         .select_from(
-            s.term.join(s.table_term, s.table_term.c.term_id == s.term.c.id)
+            s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id)
             .join(
-                s.sql_query_table,
-                s.sql_query_table.c.table_id == s.table_term.c.table_id,
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.table__term.c.table_id,
             )
-            .join(s.sql_query, s.sql_query.c.id == s.sql_query_table.c.sql_query_id)
+            .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
         )
         .where(s.term.c.source == SEMANTIC_SOURCE, ~owned)
         .distinct()
@@ -889,12 +891,12 @@ def _embedding_attrs_for_table(table_id: str):
         )
         .select_from(
             s.column_attribute.join(
-                s.column_has_attribute,
-                s.column_has_attribute.c.attribute_id == s.column_attribute.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
             )
             .join(
                 s.catalog_column,
-                s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
             .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
             .join(
@@ -923,14 +925,14 @@ def fetch_terms_and_attributes_for_table(
             ),
         )
         .select_from(
-            s.table_term.join(s.term, s.term.c.id == s.table_term.c.term_id)
-            .join(s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id)
+            s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id)
+            .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
             .join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
             )
         )
         .where(
-            s.table_term.c.table_id == table_id,
+            s.table__term.c.table_id == table_id,
             s.term.c.source == SEMANTIC_SOURCE,
         )
         .group_by(s.term.c.id)
@@ -952,8 +954,10 @@ def fetch_term_and_column_attributes_for_embedding(
             s.catalog_database.c.name.label("database_name"),
         )
         .select_from(
-            s.term.outerjoin(s.table_term, s.table_term.c.term_id == s.term.c.id)
-            .outerjoin(s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id)
+            s.term.outerjoin(s.table__term, s.table__term.c.term_id == s.term.c.id)
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+            )
             .outerjoin(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
             )
@@ -984,17 +988,17 @@ def fetch_term_and_column_attributes_for_embedding(
             s.column_attribute.c.id,
         )
         .select_from(
-            s.column_attribute_term.join(
+            s.column_attribute__term.join(
                 s.column_attribute,
-                s.column_attribute.c.id == s.column_attribute_term.c.attribute_id,
+                s.column_attribute.c.id == s.column_attribute__term.c.attribute_id,
             )
             .outerjoin(
-                s.column_has_attribute,
-                s.column_has_attribute.c.attribute_id == s.column_attribute.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
             )
             .outerjoin(
                 s.catalog_column,
-                s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
             # Outer, like the join above it: an attribute need not reach a
             # column, and an inner join here would drop those attributes
@@ -1004,7 +1008,7 @@ def fetch_term_and_column_attributes_for_embedding(
                 s.catalog_table.c.id == s.catalog_column.c.table_id,
             )
         )
-        .where(s.column_attribute_term.c.term_id == term_id)
+        .where(s.column_attribute__term.c.term_id == term_id)
         .order_by(s.column_attribute.c.id)
     )
     return dict(terms[0]), [dict(r) for r in attrs]
@@ -1037,18 +1041,18 @@ def fetch_column_attribute_embedding_contexts_by_column_id(
         )
         .select_from(
             s.catalog_column.join(
-                s.column_has_attribute,
-                s.column_has_attribute.c.column_id == s.catalog_column.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
             )
             .join(
                 s.column_attribute,
-                s.column_attribute.c.id == s.column_has_attribute.c.attribute_id,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
             )
             .join(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
-            .join(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
             .outerjoin(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
             )
@@ -1123,24 +1127,24 @@ def fetch_column_attribute_counts(
     """``[{term_id, count}]`` per Term. Terms with none are omitted."""
     statement = (
         select(
-            s.column_attribute_term.c.term_id,
+            s.column_attribute__term.c.term_id,
             func.count(func.distinct(s.column_attribute.c.id)).label("count"),
         )
         .select_from(
             s.column_attribute.join(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
         )
         .where(s.column_attribute.c.source == SEMANTIC_SOURCE)
-        .group_by(s.column_attribute_term.c.term_id)
+        .group_by(s.column_attribute__term.c.term_id)
     )
     table_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
     if table_ids is not None:
         statement = statement.where(s.column_attribute.c.table_id.in_(table_ids))
     if term_ids is not None:
         statement = statement.where(
-            s.column_attribute_term.c.term_id.in_(list(term_ids))
+            s.column_attribute__term.c.term_id.in_(list(term_ids))
         )
 
     return [
@@ -1168,12 +1172,12 @@ def fetch_column_attributes_by_term_id(
     sample_values = (
         select(s.catalog_column.c.sample_values)
         .select_from(
-            s.column_has_attribute.join(
+            s.column__has_attribute.join(
                 s.catalog_column,
-                s.catalog_column.c.id == s.column_has_attribute.c.column_id,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
             )
         )
-        .where(s.column_has_attribute.c.attribute_id == s.column_attribute.c.id)
+        .where(s.column__has_attribute.c.attribute_id == s.column_attribute.c.id)
         .order_by(s.catalog_column.c.id)
         .limit(1)
         .correlate(s.column_attribute)
@@ -1295,10 +1299,12 @@ def fetch_term_table_pairs(
     represents = restrict(
         select(
             s.term.c.id.label("term_id"),
-            s.table_term.c.table_id.label("table_id"),
+            s.table__term.c.table_id.label("table_id"),
             literal(REL_REPRESENTS).label("path"),
-        ).select_from(s.table_term.join(s.term, s.term.c.id == s.table_term.c.term_id)),
-        s.table_term.c.table_id,
+        ).select_from(
+            s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id)
+        ),
+        s.table__term.c.table_id,
     )
 
     # The link's own type is carried along so ``path`` can name it below -- the
@@ -1306,14 +1312,14 @@ def fetch_term_table_pairs(
     # one matched.
     link = (
         select(
-            s.column_has_attribute.c.column_id,
-            s.column_has_attribute.c.attribute_id,
+            s.column__has_attribute.c.column_id,
+            s.column__has_attribute.c.attribute_id,
             literal(REL_HAS_ATTRIBUTE).label("rel_type"),
         )
         .union(
             select(
-                s.column_semantic_fk.c.column_id,
-                s.column_semantic_fk.c.attribute_id,
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )
@@ -1334,10 +1340,10 @@ def fetch_term_table_pairs(
                 ),
             )
             .join(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
-            .join(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
         ),
         s.catalog_column.c.table_id,
     )
@@ -1519,11 +1525,11 @@ def _term_link_edges():
         ).select_from(source)
 
     tt, ct, ca, cf, ha = (
-        s.table_term,
+        s.table__term,
         s.catalog_column,
-        s.column_attribute_term,
-        s.column_semantic_fk,
-        s.column_has_attribute,
+        s.column_attribute__term,
+        s.column__semantic_fk,
+        s.column__has_attribute,
     )
     return (
         leg("table", tt.c.table_id, "term", tt.c.term_id, REL_REPRESENTS, tt)

@@ -407,7 +407,7 @@ def add_fks(fks_df, last_seen, database_name: str):
     if not rows:
         return
 
-    statement = insert(s.column_foreign_key).values(rows)
+    statement = insert(s.column__foreign_key).values(rows)
     store().query_write(
         statement.on_conflict_do_update(
             index_elements=["source_column_id", "target_column_id"],
@@ -424,8 +424,8 @@ def delete_old_fks(last_seen, database_name: str):
     """
     source = s.catalog_column.alias("source_column")
     store().query_write(
-        delete(s.column_foreign_key).where(
-            s.column_foreign_key.c.source_column_id.in_(
+        delete(s.column__foreign_key).where(
+            s.column__foreign_key.c.source_column_id.in_(
                 select(source.c.id)
                 .select_from(
                     source.join(
@@ -447,8 +447,8 @@ def delete_old_fks(last_seen, database_name: str):
             # from a model import on the next re-ingest. Cypher's `<>` yielded
             # NULL here, so those rows were never matched -- preserved by
             # requiring the column to be set *and* stale.
-            s.column_foreign_key.c.last_seen.isnot(None),
-            s.column_foreign_key.c.last_seen != last_seen,
+            s.column__foreign_key.c.last_seen.isnot(None),
+            s.column__foreign_key.c.last_seen != last_seen,
         )
     )
 
