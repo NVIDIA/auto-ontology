@@ -125,8 +125,10 @@ class World:
         self.schemas[name] = sid
         return did
 
-    def table(self, name: str, database: str = "shopdb") -> str:
-        tid = _add(s.catalog_table, schema_id=self.schemas[database], name=name)
+    def table(
+        self, name: str, database: str = "shopdb", pk: list[str] | None = None
+    ) -> str:
+        tid = _add(s.catalog_table, schema_id=self.schemas[database], name=name, pk=pk)
         self.tables[name] = tid
         return tid
 
@@ -836,3 +838,307 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
         )
     )
     assert len(rows) == 1
+
+
+# --------------------------------------------------------------------------
+# find_shared_hub_bridge
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def hub_and_spokes(world):
+    """A real identity hub with a declared PK, and two spokes FK-ing into it.
+
+    `robot_record` (docstring's own example) is the hub: its own declared PK
+    is `id`, and both `spoke_a.hub_id` and `spoke_b.hub_id` hold a *forward*
+    SEMANTIC_FK to the attribute that column owns -- the exact shape
+    find_join_path's forward-only guard cannot connect.
+    """
+    world.table("hub", pk=["id"])
+    world.column("hub", "id")
+    world.attribute("hub-id", owner="hub.id")
+
+    world.table("spoke_a")
+    world.column("spoke_a", "hub_id")
+    world.references("spoke_a.hub_id", "hub-id")
+
+    world.table("spoke_b")
+    world.column("spoke_b", "hub_id")
+    world.references("spoke_b.hub_id", "hub-id")
+    return world
+
+
+def test_finds_the_shared_pk_anchored_hub(hub_and_spokes) -> None:
+    result = a.find_shared_hub_bridge(
+        hub_and_spokes.columns["spoke_a.hub_id"],
+        hub_and_spokes.columns["spoke_b.hub_id"],
+    )
+    assert result == {"hub_table": "hub", "hub_column": "id"}
+
+
+def test_shared_hub_bridge_is_order_independent(hub_and_spokes) -> None:
+    assert a.find_shared_hub_bridge(
+        hub_and_spokes.columns["spoke_b.hub_id"],
+        hub_and_spokes.columns["spoke_a.hub_id"],
+    ) == {"hub_table": "hub", "hub_column": "id"}
+
+
+def test_shared_hub_bridge_returns_empty_for_the_same_column_twice(
+    hub_and_spokes,
+) -> None:
+    col = hub_and_spokes.columns["spoke_a.hub_id"]
+    assert a.find_shared_hub_bridge(col, col) == {}
+
+
+def test_shared_hub_bridge_requires_the_targets_own_declared_pk(world) -> None:
+    """Two FKs sharing a target that is NOT that table's declared PK must not bridge.
+
+    Same shape as `hub_and_spokes`, but `hub.id` is never declared as the
+    table's PK -- this is what keeps the function from treating "any
+    attribute two FK columns happen to share" as a hub.
+    """
+    world.table("hub")  # no pk=...
+    world.column("hub", "id")
+    world.attribute("hub-id", owner="hub.id")
+    world.table("spoke_a")
+    world.column("spoke_a", "hub_id")
+    world.references("spoke_a.hub_id", "hub-id")
+    world.table("spoke_b")
+    world.column("spoke_b", "hub_id")
+    world.references("spoke_b.hub_id", "hub-id")
+
+    result = a.find_shared_hub_bridge(
+        world.columns["spoke_a.hub_id"], world.columns["spoke_b.hub_id"]
+    )
+    assert result == {}
+
+
+def test_shared_hub_bridge_returns_empty_when_fks_target_different_attributes(
+    world,
+) -> None:
+    world.table("hub_x", pk=["id"])
+    world.column("hub_x", "id")
+    world.attribute("hub-x-id", owner="hub_x.id")
+    world.table("hub_y", pk=["id"])
+    world.column("hub_y", "id")
+    world.attribute("hub-y-id", owner="hub_y.id")
+    world.table("spoke_a")
+    world.column("spoke_a", "x_id")
+    world.references("spoke_a.x_id", "hub-x-id")
+    world.table("spoke_b")
+    world.column("spoke_b", "y_id")
+    world.references("spoke_b.y_id", "hub-y-id")
+
+    result = a.find_shared_hub_bridge(
+        world.columns["spoke_a.x_id"], world.columns["spoke_b.y_id"]
+    )
+    assert result == {}
+
+
+# --------------------------------------------------------------------------
+# find_anchor_hub_siblings
+# --------------------------------------------------------------------------
+
+
+def test_finds_the_hub_and_its_sibling(hub_and_spokes) -> None:
+    results, truncated = a.find_anchor_hub_siblings(hub_and_spokes.tables["spoke_a"])
+    assert truncated == 0
+    by_target = {r["target_table"]: r for r in results}
+    assert by_target["hub"]["is_hub"] is True
+    assert by_target["hub"]["source_table"] == "spoke_a"
+    assert by_target["spoke_b"]["is_hub"] is False
+    assert by_target["spoke_b"]["hub_table"] == "hub"
+    # The anchor itself and any non-sibling table must not show up.
+    assert "spoke_a" not in by_target
+
+
+def test_hub_siblings_are_empty_for_a_table_with_no_outgoing_fk(world) -> None:
+    world.table("lonely")
+    world.column("lonely", "id")
+    results, truncated = a.find_anchor_hub_siblings(world.tables["lonely"])
+    assert results == []
+    assert truncated == 0
+
+
+def test_hub_siblings_caps_and_reports_the_truncated_count(world) -> None:
+    world.table("hub", pk=["id"])
+    world.column("hub", "id")
+    world.attribute("hub-id", owner="hub.id")
+    world.table("anchor")
+    world.column("anchor", "hub_id")
+    world.references("anchor.hub_id", "hub-id")
+    for i in range(3):
+        name = f"sib{i}"
+        world.table(name)
+        world.column(name, "hub_id")
+        world.references(f"{name}.hub_id", "hub-id")
+
+    results, truncated = a.find_anchor_hub_siblings(
+        world.tables["anchor"], max_siblings=2
+    )
+    siblings = [r for r in results if not r["is_hub"]]
+    assert len(siblings) == 2
+    assert truncated == 1
+
+
+def test_hub_siblings_uncapped_when_max_siblings_is_none(world) -> None:
+    world.table("hub", pk=["id"])
+    world.column("hub", "id")
+    world.attribute("hub-id", owner="hub.id")
+    world.table("anchor")
+    world.column("anchor", "hub_id")
+    world.references("anchor.hub_id", "hub-id")
+    for i in range(3):
+        name = f"sib{i}"
+        world.table(name)
+        world.column(name, "hub_id")
+        world.references(f"{name}.hub_id", "hub-id")
+
+    results, truncated = a.find_anchor_hub_siblings(
+        world.tables["anchor"], max_siblings=None
+    )
+    siblings = [r for r in results if not r["is_hub"]]
+    assert len(siblings) == 3
+    assert truncated == 0
+
+
+def test_table_bridge_cannot_reach_across_a_shared_hub(hub_and_spokes) -> None:
+    """Documents exactly why find_shared_hub_bridge has to exist separately.
+
+    find_table_bridge/find_join_path share a forward-only SEMANTIC_FK
+    traversal, so two spokes connected only through a shared hub (both FKs
+    point *at* the hub, neither points *out* of it) are structurally
+    unreachable from each other -- confirming the guard find_shared_hub_bridge
+    was written to work around, rather than lift.
+    """
+    bridge_tables, hops = a.find_table_bridge(
+        hub_and_spokes.tables["spoke_a"], hub_and_spokes.tables["spoke_b"]
+    )
+    assert (bridge_tables, hops) == ([], [])
+
+
+# --------------------------------------------------------------------------
+# find_table_bridge
+# --------------------------------------------------------------------------
+
+
+@pytest.fixture
+def bridged(world):
+    """`orders -> customers -> addresses`, same shape as the join-path fixture.
+
+    `customers` is a genuine intermediate bridge table: reachable by the
+    ordinary forward-FK BFS, unlike the hub/spoke shape above.
+    """
+    world.table("orders")
+    world.column("orders", "customer_id")
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "address_id", 2)
+    world.table("addresses")
+    world.column("addresses", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.attribute("address-id", owner="addresses.id")
+    world.references("orders.customer_id", "customer-id")
+    world.references("customers.address_id", "address-id")
+    return world
+
+
+def test_finds_a_genuine_intermediate_bridge_table(bridged) -> None:
+    bridge_tables, hops = a.find_table_bridge(
+        bridged.tables["orders"], bridged.tables["addresses"]
+    )
+    assert [t["name"] for t in bridge_tables] == ["customers"]
+    assert [(h["source_table"], h["source_column"]) for h in hops] == [
+        ("orders", "customer_id"),
+        ("customers", "address_id"),
+    ]
+    assert [(h["target_table"], h["target_column"]) for h in hops] == [
+        ("customers", "id"),
+        ("addresses", "id"),
+    ]
+
+
+def test_table_bridge_tries_both_directions(bridged) -> None:
+    """SEMANTIC_FK is forward-only, so the reverse start must also be tried."""
+    bridge_tables, hops = a.find_table_bridge(
+        bridged.tables["addresses"], bridged.tables["orders"]
+    )
+    assert [t["name"] for t in bridge_tables] == ["customers"]
+    assert hops
+
+
+def test_table_bridge_restricts_to_allowed_table_ids(bridged) -> None:
+    """A real bridge that was never a pre-filter candidate must be discarded."""
+    bridge_tables, hops = a.find_table_bridge(
+        bridged.tables["orders"],
+        bridged.tables["addresses"],
+        allowed_table_ids={bridged.tables["orders"], bridged.tables["addresses"]},
+    )
+    assert (bridge_tables, hops) == ([], [])
+
+
+def test_table_bridge_allows_when_the_bridge_is_in_the_allowed_set(bridged) -> None:
+    bridge_tables, hops = a.find_table_bridge(
+        bridged.tables["orders"],
+        bridged.tables["addresses"],
+        allowed_table_ids={
+            bridged.tables["orders"],
+            bridged.tables["customers"],
+            bridged.tables["addresses"],
+        },
+    )
+    assert [t["name"] for t in bridge_tables] == ["customers"]
+
+
+def test_table_bridge_returns_empty_for_unconnected_tables(world) -> None:
+    world.table("alpha")
+    world.column("alpha", "x")
+    world.table("beta")
+    world.column("beta", "y")
+    assert a.find_table_bridge(world.tables["alpha"], world.tables["beta"]) == (
+        [],
+        [],
+    )
+
+
+# --------------------------------------------------------------------------
+# find_kept_table_bridges
+# --------------------------------------------------------------------------
+
+
+def test_kept_table_bridges_finds_a_bridge_between_a_pair(bridged) -> None:
+    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
+        [bridged.tables["orders"], bridged.tables["addresses"]]
+    )
+    assert [t["name"] for t in bridge_tables] == ["customers"]
+    assert len(bridge_paths) == 1
+    assert skipped == 0
+
+
+def test_kept_table_bridges_excludes_tables_already_kept(bridged) -> None:
+    """A bridge table already in the kept set must not be "rediscovered"."""
+    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
+        [
+            bridged.tables["orders"],
+            bridged.tables["customers"],
+            bridged.tables["addresses"],
+        ]
+    )
+    assert bridge_tables == []
+    # The join hops for both pairs touching customers are still surfaced.
+    assert len(bridge_paths) >= 1
+
+
+def test_kept_table_bridges_requires_at_least_two_tables(bridged) -> None:
+    assert a.find_kept_table_bridges([]) == ([], [], 0)
+    assert a.find_kept_table_bridges([bridged.tables["orders"]]) == ([], [], 0)
+
+
+def test_kept_table_bridges_respects_the_cap(bridged) -> None:
+    """max_bridge_tables=0 means no pair is ever checked."""
+    bridge_tables, bridge_paths, skipped = a.find_kept_table_bridges(
+        [bridged.tables["orders"], bridged.tables["addresses"]],
+        max_bridge_tables=0,
+    )
+    assert (bridge_tables, bridge_paths) == ([], [])
+    assert skipped == 1
