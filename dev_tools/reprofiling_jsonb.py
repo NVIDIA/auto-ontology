@@ -27,14 +27,11 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
-import sys
 
 from gsf.connectors.registry import create_connector
 from gsf.dal.datasources import (
     fetch_table_context,
     get_neo4j_conn,
-    store_column_sample_values,
 )
 from gsf.semantic.visit_enter import calculate_columns_profiling
 
@@ -43,6 +40,7 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger("reprofiling_jsonb")
+
 
 def _find_jsonb_tables_in_neo4j(database_name: str) -> list[dict]:
     """Return Neo4j table rows that contain at least one jsonb column."""
@@ -90,7 +88,7 @@ def _clear_jsonb_sample_values(database_name: str) -> int:
         """,
         {"db": database_name},
     )
-    return (result[0]["cleared"] if result else 0)
+    return result[0]["cleared"] if result else 0
 
 
 def reprofiling_for_connection(connection_string: str, *, force: bool = False) -> int:
@@ -131,8 +129,7 @@ def reprofiling_for_connection(connection_string: str, *, force: bool = False) -
             continue
 
         jsonb_col_names = [
-            c["name"] for c in columns
-            if "json" in (c.get("data_type") or "").lower()
+            c["name"] for c in columns if "json" in (c.get("data_type") or "").lower()
         ]
 
         # Intercept what store_column_sample_values actually receives so we log
@@ -169,15 +166,20 @@ def reprofiling_for_connection(connection_string: str, *, force: bool = False) -
             else:
                 logger.info("    %-30s → (no keys stored)", col_name)
 
-    logger.info("  Updated %d/%d table(s)%s", updated, len(tables),
-                f" ({failed} failed)" if failed else "")
+    logger.info(
+        "  Updated %d/%d table(s)%s",
+        updated,
+        len(tables),
+        f" ({failed} failed)" if failed else "",
+    )
     return updated
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--connection", "-c",
+        "--connection",
+        "-c",
         metavar="CONN",
         action="append",
         default=[],
@@ -214,7 +216,9 @@ def main() -> None:
         except Exception:
             logger.exception("Failed for connection %r", conn)
 
-    logger.info("Done — %d table(s) re-profiled across %d database(s)", total, len(unique))
+    logger.info(
+        "Done — %d table(s) re-profiled across %d database(s)", total, len(unique)
+    )
 
 
 if __name__ == "__main__":

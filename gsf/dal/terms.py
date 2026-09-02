@@ -812,7 +812,7 @@ def fetch_table_schema_map(database_name: str) -> dict[str, str]:
 
 
 def fetch_terms_with_sqls(
-    source: str,
+    source: str = SEMANTIC_SOURCE,
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Every Term with the **ingestion** SQL of its connected tables.
@@ -820,6 +820,11 @@ def fetch_terms_with_sqls(
     Statements owned by a SqlAttribute or CustomAnalysis are excluded, so
     generated semantic SQL cannot feed the next round of suggestions — a
     feedback loop where the suggester learns from itself.
+
+    *source* defaults to ``SEMANTIC_SOURCE`` — matching main's version, which
+    hardcoded it — so callers that never cared about non-semantic terms (the
+    zero-arg call sites/tests) keep working unchanged; it's only a parameter
+    at all because ``sql_attribute_suggester.py`` passes it explicitly.
 
     Terms with no ingestion query are omitted. When *database_name* is given,
     only terms whose tables belong to that database are returned — required

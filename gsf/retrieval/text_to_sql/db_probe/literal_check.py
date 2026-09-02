@@ -129,10 +129,17 @@ def _like_predicates(tree: exp.Expression) -> list[tuple[exp.Column, str]]:
     ``_string_predicates``), and ``ILIKE`` is skipped too — it's already
     case-insensitive by construction, so there's nothing for this check to
     catch there.
+
+    ``NOT LIKE`` shows up in two shapes depending on sqlglot version: older
+    versions wrap the ``Like`` node in an ``exp.Not`` parent; newer ones parse
+    it as a plain ``Like`` node with ``negate=True`` in its own args and no
+    ``Not`` wrapper at all. Checking only the parent silently stopped catching
+    ``NOT LIKE`` on the newer parser — every negated pattern got treated as a
+    positive one — so both shapes are checked here.
     """
     out: list[tuple[exp.Column, str]] = []
     for like in tree.find_all(exp.Like):
-        if isinstance(like.parent, exp.Not):
+        if isinstance(like.parent, exp.Not) or like.args.get("negate"):
             continue
         col = _as_column(like.this)
         pattern = _as_string_literal(like.expression)
