@@ -4,9 +4,9 @@
 
 """Data Access Layer — catalog datasource queries and VDB re-embedding.
 
-All direct Neo4j calls live in gsf/dal/datasources.py.
+All direct store access lives in gsf/dal/datasources.py.
 This module only keeps the VDB orchestration: update_node_properties
-and its helpers that mix Neo4j reads with pgvector upserts.
+and its helpers that mix catalog reads with pgvector upserts.
 """
 
 from __future__ import annotations
@@ -15,9 +15,9 @@ import logging
 from typing import Any
 
 import pandas as pd
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
+from gsf.catalog.constants import Labels
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
 
 from gsf.dal.datasources import (
@@ -93,7 +93,7 @@ def _get_node_ids_for_embedding_update(
     label: str,
     properties: dict[str, Any],
 ) -> list[str]:
-    """Return Neo4j node ids whose pgvector rows must be refreshed for *properties*.
+    """Return the ids whose pgvector rows must be refreshed for *properties*.
 
     * ``Column`` + ``description`` → column and parent ``Table`` (table text
       lists column descriptions).
@@ -116,7 +116,7 @@ def _get_node_ids_for_embedding_update(
             targets.append(table_id)
         else:
             logger.warning(
-                "Column %r has no parent Table in Neo4j; re-embedding column only.",
+                "Column %r has no parent table; re-embedding column only.",
                 node_id,
             )
         return targets
@@ -149,7 +149,7 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         )
         return
 
-    embed_df = TabularFetchEmbeddingsOp(database_name=database_name).process(
+    embed_df = CatalogEmbeddingRowsOp(database_name=database_name).process(
         (tables_df, columns_df),
     )
     if embed_df.empty:

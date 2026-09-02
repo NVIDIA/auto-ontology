@@ -14,8 +14,8 @@ import psycopg
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 
 class PostgresDatabase(SQLDatabase):
@@ -87,44 +87,96 @@ class PostgresDatabase(SQLDatabase):
     # ------------------------------------------------------------------
 
     def get_tables(self) -> pd.DataFrame:
-        # Filter tables that are part of partitioned tables.
-        # relkind distinguishes materialized views (m) from ordinary tables (r).
+        """Every relation a user can query, one row each.
+
+        Driven from ``pg_class`` rather than ``information_schema.tables``,
+        because that view omits materialized views entirely — so a matview could
+        never reach the catalog no matter what ``relkind`` was allowed through,
+        and :data:`TableTypes.MATERIALIZED_VIEW` was unreachable.
+
+        ``relkind`` cases, all of which are queryable and belong in the catalog:
+          r  ordinary table          p  partitioned table (the parent)
+          v  view                    m  materialized view
+          f  foreign table
+
+        ``relispartition = false`` drops partition *children*: they are an
+        implementation detail of their parent, and listing both would show the
+        same rows twice under names no one writes queries against. The parent
+        ``p`` must be kept for exactly that reason — excluding both, as this did
+        before, made partitioned tables invisible.
+        """
         view_type = TableTypes.VIEW
         materialized_view_type = TableTypes.MATERIALIZED_VIEW
         base_table_type = TableTypes.BASE_TABLE
         return self.execute(f"""
             SELECT
-                t.table_schema AS table_schema,
-                t.table_name   AS table_name,
+                n.nspname   AS table_schema,
+                c.relname   AS table_name,
                 CASE c.relkind
                     WHEN 'v' THEN '{view_type}'
                     WHEN 'm' THEN '{materialized_view_type}'
                     ELSE '{base_table_type}'
                 END AS table_type
-            FROM information_schema.tables t
-            JOIN pg_namespace n ON n.nspname = t.table_schema
-            JOIN pg_class c ON c.relname = t.table_name AND c.relnamespace = n.oid
-            WHERE t.table_schema NOT IN ('pg_catalog', 'information_schema')
+            FROM pg_class c
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND n.nspname NOT LIKE 'pg\\_%'
               AND c.relispartition = false
-              AND c.relkind IN ('r', 'v', 'm', 'f')
-            ORDER BY t.table_schema, t.table_name
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              -- Restores what information_schema filtered for free: a relation
+              -- the ingesting role cannot read must not be catalogued, or
+              -- text-to-SQL will offer it and every query dies with
+              -- "permission denied".
+              AND has_table_privilege(c.oid, 'SELECT')
+            ORDER BY n.nspname, c.relname
         """)
 
     def get_columns(self) -> pd.DataFrame:
+        """Columns for every relation :meth:`get_tables` returns.
+
+        Also driven from ``pg_catalog``, and for the same reason: matview
+        columns are absent from ``information_schema.columns``, so a matview
+        that reached the catalog would arrive with no columns at all.
+
+        ``format_type(atttypid, NULL)`` gives the unqualified type name without
+        precision (``character varying``, not ``character varying(255)``). It is
+        **not** identical to ``information_schema.columns.data_type``, which
+        flattens a domain to its base type and reports ``ARRAY`` /
+        ``USER-DEFINED`` where this reports ``text[]`` / ``mpaa_rating``. The
+        more specific name is deliberate — it is what the text-to-SQL agent
+        needs to write a valid predicate against an enum or an array column.
+
+        ``ordinal_position`` is a row number, not ``attnum``. ``attnum`` keeps
+        the slots of dropped columns, so a table that has ever had a
+        ``DROP COLUMN`` would number its columns 1, 3, 4 and disagree with both
+        ``information_schema`` and the model-interchange export.
+
+        ``has_table_privilege`` restores the filtering ``information_schema``
+        applied for free: without it, a role with rights on one schema still
+        catalogues, embeds and offers every table it cannot read, and every
+        generated query against them dies with ``permission denied``.
+        """
         return self.execute("""
             SELECT
-                c.table_schema       AS table_schema,
-                c.table_name         AS table_name,
-                c.column_name        AS column_name,
-                c.data_type          AS data_type,
-                c.is_nullable        AS is_nullable,
-                c.ordinal_position   AS ordinal_position
-            FROM information_schema.columns c
-            JOIN pg_namespace n ON n.nspname = c.table_schema
-            JOIN pg_class pc ON pc.relname = c.table_name AND pc.relnamespace = n.oid
-            WHERE c.table_schema NOT IN ('pg_catalog', 'information_schema')
-              AND pc.relispartition = false
-            ORDER BY c.table_schema, c.table_name, c.ordinal_position
+                n.nspname                        AS table_schema,
+                c.relname                        AS table_name,
+                a.attname                        AS column_name,
+                format_type(a.atttypid, NULL)    AS data_type,
+                NOT a.attnotnull                 AS is_nullable,
+                row_number() OVER (
+                    PARTITION BY c.oid ORDER BY a.attnum
+                )                                AS ordinal_position
+            FROM pg_attribute a
+            JOIN pg_class c ON c.oid = a.attrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+              AND n.nspname NOT LIKE 'pg\\_%'
+              AND c.relispartition = false
+              AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+              AND has_table_privilege(c.oid, 'SELECT')
+              AND a.attnum > 0
+              AND NOT a.attisdropped
+            ORDER BY n.nspname, c.relname, a.attnum
         """)
 
     def get_queries(self, hours: int = 24) -> pd.DataFrame:

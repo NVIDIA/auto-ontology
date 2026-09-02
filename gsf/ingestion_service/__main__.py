@@ -9,14 +9,14 @@ background schedulers via the app lifespan:
 
 * :class:`DataScheduler` — data ingestion, triggerable via ``POST /ingest``.
 * :class:`SemanticScheduler` — semantic compilation over the catalog that
-  :class:`DataScheduler` writes to Neo4j, triggerable via
+  :class:`DataScheduler` writes to the store, triggerable via
   ``POST /semantic/compile``. Its first pass waits for
   :class:`DataScheduler`'s first pass to finish (see ``semantic_scheduler.py``)
   so the two, which both start at the same moment on boot, can't race.
 
 Each runs once at startup, then every 24h measured from the previous run —
-independent of how long each run takes. Connections are reloaded on every pass
-so newly added ones are picked up without restarting.
+independent of how long each run takes. Connections are reloaded from the
+catalog on every pass so newly added ones are picked up without restarting.
 
 Usage::
 
@@ -36,11 +36,11 @@ from gsf.env import load_env
 
 load_env()
 
+from gsf.dal.schema_version import require_current_schema  # noqa: E402
 from gsf.ingestion_service.config import (  # noqa: E402
     is_semantic_compilation_enabled,
 )
 from gsf.ingestion_service.data_scheduler import DataScheduler  # noqa: E402
-from gsf.ingestion_service.history import ensure_history_table  # noqa: E402
 from gsf.ingestion_service.router import router  # noqa: E402
 from gsf.ingestion_service.semantic_scheduler import SemanticScheduler  # noqa: E402
 from gsf.version import get_app_version  # noqa: E402
@@ -50,6 +50,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Same gate as the API server: this service writes the catalog, so against a
+    # schema it does not expect every ingest fails partway through instead of
+    # not starting. Worse here than there, because a scheduler runs unattended —
+    # nobody is watching a request come back 500, so the failure surfaces as an
+    # empty catalog hours later.
+    require_current_schema()
+
     # uvicorn owns SIGINT/SIGTERM; each scheduler exposes a stop() that unwinds
     # its in-flight wait promptly on shutdown. Schedulers are stored on
     # app.state so the router can trigger them on demand.
@@ -57,14 +64,10 @@ async def lifespan(app: FastAPI):
     # Waits for the ingest scheduler's first pass before compiling (see
     # semantic_scheduler.py) so the two starting at the same moment on boot
     # can't race — otherwise the very first compile could run against a
-    # catalog that ingest hasn't written to Neo4j yet.
+    # catalog that ingest hasn't written yet.
     semantic_scheduler = SemanticScheduler(depends_on=data_scheduler)
     app.state.data_scheduler = data_scheduler
     app.state.semantic_scheduler = semantic_scheduler
-
-    # GSF owns this table (unlike `configurations`, which Prisma declares), so
-    # it's created here rather than assumed to already exist.
-    ensure_history_table()
 
     data_scheduler.start()
     # Only start semantic compilation if it's enabled in settings. When a user

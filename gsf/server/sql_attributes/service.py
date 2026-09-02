@@ -4,9 +4,9 @@
 
 """SqlAttribute write orchestration.
 
-All direct Neo4j calls live in gsf/dal/sql_attributes.py.
+All direct store access lives in gsf/dal/sql_attributes.py.
 This module keeps orchestration: connector resolution, SQL validation,
-Neo4j node persistence via add_query, and VDB embedding lifecycle.
+node persistence via add_query, and VDB embedding lifecycle.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.dal.queries_dal import add_query
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Props
+from gsf.catalog.store.queries import add_query
+from gsf.catalog.model import CatalogNode
+from gsf.catalog.constants import Props
 
 from gsf.connectors import get_connectors
 from gsf.dal import sql_attributes as sql_attr_dal
@@ -105,7 +105,7 @@ def _resolve_database_name(connector: str | None) -> str | None:
 
 
 def _persist_attr_with_sql(
-    attr_node: Neo4jNode,
+    attr_node: CatalogNode,
     sql: str,
     query_obj: Any,
 ) -> dict[str, Any]:
@@ -136,7 +136,7 @@ def _embed_sql_attribute(
     attr_id: str,
     database_name: str | None = None,
 ) -> None:
-    """Fetch docs from Neo4j, embed them, and upsert into *vdb*."""
+    """Fetch docs from the store, embed them, and upsert into *vdb*."""
     docs = fetch_sql_attribute_docs(attr_id)
     if not docs:
         logger.info(
@@ -252,7 +252,7 @@ def create_sql_attribute(
         get_schemas(database_name),
     )
 
-    attr_node = Neo4jNode(
+    attr_node = CatalogNode(
         name=name,
         label=LABEL_SQL_ATTRIBUTE,
         props={
@@ -357,7 +357,7 @@ def update_sql_attribute(
             source=source,
         )
 
-        attr_node = Neo4jNode(
+        attr_node = CatalogNode(
             name=next_name,
             label=LABEL_SQL_ATTRIBUTE,
             props={

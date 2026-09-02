@@ -17,8 +17,8 @@ import pandas as pd
 from databricks import sql
 from databricks.sql.client import Connection
 from databricks.sql.exc import Error
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -387,7 +387,7 @@ class DatabricksDatabase(SQLDatabase):
 
         ``SHOW TABLES`` returns both tables and views with no type column. We run
         ``SHOW VIEWS`` in the same schema to build a view-name set, then classify
-        each row correctly. This avoids storing views as ``BASE_TABLE`` in Neo4j,
+        each row correctly. This avoids storing views as ``BASE_TABLE``,
         which would break any downstream consumer that discriminates on node type.
         """
         catalog = _quoted_identifier(self._database_name)
@@ -685,7 +685,7 @@ class DatabricksDatabase(SQLDatabase):
                     table_name,
                     column_name,
                     full_data_type AS data_type,
-                    is_nullable,
+                    is_nullable = 'YES' AS is_nullable,
                     ordinal_position
                 FROM {catalog}.information_schema.columns
                 WHERE {self._schema_condition()}

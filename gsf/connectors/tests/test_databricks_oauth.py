@@ -173,7 +173,7 @@ def test_any_connection_fails_soft_when_lookup_errors(monkeypatch: MonkeyPatch) 
     import gsf.dal.connections as dal
 
     def boom() -> None:
-        raise RuntimeError("neo4j down")
+        raise RuntimeError("store down")
 
     monkeypatch.setattr(dal, "list_connections", boom)
     assert databricks_oauth.any_connection_uses_sso_federation() is False

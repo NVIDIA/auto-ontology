@@ -5,8 +5,7 @@
 """HTTP client for the ingestion service API.
 
 Lightweight on purpose: it only depends on ``httpx`` so the server can trigger
-ingest over HTTP without importing ``gsf.ingestion_service.ingest`` (which pulls
-in heavy ``nemo_retriever`` deps and requires ``REASONING_API_KEY`` at import time).
+ingest over HTTP without importing ``gsf.ingestion_service.ingest``
 """
 
 from __future__ import annotations

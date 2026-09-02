@@ -1,127 +1,104 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j helpers for applying a zone scope to catalog queries.
+"""Zone scoping: which catalog a set of zones lets you see.
 
-Users are not represented in Neo4j.  Zone membership is not used to
-authorize catalog access: every authenticated role has the same unrestricted
-catalog scope.
+This is the access-control boundary. Nearly every read in the DAL takes a
+``zone_ids`` argument and narrows itself through here, so a mistake does not
+show up as a wrong answer — it shows up as one user seeing another's data.
+Treated accordingly: the expansion rules are spelled out, and the tests cover
+each one separately rather than in aggregate.
+
+Two entry points: :func:`resolve_accessible_catalog_ids` returns the id sets a
+caller can see, and :func:`resolve_table_filter` turns those into a predicate to
+hand to ``.where()``.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from sqlalchemy import text
 
-from gsf.server.zones.constants import LABEL_ZONE, REL_ZONE_OF
+from gsf.dal.session import store
+
+#: One query in place of four round trips.
+#:
+#: Expansion runs **one level from each direct grant**, and not transitively —
+#: granting a table admits its schema, but not that schema's other tables.
+#: Every branch reads from ``granted`` rather than from another CTE, which is
+#: what keeps it non-recursive.
+_ACCESSIBLE_SQL = """
+WITH granted AS (
+    SELECT database_id, schema_id, table_id
+      FROM zone_target
+     WHERE zone_id = ANY(:zone_ids)
+),
+tabs AS (
+    -- granted directly
+    SELECT table_id AS id FROM granted WHERE table_id IS NOT NULL
+    UNION
+    -- under a granted schema
+    SELECT t.id FROM catalog_table t
+      JOIN granted g ON g.schema_id = t.schema_id
+    UNION
+    -- under a granted database
+    SELECT t.id FROM catalog_table t
+      JOIN catalog_schema s ON s.id = t.schema_id
+      JOIN granted g ON g.database_id = s.database_id
+),
+schemas AS (
+    SELECT schema_id AS id FROM granted WHERE schema_id IS NOT NULL
+    UNION
+    SELECT s.id FROM catalog_schema s
+      JOIN granted g ON g.database_id = s.database_id
+    UNION
+    -- the parent of a directly granted table
+    SELECT t.schema_id FROM catalog_table t
+      JOIN granted g ON g.table_id = t.id
+),
+dbs AS (
+    SELECT database_id AS id FROM granted WHERE database_id IS NOT NULL
+    UNION
+    -- the parent of a directly granted schema
+    SELECT s.database_id FROM catalog_schema s
+      JOIN granted g ON g.schema_id = s.id
+    UNION
+    -- the grandparent of a directly granted table
+    SELECT s.database_id FROM catalog_schema s
+      JOIN catalog_table t ON t.schema_id = s.id
+      JOIN granted g ON g.table_id = t.id
+)
+SELECT
+    (SELECT coalesce(array_agg(id), '{}') FROM dbs)     AS db_ids,
+    (SELECT coalesce(array_agg(id), '{}') FROM schemas) AS schema_ids,
+    (SELECT coalesce(array_agg(id), '{}') FROM tabs)    AS table_ids
+"""
 
 
 def get_accessible_catalog_ids_for_zones(
     zone_ids: list[str],
 ) -> dict[str, set[str]]:
-    """Return the catalog node IDs reachable via *zone_ids*.
+    """Return the catalog ids reachable through *zone_ids*.
 
-    Receives a pre-resolved list of zone IDs (already scoped to the requesting
-    user).  Does NOT consult the User node — caller is responsible for passing
-    only the zones the user has access to.
+    Receives zones already scoped to the requesting user; it does not consult
+    the user itself.
 
-    Returns a dict with three sets:
-
-    * ``"db_ids"``     — Database nodes reachable through the given zones.
-    * ``"schema_ids"`` — Schema nodes reachable through the given zones.
-    * ``"table_ids"``  — Table nodes reachable through the given zones.
-
-    Parent nodes are expanded automatically: if a zone grants access to a Table,
-    the parent Schema and grandparent Database are added so the catalog tree can
-    be rendered correctly on the client.  Likewise, if a zone covers a DB, all
-    descendant schemas and tables are included.
+    Parents are included so the catalog tree can be rendered: a zone granting a
+    table also admits that table's schema and database. Children are included
+    the other way: a zone granting a database admits its schemas and their
+    tables. Neither direction is transitive — see :data:`_ACCESSIBLE_SQL`.
     """
-    conn = get_neo4j_conn()
+    if not zone_ids:
+        return {"db_ids": set(), "schema_ids": set(), "table_ids": set()}
 
-    # Collect items directly linked via Zone → ZONE_OF → item.
-    item_rows = conn.query_read(
-        f"""
-        UNWIND $zone_ids AS zone_id
-        MATCH (z:{LABEL_ZONE} {{id: zone_id}})-[:{REL_ZONE_OF}]->(item)
-        RETURN labels(item)[0] AS label, item.id AS id
-        """,
-        {"zone_ids": zone_ids},
-    )
-
-    direct_db_ids: set[str] = set()
-    direct_schema_ids: set[str] = set()
-    direct_table_ids: set[str] = set()
-    for r in item_rows:
-        lbl, nid = r["label"], r["id"]
-        if lbl == Labels.DB:
-            direct_db_ids.add(nid)
-        elif lbl == Labels.SCHEMA:
-            direct_schema_ids.add(nid)
-        elif lbl == Labels.TABLE:
-            direct_table_ids.add(nid)
-
-    all_db_ids: set[str] = set(direct_db_ids)
-    all_schema_ids: set[str] = set(direct_schema_ids)
-    all_table_ids: set[str] = set(direct_table_ids)
-
-    # DB-level zone → expand to all descendant schemas and tables.
-    if direct_db_ids:
-        rows = conn.query_read(
-            f"""
-            UNWIND $db_ids AS db_id
-            MATCH (db:{Labels.DB} {{id: db_id}})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-            OPTIONAL MATCH (s)-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-            RETURN DISTINCT s.id AS schema_id, t.id AS table_id
-            """,
-            {"db_ids": list(direct_db_ids)},
-        )
-        for r in rows:
-            if r["schema_id"]:
-                all_schema_ids.add(r["schema_id"])
-            if r["table_id"]:
-                all_table_ids.add(r["table_id"])
-
-    # Schema-level zone → find parent DB + descendant tables.
-    if direct_schema_ids:
-        rows = conn.query_read(
-            f"""
-            UNWIND $schema_ids AS schema_id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA} {{id: schema_id}})
-            OPTIONAL MATCH (s)-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-            RETURN DISTINCT db.id AS db_id, t.id AS table_id
-            """,
-            {"schema_ids": list(direct_schema_ids)},
-        )
-        for r in rows:
-            if r["db_id"]:
-                all_db_ids.add(r["db_id"])
-            if r["table_id"]:
-                all_table_ids.add(r["table_id"])
-
-    # Table-level zone → find parent Schema and grandparent DB.
-    if direct_table_ids:
-        rows = conn.query_read(
-            f"""
-            UNWIND $table_ids AS table_id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: table_id}})
-            RETURN DISTINCT db.id AS db_id, s.id AS schema_id
-            """,
-            {"table_ids": list(direct_table_ids)},
-        )
-        for r in rows:
-            if r["db_id"]:
-                all_db_ids.add(r["db_id"])
-            if r["schema_id"]:
-                all_schema_ids.add(r["schema_id"])
-
+    rows = store().query_read(text(_ACCESSIBLE_SQL), {"zone_ids": list(zone_ids)})
+    row = rows[0]
     return {
-        "db_ids": all_db_ids,
-        "schema_ids": all_schema_ids,
-        "table_ids": all_table_ids,
+        "db_ids": {i for i in (row["db_ids"] or []) if i},
+        "schema_ids": {i for i in (row["schema_ids"] or []) if i},
+        "table_ids": {i for i in (row["table_ids"] or []) if i},
     }
 
 
@@ -129,18 +106,16 @@ def resolve_accessible_catalog_ids(
     zone_ids: list[str] | None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> dict[str, set[str]] | None:
-    """Resolve *zone_ids* to accessible catalog ids, reusing *data_ids_by_zone* if given.
+    """Resolve *zone_ids* to accessible catalog ids, reusing a prior result.
 
-    ``get_accessible_catalog_ids_for_zones`` costs several Neo4j round trips.
-    Callers that need the resolved ids in more than one place for the same
-    request (e.g. the Exploration graph builders, which combine node,
-    zone-map and edge queries) should resolve it once via this helper and
-    thread the result through every downstream call as *data_ids_by_zone*,
-    instead of letting each one re-resolve the same *zone_ids* independently.
+    ``None`` means no zone scoping at all — an admin or internal caller seeing
+    the whole catalog. That is emphatically not the same as an empty list, which
+    grants nothing, and conflating the two is how an access-control bug gets
+    written.
 
-    Returns ``None`` when *zone_ids* is ``None`` (no zone scoping — admin /
-    internal callers). Returns *data_ids_by_zone* unchanged when already
-    supplied.
+    Callers needing the ids more than once in a request (the exploration graph
+    builders combine node, zone-map and edge queries) resolve once and thread
+    the result through as *data_ids_by_zone*.
     """
     if zone_ids is None:
         return None
@@ -151,28 +126,21 @@ def resolve_accessible_catalog_ids(
 
 def resolve_table_filter(
     zone_ids: list[str] | None,
-    column_ref: str,
+    column_ref: Any,
     *,
-    extra_params: dict[str, Any] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
-) -> tuple[str, dict[str, Any]]:
-    """Build a Cypher ``WHERE`` clause restricting *column_ref* to accessible tables.
+) -> Any:
+    """A predicate restricting *column_ref* to the tables *zone_ids* can see.
 
-    *column_ref* is the Cypher expression to filter on, e.g. ``"t.id"`` or
-    ``"attr.table_id"``.  When *zone_ids* is ``None`` no filter is applied
-    (admin / internal callers who see the full unfiltered catalog).
-    *extra_params* are merged into the returned params dict unchanged (e.g.
-    query parameters unrelated to zone scoping). Pass a pre-resolved
-    *data_ids_by_zone* (see ``resolve_accessible_catalog_ids``) to avoid a
-    repeat Neo4j round trip when the caller already has it for this request.
+    *column_ref* is a SQLAlchemy column — ``catalog_table.c.id``,
+    ``column_attribute.c.table_id`` — and the result goes to ``.where()``.
 
-    Returns ``(where_clause, params)`` where *where_clause* is either an
-    empty string or a full ``WHERE <column_ref> IN $table_ids`` clause ready
-    to interpolate into an f-string query.
+    ``zone_ids is None`` yields ``None``: no filter, full catalog. An **empty
+    list** yields a predicate matching nothing, because "scoped to no zones" has
+    to deny rather than permit. Conflating the two is how an access-control bug
+    gets written.
     """
-    params = dict(extra_params or {})
     if zone_ids is None:
-        return "", params
+        return None
     resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    params["table_ids"] = list(resolved["table_ids"])
-    return f"WHERE {column_ref} IN $table_ids", params
+    return column_ref.in_(list(resolved["table_ids"]))

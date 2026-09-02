@@ -32,7 +32,7 @@ def _run_loop(monkeypatch: MonkeyPatch, connector_batches: list[list[str]]) -> d
     """Drive one ASK through ``_worker_loop`` and return the agent payload it built.
 
     ``connector_batches`` is what successive ``get_connectors()`` calls return, so a
-    worker that booted before Neo4j was reachable can be simulated with ``[[], [...]]``.
+    worker that booted before the store was reachable can be simulated with ``[[], [...]]``.
     """
     # Importing the agent module builds LLM clients at import time and lets an
     # EnvironmentError escape when no key is configured. Stub the factories before that
@@ -86,7 +86,7 @@ def test_worker_reresolves_connectors_before_building_the_payload(
 def test_worker_reuses_the_boot_connectors_when_they_are_present(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    """The healthy path must not re-resolve — that would query Neo4j per question."""
+    """The healthy path must not re-resolve — that would query the store per question."""
     payload = _run_loop(monkeypatch, connector_batches=[["boot-connector"]])
 
     assert payload["connectors"] == ["boot-connector"]

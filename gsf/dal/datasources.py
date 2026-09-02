@@ -1,17 +1,19 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j data access for catalog nodes: Database, Schema, Table, Column.
+"""Catalog reads and writes: databases, schemas, tables, columns.
 
-Contains only functions that call ``graph()`` directly.
+The functions at the bottom of the file reach the semantic tier — terms and
+attributes — and their joins are where the interesting cases live.
 
-All read functions use the ``fetch_*`` prefix.
-Write functions use ``patch_*``, ``store_*``, or ``apply_*``.
+Two shapes recur and are easy to break:
 
-Non-Neo4j helpers that call these functions remain in their original locations:
-  - get_schemas_by_ids  →  retrieval/data_access/graph_schemas.py
-  - build_tables_index  →  semantic/loaders.py
+* **A database with no schemas, or a schema with no tables, does not appear.**
+  These are inner joins, so an empty database is invisible rather than
+  present-with-zero. Callers treat absence as "nothing here".
+* **Zone scoping filters the counted rows, not just the returned ones**, so a
+  scoped user sees a schema count covering only the tables they can see.
 """
 
 from __future__ import annotations
@@ -21,31 +23,59 @@ import logging
 from typing import Any
 
 import pandas as pd
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from sqlalchemy import (
+    ColumnElement,
+    Text,
+    and_,
+    case,
+    column,
+    distinct,
+    func,
+    literal,
+    select,
+    update,
+)
+from sqlalchemy import values as sa_values
 
-from gsf.dal.cypher_fragments import (
-    column_description_expr,
-    paging_clause,
-    table_description_expr,
-)
-from gsf.dal.neo4j_tx import graph
-from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
-from gsf.semantic.constants import (
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_SQL_ATTRIBUTE,
-    LABEL_TERM,
-    REL_HAS_ATTRIBUTE,
-    REL_PROPERTY_OF,
-    REL_REPRESENTS,
-    REL_SEMANTIC_FK,
-    SQL_ATTR_SOURCE_BRIDGE,
-)
-from gsf.utils.join_columns import parse_join_columns
+from gsf.dal import schema as s
+from gsf.dal.session import store, write_transaction
+from gsf.dal.sql_fragments import column_description_expr, table_description_expr
+from gsf.dal.users import resolve_accessible_catalog_ids
+from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from gsf.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
-_ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
+#: Labels ``fetch_node_properties_by_id`` will look up, and their tables.
+_NODE_TABLES = {
+    "Database": s.catalog_database,
+    "Schema": s.catalog_schema,
+    "Table": s.catalog_table,
+    "Column": s.catalog_column,
+}
+
+
+def _catalog_join():
+    """Column → Table → Schema → Database."""
+    return (
+        s.catalog_column.join(
+            s.catalog_table, s.catalog_column.c.table_id == s.catalog_table.c.id
+        )
+        .join(s.catalog_schema, s.catalog_table.c.schema_id == s.catalog_schema.c.id)
+        .join(
+            s.catalog_database,
+            s.catalog_schema.c.database_id == s.catalog_database.c.id,
+        )
+    )
+
+
+def _table_join():
+    """Table → Schema → Database."""
+    return s.catalog_table.join(
+        s.catalog_schema, s.catalog_table.c.schema_id == s.catalog_schema.c.id
+    ).join(
+        s.catalog_database, s.catalog_schema.c.database_id == s.catalog_database.c.id
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -54,41 +84,43 @@ _ALLOWED_NODE_LABELS = frozenset(Labels.LIST_OF_ALL)
 
 
 def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
-    """Return Database rows with schema counts only; ``schemas`` is empty for lazy trees.
+    """Databases with a schema count. ``schemas`` is empty — the tree is lazy."""
+    scoped = resolve_accessible_catalog_ids(zone_ids)
 
-    When *zone_ids* is supplied the result is restricted to databases (and schema
-    counts) reachable through those zones.  Pass ``None`` (or omit) to return
-    the full unfiltered catalog (admin / internal callers).
-    """
-    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
-    if data_ids_by_zone is not None:
-        db_ids = list(data_ids_by_zone["db_ids"])
-        schema_ids = list(data_ids_by_zone["schema_ids"])
-        where_clause = "WHERE db.id IN $db_ids AND s.id IN $schema_ids"
-        params: dict[str, Any] = {"db_ids": db_ids, "schema_ids": schema_ids}
-    else:
-        where_clause = ""
-        params = {}
-
-    rows = graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-        {where_clause}
-        RETURN db.id AS id, db.name AS name, db.description AS description,
-               count(s) AS schema_count
-        ORDER BY name
-        """,
-        params,
+    statement = (
+        select(
+            s.catalog_database.c.id,
+            s.catalog_database.c.name,
+            func.count(s.catalog_schema.c.id).label("schema_count"),
+        )
+        .select_from(
+            s.catalog_database.join(
+                s.catalog_schema,
+                s.catalog_schema.c.database_id == s.catalog_database.c.id,
+            )
+        )
+        .group_by(s.catalog_database.c.id, s.catalog_database.c.name)
+        .order_by(s.catalog_database.c.name)
     )
+    if scoped is not None:
+        statement = statement.where(
+            and_(
+                s.catalog_database.c.id.in_(list(scoped["db_ids"])),
+                s.catalog_schema.c.id.in_(list(scoped["schema_ids"])),
+            )
+        )
+
     return [
         {
             "id": r["id"],
             "name": r["name"],
-            "description": r["description"],
+            # Nothing writes a database description, so this is always None.
+            # Kept in the shape because callers read the key.
+            "description": None,
             "num_of_schemas": int(r["schema_count"]),
             "schemas": [],
         }
-        for r in rows
+        for r in store().query_read(statement)
     ]
 
 
@@ -101,80 +133,75 @@ def fetch_schemas_for_database(
     db_id: str,
     zone_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Return schemas_count and a list of schema summaries for a database.
+    """``{schemas_count, schemas}`` for a database, or ``None`` if it has none.
 
-    Returns a dict with ``schemas_count`` and ``schemas`` — a list of
-    ``{id, schema_name, tables_count}`` dicts.
-
-    Returns ``None`` if no ``Database`` matches ``db_id``.
-
-    When *zone_ids* is supplied only schemas (and their table counts) reachable
-    through those zones are returned.
+    ``None`` rather than an empty result: the join requires at least one table,
+    so a database with no tables produces no rows at all and the caller treats
+    that as absent.
     """
-    data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
-    if data_ids_by_zone is not None:
-        schema_ids = list(data_ids_by_zone["schema_ids"])
-        table_ids = list(data_ids_by_zone["table_ids"])
-        where_clause = "WHERE s.id IN $schema_ids AND t.id IN $table_ids"
-        params: dict[str, Any] = {
-            "db_id": db_id,
-            "schema_ids": schema_ids,
-            "table_ids": table_ids,
-        }
-    else:
-        where_clause = ""
-        params = {"db_id": db_id}
+    scoped = resolve_accessible_catalog_ids(zone_ids)
 
-    rows = graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB} {{id: $db_id}})-[:{Edges.CONTAINS}]->
-              (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-        {where_clause}
-        WITH s.id AS id, s.name AS schema_name, s.description AS description,
-             count(t) AS tables_count
-        ORDER BY schema_name
-        WITH collect({{id: id, schema_name: schema_name,
-                      description: description,
-                      tables_count: tables_count}}) AS schemas
-        RETURN size(schemas) AS schemas_count, schemas
-        """,
-        params,
+    statement = (
+        select(
+            s.catalog_schema.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+            func.count(s.catalog_table.c.id).label("tables_count"),
+        )
+        .select_from(
+            s.catalog_schema.join(
+                s.catalog_table, s.catalog_table.c.schema_id == s.catalog_schema.c.id
+            )
+        )
+        .where(s.catalog_schema.c.database_id == db_id)
+        .group_by(s.catalog_schema.c.id, s.catalog_schema.c.name)
+        .order_by(s.catalog_schema.c.name)
     )
+    if scoped is not None:
+        statement = statement.where(
+            and_(
+                s.catalog_schema.c.id.in_(list(scoped["schema_ids"])),
+                s.catalog_table.c.id.in_(list(scoped["table_ids"])),
+            )
+        )
+
+    rows = store().query_read(statement)
     if not rows:
         return None
-    record = rows[0]
     return {
-        "schemas_count": record["schemas_count"],
-        "schemas": [dict(s) for s in record["schemas"]],
+        "schemas_count": len(rows),
+        "schemas": [
+            {
+                "id": r["id"],
+                "schema_name": r["schema_name"],
+                "description": None,
+                "tables_count": int(r["tables_count"]),
+            }
+            for r in rows
+        ],
     }
 
 
 def fetch_all_schema_ids() -> list[str]:
-    """Return all Schema node IDs."""
-    return [
-        r["schema_id"]
-        for r in graph().query_read(
-            f"MATCH (s:{Labels.SCHEMA}) RETURN s.id AS schema_id",
-        )
-    ]
+    return [r["id"] for r in store().query_read(select(s.catalog_schema.c.id))]
 
 
 def fetch_schema_ids_for_database(database_name: str) -> list[str]:
-    """Return Schema node IDs belonging to a single database.
+    """Scopes a catalog build to one database.
 
-    Scopes the catalog build to one database so schema-name collisions
-    (e.g. multiple SQLite DBs all using ``main``) don't overwrite each
-    other in the assembled ``all_schemas`` map.
+    Without it, schema-name collisions — several SQLite databases all calling
+    theirs ``main`` — overwrite each other in the assembled schema map.
     """
     return [
-        r["schema_id"]
-        for r in graph().query_read(
-            f"""
-            MATCH (db:{Labels.DB} {{name: $database_name}})
-                  -[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-            RETURN s.id AS schema_id
-            """,
-            {"database_name": database_name},
+        r["id"]
+        for r in store().query_read(
+            select(s.catalog_schema.c.id)
+            .select_from(
+                s.catalog_schema.join(
+                    s.catalog_database,
+                    s.catalog_schema.c.database_id == s.catalog_database.c.id,
+                )
+            )
+            .where(s.catalog_database.c.name == database_name)
         )
     ]
 
@@ -182,476 +209,220 @@ def fetch_schema_ids_for_database(database_name: str) -> list[str]:
 def fetch_schemas_by_ids(
     relevant_schemas_ids: list | None = None,
 ) -> list[dict[str, str]]:
-    """Return column-level rows for the given schema IDs (all schemas when empty)."""
+    """Flat column rows for the catalog map SQL validation is built from.
+
+    An empty or absent id list means *every* schema, not none. Reading it the
+    other way would leave every query unresolvable rather than raising.
+    """
     schema_ids = relevant_schemas_ids or []
-    result = graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(schema:{Labels.SCHEMA})
-              -[:{Edges.CONTAINS}]->(table:{Labels.TABLE})
-              -[:{Edges.CONTAINS}]->(column:{Labels.COLUMN})
-        WHERE size($schema_ids) = 0
-           OR schema.id IN $schema_ids
-        RETURN collect({{
-            column_name:   column.name,
-            column_id:     column.id,
-            table_name:    table.name,
-            table_id:      table.id,
-            database_name: db.name,
-            table_schema:  schema.name,
-            data_type:     column.data_type
-        }}) AS data
-        """,
-        {"schema_ids": schema_ids},
-    )
-    return result[0]["data"] if result else []
+
+    statement = select(
+        s.catalog_column.c.name.label("column_name"),
+        s.catalog_column.c.id.label("column_id"),
+        s.catalog_table.c.name.label("table_name"),
+        s.catalog_table.c.id.label("table_id"),
+        s.catalog_database.c.name.label("database_name"),
+        s.catalog_schema.c.name.label("table_schema"),
+        s.catalog_column.c.data_type,
+    ).select_from(_catalog_join())
+
+    if schema_ids:
+        statement = statement.where(s.catalog_schema.c.id.in_(list(schema_ids)))
+
+    return [dict(r) for r in store().query_read(statement)]
 
 
 # ---------------------------------------------------------------------------
 # Table
 # ---------------------------------------------------------------------------
 
-_FETCH_TABLES_QUERY = f"""
-MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
-WITH t, s, count(DISTINCT sql) AS query_count
-RETURN t.id AS id,
-       t.name AS name,
-       s.name AS schema_name,
-       t.description AS description,
-       t.pk as pk,
-       query_count
-ORDER BY query_count DESC
-"""
 
-_FETCH_TABLE_BY_ID = f"""
-MATCH (t:{Labels.TABLE} {{id: $table_id}})
-MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-RETURN t.id AS id,
-       t.name AS name,
-       s.name AS schema_name,
-       t.description AS description,
-       t.pk as pk
-"""
-
-_FETCH_TABLE_BY_NAME = f"""
-MATCH (t:{Labels.TABLE} {{name: $name}})
-MATCH (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-RETURN t.id AS id,
-       t.name AS name,
-       s.name AS schema_name,
-       t.description AS description,
-       t.pk as pk
-LIMIT 1
-"""
-
-_FETCH_JOIN_NEIGHBORS = f"""
-MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.JOIN}]-(other:{Labels.TABLE})
-RETURN DISTINCT other.id AS id,
-                other.name AS name,
-                other.description AS description
-"""
-
-_FETCH_JOINS_QUERY = f"""
-MATCH (t1:{Labels.TABLE})-[j:{Edges.JOIN}]->(t2:{Labels.TABLE})
-RETURN t1.name AS source_table,
-       t1.id AS source_table_id,
-       t2.name AS target_table,
-       t2.id AS target_table_id,
-       j.join_columns AS join_columns
-"""
-
-_FETCH_TABLES_BY_IDS = f"""
-UNWIND $table_ids AS tid
-MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
-      -[:{Edges.CONTAINS}]->(tbl:{Labels.TABLE} {{id: tid}})
-MATCH (tbl)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                         description: {column_description_expr("col")},
-                         sample_values: col.sample_values,
-                         format: col.format}}) AS cols
-RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-       db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
-"""
-
-_APPLY_TABLE_METADATA = f"""
-UNWIND $rows AS row
-MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}})
-SET t.description = coalesce(row.description, t.description)
-"""
-
-_APPLY_COLUMN_METADATA = f"""
-UNWIND $rows AS row
-MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-      (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{name: row.table_name}})
-      -[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{name: row.column_name}})
-SET c.description = coalesce(row.description, c.description),
-    c.sample_values = coalesce(row.sample_values, c.sample_values)
-"""
+def _table_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "schema_name": row["schema_name"],
+        "description": row["description"],
+        "pk": row["pk"],
+    }
 
 
-# Shared middle segment of the Table Cypher queries below: given `db, s, t`
-# in scope, computes `columns_count`, `sql_count` and `unique_term_ids` (a
-# Table's terms via both REPRESENTS and the ColumnAttribute/SEMANTIC_FK
-# path, deduplicated). Interpolate between a query's initial MATCH/WHERE and
-# its RETURN — used by both ``fetch_tables_for_schema`` (below) and
-# ``gsf.dal.exploration.fetch_data_exploration_graph`` (every visible table)
-# so the two stay in sync instead of drifting as separately-maintained
-# copies. Public (no leading underscore) so the Exploration DAL can import it.
-TABLE_COUNTS_SUBQUERY = f"""
-MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-WITH db, s, t, count(DISTINCT c) AS columns_count
-OPTIONAL MATCH (t)<-[:{Edges.SQL}]-(sql:{Labels.SQL})
-WITH db, s, t, columns_count, count(DISTINCT sql) AS sql_count
-OPTIONAL MATCH (t)-[:{REL_REPRESENTS}]->(represented:{LABEL_TERM})
-WITH db, s, t, columns_count, sql_count,
-     collect(DISTINCT represented.id) AS represented_term_ids
-OPTIONAL MATCH (t)-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-      -[:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
-      (:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
-      (attribute_term:{LABEL_TERM})
-WITH db, s, t, columns_count, sql_count,
-     represented_term_ids,
-     collect(DISTINCT attribute_term.id) AS attribute_term_ids
-WITH db, s, t, columns_count, sql_count,
-     represented_term_ids + attribute_term_ids AS all_term_ids
-WITH db, s, t, columns_count, sql_count,
-     reduce(unique_ids = [], term_id IN all_term_ids |
-         CASE
-             WHEN term_id IS NULL OR term_id IN unique_ids THEN unique_ids
-             ELSE unique_ids + term_id
-         END
-     ) AS unique_term_ids
-"""
-
-
-def fetch_tables_for_schema(
-    schema_id: str,
-    *,
-    database_name: str
-    | None = None,  # accepted for API compat; schema_id is globally unique
-    zone_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return Table payloads with column, SQL, and Term counts for a schema.
-
-    When *zone_ids* is supplied only tables reachable through those zones are
-    returned.
-    """
-    where_clause, params = resolve_table_filter(
-        zone_ids, "t.id", extra_params={"schema_id": schema_id}
-    )
-
-    return graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (s:{Labels.SCHEMA} {{id: $schema_id}})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE})
-        {where_clause}
-        {TABLE_COUNTS_SUBQUERY}
-        RETURN t.id AS id,
-               t.name AS name,
-               t.table_type AS table_type,
-               db.name AS database_name,
-               s.name AS schema_name,
-               {table_description_expr("t")} AS description,
-               coalesce(t.description_certified, false) AS description_certified,
-               columns_count,
-               sql_count,
-               size(unique_term_ids) AS terms_count
-        ORDER BY name
-        """,
-        params,
+def _table_select():
+    return select(
+        s.catalog_table.c.id,
+        s.catalog_table.c.name,
+        s.catalog_schema.c.name.label("schema_name"),
+        s.catalog_table.c.description,
+        s.catalog_table.c.pk,
+    ).select_from(
+        s.catalog_table.join(
+            s.catalog_schema, s.catalog_table.c.schema_id == s.catalog_schema.c.id
+        )
     )
 
 
 def fetch_sorted_tables() -> list[dict[str, Any]]:
-    """Return all tables ordered by query_count descending."""
-    rows = graph().query_read(_FETCH_TABLES_QUERY)
+    """Every table, busiest first.
+
+    ``name`` breaks ties. Nearly every table has a query count of zero, so
+    ordering by count alone would return rows in whatever order the store felt
+    like, differing between calls — a function whose name promises an order has
+    to impose a total one.
+    """
+    query_count = (
+        select(func.count(s.sql_query__table.c.sql_query_id))
+        .where(s.sql_query__table.c.table_id == s.catalog_table.c.id)
+        .scalar_subquery()
+        .label("query_count")
+    )
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_table.c.description,
+            s.catalog_table.c.pk,
+            query_count,
+        )
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_table.c.schema_id == s.catalog_schema.c.id
+            )
+        )
+        .order_by(query_count.desc(), s.catalog_table.c.name)
+    )
     return [
         {
             "id": r["id"],
             "name": r["name"],
             "schema_name": r["schema_name"],
-            "description": r.get("description") or "",
-            "query_count": int(r.get("query_count") or 0),
-            "pk": r.get("pk") or [],
+            "description": r["description"] or "",
+            "query_count": int(r["query_count"] or 0),
+            "pk": r["pk"] or [],
         }
         for r in rows
     ]
 
 
 def fetch_table_by_id(table_id: str) -> dict[str, Any] | None:
-    """Return a single Table row by id, or None if not found."""
-    rows = graph().query_read(_FETCH_TABLE_BY_ID, {"table_id": table_id})
-    return rows[0] if rows else None
+    rows = store().query_read(_table_select().where(s.catalog_table.c.id == table_id))
+    return _table_row(rows[0]) if rows else None
 
 
 def fetch_table_by_name(name: str) -> dict[str, Any] | None:
-    """Return the first Table row matching *name*, or None if not found."""
-    rows = graph().query_read(_FETCH_TABLE_BY_NAME, {"name": name})
-    return rows[0] if rows else None
+    """The first table of that name, in *any* schema or database.
 
-
-def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Return Table rows with nested column summaries for the given IDs."""
-    if not table_ids:
-        return []
-    try:
-        rows = graph().query_read(_FETCH_TABLES_BY_IDS, {"table_ids": table_ids})
-    except Exception:
-        logger.warning("fetch_tables_by_ids: Neo4j query failed", exc_info=True)
-        return []
-    tables = []
-    for row in rows:
-        tid = row.get("id")
-        if not tid:
-            continue
-        cols = [c for c in (row.get("cols") or []) if c.get("name")]
-        for col in cols:
-            col["sample_values"] = parse_sample_values(col.get("sample_values"))
-        tables.append(
-            {
-                "id": tid,
-                "name": row.get("name") or "",
-                "description": row.get("description") or "",
-                "database_name": row.get("database_name") or "",
-                "schema_name": row.get("schema_name") or "",
-                "label": "Table",
-                # Without this, a table discovered here during SQL repair
-                # (sql_reconstruction's _discover_tables) reaches the prompt
-                # with no primary-key line at all. The prediction graph also
-                # keys its entities on this: a table that arrives without it
-                # reaches KumoRFM with no identity, which costs it every edge
-                # and makes it unusable in `FOR EACH`.
-                "pk": row.get("pk") or [],
-                "columns": cols,
-            }
-        )
-    return tables
-
-
-def fetch_all_tables_without_term(
-    database_name: str | None = None,
-) -> list[dict[str, Any]]:
-    """Return Table nodes that have not yet been assigned a Term.
-
-    When *database_name* is provided, only tables belonging to that database
-    are returned. Multiple databases can be co-resident in the same Neo4j
-    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass — and
-    the ``database_name`` its embeddings are tagged with — isolated to a single
-    database. When omitted, every term-less table in the graph is returned.
+    Ambiguous by construction: a name is not unique across schemas or
+    databases. Ordered by id so repeated calls agree with each other — which row
+    wins is still arbitrary, but it is the same arbitrary row each time.
     """
-    from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges
-
-    if database_name is not None:
-        return graph().query_read(
-            f"""
-            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-                  (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-            WHERE NOT (t)-[:{REL_REPRESENTS}]->()
-            RETURN t.id AS id, t.name AS name, t.description AS description,
-                   sch.name AS schema_name
-            ORDER BY t.name
-            """,
-            {"database_name": database_name},
-        )
-
-    return graph().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})
-        WHERE NOT (t)-[:{REL_REPRESENTS}]->()
-        MATCH (t)<-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-        RETURN t.id AS id, t.name AS name, t.description AS description,
-               sch.name AS schema_name
-        ORDER BY t.name
-        """
+    rows = store().query_read(
+        _table_select()
+        .where(s.catalog_table.c.name == name)
+        .order_by(s.catalog_table.c.id)
+        .limit(1)
     )
+    return _table_row(rows[0]) if rows else None
 
 
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
-    """Return JOIN-adjacent tables (undirected), one row per neighbour."""
-    return graph().query_read(_FETCH_JOIN_NEIGHBORS, {"table_id": table_id})
+    """Tables joined to this one, in either direction.
+
+    A join is undirected, so both ends count — hence the union of the two
+    columns rather than a single direction.
+    """
+    other = s.catalog_table.alias("other")
+    outgoing = (
+        select(other.c.id, other.c.name, other.c.description)
+        .select_from(
+            s.table__join.join(other, other.c.id == s.table__join.c.target_table_id)
+        )
+        .where(s.table__join.c.source_table_id == table_id)
+    )
+    incoming = (
+        select(other.c.id, other.c.name, other.c.description)
+        .select_from(
+            s.table__join.join(other, other.c.id == s.table__join.c.source_table_id)
+        )
+        .where(s.table__join.c.target_table_id == table_id)
+    )
+    return [dict(r) for r in store().query_read(outgoing.union(incoming))]
 
 
 def fetch_join_edges() -> list[dict[str, Any]]:
-    """Return all JOIN edges between tables.
-
-    ``join_columns`` is stored as a JSON string (see
-    ``gsf.utils.join_columns``), so it is parsed back to a list here.
-    """
-    rows = graph().query_read(_FETCH_JOINS_QUERY)
-    for row in rows:
-        row["join_columns"] = parse_join_columns(row.get("join_columns"))
-    return rows
+    source = s.catalog_table.alias("source_table")
+    target = s.catalog_table.alias("target_table")
+    return [
+        dict(r)
+        for r in store().query_read(
+            select(
+                source.c.name.label("source_table"),
+                source.c.id.label("source_table_id"),
+                target.c.name.label("target_table"),
+                target.c.id.label("target_table_id"),
+                s.table__join.c.join_columns,
+            ).select_from(
+                s.table__join.join(
+                    source, source.c.id == s.table__join.c.source_table_id
+                ).join(target, target.c.id == s.table__join.c.target_table_id)
+            )
+        )
+    ]
 
 
 # ---------------------------------------------------------------------------
 # Column
 # ---------------------------------------------------------------------------
 
-_FETCH_COLUMNS_QUERY = f"""
-MATCH (t:{Labels.TABLE} {{id: $table_id}})
-MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-RETURN c.id AS id,
-       c.name AS name,
-       c.data_type AS data_type,
-       {column_description_expr("c")} AS description,
-       c.ordinal_position AS ordinal_position,
-       c.sample_values AS sample_values,
-       c.format AS format,
-       EXISTS {{ (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN}) }} AS is_foreign_key,
-       EXISTS {{
-           (:{Labels.COLUMN})-[:{Edges.FOREIGN_KEY}]->(c)
-       }} AS is_foreign_key_target
-ORDER BY c.ordinal_position
-"""
-
-_FETCH_FKS_QUERY = f"""
-MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(src:{Labels.COLUMN})
-      -[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})<-[:{Edges.CONTAINS}]-
-      (tgt_table:{Labels.TABLE})
-RETURN src.name AS source_column,
-       tgt.name AS target_column,
-       tgt_table.name AS target_table,
-       tgt_table.id AS target_table_id
-"""
-
-_FETCH_COL_TABLE_CONTEXTS = f"""
-UNWIND $col_ids AS col_id
-MATCH (col:{Labels.COLUMN} {{id: col_id}})<-[:{Edges.CONTAINS}]-(tbl:{Labels.TABLE})
-      <-[:{Edges.CONTAINS}]-(sch:{Labels.SCHEMA})
-      <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
-RETURN col.id AS col_id, tbl.id AS table_id, tbl.name AS table_name,
-       sch.id AS schema_id, sch.name AS schema_name,
-       db.id AS database_id, db.name AS database_name
-"""
-
-
-def fetch_columns_for_table(
-    table_id: str,
-    *,
-    skip: int = 0,
-    limit: int | None = None,
-) -> dict[str, Any] | None:
-    """Return a table dict with nested columns, or None if the table is missing.
-
-    Columns are ordered by ordinal position, so *skip* and *limit* read one
-    page of that order; pair them with ``count_columns_for_table`` for the
-    table's full column count, which no paged read can report. Omit *limit*
-    for every column of the table, which is what the catalog tree and the
-    text-to-SQL context need.
-
-    Paging happens inside a subquery scoped to the table, so the table's own
-    fields (``table_name``, ``schema_name``, ``database_name``) come back the
-    same way whether the page holds rows or not — ``None`` means the table
-    itself (or its Schema/Database path) is missing, never that *skip* landed
-    past the last column.
-    """
-    params: dict[str, Any] = {"table_id": table_id}
-    paging = paging_clause(skip, limit, params)
-    rows = graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE} {{id: $table_id}})
-        CALL (t) {{
-            MATCH (t)-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-            WITH c ORDER BY c.ordinal_position
-            {paging}
-            RETURN collect({{
-                       id: c.id,
-                       ordinal_position: c.ordinal_position,
-                       column_name: c.name,
-                       data_type: c.data_type,
-                       description: {column_description_expr("c")},
-                       description_certified: coalesce(c.description_certified, false),
-                       sample_values: c.sample_values
-                   }}) AS columns
-        }}
-        RETURN t.name AS table_name,
-               t.table_type AS table_type,
-               s.name AS schema_name,
-               db.name AS database_name,
-               columns
-        LIMIT 1
-        """,
-        params,
-    )
-    if not rows:
-        return None
-    table = rows[0]
-    for column in table.get("columns") or []:
-        column["sample_values"] = parse_sample_values(column.get("sample_values"))
-    return table
-
 
 def count_columns_for_table(table_id: str) -> int:
-    """Return how many Columns a table has.
-
-    Companion to ``fetch_columns_for_table`` when it is called with a *limit*:
-    Neo4j won't report the unpaged size of a ``LIMIT``-ed result, so the
-    caller's pager needs this second query.
-    """
-    rows = graph().query_read(
-        f"""
-        MATCH (:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-        RETURN count(c) AS total
-        """,
-        {"table_id": table_id},
+    rows = store().query_read(
+        select(func.count(s.catalog_column.c.id).label("total")).where(
+            s.catalog_column.c.table_id == table_id
+        )
     )
-    return rows[0]["total"] if rows else 0
+    return int(rows[0]["total"]) if rows else 0
 
 
 def fetch_parent_table_id_for_column(column_id: str) -> str | None:
-    """Return the id of the Table that contains this Column, or None."""
-    rows = graph().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN} {{id: $column_id}})
-        RETURN t.id AS table_id
-        LIMIT 1
-        """,
-        {"column_id": column_id},
+    rows = store().query_read(
+        select(s.catalog_column.c.table_id).where(s.catalog_column.c.id == column_id)
     )
     return rows[0]["table_id"] if rows else None
 
 
-def fetch_table_context(table_id: str) -> dict[str, Any]:
-    """Return columns and FK edges for one table."""
-    conn = graph()
-    rows = conn.query_read(_FETCH_COLUMNS_QUERY, {"table_id": table_id})
-    columns = [
-        {
-            "id": r["id"],
-            "name": r["name"],
-            "data_type": r["data_type"],
-            "description": r.get("description"),
-            "ordinal_position": r.get("ordinal_position"),
-            "sample_values": r.get("sample_values"),
-            "format": r.get("format"),
-            "is_foreign_key_target": bool(r.get("is_foreign_key_target")),
-        }
-        for r in rows
-        if r.get("id") is not None
-    ]
-    fks = conn.query_read(_FETCH_FKS_QUERY, {"table_id": table_id})
-    return {"columns": columns, "fks": fks}
-
-
 def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Batch lookup: Column id → database/schema/table identity (ids + names).
+    """Column id → its database/schema/table identity (ids + names).
 
-    Ids are included alongside names so a caller that needs to let a client
-    expand a Table/Column further (e.g. `find_term_link_path`'s catalog
-    enrichment) can reuse this instead of re-running the same
-    Database→Schema→Table→Column traversal itself; a caller that only wants
-    display text (e.g. `find_join_path`) simply ignores the extra keys.
+    Ids come back alongside names so a caller that needs to let a client expand
+    a Table/Column further (e.g. :func:`gsf.dal.terms.find_term_link_path`'s
+    catalog enrichment) can reuse this instead of re-running the same
+    database→schema→table→column join itself; a caller that only wants display
+    text (e.g. :func:`gsf.dal.attributes.find_join_path`) ignores the extra keys.
+
+    Returns ``{}`` on failure rather than raising: callers use this to decorate
+    results, and losing the decoration beats losing the result.
     """
     if not col_ids:
         return {}
     try:
-        rows = graph().query_read(_FETCH_COL_TABLE_CONTEXTS, {"col_ids": col_ids})
+        rows = store().query_read(
+            select(
+                s.catalog_column.c.id.label("col_id"),
+                s.catalog_table.c.id.label("table_id"),
+                s.catalog_table.c.name.label("table_name"),
+                s.catalog_schema.c.id.label("schema_id"),
+                s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_database.c.id.label("database_id"),
+                s.catalog_database.c.name.label("database_name"),
+            )
+            .select_from(_catalog_join())
+            .where(s.catalog_column.c.id.in_(list(col_ids)))
+        )
     except Exception:
-        logger.warning("fetch_col_table_contexts: Neo4j query failed", exc_info=True)
+        logger.warning("fetch_col_table_contexts: query failed", exc_info=True)
         return {}
+
     return {
         r["col_id"]: {
             "table_id": r.get("table_id") or "",
@@ -666,53 +437,58 @@ def fetch_col_table_contexts(col_ids: list[str]) -> dict[str, dict[str, str]]:
     }
 
 
-def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
-    """Write sample_values JSON onto Column nodes for a given table.
+def _set_column_property(table_id: str, values: dict[str, Any], column: str) -> None:
+    """Set one property across several of a table's columns, in one statement.
 
-    Skips silently when *samples* is empty.
+    ``CASE name WHEN 'a' THEN … END`` rather than a statement per column — a
+    table can have hundreds of them.
     """
+    if not values:
+        return
+
+    target = s.catalog_column.c[column]
+    store().query_write(
+        update(s.catalog_column)
+        .where(
+            and_(
+                s.catalog_column.c.table_id == table_id,
+                s.catalog_column.c.name.in_(list(values)),
+            )
+        )
+        .values(
+            **{
+                column: case(
+                    {
+                        name: literal(value, target.type)
+                        for name, value in values.items()
+                    },
+                    value=s.catalog_column.c.name,
+                    else_=target,
+                )
+            }
+        )
+    )
+
+
+def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
+    """Write sample values, JSON-encoded, onto a table's columns."""
     if not samples:
         return
-    entries = [
-        {"column_name": col, "sample_values": json.dumps(vals)}
-        for col, vals in samples.items()
-    ]
-    graph().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE col.name IN [e IN $entries | e.column_name]
-        WITH col,
-             [e IN $entries WHERE e.column_name = col.name | e.sample_values][0]
-             AS sv
-        WHERE sv IS NOT NULL
-        SET col.sample_values = sv
-        """,
-        {"table_id": table_id, "entries": entries},
+    _set_column_property(
+        table_id,
+        {name: json.dumps(values) for name, values in samples.items()},
+        "sample_values",
     )
 
 
 def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
-    """Write is_unique flags onto Column nodes for a given table.
-
-    Skips silently when *uniqueness* is empty.
-    """
+    """Write ``is_unique`` flags onto a table's columns."""
     if not uniqueness:
         return
-    entries = [
-        {"column_name": col, "is_unique": bool(is_unique)}
-        for col, is_unique in uniqueness.items()
-    ]
-    graph().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE col.name IN [e IN $entries | e.column_name]
-        WITH col,
-             [e IN $entries WHERE e.column_name = col.name | e.is_unique][0]
-             AS iu
-        WHERE iu IS NOT NULL
-        SET col.is_unique = iu
-        """,
-        {"table_id": table_id, "entries": entries},
+    _set_column_property(
+        table_id,
+        {name: bool(flag) for name, flag in uniqueness.items()},
+        "is_unique",
     )
 
 
@@ -724,83 +500,20 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
     ``YYYY-MM-DD``, …); an address or id profiler would write the same field.
     The column's type/name/description say *what* the values are.
 
-    Skips silently when *date_formats* is empty.
+    A column whose notation could not be inferred is left alone rather than
+    written as NULL: the inference declines to guess on a mixed column, and
+    that is not a reason to discard what a previous run established.
     """
-    if not date_formats:
-        return
-    entries = [
-        {"column_name": col, "format": str(fmt)}
-        for col, fmt in date_formats.items()
-        if fmt
-    ]
-    if not entries:
-        return
-    graph().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WHERE col.name IN [e IN $entries | e.column_name]
-        WITH col,
-             [e IN $entries WHERE e.column_name = col.name | e.format][0]
-             AS fmt
-        WHERE fmt IS NOT NULL
-        SET col.format = fmt
-        """,
-        {"table_id": table_id, "entries": entries},
+    _set_column_property(
+        table_id,
+        {name: str(fmt) for name, fmt in date_formats.items() if fmt},
+        "format",
     )
 
 
 # ---------------------------------------------------------------------------
-# Cross-entity (Table + Column batch operations)
+# Metadata writes
 # ---------------------------------------------------------------------------
-
-
-def fetch_tables_and_columns_by_node_ids(
-    node_ids: list[str],
-) -> tuple[pd.DataFrame, pd.DataFrame, str]:
-    """Load Table/Column rows from Neo4j as dataframes for TabularFetchEmbeddingsOp."""
-    conn = graph()
-    columns_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(c:{Labels.COLUMN})
-            WHERE t.id = id OR c.id = id
-            RETURN DISTINCT
-                   c.id AS id,
-                   t.name AS table_name,
-                   s.name AS table_schema,
-                   c.name AS column_name,
-                   c.data_type AS data_type,
-                   {column_description_expr("c")} AS description,
-                   c.sample_values AS sample_values,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
-    )
-    tables_df = pd.DataFrame(
-        conn.query_read(
-            f"""
-            UNWIND $ids AS id
-            MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(s:{Labels.SCHEMA})
-                  -[:{Edges.CONTAINS}]->(t:{Labels.TABLE} {{id: id}})
-            RETURN t.id AS id,
-                   t.name AS table_name,
-                   s.name AS table_schema,
-                   t.table_type AS table_type,
-                   t.description AS description,
-                   db.name AS database_name
-            """,
-            {"ids": node_ids},
-        ),
-    )
-    database_name = ""
-    if not tables_df.empty:
-        database_name = str(tables_df.iloc[0].get("database_name") or "")
-    elif not columns_df.empty:
-        database_name = str(columns_df.iloc[0].get("database_name") or "")
-    return tables_df, columns_df, database_name
 
 
 def apply_metadata_batch(
@@ -808,23 +521,99 @@ def apply_metadata_batch(
     table_rows: list[dict],
     column_rows: list[dict],
 ) -> None:
-    """Batch-write description / sample_values onto Table and Column nodes.
+    """Write descriptions and sample values, **without overwriting existing ones**.
 
-    *table_rows* — list of ``{table_name, description}``.
-    *column_rows* — list of ``{table_name, column_name, description, sample_values}``.
-    Skips silently when either list is empty.
+    ``coalesce(new, existing)``, and the direction matters: a curated
+    description survives a batch that has nothing to say about it.
+
+    Two statements, both ``UPDATE ... FROM (VALUES ...)``, in one transaction.
+    A row-at-a-time loop was one autocommitted round trip per table *and* per
+    column -- thousands for a warehouse-sized profiling run, each paying the
+    network latency in full, and each leaving a partial batch behind for good
+    if the run died halfway. The set-based form also evaluates the
+    database-scoping subquery once instead of once per row.
+
+    Note this makes a duplicated key within one batch indeterminate rather than
+    last-wins: Postgres updates a target row at most once per statement, so of
+    two rows naming the same column, one is applied and the other dropped.
+    Callers build these from a catalog read, where the names are already unique.
     """
-    conn = graph()
-    if table_rows:
-        conn.query_write(
-            _APPLY_TABLE_METADATA,
-            {"rows": table_rows, "database_name": database_name},
-        )
-    if column_rows:
-        conn.query_write(
-            _APPLY_COLUMN_METADATA,
-            {"rows": column_rows, "database_name": database_name},
-        )
+    with write_transaction():
+        if table_rows:
+            incoming = sa_values(
+                column("table_name", Text),
+                column("description", Text),
+                name="incoming",
+            ).data([(row["table_name"], row.get("description")) for row in table_rows])
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    and_(
+                        s.catalog_table.c.name == incoming.c.table_name,
+                        s.catalog_table.c.schema_id.in_(
+                            select(s.catalog_schema.c.id)
+                            .select_from(
+                                s.catalog_schema.join(
+                                    s.catalog_database,
+                                    s.catalog_schema.c.database_id
+                                    == s.catalog_database.c.id,
+                                )
+                            )
+                            .where(s.catalog_database.c.name == database_name)
+                        ),
+                    )
+                )
+                .values(
+                    description=func.coalesce(
+                        incoming.c.description, s.catalog_table.c.description
+                    )
+                )
+            )
+
+        if column_rows:
+            incoming = sa_values(
+                column("table_name", Text),
+                column("column_name", Text),
+                column("description", Text),
+                column("sample_values", Text),
+                name="incoming",
+            ).data(
+                [
+                    (
+                        row["table_name"],
+                        row["column_name"],
+                        row.get("description"),
+                        row.get("sample_values"),
+                    )
+                    for row in column_rows
+                ]
+            )
+            store().query_write(
+                update(s.catalog_column)
+                .where(
+                    and_(
+                        s.catalog_column.c.name == incoming.c.column_name,
+                        s.catalog_column.c.table_id.in_(
+                            select(s.catalog_table.c.id)
+                            .select_from(_table_join())
+                            .where(
+                                and_(
+                                    s.catalog_database.c.name == database_name,
+                                    s.catalog_table.c.name == incoming.c.table_name,
+                                )
+                            )
+                        ),
+                    )
+                )
+                .values(
+                    description=func.coalesce(
+                        incoming.c.description, s.catalog_column.c.description
+                    ),
+                    sample_values=func.coalesce(
+                        incoming.c.sample_values, s.catalog_column.c.sample_values
+                    ),
+                )
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -836,119 +625,642 @@ def patch_catalog_node(
     node_id: str,
     properties: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Write ``properties`` onto any catalog node matched by ``id``.
+    """Write properties onto whichever catalog row carries *node_id*.
 
-    Returns ``{id, label, props}`` or ``None`` when no node matches.
-    This is the pure Cypher write; callers are responsible for triggering
-    any downstream VDB re-embedding.
+    An id can name a database, schema, table or column, so the four tables are
+    tried in turn. Properties with no matching column are dropped rather than
+    rejected: callers set properties opportunistically, and refusing would fail
+    writes that work today.
     """
-    rows = graph().query_write(
-        f"""
-        MATCH (n:{Labels.DB}|{Labels.SCHEMA}|{Labels.TABLE}|{Labels.COLUMN}
-              {{id: $node_id}})
-        SET n += $props
-        RETURN n.id AS id, labels(n)[0] AS label, properties(n) AS props
-        """,
-        {"node_id": node_id, "props": properties},
-    )
-    if not rows:
-        return None
-    return {
-        "id": rows[0]["id"],
-        "label": rows[0]["label"],
-        "props": dict(rows[0]["props"]),
-    }
+    for label, table in _NODE_TABLES.items():
+        columns = {c.name for c in table.columns}
+        values = {k: v for k, v in properties.items() if k in columns and k != "id"}
+        rows = store().query_read(select(table.c.id).where(table.c.id == node_id))
+        if not rows:
+            continue
+        if values:
+            store().query_write(
+                update(table).where(table.c.id == node_id).values(**values)
+            )
+        props = dict(store().query_read(select(table).where(table.c.id == node_id))[0])
+        return {"id": node_id, "label": label, "props": props}
+    return None
 
 
 def fetch_node_properties_by_id(id: str, label: str | list[str]) -> dict | None:
-    """Return all properties of the node with the given id and label, or None.
+    """All of a node's properties plus its label, or ``None``.
 
-    Rejects unknown labels and returns None with a warning instead of raising.
+    Unknown labels are rejected with a warning rather than an exception — the
+    label often arrives straight from a URL.
     """
-    labels_list = label if isinstance(label, list) else [label]
-    for lbl in labels_list:
-        if lbl not in _ALLOWED_NODE_LABELS:
+    labels = label if isinstance(label, list) else [label]
+    for candidate in labels:
+        if candidate not in _NODE_TABLES:
             logger.warning(
-                "Rejecting unknown label %r in fetch_node_properties_by_id", lbl
+                "Rejecting unknown label %r in fetch_node_properties_by_id", candidate
             )
             return None
-    label_filter = "|".join(labels_list)
-    props = graph().query_read(
-        f"""
-        MATCH (n:{label_filter} {{id: $id}})
-        RETURN apoc.map.setKey(properties(n), "label", labels(n)[0]) AS props
-        """,
-        {"id": id},
-    )
-    return props[0]["props"] if props else None
+
+    for candidate in labels:
+        table = _NODE_TABLES[candidate]
+        rows = store().query_read(select(table).where(table.c.id == id))
+        if rows:
+            props = dict(rows[0])
+            props["label"] = candidate
+            return props
+    return None
 
 
 def fetch_item_by_id(item_id: str, label: str | list[str]) -> dict | None:
-    """Like ``fetch_node_properties_by_id`` but logs an error when the node is missing."""
+    """As :func:`fetch_node_properties_by_id`, but logs when nothing matches."""
     result = fetch_node_properties_by_id(item_id, label)
     if result is None:
-        logger.error("Required item with id %r not found in graph.", item_id)
+        logger.error("Required item with id %r not found.", item_id)
     return result
 
 
-def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
-    """Return pure-FK junction tables eligible for bridge SqlAttribute creation.
+# ---------------------------------------------------------------------------
+# Reads that reach the semantic tier
+# ---------------------------------------------------------------------------
 
-    A table qualifies when it has at least two columns, no column has
-    HAS_ATTRIBUTE, every column is linked via FOREIGN_KEY or SEMANTIC_FK,
-    every column resolves to an FK pair, and no SqlAttribute with source
-    ``bridgeTable`` already references the table through HAS_SQL -> Sql -> SQL.
 
-    Self-referential bridges are allowed (multiple FK columns targeting the
-    same table), e.g. ``also_buy(product_id, also_buy_product_id)``.
+def _terms_count(table_id: ColumnElement) -> ColumnElement:
+    """How many distinct Terms a table is associated with.
+
+    Two routes, and the count is the deduplicated union of both:
+
+    * **directly** — ``REPRESENTS``, the table *is* that business concept;
+    * **through its columns** — a column carries a ColumnAttribute (by
+      ``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) and that attribute is a property of
+      a Term.
+
+    Counted as "Terms reachable by any route" rather than as a ``UNION`` of the
+    three id lists. The union reads more naturally and does not work: wrapping
+    it in ``.subquery()`` to count it puts two levels between the leg predicates
+    and ``catalog_table``, and SQLAlchemy stops correlating.
+
+    The ``.correlate()`` calls below are load-bearing for the same reason.
+    SQLAlchemy auto-correlates a table only against the *immediately* enclosing
+    SELECT, and that one selects from ``term`` alone — so left to itself it adds
+    a second, unconstrained ``catalog_table`` to each ``EXISTS`` and the count
+    stops depending on which table is being counted. Every row then reports the
+    same total, which on a fixture where the numbers happen to agree looks
+    entirely correct. That is why the test asserts a table with *no* terms
+    alongside one with two.
     """
-    rows = graph().query_read(
-        f"""
-        MATCH (db:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-        MATCH (t)-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-        WITH sch, t, collect(col) AS cols
-        WHERE size(cols) >= 2
-          AND NONE(c IN cols WHERE (c)-[:{REL_HAS_ATTRIBUTE}]->())
-          AND ALL(
-            c IN cols
-            WHERE (c)-[:{Edges.FOREIGN_KEY}]->(:{Labels.COLUMN})
-               OR (c)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
-          )
-          AND NOT EXISTS {{
-            (attr:{LABEL_SQL_ATTRIBUTE} {{source: $bridge_source}})
-                  -[:{Edges.HAS_SQL}]->(:{Labels.SQL})-[:{Edges.SQL}]->(t)
-          }}
-        WITH sch, t, cols
-        UNWIND cols AS col
-        OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(fk_tgt:{Labels.COLUMN})
-              <-[:{Edges.CONTAINS}]-(fk_tbl:{Labels.TABLE})
-              <-[:{Edges.CONTAINS}]-(fk_sch:{Labels.SCHEMA})
-        OPTIONAL MATCH (col)-[:{REL_SEMANTIC_FK}]->(:{LABEL_COLUMN_ATTRIBUTE})
-              <-[:{REL_HAS_ATTRIBUTE}]-(sem_tgt:{Labels.COLUMN})
-              <-[:{Edges.CONTAINS}]-(sem_tbl:{Labels.TABLE})
-              <-[:{Edges.CONTAINS}]-(sem_sch:{Labels.SCHEMA})
-        WITH sch, t, cols, col,
-             coalesce(fk_tbl, sem_tbl) AS tgt_tbl,
-             coalesce(fk_sch, sem_sch) AS tgt_sch,
-             coalesce(fk_tgt, sem_tgt) AS tgt_col
-        WHERE tgt_tbl IS NOT NULL AND tgt_col IS NOT NULL
-        WITH sch, t, cols,
-             collect(DISTINCT {{
-               source_column: col.name,
-               target_table: tgt_tbl.name,
-               target_schema: tgt_sch.name,
-               target_column: tgt_col.name,
-               target_table_id: tgt_tbl.id
-             }}) AS fk_pairs
-        WHERE size(fk_pairs) >= 2 AND size(fk_pairs) = size(cols)
-        RETURN t.id AS table_id,
-               t.name AS table_name,
-               sch.name AS schema_name,
-               t.description AS description,
-               fk_pairs
-        ORDER BY t.name
-        """,
-        {"database_name": database_name, "bridge_source": SQL_ATTR_SOURCE_BRIDGE},
+    owner = table_id.table
+
+    def via(link_table):
+        return (
+            select(literal(1))
+            .select_from(
+                s.catalog_column.join(
+                    link_table, link_table.c.column_id == s.catalog_column.c.id
+                ).join(
+                    s.column_attribute__term,
+                    s.column_attribute__term.c.attribute_id
+                    == link_table.c.attribute_id,
+                )
+            )
+            .where(
+                s.catalog_column.c.table_id == table_id,
+                s.column_attribute__term.c.term_id == s.term.c.id,
+            )
+            .correlate(owner, s.term)
+            .exists()
+        )
+
+    direct = (
+        select(literal(1))
+        .where(
+            s.table__term.c.table_id == table_id,
+            s.table__term.c.term_id == s.term.c.id,
+        )
+        .correlate(owner, s.term)
+        .exists()
     )
-    return [dict(row) for row in rows]
+    return (
+        select(func.count())
+        .select_from(s.term)
+        .where(direct | via(s.column__has_attribute) | via(s.column__semantic_fk))
+        .correlate(owner)
+        .scalar_subquery()
+    )
+
+
+def _count_of(table, predicate) -> ColumnElement:
+    return select(func.count()).select_from(table).where(predicate).scalar_subquery()
+
+
+def fetch_tables_for_schema(
+    schema_id: str,
+    *,
+    database_name: str | None = None,
+    zone_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Tables in a schema, with column, SQL, and Term counts.
+
+    *database_name* is accepted and ignored — schema ids are globally unique, so
+    it can only ever agree with *schema_id* or contradict it. It stays in the
+    signature because callers pass it.
+    """
+    scoped = resolve_accessible_catalog_ids(zone_ids)
+
+    statement = (
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.table_type,
+            s.catalog_database.c.name.label("database_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            table_description_expr().label("description"),
+            s.catalog_table.c.description_certified,
+            _count_of(
+                s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+            ).label("columns_count"),
+            _count_of(
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.catalog_table.c.id,
+            ).label("sql_count"),
+            _terms_count(s.catalog_table.c.id).label("terms_count"),
+        )
+        .select_from(_table_join())
+        .where(s.catalog_table.c.schema_id == schema_id)
+        .order_by(s.catalog_table.c.name)
+    )
+    if scoped is not None:
+        statement = statement.where(s.catalog_table.c.id.in_(list(scoped["table_ids"])))
+
+    return [dict(r) for r in store().query_read(statement)]
+
+
+def fetch_all_tables_without_term(
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Tables not yet assigned a Term — the work list for term compilation.
+
+    Scoped to one database when *database_name* is given. Several databases can
+    share a store (the BIRD benchmark puts dozens in one), and each compile pass
+    tags its embeddings with a database name, so an unscoped pass would attribute
+    one database's tables to another.
+
+    Note this reads the table's *own* description, not the fallback: a table
+    with no Term has no Term description to fall back to.
+    """
+    statement = (
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.description,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(_table_join())
+        .where(
+            ~select(s.table__term.c.term_id)
+            .where(s.table__term.c.table_id == s.catalog_table.c.id)
+            .exists()
+        )
+        .order_by(s.catalog_table.c.name)
+    )
+    if database_name is not None:
+        statement = statement.where(s.catalog_database.c.name == database_name)
+
+    return [dict(r) for r in store().query_read(statement)]
+
+
+def fetch_columns_for_table(
+    table_id: str,
+    *,
+    skip: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any] | None:
+    """A table with its columns nested, or ``None`` if the table is missing.
+
+    Columns come back in ordinal order, so *skip* and *limit* read one page of
+    it; pair them with ``count_columns_for_table`` for the total, which no paged
+    read can report. Omit *limit* for every column, which is what the catalog
+    tree and the text-to-SQL context want.
+
+    **``None`` means the table is missing, never that the page is empty.** That
+    is why this runs two queries: the header decides existence, the page decides
+    contents. A single join with ``OFFSET`` would lose the table's own fields as
+    soon as *skip* ran past the last column, turning "page 3 of a 2-page table"
+    into "no such table".
+    """
+    header = store().query_read(
+        select(
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_table.c.table_type,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_database.c.name.label("database_name"),
+        )
+        .select_from(_table_join())
+        .where(s.catalog_table.c.id == table_id)
+        .limit(1)
+    )
+    if not header:
+        return None
+
+    page = (
+        select(
+            s.catalog_column.c.id,
+            s.catalog_column.c.ordinal_position,
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.data_type,
+            column_description_expr().label("description"),
+            s.catalog_column.c.description_certified,
+            s.catalog_column.c.sample_values,
+        )
+        .where(s.catalog_column.c.table_id == table_id)
+        # `ordinal_position` is nullable and not unique, so on its own it is not
+        # a stable page order -- two columns sharing a position could swap
+        # between page 1 and page 2, showing one twice and the other never. `id`
+        # breaks the tie.
+        .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)
+        .offset(skip)
+    )
+    if limit is not None:
+        page = page.limit(limit)
+
+    table = dict(header[0])
+    table["columns"] = [
+        {**dict(r), "sample_values": parse_sample_values(r["sample_values"])}
+        for r in store().query_read(page)
+    ]
+    return table
+
+
+def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
+    """Tables with a name/type/description summary of each column.
+
+    Returns ``[]`` rather than raising if the query fails: this decorates
+    retrieval results, and losing the decoration beats losing the results.
+
+    A table with no columns does not appear at all — the column join is inner.
+    Left that way deliberately: a column-less table in the catalog is a symptom
+    worth seeing where it originates, not something to paper over here.
+    """
+    if not table_ids:
+        return []
+    try:
+        rows = store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.name,
+                s.catalog_table.c.description,
+                s.catalog_table.c.pk,
+                s.catalog_database.c.name.label("database_name"),
+                s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_column.c.name.label("column_name"),
+                s.catalog_column.c.data_type,
+                column_description_expr().label("column_description"),
+                s.catalog_column.c.format,
+            )
+            .select_from(
+                _table_join().join(
+                    s.catalog_column,
+                    s.catalog_column.c.table_id == s.catalog_table.c.id,
+                )
+            )
+            .where(s.catalog_table.c.id.in_(list(table_ids)))
+            .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+        )
+    except Exception:
+        logger.warning("fetch_tables_by_ids: query failed", exc_info=True)
+        return []
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"] or "",
+                "description": row["description"] or "",
+                "database_name": row["database_name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "label": "Table",
+                # The prediction graph keys its entities on this: a table
+                # that arrives without a pk reaches KumoRFM with no identity,
+                # which costs it every edge and makes it unusable in
+                # `FOR EACH`. It has to survive every path to relevant_tables.
+                "pk": row.get("pk") or [],
+                "columns": [],
+            },
+        )
+        # `name` is NOT NULL, so this cannot fire today -- kept so the shape
+        # stays the same if that ever changes.
+        if row["column_name"]:
+            table["columns"].append(
+                {
+                    "name": row["column_name"],
+                    "data_type": row["data_type"],
+                    "description": row["column_description"],
+                    "format": row["format"],
+                }
+            )
+    return list(tables.values())
+
+
+def fetch_table_context(table_id: str) -> dict[str, Any]:
+    """``{columns, fks}`` for one table — what the SQL generator is handed.
+
+    ``is_foreign_key_target`` marks a column some *other* column already points
+    at; ``gsf.semantic.fk_suggester`` drops those from the columns it offers the
+    LLM, so it cannot propose an FK that inverts one the catalog already knows.
+    """
+    is_fk_target = (
+        select(literal(1))
+        .select_from(s.column__foreign_key)
+        .where(s.column__foreign_key.c.target_column_id == s.catalog_column.c.id)
+        .exists()
+    )
+    columns = [
+        {
+            "id": r["id"],
+            "name": r["name"],
+            "data_type": r["data_type"],
+            "description": r["description"],
+            "ordinal_position": r["ordinal_position"],
+            "sample_values": r["sample_values"],
+            "format": r["format"],
+            "is_foreign_key_target": bool(r["is_foreign_key_target"]),
+        }
+        for r in store().query_read(
+            select(
+                s.catalog_column.c.id,
+                s.catalog_column.c.name,
+                s.catalog_column.c.data_type,
+                column_description_expr().label("description"),
+                s.catalog_column.c.ordinal_position,
+                s.catalog_column.c.sample_values,
+                s.catalog_column.c.format,
+                is_fk_target.label("is_foreign_key_target"),
+            )
+            .where(s.catalog_column.c.table_id == table_id)
+            .order_by(s.catalog_column.c.ordinal_position, s.catalog_column.c.id)
+        )
+    ]
+
+    source = s.catalog_column.alias("source_column")
+    target = s.catalog_column.alias("target_column")
+    target_table = s.catalog_table.alias("target_table")
+    fks = [
+        dict(r)
+        for r in store().query_read(
+            select(
+                source.c.name.label("source_column"),
+                target.c.name.label("target_column"),
+                target_table.c.name.label("target_table"),
+                target_table.c.id.label("target_table_id"),
+            )
+            .select_from(
+                source.join(
+                    s.column__foreign_key,
+                    s.column__foreign_key.c.source_column_id == source.c.id,
+                )
+                .join(target, target.c.id == s.column__foreign_key.c.target_column_id)
+                .join(target_table, target_table.c.id == target.c.table_id)
+            )
+            .where(source.c.table_id == table_id)
+        )
+    ]
+    return {"columns": columns, "fks": fks}
+
+
+def fetch_tables_and_columns_by_node_ids(
+    node_ids: list[str],
+) -> tuple[pd.DataFrame, pd.DataFrame, str]:
+    """Table and column frames for ``CatalogEmbeddingRowsOp``.
+
+    *node_ids* mixes table and column ids freely. A table id pulls in all of its
+    columns; a column id pulls in only itself. Both frames carry
+    ``database_name``, and the third return value is the first one found — the
+    caller assumes a single database and there is nothing here that enforces it.
+    """
+    conn = store()
+    ids = list(node_ids)
+
+    columns_df = pd.DataFrame(
+        [
+            # ``sample_values`` is stored as a JSON string. It has to be parsed
+            # here: the operator downstream slices it to five, and on a string
+            # that takes five *characters* rather than five values.
+            {**dict(r), "sample_values": parse_sample_values(r["sample_values"])}
+            for r in conn.query_read(
+                select(
+                    s.catalog_column.c.id,
+                    s.catalog_table.c.name.label("table_name"),
+                    s.catalog_schema.c.name.label("table_schema"),
+                    s.catalog_column.c.name.label("column_name"),
+                    s.catalog_column.c.data_type,
+                    column_description_expr().label("description"),
+                    s.catalog_column.c.sample_values,
+                    s.catalog_database.c.name.label("database_name"),
+                )
+                .select_from(_catalog_join())
+                .where(s.catalog_table.c.id.in_(ids) | s.catalog_column.c.id.in_(ids))
+                .distinct()
+            )
+        ]
+    )
+    tables_df = pd.DataFrame(
+        [
+            dict(r)
+            for r in conn.query_read(
+                select(
+                    s.catalog_table.c.id,
+                    s.catalog_table.c.name.label("table_name"),
+                    s.catalog_schema.c.name.label("table_schema"),
+                    s.catalog_table.c.table_type,
+                    # The table's own description, not the fallback -- unlike
+                    # the columns three lines earlier. Asymmetric on purpose:
+                    # these frames feed embeddings, and widening what gets
+                    # embedded would shift retrieval results with no test
+                    # noticing.
+                    s.catalog_table.c.description,
+                    s.catalog_database.c.name.label("database_name"),
+                )
+                .select_from(_table_join())
+                .where(s.catalog_table.c.id.in_(ids))
+            )
+        ]
+    )
+
+    database_name = ""
+    for frame in (tables_df, columns_df):
+        if not frame.empty:
+            database_name = str(frame.iloc[0].get("database_name") or "")
+            break
+    return tables_df, columns_df, database_name
+
+
+def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
+    """Pure-FK junction tables eligible for a bridge SqlAttribute.
+
+    A table qualifies when **every** column is a foreign key — by a real
+    ``FOREIGN_KEY`` or a ``SEMANTIC_FK`` standing in for one — it has at least
+    two of them, none of its columns already carries a ColumnAttribute, and no
+    bridge SqlAttribute references it yet. Self-referential bridges count:
+    ``also_buy(product_id, also_buy_product_id)`` targets one table twice.
+
+    "Every column resolves" is checked twice, and the two are not redundant:
+    one asks whether each column has an outgoing key at all, the other whether
+    each key actually lands on a column inside a table. A key pointing at a
+    column whose table was never ingested passes the first and fails the
+    second.
+    """
+    fk_target = s.catalog_column.alias("fk_target")
+    fk_table = s.catalog_table.alias("fk_table")
+    fk_schema = s.catalog_schema.alias("fk_schema")
+    sem_target = s.catalog_column.alias("sem_target")
+    sem_table = s.catalog_table.alias("sem_table")
+    sem_schema = s.catalog_schema.alias("sem_schema")
+
+    # Column -> the table/schema/column its FK lands on, by either route.
+    # `resolved_count` below counts these rows, so a column with no resolvable
+    # target contributes nothing and the size comparison fails -- the second of
+    # the two checks described above.
+    #
+    # The SEMANTIC_FK route is Column -> ColumnAttribute <- Column: the
+    # attribute this column references is *owned* by some other column, and that
+    # other column is the join target. Reversing it would make every bridge
+    # point back at itself.
+    sem_owner = s.column__has_attribute.alias("sem_owner")
+    resolved = (
+        select(
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.table_id.label("owner_table_id"),
+            s.catalog_column.c.name.label("source_column"),
+            func.coalesce(fk_table.c.name, sem_table.c.name).label("target_table"),
+            func.coalesce(fk_schema.c.name, sem_schema.c.name).label("target_schema"),
+            func.coalesce(fk_target.c.name, sem_target.c.name).label("target_column"),
+            func.coalesce(fk_table.c.id, sem_table.c.id).label("target_table_id"),
+        )
+        .select_from(
+            s.catalog_column.outerjoin(
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
+            )
+            .outerjoin(
+                fk_target, fk_target.c.id == s.column__foreign_key.c.target_column_id
+            )
+            .outerjoin(fk_table, fk_table.c.id == fk_target.c.table_id)
+            .outerjoin(fk_schema, fk_schema.c.id == fk_table.c.schema_id)
+            .outerjoin(
+                s.column__semantic_fk,
+                s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
+            )
+            .outerjoin(
+                sem_owner,
+                sem_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+            )
+            .outerjoin(sem_target, sem_target.c.id == sem_owner.c.column_id)
+            .outerjoin(sem_table, sem_table.c.id == sem_target.c.table_id)
+            .outerjoin(sem_schema, sem_schema.c.id == sem_table.c.schema_id)
+        )
+        .where(
+            func.coalesce(fk_table.c.id, sem_table.c.id).isnot(None),
+            func.coalesce(fk_target.c.id, sem_target.c.id).isnot(None),
+        )
+        .distinct()
+        .subquery("resolved")
+    )
+
+    columns_count = _count_of(
+        s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
+    )
+    # DISTINCT on the *column*, not a row count. `resolved` carries one row per
+    # resolvable target, and a column may have several -- two foreign keys, or a
+    # SEMANTIC_FK reaching an attribute owned by more than one column. Counting
+    # rows lets a table where one column resolves twice and another not at all
+    # match `columns_count`, which is exactly the "every column is a key" claim
+    # this is supposed to enforce. That is the first of the two checks the
+    # docstring describes; the subquery's own WHERE is the second.
+    resolved_count = (
+        select(func.count(distinct(resolved.c.column_id)))
+        .select_from(resolved)
+        .where(resolved.c.owner_table_id == s.catalog_table.c.id)
+        .scalar_subquery()
+    )
+    resolved_rows = _count_of(
+        resolved, resolved.c.owner_table_id == s.catalog_table.c.id
+    )
+    has_attribute_anywhere = (
+        select(literal(1))
+        .select_from(
+            s.catalog_column.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            )
+        )
+        .where(s.catalog_column.c.table_id == s.catalog_table.c.id)
+        .exists()
+    )
+    already_bridged = (
+        select(literal(1))
+        .select_from(
+            s.sql_attribute.join(
+                s.sql_attribute__sql,
+                s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
+            ).join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.sql_attribute__sql.c.sql_query_id,
+            )
+        )
+        .where(
+            s.sql_attribute.c.source == SQL_ATTR_SOURCE_BRIDGE,
+            s.sql_query__table.c.table_id == s.catalog_table.c.id,
+        )
+        .exists()
+    )
+
+    candidates = store().query_read(
+        select(
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_table.c.description,
+        )
+        .select_from(_table_join())
+        .where(
+            s.catalog_database.c.name == database_name,
+            columns_count >= 2,
+            ~has_attribute_anywhere,
+            ~already_bridged,
+            resolved_count == columns_count,
+            # Both bounds. The line above says every column resolves; this one
+            # says none resolves twice. Without it a 2-column junction whose
+            # first column carries two foreign keys still qualifies and hands
+            # `_generate_bridge_sql_attribute` three pairs, so the bridge joins
+            # a table the junction does not connect.
+            resolved_rows == columns_count,
+        )
+        .order_by(s.catalog_table.c.name)
+    )
+    if not candidates:
+        return []
+
+    pairs: dict[str, list[dict[str, Any]]] = {}
+    for row in store().query_read(
+        select(
+            resolved.c.owner_table_id,
+            resolved.c.source_column,
+            resolved.c.target_table,
+            resolved.c.target_schema,
+            resolved.c.target_column,
+            resolved.c.target_table_id,
+        ).where(resolved.c.owner_table_id.in_([c["table_id"] for c in candidates]))
+    ):
+        pairs.setdefault(row["owner_table_id"], []).append(
+            {
+                "source_column": row["source_column"],
+                "target_table": row["target_table"],
+                "target_schema": row["target_schema"],
+                "target_column": row["target_column"],
+                "target_table_id": row["target_table_id"],
+            }
+        )
+
+    return [{**dict(c), "fk_pairs": pairs.get(c["table_id"], [])} for c in candidates]

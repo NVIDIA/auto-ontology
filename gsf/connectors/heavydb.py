@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import heavydb
 import pandas as pd
 from heavydb.common.ttypes import TDatumType
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 if TYPE_CHECKING:
     from heavydb.connection import Connection
@@ -312,7 +312,7 @@ class HeavyDBDatabase(SQLDatabase):
                             "table_name": meta.table_name,
                             "column_name": name,
                             "data_type": _type_name(type_info),
-                            "is_nullable": "YES" if type_info.nullable else "NO",
+                            "is_nullable": bool(type_info.nullable),
                             "ordinal_position": position,
                         }
                     )

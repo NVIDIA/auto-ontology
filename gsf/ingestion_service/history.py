@@ -5,9 +5,10 @@
 """Postgres-backed history of semantic compilation passes.
 
 Unlike the ``configurations`` table (owned by the frontend's Prisma schema),
-this table is owned by GSF itself: it is written and read only by Python
-services, so its schema is declared and created here rather than in
-``frontend/prisma/schema.prisma``.
+this table is GSF's own: written and read only by Python services. It is
+declared in :mod:`gsf.dal.schema` and created by a migration like every other
+GSF table, so nothing here creates it — the reads and writes below assume it
+exists, and degrade to no-ops if it somehow doesn't.
 
 The scheduler records a start/end row for every pass (see
 ``semantic_scheduler.py``); the ingestion service's status endpoint reads the
@@ -33,51 +34,26 @@ import logging
 
 import psycopg
 
+from gsf.dal.schema import RUN_FAILED, RUN_SUCCEEDED
 from gsf.infra.postgres import get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
-# The only two outcomes ever written to the ``status`` column — see the
-# module docstring on why there's no "aborted" value stored in the table.
-RUN_SUCCEEDED = "succeeded"
-RUN_FAILED = "failed"
+# The only two outcomes ever written to the ``status`` column — see the module
+# docstring on why there's no "aborted" value. Re-exported from the schema that
+# declares the CHECK constraint enforcing them, rather than restated here: two
+# copies of these strings differ only when one is wrong, and the write would
+# then fail against the constraint at runtime.
+__all__ = [
+    "RUN_FAILED",
+    "RUN_SUCCEEDED",
+    "get_last_failure_if_most_recent",
+    "get_last_successful_run",
+    "record_run_finish",
+    "record_run_start",
+]
 
 _VALID_OUTCOMES = frozenset({RUN_SUCCEEDED, RUN_FAILED})
-
-_CREATE_TABLE_SQL = f"""
-    CREATE TABLE IF NOT EXISTS semantic_compilation_history (
-        id BIGSERIAL PRIMARY KEY,
-        started_at TIMESTAMPTZ NOT NULL,
-        finished_at TIMESTAMPTZ,
-        status TEXT
-            CHECK (status IS NULL OR status IN ('{RUN_SUCCEEDED}', '{RUN_FAILED}'))
-    )
-"""
-
-
-def ensure_history_table() -> None:
-    """Create the history table if it doesn't exist yet.
-
-    Called once at ingestion service startup. Best-effort: a failure here
-    (e.g. Postgres briefly unreachable) is logged and swallowed rather than
-    crashing the service — ``record_run_start``/``record_run_finish`` already
-    degrade gracefully (they no-op) when the table isn't there yet.
-
-    Doesn't handle migrating a stale table left over from an earlier shape of
-    this column (a nullable boolean, then a required string called
-    ``succeeded`` with a pessimistic ``'aborted'`` default) — that never made
-    it past developer machines, so drop it manually if you have one lying
-    around locally; a fresh one gets created here with the current schema.
-    """
-    try:
-        with psycopg.connect(
-            get_postgres_connection_string(), connect_timeout=3
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute(_CREATE_TABLE_SQL)
-            conn.commit()
-    except Exception:
-        logger.exception("Failed to ensure semantic_compilation_history exists")
 
 
 def record_run_start() -> int | None:

@@ -5,7 +5,7 @@
 """PostgreSQL-backed lookup of a user's role (Better Auth ``user`` table).
 
 PostgreSQL is the single source of truth for whether a user is an ``admin``
-or a ``viewer`` — the Neo4j graph only stores a single, role-agnostic
+or a ``viewer`` — the catalog only stores a single, role-agnostic
 ``User`` node (see ``gsf.dal.users``).  Anything that needs to gate access
 (e.g. "can this user manage zones?", "does this user see every zone?")
 must go through :func:`get_user_role` / :func:`is_admin` instead of reading

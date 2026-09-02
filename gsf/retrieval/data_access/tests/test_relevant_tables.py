@@ -5,7 +5,7 @@
 from typing import Any
 
 import pytest
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 from gsf.retrieval.data_access import relevant_tables
 

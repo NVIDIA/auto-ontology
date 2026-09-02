@@ -60,7 +60,6 @@ imagePullSecrets:
 {{- end -}}
 
 {{/*
-Init containers that block until Postgres and Neo4j are reachable.
 A Service routes only to Ready endpoints, so `nc -z` succeeds only after
 each datastore's readiness probe has passed.
 */}}
@@ -77,23 +76,11 @@ each datastore's readiness probe has passed.
         sleep 2
       done
   {{- include "gsf.initResources" . | nindent 2 }}
-- name: wait-for-neo4j
-  image: busybox:1.36
-  imagePullPolicy: {{ .Values.imagePullPolicy }}
-  command:
-    - sh
-    - -c
-    - |
-      until nc -z neo4j {{ .Values.neo4j.service.boltPort }}; do
-        echo "waiting for neo4j..."
-        sleep 2
-      done
-  {{- include "gsf.initResources" . | nindent 2 }}
 {{- end -}}
 
 {{/*
 Init container that blocks until the frontend's Prisma schema exists in Postgres,
-gating on the `user` table that seed-admin (auth/seed-admin.ts, run from
+gating on the `frontend.user` table that seed-admin (auth/seed-admin.ts, run from
 instrumentation.ts on boot) writes to. Without this the frontend can start and
 seed the bootstrap admin before the migrate Job has created the tables, which
 fails with TableDoesNotExist and leaves no admin account (login then fails).
@@ -113,9 +100,45 @@ present and already pulled. Runs after gsf.waitForDeps, so Postgres is reachable
     - |
       until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
         -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
-        "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='user'" \
+        "SELECT 1 FROM information_schema.tables WHERE table_schema='frontend' AND table_name='user'" \
         2>/dev/null | grep -q 1; do
-        echo "waiting for prisma schema (public.user)..."
+        echo "waiting for prisma schema (frontend.user)..."
+        sleep 2
+      done
+  {{- include "gsf.initResources" . | nindent 2 }}
+{{- end -}}
+
+{{/*
+Init container that blocks until the backend's Alembic migrations have been
+applied *to the revision this release ships*. Without it the backend goes Ready
+and serves 500s on every catalog call while backend-migrate is still running --
+the Job is a normal release resource, so nothing else orders the two.
+
+Gating on a table's existence is not enough: it is satisfied from the first
+install onward, so on an upgrade that adds a column the new Pods roll out while
+the migration is still running and every query touching that column fails with
+UndefinedColumn. This compares `alembic_version.version_num` against the head
+revision baked into the image at build time, so it blocks on upgrades too.
+
+Mirrors gsf.waitForSchema, which does the same for Prisma's `frontend` schema.
+Runs after gsf.waitForDeps, so Postgres is reachable.
+*/}}
+{{- define "gsf.waitForCatalogSchema" -}}
+- name: wait-for-catalog-schema
+  image: "{{ .Values.postgres.image.repository }}:{{ .Values.postgres.image.tag }}"
+  imagePullPolicy: {{ .Values.imagePullPolicy }}
+  envFrom:
+    - secretRef:
+        name: {{ include "gsf.secretName" . }}
+  command:
+    - sh
+    - -c
+    - |
+      until PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+        -U "$POSTGRES_USER" -d "$POSTGRES_DATABASE" -tAc \
+        "SELECT 1 FROM public.alembic_version WHERE version_num = '{{ .Values.backend.alembicRevision }}'" \
+        2>/dev/null | grep -q 1; do
+        echo "waiting for alembic revision {{ .Values.backend.alembicRevision }}..."
         sleep 2
       done
   {{- include "gsf.initResources" . | nindent 2 }}

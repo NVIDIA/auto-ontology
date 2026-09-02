@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 from pytest import MonkeyPatch
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
+from gsf.catalog.constants import TableTypes
 
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.databricks import (

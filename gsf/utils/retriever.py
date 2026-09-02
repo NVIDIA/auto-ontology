@@ -57,9 +57,11 @@ def _close_retriever_vdb(retriever: Retriever | None) -> None:
 def close_retrievers() -> None:
     """Dispose singleton retriever VDB pools so CLI/debug processes can exit.
 
-    PGEngine keeps a background asyncio loop and ThreadPoolExecutor workers;
-    without an explicit close, interpreter shutdown joins those workers and
-    appears to hang after the coverage result is already printed.
+    ``PGEngine`` keeps a background asyncio loop and ThreadPoolExecutor workers,
+    so a process that never disposes them exits later than it should. Calling
+    this explicitly is the tidy path; ``PostgresVDB.close`` bounds the wait and
+    skips it outright once the loop thread is gone, so neither route can wedge
+    at shutdown the way it once did.
     """
     global _data_retriever, _semantic_retriever
     _close_retriever_vdb(_data_retriever)

@@ -19,11 +19,16 @@ Frontend commands run from `/frontend`:
 | `pnpm build` | Build the frontend |
 | `pnpm lint` | ESLint the frontend |
 
-Backend command runs from the repo root:
+Backend commands run from the repo root:
 
 | Command | Description |
 |---|---|
-| `uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
+| `uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001` | Start FastAPI on :3001 with hot reload |
+| `uv run python -m gsf.server` | Start FastAPI on :3001 without reload (what the container runs) |
+| `uv run python -m gsf.ingestion_service` | Start the ingestion service on :3002 |
+
+The app factory is `create_app()` in `gsf/server/__main__.py` — there is no
+`gsf/server/main.py`.
 
 To install dependencies:
 - Frontend: `pnpm install` from `/frontend`
@@ -42,6 +47,7 @@ To install dependencies:
 
 ## Backend Rules
 
+- **The store is Postgres.** `gsf/dal/` queries it with SQLAlchemy Core (no ORM); `gsf/dal/schema.py` is the single source of truth for the schema and `gsf/dal/session.py` owns the pooled engine. Schema changes go through Alembic — `uv run alembic revision --autogenerate -m "..."` — never by hand-editing a migration that has been applied. Several column types and constraints are deliberate and non-obvious — read the comments in `schema.py` before changing a table.
 - **Formatting/Linting**: Ruff (line-length: 88). Run `uv run ruff check gsf/` and `uv run ruff format gsf/` from repo root before committing.
 - **Dependencies**: Managed with `uv`. Add dependencies via `uv add`, not pip. Do not edit `pyproject.toml` manually for deps.
 - **API prefix**: All routes under `/api/`. Routes live in `gsf/server/datasources/router.py`, orchestration in `gsf/server/datasources/service.py`.

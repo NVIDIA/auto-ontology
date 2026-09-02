@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Deterministic coverage grade: distance filter, Neo4j enrich, 1/n entity coverage."""
+"""Deterministic coverage grade: distance filter, the store enrich, 1/n entity coverage."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from gsf.retrieval.entity_coverage.state import DEFAULT_MAX_DISTANCE
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 logger = logging.getLogger(__name__)
 
@@ -161,7 +161,7 @@ def _to_response_candidate(hit: dict[str, Any]) -> dict[str, Any]:
 
 
 class CoverageGradeAgent(BaseAgent):
-    """Filter by distance, enrich via Neo4j, compute 0–1 entity coverage grade."""
+    """Filter by distance, enrich via the store, compute 0–1 entity coverage grade."""
 
     def __init__(self) -> None:
         super().__init__("coverage_grade")

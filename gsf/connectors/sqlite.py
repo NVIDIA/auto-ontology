@@ -15,8 +15,8 @@ from urllib.parse import unquote, urlparse
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,7 @@ class SQLiteDatabase(SQLDatabase):
                         "table_name": table_name,
                         "column_name": name,
                         "data_type": data_type or "TEXT",
-                        "is_nullable": "NO" if notnull else "YES",
+                        "is_nullable": not notnull,
                         "ordinal_position": cid + 1,
                     }
                 )

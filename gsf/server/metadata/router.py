@@ -35,7 +35,7 @@ def entity_coverage(body: EntityCoverageRequest) -> dict:
     """Return ranked semantic candidates and a 0–1 entity coverage grade.
 
     Extracts entities from the question, retrieves semantic candidates, filters
-    by vector distance, enriches via Neo4j, and grades how many entities have
+    by vector distance, enriches from the catalog, and grades how many entities have
     at least one covering ColumnAttribute candidate.
 
     Returns 422 when the flow cannot produce a result for the question.

@@ -12,14 +12,13 @@ After the semantic FK pass this module runs once per compilation:
    it appears in.
 4. Send the top 10 expressions per term to an LLM that judges whether any
    should become named SqlAttributes.
-5. Persist new suggestions in Neo4j (skipping existing semantic SqlAttributes)
+5. Persist new suggestions in the store (skipping existing semantic SqlAttributes)
    and embed only the newly written nodes into the semantic VDB.
 """
 
 from __future__ import annotations
 
 import logging
-import re
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
@@ -45,7 +44,6 @@ logger = logging.getLogger(__name__)
 
 _TOP_N = 10
 _TERM_WORKERS = 4
-_COUNTER_RE = re.compile(r"^count_monthly_(\d{4})_(\d{2})$")
 
 
 # ---------------------------------------------------------------------------
@@ -68,18 +66,56 @@ class _Suggestions(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _latest_3month_score(props: dict[str, Any]) -> float:
-    """Return the sum of the three most recent monthly counters in *props*."""
-    monthly: list[tuple[tuple[int, int], float]] = []
-    for key, val in props.items():
-        m = _COUNTER_RE.match(key)
-        if m and val is not None:
-            try:
-                monthly.append(((int(m.group(1)), int(m.group(2))), float(val)))
-            except (TypeError, ValueError):
-                pass
-    monthly.sort(key=lambda x: x[0], reverse=True)
-    return sum(v for _, v in monthly[:3])
+def _usage_score(props: dict[str, Any]) -> float:
+    """Always ``0.0``. Ranking is inert, deliberately, for now.
+
+    .. warning::
+       **Known bug, preserved on purpose. Do not "fix" this in passing.**
+
+    Candidate SQL expressions are supposed to be ranked by how often their query
+    has been seen, so the busiest expressions become SqlAttribute suggestions.
+    That has never happened. The original scorer summed the three most recent
+    monthly counters, matching property names against::
+
+        ^count_monthly_(\\d{4})_(\\d{2})$
+
+    while the writer, ``gsf.catalog.model.query.Query.__init__``, produces::
+
+        f"count_{month}_{year}"     ->  "count_8_2026"
+
+    No name that regex accepts has ever been written. Every query therefore
+    scored ``0.0``, every expression tied, and ``sorted(..., reverse=True)`` over
+    equal values left them in dict insertion order. Verified against a real
+    property bag from the fixture; see the note on ``total_counter``.
+
+    Two further faults sit behind it, so simply repairing the regex would not be
+    enough:
+
+    * the sort key is ``(int(m.group(1)), int(m.group(2)))``, which reads the
+      writer's ``month_year`` as ``(year, month)`` — December 2025 would outrank
+      January 2026 even with matching names;
+    * ``fetch_terms_with_sqls``'s docstring documents the broken
+      ``count_monthly_YYYY_MM`` rather than what is written, which is likely
+      where the mistake started.
+
+    **The fix, when it is made deliberately**, is to score by ``total_counter``
+    — maintained on the same write paths, a real non-zero integer, and already a
+    single column::
+
+        return float(props.get("total_counter") or 0)
+
+    That trades recency for all-time usage. The old code *intended* recency but
+    never delivered it; if recency is wanted, ``last_query_timestamp`` is
+    already a column, and is a better answer than reviving per-month counters.
+
+    **Why it is not fixed here.** Turning ranking on changes which SqlAttributes
+    the semantic layer suggests — a product behaviour change, in a component
+    whose output the drop-the store refactor is supposed to leave untouched. It gets
+    made on its own, against its own tests, not as a side effect of a port.
+    Returning a constant keeps today's behaviour exactly, rather than leaving a
+    plausible-looking scorer that silently does nothing.
+    """
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -416,7 +452,7 @@ def _build_valid_sql(
 def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float, list[str]]]:
     """Return ``(expression, score, sql_ids)`` triples sorted by score descending.
 
-    *sql_ids* lists the Neo4j Sql node ids of every query the expression
+    *sql_ids* lists the statement ids of every query the expression
     appeared in — used later to link the created SqlAttribute back to its
     source queries.
     """
@@ -425,7 +461,7 @@ def _rank_expressions(sqls: list[dict[str, Any]]) -> list[tuple[str, float, list
     for item in sqls:
         sql_text = item.get("sql_text") or ""
         sql_id = item.get("sql_id") or ""
-        sql_score = _latest_3month_score(item.get("props") or {})
+        sql_score = _usage_score(item.get("props") or {})
         if not sql_text:
             continue
         for expr in _extract_expressions(sql_text):

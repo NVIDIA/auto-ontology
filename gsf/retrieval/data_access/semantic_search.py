@@ -31,7 +31,7 @@ import random
 import time
 from typing import TYPE_CHECKING, Literal
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 

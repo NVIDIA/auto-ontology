@@ -12,7 +12,11 @@ from collections.abc import Mapping
 from typing import Any
 
 import yaml
-from ossie_gsf import GSFConversionError, convert_gsf_to_ossie, convert_ossie_to_gsf
+from ossie_nvidia_gsf import (
+    GSFConversionError,
+    convert_gsf_to_ossie,
+    convert_ossie_to_gsf,
+)
 
 from gsf.connectors import get_connectors
 from gsf.dal import model_interchange as dal

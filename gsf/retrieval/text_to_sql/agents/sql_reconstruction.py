@@ -9,7 +9,7 @@ Reconstructs SQL queries that failed validation. On the first
 reconstruction attempt the agent classifies the error type via an LLM
 call. When the error is MISSING_DATA, it searches the data VDB for
 additional tables using LLM-suggested queries, enriches them with full
-column info from Neo4j, and merges them into the available context.
+column info from the store, and merges them into the available context.
 For FIXABLE errors it proceeds directly to SQL reconstruction with the
 existing tables.
 
@@ -383,7 +383,7 @@ class SQLReconstructionAgent(BaseAgent):
         search_queries: list[str],
         existing_tables: list[dict],
     ) -> list[dict]:
-        """Search the data VDB for additional tables, enrich with Neo4j columns."""
+        """Search the data VDB for additional tables, enrich with the store columns."""
         data_retriever = state.get("data_retriever")
         if data_retriever is None:
             self.logger.warning("No data_retriever — skipping table discovery")

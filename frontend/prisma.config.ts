@@ -19,6 +19,10 @@ export default defineConfig({
 		path: 'prisma/migrations',
 	},
 	datasource: {
-		url: `postgresql://${user}:${password}@${host}:${port}/${database}`,
+		// `?schema=frontend` is load-bearing. Prisma issues unqualified DDL and
+		// lets the connection's search_path decide where it lands; without this
+		// the tables follow the server default, which resolves `"$user"` to the
+		// `gsf` schema because the role is also called `gsf`.
+		url: `postgresql://${user}:${password}@${host}:${port}/${database}?schema=frontend`,
 	},
 });

@@ -10,7 +10,7 @@ The text-to-SQL prompts expect each table to be a flat dict with
 
 * parses the vector hit ``text`` into structured fields,
 * normalises a single table dict into the prompt shape, merges duplicates
-  with different richness (Neo4j vs vector hits), and
+  with different richness (catalog vs vector hits), and
 * runs the semantic search restricted to ``Table`` rows.
 """
 
@@ -20,7 +20,7 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from gsf.retrieval.data_access.semantic_search import (
     search_semantic_index,
 )
@@ -150,7 +150,7 @@ def _merge_column_lists(ca: list, cb: list) -> list:
 
 
 def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
-    """Merge two table dicts with the same ``id`` (e.g. Neo4j vs vector); prefer non-empty / richer fields."""
+    """Merge two table dicts with the same ``id`` (e.g. catalog vs vector); prefer non-empty / richer fields."""
     out = dict(a)
     for k, v in b.items():
         if v is None:

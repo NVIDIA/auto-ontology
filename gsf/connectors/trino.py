@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Trino connector implementing the NeMo-Retriever SQLDatabase ABC.
+"""Trino connector implementing GSF's SQLDatabase ABC.
 
 Trino is a distributed query engine that federates other systems -- Hive, Iceberg,
 PostgreSQL, Kafka -- behind one ANSI SQL surface. It speaks HTTP rather than a
@@ -53,8 +53,8 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 if TYPE_CHECKING:
     from trino.dbapi import Connection

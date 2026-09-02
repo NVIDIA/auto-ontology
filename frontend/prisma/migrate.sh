@@ -16,14 +16,22 @@
 #
 # The cleanup is idempotent: it only fires when conversation_analytics exists
 # WITHOUT user_id, so it is a no-op on fresh installs (table absent) and on
-# every deploy after the column has been added. It touches only the `public`
-# schema, matching the scope `db push` operates on.
+# every deploy after the column has been added. It touches only the `frontend`
+# schema -- as the SQL above shows -- matching the scope `db push` operates on,
+# which is the one schema Prisma's datasource lists.
 set -eu
 
 # Both subcommands read the schema path and datasource url from
 # prisma.config.ts (shipped alongside this script in /app/migrate). Prisma 7's
 # `db execute` has no --schema flag; it takes the datasource from the config.
 PRISMA="node node_modules/prisma/build/index.js"
+
+# `db push` does not create the schema it targets, so this has to exist first
+# or the very first push fails with "schema \"frontend\" does not exist".
+echo "migrate: ensuring the frontend schema exists..."
+$PRISMA db execute --stdin <<'SQL'
+CREATE SCHEMA IF NOT EXISTS frontend;
+SQL
 
 echo "migrate: checking conversation_analytics for the pre-user_id schema..."
 $PRISMA db execute --stdin <<'SQL'
@@ -33,16 +41,16 @@ DECLARE
 BEGIN
   IF EXISTS (
     SELECT 1 FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_name = 'conversation_analytics'
+    WHERE table_schema = 'frontend' AND table_name = 'conversation_analytics'
   ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public'
+    WHERE table_schema = 'frontend'
       AND table_name = 'conversation_analytics'
       AND column_name = 'user_id'
   ) THEN
-    SELECT count(*) INTO stale_rows FROM public.conversation_analytics;
+    SELECT count(*) INTO stale_rows FROM frontend.conversation_analytics;
     RAISE NOTICE 'conversation_analytics is missing user_id; truncating % pre-feature row(s) so the required column can be added', stale_rows;
-    TRUNCATE TABLE public.conversation_analytics;
+    TRUNCATE TABLE frontend.conversation_analytics;
   END IF;
 END $$;
 SQL

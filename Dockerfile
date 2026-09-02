@@ -89,9 +89,13 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=gsf:gsf gsf/ ./gsf/
 COPY --chown=gsf:gsf pyproject.toml ./
+# Schema migrations for the `public` schema, run by the `migrate` mode below.
+COPY --chown=gsf:gsf alembic/ ./alembic/
+COPY --chown=gsf:gsf alembic.ini ./
 
-# Dispatcher entrypoint: selects between the FastAPI server and the
-# ingestion service based on the first arg. Defaults to gsf.server.
+# Dispatcher entrypoint: selects between the FastAPI server, the ingestion
+# service, and the one-shot schema migration based on the first arg.
+# Defaults to gsf.server.
 COPY --chmod=0755 <<'EOF' /usr/local/bin/entrypoint.sh
 #!/bin/sh
 set -e
@@ -103,9 +107,14 @@ case "$mode" in
   ingestion_service)
     exec python -m gsf.ingestion_service
     ;;
+  migrate)
+    # Owns `public` only. Prisma owns `frontend` and migrates separately;
+    # the two are independent and may run in either order.
+    exec alembic upgrade head
+    ;;
   *)
     echo "Unknown mode: $mode" >&2
-    echo "Usage: docker run <image> [server|ingestion_service]" >&2
+    echo "Usage: docker run <image> [server|ingestion_service|migrate]" >&2
     exit 2
     ;;
 esac
@@ -115,8 +124,20 @@ USER gsf
 
 EXPOSE 3001
 
+# `/api/health/live`, not `/api/health`. The latter is the *readiness* probe:
+# it queries Postgres and returns 503 when the database is unreachable. Docker
+# has no notion of readiness -- HEALTHCHECK produces one binary container state
+# -- so pointing it there makes a database blip mark this container unhealthy,
+# and anything gating on `condition: service_healthy` (the frontend, in
+# docker-compose.yml) then refuses to start behind a backend that is running
+# perfectly well.
+#
+# Restarting this process cannot fix an unreachable database, which is the whole
+# reason the health router splits the two and the Helm chart points its
+# livenessProbe at /api/health/live and only its readinessProbe at /api/health.
+# Readiness stays available on /api/health for the things that can act on it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{__import__(\"os\").environ.get(\"PORT\",\"3001\")}/api/health', timeout=3).status == 200 else 1)"
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f'http://127.0.0.1:{__import__(\"os\").environ.get(\"PORT\",\"3001\")}/api/health/live', timeout=3).status == 200 else 1)"
 
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/entrypoint.sh"]
 CMD ["server"]

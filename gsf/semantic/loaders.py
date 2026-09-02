@@ -1,6 +1,6 @@
-"""Read metadata layer (Table, Column, fk, join) from Neo4j.
+"""Read metadata layer (Table, Column, fk, join) from the store.
 
-All direct Neo4j calls live in gsf/dal/datasources.py.
+All direct store access lives in gsf/dal/datasources.py.
 This module only keeps the pure-Python helper build_tables_index.
 """
 

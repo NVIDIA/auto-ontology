@@ -16,17 +16,13 @@ from __future__ import annotations
 import logging
 import os
 
-from nemo_retriever.graph import Graph
-from nemo_retriever.tabular_data.operators.tabular_schema_extract_operator import (
-    TabularSchemaExtractOp,
+from gsf.utils.embedding_rows import (
+    CatalogEmbeddingRowsOp,
 )
-from nemo_retriever.tabular_data.operators.tabular_fetch_embeddings_operator import (
-    TabularFetchEmbeddingsOp,
-)
-from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
-from nemo_retriever.common.params.models import TabularExtractParams
+from gsf.catalog import ingest_catalog
 from gsf.utils import get_embed_params
+from gsf.utils.embedding import batch_embed
 from gsf.vdb import get_data_vdb
 from gsf.connectors.registry import create_connector
 
@@ -34,32 +30,14 @@ logger = logging.getLogger("dev_tools.local_ingest")
 
 
 def run_ingest(connection_string: str) -> None:
-    """Build the tabular ingest graph, run it, and write embeddings to pgvector."""
+    """Ingest the catalog, embed it, and write the embeddings to pgvector."""
     connector = create_connector(connection_string)
     database_name = connector.database_name
 
-    tabular_params = TabularExtractParams(
-        connector=connector,
-    )
+    schema_data = ingest_catalog(connector)
 
-    extract_graph = Graph() >> TabularSchemaExtractOp(tabular_params=tabular_params)
-    extract_results = extract_graph.execute(None)
-    schema_data = extract_results[0] if extract_results else None
-    if not (isinstance(schema_data, tuple) and len(schema_data) == 2):
-        raise RuntimeError(
-            "TabularSchemaExtractOp did not return (tables_df, columns_df); "
-            f"got {type(schema_data).__name__}."
-        )
-
-    embed_params = get_embed_params()
-
-    embed_graph = (
-        Graph()
-        >> TabularFetchEmbeddingsOp(database_name=database_name)
-        >> _BatchEmbedActor(params=embed_params)
-    )
-    results = embed_graph.execute(schema_data)
-    result_df = results[0] if results else None
+    embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(schema_data)
+    result_df = batch_embed(embed_rows, get_embed_params())
 
     # PostgresVDB.__init__ wipes existing rows for `database_name` before we
     # re-ingest, so the store starts clean for this database.

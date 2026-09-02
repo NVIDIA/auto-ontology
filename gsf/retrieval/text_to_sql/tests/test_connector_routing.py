@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from typing import cast
 
 import pytest
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,

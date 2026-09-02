@@ -12,7 +12,7 @@ waits for the Job to complete. Naming per `.Release.Revision` gives a fresh Job
 each upgrade (Job specs are immutable, so a stable name could not re-run), and
 ttlSecondsAfterFinished garbage-collects finished Jobs.
 
-Prisma is scoped to the `public` schema only (schemas = ["public"] +
+Prisma is scoped to the `frontend` schema only (schemas = ["frontend"] +
 multiSchema). Ingestion's vector table lives in the separate `vdb` schema
 (see gsf/vdb), so `db push` never sees it and cannot drop it.
 

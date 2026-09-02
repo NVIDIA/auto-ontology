@@ -43,7 +43,14 @@ export const POST = withPermission({ apiToken: ['manage'] })(async (req) => {
 	const denied = await requireSessionCaller();
 	if (denied) return denied;
 
-	const body = (await req.json()) as { name?: unknown; expires_in_days?: unknown };
+	// A malformed or absent body is a client error, not a 500 -- every other
+	// input problem on this route answers 400.
+	let body: { name?: unknown; expires_in_days?: unknown };
+	try {
+		body = (await req.json()) as { name?: unknown; expires_in_days?: unknown };
+	} catch {
+		return NextResponse.json({ error: 'A JSON body is required.' }, { status: 400 });
+	}
 
 	const name = typeof body.name === 'string' ? body.name.trim() : '';
 	if (!name) return NextResponse.json({ error: 'A token name is required.' }, { status: 400 });

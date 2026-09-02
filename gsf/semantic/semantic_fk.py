@@ -15,8 +15,8 @@ Algorithm
       ColumnAttribute records (excluding candidates on the FK's own table),
       ask the LLM to pick the best match, and fall back to probing the live
       database for a candidate whose sample values match when the LLM
-      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j
-      UUID directly — no additional graph lookup needed.
+      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
+      directly — no additional lookup needed.
 """
 
 from __future__ import annotations
@@ -55,12 +55,12 @@ _WORKERS = 2
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
 description and a list of candidate primary-key columns retrieved from a \
-vector search. Each candidate is prefixed with its unique neo4j_id. \
+vector search. Each candidate is prefixed with its unique column_id. \
 Your task is to decide which candidate (if any) is the column that the \
 foreign key references.
 
 Rules:
-- Return the exact neo4j_id of the best matching candidate, or null if none fit.
+- Return the exact column_id of the best matching candidate, or null if none fit.
 - Only pick a candidate when you are confident it is the PK being referenced.
 - Do NOT guess. If unsure, return null.
 """
@@ -263,7 +263,7 @@ def _resolve_via_vdb(
     query level — a non-unique column can't validly serve as the referenced
     key.
 
-    The hit's ``metadata["id"]`` is the ColumnAttribute Neo4j UUID directly —
+    The hit's ``metadata["id"]`` is the ColumnAttribute id directly —
     no additional graph lookup is required.
 
     Returns the ColumnAttribute id from a confident LLM match, or — when the
@@ -429,10 +429,14 @@ def _llm_pick_hit(
     col: dict[str, Any],
     hits: list[dict[str, Any]],
 ) -> str | None:
-    """Ask the LLM to select the Neo4j column ID of the best matching hit.
+    """Ask the LLM which candidate column the foreign key references.
 
-    Returns the ``neo4j_id`` string from the chosen hit's metadata, or ``None``
-    when the LLM is not confident enough to pick any candidate.
+    Returns the ``column_id`` from the chosen hit's metadata, or ``None`` when
+    the LLM is not confident enough to pick any candidate.
+
+    The ``column_id`` label only has to be internally consistent between the
+    candidate list and the instruction that references it — but it *is* part of
+    the prompt, so changing it changes model behaviour.
     """
     col_ctx = (
         f"Foreign-key column: {col.get('name', '')} "
@@ -443,16 +447,16 @@ def _llm_pick_hit(
 
     candidates_lines: list[str] = []
     for hit in hits:
-        neo4j_id = (hit.get("metadata") or {}).get("id", "")
+        column_id = (hit.get("metadata") or {}).get("id", "")
         text = (hit.get("text") or "")[:300]
-        candidates_lines.append(f"neo4j_id={neo4j_id} | {text}")
+        candidates_lines.append(f"column_id={column_id} | {text}")
     candidates_block = "\n".join(candidates_lines)
 
     human_text = (
         f"{col_ctx}\n\n"
         f"Candidate PK columns (from vector search):\n{candidates_block}\n\n"
         "Which candidate does this FK column reference? "
-        "Return its exact neo4j_id value, or null if none are a confident match."
+        "Return its exact column_id value, or null if none are a confident match."
     )
 
     result = invoke_with_structured_output(

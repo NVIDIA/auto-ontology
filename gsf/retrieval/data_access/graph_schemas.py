@@ -2,12 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j-backed schema / node lookups.
+"""Catalog-backed schema and node lookups.
 
 Builds the :class:`Schema` objects consumed by the SQL parser plus generic
 ``fetch_item_by_id`` helpers.
 
-All direct Neo4j calls live in gsf/dal/datasources.py.
+All direct store access lives in gsf/dal/datasources.py.
 This module only keeps the pure-Python ``get_schemas_by_ids`` that assembles
 pandas DataFrames into :class:`Schema` objects.
 """
@@ -19,9 +19,9 @@ import time
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.neo4j_node import Neo4jNode
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-from nemo_retriever.tabular_data.ingestion.model.schema import Schema
+from gsf.catalog.model import CatalogNode
+from gsf.catalog.constants import Labels
+from gsf.catalog.model import Schema
 
 from gsf.dal.datasources import (
     fetch_all_schema_ids,
@@ -39,7 +39,7 @@ __all__ = [
 
 
 def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
-    """Assemble :class:`Schema` objects from Neo4j catalog data.
+    """Assemble :class:`Schema` objects from catalog data.
 
     Fetches raw column/table rows via :func:`gsf.dal.datasources.fetch_schemas_by_ids`
     then builds the in-memory :class:`Schema` map consumed by the SQL parser.
@@ -57,7 +57,7 @@ def get_schemas_by_ids(relevant_schemas_ids: list | None = None) -> dict:
     schema_dfs = {}
     dbs_nodes = {}
     for database_name in dbs:
-        database_node = Neo4jNode(
+        database_node = CatalogNode(
             name=database_name, label=Labels.DB, props={"name": database_name}
         )
         dbs_nodes[database_name] = database_node

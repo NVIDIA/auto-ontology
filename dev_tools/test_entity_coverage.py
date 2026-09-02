@@ -50,13 +50,13 @@ def _cleanup() -> None:
     close_retrievers()
     invalidate_connectors_cache()
     try:
-        from nemo_retriever.tabular_data.neo4j import neo4j_connection
+        from gsf.catalog.store.store import connection
 
-        if neo4j_connection._conn is not None:
-            neo4j_connection._conn.close()
-            neo4j_connection._conn = None
+        if connection._conn is not None:
+            connection._conn.close()
+            connection._conn = None
     except Exception:
-        logger.exception("Failed to close Neo4j connection during cleanup")
+        logger.exception("Failed to close the store connection during cleanup")
 
 
 def main(argv: list[str] | None = None) -> int:

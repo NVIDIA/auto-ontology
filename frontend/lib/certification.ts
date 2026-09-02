@@ -23,8 +23,8 @@ export const attributeStatus = (item: AttributeCertifiableFields): Certification
 /*
  * A term's three-state aggregate status is deliberately NOT computed here.
  * The Terms list only receives per-term attribute *counts*, never the
- * attribute nodes, so the rollup can only be done in Cypher — see
- * `_certification_flags_clause` in gsf/dal/terms.py. Every read returns it as
+ * attributes themselves, so the rollup can only be done server-side — see
+ * `_certification` in gsf/dal/terms.py. Every read returns it as
  * `Term.certification` and every certification write returns the recomputed
  * value, so there is exactly one implementation of the rule.
  */

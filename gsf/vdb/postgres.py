@@ -185,6 +185,7 @@ class PostgresVDB(VDB):
                     Column(_LABEL_METADATA_COLUMN, "VARCHAR(100)", nullable=True),
                 ],
             )
+            self._create_vector_index()
 
         self._store = PGVectorStore.create_sync(
             engine=engine,
@@ -194,6 +195,63 @@ class PostgresVDB(VDB):
             metadata_columns=[_DATABASE_METADATA_COLUMN, _LABEL_METADATA_COLUMN],
         )
         return self._store
+
+    def _create_vector_index(self) -> None:
+        """Convert the embedding column to ``halfvec`` and index it with HNSW.
+
+        Without an index every similarity search is a sequential scan over the
+        whole collection -- measured at 175ms against 0.36ms indexed on 51,200
+        rows, and it degrades linearly from there.
+
+        **The column has to become ``halfvec`` for the index to be reachable**,
+        which is not obvious and is worth the ALTER. pgvector caps HNSW at 2000
+        dimensions for ``vector`` and the embedding model emits 2048, so the
+        only index that can be built over a ``vector(2048)`` column is one over
+        a cast expression -- and an expression index is matched *syntactically*,
+        so it serves ``embedding::halfvec(2048) <=> $1`` and not the plain
+        ``embedding <=> $1`` that ``PGVectorStore`` generates. Postgres then
+        silently plans a sequential scan and nothing reports it. Typing the
+        column ``halfvec`` instead lets a plain index serve the query the store
+        actually writes: the *parameter* is cast (``embedding <=> ($1)::halfvec``),
+        which costs nothing, rather than the indexed column.
+
+        The tradeoff is that stored vectors are float16 rather than float32.
+        Cosine ranking over 2048 dimensions tolerates that -- it is the same
+        approximation the index itself would apply -- but it is a real precision
+        change, not just an index.
+
+        Best-effort: a failure here costs latency, not correctness, so it is
+        logged and the store still works.
+        """
+        qualified = sql.Identifier(self.schema_name, self.collection_name)
+        index_name = sql.Identifier(f"ix_hnsw_{self.collection_name}_embedding")
+        try:
+            with psycopg.connect(self.connection_string) as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        sql.SQL(
+                            "ALTER TABLE {table} "
+                            "ALTER COLUMN embedding TYPE halfvec({dim})"
+                        ).format(
+                            table=qualified,
+                            dim=sql.Literal(self.vector_size),
+                        )
+                    )
+                    cur.execute(
+                        sql.SQL(
+                            "CREATE INDEX IF NOT EXISTS {name} ON {table} "
+                            "USING hnsw (embedding halfvec_cosine_ops)"
+                        ).format(name=index_name, table=qualified)
+                    )
+                conn.commit()
+        except Exception:
+            logger.warning(
+                "PostgresVDB: could not build the HNSW index on %s.%s; "
+                "similarity search will fall back to a sequential scan",
+                self.schema_name,
+                self.collection_name,
+                exc_info=True,
+            )
 
     def create_index(self, **kwargs: Any) -> str:
         """Ensure the pgvector extension and underlying table exist."""
@@ -416,11 +474,32 @@ class PostgresVDB(VDB):
         self.create_index()
         return self.write_to_index(records)
 
-    def close(self) -> None:
-        """Dispose the engine's connection pool.
+    #: Seconds to wait for the pool to dispose before giving up on it.
+    #:
+    #: Disposal is a courtesy: the pool's sockets are closed by the OS when the
+    #: process exits either way. Waiting longer than this buys nothing and risks
+    #: the hang described on :meth:`close`.
+    _DISPOSE_TIMEOUT = 5.0
 
-        If called from the engine's event-loop thread, dispose is scheduled
-        without waiting to avoid a self-join deadlock.
+    def close(self) -> None:
+        """Dispose the engine's connection pool, without ever blocking forever.
+
+        Three paths, because disposal has to cross a thread boundary and each
+        way of doing that can wedge:
+
+        * **On the engine's own loop thread** -- scheduled, never waited on, or
+          it would join itself.
+        * **Off it, with the loop alive** -- submitted and waited on with a
+          timeout.
+        * **Off it, with the loop gone** -- skipped entirely.
+
+        That last case is the one that matters, and it is why this does not use
+        ``engine._run_as_sync``: that helper waits on ``future.result()`` with
+        no timeout, and at interpreter shutdown the loop thread is already gone,
+        so the future is never resolved by anyone. Reached through
+        :meth:`__del__`, it hung ``python -m gsf.semantic`` for 45+ minutes
+        after the work had finished and committed, and the ``try/except`` around
+        it cannot catch a hang.
         """
         self._store = None
         engine = self._engine
@@ -449,10 +528,77 @@ class PostgresVDB(VDB):
                     pass
             return
 
+        # Nobody is left to run the coroutine: submitting it would wait on a
+        # future that can never resolve.
+        if loop is None or not loop.is_running():
+            return
+        if thread is not None and not thread.is_alive():
+            return
+
         try:
-            engine._run_as_sync(engine._pool.dispose())
+            future = asyncio.run_coroutine_threadsafe(engine._pool.dispose(), loop)
+            future.result(timeout=self._DISPOSE_TIMEOUT)
         except Exception:
-            pass
+            # Includes the timeout: the pool outliving the process by a few
+            # seconds is not worth blocking a shutdown over.
+            logger.debug("PostgresVDB.close: pool dispose did not complete")
+
+    # ------------------------------------------------------------------
+    # Collection management — required by the ABC, unused by GSF
+    # ------------------------------------------------------------------
+    #
+    # ``VDB`` gained a collection-management API (scopes, collections,
+    # per-document CRUD) that models a multi-tenant document store. GSF has one
+    # collection per tier, created by ``_ensure_schema``, and reaches the store
+    # through ``run`` / ``write_to_index`` / ``retrieval`` and the three bulk
+    # deletes above — none of these are on any path it takes.
+    #
+    # They are declared abstract, so leaving them out makes ``PostgresVDB``
+    # itself abstract and every ``get_data_vdb()`` raise ``TypeError`` at
+    # construction. They raise rather than returning a plausible empty value:
+    # if GSF ever grows a caller, it should fail here and get a real
+    # implementation, not silently read an empty collection.
+
+    def _unsupported(self, method: str) -> NotImplementedError:
+        return NotImplementedError(
+            f"PostgresVDB does not implement {method}(): GSF uses a single "
+            f"collection per tier and never calls the collection-management "
+            f"API. Implement it here if that changes."
+        )
+
+    def create_collection(self, *, scope, request):
+        raise self._unsupported("create_collection")
+
+    def get_collection(self, *, scope, collection_name):
+        raise self._unsupported("get_collection")
+
+    def update_collection(self, *, scope, collection_name, request):
+        raise self._unsupported("update_collection")
+
+    def delete_collection(self, *, scope, collection_name, if_exists):
+        raise self._unsupported("delete_collection")
+
+    def list_collections(self, *, scope, limit, continuation_token):
+        raise self._unsupported("list_collections")
+
+    def retrieve_collection(
+        self, vectors, *, scope, collection_name, query_texts, top_k, **kwargs
+    ):
+        raise self._unsupported("retrieve_collection")
+
+    def write_collection(self, records, *, context):
+        # Reached only when a caller passes `collection_context` to
+        # IngestVdbOperator; GSF never does, so ingestion takes `run()`.
+        raise self._unsupported("write_collection")
+
+    def get_document(self, *, scope, collection_name, document_id):
+        raise self._unsupported("get_document")
+
+    def list_documents(self, *, scope, collection_name, limit, continuation_token):
+        raise self._unsupported("list_documents")
+
+    def delete_document(self, *, scope, collection_name, document_id, if_exists):
+        raise self._unsupported("delete_document")
 
     def __del__(self) -> None:
         try:

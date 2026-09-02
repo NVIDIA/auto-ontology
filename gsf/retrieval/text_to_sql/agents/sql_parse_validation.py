@@ -27,7 +27,7 @@ from typing import Any, Dict
 import sqlglot
 from sqlglot import expressions as exp
 
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+from gsf.catalog.sql_parse import parse_query_single
 from gsf.dal.attributes import find_table_key_columns
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
