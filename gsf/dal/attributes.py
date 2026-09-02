@@ -843,6 +843,12 @@ def _extract_column_hops(path: list[dict[str, Any]]) -> list[tuple[str, str]]:
     *different* column that continues the next crossing (e.g. bridging two
     hops through a shared pivot table).
 
+    Pre-existing on main, not branch-specific: the Postgres rewrite of
+    find_join_path/find_table_bridge dropped this guard when it moved off
+    Cypher, independent of anything in this branch's own history. Worth
+    surfacing to whoever owns main, since any other branch built on top of
+    it inherits the same false positive.
+
     Returns a list of (source_column_id, target_column_id) pairs, in path order.
     """
     hops: list[tuple[str, str]] = []
