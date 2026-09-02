@@ -30,7 +30,12 @@ from typing import Any
 
 import pandas as pd
 
-from gsf.retrieval.kumo.budget import Budget, BudgetExceeded, Spend
+from gsf.retrieval.kumo.budget import (
+    Budget,
+    BudgetExceeded,
+    RefusedForCapacity,
+    Spend,
+)
 from gsf.retrieval.kumo.column_reference import build_column_reference
 from gsf.retrieval.kumo.graph_cache import (
     BuildTimedOut,
@@ -50,10 +55,22 @@ from gsf.retrieval.kumo.telemetry import (
     RunRecord,
     emit,
     llm_model_name,
+    redact_error,
     redact_literals,
 )
 
 logger = logging.getLogger(__name__)
+
+
+class TableUnavailable(RefusedForCapacity):
+    """A table the question needs could not be read.
+
+    Distinct from a table that read back empty, which is an answer. A read that
+    failed leaves the graph missing a table the question was scoped to, and a
+    prediction built from what remains answers a narrower question without
+    saying so.
+    """
+
 
 # Bounds so building the graph on a large database stays tractable. The whole
 # (capped) dataset is uploaded to the hosted KumoRFM service.
@@ -64,11 +81,7 @@ _MAX_ROWS_PER_TABLE: int | None = (
 _MAX_PREVIEW_ROWS = int(os.environ.get("KUMO_MAX_PREVIEW_ROWS", "50"))
 _MAX_ENTITIES = int(os.environ.get("KUMO_MAX_ENTITIES", "2000"))
 
-_GRAPH_CACHE = GraphCache(
-    max_entries=int(os.environ.get("KUMO_GRAPH_CACHE_ENTRIES", "8")),
-    ttl_seconds=float(os.environ.get("KUMO_GRAPH_CACHE_TTL", "300")),
-    wait_seconds=Budget.from_env().max_seconds,
-)
+_GRAPH_CACHE = GraphCache.from_env()
 PROMPT_VERSION = "1"
 
 _init_lock = threading.Lock()
@@ -198,9 +211,13 @@ def _load_relevant_frames(
             df = connector.execute(
                 f"SELECT {_projection(t)} FROM {_quote(schema, table)}{limit}"
             )
-        except Exception:
+        except Exception as error:
             logger.exception("kumo: failed to load rows for %s.%s", schema, table)
-            continue
+            raise TableUnavailable(
+                f"{schema}.{table} could not be read, so a prediction over it "
+                f"would answer from the tables that did load and report a total "
+                f"that reads like the whole. ({type(error).__name__})"
+            ) from error
         elapsed = time.perf_counter() - t_start
         if df is None or df.empty:
             logger.info("kumo: %s.%s returned 0 rows in %.2fs", schema, table, elapsed)
@@ -221,6 +238,24 @@ def _load_relevant_frames(
         if catalog_keys:
             key_columns[name] = catalog_keys
     return frames, name_map, key_columns
+
+
+def _refused(message: str, identity: "GraphIdentity | None" = None) -> dict[str, Any]:
+    """Report a request that never became a prediction, and record that it did not.
+
+    A refusal during preparation exits before ``run_prediction``, so without
+    this the only requests that leave a trace are the ones that got far enough
+    to ask the model. A question refused for cost or for a table that would not
+    read is exactly the kind someone asks about later.
+    """
+    emit(
+        RunRecord(
+            outcome="refused",
+            error=redact_error(message),
+            graph=identity or GraphIdentity(),
+        )
+    )
+    return _error_response(message)
 
 
 def _error_response(message: str) -> dict[str, Any]:
@@ -586,7 +621,7 @@ def build_prediction_context(
     logger.info("kumo: build_prediction_context start")
 
     if not connectors:
-        return _error_response("No database connection is configured.")
+        return _refused("No database connection is configured.")
 
     key = _cache_key(connectors, relevant_tables or [], join_paths)
     if key is not None:
@@ -594,10 +629,11 @@ def build_prediction_context(
             cached, built_here = _GRAPH_CACHE.get_or_build(
                 key,
                 lambda: _build_context(connectors, relevant_tables, join_paths, []),
+                worth_keeping=_worth_keeping,
             )
         except BuildTimedOut as waited:
             logger.info("kumo: gave up waiting for a build in progress: %s", waited)
-            return _error_response(str(waited))
+            return _refused(str(waited))
         if isinstance(cached, PredictionContext):
             return dataclasses.replace(
                 cached,
@@ -607,10 +643,27 @@ def build_prediction_context(
                     cache=CACHE_MISS if built_here else CACHE_HIT,
                 ),
             )
-        _GRAPH_CACHE.invalidate(key)
         return cached
 
     return _build_context(connectors, relevant_tables, join_paths, examples)
+
+
+def _worth_keeping(built: Any) -> bool:
+    """Whether a build is worth holding for the requests that follow it.
+
+    A failure is not: it would be served to them as a hit and would count
+    against the entry bound, evicting a graph that worked to make room for one
+    that did not.
+
+    Nor is a graph whose edges the engine GUESSED. The catalog said nothing
+    about those relationships, so inference chose them from names and values,
+    and a second request over the same tables can be given a different shape.
+    Holding the first one freezes whichever build won the race for the whole
+    TTL. Rebuilding is the cheaper mistake.
+    """
+    if not isinstance(built, PredictionContext):
+        return False
+    return built.identity.edges_from != "inferred"
 
 
 def _cache_key(
@@ -634,7 +687,7 @@ def _cache_key(
     connector = _connector_identity(connectors)
     if connector is None:
         return None
-    import kumo_relational_engine
+    import kumo_relational_client
 
     return CacheKey(
         connector=connector,
@@ -647,7 +700,7 @@ def _cache_key(
         schema_fingerprint=catalog_fingerprint(relevant_tables),
         join_fingerprint=join_fingerprint(join_paths),
         prompt_version=PROMPT_VERSION,
-        engine_version=str(getattr(kumo_relational_engine, "__version__", "")),
+        engine_version=str(getattr(kumo_relational_client, "__version__", "")),
     )
 
 
@@ -707,7 +760,7 @@ def _build_context(
     examples: list[dict[str, str]] | None,
 ) -> "PredictionContext | dict[str, Any]":
     """Read the tables and build the graph and model over them."""
-    import kumo_relational_engine
+    import kumo_relational_client
     from kumo_relational_client import relational as rfm
 
     from gsf.retrieval.kumo.kumo_model import KumoModel, build_graph_context
@@ -726,9 +779,12 @@ def _build_context(
         )
     except BudgetExceeded as exceeded:
         logger.info("kumo: refused, over budget: %s", exceeded)
-        return _error_response(str(exceeded))
+        return _refused(str(exceeded))
+    except TableUnavailable as unavailable:
+        logger.info("kumo: refused, a table could not be read: %s", unavailable)
+        return _refused(str(unavailable))
     if not frames:
-        return _error_response(
+        return _refused(
             "No relevant tables were available to build a prediction graph."
         )
     logger.info(
@@ -789,7 +845,7 @@ def _build_context(
         column_reference=build_column_reference(relevant_tables or [], col_stypes),
         identity=GraphIdentity(
             fingerprint=built_graph_fingerprint(graph),
-            engine_version=str(getattr(kumo_relational_engine, "__version__", "")),
+            engine_version=str(getattr(kumo_relational_client, "__version__", "")),
             prompt_version=PROMPT_VERSION,
             tables=len(frames),
             rows=int(sum(len(frame) for frame in frames.values())),
@@ -817,7 +873,7 @@ def run_prediction(
     try:
         return _run_prediction(question, llm, context, generate_pql, record)
     except Exception as error:
-        record.error = f"{type(error).__name__}: {error}"
+        record.error = redact_error(f"{type(error).__name__}: {error}")
         raise
     finally:
         record.seconds = round(time.perf_counter() - started, 3)
@@ -852,7 +908,7 @@ def _run_prediction(
     record.attempts = int(getattr(result, "attempts", 0) or 0)
     record.entities = int(getattr(result, "num_entities", 0) or 0)
     record.rows_returned = len(getattr(result, "rows", []) or [])
-    record.error = str(getattr(result, "error", "") or "")
+    record.error = redact_error(str(getattr(result, "error", "") or ""))
     record.outcome = "answered" if getattr(result, "success", False) else "refused"
 
     return _format_result(result)

@@ -130,6 +130,11 @@ def _build(warehouse: Any, examples: list[dict[str, str]]) -> Any:
     return predictor.build_prediction_context([warehouse], CATALOG, JOINS, examples)
 
 
+def _build_no_joins(warehouse: Any, examples: list[dict[str, str]]) -> Any:
+    """No catalog joins, so the engine has to guess the relationships."""
+    return predictor.build_prediction_context([warehouse], CATALOG, None, examples)
+
+
 def test_only_the_columns_the_catalog_names_are_read() -> None:
     """A projection that is computed and then not used reads the whole table."""
     predictor._GRAPH_CACHE.clear()
@@ -248,7 +253,7 @@ def test_giving_up_on_a_hung_build_reaches_the_caller_as_a_refusal(
     """BuildTimedOut must become a graceful answer, not escape as an exception."""
     from gsf.retrieval.kumo.graph_cache import BuildTimedOut
 
-    def timed_out(self: Any, key: Any, build: Any) -> Any:
+    def timed_out(self: Any, key: Any, build: Any, **kwargs: Any) -> Any:
         raise BuildTimedOut("Preparing this prediction is taking longer than 300s")
 
     monkeypatch.setattr(predictor.GraphCache, "get_or_build", timed_out)
@@ -322,3 +327,146 @@ def test_every_prediction_leaves_a_record(caplog: Any) -> None:
     ]
     assert len(written) == 1
     assert written[0]["outcome"] == "answered"
+
+
+class _OneTableFails(_Warehouse):
+    """The customers table reads; the orders table does not."""
+
+    def execute(self, sql: str) -> pd.DataFrame:
+        if "orders" in sql:
+            raise RuntimeError("connection reset by peer")
+        return super().execute(sql)
+
+
+def test_a_table_that_cannot_be_read_stops_the_prediction() -> None:
+    """Building from the tables that did load answers a narrower question silently."""
+    predictor._GRAPH_CACHE.clear()
+
+    answer = _build(_OneTableFails(), [])
+
+    assert isinstance(answer, dict), "a partial graph was built and returned"
+    assert "orders" in answer["response"]
+    assert "could not be read" in answer["response"]
+
+
+def test_a_table_that_reads_back_empty_is_not_a_failure() -> None:
+    """Empty is an answer; unreadable is not. They must not be conflated."""
+
+    class Empty(_Warehouse):
+        def execute(self, sql: str) -> pd.DataFrame:
+            if "orders" in sql:
+                return pd.DataFrame()
+            return super().execute(sql)
+
+    predictor._GRAPH_CACHE.clear()
+
+    answer = _build(Empty(), [])
+
+    assert not isinstance(answer, dict) or "could not be read" not in answer.get(
+        "response", ""
+    )
+
+
+def test_a_graph_whose_edges_were_guessed_is_not_held() -> None:
+    """Inference can pick different edges for the same tables, so freezing one
+    serves whichever build won the race to everyone for the whole TTL."""
+    predictor._GRAPH_CACHE.clear()
+
+    first = _build_no_joins(_Warehouse(), [])
+    second = _build_no_joins(_Warehouse(), [])
+
+    assert first.identity.edges_from == "inferred"
+    assert second.identity.cache != "hit", "a guessed graph was served from cache"
+
+
+def test_a_graph_built_from_catalog_joins_is_held() -> None:
+    """Those edges were stated, so a second request gets the same shape."""
+    predictor._GRAPH_CACHE.clear()
+
+    first = _build(_Warehouse(), [])
+    second = _build(_Warehouse(), [])
+
+    assert first.identity.edges_from == "catalog"
+    assert second.identity.cache == "hit"
+
+
+def test_a_prediction_that_raised_still_leaves_a_record(caplog: Any) -> None:
+    """The module promises a record whether it answered, refused, or failed."""
+    import json
+    import logging
+
+    from gsf.retrieval.kumo import pql_gen
+
+    predictor._GRAPH_CACHE.clear()
+    context = _build(_Warehouse(), [])
+    original = pql_gen.generate_pql
+
+    def boom(*args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError("the gateway timed out after 60s")
+
+    pql_gen.generate_pql = boom
+    try:
+        with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+            with pytest.raises(RuntimeError):
+                predictor.run_prediction("who churns?", _LLM(), context)
+    finally:
+        pql_gen.generate_pql = original
+
+    written = [
+        json.loads(r.getMessage().removeprefix("kumo.run "))
+        for r in caplog.records
+        if r.getMessage().startswith("kumo.run ")
+    ]
+    assert len(written) == 1
+    assert written[0]["outcome"] == "failed"
+    assert "gateway timed out" in written[0]["error"]
+    assert written[0]["graph"]["fingerprint"] == context.identity.fingerprint
+
+
+def _records(caplog: Any) -> list[dict[str, Any]]:
+    import json
+
+    return [
+        json.loads(r.getMessage().removeprefix("kumo.run "))
+        for r in caplog.records
+        if r.getMessage().startswith("kumo.run ")
+    ]
+
+
+def test_a_request_refused_before_predicting_still_leaves_a_record(
+    monkeypatch: pytest.MonkeyPatch, caplog: Any
+) -> None:
+    """A refusal exits before run_prediction, so nothing recorded it at all."""
+    import logging
+
+    monkeypatch.setenv("KUMO_MAX_TABLES", "1")
+    predictor._GRAPH_CACHE.clear()
+
+    with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+        answer = _build(_Warehouse(), [])
+
+    assert isinstance(answer, dict)
+    written = _records(caplog)
+    assert len(written) == 1
+    assert written[0]["outcome"] == "refused"
+    assert "more than 1 table" in written[0]["error"]
+
+
+def test_an_unreadable_table_leaves_a_record(caplog: Any) -> None:
+    import logging
+
+    predictor._GRAPH_CACHE.clear()
+
+    with caplog.at_level(logging.INFO, logger="gsf.retrieval.kumo.telemetry"):
+        _build(_OneTableFails(), [])
+
+    written = _records(caplog)
+    assert written and written[0]["outcome"] == "refused"
+    assert "could not be read" in written[0]["error"]
+
+
+def test_a_refusal_record_carries_no_unredacted_values(caplog: Any) -> None:
+    """The refusal message is prose, but it goes through the same redaction."""
+    import inspect
+
+    assert "redact_error(" in inspect.getsource(predictor._refused)

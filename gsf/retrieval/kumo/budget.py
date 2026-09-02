@@ -32,7 +32,16 @@ if TYPE_CHECKING:
     import pandas as pd
 
 
-class BudgetExceeded(RuntimeError):
+class RefusedForCapacity(RuntimeError):
+    """A question refused because of what answering it would cost.
+
+    A caller that wants to treat every capacity refusal alike, to report it
+    differently from a failure, has one type to catch rather than having to know
+    each of the reasons a request can be too big.
+    """
+
+
+class BudgetExceeded(RefusedForCapacity):
     """A prediction needed more than one request is allowed to spend."""
 
 

@@ -20,6 +20,7 @@ from gsf.retrieval.kumo.telemetry import (
     RunRecord,
     emit,
     llm_model_name,
+    redact_error,
     redact_literals,
 )
 
@@ -315,3 +316,36 @@ def test_an_empty_column_name_cannot_stand_in_for_a_missing_one() -> None:
     assert built_graph_fingerprint(
         _graph(tables={"customers": named})
     ) != built_graph_fingerprint(_graph(tables={"customers": fewer}))
+
+
+def test_an_error_message_that_quotes_the_query_is_redacted() -> None:
+    """Warehouses echo the offending fragment, literals and all."""
+    redacted = redact_error(
+        "ParserException: syntax error near "
+        "FOR customers.email IN ('alice@acme.com', 'bob@acme.com')"
+    )
+
+    assert "acme.com" not in redacted
+    assert "IN (2 values)" in redacted
+    assert "ParserException" in redacted
+
+
+def test_an_error_with_a_quoted_value_is_redacted() -> None:
+    redacted = redact_error("Unknown tier 'Platinum' in filter")
+
+    assert "Platinum" not in redacted
+    assert "Unknown tier" in redacted
+
+
+def test_an_empty_error_stays_empty() -> None:
+    assert redact_error("") == ""
+
+
+def test_the_recorded_error_goes_through_redaction() -> None:
+    """Redaction has to be where the record is made, not left to callers."""
+    import inspect
+
+    from gsf.retrieval.kumo import predictor
+
+    assert "redact_error(" in inspect.getsource(predictor._run_prediction)
+    assert "redact_error(" in inspect.getsource(predictor.run_prediction)

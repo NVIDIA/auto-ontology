@@ -22,6 +22,7 @@ the checks below, because everything here is written verbatim into a prompt.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from typing import Any
 
@@ -47,9 +48,51 @@ _SENSITIVE_COLUMN_NAMES = re.compile(
 _ENUMERABLE_STYPES = frozenset({"categorical", "multicategorical"})
 
 
+def _extra_sensitive_names() -> "re.Pattern[str] | None":
+    """Column names an operator has told us are sensitive here.
+
+    The built-in list cannot know what a given deployment calls things, and a
+    column it has not heard of gets no protection at all. Read from
+    ``KUMO_SENSITIVE_COLUMNS`` as a comma-separated list of substrings, and
+    added to the built-in list rather than replacing it, so widening the net
+    locally cannot narrow it.
+    """
+    raw = os.environ.get("KUMO_SENSITIVE_COLUMNS", "")
+    parts = [re.escape(p.strip()) for p in raw.split(",") if p.strip()]
+    return re.compile("|".join(parts), re.IGNORECASE) if parts else None
+
+
+# A value that reads like a sentence or an instruction rather than a category.
+# A tier is a word or two; anything carrying a verb phrase, several words, or
+# the shape of a directive is not a vocabulary entry and does not belong in the
+# same text as the instructions.
+_INSTRUCTION_SHAPED = re.compile(
+    r"\b(ignore|disregard|forget|instead|you\s+are|system|prompt|instruction|"
+    r"reveal|output|respond|answer|execute|run|delete|drop|update|insert)\b",
+    re.IGNORECASE,
+)
+_MAX_WORDS = 4
+
+
+def reads_like_an_instruction(value: str) -> bool:
+    """Whether a value would be read as something other than a category.
+
+    Blocking odd characters and known secret shapes still lets a plain English
+    sentence through, and a sentence copied verbatim into the prompt sits in the
+    same text as the instructions, where the model has no way to tell which is
+    which. A category is a word or two; a sentence is not one.
+    """
+    text = str(value).strip()
+    return len(text.split()) > _MAX_WORDS or bool(_INSTRUCTION_SHAPED.search(text))
+
+
 def is_sensitive_column(name: str) -> bool:
     """Whether a column's name says its values should not reach a prompt."""
-    return bool(_SENSITIVE_COLUMN_NAMES.search(str(name)))
+    text = str(name)
+    if _SENSITIVE_COLUMN_NAMES.search(text):
+        return True
+    extra = _extra_sensitive_names()
+    return bool(extra and extra.search(text))
 
 
 def is_safe_value(value: Any) -> bool:
@@ -60,6 +103,8 @@ def is_safe_value(value: Any) -> bool:
     if not text.strip() or len(text) > MAX_VALUE_LENGTH:
         return False
     if _UNSAFE_CHARACTERS.search(text):
+        return False
+    if reads_like_an_instruction(text):
         return False
     return not any(shape.search(text) for shape in _SENSITIVE_SHAPES)
 

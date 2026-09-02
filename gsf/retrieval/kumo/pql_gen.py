@@ -1,5 +1,4 @@
 # SPDX-FileCopyrightText: Copyright (c) 2025-2026, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
-# All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -38,6 +37,7 @@ from typing import Protocol
 from langchain_core.language_models import BaseChatModel
 from gsf.connectors.base import SQLDatabase
 
+from gsf.retrieval.kumo.budget import RefusedForCapacity
 from gsf.retrieval.kumo.prompts import build_pql_prompt
 from gsf.utils.llm_invoke import invoke_text
 
@@ -330,7 +330,7 @@ class PqlGenerationResult:
     prediction_table_columns: list[str] = field(default_factory=list)
 
 
-class PqlPopulationTooLargeError(ValueError):
+class PqlPopulationTooLargeError(RefusedForCapacity, ValueError):
     """A whole-population question over more entities than one run can score.
 
     Distinct from a query the repair loop can fix: no rewriting of the PQL makes

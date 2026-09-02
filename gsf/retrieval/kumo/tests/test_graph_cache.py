@@ -14,6 +14,7 @@ import time
 
 import pytest
 from pathlib import Path
+from typing import Any
 
 from gsf.retrieval.kumo.graph_cache import (
     BuildTimedOut,
@@ -654,3 +655,110 @@ def test_a_column_gaining_a_description_is_a_new_schema() -> None:
     documented = [{"name": "t", "columns": [{"name": "a", "description": "the id"}]}]
 
     assert catalog_fingerprint(bare) != catalog_fingerprint(documented)
+
+
+def test_a_build_that_returns_a_failure_is_not_kept() -> None:
+    """Returned failures were stored like successes and served as hits."""
+    cache = GraphCache(max_entries=8, ttl_seconds=60, wait_seconds=30)
+    builds = []
+
+    def failing() -> dict[str, str]:
+        builds.append(1)
+        return {"error": "no tables"}
+
+    for _ in range(3):
+        value, _ = cache.get_or_build(
+            _key(), failing, worth_keeping=lambda built: not isinstance(built, dict)
+        )
+        assert value == {"error": "no tables"}
+
+    assert len(builds) == 3, "a failure was served from the cache"
+    assert cache._entries == {}
+
+
+def test_a_failure_does_not_evict_a_real_graph() -> None:
+    """Counting a failure against the bound throws away something that worked."""
+    cache = GraphCache(max_entries=1, ttl_seconds=60, wait_seconds=30)
+    keeps = lambda built: not isinstance(built, dict)  # noqa: E731
+
+    cache.get_or_build(_key(tables=("good",)), lambda: "graph", worth_keeping=keeps)
+    cache.get_or_build(
+        _key(tables=("bad",)), lambda: {"error": "x"}, worth_keeping=keeps
+    )
+
+    value, built_here = cache.get_or_build(
+        _key(tables=("good",)), lambda: "rebuilt", worth_keeping=keeps
+    )
+    assert (value, built_here) == ("graph", False)
+
+
+def test_a_successful_build_is_still_kept() -> None:
+    cache = GraphCache(max_entries=8, ttl_seconds=60, wait_seconds=30)
+    builds = []
+
+    for _ in range(3):
+        cache.get_or_build(
+            _key(),
+            lambda: builds.append(1) or "graph",
+            worth_keeping=lambda built: not isinstance(built, dict),
+        )
+
+    assert len(builds) == 1
+
+
+class _Weighed:
+    """A cached graph that reports what holding it costs."""
+
+    def __init__(self, nbytes: int) -> None:
+        self.identity = type("Identity", (), {"bytes": nbytes})()
+
+
+def test_the_cache_is_bounded_by_weight_not_only_by_count() -> None:
+    """One graph holds the data it was built from, so counting entries bounds
+    nothing: a few can outweigh the process."""
+    cache = GraphCache(max_entries=100, ttl_seconds=60, wait_seconds=30, max_bytes=250)
+
+    for name in ("a", "b", "c", "d"):
+        cache.get_or_build(_key(tables=(name,)), lambda: _Weighed(100))
+
+    held = sum(v.identity.bytes for _, v in cache._entries.values())
+    assert held <= 250
+    assert len(cache._entries) < 4
+
+
+def test_the_graph_just_built_is_never_the_one_dropped() -> None:
+    """Refusing to hold what was just built rebuilds it for the next question."""
+    cache = GraphCache(max_entries=100, ttl_seconds=60, wait_seconds=30, max_bytes=10)
+
+    cache.get_or_build(_key(tables=("huge",)), lambda: _Weighed(5000))
+
+    assert len(cache._entries) == 1
+
+
+def test_the_count_bound_still_applies() -> None:
+    cache = GraphCache(
+        max_entries=2, ttl_seconds=60, wait_seconds=30, max_bytes=1 << 40
+    )
+
+    for name in ("a", "b", "c"):
+        cache.get_or_build(_key(tables=(name,)), lambda: _Weighed(1))
+
+    assert len(cache._entries) == 2
+
+
+def test_from_env_reads_both_bounds(monkeypatch: Any) -> None:
+    monkeypatch.setenv("KUMO_GRAPH_CACHE_ENTRIES", "3")
+    monkeypatch.setenv("KUMO_GRAPH_CACHE_BYTES", "1234")
+    monkeypatch.setenv("KUMO_GRAPH_CACHE_TTL", "60")
+
+    cache = GraphCache.from_env()
+
+    assert (cache._max_entries, cache._max_bytes, cache._ttl) == (3, 1234, 60.0)
+
+
+def test_a_nonsense_setting_falls_back_rather_than_crashing(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("KUMO_GRAPH_CACHE_ENTRIES", "not-a-number")
+
+    assert GraphCache.from_env()._max_entries == 8

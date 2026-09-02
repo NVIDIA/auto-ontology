@@ -118,3 +118,39 @@ def test_a_larger_budget_is_written_with_a_thousands_separator() -> None:
 
     with pytest.raises(BudgetExceeded, match="1,500 tables"):
         spend.add_table("orders", pd.DataFrame({"a": [1]}))
+
+
+def test_a_request_that_exactly_fits_is_allowed() -> None:
+    """An accidental > becoming >= would refuse requests that fit exactly."""
+    spend = Spend(Budget(max_tables=2, max_bytes=1 << 40, max_seconds=300))
+
+    spend.add_table("customers", pd.DataFrame({"a": [1]}))
+    spend.add_table("orders", pd.DataFrame({"a": [1]}))
+
+    assert spend.tables == 2
+
+
+def test_bytes_that_exactly_fit_are_allowed() -> None:
+    frame = pd.DataFrame({"a": list(range(100))})
+    exactly = int(frame.memory_usage(deep=True).sum())
+    spend = Spend(Budget(max_tables=10, max_bytes=exactly, max_seconds=300))
+
+    spend.add_table("orders", frame)
+
+    assert spend.nbytes == exactly
+
+
+def test_one_byte_over_is_refused() -> None:
+    """The other side of the same boundary."""
+    frame = pd.DataFrame({"a": list(range(100))})
+    exactly = int(frame.memory_usage(deep=True).sum())
+    spend = Spend(Budget(max_tables=10, max_bytes=exactly - 1, max_seconds=300))
+
+    with pytest.raises(BudgetExceeded):
+        spend.add_table("orders", frame)
+
+
+def test_a_deadline_that_has_not_passed_is_allowed() -> None:
+    spend = Spend(Budget(max_tables=10, max_bytes=1 << 40, max_seconds=300))
+
+    spend.check_deadline("reading tables")

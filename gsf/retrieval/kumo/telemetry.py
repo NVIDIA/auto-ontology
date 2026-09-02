@@ -37,6 +37,10 @@ logger = logging.getLogger(__name__)
 _STRING_LITERAL = re.compile(r"'(?:[^']|'')*'")
 _IN_LIST = re.compile(r"\bIN\s*\(([^()]*)\)", re.IGNORECASE)
 
+# Bumped when a field in RunRecord is renamed or removed, so a reader can tell
+# which shape it is looking at rather than discovering the change by breaking.
+SCHEMA_VERSION = 1
+
 CACHE_HIT = "hit"
 CACHE_MISS = "miss"
 CACHE_DISABLED = "disabled"
@@ -72,6 +76,7 @@ class RunRecord:
     """One prediction, as it will be read back when something looks wrong."""
 
     outcome: str
+    schema_version: int = SCHEMA_VERSION
     llm_model: str = ""
     pql: str = ""
     attempts: int = 0
@@ -100,6 +105,16 @@ def redact_literals(pql: str) -> str:
         return f"IN ({values} values)"
 
     return _IN_LIST.sub(_count, redacted)
+
+
+def redact_error(message: str) -> str:
+    """An error message with the values it quoted back removed.
+
+    A warehouse or engine rejecting a query commonly echoes the offending
+    fragment, which carries the same literals the query did. Left alone it
+    would put in the log exactly what redacting the query kept out.
+    """
+    return redact_literals(message) if message else ""
 
 
 def emit(record: RunRecord) -> None:

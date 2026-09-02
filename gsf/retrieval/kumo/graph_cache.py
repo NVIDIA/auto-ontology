@@ -24,13 +24,27 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import os
 import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from gsf.retrieval.kumo.budget import Budget
+
 logger = logging.getLogger(__name__)
+
+
+def _positive_int(name: str, default: int) -> int:
+    """A positive integer from the environment, or the default it is not."""
+    raw = os.environ.get(name)
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        logger.warning("kumo: %s is not a number; using %d", name, default)
+        return default
+    return value if value > 0 else default
 
 
 class BuildTimedOut(TimeoutError):
@@ -91,12 +105,39 @@ class GraphCache:
     any time and nothing tells us when.
     """
 
+    @classmethod
+    def from_env(cls) -> "GraphCache":
+        """The cache this deployment is configured for.
+
+        ``KUMO_GRAPH_CACHE_ENTRIES`` bounds how many graphs are held and
+        ``KUMO_GRAPH_CACHE_BYTES`` how much they may weigh together. Both are
+        needed: entries alone bound nothing, because one graph holds the data it
+        was built from and may be as large as a whole request's budget, so a
+        handful of them can outweigh the process.
+
+        ``KUMO_GRAPH_CACHE_TTL`` is how long a graph may be reused before it is
+        built again. Longer means fewer warehouse reads and more chance of
+        answering from a schema that has since changed; nothing announces a
+        table being added or dropped, so this is the only thing that notices.
+        """
+        return cls(
+            max_entries=_positive_int("KUMO_GRAPH_CACHE_ENTRIES", 8),
+            ttl_seconds=float(_positive_int("KUMO_GRAPH_CACHE_TTL", 300)),
+            wait_seconds=Budget.from_env().max_seconds,
+            max_bytes=_positive_int("KUMO_GRAPH_CACHE_BYTES", 4 * 1024**3),
+        )
+
     def __init__(
-        self, max_entries: int, ttl_seconds: float, wait_seconds: float
+        self,
+        max_entries: int,
+        ttl_seconds: float,
+        wait_seconds: float,
+        max_bytes: int | None = None,
     ) -> None:
         self._max_entries = max_entries
         self._ttl = ttl_seconds
         self._wait = wait_seconds
+        self._max_bytes = max_bytes
         self._entries: OrderedDict[CacheKey, tuple[float, Any]] = OrderedDict()
         self._flights: dict[CacheKey, _Flight] = {}
         self._guard = threading.Lock()
@@ -114,12 +155,22 @@ class GraphCache:
         self._entries.move_to_end(key)
         return value
 
-    def get_or_build(self, key: CacheKey, build: Callable[[], Any]) -> tuple[Any, bool]:
+    def get_or_build(
+        self,
+        key: CacheKey,
+        build: Callable[[], Any],
+        worth_keeping: Callable[[Any], bool] | None = None,
+    ) -> tuple[Any, bool]:
         """The graph for *key* and whether this call is what built it.
 
         Concurrent callers for one key wait on the first rather than each
         building a copy, which is what keeps a burst of follow-ups from reading
         the same tables several times over. Only one of them is told it built.
+
+        ``worth_keeping`` decides whether a build is worth holding. A build that
+        reports a failure by RETURNING it rather than raising would otherwise be
+        stored like a success: served to the waiters as a hit, and counted
+        against the entry bound, evicting a real graph to make room for it.
         """
         with self._guard:
             value = self._fresh(key)
@@ -157,12 +208,13 @@ class GraphCache:
                         flight.finished = True
                         flight.error = error
                     raise
+                keep = worth_keeping is None or worth_keeping(built)
                 with self._guard:
                     flight.finished = True
-                    self._entries[key] = (time.monotonic(), built)
-                    self._entries.move_to_end(key)
-                    while len(self._entries) > self._max_entries:
-                        self._entries.popitem(last=False)
+                    if keep:
+                        self._entries[key] = (time.monotonic(), built)
+                        self._entries.move_to_end(key)
+                        self._evict()
                 return built, True
             finally:
                 flight.lock.release()
@@ -170,6 +222,31 @@ class GraphCache:
             with self._guard:
                 flight.waiting -= 1
                 self._retire(key, flight)
+
+    def _weight(self, value: Any) -> int:
+        """What holding this graph costs, as its build measured it."""
+        return int(getattr(getattr(value, "identity", None), "bytes", 0) or 0)
+
+    def _evict(self) -> None:
+        """Drop the least recently used until the cache fits both bounds.
+
+        Counting entries alone bounds nothing: one graph holds the data it was
+        built from, so a few of them can outweigh the process even though every
+        request that built one stayed inside its own budget.
+
+        The newest entry is never dropped, even alone over the weight bound.
+        Refusing to hold what was just built would mean rebuilding it for the
+        very next question, and the request that built it has already paid.
+        """
+        while len(self._entries) > self._max_entries:
+            self._entries.popitem(last=False)
+        if not self._max_bytes:
+            return
+        while len(self._entries) > 1:
+            held = sum(self._weight(value) for _, value in self._entries.values())
+            if held <= self._max_bytes:
+                return
+            self._entries.popitem(last=False)
 
     def _retire(self, key: CacheKey, flight: "_Flight") -> None:
         """Forget a flight once nobody is waiting on it.
