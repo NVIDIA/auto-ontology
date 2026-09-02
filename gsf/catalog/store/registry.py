@@ -176,13 +176,13 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
     (Edges.CONTAINS, Labels.TABLE, Labels.COLUMN): LinkSpec(Edges.CONTAINS, None),
     (Edges.FOREIGN_KEY, Labels.COLUMN, Labels.COLUMN): LinkSpec(
         Edges.FOREIGN_KEY,
-        s.column_foreign_key,
+        s.column__foreign_key,
         "source_column_id",
         "target_column_id",
     ),
     (Edges.JOIN, Labels.TABLE, Labels.TABLE): LinkSpec(
         Edges.JOIN,
-        s.table_join,
+        s.table__join,
         "source_table_id",
         "target_table_id",
         frozenset({"join_columns"}),
@@ -191,31 +191,31 @@ LINKS: dict[tuple[str, str, str], LinkSpec] = {
     # rather than overwrites -- see `_upsert_edge_row`.
     (Edges.JOIN, Labels.COLUMN, Labels.COLUMN): LinkSpec(
         Edges.JOIN,
-        s.column_join,
+        s.column__join,
         "source_column_id",
         "target_column_id",
         frozenset({"refs"}),
     ),
     (Edges.UNION, Labels.COLUMN, Labels.COLUMN): LinkSpec(
         Edges.UNION,
-        s.column_union,
+        s.column__union,
         "source_column_id",
         "target_column_id",
         frozenset({"refs"}),
     ),
     (Edges.SQL, Labels.SQL, Labels.TABLE): LinkSpec(
-        Edges.SQL, s.sql_query_table, "sql_query_id", "table_id"
+        Edges.SQL, s.sql_query__table, "sql_query_id", "table_id"
     ),
     # Same relationship type, different target: a statement points at both the
     # tables it reads and the leaf columns it selects.
     (Edges.SQL, Labels.SQL, Labels.COLUMN): LinkSpec(
-        Edges.SQL, s.sql_query_column, "sql_query_id", "column_id"
+        Edges.SQL, s.sql_query__column, "sql_query_id", "column_id"
     ),
     (Edges.HAS_SQL, Labels.CUSTOM_ANALYSIS, Labels.SQL): LinkSpec(
-        Edges.HAS_SQL, s.custom_analysis_sql, "analysis_id", "sql_query_id"
+        Edges.HAS_SQL, s.custom_analysis__sql, "analysis_id", "sql_query_id"
     ),
     (Edges.HAS_SQL, LABEL_SQL_ATTRIBUTE, Labels.SQL): LinkSpec(
-        Edges.HAS_SQL, s.sql_attribute_sql, "attribute_id", "sql_query_id"
+        Edges.HAS_SQL, s.sql_attribute__sql, "attribute_id", "sql_query_id"
     ),
 }
 

@@ -126,7 +126,7 @@ def test_referencing_rows_survive_a_reingest() -> None:
     write_sql_edge()
 
     rows = store().query_read(
-        s.sql_query_table.select().where(s.sql_query_table.c.table_id == table_id)
+        s.sql_query__table.select().where(s.sql_query__table.c.table_id == table_id)
     )
     assert len(rows) == 1
 
@@ -283,7 +283,7 @@ def test_sql_edge_becomes_a_row() -> None:
     pg_queries.add_query([(sql_node, table, {Props.SQL_ID: "sql-1"})])
 
     rows = store().query_read(
-        s.sql_query_table.select().where(s.sql_query_table.c.table_id == table_id)
+        s.sql_query__table.select().where(s.sql_query__table.c.table_id == table_id)
     )
     assert len(rows) == 1
 
@@ -301,7 +301,7 @@ def test_repeated_sql_link_does_not_duplicate() -> None:
     pg_queries.add_query([link, link])
 
     rows = store().query_read(
-        s.sql_query_table.select().where(s.sql_query_table.c.table_id == table_id)
+        s.sql_query__table.select().where(s.sql_query__table.c.table_id == table_id)
     )
     assert len(rows) == 1
 

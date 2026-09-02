@@ -116,11 +116,11 @@ def _sql_owned_tables(link_table, owner_column, owner_ids: list[str]):
     """``{owner_id: [table_id, ...]}`` for owners that reach tables via their SQL."""
     owned: dict[str, list[str]] = {}
     for row in store().query_read(
-        select(owner_column, s.sql_query_table.c.table_id)
+        select(owner_column, s.sql_query__table.c.table_id)
         .select_from(
             link_table.join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id == link_table.c.sql_query_id,
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id == link_table.c.sql_query_id,
             )
         )
         .where(owner_column.in_(owner_ids))
@@ -154,9 +154,9 @@ def _expand_custom_analyses(ids: list[str]) -> dict[str, dict[str, Any]]:
     rows = store().query_read(
         select(s.custom_analysis).where(s.custom_analysis.c.id.in_(ids))
     )
-    sql = _sql_text(s.custom_analysis_sql, s.custom_analysis_sql.c.analysis_id, ids)
+    sql = _sql_text(s.custom_analysis__sql, s.custom_analysis__sql.c.analysis_id, ids)
     owned = _sql_owned_tables(
-        s.custom_analysis_sql, s.custom_analysis_sql.c.analysis_id, ids
+        s.custom_analysis__sql, s.custom_analysis__sql.c.analysis_id, ids
     )
     tables = _table_payloads(sorted({t for v in owned.values() for t in v}))
 
@@ -188,22 +188,22 @@ def _expand_sql_attributes(ids: list[str]) -> dict[str, dict[str, Any]]:
         )
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
-            ).join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
+            ).join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
         )
         .where(
             s.sql_attribute.c.id.in_(ids),
             select(literal(1))
-            .where(s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id)
+            .where(s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id)
             .correlate(s.sql_attribute)
             .exists(),
         )
         .order_by(s.sql_attribute.c.id, s.term.c.id)
     )
-    sql = _sql_text(s.sql_attribute_sql, s.sql_attribute_sql.c.attribute_id, ids)
+    sql = _sql_text(s.sql_attribute__sql, s.sql_attribute__sql.c.attribute_id, ids)
     owned = _sql_owned_tables(
-        s.sql_attribute_sql, s.sql_attribute_sql.c.attribute_id, ids
+        s.sql_attribute__sql, s.sql_attribute__sql.c.attribute_id, ids
     )
     tables = _table_payloads(sorted({t for v in owned.values() for t in v}))
 

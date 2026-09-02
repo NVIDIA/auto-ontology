@@ -61,11 +61,11 @@ def _sql_text():
     return (
         select(s.sql_query.c.sql_full_query)
         .select_from(
-            s.custom_analysis_sql.join(
-                s.sql_query, s.sql_query.c.id == s.custom_analysis_sql.c.sql_query_id
+            s.custom_analysis__sql.join(
+                s.sql_query, s.sql_query.c.id == s.custom_analysis__sql.c.sql_query_id
             )
         )
-        .where(s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id)
+        .where(s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id)
         .order_by(s.sql_query.c.id)
         .limit(1)
         .correlate(s.custom_analysis)
@@ -82,7 +82,7 @@ def _has_sql():
     """
     return (
         select(literal(1))
-        .where(s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id)
+        .where(s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id)
         .correlate(s.custom_analysis)
         .exists()
     )
@@ -93,15 +93,15 @@ def _out_of_zone(table_ids: list[str]):
     return (
         select(literal(1))
         .select_from(
-            s.custom_analysis_sql.join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id
-                == s.custom_analysis_sql.c.sql_query_id,
+            s.custom_analysis__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.custom_analysis__sql.c.sql_query_id,
             )
         )
         .where(
-            s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id,
-            s.sql_query_table.c.table_id.notin_(table_ids),
+            s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
+            s.sql_query__table.c.table_id.notin_(table_ids),
         )
         .correlate(s.custom_analysis)
         .exists()
@@ -169,10 +169,10 @@ def find_analysis_by_sql(
         select(s.custom_analysis.c.id, s.custom_analysis.c.name)
         .select_from(
             s.custom_analysis.join(
-                s.custom_analysis_sql,
-                s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id,
+                s.custom_analysis__sql,
+                s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
             ).join(
-                s.sql_query, s.sql_query.c.id == s.custom_analysis_sql.c.sql_query_id
+                s.sql_query, s.sql_query.c.id == s.custom_analysis__sql.c.sql_query_id
             )
         )
         .where(s.sql_query.c.sql_full_query == sql)
@@ -286,14 +286,14 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                 column_description_expr().label("column_description"),
             )
             .select_from(
-                s.custom_analysis_sql.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id
-                    == s.custom_analysis_sql.c.sql_query_id,
+                s.custom_analysis__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.custom_analysis__sql.c.sql_query_id,
                 )
                 .join(
                     s.catalog_table,
-                    s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                    s.catalog_table.c.id == s.sql_query__table.c.table_id,
                 )
                 .join(
                     s.catalog_schema,
@@ -308,7 +308,7 @@ def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str,
                     s.catalog_column.c.table_id == s.catalog_table.c.id,
                 )
             )
-            .where(s.custom_analysis_sql.c.analysis_id.in_(list(analysis_ids)))
+            .where(s.custom_analysis__sql.c.analysis_id.in_(list(analysis_ids)))
             .distinct()
             .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
         )
@@ -361,14 +361,14 @@ def custom_analysis_exists(database_name: str | None = None) -> bool:
         statement = statement.where(
             select(literal(1))
             .select_from(
-                s.custom_analysis_sql.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id
-                    == s.custom_analysis_sql.c.sql_query_id,
+                s.custom_analysis__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.custom_analysis__sql.c.sql_query_id,
                 )
                 .join(
                     s.catalog_table,
-                    s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                    s.catalog_table.c.id == s.sql_query__table.c.table_id,
                 )
                 .join(
                     s.catalog_schema,
@@ -380,7 +380,7 @@ def custom_analysis_exists(database_name: str | None = None) -> bool:
                 )
             )
             .where(
-                s.custom_analysis_sql.c.analysis_id == s.custom_analysis.c.id,
+                s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
                 s.catalog_database.c.name == database_name,
             )
             .correlate(s.custom_analysis)
@@ -401,8 +401,8 @@ def custom_analysis_exists(database_name: str | None = None) -> bool:
 def detach_existing_sql_edges(analysis_id: str) -> None:
     """Unlink every statement from the analysis, leaving the statements alone."""
     store().query_write(
-        delete(s.custom_analysis_sql).where(
-            s.custom_analysis_sql.c.analysis_id == analysis_id
+        delete(s.custom_analysis__sql).where(
+            s.custom_analysis__sql.c.analysis_id == analysis_id
         )
     )
 
@@ -416,8 +416,8 @@ def delete_custom_analysis_node(analysis_id: str) -> None:
     into this analysis, so leaving it behind accumulates unreachable rows that
     still show up in query-history reads.
     """
-    owned = select(s.custom_analysis_sql.c.sql_query_id).where(
-        s.custom_analysis_sql.c.analysis_id == analysis_id
+    owned = select(s.custom_analysis__sql.c.sql_query_id).where(
+        s.custom_analysis__sql.c.analysis_id == analysis_id
     )
 
     # One unit: deleting the analysis first drops the link rows by cascade, so
@@ -575,14 +575,14 @@ def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
     rows = store().query_read(
         select(s.catalog_database.c.name)
         .select_from(
-            s.custom_analysis_sql.join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id
-                == s.custom_analysis_sql.c.sql_query_id,
+            s.custom_analysis__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.custom_analysis__sql.c.sql_query_id,
             )
             .join(
                 s.catalog_table,
-                s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                s.catalog_table.c.id == s.sql_query__table.c.table_id,
             )
             .join(
                 s.catalog_schema,
@@ -593,7 +593,7 @@ def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
                 s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
         )
-        .where(s.custom_analysis_sql.c.analysis_id == analysis_id)
+        .where(s.custom_analysis__sql.c.analysis_id == analysis_id)
         .distinct()
         # Stable across calls: without it two databases would alternate, and the
         # embedding's scope would depend on plan order.

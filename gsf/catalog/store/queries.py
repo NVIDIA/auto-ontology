@@ -190,7 +190,7 @@ def _dedupe(array):
     ``column_valued`` is what makes this legal: ``unnest`` is a set-returning
     function and has to sit in ``FROM``, not in the select list. Calling it
     inline instead makes SQLAlchemy infer the FROM from the array expression
-    and emit ``FROM column_union, column_union AS excluded``, which Postgres
+    and emit ``FROM column__union, column__union AS excluded``, which Postgres
     rejects.
 
     The ``coalesce`` guards a case that is unreachable today but cheap to hold
@@ -199,7 +199,7 @@ def _dedupe(array):
     ingest on the *second* pass over a link -- the first inserts, only the
     second reaches ON CONFLICT:
 
-        null value in column "refs" of relation "column_join"
+        null value in column "refs" of relation "column__join"
         violates not-null constraint
 
     Nothing produces an empty one now: both writers are in ``sql_parse`` and
@@ -263,8 +263,8 @@ def update_counters_and_timestamps_for_query_and_affected_data(
     # A statement references both tables and columns, through two association
     # tables -- so two updates.
     for association, target, key in (
-        (s.sql_query_table, s.catalog_table, "table_id"),
-        (s.sql_query_column, s.catalog_column, "column_id"),
+        (s.sql_query__table, s.catalog_table, "table_id"),
+        (s.sql_query__column, s.catalog_column, "column_id"),
     ):
         if "last_query_timestamp" not in target.c:
             # Only statements carry a last-query timestamp; the catalog tier
@@ -298,11 +298,11 @@ def load_sqls_to_tables() -> pd.DataFrame:
         return pd.DataFrame(columns=_EMPTY_SQLS_COLUMNS)
 
     tables: dict[str, list[str]] = {}
-    for row in store().query_read(select(s.sql_query_table)):
+    for row in store().query_read(select(s.sql_query__table)):
         tables.setdefault(row["sql_query_id"], []).append(row["table_id"])
 
     columns: dict[str, list[str]] = {}
-    for row in store().query_read(select(s.sql_query_column)):
+    for row in store().query_read(select(s.sql_query__column)):
         columns.setdefault(row["sql_query_id"], []).append(row["column_id"])
 
     return pd.DataFrame(

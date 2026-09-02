@@ -104,19 +104,19 @@ Association tables (both endpoints cascade):
 
 | Table | Links | Notes |
 |---|---|---|
-| `column_foreign_key` | column → column | physical FKs read from the source |
-| `column_join` | column → column | `refs text[]`, accumulated from statements |
-| `column_union` | column → column | `refs text[]`, same |
-| `table_join` | table → table | |
-| `sql_query_table` | sql_query → table | |
-| `sql_query_column` | sql_query → column | |
-| `column_has_attribute` | column → column_attribute | |
-| `column_semantic_fk` | column → column_attribute | LLM-inferred, one direction |
-| `column_attribute_term` | column_attribute → term | |
-| `sql_attribute_term` | sql_attribute → term | |
-| `table_term` | table → term | |
-| `sql_attribute_sql` | sql_attribute → sql_query | |
-| `custom_analysis_sql` | custom_analysis → sql_query | |
+| `column__foreign_key` | column → column | physical FKs read from the source |
+| `column__join` | column → column | `refs text[]`, accumulated from statements |
+| `column__union` | column → column | `refs text[]`, same |
+| `table__join` | table → table | |
+| `sql_query__table` | sql_query → table | |
+| `sql_query__column` | sql_query → column | |
+| `column__has_attribute` | column → column_attribute | |
+| `column__semantic_fk` | column → column_attribute | LLM-inferred, one direction |
+| `column_attribute__term` | column_attribute → term | |
+| `sql_attribute__term` | sql_attribute → term | |
+| `table__term` | table → term | |
+| `sql_attribute__sql` | sql_attribute → sql_query | |
+| `custom_analysis__sql` | custom_analysis → sql_query | |
 | `zone_target` | zone → database / schema / table | access scoping |
 
 Standalone: `term`, `column_attribute`, `sql_attribute`, `custom_analysis`,
@@ -210,7 +210,7 @@ understanding before changing anything near it.
 
 In Neo4j a join path was `apoc.path.expandConfig` over a labelled graph. In
 Postgres the edges are spread across `catalog_column.table_id`,
-`column_has_attribute` and `column_semantic_fk` — three different tables with
+`column__has_attribute` and `column__semantic_fk` — three different tables with
 different shapes. The view **`join_path_edge`** normalises them into one
 `(src_kind, src_id, dst_kind, dst_id)` relation, so the search has a single
 thing to walk:
@@ -218,8 +218,8 @@ thing to walk:
 ```
 column           → table            (via catalog_column.table_id)
 table            → column           (the reverse)
-column           ↔ column_attribute (column_has_attribute, both directions)
-column           → column_attribute (column_semantic_fk, one direction only)
+column           ↔ column_attribute (column__has_attribute, both directions)
+column           → column_attribute (column__semantic_fk, one direction only)
 ```
 
 `SEMANTIC_FK` is deliberately emitted **one way** in the view while being read
@@ -328,8 +328,8 @@ redacted, arrays sorted. The harness was validated first: two independent
 ingests must produce identical output.
 
 **This caught a bad proof.** The first fingerprint compared identical — but
-`sql_query`, `sql_query_table`, `sql_query_column`, `column_join` and
-`column_union` were all *zero rows*, because the fixtures generate no SQL
+`sql_query`, `sql_query__table`, `sql_query__column`, `column__join` and
+`column__union` were all *zero rows*, because the fixtures generate no SQL
 history. The run exercised none of the changed code. A second scenario was
 built to drive statements through `parse_queries_df` → `add_query` (SQL links,
 two joins, a union, deliberate repeats for `refs` accumulation), then run

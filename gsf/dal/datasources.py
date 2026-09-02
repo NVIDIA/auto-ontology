@@ -270,8 +270,8 @@ def fetch_sorted_tables() -> list[dict[str, Any]]:
     to impose a total one.
     """
     query_count = (
-        select(func.count(s.sql_query_table.c.sql_query_id))
-        .where(s.sql_query_table.c.table_id == s.catalog_table.c.id)
+        select(func.count(s.sql_query__table.c.sql_query_id))
+        .where(s.sql_query__table.c.table_id == s.catalog_table.c.id)
         .scalar_subquery()
         .label("query_count")
     )
@@ -335,16 +335,16 @@ def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
     outgoing = (
         select(other.c.id, other.c.name, other.c.description)
         .select_from(
-            s.table_join.join(other, other.c.id == s.table_join.c.target_table_id)
+            s.table__join.join(other, other.c.id == s.table__join.c.target_table_id)
         )
-        .where(s.table_join.c.source_table_id == table_id)
+        .where(s.table__join.c.source_table_id == table_id)
     )
     incoming = (
         select(other.c.id, other.c.name, other.c.description)
         .select_from(
-            s.table_join.join(other, other.c.id == s.table_join.c.source_table_id)
+            s.table__join.join(other, other.c.id == s.table__join.c.source_table_id)
         )
-        .where(s.table_join.c.target_table_id == table_id)
+        .where(s.table__join.c.target_table_id == table_id)
     )
     return [dict(r) for r in store().query_read(outgoing.union(incoming))]
 
@@ -360,11 +360,11 @@ def fetch_join_edges() -> list[dict[str, Any]]:
                 source.c.id.label("source_table_id"),
                 target.c.name.label("target_table"),
                 target.c.id.label("target_table_id"),
-                s.table_join.c.join_columns,
+                s.table__join.c.join_columns,
             ).select_from(
-                s.table_join.join(
-                    source, source.c.id == s.table_join.c.source_table_id
-                ).join(target, target.c.id == s.table_join.c.target_table_id)
+                s.table__join.join(
+                    source, source.c.id == s.table__join.c.source_table_id
+                ).join(target, target.c.id == s.table__join.c.target_table_id)
             )
         )
     ]
@@ -717,13 +717,14 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
                 s.catalog_column.join(
                     link_table, link_table.c.column_id == s.catalog_column.c.id
                 ).join(
-                    s.column_attribute_term,
-                    s.column_attribute_term.c.attribute_id == link_table.c.attribute_id,
+                    s.column_attribute__term,
+                    s.column_attribute__term.c.attribute_id
+                    == link_table.c.attribute_id,
                 )
             )
             .where(
                 s.catalog_column.c.table_id == table_id,
-                s.column_attribute_term.c.term_id == s.term.c.id,
+                s.column_attribute__term.c.term_id == s.term.c.id,
             )
             .correlate(owner, s.term)
             .exists()
@@ -732,8 +733,8 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
     direct = (
         select(literal(1))
         .where(
-            s.table_term.c.table_id == table_id,
-            s.table_term.c.term_id == s.term.c.id,
+            s.table__term.c.table_id == table_id,
+            s.table__term.c.term_id == s.term.c.id,
         )
         .correlate(owner, s.term)
         .exists()
@@ -741,7 +742,7 @@ def _terms_count(table_id: ColumnElement) -> ColumnElement:
     return (
         select(func.count())
         .select_from(s.term)
-        .where(direct | via(s.column_has_attribute) | via(s.column_semantic_fk))
+        .where(direct | via(s.column__has_attribute) | via(s.column__semantic_fk))
         .correlate(owner)
         .scalar_subquery()
     )
@@ -778,7 +779,8 @@ def fetch_tables_for_schema(
                 s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
             ).label("columns_count"),
             _count_of(
-                s.sql_query_table, s.sql_query_table.c.table_id == s.catalog_table.c.id
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.catalog_table.c.id,
             ).label("sql_count"),
             _terms_count(s.catalog_table.c.id).label("terms_count"),
         )
@@ -814,8 +816,8 @@ def fetch_all_tables_without_term(
         )
         .select_from(_table_join())
         .where(
-            ~select(s.table_term.c.term_id)
-            .where(s.table_term.c.table_id == s.catalog_table.c.id)
+            ~select(s.table__term.c.term_id)
+            .where(s.table__term.c.table_id == s.catalog_table.c.id)
             .exists()
         )
         .order_by(s.catalog_table.c.name)
@@ -969,8 +971,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
     """
     is_fk_target = (
         select(literal(1))
-        .select_from(s.column_foreign_key)
-        .where(s.column_foreign_key.c.target_column_id == s.catalog_column.c.id)
+        .select_from(s.column__foreign_key)
+        .where(s.column__foreign_key.c.target_column_id == s.catalog_column.c.id)
         .exists()
     )
     columns = [
@@ -1014,10 +1016,10 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             )
             .select_from(
                 source.join(
-                    s.column_foreign_key,
-                    s.column_foreign_key.c.source_column_id == source.c.id,
+                    s.column__foreign_key,
+                    s.column__foreign_key.c.source_column_id == source.c.id,
                 )
-                .join(target, target.c.id == s.column_foreign_key.c.target_column_id)
+                .join(target, target.c.id == s.column__foreign_key.c.target_column_id)
                 .join(target_table, target_table.c.id == target.c.table_id)
             )
             .where(source.c.table_id == table_id)
@@ -1124,7 +1126,7 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
     # attribute this column references is *owned* by some other column, and that
     # other column is the join target. Reversing it would make every bridge
     # point back at itself.
-    sem_owner = s.column_has_attribute.alias("sem_owner")
+    sem_owner = s.column__has_attribute.alias("sem_owner")
     resolved = (
         select(
             s.catalog_column.c.id.label("column_id"),
@@ -1137,21 +1139,21 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         )
         .select_from(
             s.catalog_column.outerjoin(
-                s.column_foreign_key,
-                s.column_foreign_key.c.source_column_id == s.catalog_column.c.id,
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
             )
             .outerjoin(
-                fk_target, fk_target.c.id == s.column_foreign_key.c.target_column_id
+                fk_target, fk_target.c.id == s.column__foreign_key.c.target_column_id
             )
             .outerjoin(fk_table, fk_table.c.id == fk_target.c.table_id)
             .outerjoin(fk_schema, fk_schema.c.id == fk_table.c.schema_id)
             .outerjoin(
-                s.column_semantic_fk,
-                s.column_semantic_fk.c.column_id == s.catalog_column.c.id,
+                s.column__semantic_fk,
+                s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
             )
             .outerjoin(
                 sem_owner,
-                sem_owner.c.attribute_id == s.column_semantic_fk.c.attribute_id,
+                sem_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
             )
             .outerjoin(sem_target, sem_target.c.id == sem_owner.c.column_id)
             .outerjoin(sem_table, sem_table.c.id == sem_target.c.table_id)
@@ -1188,8 +1190,8 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         select(literal(1))
         .select_from(
             s.catalog_column.join(
-                s.column_has_attribute,
-                s.column_has_attribute.c.column_id == s.catalog_column.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
             )
         )
         .where(s.catalog_column.c.table_id == s.catalog_table.c.id)
@@ -1199,16 +1201,17 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         select(literal(1))
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_sql,
-                s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_attribute__sql,
+                s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
             ).join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id == s.sql_attribute_sql.c.sql_query_id,
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.sql_attribute__sql.c.sql_query_id,
             )
         )
         .where(
             s.sql_attribute.c.source == SQL_ATTR_SOURCE_BRIDGE,
-            s.sql_query_table.c.table_id == s.catalog_table.c.id,
+            s.sql_query__table.c.table_id == s.catalog_table.c.id,
         )
         .exists()
     )

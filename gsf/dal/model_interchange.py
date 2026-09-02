@@ -204,10 +204,10 @@ def _export_foreign_keys(database_ids: list[str]) -> list[dict[str, Any]]:
             .select_from(
                 _catalog_join()
                 .join(
-                    s.column_foreign_key,
-                    s.column_foreign_key.c.source_column_id == s.catalog_column.c.id,
+                    s.column__foreign_key,
+                    s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
                 )
-                .join(target, target.c.id == s.column_foreign_key.c.target_column_id)
+                .join(target, target.c.id == s.column__foreign_key.c.target_column_id)
             )
             .where(_database_scope(database_ids))
             .distinct()
@@ -228,9 +228,9 @@ def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
 
     statement = (
         select(
-            s.table_join.c.source_table_id,
-            s.table_join.c.target_table_id,
-            s.table_join.c.join_columns,
+            s.table__join.c.source_table_id,
+            s.table__join.c.target_table_id,
+            s.table__join.c.join_columns,
         )
         .select_from(
             s.catalog_database.join(
@@ -238,8 +238,10 @@ def _export_joins(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_schema.c.database_id == s.catalog_database.c.id,
             )
             .join(s.catalog_table, s.catalog_table.c.schema_id == s.catalog_schema.c.id)
-            .join(s.table_join, s.table_join.c.source_table_id == s.catalog_table.c.id)
-            .join(target_table, target_table.c.id == s.table_join.c.target_table_id)
+            .join(
+                s.table__join, s.table__join.c.source_table_id == s.catalog_table.c.id
+            )
+            .join(target_table, target_table.c.id == s.table__join.c.target_table_id)
             .join(target_schema, target_schema.c.id == target_table.c.schema_id)
             .join(target_database, target_database.c.id == target_schema.c.database_id)
         )
@@ -259,10 +261,10 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
     partly owns.
     """
     in_scope = (
-        select(s.table_term.c.term_id)
+        select(s.table__term.c.term_id)
         .select_from(
-            s.table_term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
             )
             .join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
@@ -286,31 +288,31 @@ def _export_terms(database_ids: list[str]) -> list[dict[str, Any]]:
 
     represents: dict[str, list[str]] = {}
     for row in store().query_read(
-        select(s.table_term.c.term_id, s.table_term.c.table_id)
-        .where(s.table_term.c.term_id.in_(term_ids))
-        .order_by(s.table_term.c.table_id)
+        select(s.table__term.c.term_id, s.table__term.c.table_id)
+        .where(s.table__term.c.term_id.in_(term_ids))
+        .order_by(s.table__term.c.table_id)
     ):
         represents.setdefault(row["term_id"], []).append(row["table_id"])
 
     attributes: dict[str, list[dict[str, Any]]] = {}
     for row in store().query_read(
         select(
-            s.column_attribute_term.c.term_id,
+            s.column_attribute__term.c.term_id,
             s.column_attribute.c.id,
             s.column_attribute.c.name,
             s.column_attribute.c.description,
-            s.column_has_attribute.c.column_id,
+            s.column__has_attribute.c.column_id,
         )
         .select_from(
-            s.column_attribute_term.join(
+            s.column_attribute__term.join(
                 s.column_attribute,
-                s.column_attribute.c.id == s.column_attribute_term.c.attribute_id,
+                s.column_attribute.c.id == s.column_attribute__term.c.attribute_id,
             ).join(
-                s.column_has_attribute,
-                s.column_has_attribute.c.attribute_id == s.column_attribute.c.id,
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
             )
         )
-        .where(s.column_attribute_term.c.term_id.in_(term_ids))
+        .where(s.column_attribute__term.c.term_id.in_(term_ids))
         .distinct()
         .order_by(s.column_attribute.c.id)
     ):
@@ -340,13 +342,13 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
         dict(r)
         for r in store().query_read(
             select(
-                s.column_semantic_fk.c.column_id,
-                s.column_semantic_fk.c.attribute_id.label("column_attribute_id"),
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
             )
             .select_from(
                 _catalog_join().join(
-                    s.column_semantic_fk,
-                    s.column_semantic_fk.c.column_id == s.catalog_column.c.id,
+                    s.column__semantic_fk,
+                    s.column__semantic_fk.c.column_id == s.catalog_column.c.id,
                 )
             )
             .where(_database_scope(database_ids))
@@ -372,10 +374,10 @@ def _export_sql_owners(database_ids: list[str], link_table, owner_table, owner_c
             )
             .join(s.catalog_table, s.catalog_table.c.schema_id == s.catalog_schema.c.id)
             .join(
-                s.sql_query_table,
-                s.sql_query_table.c.table_id == s.catalog_table.c.id,
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.catalog_table.c.id,
             )
-            .join(s.sql_query, s.sql_query.c.id == s.sql_query_table.c.sql_query_id)
+            .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
             .join(link_table, link_table.c.sql_query_id == s.sql_query.c.id)
             .join(owner_table, owner_table.c.id == owner_column)
         )
@@ -387,9 +389,9 @@ def _export_sql_owners(database_ids: list[str], link_table, owner_table, owner_c
 def _export_sql_attributes(database_ids: list[str]) -> list[dict[str, Any]]:
     statement = _export_sql_owners(
         database_ids,
-        s.sql_attribute_sql,
+        s.sql_attribute__sql,
         s.sql_attribute,
-        s.sql_attribute_sql.c.attribute_id,
+        s.sql_attribute__sql.c.attribute_id,
     )
     statement = (
         statement.add_columns(
@@ -398,10 +400,10 @@ def _export_sql_attributes(database_ids: list[str]) -> list[dict[str, Any]]:
             s.term.c.id.label("term_id"),
         )
         .join(
-            s.sql_attribute_term,
-            s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
+            s.sql_attribute__term,
+            s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
         )
-        .join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+        .join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
         .order_by(s.sql_attribute.c.name)
     )
     return [
@@ -418,9 +420,9 @@ def _export_sql_attributes(database_ids: list[str]) -> list[dict[str, Any]]:
 def _export_custom_analyses(database_ids: list[str]) -> list[dict[str, Any]]:
     statement = _export_sql_owners(
         database_ids,
-        s.custom_analysis_sql,
+        s.custom_analysis__sql,
         s.custom_analysis,
-        s.custom_analysis_sql.c.analysis_id,
+        s.custom_analysis__sql.c.analysis_id,
     ).order_by(s.custom_analysis.c.name)
     return [
         {**dict(row), "description": row["description"] or ""}
@@ -887,12 +889,12 @@ def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
     names: dict[str, str] = {}
     for row in store().query_read(
         select(
-            s.table_term.c.term_id,
+            s.table__term.c.term_id,
             s.catalog_database.c.name.label("database_name"),
         )
         .select_from(
-            s.table_term.join(
-                s.catalog_table, s.catalog_table.c.id == s.table_term.c.table_id
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
             )
             .join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
@@ -902,7 +904,7 @@ def _database_names_for_terms(term_ids: list[str]) -> dict[str, str]:
                 s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
         )
-        .where(s.table_term.c.term_id.in_(term_ids))
+        .where(s.table__term.c.term_id.in_(term_ids))
         .order_by(s.catalog_database.c.id)
     ):
         names.setdefault(row["term_id"], row["database_name"])
@@ -1169,7 +1171,7 @@ def _import_catalog(
 
 def _import_foreign_keys(document: GsfModelDocument, id_map: dict[str, str]) -> None:
     _link(
-        s.column_foreign_key,
+        s.column__foreign_key,
         [
             {
                 "source_column_id": _remap(
@@ -1199,12 +1201,12 @@ def _import_joins(document: GsfModelDocument, id_map: dict[str, str]) -> None:
     ]
     if not rows:
         return
-    statement = insert(s.table_join).values(rows)
+    statement = insert(s.table__join).values(rows)
     store().query_write(
         statement.on_conflict_do_update(
             index_elements=[
-                s.table_join.c.source_table_id,
-                s.table_join.c.target_table_id,
+                s.table__join.c.source_table_id,
+                s.table__join.c.target_table_id,
             ],
             set_={"join_columns": statement.excluded.join_columns},
         )
@@ -1251,14 +1253,14 @@ def _delete_scoped_semantics_not_in_payload(
     for owner_table, link_table, owner_column, keep in (
         (
             s.sql_attribute,
-            s.sql_attribute_sql,
-            s.sql_attribute_sql.c.attribute_id,
+            s.sql_attribute__sql,
+            s.sql_attribute__sql.c.attribute_id,
             keep_sql_attrs,
         ),
         (
             s.custom_analysis,
-            s.custom_analysis_sql,
-            s.custom_analysis_sql.c.analysis_id,
+            s.custom_analysis__sql,
+            s.custom_analysis__sql.c.analysis_id,
             keep_analyses,
         ),
     ):
@@ -1266,11 +1268,11 @@ def _delete_scoped_semantics_not_in_payload(
             select(owner_column)
             .select_from(
                 link_table.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id == link_table.c.sql_query_id,
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id == link_table.c.sql_query_id,
                 )
             )
-            .where(s.sql_query_table.c.table_id.in_(scoped_tables))
+            .where(s.sql_query__table.c.table_id.in_(scoped_tables))
             .distinct()
         )
         store().query_write(
@@ -1294,13 +1296,13 @@ def _delete_scoped_semantics_not_in_payload(
 
     # Only terms whose every representing table is inside this import.
     outside = (
-        select(s.table_term.c.term_id)
-        .where(s.table_term.c.table_id.notin_(scoped_tables))
+        select(s.table__term.c.term_id)
+        .where(s.table__term.c.table_id.notin_(scoped_tables))
         .distinct()
     )
     inside = (
-        select(s.table_term.c.term_id)
-        .where(s.table_term.c.table_id.in_(scoped_tables))
+        select(s.table__term.c.term_id)
+        .where(s.table__term.c.table_id.in_(scoped_tables))
         .distinct()
     )
     store().query_write(
@@ -1357,9 +1359,9 @@ def _import_terms(
         # ids can match `table_id`, so the wider list is harmless and avoids
         # threading the document's table set through here.
         store().query_write(
-            s.table_term.delete().where(
-                s.table_term.c.term_id == live_term_id,
-                s.table_term.c.table_id.in_(list(id_map.values())),
+            s.table__term.delete().where(
+                s.table__term.c.term_id == live_term_id,
+                s.table__term.c.table_id.in_(list(id_map.values())),
             )
         )
         for table_id in term.represents:
@@ -1374,7 +1376,7 @@ def _import_terms(
                 )
                 continue
             represents_rows.append({"term_id": live_term_id, "table_id": live_table_id})
-    _link(s.table_term, represents_rows)
+    _link(s.table__term, represents_rows)
 
     if embed_buffer is not None and newly_created:
         db_names = _database_names_for_terms(newly_created)
@@ -1475,8 +1477,8 @@ def _import_column_attributes(
                 ),
             )
 
-    _link(s.column_has_attribute, has_attribute_rows)
-    _link(s.column_attribute_term, property_of_rows)
+    _link(s.column__has_attribute, has_attribute_rows)
+    _link(s.column_attribute__term, property_of_rows)
 
 
 def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> None:
@@ -1494,7 +1496,7 @@ def _import_semantic_fks(document: GsfModelDocument, id_map: dict[str, str]) -> 
             continue
         rows.append({"column_id": column_id, "attribute_id": attribute_id})
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         rows,
     )
 

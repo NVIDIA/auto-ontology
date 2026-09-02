@@ -8,7 +8,7 @@ Alembic autogenerates migrations by diffing against :data:`METADATA`, so this
 file is the single source of truth for the schema — never hand-edit a migration
 that has already been applied.
 
-Three decisions shape everything downstream:
+Four decisions shape everything downstream:
 
 * **Containment is a parent foreign key, not an edge table.** A database owns
   its schemas, a schema its tables, a table its columns. That is what makes
@@ -22,6 +22,18 @@ Three decisions shape everything downstream:
 * **The catalog tier is prefixed ``catalog_``** — one rule that sidesteps
   ``table`` and ``column`` being reserved words and ``schema`` colliding with
   ``information_schema``, instead of three separate exceptions.
+* **Association tables contain exactly one ``__``; entity tables contain none.**
+  The name says which kind of table it is, and where the first endpoint's name
+  ends. Both used to be guesswork: ``column_attribute_term`` could be read as
+  ``column_attribute`` + ``term`` or ``column`` + ``attribute_term``, and
+  nothing but familiarity separated it from the ``column_attribute`` entity
+  sitting beside it.
+
+  The separator marks the *first endpoint*, not a strict ``<source>__<target>``
+  — which cannot name the self-edges (``column__join``, ``table__join``) or
+  distinguish the two edges that share endpoints, ``column__has_attribute`` and
+  ``column__semantic_fk``. Indexes and constraints follow their table's name, so
+  ``pk_table__term`` never drifts back to the ambiguous form.
 """
 
 from __future__ import annotations
@@ -228,8 +240,8 @@ catalog_column = Table(
 )
 
 # FOREIGN_KEY: Column -> Column.
-column_foreign_key = Table(
-    "column_foreign_key",
+column__foreign_key = Table(
+    "column__foreign_key",
     METADATA,
     Column(
         "source_column_id",
@@ -253,10 +265,10 @@ column_foreign_key = Table(
 
 # JOIN / UNION: Column <-> Column, carrying the statements that observed them.
 #
-# Distinct from `table_join` below, and both are real. This one is written by
+# Distinct from `table__join` below, and both are real. This one is written by
 # **query** ingestion -- `sql_parse` emits one entry per observed join
 # condition, so `refs` accumulates `"<sql id>|<condition>"` strings as more
-# statements are seen. `table_join` is written only by a model import and
+# statements are seen. `table__join` is written only by a model import and
 # carries the join's *columns*; nothing writes both.
 #
 # `refs` is an array that grows rather than a row per reference, because that is
@@ -282,13 +294,13 @@ def _column_pair_edge(name: str) -> Table:
     )
 
 
-column_join = _column_pair_edge("column_join")
-column_union = _column_pair_edge("column_union")
+column__join = _column_pair_edge("column__join")
+column__union = _column_pair_edge("column__union")
 
 
 # JOIN: Table -> Table, carrying the columns that join them.
-table_join = Table(
-    "table_join",
+table__join = Table(
+    "table__join",
     METADATA,
     Column(
         "source_table_id",
@@ -341,8 +353,8 @@ sql_query = Table(
 
 # SQL: Sql -> Table. An association, because one statement references many
 # tables and one table is referenced by many statements.
-sql_query_table = Table(
-    "sql_query_table",
+sql_query__table = Table(
+    "sql_query__table",
     METADATA,
     Column(
         "sql_query_id",
@@ -363,8 +375,8 @@ sql_query_table = Table(
 # the two are always read separately -- `load_sqls_to_tables` returns tables and
 # columns as distinct lists, and query deduplication compares them as distinct
 # sets.
-sql_query_column = Table(
-    "sql_query_column",
+sql_query__column = Table(
+    "sql_query__column",
     METADATA,
     Column(
         "sql_query_id",
@@ -399,8 +411,8 @@ term = Table(
 )
 
 # REPRESENTS: Table -> Term.
-table_term = Table(
-    "table_term",
+table__term = Table(
+    "table__term",
     METADATA,
     Column(
         "table_id",
@@ -443,8 +455,8 @@ column_attribute = Table(
 )
 
 # PROPERTY_OF: ColumnAttribute -> Term.
-column_attribute_term = Table(
-    "column_attribute_term",
+column_attribute__term = Table(
+    "column_attribute__term",
     METADATA,
     Column(
         "attribute_id",
@@ -469,8 +481,8 @@ column_attribute_term = Table(
 # unlinked when it has no SEMANTIC_FK, so at most one is expected, whereas a
 # column can carry several attributes -- and a discriminator in the primary key
 # makes any constraint that applies to only one of them impossible to express.
-column_has_attribute = Table(
-    "column_has_attribute",
+column__has_attribute = Table(
+    "column__has_attribute",
     METADATA,
     Column(
         "column_id",
@@ -486,8 +498,8 @@ column_has_attribute = Table(
     ),
 )
 
-column_semantic_fk = Table(
-    "column_semantic_fk",
+column__semantic_fk = Table(
+    "column__semantic_fk",
     METADATA,
     Column(
         "column_id",
@@ -521,8 +533,8 @@ sql_attribute = Table(
 )
 
 # PROPERTY_OF: SqlAttribute -> Term.
-sql_attribute_term = Table(
-    "sql_attribute_term",
+sql_attribute__term = Table(
+    "sql_attribute__term",
     METADATA,
     Column(
         "attribute_id",
@@ -536,8 +548,8 @@ sql_attribute_term = Table(
 )
 
 # HAS_SQL: SqlAttribute -> Sql.
-sql_attribute_sql = Table(
-    "sql_attribute_sql",
+sql_attribute__sql = Table(
+    "sql_attribute__sql",
     METADATA,
     Column(
         "attribute_id",
@@ -563,8 +575,8 @@ custom_analysis = Table(
 )
 
 # HAS_SQL: CustomAnalysis -> Sql.
-custom_analysis_sql = Table(
-    "custom_analysis_sql",
+custom_analysis__sql = Table(
+    "custom_analysis__sql",
     METADATA,
     Column(
         "analysis_id",
@@ -720,24 +732,24 @@ Index("ix_catalog_table_name", catalog_table.c.name)
 Index("ix_catalog_column_table_id", catalog_column.c.table_id)
 Index("ix_catalog_column_name", catalog_column.c.name)
 
-Index("ix_column_foreign_key_target", column_foreign_key.c.target_column_id)
-Index("ix_table_join_target", table_join.c.target_table_id)
-Index("ix_sql_query_table_table_id", sql_query_table.c.table_id)
-Index("ix_sql_query_column_column_id", sql_query_column.c.column_id)
+Index("ix_column__foreign_key_target", column__foreign_key.c.target_column_id)
+Index("ix_table__join_target", table__join.c.target_table_id)
+Index("ix_sql_query__table_table_id", sql_query__table.c.table_id)
+Index("ix_sql_query__column_column_id", sql_query__column.c.column_id)
 
 Index("ix_term_name", term.c.name)
-Index("ix_table_term_term_id", table_term.c.term_id)
+Index("ix_table__term_term_id", table__term.c.term_id)
 Index("ix_column_attribute_term_name", column_attribute.c.term_name)
 Index("ix_column_attribute_table_id", column_attribute.c.table_id)
-Index("ix_column_attribute_term_term_id", column_attribute_term.c.term_id)
-Index("ix_sql_attribute_term_term_id", sql_attribute_term.c.term_id)
+Index("ix_column_attribute__term_term_id", column_attribute__term.c.term_id)
+Index("ix_sql_attribute__term_term_id", sql_attribute__term.c.term_id)
 
 # Both link tables are read in both directions -- from a column to its
 # attributes, and from an attribute back to the columns that reference it
 # (`fetch_attr_column_contexts` binds the attribute first). The composite
 # primary key already indexes the column_id order; these cover the reverse.
-Index("ix_column_has_attribute_attribute_id", column_has_attribute.c.attribute_id)
-Index("ix_column_semantic_fk_attribute_id", column_semantic_fk.c.attribute_id)
+Index("ix_column__has_attribute_attribute_id", column__has_attribute.c.attribute_id)
+Index("ix_column__semantic_fk_attribute_id", column__semantic_fk.c.attribute_id)
 
 # Supports the case-insensitive name check that replaces a unique constraint.
 Index("ix_zone_name_lower", func.lower(zone.c.name))
@@ -775,7 +787,7 @@ for _table in (
 #: **stored** in one direction, but the codebase reads it in both:
 #: ``fetch_attr_column_contexts`` binds a ColumnAttribute and finds the columns
 #: referencing it, which is the reverse traversal. Anything needing that must
-#: query :data:`column_semantic_fk` directly rather than this view.
+#: query :data:`column__semantic_fk` directly rather than this view.
 #:
 #: The restriction is specific to path-finding. Allowed to traverse SEMANTIC_FK
 #: backwards, a path would hop from one FK column up to a shared target
@@ -792,13 +804,13 @@ CREATE OR REPLACE VIEW join_path_edge AS
       FROM catalog_column c
     UNION ALL
     SELECT 'column', h.column_id, 'column_attribute', h.attribute_id
-      FROM column_has_attribute h
+      FROM column__has_attribute h
     UNION ALL
     SELECT 'column_attribute', h.attribute_id, 'column', h.column_id
-      FROM column_has_attribute h
+      FROM column__has_attribute h
     UNION ALL
     SELECT 'column', f.column_id, 'column_attribute', f.attribute_id
-      FROM column_semantic_fk f
+      FROM column__semantic_fk f
 """
 
 DROP_JOIN_PATH_EDGE_VIEW_SQL = "DROP VIEW IF EXISTS join_path_edge"
@@ -824,8 +836,8 @@ join_path_edge = Table(
 
 __all__ = [
     "METADATA",
-    "column_join",
-    "column_union",
+    "column__join",
+    "column__union",
     "VIEWS",
     "join_path_edge",
     "JOIN_PATH_EDGE_VIEW_SQL",
@@ -836,22 +848,22 @@ __all__ = [
     "catalog_schema",
     "catalog_table",
     "column_attribute",
-    "column_has_attribute",
-    "column_semantic_fk",
-    "column_attribute_term",
-    "column_foreign_key",
+    "column__has_attribute",
+    "column__semantic_fk",
+    "column_attribute__term",
+    "column__foreign_key",
     "custom_analysis",
-    "custom_analysis_sql",
+    "custom_analysis__sql",
     "pql_analysis",
     "sql_attribute",
-    "sql_attribute_sql",
-    "sql_attribute_term",
+    "sql_attribute__sql",
+    "sql_attribute__term",
     "sql_query",
-    "sql_query_table",
-    "sql_query_column",
+    "sql_query__table",
+    "sql_query__column",
     "semantic_compilation_history",
-    "table_join",
-    "table_term",
+    "table__join",
+    "table__term",
     "term",
     "text_attribute",
     "zone",

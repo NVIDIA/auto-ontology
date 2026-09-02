@@ -69,8 +69,8 @@ def column_description_expr(column=s.catalog_column) -> ColumnElement:
     """
     return func.coalesce(
         _non_blank(column.c.description),
-        _attribute_description(column.c.id, s.column_has_attribute),
-        _attribute_description(column.c.id, s.column_semantic_fk),
+        _attribute_description(column.c.id, s.column__has_attribute),
+        _attribute_description(column.c.id, s.column__semantic_fk),
     )
 
 
@@ -83,9 +83,9 @@ def table_description_expr(table=s.catalog_table) -> ColumnElement:
     table_id = table.c.id
     from_term = (
         select(s.term.c.description)
-        .select_from(s.table_term.join(s.term, s.term.c.id == s.table_term.c.term_id))
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
         .where(
-            s.table_term.c.table_id == table_id,
+            s.table__term.c.table_id == table_id,
             _non_blank(s.term.c.description).isnot(None),
         )
         .order_by(s.term.c.id)

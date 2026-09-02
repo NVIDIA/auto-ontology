@@ -106,7 +106,7 @@ def foreign_keys(database_name: str) -> set[tuple[str, str]]:
     """``(source column name, target column name)`` for each foreign key."""
     rows = _pg(
         "SELECT sc.name AS src, tc.name AS dst "
-        "FROM column_foreign_key fk "
+        "FROM column__foreign_key fk "
         "JOIN catalog_column sc ON sc.id = fk.source_column_id "
         "JOIN catalog_column tc ON tc.id = fk.target_column_id "
         "JOIN catalog_table t ON t.id = sc.table_id "

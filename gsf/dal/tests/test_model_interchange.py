@@ -97,12 +97,12 @@ class World:
             is_nullable=False,
         )
         _link(
-            s.column_foreign_key,
+            s.column__foreign_key,
             source_column_id=self.customer_ref,
             target_column_id=self.customer_id,
         )
         _link(
-            s.table_join,
+            s.table__join,
             source_table_id=self.orders,
             target_table_id=self.customers,
             join_columns=[{"source": "customer_id", "target": "id"}],
@@ -114,7 +114,7 @@ class World:
             description="a purchase",
             source=SEMANTIC_SOURCE,
         )
-        _link(s.table_term, table_id=self.orders, term_id=self.term)
+        _link(s.table__term, table_id=self.orders, term_id=self.term)
         self.attribute = _add(
             s.column_attribute,
             name=f"{prefix}-order-id",
@@ -124,13 +124,13 @@ class World:
             table_id=self.orders,
         )
         _link(
-            s.column_has_attribute,
+            s.column__has_attribute,
             column_id=self.order_id,
             attribute_id=self.attribute,
         )
-        _link(s.column_attribute_term, attribute_id=self.attribute, term_id=self.term)
+        _link(s.column_attribute__term, attribute_id=self.attribute, term_id=self.term)
         _link(
-            s.column_semantic_fk,
+            s.column__semantic_fk,
             column_id=self.customer_ref,
             attribute_id=self.attribute,
         )
@@ -350,7 +350,7 @@ def test_a_join_leaving_the_scope_is_not_exported(world) -> None:
     other_schema = _add(s.catalog_schema, database_id=other_db, name="public")
     outside = _add(s.catalog_table, schema_id=other_schema, name="elsewhere")
     _link(
-        s.table_join,
+        s.table__join,
         source_table_id=world.orders,
         target_table_id=outside,
         join_columns=[{"source": "x", "target": "y"}],
@@ -518,7 +518,7 @@ def test_replace_drops_a_term_the_payload_omits(world) -> None:
         name=f"{world.prefix}-Stale",
         source=SEMANTIC_SOURCE,
     )
-    _link(s.table_term, table_id=world.orders, term_id=stale)
+    _link(s.table__term, table_id=world.orders, term_id=stale)
 
     mi.apply_import_model(document, replace=True)
 
@@ -545,8 +545,8 @@ def test_a_cross_database_term_stays_importable(world) -> None:
     outside = _add(s.catalog_table, schema_id=other_schema, name="elsewhere")
 
     shared = _add(s.term, name=f"{world.prefix}-Shared", source=SEMANTIC_SOURCE)
-    _link(s.table_term, table_id=world.orders, term_id=shared)
-    _link(s.table_term, table_id=outside, term_id=shared)
+    _link(s.table__term, table_id=world.orders, term_id=shared)
+    _link(s.table__term, table_id=outside, term_id=shared)
 
     document = _document(world)
     represents = {term.id: term.represents for term in document.semantic_layer.terms}
@@ -562,7 +562,7 @@ def test_a_cross_database_term_stays_importable(world) -> None:
     linked = {
         row["table_id"]
         for row in store().query_read(
-            select(s.table_term.c.table_id).where(s.table_term.c.term_id == shared)
+            select(s.table__term.c.table_id).where(s.table__term.c.term_id == shared)
         )
     }
     assert world.orders in linked, "the in-scope table is represented"
@@ -583,8 +583,8 @@ def test_replace_keeps_a_term_that_left_this_databases_scope(world) -> None:
 
     # Created *after* the export, so the payload does not mention it at all.
     shared = _add(s.term, name=f"{world.prefix}-Shared", source=SEMANTIC_SOURCE)
-    _link(s.table_term, table_id=world.orders, term_id=shared)
-    _link(s.table_term, table_id=outside, term_id=shared)
+    _link(s.table__term, table_id=world.orders, term_id=shared)
+    _link(s.table__term, table_id=outside, term_id=shared)
 
     mi.apply_import_model(document, replace=True)
 

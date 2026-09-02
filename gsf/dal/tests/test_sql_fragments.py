@@ -118,7 +118,7 @@ def test_the_columns_own_description_wins(fixture) -> None:
     )
     attr = _attribute(fixture["prefix"], "from the attribute")
     store().query_write(
-        s.column_has_attribute.insert().values(
+        s.column__has_attribute.insert().values(
             column_id=fixture["column"], attribute_id=attr
         )
     )
@@ -128,7 +128,7 @@ def test_the_columns_own_description_wins(fixture) -> None:
 def test_falls_back_to_has_attribute(fixture) -> None:
     attr = _attribute(fixture["prefix"], "from the attribute")
     store().query_write(
-        s.column_has_attribute.insert().values(
+        s.column__has_attribute.insert().values(
             column_id=fixture["column"], attribute_id=attr
         )
     )
@@ -144,12 +144,12 @@ def test_has_attribute_beats_semantic_fk(fixture) -> None:
     owned = _attribute(fixture["prefix"], "owned")
     referenced = _attribute(fixture["prefix"], "referenced")
     store().query_write(
-        s.column_has_attribute.insert().values(
+        s.column__has_attribute.insert().values(
             column_id=fixture["column"], attribute_id=owned
         )
     )
     store().query_write(
-        s.column_semantic_fk.insert().values(
+        s.column__semantic_fk.insert().values(
             column_id=fixture["column"], attribute_id=referenced
         )
     )
@@ -159,7 +159,7 @@ def test_has_attribute_beats_semantic_fk(fixture) -> None:
 def test_falls_back_to_semantic_fk_when_that_is_all_there_is(fixture) -> None:
     referenced = _attribute(fixture["prefix"], "referenced")
     store().query_write(
-        s.column_semantic_fk.insert().values(
+        s.column__semantic_fk.insert().values(
             column_id=fixture["column"], attribute_id=referenced
         )
     )
@@ -180,7 +180,7 @@ def test_a_blank_description_does_not_mask_the_fallback(fixture) -> None:
     )
     attr = _attribute(fixture["prefix"], "from the attribute")
     store().query_write(
-        s.column_has_attribute.insert().values(
+        s.column__has_attribute.insert().values(
             column_id=fixture["column"], attribute_id=attr
         )
     )
@@ -192,7 +192,7 @@ def test_a_blank_attribute_description_is_skipped(fixture) -> None:
     real = _attribute(fixture["prefix"], "the real one")
     for attr in (blank, real):
         store().query_write(
-            s.column_has_attribute.insert().values(
+            s.column__has_attribute.insert().values(
                 column_id=fixture["column"], attribute_id=attr
             )
         )
@@ -204,7 +204,7 @@ def test_another_columns_attribute_is_not_borrowed(fixture) -> None:
     other = _insert(s.catalog_column, table_id=fixture["table"], name="phone")
     attr = _attribute(fixture["prefix"], "belongs to phone")
     store().query_write(
-        s.column_has_attribute.insert().values(column_id=other, attribute_id=attr)
+        s.column__has_attribute.insert().values(column_id=other, attribute_id=attr)
     )
     assert _describe_column(fixture["column"]) is None
 
@@ -217,7 +217,7 @@ def test_another_columns_attribute_is_not_borrowed(fixture) -> None:
 def test_table_falls_back_to_its_term(fixture) -> None:
     term = _insert(s.term, name=f"{fixture['prefix']}-Customer", description="a buyer")
     store().query_write(
-        s.table_term.insert().values(table_id=fixture["table"], term_id=term)
+        s.table__term.insert().values(table_id=fixture["table"], term_id=term)
     )
     assert _describe_table(fixture["table"]) == "a buyer"
 
@@ -230,7 +230,7 @@ def test_table_own_description_wins(fixture) -> None:
     )
     term = _insert(s.term, name=f"{fixture['prefix']}-Customer", description="a buyer")
     store().query_write(
-        s.table_term.insert().values(table_id=fixture["table"], term_id=term)
+        s.table__term.insert().values(table_id=fixture["table"], term_id=term)
     )
     assert _describe_table(fixture["table"]) == "from the table"
 
@@ -243,7 +243,7 @@ def test_blank_table_description_does_not_mask_the_term(fixture) -> None:
     )
     term = _insert(s.term, name=f"{fixture['prefix']}-Customer", description="a buyer")
     store().query_write(
-        s.table_term.insert().values(table_id=fixture["table"], term_id=term)
+        s.table__term.insert().values(table_id=fixture["table"], term_id=term)
     )
     assert _describe_table(fixture["table"]) == "a buyer"
 

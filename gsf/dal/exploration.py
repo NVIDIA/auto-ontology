@@ -89,8 +89,8 @@ def _non_empty_sql():
 
 def _shared_sql_pairs(table_filter=None):
     """Table pairs referenced together by one non-empty statement."""
-    source = s.sql_query_table.alias("sql_source")
-    target = s.sql_query_table.alias("sql_target")
+    source = s.sql_query__table.alias("sql_source")
+    target = s.sql_query__table.alias("sql_target")
     statement = (
         select(
             source.c.table_id.label("source"),
@@ -125,12 +125,12 @@ def _fk_column_pairs(table_filter=None):
             target_column.c.sample_values.label("target_sample_values"),
         )
         .select_from(
-            s.column_foreign_key.join(
+            s.column__foreign_key.join(
                 source_column,
-                source_column.c.id == s.column_foreign_key.c.source_column_id,
+                source_column.c.id == s.column__foreign_key.c.source_column_id,
             ).join(
                 target_column,
-                target_column.c.id == s.column_foreign_key.c.target_column_id,
+                target_column.c.id == s.column__foreign_key.c.target_column_id,
             )
         )
         .where(source_column.c.table_id != target_column.c.table_id)
@@ -246,10 +246,10 @@ def _sql_in_scope(table_filter: list[str] | None):
         return literal(True)
     return ~(
         select(literal(1))
-        .select_from(s.sql_query_table)
+        .select_from(s.sql_query__table)
         .where(
-            s.sql_query_table.c.sql_query_id == s.sql_query.c.id,
-            s.sql_query_table.c.table_id.notin_(table_filter),
+            s.sql_query__table.c.sql_query_id == s.sql_query.c.id,
+            s.sql_query__table.c.table_id.notin_(table_filter),
         )
         .exists()
     )
@@ -266,14 +266,14 @@ def _attribute_link():
     """
     return (
         select(
-            s.column_has_attribute.c.column_id,
-            s.column_has_attribute.c.attribute_id,
+            s.column__has_attribute.c.column_id,
+            s.column__has_attribute.c.attribute_id,
             literal(REL_HAS_ATTRIBUTE).label("rel_type"),
         )
         .union(
             select(
-                s.column_semantic_fk.c.column_id,
-                s.column_semantic_fk.c.attribute_id,
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
                 literal(REL_SEMANTIC_FK).label("rel_type"),
             )
         )
@@ -292,17 +292,17 @@ def _term_table_links():
     """
     represents = (
         select(
-            s.table_term.c.term_id,
-            s.table_term.c.table_id,
+            s.table__term.c.term_id,
+            s.table__term.c.table_id,
             literal(REL_REPRESENTS).label("rel_type"),
         )
-        .select_from(s.table_term.join(s.term, s.term.c.id == s.table_term.c.term_id))
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
         .where(s.term.c.source == SEMANTIC_SOURCE)
     )
     link = _attribute_link()
     via_attribute = (
         select(
-            s.column_attribute_term.c.term_id,
+            s.column_attribute__term.c.term_id,
             s.catalog_column.c.table_id,
             link.c.rel_type,
         )
@@ -316,10 +316,10 @@ def _term_table_links():
                 ),
             )
             .join(
-                s.column_attribute_term,
-                s.column_attribute_term.c.attribute_id == s.column_attribute.c.id,
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
             )
-            .join(s.term, s.term.c.id == s.column_attribute_term.c.term_id)
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
         )
         .where(s.term.c.source == SEMANTIC_SOURCE)
     )
@@ -452,11 +452,11 @@ def fetch_table_exploration_details(
     queries = store().query_read(
         select(s.sql_query.c.id, s.sql_query.c.sql_full_query.label("sql"))
         .select_from(
-            s.sql_query_table.join(
-                s.sql_query, s.sql_query.c.id == s.sql_query_table.c.sql_query_id
+            s.sql_query__table.join(
+                s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id
             )
         )
-        .where(s.sql_query_table.c.table_id == table_id)
+        .where(s.sql_query__table.c.table_id == table_id)
         .distinct()
         .order_by(s.sql_query.c.id)
     )
@@ -635,12 +635,12 @@ def fetch_column_exploration_details(
         select(*_COLUMN_REF_COLUMNS)
         .select_from(
             _column_catalog_join().join(
-                s.column_foreign_key,
-                s.column_foreign_key.c.target_column_id == s.catalog_column.c.id,
+                s.column__foreign_key,
+                s.column__foreign_key.c.target_column_id == s.catalog_column.c.id,
             )
         )
         .where(
-            s.column_foreign_key.c.source_column_id == column_id,
+            s.column__foreign_key.c.source_column_id == column_id,
             owned,
             _visible_table(table_filter),
         )
@@ -650,12 +650,12 @@ def fetch_column_exploration_details(
         select(*_COLUMN_REF_COLUMNS)
         .select_from(
             _column_catalog_join().join(
-                s.column_foreign_key,
-                s.column_foreign_key.c.source_column_id == s.catalog_column.c.id,
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
             )
         )
         .where(
-            s.column_foreign_key.c.target_column_id == column_id,
+            s.column__foreign_key.c.target_column_id == column_id,
             owned,
             _visible_table(table_filter),
         )
@@ -669,12 +669,12 @@ def fetch_column_exploration_details(
     sql_rows = store().query_read(
         select(s.sql_query.c.id, s.sql_query.c.sql_full_query.label("sql"))
         .select_from(
-            s.sql_query_column.join(
-                s.sql_query, s.sql_query.c.id == s.sql_query_column.c.sql_query_id
+            s.sql_query__column.join(
+                s.sql_query, s.sql_query.c.id == s.sql_query__column.c.sql_query_id
             )
         )
         .where(
-            s.sql_query_column.c.column_id == column_id,
+            s.sql_query__column.c.column_id == column_id,
             owned,
             _sql_in_scope(table_filter),
         )
@@ -712,11 +712,11 @@ def fetch_column_attribute_exploration_details(
     term_rows = store().query_read(
         select(s.term.c.id, s.term.c.name, s.term.c.description)
         .select_from(
-            s.column_attribute_term.join(
-                s.term, s.term.c.id == s.column_attribute_term.c.term_id
+            s.column_attribute__term.join(
+                s.term, s.term.c.id == s.column_attribute__term.c.term_id
             )
         )
-        .where(s.column_attribute_term.c.attribute_id == attr_id)
+        .where(s.column_attribute__term.c.attribute_id == attr_id)
         .limit(1)
     )
     term = (
@@ -788,12 +788,12 @@ def fetch_sql_attribute_exploration_details(
     sql_rows = store().query_read(
         select(s.sql_query.c.id, s.sql_query.c.sql_full_query.label("sql"))
         .select_from(
-            s.sql_attribute_sql.join(
-                s.sql_query, s.sql_query.c.id == s.sql_attribute_sql.c.sql_query_id
+            s.sql_attribute__sql.join(
+                s.sql_query, s.sql_query.c.id == s.sql_attribute__sql.c.sql_query_id
             )
         )
         .where(
-            s.sql_attribute_sql.c.attribute_id == attr_id,
+            s.sql_attribute__sql.c.attribute_id == attr_id,
             _sql_in_scope(table_filter),
         )
         .order_by(s.sql_query.c.id)
@@ -802,11 +802,11 @@ def fetch_sql_attribute_exploration_details(
     term_rows = store().query_read(
         select(s.term.c.id, s.term.c.name, s.term.c.description)
         .select_from(
-            s.sql_attribute_term.join(
-                s.term, s.term.c.id == s.sql_attribute_term.c.term_id
+            s.sql_attribute__term.join(
+                s.term, s.term.c.id == s.sql_attribute__term.c.term_id
             )
         )
-        .where(s.sql_attribute_term.c.attribute_id == attr_id)
+        .where(s.sql_attribute__term.c.attribute_id == attr_id)
         .limit(1)
     )
     return {
@@ -841,15 +841,15 @@ def fetch_sql_exploration_details(
             s.custom_analysis.c.description,
         )
         .select_from(
-            s.custom_analysis_sql.join(
+            s.custom_analysis__sql.join(
                 s.custom_analysis,
-                s.custom_analysis.c.id == s.custom_analysis_sql.c.analysis_id,
+                s.custom_analysis.c.id == s.custom_analysis__sql.c.analysis_id,
             ).join(
-                s.sql_query, s.sql_query.c.id == s.custom_analysis_sql.c.sql_query_id
+                s.sql_query, s.sql_query.c.id == s.custom_analysis__sql.c.sql_query_id
             )
         )
         .where(
-            s.custom_analysis_sql.c.sql_query_id == sql_id,
+            s.custom_analysis__sql.c.sql_query_id == sql_id,
             _sql_in_scope(table_filter),
         )
         .distinct()
@@ -860,11 +860,11 @@ def fetch_sql_exploration_details(
         select(*_COLUMN_REF_COLUMNS)
         .select_from(
             _column_catalog_join().join(
-                s.sql_query_column,
-                s.sql_query_column.c.column_id == s.catalog_column.c.id,
+                s.sql_query__column,
+                s.sql_query__column.c.column_id == s.catalog_column.c.id,
             )
         )
-        .where(s.sql_query_column.c.sql_query_id == sql_id, visible)
+        .where(s.sql_query__column.c.sql_query_id == sql_id, visible)
         .distinct()
         .order_by(
             s.catalog_table.c.name, s.catalog_column.c.name, s.catalog_column.c.id
@@ -875,11 +875,11 @@ def fetch_sql_exploration_details(
         select(*_TABLE_REF_COLUMNS)
         .select_from(
             _table_catalog_join().join(
-                s.sql_query_table,
-                s.sql_query_table.c.table_id == s.catalog_table.c.id,
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.catalog_table.c.id,
             )
         )
-        .where(s.sql_query_table.c.sql_query_id == sql_id, visible)
+        .where(s.sql_query__table.c.sql_query_id == sql_id, visible)
         .distinct()
         .order_by(s.catalog_table.c.name, s.catalog_table.c.id)
     )
@@ -894,17 +894,17 @@ def fetch_sql_exploration_details(
             term.c.name.label("term_name"),
         )
         .select_from(
-            s.sql_attribute_sql.join(
+            s.sql_attribute__sql.join(
                 s.sql_attribute,
-                s.sql_attribute.c.id == s.sql_attribute_sql.c.attribute_id,
+                s.sql_attribute.c.id == s.sql_attribute__sql.c.attribute_id,
             )
             .outerjoin(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
             )
-            .outerjoin(term, term.c.id == s.sql_attribute_term.c.term_id)
+            .outerjoin(term, term.c.id == s.sql_attribute__term.c.term_id)
         )
-        .where(s.sql_attribute_sql.c.sql_query_id == sql_id)
+        .where(s.sql_attribute__sql.c.sql_query_id == sql_id)
         .distinct()
         .order_by(s.sql_attribute.c.name)
     )
@@ -1168,7 +1168,8 @@ def fetch_data_exploration_graph(
                 s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
             ).label("columns_count"),
             _count_of(
-                s.sql_query_table, s.sql_query_table.c.table_id == s.catalog_table.c.id
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.catalog_table.c.id,
             ).label("sql_count"),
             _terms_count(s.catalog_table.c.id).label("terms_count"),
         )

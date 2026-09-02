@@ -38,7 +38,7 @@ def require_schema():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
-        store().query_read("SELECT 1 FROM sql_query_table LIMIT 1")
+        store().query_read("SELECT 1 FROM sql_query__table LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
 
@@ -80,12 +80,12 @@ class World:
         qid = _add(s.sql_query, sql_full_query=sql)
         self.queries.append(qid)
         for table in tables:
-            _link(s.sql_query_table, sql_query_id=qid, table_id=self.tables[table])
+            _link(s.sql_query__table, sql_query_id=qid, table_id=self.tables[table])
         return qid
 
     def foreign_key(self, source: str, target: str) -> None:
         _link(
-            s.column_foreign_key,
+            s.column__foreign_key,
             source_column_id=self.columns[source],
             target_column_id=self.columns[target],
         )
@@ -94,7 +94,7 @@ class World:
         tid = _add(s.term, name=f"{self.prefix}-{name}", source=SEMANTIC_SOURCE)
         self.terms[name] = tid
         for table in represents:
-            _link(s.table_term, table_id=self.tables[table], term_id=tid)
+            _link(s.table__term, table_id=self.tables[table], term_id=tid)
         return tid
 
     def zone(self, name: str, *tables: str) -> str:
@@ -347,12 +347,12 @@ def test_table_details_finds_terms_by_either_route(world) -> None:
         table_id=world.tables["orders"],
     )
     _link(
-        s.column_attribute_term,
+        s.column_attribute__term,
         attribute_id=attribute,
         term_id=world.terms["Customer"],
     )
     _link(
-        s.column_semantic_fk,
+        s.column__semantic_fk,
         column_id=world.columns["orders.id"],
         attribute_id=attribute,
     )

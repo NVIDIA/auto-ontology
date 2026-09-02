@@ -87,9 +87,9 @@ class World:
         if sql is not None:
             qid = _add(s.sql_query, sql_full_query=sql)
             self.queries.append(qid)
-            _link(s.custom_analysis_sql, analysis_id=aid, sql_query_id=qid)
+            _link(s.custom_analysis__sql, analysis_id=aid, sql_query_id=qid)
             for table in tables:
-                _link(s.sql_query_table, sql_query_id=qid, table_id=self.tables[table])
+                _link(s.sql_query__table, sql_query_id=qid, table_id=self.tables[table])
         return aid
 
     def zone(self, name: str, *, table: str) -> str:
@@ -282,8 +282,8 @@ def test_delete_cascades_the_link_row(world) -> None:
     ca.delete_custom_analysis_node(analysis)
     assert (
         store().query_read(
-            select(s.custom_analysis_sql.c.sql_query_id).where(
-                s.custom_analysis_sql.c.analysis_id == analysis
+            select(s.custom_analysis__sql.c.sql_query_id).where(
+                s.custom_analysis__sql.c.analysis_id == analysis
             )
         )
         == []

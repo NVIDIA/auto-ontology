@@ -66,14 +66,15 @@ def _out_of_zone(table_ids: list[str]):
     return (
         select(literal(1))
         .select_from(
-            s.sql_attribute_sql.join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id == s.sql_attribute_sql.c.sql_query_id,
+            s.sql_attribute__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.sql_attribute__sql.c.sql_query_id,
             )
         )
         .where(
-            s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id,
-            s.sql_query_table.c.table_id.notin_(table_ids),
+            s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
+            s.sql_query__table.c.table_id.notin_(table_ids),
         )
         .correlate(s.sql_attribute)
         .exists()
@@ -100,11 +101,11 @@ def _zone_scope(
 _SQL_TEXT = (
     select(s.sql_query.c.sql_full_query)
     .select_from(
-        s.sql_attribute_sql.join(
-            s.sql_query, s.sql_query.c.id == s.sql_attribute_sql.c.sql_query_id
+        s.sql_attribute__sql.join(
+            s.sql_query, s.sql_query.c.id == s.sql_attribute__sql.c.sql_query_id
         )
     )
-    .where(s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id)
+    .where(s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id)
     .order_by(s.sql_query.c.id)
     .limit(1)
     .correlate(s.sql_attribute)
@@ -121,7 +122,7 @@ def _has_sql():
     """
     return (
         select(literal(1))
-        .where(s.sql_attribute_sql.c.attribute_id == s.sql_attribute.c.id)
+        .where(s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id)
         .correlate(s.sql_attribute)
         .exists()
     )
@@ -144,9 +145,9 @@ def _attribute_select():
         )
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
-            ).join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
+            ).join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
         )
         .where(_has_sql())
     )
@@ -219,9 +220,9 @@ def fetch_sql_attribute_counts(
         )
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
-            ).join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
+            ).join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
         )
         .where(_has_sql())
         .group_by(s.term.c.id)
@@ -263,7 +264,7 @@ def get_full_sql_attribute_by_id(
     # target can name -- table, schema or database -- as three explicit
     # branches over the containment keys.
     covered = or_(
-        s.zone_target.c.table_id == s.sql_query_table.c.table_id,
+        s.zone_target.c.table_id == s.sql_query__table.c.table_id,
         s.zone_target.c.schema_id == s.catalog_table.c.schema_id,
         s.zone_target.c.database_id == s.catalog_schema.c.database_id,
     )
@@ -275,18 +276,21 @@ def get_full_sql_attribute_by_id(
             s.zone.c.enabled,
         )
         .select_from(
-            s.sql_attribute_sql.join(
-                s.sql_query_table,
-                s.sql_query_table.c.sql_query_id == s.sql_attribute_sql.c.sql_query_id,
+            s.sql_attribute__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.sql_attribute__sql.c.sql_query_id,
             )
-            .join(s.catalog_table, s.catalog_table.c.id == s.sql_query_table.c.table_id)
+            .join(
+                s.catalog_table, s.catalog_table.c.id == s.sql_query__table.c.table_id
+            )
             .join(
                 s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
             )
             .join(s.zone_target, covered)
             .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
         )
-        .where(s.sql_attribute_sql.c.attribute_id == attr_id)
+        .where(s.sql_attribute__sql.c.attribute_id == attr_id)
         .distinct()
         .order_by(s.zone.c.name)
     )
@@ -337,11 +341,11 @@ def count_sql_attributes_by_term_id(
         select(func.count(func.distinct(s.sql_attribute.c.id)).label("total"))
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
             )
         )
-        .where(s.sql_attribute_term.c.term_id == term_id, _has_sql())
+        .where(s.sql_attribute__term.c.term_id == term_id, _has_sql())
     )
     scope = _zone_scope(zone_ids)
     if scope is not None:
@@ -391,11 +395,11 @@ def find_attr_by_expression(
         )
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
             )
         )
-        .where(s.sql_attribute_term.c.term_id == term_id)
+        .where(s.sql_attribute__term.c.term_id == term_id)
     )
     if exclude_id is not None:
         statement = statement.where(s.sql_attribute.c.id != exclude_id)
@@ -430,7 +434,9 @@ def detach_existing_sql_edges(attr_id: str) -> None:
     attribute does not own.
     """
     store().query_write(
-        delete(s.sql_attribute_sql).where(s.sql_attribute_sql.c.attribute_id == attr_id)
+        delete(s.sql_attribute__sql).where(
+            s.sql_attribute__sql.c.attribute_id == attr_id
+        )
     )
 
 
@@ -444,13 +450,13 @@ def link_to_term(attr_id: str, term_id: str) -> None:
     """
     with write_transaction():
         store().query_write(
-            delete(s.sql_attribute_term).where(
-                s.sql_attribute_term.c.attribute_id == attr_id,
-                s.sql_attribute_term.c.term_id != term_id,
+            delete(s.sql_attribute__term).where(
+                s.sql_attribute__term.c.attribute_id == attr_id,
+                s.sql_attribute__term.c.term_id != term_id,
             )
         )
         store().query_write(
-            insert(s.sql_attribute_term)
+            insert(s.sql_attribute__term)
             .values(attribute_id=attr_id, term_id=term_id)
             .on_conflict_do_nothing()
         )
@@ -510,8 +516,8 @@ def clear_sql_attribute_description_suggestions_for_term(term_id: str) -> None:
         update(s.sql_attribute)
         .where(
             s.sql_attribute.c.id.in_(
-                select(s.sql_attribute_term.c.attribute_id).where(
-                    s.sql_attribute_term.c.term_id == term_id
+                select(s.sql_attribute__term.c.attribute_id).where(
+                    s.sql_attribute__term.c.term_id == term_id
                 )
             )
         )
@@ -556,9 +562,9 @@ def fetch_sql_attributes_with_sql(attr_ids: list[str]) -> list[dict[str, str]]:
             )
             .select_from(
                 s.sql_attribute.join(
-                    s.sql_attribute_term,
-                    s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
-                ).join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+                    s.sql_attribute__term,
+                    s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
+                ).join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
             )
             .where(s.sql_attribute.c.id.in_(list(attr_ids)), _has_sql())
             .order_by(s.sql_attribute.c.id, s.term.c.id)
@@ -615,14 +621,14 @@ def fetch_tables_from_sql_attributes(
                 column_description_expr().label("column_description"),
             )
             .select_from(
-                s.sql_attribute_sql.join(
-                    s.sql_query_table,
-                    s.sql_query_table.c.sql_query_id
-                    == s.sql_attribute_sql.c.sql_query_id,
+                s.sql_attribute__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.sql_attribute__sql.c.sql_query_id,
                 )
                 .join(
                     s.catalog_table,
-                    s.catalog_table.c.id == s.sql_query_table.c.table_id,
+                    s.catalog_table.c.id == s.sql_query__table.c.table_id,
                 )
                 .join(
                     s.catalog_schema,
@@ -637,7 +643,7 @@ def fetch_tables_from_sql_attributes(
                     s.catalog_column.c.table_id == s.catalog_table.c.id,
                 )
             )
-            .where(s.sql_attribute_sql.c.attribute_id.in_(list(attr_ids)))
+            .where(s.sql_attribute__sql.c.attribute_id.in_(list(attr_ids)))
             .distinct()
             .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
         )
@@ -699,9 +705,9 @@ def fetch_sql_attribute_docs(attr_id: str) -> list[dict[str, Any]]:
         )
         .select_from(
             s.sql_attribute.join(
-                s.sql_attribute_term,
-                s.sql_attribute_term.c.attribute_id == s.sql_attribute.c.id,
-            ).join(s.term, s.term.c.id == s.sql_attribute_term.c.term_id)
+                s.sql_attribute__term,
+                s.sql_attribute__term.c.attribute_id == s.sql_attribute.c.id,
+            ).join(s.term, s.term.c.id == s.sql_attribute__term.c.term_id)
         )
         .where(s.sql_attribute.c.id == attr_id, _has_sql())
         .order_by(s.term.c.id)
