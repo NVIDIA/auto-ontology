@@ -37,17 +37,5 @@
       "console": "integratedTerminal",
       "justMyCode": false
     },
-    {
-      "name": "dor_prod: Eval (single query)",
-      "type": "debugpy",
-      "request": "launch",
-      "module": "dev_tools.evaluation.eval_chatbot",
-      "args": ["--single", "--database-name", "alien"],
-      "cwd": "${workspaceFolder}",
-      "python": "${workspaceFolder}/.venv/bin/python",
-      "envFile": "${workspaceFolder}/.env",
-      "console": "integratedTerminal",
-      "justMyCode": false
-    },
   ]
 }
