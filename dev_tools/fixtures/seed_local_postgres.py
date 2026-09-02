@@ -5,19 +5,19 @@
 """Seed the local docker-compose Postgres with the demo catalogs.
 
 Creates each demo database if it doesn't exist, then applies its SQL from
-``dev_tools/sql/``. Idempotent — safe to re-run.
+``dev_tools/fixtures/sql/``. Idempotent — safe to re-run.
 
 ``pagila`` is the Postgres fixture: two schemas, views, a materialized view, a
 partitioned table, arrays, an enum and a tsvector column — see
-``dev_tools/sql/README.md`` for why each of those matters.
+``dev_tools/fixtures/sql/README.md`` for why each of those matters.
 
-The SQLite fixture (Chinook) is built by ``dev_tools.build_sqlite_fixtures``;
-run both, or just ``dev_tools.seed_fixtures`` which calls each in turn.
+The SQLite fixture (Chinook) is built by ``dev_tools.fixtures.build_sqlite_fixtures``;
+run both, or just ``dev_tools.fixtures.seed_fixtures`` which calls each in turn.
 
 Usage::
 
     docker compose up -d postgres
-    uv run --no-sync python -m dev_tools.seed_local_postgres
+    uv run --no-sync python -m dev_tools.fixtures.seed_local_postgres
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ from pathlib import Path
 
 import psycopg
 
-logger = logging.getLogger("dev_tools.seed_local_postgres")
+logger = logging.getLogger("dev_tools.fixtures.seed_local_postgres")
 
 DEFAULT_POSTGRES_HOST = "localhost"
 DEFAULT_POSTGRES_PORT = 5432

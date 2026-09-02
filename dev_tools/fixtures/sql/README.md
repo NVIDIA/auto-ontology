@@ -4,7 +4,7 @@ Build everything with one command (Postgres must be up):
 
 ```bash
 docker compose up -d postgres
-uv run --no-sync python -m dev_tools.seed_fixtures
+uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
 ```
 
 Idempotent — re-running skips anything already loaded. To rebuild a Postgres
@@ -50,7 +50,7 @@ has nowhere.
 ## How `pagila.sql` was produced
 
 Not a verbatim upstream file. Reproduce with
-`dev_tools/sql/build_pagila.sh` (see below):
+`dev_tools/fixtures/sql/build_pagila.sh` (see below):
 
 1. **Pinned to `pagila-v3.1.0`, not `master`.** Upstream master targets
    PostgreSQL 18 — it uses `uuidv7()` defaults and `VIRTUAL` generated columns,

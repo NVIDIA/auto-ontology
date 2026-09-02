@@ -24,7 +24,7 @@ Usage::
 
     export POSTGRES_HOST=... POSTGRES_PORT=... POSTGRES_USER=... POSTGRES_PASSWORD=...
     export CONNECTION_STRINGS="postgresql://.../pagila,sqlite:////abs/path/chinook.sqlite"
-    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import logging
 import os
 from typing import Any
 
-logger = logging.getLogger("dev_tools.seed_graph_fixture")
+logger = logging.getLogger("dev_tools.fixtures.seed_graph_fixture")
 
 
 # ---------------------------------------------------------------------------
@@ -239,7 +239,7 @@ SEMANTIC_FKS: tuple[tuple[tuple[str, str, str, str], tuple[str, str]], ...] = (
 # Every statement must reference at least one column by name. ``parse_query_single``
 # resolves tables *through column references*, so a bare ``SELECT count(*) FROM film``
 # is rejected as "doesn't reference any table known to the catalog" even when the
-# table is catalogued. Covered by ``dev_tools/tests/test_graph_fixture.py``.
+# table is catalogued.
 SQL_ATTRIBUTES: tuple[tuple[str, str, str, str, str], ...] = (
     (
         "total revenue",

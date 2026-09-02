@@ -11,18 +11,18 @@ point that runs both, so setup is one command rather than two.
 Usage::
 
     docker compose up -d postgres
-    uv run --no-sync python -m dev_tools.seed_fixtures
+    uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
 
-See ``dev_tools/sql/README.md`` for what each fixture covers and why.
+See ``dev_tools/fixtures/sql/README.md`` for what each fixture covers and why.
 """
 
 from __future__ import annotations
 
 import logging
 
-from dev_tools import build_sqlite_fixtures, seed_local_postgres
+from dev_tools.fixtures import build_sqlite_fixtures, seed_local_postgres
 
-logger = logging.getLogger("dev_tools.seed_fixtures")
+logger = logging.getLogger("dev_tools.fixtures.seed_fixtures")
 
 
 def main() -> None:

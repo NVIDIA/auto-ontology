@@ -4,7 +4,7 @@
 
 """Assert the fixture databases have the shapes the refactor's tests rely on.
 
-Every claim in ``dev_tools/sql/README.md`` about what Pagila and Chinook cover
+Every claim in ``dev_tools/fixtures/sql/README.md`` about what Pagila and Chinook cover
 is load-bearing: golden captures, the ``find_join_path`` suite, and the
 schema-scoped zone tests are all written against these shapes. Three of the
 original assumptions turned out to be wrong when first checked, which is why
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from dev_tools import build_sqlite_fixtures
+from dev_tools.fixtures import build_sqlite_fixtures
 
 SQL_DIR = Path(__file__).resolve().parents[1] / "sql"
 
@@ -76,7 +76,7 @@ def test_chinook_has_enough_rows_for_sample_values(
 def pagila():
     psycopg = pytest.importorskip("psycopg")
     if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set; run dev_tools.seed_fixtures first")
+        pytest.skip("POSTGRES_* not set; run dev_tools.fixtures.seed_fixtures first")
     try:
         conn = psycopg.connect(
             host=os.environ.get("POSTGRES_HOST", "localhost"),

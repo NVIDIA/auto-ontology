@@ -2,6 +2,30 @@
 
 Local development helpers: environment setup, database seeding, and ingest.
 
+## Layout
+
+| Path | What it is |
+|---|---|
+| `setup_env.sh` | Brings the docker-compose stack up. Human-invoked. |
+| `local_ingest.py` | Ingests the local Postgres source into the pgvector store. |
+| `generate_backend_openapi.py` | Dumps the FastAPI OpenAPI specs to `docs/openapi/`. Run by `ci-openapi.yml`. |
+| `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |
+| `fixtures/` | The test fixtures. **CI depends on these** — see below. |
+
+Everything under `fixtures/` builds the databases that `gsf/dal/tests/test_golden.py`
+and `gsf/connectors/tests/test_postgres.py` replay against, and is driven by
+`.github/workflows/ci-python.yml`. Changing it changes what CI proves. See
+[`fixtures/sql/README.md`](./fixtures/sql/README.md) for what each fixture
+database covers and why.
+
+```bash
+docker compose up -d postgres
+uv run --no-sync python -m dev_tools.fixtures.seed_fixtures          # pagila + chinook
+uv run --no-sync alembic upgrade head
+uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
+uv run --no-sync pytest gsf dev_tools -q
+```
+
 ## Running locally
 
 The **frontend** (`frontend/`) and the **Python API** (`gsf/`) must both be running.
@@ -10,8 +34,8 @@ The **frontend** (`frontend/`) and the **Python API** (`gsf/`) must both be runn
 
 ```bash
 cp .env.example .env   # then edit credentials as needed
-pnpm install
-uv sync
+cd frontend && pnpm install
+uv sync                # from the repo root
 ```
 
 ### Start development
@@ -22,7 +46,7 @@ Full stack (infrastructure + Next.js + FastAPI):
 ./dev_tools/setup_env.sh
 ```
 
-Or infrastructure only (Postgres, pgAdmin):
+Or infrastructure only (Postgres, pgAdmin, ingestion service):
 
 ```bash
 ./dev_tools/setup_env.sh --dev
@@ -31,8 +55,8 @@ Or infrastructure only (Postgres, pgAdmin):
 Then start the app manually:
 
 ```bash
-pnpm dev        # Next.js on port 3000
-pnpm dev:api    # FastAPI on port 3001
+cd frontend && pnpm dev   # Next.js on port 3000
+uv run python -m gsf.server   # FastAPI on port 3001 (from the repo root)
 ```
 
 Open **http://localhost:3000**.
@@ -47,10 +71,9 @@ Brings up the GSF environment via `docker compose`.
 
 | Command | What it starts |
 |---|---|
-| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin) **and** the `gsf` + `gsf-frontend` images (built with `--build`). |
-| `bash ./dev_tools/setup_env.sh --dev` | Infra only (Postgres, pgAdmin). You run `gsf` / `gsf-frontend` locally yourself. |
+| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin, ingestion service) **and** the `gsf` + `gsf-frontend` images (built with `--build`). |
+| `bash ./dev_tools/setup_env.sh --dev` | Infra only. You run `gsf` / `gsf-frontend` locally yourself. |
 | `bash ./dev_tools/setup_env.sh --ds` | Infra **+** `gsf-frontend` in docker. You run `gsf` locally on `:3001`; the containerised frontend reaches it via `host.docker.internal:3001`. |
-
 
 ### Endpoints
 
@@ -58,6 +81,7 @@ Brings up the GSF environment via `docker compose`.
 |---|---|
 | Postgres | `localhost:5432` |
 | pgAdmin | <http://localhost:5050> |
+| GSF ingestion service | <http://localhost:3002> |
 | GSF frontend (full stack only) | <http://localhost:3000> |
 | GSF backend (full stack only) | <http://localhost:3001> |
 
@@ -69,10 +93,14 @@ After `./dev_tools/setup_env.sh --dev` brings the infra up, start the apps local
 # terminal 1 — Next.js
 cd frontend && pnpm install && pnpm dev
 
-# terminal 2 — FastAPI
+# terminal 2 — FastAPI (from the repo root)
 uv sync
-uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .
+uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
+
+The app factory is `create_app()` in `gsf/server/__main__.py`; there is no
+`gsf/server/main.py`. `uv run python -m gsf.server` starts the same app without
+`--reload` — that is what the container runs.
 
 ### `--ds` workflow
 
@@ -85,7 +113,7 @@ bash ./dev_tools/setup_env.sh --ds
 
 # then, on the host:
 uv sync
-uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .
+uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
 > Linux note: `host.docker.internal` works out-of-the-box on Docker Desktop (macOS / Windows). On native Linux Docker you may need to add `--add-host=host.docker.internal:host-gateway` or bind the backend to `0.0.0.0` and use the docker bridge IP.

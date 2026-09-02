@@ -18,7 +18,7 @@ Uses the ``sqlite3`` standard library, so there is no dependency on the
 
 Usage::
 
-    uv run --no-sync python -m dev_tools.build_sqlite_fixtures
+    uv run --no-sync python -m dev_tools.fixtures.build_sqlite_fixtures
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("dev_tools.build_sqlite_fixtures")
+logger = logging.getLogger("dev_tools.fixtures.build_sqlite_fixtures")
 
 SQL_DIR = Path(__file__).resolve().parent / "sql"
 

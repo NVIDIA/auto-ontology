@@ -19,8 +19,8 @@ graph shape matches.
 
 Usage::
 
-    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
-    uv run --no-sync python -m dev_tools.capture_dal_golden
+    uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
+    uv run --no-sync python -m dev_tools.fixtures.capture_dal_golden
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ import re
 from pathlib import Path
 from typing import Any, Callable
 
-logger = logging.getLogger("dev_tools.capture_dal_golden")
+logger = logging.getLogger("dev_tools.fixtures.capture_dal_golden")
 
-GOLDEN_DIR = Path(__file__).resolve().parents[1] / "gsf" / "dal" / "tests" / "golden"
+GOLDEN_DIR = Path(__file__).resolve().parents[2] / "gsf" / "dal" / "tests" / "golden"
 
 UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -399,7 +399,8 @@ def _fixture_ids() -> dict[str, Any]:
     if missing:
         raise SystemExit(
             f"fixture incomplete, ids not found: {missing}\n"
-            f"Run: uv run --no-sync python -m dev_tools.seed_graph_fixture --reset"
+            "Run: uv run --no-sync python -m "
+            "dev_tools.fixtures.seed_graph_fixture --reset"
         )
     return ids
 

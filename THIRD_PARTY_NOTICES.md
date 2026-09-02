@@ -56,13 +56,13 @@ them.
 
 ### Sample databases (test fixtures, not redistributed in any build artifact)
 
-Vendored under `dev_tools/sql/` and used only to seed local development and
-test databases. See `dev_tools/sql/README.md` for provenance and for the
+Vendored under `dev_tools/fixtures/sql/` and used only to seed local development and
+test databases. See `dev_tools/fixtures/sql/README.md` for provenance and for the
 modifications made to Pagila.
 
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
-| Pagila | pagila-v3.1.0 (trimmed; see `dev_tools/sql/README.md`) | MIT | https://github.com/devrimgunduz/pagila |
+| Pagila | pagila-v3.1.0 (trimmed; see `dev_tools/fixtures/sql/README.md`) | MIT | https://github.com/devrimgunduz/pagila |
 | Chinook Database | master (unmodified) | MIT | https://github.com/lerocha/chinook-database |
 
 Pagila is Copyright (c) Devrim Gündüz. Chinook is Copyright (c) 2008-2024 Luis

@@ -3,7 +3,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Regenerate dev_tools/sql/pagila.sql from upstream Pagila.
+# Regenerate dev_tools/fixtures/sql/pagila.sql from upstream Pagila.
 #
 # You should not need to run this — pagila.sql is committed. It exists so the
 # fixture is reproducible rather than a mystery blob, and so bumping the
@@ -12,7 +12,7 @@
 # Requires Docker. Uses a throwaway container so it never touches the project's
 # compose stack or its volumes.
 #
-# Usage:  ./dev_tools/sql/build_pagila.sh
+# Usage:  ./dev_tools/fixtures/sql/build_pagila.sh
 set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
