@@ -363,8 +363,6 @@ def fetch_attr_column_contexts(
                 "schema_name": row["schema_name"] or "",
                 "database_name": row["database_name"] or "",
                 "term_name": row["term_name"] or "",
-                # Only present on attrs re-ingested since this field was added —
-                # older rows fall back to "" here (rendered as no tag downstream).
                 "datatype": row["datatype"] or "",
             },
         )
