@@ -50,6 +50,30 @@ def _null_transaction():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _no_live_connection_lookup():
+    """Sever the two connection lookups ``export_model`` reaches through.
+
+    ``service.export_model`` calls ``_dialect_by_database_name()``, which reads
+    ``get_connectors()`` and ``list_connections()`` — and the latter queries
+    Postgres. Patching only the ``dal`` calls each test names leaves that path
+    live, so these mock-backed tests quietly opened a connection and failed with
+    ``OperationalError`` on any machine without the local stack up. CI never
+    caught it: the workflow provides a Postgres service, so the call succeeded
+    there and returned nothing.
+
+    Autouse rather than per-test decorators so a test added later cannot
+    reopen the hole. Both boundaries are stubbed instead of
+    ``_dialect_by_database_name`` itself, which keeps its merge logic under
+    test; a test that wants real dialects can patch these with its own values.
+    """
+    with (
+        patch("gsf.server.model_interchange.service.get_connectors", return_value=[]),
+        patch("gsf.server.model_interchange.service.list_connections", return_value=[]),
+    ):
+        yield
+
+
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:
     return [
         {
