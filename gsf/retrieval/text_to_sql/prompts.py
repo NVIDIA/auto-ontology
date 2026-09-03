@@ -253,7 +253,7 @@ ORDER BY total_sales DESC;"""
 
     evidence_block = (
         "## Evidence Priority\n"
-        'The question includes an "Evidence:" section — treat it as authoritative '
+        "The request includes evidence — treat it as authoritative "
         "ground truth. Evidence overrides semantic hints, examples, descriptions, and "
         "your own interpretation. Apply every evidence clause exactly: use named "
         "columns/tables, formulas, filters, synonyms, ranking rules, and LIKE patterns "

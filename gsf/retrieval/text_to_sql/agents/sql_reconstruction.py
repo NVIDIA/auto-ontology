@@ -37,11 +37,7 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.evidence_hints import (
-    build_evidence_hints_block,
-    extract_evidence,
-    question_without_evidence,
-)
+from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
@@ -476,15 +472,12 @@ class SQLReconstructionAgent(BaseAgent):
         # Scopes the evidence re-surfacing below to debug turns only, so
         # ordinary in-turn self-repair (pre-first-submission) is unaffected.
         is_debug_turn = path_state.get("_resume_from") == "reconstruct_sql"
-        # On a debug turn, evidence (if any) is re-surfaced in its own
-        # labeled, emphasized section below (raw_evidence_reminder_section)
-        # rather than left buried at the tail of question_block — strip it
-        # here so it isn't shown twice in the same prompt. Left untouched
-        # outside debug turns.
+        # Evidence now arrives as its own state field rather than embedded in
+        # the question text, so question_block never contains it and needs
+        # no stripping.
+        evidence = state["evidence"]
         question_block = format_dual_question_block(
-            question_without_evidence(original_question)
-            if is_debug_turn
-            else original_question,
+            original_question,
             sanitized_question,
         )
 
@@ -603,8 +596,8 @@ class SQLReconstructionAgent(BaseAgent):
         )
 
         evidence_section = ""
-        if extract_evidence(original_question):
-            evidence_hints = build_evidence_hints_block(original_question)
+        if evidence:
+            evidence_hints = build_evidence_hints_block(original_question, evidence)
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
@@ -613,12 +606,11 @@ class SQLReconstructionAgent(BaseAgent):
         # at the tail of question_block — several observed debug-turn
         # reconstruction failures used a plausible-but-wrong formula, column,
         # or threshold even though the correct one was sitting in this exact
-        # text. Debug-turn only (see is_debug_turn above) — question_block
-        # only has evidence stripped out in that same case, so it isn't
-        # duplicated in the prompt there; outside a debug turn this section
-        # stays empty and evidence is left exactly where it always was.
+        # text. Debug-turn only (see is_debug_turn above); outside a debug
+        # turn this section stays empty (evidence is still injected as its
+        # own SystemMessage below, just without this extra emphasis).
         raw_evidence_reminder_section = ""
-        raw_evidence = extract_evidence(original_question) if is_debug_turn else None
+        raw_evidence = evidence if is_debug_turn else None
         if raw_evidence:
             raw_evidence_reminder_section = (
                 "\nEVIDENCE (already resolved during clarification — re-check "
@@ -680,7 +672,12 @@ class SQLReconstructionAgent(BaseAgent):
             "writing the final answer."
         )
 
-        messages = messages + [HumanMessage(content=error_prompt)]
+        messages = list(messages)
+        if evidence:
+            messages.append(
+                SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+            )
+        messages.append(HumanMessage(content=error_prompt))
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 
