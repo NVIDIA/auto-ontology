@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from typing import cast
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -65,3 +67,43 @@ def test_table_discovery_uses_retrieval_database(
 
     assert result == []
     assert database_names == [expected_database]
+
+
+def test_reconstruction_uses_evidence_from_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_messages: list = []
+
+    def fake_invoke(_llm: object, messages: list, _model: object) -> None:
+        captured_messages.extend(messages)
+        return None
+
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": MagicMock(),
+            "initial_question": "What happened at 0:01:54?",
+            "evidence": "The time refers to events.duration LIKE 'M:SS%'.",
+            "messages": [],
+            "path_state": {
+                "error": "invalid time filter",
+                "error_analysis_done": True,
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT 1",
+                    thought="",
+                ),
+            },
+        },
+    )
+
+    SQLReconstructionAgent().execute(state)
+
+    prompt = captured_messages[-1].content
+    assert "## Authoritative Evidence" in captured_messages[-2].content
+    assert "The time refers to" not in prompt
+    assert "events.duration LIKE '1:54%'" in prompt

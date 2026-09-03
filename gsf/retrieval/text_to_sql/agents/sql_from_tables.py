@@ -29,10 +29,7 @@ from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.evidence_hints import (
-    build_evidence_hints_block,
-    extract_evidence,
-)
+from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -93,7 +90,8 @@ class SQLFromTablesAgent(BaseAgent):
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         question = get_question_for_processing(state)
-        has_evidence = extract_evidence(original_question) is not None
+        evidence = state["evidence"]
+        has_evidence = bool(evidence)
         main_question = (
             format_dual_question_block(original_question, question)
             if has_evidence
@@ -124,9 +122,10 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_general_prompt
 
         observation_block = ""
-        evidence_hints = build_evidence_hints_block(original_question)
-        if evidence_hints:
-            observation_block = f"\n{evidence_hints}\n"
+        if evidence:
+            evidence_hints = build_evidence_hints_block(original_question, evidence)
+            if evidence_hints:
+                observation_block = f"\n{evidence_hints}\n"
 
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
@@ -143,10 +142,12 @@ class SQLFromTablesAgent(BaseAgent):
             custom_analyses="",
         )
 
-        messages = state["messages"] + [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
+        messages = state["messages"] + [SystemMessage(content=system_prompt)]
+        if evidence:
+            messages.append(
+                SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+            )
+        messages.append(HumanMessage(content=user_prompt))
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 

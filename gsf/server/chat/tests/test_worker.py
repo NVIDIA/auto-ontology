@@ -28,7 +28,12 @@ class _FakeQueue:
         self.puts.append(item)
 
 
-def _run_loop(monkeypatch: MonkeyPatch, connector_batches: list[list[str]]) -> dict:
+def _run_loop(
+    monkeypatch: MonkeyPatch,
+    connector_batches: list[list[str]],
+    *,
+    evidence: str | None = None,
+) -> dict:
     """Drive one ASK through ``_worker_loop`` and return the agent payload it built.
 
     ``connector_batches`` is what successive ``get_connectors()`` calls return, so a
@@ -64,7 +69,7 @@ def _run_loop(monkeypatch: MonkeyPatch, connector_batches: list[list[str]]) -> d
         "gsf.retrieval.text_to_sql.main.stream_agent_response", fake_stream
     )
 
-    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, []))])
+    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, [], evidence))])
     worker_module._worker_loop(in_q, _FakeQueue())
     return captured
 
@@ -91,3 +96,18 @@ def test_worker_reuses_the_boot_connectors_when_they_are_present(
 
     assert payload["connectors"] == ["boot-connector"]
     assert payload["question"] == "q"
+    assert payload["evidence"] == ""
+
+
+def test_worker_forwards_evidence_without_changing_question(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    payload = _run_loop(
+        monkeypatch,
+        connector_batches=[["boot-connector"]],
+        evidence="status means accounts.status",
+    )
+
+    assert payload["question"] == "q"
+    assert payload["processing_question"] == "q"
+    assert payload["evidence"] == "status means accounts.status"

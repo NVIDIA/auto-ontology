@@ -167,6 +167,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
         question: str,
         ctx: Context,
         conversation_id: str | None = None,
+        evidence: str | None = None,
     ) -> DataAnswer:
         """Run one text-to-SQL turn and return its structured result.
 
@@ -181,10 +182,14 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
                 questions resolve against earlier turns. Requires the caller
                 to hold conversation-write permission, and rejects a second
                 question while the first is still running.
+            evidence: Optional authoritative BIRD evidence supplied separately
+                from the question.
         """
         body: dict[str, Any] = {"question": question}
         if conversation_id:
             body["conversation_id"] = conversation_id
+        if evidence:
+            body["evidence"] = evidence
 
         answer: DataAnswer | None = None
         steps = 0

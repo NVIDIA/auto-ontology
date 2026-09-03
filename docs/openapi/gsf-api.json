@@ -950,6 +950,16 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "evidence": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "conversation_id": {
                     "anyOf": [
                       {

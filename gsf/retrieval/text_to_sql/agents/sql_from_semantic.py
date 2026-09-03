@@ -50,10 +50,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     format_dialect_rules,
     format_dual_question_block,
 )
-from gsf.retrieval.text_to_sql.evidence_hints import (
-    build_evidence_hints_block,
-    extract_evidence,
-)
+from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
@@ -124,6 +121,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
+        evidence = state["evidence"]
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -189,8 +187,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             glossary_section = format_glossary_section(state.get("glossary") or [])
             if glossary_section:
                 observation_block += f"\n{glossary_section}"
-            if extract_evidence(original_question):
-                evidence_hints = build_evidence_hints_block(original_question)
+            if evidence:
+                evidence_hints = build_evidence_hints_block(original_question, evidence)
                 if evidence_hints:
                     observation_block += f"\n{evidence_hints}\n"
 
@@ -257,17 +255,18 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
 
             # Choose system prompt based on context
-            has_evidence = extract_evidence(original_question) is not None
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
-                has_evidence=has_evidence,
+                has_evidence=bool(evidence),
             )
 
-            messages = state["messages"] + [
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_prompt),
-            ]
+            messages = state["messages"] + [SystemMessage(content=system_prompt)]
+            if evidence:
+                messages.append(
+                    SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+                )
+            messages.append(HumanMessage(content=user_prompt))
 
             # Add calendar time window reminder if needed
             if any(

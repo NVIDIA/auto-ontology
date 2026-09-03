@@ -36,10 +36,7 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.evidence_hints import (
-    build_evidence_hints_block,
-    extract_evidence,
-)
+from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
@@ -280,6 +277,7 @@ class SQLReconstructionAgent(BaseAgent):
         incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
+        evidence = state["evidence"]
         question_block = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -359,8 +357,8 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         evidence_section = ""
-        if extract_evidence(original_question):
-            evidence_hints = build_evidence_hints_block(original_question)
+        if evidence:
+            evidence_hints = build_evidence_hints_block(original_question, evidence)
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
@@ -407,7 +405,12 @@ class SQLReconstructionAgent(BaseAgent):
             "writing the final answer."
         )
 
-        messages = messages + [HumanMessage(content=error_prompt)]
+        messages = list(messages)
+        if evidence:
+            messages.append(
+                SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+            )
+        messages.append(HumanMessage(content=error_prompt))
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 

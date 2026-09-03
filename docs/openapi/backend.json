@@ -49,6 +49,18 @@
             "description": "Stable thread UUID. When supplied, prior completed turns for it are loaded and the new turn \u2014 including the chart/table bubble, once ready \u2014 is persisted to it. An unknown UUID creates the conversation; one owned by another user is rejected with 404. Omitting it runs the question statelessly, with no history and no chart step.",
             "title": "Conversation Id"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional authoritative BIRD evidence supplied separately from the question.",
+            "title": "Evidence"
+          },
           "prediction": {
             "anyOf": [
               {

@@ -99,6 +99,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     state: dict = {
         "llm": llm_client,
         "initial_question": processing_question,
+        "evidence": payload.get("evidence") or "",
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,

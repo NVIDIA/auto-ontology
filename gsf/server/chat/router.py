@@ -625,6 +625,7 @@ async def chat_completions(
         target_db=target_db,
         subject_token=subject_token,
         conversation_history=conversation_history,
+        evidence=request.evidence,
     )
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))

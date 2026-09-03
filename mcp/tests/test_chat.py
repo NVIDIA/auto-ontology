@@ -295,6 +295,31 @@ def test_forwards_the_conversation_when_given() -> None:
     assert captured["conversation_id"] == "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 
 
+def test_forwards_evidence_separately_from_question() -> None:
+    captured: dict[str, Any] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            content=_sse({"type": "result", "answer": _ANSWER}).encode(),
+            headers={"content-type": "text/event-stream"},
+        )
+
+    _call(
+        _server(handler),
+        {
+            "question": "how many?",
+            "evidence": "active refers to customers.status",
+        },
+    )
+
+    assert captured == {
+        "question": "how many?",
+        "evidence": "active refers to customers.status",
+    }
+
+
 def test_the_database_cannot_be_pinned_by_a_caller() -> None:
     # target_db exists on the API for benchmarking. Exposing it would invite an
     # agent to route around the semantic layer, so the tool has no such
