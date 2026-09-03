@@ -17,6 +17,8 @@ type MessageListProps = {
 	messages: ChatMessage[];
 	isLoading: boolean;
 	steps: GraphStep[];
+	/** SQL the running agent has produced but not finished executing. */
+	liveSql?: string | null;
 	messageListLoading?: boolean;
 };
 
@@ -24,6 +26,7 @@ export const MessageList = ({
 	messages,
 	isLoading,
 	steps,
+	liveSql,
 	messageListLoading = false,
 }: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
@@ -67,7 +70,7 @@ export const MessageList = ({
 				{messages.map((msg) => (
 					<MessageBubble key={msg.id} message={msg} />
 				))}
-				{isLoading && <ThinkingMessage steps={steps} />}
+				{isLoading && <ThinkingMessage steps={steps} liveSql={liveSql} />}
 				<div ref={bottomRef} />
 			</div>
 		</div>

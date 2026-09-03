@@ -50,6 +50,11 @@ from gsf.retrieval.text_to_sql.db_probe.config import (
 
 logger = logging.getLogger(__name__)
 
+# Tag on the payload a node writes to the custom stream channel as it starts.
+# ``stream_agent_response`` turns it into the client's "this step is running
+# now" event; keep the two in step.
+NODE_START_EVENT = "step_start"
+
 
 def route_sql_validation(state: AgentState) -> str:
     """
@@ -203,12 +208,36 @@ def log_node_visit(state, node_name: str):
     logger.info(f"🔁 Node visits: {counts} | Total visits this run: {total}")
 
 
+def announce_node_start(node_name: str) -> None:
+    """Tell the stream this node is starting, before it does its work.
+
+    ``app.stream()`` only yields a node's update once that node has *finished*,
+    so a client driven by those updates always displays the previous node's
+    label — a 20s reconstruction shows up as "Validating intent" hanging.
+    LangGraph's custom stream channel is the way out: what a node writes here
+    is streamed the moment it is written, so the label the user sees is the
+    work actually in progress. Paired with the ``phase: "end"`` event that the
+    node's update produces (which carries its ``thought``) — see
+    ``stream_agent_response``.
+
+    Never fatal: outside a streaming context there is no writer to get, and a
+    missing progress event must not take the run down with it.
+    """
+    try:
+        from langgraph.config import get_stream_writer
+
+        get_stream_writer()({"type": NODE_START_EVENT, "node": node_name})
+    except Exception:  # noqa: BLE001 — progress reporting is best-effort
+        logger.debug("No stream writer for node %s", node_name, exc_info=True)
+
+
 def wrap_node_with_logging(node_name: str, fn):
     """
     Wrap a node callable so it logs node visits automatically.
     """
 
     def wrapped(state):
+        announce_node_start(node_name)
         log_node_visit(state, node_name)
         return fn(state)
 
@@ -472,6 +501,7 @@ def create_graph():
 
 
 __all__ = [
+    "NODE_START_EVENT",
     "TextToSQLPayload",
     "AgentState",
     "create_graph",

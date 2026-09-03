@@ -216,6 +216,14 @@ class _Slot:
     # i.e. once ``buffer`` is complete and no more events will ever be
     # appended.
     finished: threading.Event = field(default_factory=threading.Event)
+    # Last SQL the run streamed out (from a ``sql`` event). A failure after
+    # the query was validated — execution errors that exhaust the retry
+    # budget, or a hard error — produces an answer with no ``sql_code``, so
+    # without remembering it here the query the user just watched fail would
+    # vanish from the persisted turn the moment the page reloaded. A run that
+    # never got a query past validation has no ``sql`` event and so persists
+    # none. See ``_pump``.
+    last_sql: str | None = None
 
 
 # Keyed by authenticated user + conversation_id (or a per-request unique key
@@ -382,10 +390,14 @@ def _pump(slot: _Slot) -> None:
         if event_type == "result":
             answer = event.get("answer") or {}
             response = str(answer.get("response") or "")
-            sql_code = answer.get("sql_code")
+            # An answer the agent gave up on (``unconstructable_sql_response``)
+            # carries no SQL, even when a query did run earlier in the turn.
+            # Fall back to the last one streamed so the failed query is still
+            # in history, matching what the user watched live.
+            sql_code = answer.get("sql_code") or slot.last_sql
         elif event_type == "error":
             response = str(event.get("message") or "")
-            sql_code = None
+            sql_code = slot.last_sql
         else:
             return
         if not response and not sql_code:
@@ -422,6 +434,10 @@ def _pump(slot: _Slot) -> None:
             if event.get("type") == "step":
                 node_name = event.get("node", "")
                 event = {**event, "label": NODE_LABELS.get(node_name, node_name)}
+            elif event.get("type") == "sql":
+                # Streamed straight through for the live view; remembered so
+                # the failure paths above have something to persist.
+                slot.last_sql = str(event.get("sql") or "") or None
             persist_event(event)
             with slot.buffer_lock:
                 slot.buffer.append(event)
@@ -511,7 +527,9 @@ async def chat_completions(
 ) -> StreamingResponse:
     """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
 
-    Emits the SQL and formatted answer as a ``result`` event, then — if that
+    Emits a ``sql`` event once the agent has a validated query, just before it
+    executes, so callers can show the SQL while it runs. Emits the final SQL
+    and formatted answer as a ``result`` event, then — if that
     answer has an executed result — generates and persists the chart/table
     bubble itself and streams it back as a ``charts`` event before the stream
     closes with ``[DONE]``. Callers that only care about the text/SQL answer

@@ -10,6 +10,7 @@ from typing import Generator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    NODE_START_EVENT,
     _prediction_enabled,
     create_graph,
 )
@@ -128,6 +129,63 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
+# How many reconstructions ``route_sql_validation`` allows before it stops
+# re-validating intent and routes straight from syntax validation to
+# execution. Mirrored here so the ``sql`` event still fires on that branch;
+# keep the two in step.
+_INTENT_VALIDATION_SKIPPED_AFTER = 5
+
+
+def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
+    """The SQL this node just cleared for execution, or ``""``.
+
+    Deliberately *not* emitted when a generation node produces SQL: syntax
+    validation and intent validation both send the query back for
+    reconstruction, so a draft shown at generation time is frequently not the
+    query that runs. Emitting only once a node has cleared it means the block
+    the user sees is always exactly what executes.
+
+    Three nodes can be the last hop before ``execute_sql_query``, so all three
+    have to be recognised (see ``create_graph``):
+
+    * ``validate_intent`` accepting the query (``intent_valid``) — the usual
+      path;
+    * ``precheck_value_repair`` returning ``valid_sql`` — only built into the
+      graph when ``DB_PROBE_PROACTIVE`` is on, in which case it, not intent
+      validation, is the final hop;
+    * ``validate_sql_query`` returning ``valid_sql`` after more than
+      ``_INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions, where
+      ``route_sql_validation`` bypasses intent validation entirely.
+
+    The trade-off this accepts: a run that never gets a query past intent
+    validation (``unconstructable`` after 8 attempts) shows no SQL at all.
+    """
+    decision = (node_output or {}).get("decision") or ""
+
+    cleared = (
+        decision == "intent_valid"
+        or (node_name == "precheck_value_repair" and decision == "valid_sql")
+        or (
+            node_name == "validate_sql_query"
+            and decision == "valid_sql"
+            and (node_path_state.get("reconstruction_count") or 0)
+            > _INTENT_VALIDATION_SKIPPED_AFTER
+        )
+    )
+    if not cleared:
+        return ""
+
+    # ``SQLValidationAgent`` copies the accepted query into ``sql_code``, and
+    # that is what ``SQLExecutionAgent`` runs. Fall back to the generation
+    # result only for the intent-validation early return that fires when
+    # there is no validated SQL to check.
+    sql = (node_path_state.get("sql_code") or "").strip()
+    if sql:
+        return sql
+    generated = node_path_state.get("sql_generation_result")
+    return (getattr(generated, "sql_code", "") or "").strip()
+
+
 def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
     """Concatenate the run's per-node thought entries into one summary string.
 
@@ -147,21 +205,51 @@ def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
 def stream_agent_response(
     payload: TextToSQLPayload,
 ) -> Generator[dict, None, None]:
-    """Yield ``{"type": "step", "node": ..., "thought": ...}`` for each graph
-    node, then ``{"type": "result", "answer": ...}`` with the final answer
-    (its ``thoughts`` key summarizes every ``thought`` collected along the
-    way). On error yields ``{"type": "error", "message": ...}``."""
+    """Yield two ``{"type": "step", "node": ..., "phase": ...}`` events per
+    graph node — ``"start"`` as it begins (so a client can label the work in
+    progress) and ``"end"`` when it returns, carrying its ``thought`` — plus
+    ``{"type": "sql", "node": ..., "sql": ...}`` once a query has cleared
+    validation and is about to run (see ``_sql_about_to_run``), then
+    ``{"type": "result", "answer": ...}`` with the final answer (its
+    ``thoughts`` key summarizes every ``thought`` collected along the way).
+    On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
 
     logger.info("Text-to-SQL agent started for question: %s", payload["question"])
 
     state = _build_state(payload)
     final_state = dict(state)
+    # Last SQL surfaced to the client. A query can clear its final gate more
+    # than once (an empty result sends it back through validation unchanged),
+    # so dedupe rather than re-emitting the same query.
+    streamed_sql: str | None = None
 
     try:
-        for step in app.stream(state, config={"recursion_limit": 45}):
+        # Two channels, and the distinction is the whole point of the "start"
+        # event: ``custom`` payloads are streamed the instant a node writes
+        # one (i.e. as it begins), while ``updates`` only arrive once that
+        # node has returned. Reading updates alone means the label on screen
+        # is always the previously finished node, so a slow reconstruction
+        # looks like the *validation* before it has hung.
+        for mode, chunk in app.stream(
+            state,
+            stream_mode=["updates", "custom"],
+            config={"recursion_limit": 45},
+        ):
+            if mode == "custom":
+                if (chunk or {}).get("type") == NODE_START_EVENT:
+                    started = chunk.get("node")
+                    if started:
+                        yield {
+                            "type": "step",
+                            "phase": "start",
+                            "node": started,
+                            "thought": None,
+                        }
+                continue
+
             logger.info("--- AGENT STEP ---")
-            for node_name, node_output in step.items():
+            for node_name, node_output in chunk.items():
                 logger.info("Node: %s", node_name)
 
                 # A node records its own thought (if any) at the tail of
@@ -175,7 +263,25 @@ def stream_agent_response(
                 if thoughts_log and thoughts_log[-1].get("node") == node_name:
                     thought = thoughts_log[-1].get("text")
 
-                yield {"type": "step", "node": node_name, "thought": thought}
+                # Closes the step its "start" event opened, and is the only
+                # place a thought can be attached: the node has to finish
+                # before it has one to report.
+                yield {
+                    "type": "step",
+                    "phase": "end",
+                    "node": node_name,
+                    "thought": thought,
+                }
+
+                # Surface the SQL once a node has cleared it for execution,
+                # so it is on screen while the database runs it rather than
+                # only landing with the final answer. Drafts that validation
+                # is about to send back for reconstruction are deliberately
+                # not shown — see ``_sql_about_to_run``.
+                node_sql = _sql_about_to_run(node_name, node_output, node_path_state)
+                if node_sql and node_sql != streamed_sql:
+                    streamed_sql = node_sql
+                    yield {"type": "sql", "node": node_name, "sql": node_sql}
 
                 if node_output:
                     if "path_state" in node_output:
