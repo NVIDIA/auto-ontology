@@ -46,7 +46,6 @@ Rules:
 - Preserve every factual constraint: numbers, product names, brands, categories, and \
 qualifiers such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.
-- If the input is already a direct question, return it unchanged.
 - Output one concise question or search intent, not a paragraph.
 
 Examples:
