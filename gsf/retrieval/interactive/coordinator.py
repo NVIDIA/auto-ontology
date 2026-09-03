@@ -265,14 +265,30 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         )
     evidence_question = session.working_question
 
-    question = session.working_question
-    # For Phase 2, append the raw Phase 1 SQL as an exact reference so numeric thresholds,
+    # Send the original (pre-clarification) question as the working question to
+    # SQL generation, and route the fully merged/clarified version into evidence
+    # instead — the merged question accumulates every formula and definition
+    # collected across clarify turns and can get long, which was diluting entity
+    # retrieval. Only worth doing when a merge actually happened; otherwise
+    # working_question == original_question and this would just duplicate the
+    # question in evidence for no reason.
+    question = session.original_question
+    expanded_question_note = ""
+    if session.working_question != session.original_question:
+        expanded_question_note = (
+            "## Expanded Question (incorporates all clarifications — this is "
+            f"the full, authoritative question)\n{session.working_question}\n\n"
+        )
+    # Phase 2 only: the raw Phase 1 SQL as an exact reference so numeric thresholds,
     # CASE conditions, and formulas are preserved verbatim — the merged question captures
     # intent and structure, but the raw SQL is the source of truth for precise values.
+    # Reference material like the expanded question above, so it belongs in evidence
+    # rather than bolted onto the short original question.
+    phase1_sql_reference_note = ""
     if p1_sql and p1_question:
-        question = (
-            f"{question}\n\n[Phase 1 SQL reference — use exact column names, "
-            f"thresholds, and formulas from this SQL where applicable]\n{p1_sql}"
+        phase1_sql_reference_note = (
+            "## Phase 1 SQL Reference (use exact column names, thresholds, and "
+            f"formulas from this SQL where applicable)\n{p1_sql}\n\n"
         )
 
     resolved_terms_section = build_grounded_terms_hint(session)
@@ -312,12 +328,18 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             logger.info(
                 "[%s] SQL gen — injected conditional output hint", session.task_id
             )
+    if expanded_question_note or phase1_sql_reference_note:
+        evidence = expanded_question_note + phase1_sql_reference_note + evidence
+        logger.info(
+            "[%s] SQL gen — prepended expanded question/Phase 1 SQL reference to evidence",
+            session.task_id,
+        )
     if evidence:
-        question = f"{question}\n\nEvidence: {evidence}"
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
 
     payload: TextToSQLPayload = {
         "question": question,
+        "evidence": evidence,
         "data_retriever": session.data_retriever,
         "semantic_retriever": session.semantic_retriever,
         "connectors": session.connectors,
