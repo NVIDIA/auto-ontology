@@ -109,14 +109,21 @@ def resolve_semantic_fks(database_name: str) -> int:
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
                 _log_start(index, col)
-                merge_semantic_fk(col["id"], attr_id)
-                declared_written += 1
-                logger.debug(
-                    "resolve_semantic_fks [declared]: %s.%s → attr %s",
-                    col.get("table_name"),
-                    col.get("name"),
-                    attr_id,
-                )
+                # merge_semantic_fk refuses (and logs) a cross-database edge on
+                # its own -- should be structurally impossible for a declared
+                # FK, whose target is always a column in the same connected
+                # database, but treat "not written" the same as "no attribute
+                # found" rather than assume.
+                if merge_semantic_fk(col["id"], attr_id):
+                    declared_written += 1
+                    logger.debug(
+                        "resolve_semantic_fks [declared]: %s.%s → attr %s",
+                        col.get("table_name"),
+                        col.get("name"),
+                        attr_id,
+                    )
+                else:
+                    llm_queue.append((index, col))
             else:
                 logger.debug(
                     "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
@@ -151,8 +158,13 @@ def resolve_semantic_fks(database_name: str) -> int:
         _log_start(index, col)
         try:
             attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
-            if attr_id:
-                merge_semantic_fk(col["id"], attr_id)
+            # The VDB where-filter already scopes hits to database_name, but
+            # it's a query-time filter over a collection shared by every
+            # ingested database, not physical isolation -- the same shape of
+            # mechanism that let Term nodes leak across databases elsewhere.
+            # merge_semantic_fk verifies against the catalog before writing
+            # rather than trust the filter alone, and logs its own rejection.
+            if attr_id and merge_semantic_fk(col["id"], attr_id):
                 logger.debug(
                     "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),

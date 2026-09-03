@@ -11,7 +11,7 @@
     "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
-    "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'None'",
+    "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None) -> 'dict[str, Any] | None'"
   },
   "candidates": {

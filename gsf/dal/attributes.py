@@ -489,13 +489,40 @@ def find_unlinked_fk_columns(
     return [dict(r) for r in store().query_read(statement)]
 
 
-def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
-    """Point a column at the attribute it references. Idempotent."""
+def _same_database(src_column_id: str, tgt_attr_id: str) -> bool:
+    """Whether *src_column_id* and *tgt_attr_id* belong to the same database."""
+    col_ctx = fetch_col_table_contexts([src_column_id])
+    attr_ctx = fetch_attr_column_contexts([tgt_attr_id], database_name=None)
+    col_db = col_ctx.get(src_column_id, {}).get("database_name")
+    attr_db = attr_ctx.get(tgt_attr_id, {}).get("database_name")
+    return bool(col_db) and col_db == attr_db
+
+
+def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
+    """Point a column at the attribute it references. Idempotent.
+
+    Refuses — writes nothing, returns ``False`` — when the two belong to
+    different ingested databases. This is the one place a ``SEMANTIC_FK``
+    edge is created, so it is the one place that has to enforce that it never
+    crosses a database boundary: a path built from such an edge would later
+    name a table that doesn't exist in the query's target database. Enforcing
+    it here, rather than in each caller, means every writer — compilation,
+    test fixtures, dev tooling — gets the guarantee for free instead of having
+    to remember to check first.
+    """
+    if not _same_database(src_column_id, tgt_attr_id):
+        logger.warning(
+            "merge_semantic_fk: refusing cross-database edge %s -> %s",
+            src_column_id,
+            tgt_attr_id,
+        )
+        return False
     store().query_write(
         insert(s.column__semantic_fk)
         .values(column_id=src_column_id, attribute_id=tgt_attr_id)
         .on_conflict_do_nothing()
     )
+    return True
 
 
 def _column_path_select(link_table):
@@ -755,8 +782,12 @@ def _name_tables(node_ids: list[str]) -> dict[str, str]:
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     """The shortest semantic join route between two columns, as hop dicts.
 
-    ``[]`` when the columns are the same, when no path exists, or when the only
-    path crosses databases.
+    ``[]`` when the columns are the same or when no path exists. Cross-database
+    paths are not filtered here — ``SEMANTIC_FK`` edges are guarded against
+    ever crossing databases where they're created, in
+    :func:`gsf.semantic.semantic_fk.resolve_semantic_fks` (via
+    :func:`merge_semantic_fk`), so a path built from them cannot span two
+    databases by construction.
 
     The traversal rules live in the ``join_path_edge`` view, and the one that
     matters is that **SEMANTIC_FK is emitted outgoing only**. Traversed
@@ -797,22 +828,6 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
     col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
-
-    databases = {
-        context.get("database_name")
-        for context in contexts.values()
-        if context.get("database_name")
-    }
-    if len(databases) > 1:
-        # Only reachable through a shared ColumnAttribute -- Database is not a
-        # node in the view, so there is no other way across.
-        logger.warning(
-            "find_join_path: rejected cross-database path %s -> %s (%s)",
-            anchor_col_id,
-            dest_col_id,
-            ", ".join(sorted(databases)),
-        )
-        return []
 
     hops: list[dict] = []
     for source_id, target_id in hop_pairs:
@@ -1158,19 +1173,6 @@ def find_table_bridge(
         col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
         names = _name_columns(col_ids)
         col_ctx = fetch_col_table_contexts(col_ids)
-        databases = {
-            context.get("database_name")
-            for context in col_ctx.values()
-            if context.get("database_name")
-        }
-        if len(databases) > 1:
-            logger.warning(
-                "find_table_bridge: rejected cross-database path %s -> %s (%s)",
-                src,
-                dst,
-                ", ".join(sorted(databases)),
-            )
-            continue
 
         hops: list[dict] = []
         for source_id, target_id in hop_pairs:

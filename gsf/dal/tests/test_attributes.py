@@ -413,37 +413,6 @@ def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
     )
 
 
-def test_a_cross_database_path_is_rejected(world) -> None:
-    """Reachable only through a shared ColumnAttribute — Database is not a node.
-
-    The path is genuinely found and then thrown away, so this is not testing
-    that the traversal fails; it is testing that the check after it fires.
-    """
-    world.database("otherdb")
-    world.table("customers")
-    world.column("customers", "id")
-    world.table("remote_orders", database="otherdb")
-    world.column("remote_orders", "customer_id")
-
-    world.attribute("customer-id", owner="customers.id")
-    world.references("remote_orders.customer_id", "customer-id")
-
-    # The traversal does find it...
-    assert (
-        a._bfs_path(
-            world.columns["remote_orders.customer_id"], world.columns["customers.id"]
-        )
-        is not None
-    )
-    # ...and find_join_path throws it away.
-    assert (
-        a.find_join_path(
-            world.columns["remote_orders.customer_id"], world.columns["customers.id"]
-        )
-        == []
-    )
-
-
 def test_a_cycle_terminates(world) -> None:
     """Two tables referencing each other's attributes, plus an unreachable target.
 
@@ -838,6 +807,31 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
         )
     )
     assert len(rows) == 1
+
+
+def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
+    """A column and attribute in different ingested databases must never link.
+
+    This is the only place a SEMANTIC_FK edge is created, so it is the only
+    place that has to enforce this — every other writer (compilation, test
+    fixtures, dev tooling) relies on this guard instead of checking first.
+    """
+    world.database("otherdb")
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("remote_orders", database="otherdb")
+    world.column("remote_orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+
+    written = a.merge_semantic_fk(world.columns["remote_orders.customer_id"], attr)
+    assert written is False
+
+    rows = store().query_read(
+        select(s.column__semantic_fk.c.column_id).where(
+            s.column__semantic_fk.c.attribute_id == attr
+        )
+    )
+    assert rows == []
 
 
 # --------------------------------------------------------------------------
