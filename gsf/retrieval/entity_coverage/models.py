@@ -26,8 +26,8 @@ class QuestionExtractionLiteModel(StrictLLMOutputModel):
     required_entity_name: list[str] = Field(
         ...,
         description=(
-            "Concepts explicitly mentioned in the question that refer to "
-            "database entities. Only extract what the question actually says. "
+            "Concepts present in the completed sanitized question that refer to "
+            "database entities. Do not extract directly from supporting context. "
             "When words describe a single filterable item, keep them in one "
             "phrase instead of splitting. Keep brand names, product names, and "
             "descriptive named constants; omit numeric literals, dates, and "

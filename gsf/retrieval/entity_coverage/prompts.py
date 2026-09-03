@@ -37,6 +37,30 @@ abbreviations, shortcuts, and internal jargon in the question.
 """
 
 
+def format_evidence_section(evidence: str | None) -> str:
+    """Render narrowly scoped evidence guidance for question sanitization."""
+    if not evidence:
+        return ""
+    return f"""## Evidence for sanitization
+
+Use this evidence only to disambiguate the domain meaning of the input while producing
+`sanitized_question`.
+
+Rules:
+- Add at most one concise disambiguating qualifier to the sanitized question, and only
+  when it materially improves entity retrieval.
+- Do not append or summarize the evidence.
+- Do not copy background, explanations, formulas, SQL, values, unrelated terms, or
+  inventories of tables or columns into the sanitized question.
+- Evidence must not add a second interpretation or broaden the user's request.
+- Part 2 must derive entities only from the completed sanitized question, never directly
+  from this evidence section.
+
+{evidence}
+
+"""
+
+
 _SANITIZE_AND_ENTITIES = f"""## Part 1 — sanitized_question
 
 Rules:
@@ -60,10 +84,11 @@ sanitized_question: How many shipments were delivered last month?
 ## Part 2 — required_entity_name
 
 Populate "required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database \
-tables, columns, or relationships. Extract from the sanitized intent.
+tables, columns, or relationships. Extract only from the completed sanitized intent. \
+Do not extract entities directly from Glossary or Evidence sections.
 
-Preserve the exact casing of terms as they appear in the question. Do not lowercase,
-uppercase, or normalize them.
+Preserve the exact casing of terms as they appear in the completed sanitized question.
+Do not lowercase, uppercase, or normalize them.
 
 Glossary rule: when a word or phrase in the question matches a Glossary entry — an
 abbreviation, a shortcut, or internal jargon — resolve it in place using that entry's
@@ -156,14 +181,17 @@ def create_question_extraction_prompt(
     question: str,
     glossary: list[dict[str, str]] | None = None,
     *,
+    evidence: str | None = None,
     include_subject: bool = True,
 ) -> str:
     """Sanitize and extract entity noun phrases; optionally also name subject/acronyms.
 
-    Glossary is always injected so the model can resolve abbreviations while
-    sanitizing and extracting entities, even when ``include_subject`` is False.
+    Glossary is always injected so the model can resolve abbreviations. Evidence,
+    when provided, is restricted to refining the sanitized question before entity
+    extraction, including when ``include_subject`` is False.
     """
     glossary_section = format_glossary_section(glossary)
+    evidence_section = format_evidence_section(evidence)
     if include_subject:
         intro = (
             "You rewrite conversational user requests into concise, SQL-ready "
@@ -184,7 +212,7 @@ def create_question_extraction_prompt(
 
 {_SANITIZE_AND_ENTITIES}
 {trailing}
-{glossary_section}## Input
+{glossary_section}{evidence_section}## Input
 
 {question}
 """

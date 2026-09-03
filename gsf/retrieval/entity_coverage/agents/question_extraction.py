@@ -67,6 +67,7 @@ class QuestionExtractionAgent(BaseAgent):
         path_state = state.get("path_state", {})
         original_question = get_original_question(state)
         glossary = state.get("glossary") or []
+        evidence = state.get("evidence") or ""
         # After this node (full mode), ``glossary`` means only the entries used.
         result: Dict[str, Any] = {"path_state": path_state, "glossary": []}
 
@@ -76,6 +77,7 @@ class QuestionExtractionAgent(BaseAgent):
                     content=create_question_extraction_prompt(
                         original_question,
                         glossary,
+                        evidence=evidence,
                         include_subject=self._include_subject,
                     )
                 )
