@@ -36,8 +36,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from gsf.dal.attributes import find_table_id_by_name
-from gsf.dal.datasources import fetch_tables_by_ids
+from gsf.dal.datasources import fetch_tables_by_ids, find_table_id_by_name
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import _get_sql_code
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import (
     detect_degenerate_sql,

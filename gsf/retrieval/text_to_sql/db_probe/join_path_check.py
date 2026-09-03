@@ -53,9 +53,11 @@ from sqlglot import exp
 
 from gsf.dal.attributes import (
     column_participates_in_semantic_fk,
-    find_column_id_by_table_and_name,
     find_join_path,
     find_shared_hub_bridge,
+)
+from gsf.dal.datasources import (
+    find_column_id_by_table_and_name,
     find_table_key_columns,
 )
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor

@@ -28,7 +28,7 @@ import sqlglot
 from sqlglot import expressions as exp
 
 from gsf.catalog.sql_parse import parse_query_single
-from gsf.dal.attributes import find_table_key_columns
+from gsf.dal.datasources import find_table_key_columns
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.state import AgentState
