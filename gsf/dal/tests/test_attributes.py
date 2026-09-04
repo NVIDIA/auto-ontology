@@ -211,45 +211,41 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
     )
 
 
-def test_two_columns_referencing_the_same_attribute_do_not_join(joined) -> None:
-    """The single most important case in this file.
-
-    `orders.customer_id` and `invoices.customer_id` both point at the same
-    attribute. Traversing SEMANTIC_FK backwards would walk up from one and back
-    down the other, returning a join between two columns that have nothing to do
-    with each other. The view simply does not emit the reverse row.
-    """
+def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None:
+    """Sibling FKs route through their owner table, never directly to each other."""
     joined.table("invoices")
     joined.column("invoices", "customer_id")
     joined.references("invoices.customer_id", "customer-id")
 
-    assert (
-        a.find_join_path(
-            joined.columns["orders.customer_id"],
-            joined.columns["invoices.customer_id"],
-        )
-        == []
+    hops = a.find_join_path(
+        joined.columns["orders.customer_id"],
+        joined.columns["invoices.customer_id"],
     )
-    _assert_agrees_with_oracle(
-        joined.columns["orders.customer_id"], joined.columns["invoices.customer_id"]
-    )
+    assert [(hop["source_table"], hop["source_column"]) for hop in hops] == [
+        ("orders", "customer_id"),
+        ("customers", "id"),
+    ]
+    assert [(hop["target_table"], hop["target_column"]) for hop in hops] == [
+        ("customers", "id"),
+        ("invoices", "customer_id"),
+    ]
 
 
-def test_the_reverse_direction_still_reaches_the_referencing_column(joined) -> None:
-    """Anchor and destination swapped: reachable, via CONTAINS rather than the FK.
-
-    Worth stating because it shows the SEMANTIC_FK restriction is not the same
-    as making the graph one-way — the columns are still connected through their
-    tables when a route exists.
-    """
+def test_join_path_is_oriented_from_anchor_table_in_both_directions(joined) -> None:
     forward = a.find_join_path(
         joined.columns["orders.customer_id"], joined.columns["customers.id"]
     )
     backward = a.find_join_path(
         joined.columns["customers.id"], joined.columns["orders.customer_id"]
     )
-    assert forward != []
-    assert backward == []
+    assert (forward[0]["source_table"], forward[0]["target_table"]) == (
+        "orders",
+        "customers",
+    )
+    assert (backward[0]["source_table"], backward[0]["target_table"]) == (
+        "customers",
+        "orders",
+    )
 
 
 def test_a_column_has_no_path_to_itself(joined) -> None:
@@ -294,14 +290,77 @@ def test_two_schemas_are_not_connected_through_their_schema(world) -> None:
     assert a.find_join_path(world.columns["alpha.x"], world.columns["beta.y"]) == []
 
 
-def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
-    """`orders -> customers -> addresses`, and the pairing that reads it.
+def test_two_columns_in_the_same_table_need_no_join(world) -> None:
+    world.table("customers")
+    world.column("customers", "id", 1)
+    world.column("customers", "name", 2)
 
-    The traversal returns columns in join-partner order once the Table and
-    ColumnAttribute nodes are dropped, and the hops are built pairwise
-    `(0,1), (2,3)`. Getting that wrong produces the right number of hops with
-    the wrong endpoints, which no shape assertion would catch.
-    """
+    assert (
+        a.find_join_path(world.columns["customers.id"], world.columns["customers.name"])
+        == []
+    )
+
+
+def test_endpoints_are_tables_to_connect_not_required_join_columns(world) -> None:
+    """Return real join keys even when neither input column is a join key."""
+    world.table("customers")
+    world.column("customers", "name", 1)
+    world.column("customers", "address_id", 2)
+    world.table("addresses")
+    world.column("addresses", "id", 1)
+    world.column("addresses", "city", 2)
+
+    world.attribute("address-id", owner="addresses.id")
+    world.references("customers.address_id", "address-id")
+
+    assert a.find_join_path(
+        world.columns["customers.name"], world.columns["addresses.city"]
+    ) == [
+        {
+            "source_database": f"{world.prefix}-shopdb",
+            "source_schema": "public",
+            "source_table": "customers",
+            "source_column": "address_id",
+            "target_database": f"{world.prefix}-shopdb",
+            "target_schema": "public",
+            "target_table": "addresses",
+            "target_column": "id",
+        }
+    ]
+
+
+def test_path_can_enter_and_leave_an_intermediate_fk_table(world) -> None:
+    """Cities -> suppliers -> categories requires opposite FK directions."""
+    world.table("cities")
+    world.column("cities", "id", 1)
+    world.column("cities", "name", 2)
+    world.table("suppliers")
+    world.column("suppliers", "city_id", 1)
+    world.column("suppliers", "category_id", 2)
+    world.table("categories")
+    world.column("categories", "id", 1)
+    world.column("categories", "name", 2)
+
+    world.attribute("city-id", owner="cities.id")
+    world.attribute("category-id", owner="categories.id")
+    world.references("suppliers.city_id", "city-id")
+    world.references("suppliers.category_id", "category-id")
+
+    hops = a.find_join_path(
+        world.columns["cities.name"], world.columns["categories.name"]
+    )
+    assert [(hop["source_table"], hop["source_column"]) for hop in hops] == [
+        ("cities", "id"),
+        ("suppliers", "category_id"),
+    ]
+    assert [(hop["target_table"], hop["target_column"]) for hop in hops] == [
+        ("suppliers", "city_id"),
+        ("categories", "id"),
+    ]
+
+
+def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
+    """`orders -> customers -> addresses`, with only semantic crossings emitted."""
     world.table("addresses")
     world.column("addresses", "id")
     world.table("customers")
