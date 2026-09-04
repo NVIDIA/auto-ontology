@@ -58,3 +58,26 @@ To install dependencies:
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
 - Branch from `main`. Current working branch: `fix/architecture`.
+
+### Opening a PR
+
+**A PR is not done until every GitHub Actions workflow passes.** After opening
+one, poll `gh pr checks <number>` until no check is pending, then fix whatever
+failed and push again — repeat until the run is green. Report the final state
+honestly; do not hand back a PR with unexamined or failing checks.
+
+Run these locally first — they are the same gates CI applies, and catching a
+failure here costs seconds instead of a CI round-trip:
+
+| Check | Command | Catches |
+|---|---|---|
+| Ruff | `uv run ruff check gsf/ && uv run ruff format --check gsf/` | Backend lint/format |
+| Pytest | `uv run pytest gsf dev_tools -q` | Backend tests |
+| OpenAPI | `uv run python -m dev_tools.generate_backend_openapi` | **Stale `docs/openapi/*.json`** |
+| Frontend | `cd frontend && npx prettier --check . && pnpm lint && pnpm build` | Format, lint, build |
+
+The OpenAPI one is the easy one to miss: `docs/openapi/backend.json` and
+`ingestion.json` are committed, and the spec embeds each route's **docstring**.
+Editing a docstring on any `@router` handler — not just changing a signature or
+model — makes the committed spec stale and fails "Backend spec is up to date".
+Regenerate and commit the result whenever a route's code or docs change.
