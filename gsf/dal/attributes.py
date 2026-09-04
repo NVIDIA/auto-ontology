@@ -2,16 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""ColumnAttribute and SEMANTIC_FK reads and writes, plus ``find_join_path``.
+"""ColumnAttribute and SEMANTIC_FK reads and writes, plus join-path traversal.
 
-``find_join_path`` is level-at-a-time BFS driven from Python over the
-:data:`~gsf.dal.schema.JOIN_PATH_EDGE_VIEW_SQL` view, deliberately not a
-recursive CTE — see its docstring for why. The CTE version lives in the tests as
-a cross-check.
+``find_join_path`` projects semantic FK/owner relationships into undirected
+table edges, then runs BFS over tables while retaining the exact join columns
+on every edge. The lower-level ``join_path_edge`` traversal remains as a
+directional graph oracle for its dedicated tests.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 import itertools
 import logging
 from typing import Any
@@ -637,6 +638,102 @@ _EXPAND_LEVEL = (
 )
 
 
+_fk_column = s.catalog_column.alias("join_fk_column")
+_fk_table = s.catalog_table.alias("join_fk_table")
+_fk_schema = s.catalog_schema.alias("join_fk_schema")
+_owner_column = s.catalog_column.alias("join_owner_column")
+_owner_table = s.catalog_table.alias("join_owner_table")
+_owner_schema = s.catalog_schema.alias("join_owner_schema")
+
+_SEMANTIC_TABLE_EDGES = (
+    select(
+        _fk_table.c.id.label("fk_table_id"),
+        _fk_column.c.id.label("fk_column_id"),
+        _owner_table.c.id.label("owner_table_id"),
+        _owner_column.c.id.label("owner_column_id"),
+    )
+    .select_from(
+        s.column__semantic_fk.join(
+            _fk_column,
+            _fk_column.c.id == s.column__semantic_fk.c.column_id,
+        )
+        .join(_fk_table, _fk_table.c.id == _fk_column.c.table_id)
+        .join(_fk_schema, _fk_schema.c.id == _fk_table.c.schema_id)
+        .join(
+            s.column__has_attribute,
+            s.column__has_attribute.c.attribute_id
+            == s.column__semantic_fk.c.attribute_id,
+        )
+        .join(
+            _owner_column,
+            _owner_column.c.id == s.column__has_attribute.c.column_id,
+        )
+        .join(_owner_table, _owner_table.c.id == _owner_column.c.table_id)
+        .join(_owner_schema, _owner_schema.c.id == _owner_table.c.schema_id)
+    )
+    .where(
+        _fk_schema.c.database_id == bindparam("database_id"),
+        _owner_schema.c.database_id == bindparam("database_id"),
+    )
+    .distinct()
+)
+
+
+def _find_table_join_hops(
+    anchor_table_id: str,
+    dest_table_id: str,
+    database_id: str,
+) -> list[tuple[str, str]]:
+    """Find table-to-table joins, oriented from anchor table to destination.
+
+    Each semantic relationship becomes one undirected table edge whose payload
+    is the actual FK/owner column pair. Searching this projection makes input
+    column choice and FK direction irrelevant without ever turning two FKs
+    that reference the same attribute into a direct join.
+    """
+    rows = store().query_read(
+        _SEMANTIC_TABLE_EDGES,
+        {"database_id": database_id},
+    )
+    adjacency: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
+    for row in rows:
+        fk_table_id = row["fk_table_id"]
+        owner_table_id = row["owner_table_id"]
+        if fk_table_id == owner_table_id:
+            continue
+        adjacency[fk_table_id].append(
+            (owner_table_id, row["fk_column_id"], row["owner_column_id"])
+        )
+        adjacency[owner_table_id].append(
+            (fk_table_id, row["owner_column_id"], row["fk_column_id"])
+        )
+    for edges in adjacency.values():
+        edges.sort()
+
+    max_hops = (MAX_PATH_DEPTH + 2) // 4
+    parents: dict[str, tuple[str, str, str] | None] = {anchor_table_id: None}
+    frontier: deque[tuple[str, int]] = deque([(anchor_table_id, 0)])
+    while frontier:
+        table_id, depth = frontier.popleft()
+        if depth >= max_hops:
+            continue
+        for next_table_id, source_col_id, target_col_id in adjacency.get(table_id, []):
+            if next_table_id in parents:
+                continue
+            parents[next_table_id] = (table_id, source_col_id, target_col_id)
+            if next_table_id == dest_table_id:
+                hops: list[tuple[str, str]] = []
+                current = dest_table_id
+                while parents[current] is not None:
+                    previous, source_col_id, target_col_id = parents[current]
+                    hops.append((source_col_id, target_col_id))
+                    current = previous
+                hops.reverse()
+                return hops
+            frontier.append((next_table_id, depth + 1))
+    return []
+
+
 def _bfs_path(
     anchor_col_id: str,
     dest_col_id: str,
@@ -655,10 +752,10 @@ def _bfs_path(
 
     Real paths are 2-4 hops, so this is typically 3-5 indexed queries.
 
-    *anchor_kind* defaults to ``"column"`` for :func:`find_join_path`'s
-    column-to-column search. :func:`find_table_bridge` passes ``"table"`` to
-    reuse the same BFS engine (and the same ``join_path_edge`` traversal
-    rules) starting from a Table node instead.
+    *anchor_kind* defaults to ``"column"``; :func:`find_table_bridge` passes
+    ``"table"`` to reuse the same BFS engine (and the same ``join_path_edge``
+    traversal rules) starting from a Table node instead. :func:`find_join_path`
+    no longer goes through here — it uses :func:`_find_table_join_hops`.
     """
     visited: dict[str, tuple[str, str | None]] = {anchor_col_id: (anchor_kind, None)}
     frontier = [anchor_col_id]
@@ -780,35 +877,39 @@ def _name_tables(node_ids: list[str]) -> dict[str, str]:
 
 
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
-    """The shortest semantic join route between two columns, as hop dicts.
+    """The shortest semantic join route between the columns' tables.
 
-    ``[]`` when the columns are the same or when no path exists. Cross-database
-    paths are not filtered here — ``SEMANTIC_FK`` edges are guarded against
-    ever crossing databases where they're created, in
-    :func:`gsf.semantic.semantic_fk.resolve_semantic_fks` (via
-    :func:`merge_semantic_fk`), so a path built from them cannot span two
-    databases by construction.
+    The endpoint columns identify the tables to connect; they do not have to be
+    the join columns. Returned hops contain the actual columns for each
+    adjacent table crossing.
 
-    The traversal rules live in the ``join_path_edge`` view, and the one that
-    matters is that **SEMANTIC_FK is emitted outgoing only**. Traversed
-    backwards, a path hops from one FK column up to a shared attribute and back
-    down a *different* FK column, inventing a join between two columns that
-    merely reference the same thing — two ``customer_id`` columns joined to each
-    other. That is a wrong answer that looks entirely reasonable, which is why
-    it gets a test of its own.
-
-    After the traversal, hops are extracted by :func:`_extract_column_hops`,
-    which only counts a pair of columns as joined when they're actually linked
-    through a column_attribute node — not merely by both belonging to the same
-    table. See its docstring for why: naively pairing every column-kind node on
-    the path by position would report two unrelated columns that happen to
-    share a table as a false "1 hop" join.
+    ``[]`` when both columns belong to the same table, no semantic route exists,
+    either endpoint is missing, or the endpoints belong to different databases.
     """
     if anchor_col_id == dest_col_id:
         return []
 
+    endpoint_contexts = fetch_col_table_contexts([anchor_col_id, dest_col_id])
+    anchor_context = endpoint_contexts.get(anchor_col_id)
+    dest_context = endpoint_contexts.get(dest_col_id)
+    if not anchor_context or not dest_context:
+        return []
+    if anchor_context["table_id"] == dest_context["table_id"]:
+        return []
+    if anchor_context["database_id"] != dest_context["database_id"]:
+        logger.warning(
+            "find_join_path: rejected cross-database path %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+        )
+        return []
+
     try:
-        path = _bfs_path(anchor_col_id, dest_col_id)
+        hop_pairs = _find_table_join_hops(
+            anchor_context["table_id"],
+            dest_context["table_id"],
+            anchor_context["database_id"],
+        )
     except Exception:
         logger.warning(
             "find_join_path: query failed for %s -> %s",
@@ -818,14 +919,10 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         )
         return []
 
-    if not path:
-        return []
-
-    hop_pairs = _extract_column_hops(path)
     if not hop_pairs:
         return []
 
-    col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
+    col_ids = list(dict.fromkeys(col_id for pair in hop_pairs for col_id in pair))
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
 
