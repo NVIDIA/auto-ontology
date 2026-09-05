@@ -3,6 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from types import SimpleNamespace
+from typing import Any
+
+import pytest
 
 from gsf.retrieval.entity_coverage.agents import question_extraction
 from gsf.retrieval.entity_coverage.agents.question_extraction import (
@@ -25,7 +28,7 @@ def _state() -> dict:
     }
 
 
-def test_submitted_and_processing_questions_remain_distinct():
+def test_submitted_and_processing_questions_remain_distinct() -> None:
     state = _state()
 
     assert get_original_question(state) == "What about those in 2025?"
@@ -36,10 +39,14 @@ def test_submitted_and_processing_questions_remain_distinct():
     assert get_question_for_processing(state) == "active suppliers during 2025"
 
 
-def test_extraction_uses_standalone_processing_question(monkeypatch):
+def test_extraction_uses_standalone_processing_question(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     seen: list[str] = []
 
-    def fake_invoke(llm, messages, schema):
+    def fake_invoke(
+        llm: Any, messages: list[Any], schema: type[Any]
+    ) -> SimpleNamespace:
         seen.append(messages[0].content)
         return SimpleNamespace(
             sanitized_question="active suppliers during 2025",

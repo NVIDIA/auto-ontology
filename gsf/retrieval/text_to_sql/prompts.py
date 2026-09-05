@@ -529,8 +529,18 @@ def create_intent_validation_prompt(
     sql_code: str,
     custom_analyses: str = "",
     join_paths: str = "",
+    processing_question: str | None = None,
 ) -> str:
-    question_block = format_dual_question_block(original_question, sanitized_question)
+    processing = (processing_question or original_question).strip()
+    normalized = sanitized_question.strip()
+    if processing not in {original_question.strip(), normalized}:
+        question_block = (
+            f"Submitted question:\n{original_question}\n\n"
+            f"Standalone processing question:\n{processing}\n\n"
+            f"Normalized retrieval question:\n{normalized}"
+        )
+    else:
+        question_block = format_dual_question_block(original_question, normalized)
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
     join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
@@ -556,7 +566,7 @@ concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fa
    - distinctness: duplicate-preserving versus unique semantics
    - ordering: ranking direction, limit, and tie behavior
    - join: required relationship and authoritative path
-   Identify each source as submitted question, normalized question, custom analysis, or authoritative join path. Set constraint validation complete only after checking every category against all supplied sources.
+   Identify each source as submitted question, standalone processing question, normalized question, custom analysis, or authoritative join path. Attribute a constraint to processing_question when the standalone processing form supplies it, even when normalized text is also present. Set constraint validation complete only after checking every category against all supplied sources.
    Mark `violated` only for a material drop, rewrite, reversal, or unsupported addition. Explicitly catch unsupported status filters, label rewrites, spurious DISTINCT, and join/formula drift. Do not invent constraints.
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work and has no violated material constraint, mark it as VALID.

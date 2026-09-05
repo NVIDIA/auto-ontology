@@ -68,6 +68,7 @@ class ConstraintDisposition(BaseModel):
     ]
     source: Literal[
         "submitted_question",
+        "processing_question",
         "normalized_question",
         "custom_analysis",
         "authoritative_join_path",
@@ -203,6 +204,9 @@ class IntentValidationAgent(BaseAgent):
 
         # Get user's question
         original_question = get_original_question(state)
+        processing_question = str(
+            path_state.get("processing_question") or original_question
+        )
         sanitized_question = get_question_for_processing(state)
 
         # Prefer the enriched snippets (name/description/sql) from preparation.
@@ -240,6 +244,7 @@ class IntentValidationAgent(BaseAgent):
             sql_code,
             custom_analyses=ca_section,
             join_paths=join_paths_section,
+            processing_question=processing_question,
         )
 
         messages = [
@@ -262,7 +267,13 @@ class IntentValidationAgent(BaseAgent):
 
         if validation_result is None:
             self.logger.warning("Intent validation returned no structured result")
-            return {"decision": "intent_valid", "path_state": path_state}
+            path_state["intent_constraint_dispositions"] = []
+            path_state["intent_constraint_validation_complete"] = False
+            path_state["error"] = (
+                "Intent constraint validation was unavailable; reconstruct without "
+                "silently accepting unchecked request/evidence constraints."
+            )
+            return {"decision": "intent_invalid", "path_state": path_state}
 
         dispositions = [
             item.model_dump() for item in validation_result.constraint_dispositions

@@ -92,7 +92,9 @@ def _violation(kind: str, source: str, explanation: str) -> ConstraintDispositio
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_unsupported_status_filter_is_a_typed_intent_failure(mock_invoke: MagicMock):
+def test_unsupported_status_filter_is_a_typed_intent_failure(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=True,
         constraint_validation_complete=True,
@@ -115,7 +117,9 @@ def test_unsupported_status_filter_is_a_typed_intent_failure(mock_invoke: MagicM
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_label_rewrite_is_a_typed_intent_failure(mock_invoke: MagicMock):
+def test_label_rewrite_is_a_typed_intent_failure(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=False,
         constraint_validation_complete=True,
@@ -136,7 +140,9 @@ def test_label_rewrite_is_a_typed_intent_failure(mock_invoke: MagicMock):
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_spurious_distinct_is_a_typed_intent_failure(mock_invoke: MagicMock):
+def test_spurious_distinct_is_a_typed_intent_failure(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=True,
         constraint_validation_complete=True,
@@ -159,7 +165,9 @@ def test_spurious_distinct_is_a_typed_intent_failure(mock_invoke: MagicMock):
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_formula_drift_is_a_typed_intent_failure(mock_invoke: MagicMock):
+def test_formula_drift_is_a_typed_intent_failure(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=True,
         constraint_validation_complete=True,
@@ -183,7 +191,9 @@ def test_formula_drift_is_a_typed_intent_failure(mock_invoke: MagicMock):
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_retained_constraints_are_observable_and_pass(mock_invoke: MagicMock):
+def test_retained_constraints_are_observable_and_pass(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=True,
         constraint_validation_complete=True,
@@ -211,7 +221,9 @@ def test_retained_constraints_are_observable_and_pass(mock_invoke: MagicMock):
 
 
 @patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
-def test_incomplete_constraint_validation_fails_closed(mock_invoke: MagicMock):
+def test_incomplete_constraint_validation_fails_closed(
+    mock_invoke: MagicMock,
+) -> None:
     mock_invoke.return_value = IntentValidationModel(
         is_valid=True,
         constraint_validation_complete=False,
@@ -224,3 +236,55 @@ def test_incomplete_constraint_validation_fails_closed(mock_invoke: MagicMock):
     assert result["decision"] == "intent_invalid"
     assert result["path_state"]["intent_constraint_validation_complete"] is False
     assert "incomplete" in result["path_state"]["error"]
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_processing_question_constraint_keeps_its_source(
+    mock_invoke: MagicMock,
+) -> None:
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            ConstraintDisposition(
+                constraint_type="literal",
+                source="processing_question",
+                source_text="supplier status is active",
+                status="retained",
+                explanation="SQL uses status = 'active'",
+            )
+        ],
+    )
+    state = _validation_state(
+        "What about active ones?",
+        "SELECT * FROM suppliers WHERE status = 'active'",
+    )
+    state["path_state"]["processing_question"] = "List active suppliers"
+    state["path_state"]["normalized_question"] = "suppliers with active status"
+
+    result = IntentValidationAgent().execute(state)
+
+    assert result["decision"] == "intent_valid"
+    disposition = result["path_state"]["intent_constraint_dispositions"][0]
+    assert disposition["source"] == "processing_question"
+    prompt = mock_invoke.call_args.args[1][1].content
+    assert "Submitted question:\nWhat about active ones?" in prompt
+    assert "Standalone processing question:\nList active suppliers" in prompt
+    assert "Normalized retrieval question:\nsuppliers with active status" in prompt
+
+
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output",
+    return_value=None,
+)
+def test_unavailable_constraint_validation_fails_closed(
+    mock_invoke: MagicMock,
+) -> None:
+    result = IntentValidationAgent().execute(
+        _validation_state("List suppliers", "SELECT * FROM suppliers")
+    )
+
+    assert result["decision"] == "intent_invalid"
+    assert result["path_state"]["intent_constraint_dispositions"] == []
+    assert result["path_state"]["intent_constraint_validation_complete"] is False
+    assert "unavailable" in result["path_state"]["error"]
