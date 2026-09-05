@@ -87,6 +87,16 @@ def route_sql_validation(state: AgentState) -> str:
         # SQL is valid - check if we should skip intent validation
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
         if reconstruction_count > 5:
+            if (
+                state["path_state"].get("intent_constraint_validation_complete")
+                is False
+            ):
+                logger.error(
+                    "Intent constraint validation remained unavailable/incomplete "
+                    "after %d reconstructions; refusing unchecked SQL",
+                    reconstruction_count,
+                )
+                return "unconstructable"
             logger.info(
                 f"Skipping intent validation after {reconstruction_count} reconstructions"
             )

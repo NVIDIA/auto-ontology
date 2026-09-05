@@ -10,6 +10,7 @@ from gsf.retrieval.text_to_sql.agents.intent_validation import (
     IntentValidationAgent,
     IntentValidationModel,
 )
+from gsf.retrieval.text_to_sql.text_to_sql_graph import route_sql_validation
 
 
 @patch(
@@ -288,3 +289,15 @@ def test_unavailable_constraint_validation_fails_closed(
     assert result["path_state"]["intent_constraint_dispositions"] == []
     assert result["path_state"]["intent_constraint_validation_complete"] is False
     assert "unavailable" in result["path_state"]["error"]
+
+
+def test_repeated_unavailable_validation_never_skips_to_execution() -> None:
+    state = {
+        "decision": "valid_sql",
+        "path_state": {
+            "reconstruction_count": 6,
+            "intent_constraint_validation_complete": False,
+        },
+    }
+
+    assert route_sql_validation(state) == "unconstructable"
