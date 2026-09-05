@@ -23,7 +23,7 @@ Design Decisions:
 """
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict, Literal
 from pydantic import BaseModel, Field
 from langchain_core.messages import SystemMessage, HumanMessage
 
@@ -53,6 +53,35 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "validate_intent"
 
 
+class ConstraintDisposition(BaseModel):
+    """Typed comparison of one user/evidence constraint with generated SQL."""
+
+    constraint_type: Literal[
+        "formula",
+        "literal",
+        "temporal",
+        "grain",
+        "projection",
+        "distinctness",
+        "ordering",
+        "join",
+    ]
+    source: Literal[
+        "submitted_question",
+        "normalized_question",
+        "custom_analysis",
+        "authoritative_join_path",
+    ]
+    source_text: str = Field(
+        description="Concise constraint from the submitted request or authoritative evidence."
+    )
+    status: Literal["retained", "violated", "not_applicable"]
+    explanation: str = Field(
+        default="",
+        description="Brief SQL-grounded reason for this disposition.",
+    )
+
+
 class IntentValidationModel(BaseModel):
     """Model for intent validation response."""
 
@@ -76,6 +105,20 @@ class IntentValidationModel(BaseModel):
             "List of CRITICAL aggregation issues that are clearly wrong (not minor variations). "
             "Leave EMPTY [] if there are no aggregation issues — "
             "do NOT add explanatory text like 'no aggregation issues'."
+        ),
+    )
+    constraint_validation_complete: bool = Field(
+        description=(
+            "True only after every material constraint category in the supplied "
+            "request and evidence has been checked."
+        )
+    )
+    constraint_dispositions: list[ConstraintDisposition] = Field(
+        default_factory=list,
+        description=(
+            "One typed disposition for each material formula, literal, temporal, grain, "
+            "projection, distinctness, ordering, and join constraint found in the exact "
+            "request or authoritative evidence. Do not invent constraints."
         ),
     )
 
@@ -217,12 +260,35 @@ class IntentValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
+        if validation_result is None:
+            self.logger.warning("Intent validation returned no structured result")
+            return {"decision": "intent_valid", "path_state": path_state}
+
+        dispositions = [
+            item.model_dump() for item in validation_result.constraint_dispositions
+        ]
+        path_state["intent_constraint_dispositions"] = dispositions
+        path_state["intent_constraint_validation_complete"] = (
+            validation_result.constraint_validation_complete
+        )
+        if not validation_result.constraint_validation_complete:
+            path_state["error"] = (
+                "Intent constraint validation was incomplete; reconstruct without "
+                "silently accepting unchecked request/evidence constraints."
+            )
+            return {"decision": "intent_invalid", "path_state": path_state}
+        violations = [
+            item
+            for item in validation_result.constraint_dispositions
+            if item.status == "violated"
+        ]
+
         if (validation_result.reasoning or "").strip():
             record_thought(
                 path_state, _GRAPH_NODE_NAME, validation_result.reasoning.strip()
             )
 
-        if validation_result.is_valid:
+        if validation_result.is_valid and not violations:
             self.logger.info("SQL validation passed (no critical issues)")
             return {
                 "decision": "intent_valid",
@@ -230,7 +296,9 @@ class IntentValidationAgent(BaseAgent):
             }
 
         has_real_issues = (
-            validation_result.join_issues or validation_result.aggregation_issues
+            validation_result.join_issues
+            or validation_result.aggregation_issues
+            or violations
         )
         if not has_real_issues:
             self.logger.info(
@@ -255,6 +323,16 @@ class IntentValidationAgent(BaseAgent):
                 "\n\nCritical aggregation issues:\n"
                 + "\n".join(
                     f"  - {issue}" for issue in validation_result.aggregation_issues
+                )
+            )
+
+        if violations:
+            error_parts.append(
+                "\n\nViolated request/evidence constraints:\n"
+                + "\n".join(
+                    f"  - [{item.constraint_type}] {item.source_text}: "
+                    f"{item.explanation}"
+                    for item in violations
                 )
             )
 

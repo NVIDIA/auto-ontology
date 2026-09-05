@@ -328,6 +328,18 @@ fail for those.
 2. **Clearly Wrong Aggregations**: Are aggregations
 completely incorrect? (e.g., COUNT when user explicitly
 asks for SUM) (Minor variations are acceptable)
+3. **Constraint Preservation**: Compare the exact original
+request, sanitized intent, authoritative join paths, and
+custom analyses with the SQL. Emit a typed disposition,
+including its exact source, for each material constraint in these categories: formula,
+literal, temporal boundary, aggregation grain, projection,
+distinctness, ordering/ranking, and join. Mark `violated`
+only when the SQL drops, changes, or invents a material
+constraint. In particular, flag unsupported status filters,
+label/value rewrites, spurious DISTINCT that changes the
+requested multiplicity, wrong formulas, and reversed or
+missing explicit ordering. Do not infer a requirement that
+is absent from the supplied request/evidence.
 
 When DOMAIN-SPECIFIC CUSTOM ANALYSES are provided, treat
 their SQL patterns as intentional user-defined domain
@@ -535,8 +547,19 @@ Check for CRITICAL issues ONLY (be lenient):
 join paths that could still answer it are OK — including different fields/roles for the same \
 concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
+3. For every material constraint in the supplied request/evidence, return one typed disposition:
+   - formula: calculation, numerator/denominator, or aggregation function
+   - literal: names, labels, categories, statuses, and numeric values
+   - temporal: date field, window, boundary, and inclusivity
+   - grain: grouping level and one-row-per semantics
+   - projection: requested output fields
+   - distinctness: duplicate-preserving versus unique semantics
+   - ordering: ranking direction, limit, and tie behavior
+   - join: required relationship and authoritative path
+   Identify each source as submitted question, normalized question, custom analysis, or authoritative join path. Set constraint validation complete only after checking every category against all supplied sources.
+   Mark `violated` only for a material drop, rewrite, reversal, or unsupported addition. Explicitly catch unsupported status filters, label rewrites, spurious DISTINCT, and join/formula drift. Do not invent constraints.
 
-Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
+Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work and has no violated material constraint, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
 definitions — do not flag the generated query as invalid merely for following those patterns.
 If AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows one of those verified paths.

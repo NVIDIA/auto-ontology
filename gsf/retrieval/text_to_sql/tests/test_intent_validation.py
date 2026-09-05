@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from gsf.retrieval.text_to_sql.agents.intent_validation import (
+    ConstraintDisposition,
     IntentValidationAgent,
     IntentValidationModel,
 )
@@ -13,7 +14,9 @@ from gsf.retrieval.text_to_sql.agents.intent_validation import (
 
 @patch(
     "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output",
-    return_value=IntentValidationModel(is_valid=True),
+    return_value=IntentValidationModel(
+        is_valid=True, constraint_validation_complete=True
+    ),
 )
 def test_intent_validation_keeps_authoritative_attribute_join(
     mock_invoke: MagicMock,
@@ -64,3 +67,160 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     assert "AUTHORITATIVE JOIN PATHS" in prompt
     assert "public.orders.customer_id = public.customers.id" in prompt
     assert "do not flag a generated join that follows" in prompt
+
+
+def _validation_state(question: str, sql: str) -> dict:
+    return {
+        "llm": MagicMock(),
+        "initial_question": question,
+        "path_state": {
+            "processing_question": question,
+            "normalized_question": question,
+            "sql_generation_result": SimpleNamespace(sql_code=sql),
+        },
+    }
+
+
+def _violation(kind: str, source: str, explanation: str) -> ConstraintDisposition:
+    return ConstraintDisposition(
+        constraint_type=kind,
+        source="submitted_question",
+        source_text=source,
+        status="violated",
+        explanation=explanation,
+    )
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_unsupported_status_filter_is_a_typed_intent_failure(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            _violation(
+                "literal",
+                "No status was requested",
+                "SQL invents status = 'active'",
+            )
+        ],
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state("List suppliers", "SELECT * FROM suppliers WHERE status='active'")
+    )
+
+    assert result["decision"] == "intent_invalid"
+    assert result["path_state"]["intent_constraint_dispositions"][0]["status"] == "violated"
+    assert "invents status" in result["path_state"]["error"]
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_label_rewrite_is_a_typed_intent_failure(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=False,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            _violation("literal", "label = Enterprise", "SQL filters label = Commercial")
+        ],
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state(
+            "Show Enterprise accounts",
+            "SELECT * FROM accounts WHERE label='Commercial'",
+        )
+    )
+
+    assert result["decision"] == "intent_invalid"
+    assert "label = Enterprise" in result["path_state"]["error"]
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_spurious_distinct_is_a_typed_intent_failure(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            _violation(
+                "distinctness",
+                "Return every transaction",
+                "DISTINCT collapses repeated transaction amounts",
+            )
+        ],
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state(
+            "Return every transaction amount", "SELECT DISTINCT amount FROM transactions"
+        )
+    )
+
+    assert result["decision"] == "intent_invalid"
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_formula_drift_is_a_typed_intent_failure(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            _violation(
+                "formula",
+                "margin = revenue - cost",
+                "SQL divides revenue by cost",
+            )
+        ],
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state(
+            "Compute margin as revenue minus cost",
+            "SELECT revenue / cost AS margin FROM sales",
+        )
+    )
+
+    assert result["decision"] == "intent_invalid"
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_retained_constraints_are_observable_and_pass(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=True,
+        constraint_dispositions=[
+            ConstraintDisposition(
+                constraint_type="ordering",
+                source="submitted_question",
+                source_text="top 5 by descending revenue",
+                status="retained",
+                explanation="ORDER BY revenue DESC LIMIT 5",
+            )
+        ],
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state(
+            "Top 5 suppliers by revenue",
+            "SELECT supplier, SUM(revenue) revenue FROM sales GROUP BY supplier "
+            "ORDER BY revenue DESC LIMIT 5",
+        )
+    )
+
+    assert result["decision"] == "intent_valid"
+    assert result["path_state"]["intent_constraint_dispositions"][0]["status"] == "retained"
+
+
+@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+def test_incomplete_constraint_validation_fails_closed(mock_invoke: MagicMock):
+    mock_invoke.return_value = IntentValidationModel(
+        is_valid=True,
+        constraint_validation_complete=False,
+    )
+
+    result = IntentValidationAgent().execute(
+        _validation_state("List suppliers", "SELECT * FROM suppliers")
+    )
+
+    assert result["decision"] == "intent_invalid"
+    assert result["path_state"]["intent_constraint_validation_complete"] is False
+    assert "incomplete" in result["path_state"]["error"]
