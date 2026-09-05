@@ -58,6 +58,9 @@ class AgentState(TypedDict):
     # Caller-supplied branch override; see TextToSQLPayload.prediction.
     prediction_override: NotRequired[bool | None]
     connectors: list[SQLDatabase]
+    # Mutable per-run details. ``processing_question`` is the standalone query
+    # used for extraction/retrieval; ``initial_question`` remains the exact
+    # user-submitted turn for intent validation and lineage.
     path_state: dict
     data_retriever: Retriever
     semantic_retriever: Retriever
@@ -77,13 +80,17 @@ def get_question_for_processing(state: AgentState) -> str:
     """
     Question string for retrieval and semantic search.
 
-    Uses ``path_state["normalized_question"]`` when set (e.g. after sanitization),
-    otherwise ``initial_question``.
+    Uses ``path_state["normalized_question"]`` when set (e.g. after extraction),
+    then the caller-provided standalone ``processing_question`` (e.g. resolved
+    follow-up context), and finally the exact submitted ``initial_question``.
     """
     path_state = state.get("path_state", {})
     normalized_question = path_state.get("normalized_question")
     if normalized_question:
         return normalized_question
+    processing_question = path_state.get("processing_question")
+    if processing_question:
+        return processing_question
     return state.get("initial_question", "")
 
 

@@ -17,7 +17,7 @@ from gsf.retrieval.entity_coverage.models import (
 )
 from gsf.retrieval.entity_coverage.prompts import create_question_extraction_prompt
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
+from gsf.retrieval.text_to_sql.state import AgentState, get_question_for_processing
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class QuestionExtractionAgent(BaseAgent):
         self._include_subject = include_subject
 
     def validate_input(self, state: AgentState) -> bool:
-        question = get_original_question(state)
+        question = get_question_for_processing(state)
         if not question:
             self.logger.warning("No question found, skipping question extraction")
             return False
@@ -65,7 +65,7 @@ class QuestionExtractionAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         llm = state["llm"]
         path_state = state.get("path_state", {})
-        original_question = get_original_question(state)
+        original_question = get_question_for_processing(state)
         glossary = state.get("glossary") or []
         # After this node (full mode), ``glossary`` means only the entries used.
         result: Dict[str, Any] = {"path_state": path_state, "glossary": []}

@@ -83,9 +83,14 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         if connector_db:
             initial_path_state["target_db"] = connector_db
 
+    submitted_question = payload["question"].strip()
     processing_question = (
-        payload.get("processing_question") or payload["question"]
+        payload.get("processing_question") or submitted_question
     ).strip()
+    # Keep the exact submitted turn separate from a standalone follow-up rewrite.
+    # Question extraction may replace normalized_question later, while intent
+    # validation must continue to see both representations.
+    initial_path_state["processing_question"] = processing_question
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
@@ -98,7 +103,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     state: dict = {
         "llm": llm_client,
-        "initial_question": processing_question,
+        "initial_question": submitted_question,
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,
