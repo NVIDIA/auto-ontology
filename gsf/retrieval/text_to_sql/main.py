@@ -24,6 +24,22 @@ from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
+
+class AgentRunError(RuntimeError):
+    """Graph failure carrying the last node and recoverable partial answer."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        node: str | None = None,
+        partial_answer: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.node = node
+        self.partial_answer = partial_answer or {}
+
+
 try:
     llm_client = get_llm_client()
 except ValueError as e:
@@ -144,6 +160,22 @@ def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _extract_partial_answer(final_state: dict) -> dict:
+    """Return generated SQL/response that existed before a downstream failure."""
+    path_state = final_state.get("path_state", {})
+    generation = path_state.get("sql_generation_result")
+    sql_code = path_state.get("sql_code") or getattr(generation, "sql_code", "")
+    response = getattr(generation, "response", "")
+    thought = getattr(generation, "thought", "")
+    if not sql_code and not response:
+        return {}
+    return {
+        "sql_code": str(sql_code or ""),
+        "response": str(response or ""),
+        "thought": str(thought or ""),
+    }
+
+
 def stream_agent_response(
     payload: TextToSQLPayload,
 ) -> Generator[dict, None, None]:
@@ -158,10 +190,12 @@ def stream_agent_response(
     state = _build_state(payload)
     final_state = dict(state)
 
+    last_node: str | None = None
     try:
         for step in app.stream(state, config={"recursion_limit": 45}):
             logger.info("--- AGENT STEP ---")
             for node_name, node_output in step.items():
+                last_node = node_name
                 logger.info("Node: %s", node_name)
 
                 # A node records its own thought (if any) at the tail of
@@ -197,7 +231,13 @@ def stream_agent_response(
 
     except Exception as exc:
         logger.exception("Error during agent stream")
-        yield {"type": "error", "message": f"Agent failed: {exc}"}
+        yield {
+            "type": "error",
+            "message": f"Agent failed after {last_node or 'graph_start'}: {exc}",
+            "node": last_node,
+            "error_type": type(exc).__name__,
+            "partial_answer": _extract_partial_answer(final_state),
+        }
 
 
 def get_agent_response(payload: TextToSQLPayload) -> dict:
@@ -206,7 +246,11 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
         if event["type"] == "result":
             return event["answer"]
         if event["type"] == "error":
-            raise RuntimeError(event["message"])
+            raise AgentRunError(
+                event["message"],
+                node=event.get("node"),
+                partial_answer=event.get("partial_answer"),
+            )
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
@@ -216,4 +260,5 @@ __all__ = [
     "app",
     "graph",
     "llm_client",
+    "AgentRunError",
 ]

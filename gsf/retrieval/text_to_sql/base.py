@@ -42,7 +42,7 @@ class BaseAgent(ABC):
                 return {"path_state": {...}}
     """
 
-    def __init__(self, agent_name: str):
+    def __init__(self, agent_name: str, *, failure_decision: str | None = None):
         """
         Initialize the agent.
 
@@ -50,6 +50,7 @@ class BaseAgent(ABC):
             agent_name: Human-readable name for logging and debugging
         """
         self.agent_name = agent_name
+        self.failure_decision = failure_decision
         self.logger = logging.getLogger(f"{__name__}.{agent_name}")
 
     @abstractmethod
@@ -119,7 +120,10 @@ class BaseAgent(ABC):
             "agent": self.agent_name,
         }
 
-        return {"path_state": path_state}
+        result: Dict[str, Any] = {"path_state": path_state}
+        if self.failure_decision is not None:
+            result["decision"] = self.failure_decision
+        return result
 
     def log_execution_start(self, state: AgentState) -> None:
         """Log the start of agent execution."""
@@ -198,10 +202,19 @@ def agent_wrapper(agent: BaseAgent):
         """
         # Validate input
         if not agent.validate_input(state):
-            agent.logger.warning(
-                f"Input validation failed for {agent.agent_name}, skipping execution"
-            )
-            return {}
+            message = f"Input validation failed for {agent.agent_name}"
+            agent.logger.warning(message)
+            path_state = state.get("path_state", {})
+            path_state["error"] = {
+                "type": "AgentInputValidationError",
+                "message": message,
+                "agent": agent.agent_name,
+            }
+            result: Dict[str, Any] = {"path_state": path_state}
+            if agent.failure_decision is not None:
+                result["decision"] = agent.failure_decision
+                return result
+            raise AgentExecutionError(message)
 
         # Log execution start
         agent.log_execution_start(state)
@@ -212,10 +225,9 @@ def agent_wrapper(agent: BaseAgent):
 
             # Ensure result is a dict
             if not isinstance(result, dict):
-                agent.logger.error(
+                raise AgentExecutionError(
                     f"Agent {agent.agent_name} returned non-dict result: {result}"
                 )
-                return {}
 
             # Log execution end
             agent.log_execution_end(state, result)
