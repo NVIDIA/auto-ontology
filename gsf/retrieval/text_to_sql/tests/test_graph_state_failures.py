@@ -2,20 +2,33 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from typing import Any
+
+import pytest
+
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
-from gsf.retrieval.text_to_sql.base import BaseAgent, AgentExecutionError, agent_wrapper
+from gsf.retrieval.text_to_sql.base import AgentExecutionError, BaseAgent, agent_wrapper
+from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.text_to_sql.text_to_sql_graph import route_decision
 
 
 class _InvalidAgent(BaseAgent):
-    def __init__(self, failure_decision: str | None = None):
+    def __init__(self, failure_decision: str | None = None) -> None:
         super().__init__("invalid_fixture", failure_decision=failure_decision)
 
-    def validate_input(self, state):
+    def validate_input(self, state: AgentState) -> bool:
         return False
 
-    def execute(self, state):
+    def execute(self, state: AgentState) -> dict[str, Any]:
         raise AssertionError("invalid input must not execute")
+
+
+class _MalformedAgent(BaseAgent):
+    def __init__(self) -> None:
+        super().__init__("malformed_fixture")
+
+    def execute(self, state: AgentState) -> dict[str, Any]:
+        return None  # type: ignore[return-value]
 
 
 def _state(decision: str = "intent_valid") -> dict:
@@ -28,7 +41,7 @@ def _state(decision: str = "intent_valid") -> dict:
     }
 
 
-def test_validation_failure_never_returns_an_empty_state_update():
+def test_validation_failure_never_returns_an_empty_state_update() -> None:
     try:
         agent_wrapper(_InvalidAgent())(_state())
     except AgentExecutionError as exc:
@@ -37,7 +50,7 @@ def test_validation_failure_never_returns_an_empty_state_update():
         raise AssertionError("missing failure decision must fail explicitly")
 
 
-def test_execution_validation_failure_replaces_stale_intent_decision():
+def test_execution_validation_failure_replaces_stale_intent_decision() -> None:
     state = _state()
     update = agent_wrapper(SQLExecutionAgent())(state)
     merged = {**state, **update}
@@ -47,7 +60,9 @@ def test_execution_validation_failure_replaces_stale_intent_decision():
     assert update["path_state"]["error"]["agent"] == "sql_execution"
 
 
-def test_execution_exception_replaces_stale_intent_decision(monkeypatch):
+def test_execution_exception_replaces_stale_intent_decision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     agent = SQLExecutionAgent()
     monkeypatch.setattr(agent, "validate_input", lambda state: True)
     monkeypatch.setattr(
@@ -67,3 +82,8 @@ def test_execution_exception_replaces_stale_intent_decision(monkeypatch):
         "message": "fixture failure",
         "agent": "sql_execution",
     }
+
+
+def test_malformed_result_without_failure_transition_raises() -> None:
+    with pytest.raises(AgentExecutionError, match="returned non-dict"):
+        agent_wrapper(_MalformedAgent())(_state())

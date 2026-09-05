@@ -234,10 +234,15 @@ def agent_wrapper(agent: BaseAgent):
 
             return result
 
+        except AgentExecutionError as e:
+            # Without a node-specific failure transition, returning path_state
+            # would preserve the preceding node's decision and recreate the stale
+            # routing failure this wrapper is meant to prevent.
+            if agent.failure_decision is None:
+                raise
+            return agent.handle_error(e, state)
         except Exception as e:
-            # Handle error
-            error_result = agent.handle_error(e, state)
-            return error_result
+            return agent.handle_error(e, state)
 
     # Preserve agent name for debugging
     wrapped.__name__ = f"{agent.agent_name}_wrapped"

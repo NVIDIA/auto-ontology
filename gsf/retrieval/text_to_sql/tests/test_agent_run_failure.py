@@ -3,7 +3,9 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import os
+from collections.abc import Iterator
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -21,7 +23,9 @@ from gsf.retrieval.text_to_sql import main  # noqa: E402
 
 
 class _FailAfterGenerationApp:
-    def stream(self, state, config):
+    def stream(
+        self, state: dict[str, Any], config: dict[str, Any]
+    ) -> Iterator[dict[str, Any]]:
         yield {
             "validate_intent": {
                 "path_state": {
@@ -36,7 +40,9 @@ class _FailAfterGenerationApp:
         raise KeyError("intent_valid")
 
 
-def test_stream_error_preserves_partial_generated_sql(monkeypatch):
+def test_stream_error_preserves_partial_generated_sql(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
     monkeypatch.setattr(main, "app", _FailAfterGenerationApp())
 
@@ -55,7 +61,9 @@ def test_stream_error_preserves_partial_generated_sql(monkeypatch):
     }
 
 
-def test_nonstreaming_error_exposes_partial_answer(monkeypatch):
+def test_nonstreaming_error_exposes_partial_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
     monkeypatch.setattr(main, "app", _FailAfterGenerationApp())
 
