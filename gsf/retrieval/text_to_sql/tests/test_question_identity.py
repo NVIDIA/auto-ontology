@@ -55,7 +55,9 @@ def test_extraction_uses_standalone_processing_question(
             used_glossary_names=[],
         )
 
-    monkeypatch.setattr(question_extraction, "invoke_with_structured_output", fake_invoke)
+    monkeypatch.setattr(
+        question_extraction, "invoke_with_structured_output", fake_invoke
+    )
 
     result = QuestionExtractionAgent().execute(_state())
 

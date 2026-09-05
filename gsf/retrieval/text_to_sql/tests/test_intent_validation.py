@@ -92,7 +92,9 @@ def _violation(kind: str, source: str, explanation: str) -> ConstraintDispositio
     )
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_unsupported_status_filter_is_a_typed_intent_failure(
     mock_invoke: MagicMock,
 ) -> None:
@@ -109,15 +111,22 @@ def test_unsupported_status_filter_is_a_typed_intent_failure(
     )
 
     result = IntentValidationAgent().execute(
-        _validation_state("List suppliers", "SELECT * FROM suppliers WHERE status='active'")
+        _validation_state(
+            "List suppliers", "SELECT * FROM suppliers WHERE status='active'"
+        )
     )
 
     assert result["decision"] == "intent_invalid"
-    assert result["path_state"]["intent_constraint_dispositions"][0]["status"] == "violated"
+    assert (
+        result["path_state"]["intent_constraint_dispositions"][0]["status"]
+        == "violated"
+    )
     assert "invents status" in result["path_state"]["error"]
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_label_rewrite_is_a_typed_intent_failure(
     mock_invoke: MagicMock,
 ) -> None:
@@ -125,7 +134,9 @@ def test_label_rewrite_is_a_typed_intent_failure(
         is_valid=False,
         constraint_validation_complete=True,
         constraint_dispositions=[
-            _violation("literal", "label = Enterprise", "SQL filters label = Commercial")
+            _violation(
+                "literal", "label = Enterprise", "SQL filters label = Commercial"
+            )
         ],
     )
 
@@ -140,7 +151,9 @@ def test_label_rewrite_is_a_typed_intent_failure(
     assert "label = Enterprise" in result["path_state"]["error"]
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_spurious_distinct_is_a_typed_intent_failure(
     mock_invoke: MagicMock,
 ) -> None:
@@ -158,14 +171,17 @@ def test_spurious_distinct_is_a_typed_intent_failure(
 
     result = IntentValidationAgent().execute(
         _validation_state(
-            "Return every transaction amount", "SELECT DISTINCT amount FROM transactions"
+            "Return every transaction amount",
+            "SELECT DISTINCT amount FROM transactions",
         )
     )
 
     assert result["decision"] == "intent_invalid"
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_formula_drift_is_a_typed_intent_failure(
     mock_invoke: MagicMock,
 ) -> None:
@@ -191,7 +207,9 @@ def test_formula_drift_is_a_typed_intent_failure(
     assert result["decision"] == "intent_invalid"
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_retained_constraints_are_observable_and_pass(
     mock_invoke: MagicMock,
 ) -> None:
@@ -218,10 +236,15 @@ def test_retained_constraints_are_observable_and_pass(
     )
 
     assert result["decision"] == "intent_valid"
-    assert result["path_state"]["intent_constraint_dispositions"][0]["status"] == "retained"
+    assert (
+        result["path_state"]["intent_constraint_dispositions"][0]["status"]
+        == "retained"
+    )
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_incomplete_constraint_validation_fails_closed(
     mock_invoke: MagicMock,
 ) -> None:
@@ -239,7 +262,9 @@ def test_incomplete_constraint_validation_fails_closed(
     assert "incomplete" in result["path_state"]["error"]
 
 
-@patch("gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output")
+@patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output"
+)
 def test_processing_question_constraint_keeps_its_source(
     mock_invoke: MagicMock,
 ) -> None:
