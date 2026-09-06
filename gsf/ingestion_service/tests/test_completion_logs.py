@@ -48,7 +48,9 @@ def _stub_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "get_embed_params", lambda: {})
     monkeypatch.setattr(mod, "ingest_catalog", lambda c: ([1, 2, 3], [1, 2]))
     monkeypatch.setattr(mod, "CatalogEmbeddingRowsOp", lambda **kw: lambda pair: pair)
-    monkeypatch.setattr(mod, "batch_embed", lambda rows, params: None)
+    monkeypatch.setattr(
+        mod, "batch_embed_chunks", lambda rows, params, label="": iter(())
+    )
 
 
 def test_run_ingest_logs_success_with_counts(

@@ -14,6 +14,7 @@ Each module is the single source of truth for a domain:
   reset           — Deleting a database's catalog/semantic rows and embeddings
   candidates      — Vector-hit enrichment at retrieval time
   exploration     — The data- and semantic-layer Exploration graphs
+  search          — Fulltext global search across catalog and semantic rows
   users           — Zone-scope helpers. Users and user-to-zone grants live in
                     Prisma's tables, not here.
 

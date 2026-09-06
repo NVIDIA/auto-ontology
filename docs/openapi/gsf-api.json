@@ -4425,6 +4425,118 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/search/global-search": {
+      "post": {
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first.",
+        "operationId": "post_api_search_global_search",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_GlobalSearchItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Global Search",
+        "tags": ["search"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/search/global-search/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/search/global-search/count": {
+      "post": {
+        "description": "Hit counts by type for the same query as ``/search/global-search``.",
+        "operationId": "post_api_search_global_search_count",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_dict_str__int__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Global Search Count",
+        "tags": ["search"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/search/global-search/count/route.ts",
+        "x-gsf-permissions": {
+          "catalog": ["read"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/semantic-compilation/reset": {
       "post": {
         "description": "semanticCompilationApi.reset — delete every database's compiled semantic\nlayer. Destructive, so it sits behind `manage` rather than the `read` tier\nthat may view the toggle.",
@@ -7152,6 +7264,21 @@
         "title": "DataResponse[DataExplorationGraph]",
         "type": "object"
       },
+      "DataResponse_dict_str__int__": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Data",
+            "type": "object"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[dict[str, int]]",
+        "type": "object"
+      },
       "DataResponse_dict_str__list_ZoneChip___": {
         "additionalProperties": true,
         "properties": {
@@ -7835,6 +7962,168 @@
         "title": "ForeignKeyRef",
         "type": "object"
       },
+      "GlobalSearchBreadcrumb": {
+        "additionalProperties": true,
+        "description": "One hop in a global-search hit's catalog/semantic path.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["name", "type"],
+        "title": "GlobalSearchBreadcrumb",
+        "type": "object"
+      },
+      "GlobalSearchFilters": {
+        "properties": {
+          "description": {
+            "default": false,
+            "title": "Description",
+            "type": "boolean"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          }
+        },
+        "title": "GlobalSearchFilters",
+        "type": "object"
+      },
+      "GlobalSearchItem": {
+        "additionalProperties": true,
+        "description": "One global-search hit: identity plus optional certified/parent path.\n\n``type`` is the entity's label (``Term``, ``Table``, ``ColumnAttribute``, …).\n``table_type`` is set on ``Table`` nodes so the client can tell views apart.",
+        "properties": {
+          "breadcrumbs": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalSearchBreadcrumb"
+            },
+            "title": "Breadcrumbs",
+            "type": "array"
+          },
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "synonyms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Synonyms",
+            "type": "array"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": ["id", "type"],
+        "title": "GlobalSearchItem",
+        "type": "object"
+      },
+      "GlobalSearchRequest": {
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/GlobalSearchFilters"
+          },
+          "search_term": {
+            "minLength": 0,
+            "title": "Search Term",
+            "type": "string"
+          },
+          "text_match_option": {
+            "default": "contains",
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": ["search_term"],
+        "title": "GlobalSearchRequest",
+        "type": "object"
+      },
       "GraphLink": {
         "additionalProperties": true,
         "description": "An undirected term↔term link (two terms sharing at least one table).\n\n``relationship_types`` names the relationship kind(s)\n(``REPRESENTS``, ``HAS_ATTRIBUTE``, ``SEMANTIC_FK``) connecting either\nterm to a table they share, for labeling the connection in the graph.",
@@ -7940,6 +8229,25 @@
         },
         "required": ["data", "count"],
         "title": "ListResponse[ExplorationEdge]",
+        "type": "object"
+      },
+      "ListResponse_GlobalSearchItem_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalSearchItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[GlobalSearchItem]",
         "type": "object"
       },
       "ListResponse_PqlAnalysis_": {

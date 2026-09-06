@@ -12,13 +12,30 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+# This agent's node name in the graph. ``stream_agent_response`` matches
+# ``record_thought`` entries against the *graph* node name, not the agent's,
+# so a thought filed under "sql_execution" would never reach the client.
+_GRAPH_NODE_NAME = "execute_sql_query"
+
+# Execution errors go into a step message. Drivers can return very long ones
+# (echoed query text, stack traces), so cap what gets surfaced.
+_MAX_ERROR_CHARS = 300
+
+
+def _short_error(error: str) -> str:
+    """One-line, length-capped form of a driver error for a step message."""
+    collapsed = " ".join(str(error).split())
+    if len(collapsed) <= _MAX_ERROR_CHARS:
+        return collapsed
+    return collapsed[:_MAX_ERROR_CHARS].rstrip() + "…"
 
 
 class QueryResponse:
@@ -74,7 +91,10 @@ class SQLExecutionAgent(BaseAgent):
     """
 
     def __init__(self):
-        super().__init__("sql_execution")
+        # Any execution exception or missing SQL must route to reconstruction.
+        # Without an explicit failure decision, the generic wrapper can preserve
+        # the preceding intent_valid value, which is invalid for this node's edge map.
+        super().__init__("sql_execution", failure_decision="invalid_sql")
 
     def validate_input(self, state: AgentState) -> bool:
         path_state = state.get("path_state", {})
@@ -103,6 +123,15 @@ class SQLExecutionAgent(BaseAgent):
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)
             path_state["error"] = response_from_db.error
+            # Without this the retry is invisible: the graph loops back to
+            # reconstruction and the user just watches the step list bounce
+            # between "Generating SQL" and "Running query" with no reason
+            # given. The driver's message is already user-facing text.
+            record_thought(
+                path_state,
+                _GRAPH_NODE_NAME,
+                f"Query failed, rewriting it: {_short_error(response_from_db.error)}",
+            )
             return {"decision": "invalid_sql", "path_state": path_state}
 
         return {

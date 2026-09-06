@@ -6,6 +6,7 @@ import type {
 	ChatRequest,
 	ChatStreamEvent,
 	StepEvent,
+	SqlEvent,
 	ResultEvent,
 	ChartsEvent,
 	ErrorEvent,
@@ -25,6 +26,8 @@ const getResponseErrorMessage = async (res: Response): Promise<string> => {
 
 export type ChatEventCallbacks = {
 	onStep: (event: StepEvent) => void;
+	/** The SQL the agent is about to run (or has just rewritten). */
+	onSql?: (event: SqlEvent) => void;
 	onResult: (event: ResultEvent) => void;
 	onCharts?: (event: ChartsEvent) => void;
 	onError: (event: ErrorEvent) => void;
@@ -43,8 +46,8 @@ export type StreamChatCallbacks = ChatEventCallbacks & {
 };
 
 /**
- * Reads an already-open SSE `Response` body, dispatching `step`/`result`/
- * `charts`/`error` events to `callbacks` as they arrive. Shared by
+ * Reads an already-open SSE `Response` body, dispatching `step`/`sql`/
+ * `result`/`charts`/`error` events to `callbacks` as they arrive. Shared by
  * `streamChat` (submitting a new question) and `watchChat` (reattaching to a
  * run already in progress) since both consume the exact same wire format.
  *
@@ -86,6 +89,9 @@ const consumeSseStream = async (res: Response, callbacks: ChatEventCallbacks): P
 				switch (event.type) {
 					case 'step':
 						callbacks.onStep(event);
+						break;
+					case 'sql':
+						callbacks.onSql?.(event);
 						break;
 					case 'result':
 						callbacks.onResult(event);

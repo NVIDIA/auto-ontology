@@ -6,9 +6,16 @@
 
 import type { GraphStep } from '@/types/chat';
 import { Icon, IconName } from '@/common/icons';
+import { SqlBlock } from '@/common/SqlBlock';
 
 type ThinkingMessageProps = {
 	steps: GraphStep[];
+	/**
+	 * The validated query the agent is running, shown while it executes.
+	 * Replaced in place if execution fails and the query is rebuilt, so a run
+	 * that retries doesn't stack up discarded attempts.
+	 */
+	liveSql?: string | null;
 };
 
 const Dot = ({ delay }: { delay: string }) => (
@@ -21,7 +28,7 @@ const Dot = ({ delay }: { delay: string }) => (
 	/>
 );
 
-export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
+export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 	const activeStep = [...steps].reverse().find((s) => s.status === 'active');
 	const completedSteps = steps.filter((s) => s.status === 'completed');
 
@@ -68,7 +75,7 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 					</ul>
 				)}
 
-				<div className="flex flex-col items-start gap-2">
+				<div className="flex w-full flex-col items-start gap-2">
 					{activeStep && (
 						<span className="text-sm text-zinc-800 dark:text-zinc-100">
 							<span>{activeStep.label}</span>
@@ -79,6 +86,20 @@ export const ThinkingMessage = ({ steps }: ThinkingMessageProps) => {
 							)}
 						</span>
 					)}
+
+					{/* Below the active step, not above it: the query is cleared
+					    for execution by the step currently showing, so rendering
+					    it higher up would read as having happened first. */}
+					{liveSql && (
+						<SqlBlock
+							sql={liveSql}
+							label={
+								liveSql.trim().toUpperCase().startsWith('PREDICT') ? 'PQL' : 'SQL'
+							}
+							className="w-full"
+						/>
+					)}
+
 					<span className="flex items-end gap-1">
 						<Dot delay="0s" />
 						<Dot delay="0.2s" />
