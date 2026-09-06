@@ -4,6 +4,7 @@
 
 import logging
 import os
+from typing import Any, Callable, Dict
 
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
@@ -231,12 +232,15 @@ def announce_node_start(node_name: str) -> None:
         logger.debug("No stream writer for node %s", node_name, exc_info=True)
 
 
-def wrap_node_with_logging(node_name: str, fn):
+def wrap_node_with_logging(
+    node_name: str,
+    fn: Callable[[AgentState], Dict[str, Any]],
+) -> Callable[[AgentState], Dict[str, Any]]:
     """
     Wrap a node callable so it logs node visits automatically.
     """
 
-    def wrapped(state):
+    def wrapped(state: AgentState) -> Dict[str, Any]:
         announce_node_start(node_name)
         log_node_visit(state, node_name)
         return fn(state)
