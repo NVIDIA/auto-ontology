@@ -406,6 +406,39 @@ def test_show_columns_skips_a_table_it_cannot_read() -> None:
     assert list(columns["table_name"]) == ["ok"]
 
 
+def test_schema_scope_permission_denial_aborts_after_first_table() -> None:
+    """A USE CATALOG/SCHEMA denial applies to every table and must fail fast."""
+    from databricks.sql.exc import Error as DatabricksError
+
+    db = DatabricksDatabase(_connection_string(), schemas=["s"])
+    issued: list[str] = []
+
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        issued.append(" ".join(sql_text.split()))
+        if sql_text.startswith("SHOW TABLES"):
+            return pd.DataFrame(
+                {"database": ["s", "s"], "tablename": ["first", "second"]}
+            )
+        raise DatabricksError(
+            "PERMISSION_DENIED: User does not have USE CATALOG on Catalog 'main'."
+        )
+
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
+
+    with pytest.raises(DatabricksError, match="USE CATALOG"):
+        db.get_columns()
+
+    assert issued == [
+        "SHOW TABLES IN `main`.`s`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`first`",
+    ]
+
+
 def _describe_rows(constraints: list[tuple[str, str]]) -> pd.DataFrame:
     """DESCRIBE TABLE EXTENDED output: columns, then metadata sections."""
     rows = [

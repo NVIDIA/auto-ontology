@@ -19,6 +19,39 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from gsf.connectors.base import SQLDatabase
 
 
+class IncompleteCatalogExtractionError(RuntimeError):
+    """Raised when listed relations do not have a complete column inventory."""
+
+
+def _relation_keys(frame: Any) -> set[tuple[str, str]]:
+    if frame is None or frame.empty:
+        return set()
+    return {
+        (str(row.get("table_schema") or ""), str(row.get("table_name") or ""))
+        for _, row in frame.iterrows()
+        if str(row.get("table_name") or "")
+    }
+
+
+def _validate_relation_column_coverage(tables: Any, columns: Any) -> None:
+    """Fail closed when a connector lists relations it could not describe."""
+    listed = _relation_keys(tables)
+    if not listed:
+        return
+    described = _relation_keys(columns)
+    missing = sorted(listed - described)
+    if not missing:
+        return
+    preview = ", ".join(
+        f"{schema + '.' if schema else ''}{table}" for schema, table in missing[:10]
+    )
+    suffix = "" if len(missing) <= 10 else f" (+{len(missing) - 10} more)"
+    raise IncompleteCatalogExtractionError(
+        f"Catalog extraction listed {len(listed)} relation(s), but "
+        f"{len(missing)} had no described columns: {preview}{suffix}"
+    )
+
+
 def create_dataframe(connector: "SQLDatabase"):
     """Extract raw schema DataFrames from any SQLDatabase connector."""
     tables = connector.get_tables()
@@ -27,6 +60,7 @@ def create_dataframe(connector: "SQLDatabase"):
     queries = connector.get_queries()
     pks = connector.get_pks()
     fks = connector.get_fks()
+    _validate_relation_column_coverage(tables, columns)
     return tables, columns, views, queries, pks, fks
 
 

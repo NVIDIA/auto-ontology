@@ -49,6 +49,16 @@ _FOREIGN_KEY_RE = re.compile(
     r"FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+([^\s(]+)\s*\(([^)]*)\)",
     re.IGNORECASE,
 )
+_SCOPE_PERMISSION_ERROR_RE = re.compile(
+    r"(?:PERMISSION_DENIED|INSUFFICIENT_PERMISSIONS).*?"
+    r"(?:USE\s+CATALOG|USE\s+SCHEMA|does\s+not\s+have\s+USE)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_scope_permission_error(error: BaseException) -> bool:
+    """Whether one metadata failure proves the whole catalog/schema is unreadable."""
+    return bool(_SCOPE_PERMISSION_ERROR_RE.search(str(error)))
 
 
 def _identifier_list(raw: str) -> list[str]:
@@ -546,13 +556,27 @@ class DatabricksDatabase(SQLDatabase):
                     described = self._run(
                         connection, f"DESCRIBE TABLE EXTENDED {qualified}"
                     )
-                except Error:
-                    # One unreadable table (dropped mid-run, or no grant) must not
-                    # abandon the rest of the schema.
+                except Error as error:
+                    # A missing USE CATALOG/SCHEMA grant invalidates every remaining
+                    # relation. Stop after the first denial instead of issuing and
+                    # swallowing one doomed DESCRIBE per table.
+                    if _is_scope_permission_error(error):
+                        logger.error(
+                            "databricks: schema-scoped DESCRIBE denied for %s.%s "
+                            "(%s); aborting extraction",
+                            schema,
+                            table_name,
+                            type(error).__name__,
+                        )
+                        raise
+                    # One table can still disappear mid-run or carry a narrower grant.
+                    # Generic extraction coverage validation reports the skipped table
+                    # before anything is written to the catalog.
                     logger.warning(
-                        "databricks: DESCRIBE failed for %s.%s; skipping",
+                        "databricks: DESCRIBE failed for %s.%s (%s); skipping",
                         schema,
                         table_name,
+                        type(error).__name__,
                     )
                     continue
 
