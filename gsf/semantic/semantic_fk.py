@@ -246,13 +246,19 @@ def _resolve_via_vdb(
 
     Returns the ColumnAttribute id if a confident LLM match is found, else None.
     """
-    vdb_kwargs = {
-        "where": {
-            "label": "ColumnAttribute",
-            "database_name": database_name,
-            "is_unique": True,
-        }
+    metadata_filter: dict[str, Any] = {
+        "label": "ColumnAttribute",
+        "database_name": database_name,
+        "is_unique": True,
     }
+    # Cross-schema inference is unsafe by default: schemas in one catalog often
+    # represent unrelated business domains that reuse generic id/SKU names.
+    # Declared foreign keys take the fast path before this fallback, so a real
+    # cross-schema relationship remains supported when the source declares it.
+    schema_name = str(col.get("schema_name") or "").strip()
+    if schema_name:
+        metadata_filter["schema_name"] = schema_name
+    vdb_kwargs = {"where": metadata_filter}
     full_query = _build_query_text(col)
     name_query = f"column_name: {col.get('name', '')}"
 
@@ -267,6 +273,17 @@ def _resolve_via_vdb(
             seen_ids.add(hit_id)
             merged.append(hit)
 
+    # Server-side metadata filtering is the primary boundary; repeat schema
+    # enforcement client-side so a backend that ignores/partially supports the
+    # filter cannot leak a cross-domain candidate into the LLM decision.
+    if schema_name and merged:
+        merged = [
+            hit
+            for hit in merged
+            if str((hit.get("metadata") or {}).get("schema_name") or "").casefold()
+            == schema_name.casefold()
+        ]
+
     source_table_id = col.get("table_id")
     if source_table_id and merged:
         merged = [
@@ -279,10 +296,74 @@ def _resolve_via_vdb(
     if not merged:
         return None
 
+    # When retrieval found one or more exact physical-column-name matches, do
+    # not let a semantically similar but differently named unique field (for
+    # example CustomerID -> rowguid) compete with those stronger candidates.
+    # If there is no exact match, retain the existing semantic/value fallback
+    # for conventional pairs such as l_orderkey -> o_orderkey.
+    source_name = str(col.get("name") or "").casefold()
+    exact_name_hits = [
+        hit
+        for hit in merged
+        if str((hit.get("metadata") or {}).get("source_column") or "").casefold()
+        == source_name
+    ]
+    if exact_name_hits:
+        merged = exact_name_hits
+
     selected = _llm_pick_hit(col, merged)
     if selected:
-        return selected
+        selected_hit = next(
+            (
+                hit
+                for hit in merged
+                if (hit.get("metadata") or {}).get("id") == selected
+            ),
+            None,
+        )
+        corroborated = _selected_hit_matches_samples(col, selected_hit, connector)
+        # None means no connector/samples were available, preserving existing
+        # behavior. False means the source samples disproved the LLM-selected
+        # relationship, which must not become authoritative.
+        if corroborated is not False:
+            return selected
+        logger.warning(
+            "semantic FK candidate rejected by sample mismatch: %s.%s -> %s",
+            col.get("table_name"),
+            col.get("name"),
+            selected,
+        )
     return _match_hit_by_sample_values(col, merged, connector)
+
+
+def _selected_hit_matches_samples(
+    col: dict[str, Any],
+    hit: dict[str, Any] | None,
+    connector: SQLDatabase | None,
+) -> bool | None:
+    """Corroborate one LLM-selected target with source-column sample values."""
+    samples = _distinct_samples(col.get("sample_values"))
+    if connector is None or not samples:
+        return None
+    if hit is None:
+        return False
+    sql = _sample_match_sql(
+        hit.get("metadata") or {},
+        samples,
+        getattr(connector, "dialect", None),
+    )
+    if not sql:
+        return False
+    with ProbeExecutor(connector, max_calls=1) as executor:
+        result = executor.run(sql, purpose="semantic FK selected-candidate validation")
+    if not result["ok"]:
+        return False
+    matched_values = {
+        str(next(iter(row.values())))
+        for row in (result.get("rows") or [])
+        if row and next(iter(row.values())) is not None
+    }
+    return set(samples).issubset(matched_values)
 
 
 def _match_hit_by_sample_values(

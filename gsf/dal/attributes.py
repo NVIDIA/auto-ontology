@@ -408,8 +408,10 @@ def find_unlinked_fk_columns(
             s.catalog_column.c.description,
             s.catalog_column.c.sample_values,
             s.catalog_column.c.is_unique,
+            s.catalog_column.c.data_type,
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
             s.column__foreign_key.c.target_column_id.label("fk_target_col_id"),
             # The FK target's *table*, not just its column: `resolve_semantic_fks`
             # skips a candidate whose target table is the source table, which it
@@ -419,6 +421,13 @@ def find_unlinked_fk_columns(
         .select_from(
             s.catalog_column.join(
                 s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
             .outerjoin(
                 s.column__foreign_key,
@@ -443,15 +452,7 @@ def find_unlinked_fk_columns(
         )
     )
     if database_name is not None:
-        statement = statement.select_from(
-            s.catalog_schema.join(
-                s.catalog_database,
-                s.catalog_database.c.id == s.catalog_schema.c.database_id,
-            )
-        ).where(
-            s.catalog_table.c.schema_id == s.catalog_schema.c.id,
-            s.catalog_database.c.name == database_name,
-        )
+        statement = statement.where(s.catalog_database.c.name == database_name)
 
     return [dict(r) for r in store().query_read(statement)]
 

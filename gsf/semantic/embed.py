@@ -55,6 +55,7 @@ class SemanticEmbedder:
             query_text,
             label_filter=["Term"],
             per_label_k=top_k,
+            database_name=self.database_name,
         )
 
         candidates: list[dict[str, Any]] = []

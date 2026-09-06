@@ -80,6 +80,85 @@ def test_vdb_resolution_excludes_same_table_candidates(
     mock_sql_fallback.assert_not_called()
 
 
+@patch("gsf.semantic.semantic_fk._match_hit_by_sample_values")
+@patch("gsf.semantic.semantic_fk._llm_pick_hit", return_value="target-attr")
+def test_vdb_resolution_scopes_inference_to_source_schema(
+    _mock_llm_pick: MagicMock,
+    _mock_sql_fallback: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    retriever.query.side_effect = [
+        [_hit("target-attr", "table-2", schema_name="commerce")],
+        [],
+    ]
+    column = {
+        "id": "source-column",
+        "name": "customer_id",
+        "table_id": "table-1",
+        "table_name": "transactions",
+        "schema_name": "commerce",
+    }
+
+    assert (
+        semantic_fk._resolve_via_vdb(column, retriever, "catalog")
+        == "target-attr"
+    )
+    assert all(
+        call.kwargs["vdb_kwargs"]["where"]["schema_name"] == "commerce"
+        for call in retriever.query.call_args_list
+    )
+
+
+@patch("gsf.semantic.semantic_fk._llm_pick_hit")
+def test_vdb_resolution_rejects_cross_schema_hits_client_side(
+    mock_llm_pick: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    retriever.query.side_effect = [
+        [_hit("manufacturing-order", "table-2", schema_name="manufacturing")],
+        [],
+    ]
+    column = {
+        "id": "source-column",
+        "name": "order_id",
+        "table_id": "table-1",
+        "table_name": "order_details",
+        "schema_name": "commerce",
+    }
+
+    assert semantic_fk._resolve_via_vdb(column, retriever, "catalog") is None
+    mock_llm_pick.assert_not_called()
+
+
+@patch("gsf.semantic.semantic_fk._match_hit_by_sample_values")
+@patch("gsf.semantic.semantic_fk._llm_pick_hit", return_value="customer-id")
+def test_vdb_resolution_prefers_exact_column_names_over_semantic_distractors(
+    mock_llm_pick: MagicMock,
+    _mock_sql_fallback: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    exact = _hit(
+        "customer-id", "customers", source_column="CUSTOMER_ID", schema_name="commerce"
+    )
+    distractor = _hit(
+        "row-guid", "aw-customers", source_column="rowguid", schema_name="commerce"
+    )
+    retriever.query.side_effect = [[distractor, exact], []]
+    column = {
+        "id": "source-column",
+        "name": "customer_id",
+        "table_id": "transactions",
+        "table_name": "transactions",
+        "schema_name": "commerce",
+    }
+
+    assert (
+        semantic_fk._resolve_via_vdb(column, retriever, "catalog")
+        == "customer-id"
+    )
+    assert mock_llm_pick.call_args.args[1] == [exact]
+
+
 @patch("gsf.semantic.semantic_fk._llm_pick_hit")
 def test_vdb_resolution_skips_llm_when_only_same_table_candidate_exists(
     mock_llm_pick: MagicMock,
@@ -179,6 +258,61 @@ def _run_sample_fallback(
             MagicMock(dialect="postgresql"),
         )
     return selected, executor
+
+
+def test_llm_selected_hit_requires_sample_corroboration_when_available() -> None:
+    column = {
+        "name": "customer_id",
+        "table_name": "transactions",
+        "sample_values": '["customer-a", "customer-b"]',
+    }
+    hit = _hit(
+        "row-guid",
+        "aw-customers",
+        source_column="rowguid",
+        schema_name="commerce",
+    )
+    executor = MagicMock()
+    executor.__enter__.return_value = executor
+    executor.run.return_value = _probe_result("different-a", "different-b")
+
+    with patch(
+        "gsf.semantic.semantic_fk.ProbeExecutor",
+        return_value=executor,
+    ):
+        matched = semantic_fk._selected_hit_matches_samples(
+            column, hit, MagicMock(dialect="databricks")
+        )
+
+    assert matched is False
+    assert executor.run.call_count == 1
+
+
+def test_llm_selected_hit_accepts_complete_sample_overlap() -> None:
+    column = {
+        "name": "customer_id",
+        "table_name": "transactions",
+        "sample_values": '["customer-a", "customer-b"]',
+    }
+    hit = _hit(
+        "customer-id",
+        "customers",
+        source_column="customer_id",
+        schema_name="commerce",
+    )
+    executor = MagicMock()
+    executor.__enter__.return_value = executor
+    executor.run.return_value = _probe_result("customer-b", "customer-a")
+
+    with patch(
+        "gsf.semantic.semantic_fk.ProbeExecutor",
+        return_value=executor,
+    ):
+        matched = semantic_fk._selected_hit_matches_samples(
+            column, hit, MagicMock(dialect="databricks")
+        )
+
+    assert matched is True
 
 
 def test_sql_fallback_selects_candidate_containing_all_samples() -> None:
