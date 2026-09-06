@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -58,6 +59,42 @@ def test_schema_policy_rejects_existing_exact_name_in_another_schema(
     with patch("gsf.dal.terms.store", return_value=store):
         with pytest.raises(terms._TermScopeConflictError, match="outside.*schema"):
             terms._guard_term_scope("Product", "table-id")
+
+
+def test_merge_serializes_scope_check_with_term_write(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TERM_AUTO_MERGE_SCOPE", "schema")
+    store = MagicMock()
+    store.query_read.return_value = [{"id": "table-id"}]
+    locked = False
+
+    def query_write(statement, parameters=None):
+        nonlocal locked
+        if isinstance(statement, str):
+            assert "pg_advisory_xact_lock" in statement
+            assert parameters == {"key": "semantic:Product"}
+            locked = True
+            return []
+        if not locked:
+            raise AssertionError("Term write occurred before advisory scope lock")
+        if "RETURNING term.id" in str(statement):
+            return [{"id": "term-id"}]
+        return []
+
+    store.query_write.side_effect = query_write
+
+    def guard(*_args, **_kwargs) -> None:
+        assert locked
+
+    with (
+        patch("gsf.dal.terms.store", return_value=store),
+        patch("gsf.dal.terms.write_transaction", return_value=nullcontext()),
+        patch("gsf.dal.terms._guard_term_scope", side_effect=guard) as scope_guard,
+    ):
+        assert terms.merge_term("Product", "A product", "table-id") == "term-id"
+
+    scope_guard.assert_called_once_with("Product", "table-id", policy="schema")
 
 
 def test_schema_policy_allows_existing_exact_name_in_same_schema(

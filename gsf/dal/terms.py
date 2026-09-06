@@ -94,9 +94,14 @@ def _scope_conflicts(
     )
 
 
-def _guard_term_scope(name: str, table_id: str) -> None:
+def _guard_term_scope(
+    name: str,
+    table_id: str,
+    *,
+    policy: str | None = None,
+) -> None:
     """Reject an automatic exact-name merge outside the configured scope."""
-    policy = _term_scope_policy()
+    policy = policy or _term_scope_policy()
     if policy == "global":
         return
     target_rows = store().query_read(
@@ -506,8 +511,7 @@ def merge_term(
     ):
         return None
 
-    _guard_term_scope(name, table_id)
-
+    policy = _term_scope_policy()
     statement = insert(s.term).values(
         name=name,
         source=SEMANTIC_SOURCE,
@@ -518,6 +522,15 @@ def merge_term(
     # is excluded by `_represented()`, so it is invisible to every read while
     # still occupying `uq_term_name_source` -- it blocks its own name forever.
     with write_transaction():
+        if policy != "global":
+            # Serialize check + upsert across workers/processes. A Python lock only
+            # protects one process; this transaction-scoped advisory lock follows
+            # the shared PostgreSQL store and releases automatically on rollback.
+            store().query_write(
+                "SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))",
+                {"key": f"{SEMANTIC_SOURCE}:{name}"},
+            )
+            _guard_term_scope(name, table_id, policy=policy)
         rows = store().query_write(
             statement.on_conflict_do_update(
                 constraint="uq_term_name_source",
