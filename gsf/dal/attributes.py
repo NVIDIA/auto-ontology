@@ -714,6 +714,25 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         source, target = col_nodes[i], col_nodes[i + 1]
         source_context = contexts.get(source["id"], {})
         target_context = contexts.get(target["id"], {})
+        source_relation = (
+            source_context.get("database_name", ""),
+            source_context.get("schema_name", ""),
+            source_context.get("table_name", ""),
+        )
+        target_relation = (
+            target_context.get("database_name", ""),
+            target_context.get("schema_name", ""),
+            target_context.get("table_name", ""),
+        )
+        if source_relation == target_relation:
+            logger.warning(
+                "find_join_path: rejected same-table cross-column hop %s.%s -> %s.%s",
+                source_context.get("table_name", ""),
+                names.get(source["id"], ""),
+                target_context.get("table_name", ""),
+                names.get(target["id"], ""),
+            )
+            return []
         hops.append(
             {
                 "source_database": source_context.get("database_name", ""),
