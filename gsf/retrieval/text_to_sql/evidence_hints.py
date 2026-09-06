@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Derive short, deterministic SQL hints from BIRD-style evidence text.
+"""Derive short, deterministic SQL hints from evidence text.
 
 Returns an empty string when no evidence is provided or no known patterns match.
 """
@@ -37,7 +37,7 @@ _SLASH_DATE_IN_Q = re.compile(r"\b20\d{2}/\d{1,2}/\d{1,2}\b")
 
 
 def _normalize_time_for_like(literal: str) -> str | None:
-    """Map question time `0:01:54` to BIRD LIKE prefix `1:54`."""
+    """Map question time `0:01:54` to LIKE prefix `1:54`."""
     match = re.match(r"0:(\d{1,2}):(\d{2})$", literal)
     if not match:
         return None

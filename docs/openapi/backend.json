@@ -58,7 +58,7 @@
                 "type": "null"
               }
             ],
-            "description": "Optional authoritative BIRD evidence supplied separately from the question.",
+            "description": "Optional authoritative evidence supplied separately from the question.",
             "title": "Evidence"
           },
           "prediction": {

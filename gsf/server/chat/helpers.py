@@ -36,7 +36,7 @@ class ChatRequest(BaseModel):
     evidence: str | None = Field(
         default=None,
         description=(
-            "Optional authoritative BIRD evidence supplied separately from the question."
+            "Optional authoritative evidence supplied separately from the question."
         ),
     )
     conversation_id: UUID | None = Field(

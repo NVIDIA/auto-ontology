@@ -815,9 +815,8 @@ def fetch_all_tables_without_term(
     """Tables not yet assigned a Term — the work list for term compilation.
 
     Scoped to one database when *database_name* is given. Several databases can
-    share a store (the BIRD benchmark puts dozens in one), and each compile pass
-    tags its embeddings with a database name, so an unscoped pass would attribute
-    one database's tables to another.
+    share a store, and each compile pass tags its embeddings with a database name,
+    so an unscoped pass would attribute one database's tables to another.
 
     Note this reads the table's *own* description, not the fallback: a table
     with no Term has no Term description to fall back to.

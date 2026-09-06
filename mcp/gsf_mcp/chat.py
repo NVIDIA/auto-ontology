@@ -182,7 +182,7 @@ def register(mcp: FastMCP, settings: Settings, client: httpx.AsyncClient) -> Non
                 questions resolve against earlier turns. Requires the caller
                 to hold conversation-write permission, and rejects a second
                 question while the first is still running.
-            evidence: Optional authoritative BIRD evidence supplied separately
+            evidence: Optional authoritative evidence supplied separately
                 from the question.
         """
         body: dict[str, Any] = {"question": question}

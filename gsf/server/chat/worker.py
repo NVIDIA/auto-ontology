@@ -253,7 +253,7 @@ class PrewarmedWorker:
         *subject_token* is the caller's SSO JWT. When present the worker builds
         per-user connectors for this question instead of using the prewarmed
         ones, so SQL executes under that user's own Databricks grants.
-        *evidence* is optional authoritative BIRD evidence kept separate from
+        *evidence* is optional authoritative evidence kept separate from
         the question.
         """
         self._in_q.put(
