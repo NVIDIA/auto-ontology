@@ -13,6 +13,7 @@ import pytest
 
 from gsf.catalog.extract import (
     IncompleteCatalogExtractionError,
+    _relation_keys,
     create_dataframe,
 )
 
@@ -33,6 +34,17 @@ def test_empty_catalog_is_valid() -> None:
 
     assert tables.empty
     assert columns.empty
+
+
+def test_nullable_relation_identifiers_are_normalized_without_boolean_coercion() -> None:
+    frame = pd.DataFrame(
+        [
+            {"table_schema": pd.NA, "table_name": "orders"},
+            {"table_schema": "sales", "table_name": pd.NA},
+        ]
+    )
+
+    assert _relation_keys(frame) == {("", "orders")}
 
 
 def test_every_listed_relation_with_columns_is_valid() -> None:

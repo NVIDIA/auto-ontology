@@ -13,6 +13,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+import pandas as pd
+
 from gsf.catalog.normalize import normalize_columns, normalize_tables
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -26,11 +28,15 @@ class IncompleteCatalogExtractionError(RuntimeError):
 def _relation_keys(frame: Any) -> set[tuple[str, str]]:
     if frame is None or frame.empty:
         return set()
-    return {
-        (str(row.get("table_schema") or ""), str(row.get("table_name") or ""))
-        for _, row in frame.iterrows()
-        if str(row.get("table_name") or "")
-    }
+    keys: set[tuple[str, str]] = set()
+    for _, row in frame.iterrows():
+        raw_schema = row.get("table_schema")
+        raw_table = row.get("table_name")
+        schema = "" if pd.isna(raw_schema) else str(raw_schema)
+        table = "" if pd.isna(raw_table) else str(raw_table)
+        if table:
+            keys.add((schema, table))
+    return keys
 
 
 def _validate_relation_column_coverage(tables: Any, columns: Any) -> None:
