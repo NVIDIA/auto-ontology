@@ -15,8 +15,8 @@ Working question: {question}
 Relevant external knowledge (one entry per term):
 {grounded_kg}
 {resolved_terms_section}
-Extract the formulas, calculation rules, threshold/filter conditions or definitions that are \
-directly needed to answer the working question above. For each such entry, output one \
+Extract any formulas, calculation rules, threshold/filter conditions or definitions from the relevant \
+external knowledge that are directly needed to answer the working question above. For each such entry, output one \
 line in SQL-friendly notation:
   TermName = <formula, threshold, filter condition or definition using column names and values, if present>
 Only include conditions expressible with specific column names and values — skip \
