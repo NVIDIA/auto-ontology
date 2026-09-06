@@ -10,6 +10,7 @@ from typing import Generator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    INTENT_VALIDATION_SKIPPED_AFTER,
     NODE_START_EVENT,
     _prediction_enabled,
     create_graph,
@@ -152,13 +153,6 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
-# How many reconstructions ``route_sql_validation`` allows before it stops
-# re-validating intent and routes straight from syntax validation to
-# execution. Mirrored here so the ``sql`` event still fires on that branch;
-# keep the two in step.
-_INTENT_VALIDATION_SKIPPED_AFTER = 5
-
-
 def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
     """The SQL this node just cleared for execution, or ``""``.
 
@@ -177,7 +171,7 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
       reconstruction over a literal mismatch;
     * without it, ``validate_intent`` accepting the query (``intent_valid``)
       is the last gate, or ``validate_sql_query`` returning ``valid_sql``
-      after more than ``_INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions,
+      after more than ``INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions,
       the branch where ``route_sql_validation`` bypasses intent validation
       entirely.
 
@@ -193,7 +187,7 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
             node_name == "validate_sql_query"
             and decision == "valid_sql"
             and (node_path_state.get("reconstruction_count") or 0)
-            > _INTENT_VALIDATION_SKIPPED_AFTER
+            > INTENT_VALIDATION_SKIPPED_AFTER
         )
     if not cleared:
         return ""

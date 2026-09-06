@@ -56,13 +56,22 @@ logger = logging.getLogger(__name__)
 # now" event; keep the two in step.
 NODE_START_EVENT = "step_start"
 
+# Reconstructions after which ``route_sql_validation`` stops re-validating
+# intent and routes straight from syntax validation to execution. Exported
+# rather than inlined because ``stream_agent_response`` has to know the same
+# threshold to tell which node is the last gate before execution on that
+# branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
+# stop the ``sql`` event firing there.
+INTENT_VALIDATION_SKIPPED_AFTER = 5
+
 
 def route_sql_validation(state: AgentState) -> str:
     """
     Route based on SQL validation result.
 
     Handles SQL validation attempts and fallback logic:
-    - "skip_intent_validation" if SQL is valid but reconstruction_count > 5 (skip intent validation)
+    - "skip_intent_validation" if SQL is valid but reconstruction_count exceeds
+      INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
     - "fallback" after 4 attempts (try constructing from tables)
@@ -92,7 +101,7 @@ def route_sql_validation(state: AgentState) -> str:
     else:
         # SQL is valid - check if we should skip intent validation
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
-        if reconstruction_count > 5:
+        if reconstruction_count > INTENT_VALIDATION_SKIPPED_AFTER:
             logger.info(
                 f"Skipping intent validation after {reconstruction_count} reconstructions"
             )
@@ -505,6 +514,7 @@ def create_graph():
 
 
 __all__ = [
+    "INTENT_VALIDATION_SKIPPED_AFTER",
     "NODE_START_EVENT",
     "TextToSQLPayload",
     "AgentState",

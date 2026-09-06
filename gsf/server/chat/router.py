@@ -159,6 +159,19 @@ _DISCONNECT_POLL_S = 0.1
 # has caught up to the live tail. Also the SSE heartbeat cadence.
 _BUFFER_POLL_S = 0.25
 
+# Headers every SSE response here carries. Shared so the two endpoints cannot
+# drift apart — ``/chat/watch`` is a GET, so it is the one a shared cache would
+# actually be willing to store.
+#
+# ``no-store``, not ``no-cache``: the latter permits storing the response and
+# only requires revalidation before reuse, and these bodies carry the user's
+# SQL and the rows it returned. ``X-Accel-Buffering`` is what stops nginx from
+# buffering the stream; the cache directive has no bearing on that.
+_SSE_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Accel-Buffering": "no",
+}
+
 
 def _resolve_chat_target_db(target_db: str | None) -> str | None:
     """Resolve a catalog database UUID or name to its canonical name."""
@@ -650,10 +663,7 @@ async def chat_completions(
     return StreamingResponse(
         _stream_slot(slot),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 
@@ -688,19 +698,13 @@ async def chat_watch(conversation_id: UUID, request: Request) -> StreamingRespon
         return StreamingResponse(
             iter(["data: [DONE]\n\n"]),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=_SSE_HEADERS,
         )
 
     return StreamingResponse(
         _stream_slot(slot),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 

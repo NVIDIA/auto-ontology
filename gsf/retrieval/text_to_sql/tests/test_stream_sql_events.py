@@ -16,7 +16,13 @@ from typing import Any, Iterator, cast
 import pytest
 
 from gsf.retrieval.text_to_sql.state import TextToSQLPayload
+from gsf.retrieval.text_to_sql.text_to_sql_graph import INTENT_VALIDATION_SKIPPED_AFTER
 from gsf.utils import llm_invoke
+
+# One past the threshold is where ``route_sql_validation`` starts skipping
+# intent validation. Derived from the graph's own constant so retuning the
+# retry budget moves these tests with it instead of silently invalidating them.
+_PAST_SKIP_THRESHOLD = INTENT_VALIDATION_SKIPPED_AFTER + 1
 
 
 @pytest.fixture(name="main")
@@ -275,7 +281,9 @@ def test_skip_intent_branch_waits_for_the_proactive_check(
 
     monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
 
-    events = _run(main, monkeypatch, [_syntax_ok_step("SELECT 1", 6)])
+    events = _run(
+        main, monkeypatch, [_syntax_ok_step("SELECT 1", _PAST_SKIP_THRESHOLD)]
+    )
 
     assert _sql_events(events) == []
 
@@ -312,10 +320,12 @@ def test_skipped_intent_validation_still_emits(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Past 5 reconstructions ``route_sql_validation`` goes straight from
-    syntax validation to execution, so that node becomes the last gate."""
+    """Past the threshold ``route_sql_validation`` goes straight from syntax
+    validation to execution, so that node becomes the last gate."""
 
-    events = _run(main, monkeypatch, [_syntax_ok_step("SELECT 1", 6)])
+    events = _run(
+        main, monkeypatch, [_syntax_ok_step("SELECT 1", _PAST_SKIP_THRESHOLD)]
+    )
 
     assert _sql_events(events) == [("validate_sql_query", "SELECT 1")]
 
@@ -324,10 +334,19 @@ def test_syntax_validation_alone_does_not_emit(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Below the reconstruction threshold, intent validation runs next and may
-    still reject the query."""
+    """At the threshold intent validation still runs next and may reject the
+    query, so this node is not yet the last gate.
 
-    events = _run(main, monkeypatch, [_syntax_ok_step("SELECT 1", 1)])
+    Pinned to the boundary rather than an arbitrary low count: the routing is
+    ``> INTENT_VALIDATION_SKIPPED_AFTER``, so the constant itself is the
+    largest count that must *not* emit here.
+    """
+
+    events = _run(
+        main,
+        monkeypatch,
+        [_syntax_ok_step("SELECT 1", INTENT_VALIDATION_SKIPPED_AFTER)],
+    )
 
     assert _sql_events(events) == []
 
