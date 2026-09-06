@@ -193,51 +193,111 @@ def test_rejected_draft_never_reaches_the_client(
     assert _sql_events(events) == [("validate_intent", "SELECT good")]
 
 
-def test_proactive_value_check_is_the_last_hop_when_enabled(
+def _precheck_step(sql: str, decision: str) -> dict[str, Any]:
+    return {
+        "precheck_value_repair": {
+            "path_state": {"sql_code": sql},
+            "decision": decision,
+        }
+    }
+
+
+def test_proactive_value_check_is_the_only_gate_when_enabled(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With DB_PROBE_PROACTIVE on, that node — not intent validation — clears
-    the query, and it must still be recognised (deduped against the intent
-    event for the same SQL)."""
+    """With the proactive check in the graph it, not intent validation, is the
+    last hop, so ``intent_valid`` alone must not emit."""
+
+    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+
+    events = _run(
+        main,
+        monkeypatch,
+        [_intent_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
+    )
+
+    assert _sql_events(events) == [("precheck_value_repair", "SELECT 1")]
+
+
+def test_proactive_rejection_never_shows_the_query(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A literal mismatch sends an intent-valid query to reconstruction.
+
+    Emitting at ``intent_valid`` would put a query on screen that the
+    proactive check is about to reject — only the rewrite that survives it
+    ever runs.
+    """
+
+    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
 
     events = _run(
         main,
         monkeypatch,
         [
-            _intent_ok_step("SELECT 1"),
+            _intent_ok_step("SELECT bad_literal"),
+            _precheck_step("SELECT bad_literal", "invalid_sql"),
             {
-                "precheck_value_repair": {
-                    "path_state": {"sql_code": "SELECT 1"},
-                    "decision": "valid_sql",
+                "reconstruct_sql": {
+                    "path_state": {
+                        "sql_generation_result": _generated("SELECT good"),
+                        "sql_code": "SELECT bad_literal",
+                    },
+                    "decision": "validate_sql_query",
                 }
             },
+            _syntax_ok_step("SELECT good"),
+            _intent_ok_step("SELECT good"),
+            _precheck_step("SELECT good", "valid_sql"),
         ],
     )
 
-    assert _sql_events(events) == [("validate_intent", "SELECT 1")]
+    assert _sql_events(events) == [("precheck_value_repair", "SELECT good")]
 
 
-def test_proactive_check_alone_still_emits(
+def test_skip_intent_branch_waits_for_the_proactive_check(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Past the reconstruction threshold ``route_sql_validation`` skips intent
+    validation, but with the proactive check enabled it still routes through
+    that node rather than straight to execution."""
+
+    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+
+    events = _run(main, monkeypatch, [_syntax_ok_step("SELECT 1", 6)])
+
+    assert _sql_events(events) == []
+
+
+def test_proactive_check_emits_without_a_preceding_intent_pass(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """It is the only gate on the skip-intent branch, so it has to emit."""
 
+    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+
+    events = _run(main, monkeypatch, [_precheck_step("SELECT 1", "valid_sql")])
+
+    assert _sql_events(events) == [("precheck_value_repair", "SELECT 1")]
+
+
+def test_proactive_node_is_ignored_when_not_in_the_graph(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default build: intent validation is the last gate and emits there."""
+
     events = _run(
         main,
         monkeypatch,
-        [
-            {
-                "precheck_value_repair": {
-                    "path_state": {"sql_code": "SELECT 1"},
-                    "decision": "valid_sql",
-                }
-            }
-        ],
+        [_intent_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
     )
 
-    assert _sql_events(events) == [("precheck_value_repair", "SELECT 1")]
+    assert _sql_events(events) == [("validate_intent", "SELECT 1")]
 
 
 def test_skipped_intent_validation_still_emits(

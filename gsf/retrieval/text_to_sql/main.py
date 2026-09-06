@@ -34,6 +34,13 @@ except ValueError as e:
 graph = create_graph()
 app = graph.compile()
 
+# Whether the proactive value check sits between validation and execution.
+# Read off the graph that was actually built rather than re-reading
+# ``DB_PROBE_PROACTIVE``: ``create_graph`` evaluates that env var once at
+# import, so a later change to it would leave the two disagreeing about which
+# node is the last gate before execution. See ``_sql_about_to_run``.
+_PROACTIVE_VALUE_CHECK_IN_GRAPH = "precheck_value_repair" in graph.nodes
+
 
 def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts = payload.get("custom_prompts", "")
@@ -145,33 +152,33 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
     query that runs. Emitting only once a node has cleared it means the block
     the user sees is always exactly what executes.
 
-    Three nodes can be the last hop before ``execute_sql_query``, so all three
-    have to be recognised (see ``create_graph``):
+    Which node is the *last* one before ``execute_sql_query`` depends on how
+    the graph was built (see ``create_graph``):
 
-    * ``validate_intent`` accepting the query (``intent_valid``) — the usual
-      path;
-    * ``precheck_value_repair`` returning ``valid_sql`` — only built into the
-      graph when ``DB_PROBE_PROACTIVE`` is on, in which case it, not intent
-      validation, is the final hop;
-    * ``validate_sql_query`` returning ``valid_sql`` after more than
-      ``_INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions, where
-      ``route_sql_validation`` bypasses intent validation entirely.
+    * with the proactive value check in the graph, every route to execution is
+      funnelled through ``precheck_value_repair``, so only its ``valid_sql``
+      counts — an ``intent_valid`` query can still be bounced from there to
+      reconstruction over a literal mismatch;
+    * without it, ``validate_intent`` accepting the query (``intent_valid``)
+      is the last gate, or ``validate_sql_query`` returning ``valid_sql``
+      after more than ``_INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions,
+      the branch where ``route_sql_validation`` bypasses intent validation
+      entirely.
 
-    The trade-off this accepts: a run that never gets a query past intent
-    validation (``unconstructable`` after 8 attempts) shows no SQL at all.
+    The trade-off this accepts: a run that never gets a query past its final
+    gate (``unconstructable`` after 8 attempts) shows no SQL at all.
     """
     decision = (node_output or {}).get("decision") or ""
 
-    cleared = (
-        decision == "intent_valid"
-        or (node_name == "precheck_value_repair" and decision == "valid_sql")
-        or (
+    if _PROACTIVE_VALUE_CHECK_IN_GRAPH:
+        cleared = node_name == "precheck_value_repair" and decision == "valid_sql"
+    else:
+        cleared = decision == "intent_valid" or (
             node_name == "validate_sql_query"
             and decision == "valid_sql"
             and (node_path_state.get("reconstruction_count") or 0)
             > _INTENT_VALIDATION_SKIPPED_AFTER
         )
-    )
     if not cleared:
         return ""
 
