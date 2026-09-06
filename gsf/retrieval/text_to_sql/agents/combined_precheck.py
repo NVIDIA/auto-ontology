@@ -29,7 +29,7 @@ skipped for this cycle whenever the join check fails, matching the ordering
 rationale already documented on ``JoinPathCheckAgent``.
 
 Each sub-check keeps its own attempt-limiting state
-(``join_path_repair_attempts``, ``jsonb_path_repair_attempted``,
+(``join_path_repair_attempts``, ``jsonb_path_repair_attempts``,
 ``value_repair_attempted``) exactly as before, since this node calls the
 existing agent classes' ``execute`` directly rather than reimplementing
 their logic — only the orchestration (which run, in what order, how their

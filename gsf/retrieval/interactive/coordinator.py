@@ -107,14 +107,15 @@ def _apply_debug_seed(
     # intent validation almost immediately, cutting off the fresh repair
     # budget this turn is supposed to get.
     #
-    # "jsonb_path_repair_attempted" is JsonbPathCheckAgent's one-shot guard
-    # (see jsonb_path_check.py) — it stays True forever once a path is fixed
-    # once in this phase, so without popping it here the debug turn's
-    # from-scratch reconstruction (which can reintroduce the exact class of
-    # bug the check already fixed, e.g. flattening a nested JSONB key back
-    # out) gets zero path-check coverage instead of the one fresh pass every
-    # other repair guard below already gets. "join_path_repair_attempts" is
-    # the analogous counter for JoinPathCheckAgent — same reasoning.
+    # "jsonb_path_repair_attempts" is JsonbPathCheckAgent's bounded counter
+    # (see jsonb_path_check.py, capped at _MAX_REPAIR_ATTEMPTS) — it stays at
+    # its capped value forever once exhausted in this phase, so without
+    # popping it here the debug turn's from-scratch reconstruction (which can
+    # reintroduce the exact class of bug the check already fixed, e.g.
+    # flattening a nested JSONB key back out) gets zero path-check coverage
+    # instead of the fresh attempt budget every other repair guard below
+    # already gets. "join_path_repair_attempts" is the analogous counter for
+    # JoinPathCheckAgent — same reasoning.
     # "value_repair_attempted" (proactive_value_check.py, empty_result_value_repair.py),
     # "null_jsonb_retry_attempted", and "empty_like_retry_attempted"
     # (empty_like_result_check.py) are the same one-shot-per-phase shape —
@@ -122,7 +123,7 @@ def _apply_debug_seed(
     # SQL instead of silently no-opping because a prior turn already used it.
     for key in (
         "failed_attempts",
-        "jsonb_path_repair_attempted",
+        "jsonb_path_repair_attempts",
         "join_path_repair_attempts",
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
@@ -165,7 +166,7 @@ def _apply_follow_up_seed(
         "sql_response_from_db",
         "similar_questions",
         "failed_attempts",
-        "jsonb_path_repair_attempted",
+        "jsonb_path_repair_attempts",
         "join_path_repair_attempts",
         "value_repair_attempted",
         "null_jsonb_retry_attempted",

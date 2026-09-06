@@ -891,7 +891,7 @@ def fetch_columns_for_table(
 
 
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Tables with a name/type/description summary of each column.
+    """Tables with a name/type/description/sample_values summary of each column.
 
     Returns ``[]`` rather than raising if the query fails: this decorates
     retrieval results, and losing the decoration beats losing the results.
@@ -899,6 +899,15 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     A table with no columns does not appear at all — the column join is inner.
     Left that way deliberately: a column-less table in the catalog is a symptom
     worth seeing where it originates, not something to paper over here.
+
+    ``sample_values`` is what lets a SQL-generating model write a correct
+    ``->``/``->>`` path into a JSONB column instead of guessing a plausible
+    sibling key — this is the only per-column field ``candidates_preparation``'s
+    "back-fill" step (§4a: any table whose columns arrived without
+    sample_values from the vector-index hit) exists to supply. It was
+    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
+    dropped it from this query's rewrite (the Neo4j Cypher version had it);
+    restored so the back-fill isn't a no-op again.
     """
     if not table_ids:
         return []
@@ -915,6 +924,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
                 s.catalog_column.c.format,
+                s.catalog_column.c.sample_values,
             )
             .select_from(
                 _table_join().join(
@@ -957,6 +967,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "data_type": row["data_type"],
                     "description": row["column_description"],
                     "format": row["format"],
+                    "sample_values": parse_sample_values(row["sample_values"]),
                 }
             )
     return list(tables.values())

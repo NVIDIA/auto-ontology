@@ -9,8 +9,15 @@ paths instead of filter literals. Runs before execution so it also catches
 paths that would return non-empty-but-wrong-because-NULL columns, not just
 paths that happen to empty out the whole result. Gated by
 ``DB_PROBE_JSONB_PATH_CHECK`` since it costs a few cheap probes on every query
-that navigates JSONB. Runs at most once per request (guarded) to avoid
-reconstruction loops.
+that navigates JSONB. Runs at most ``_MAX_REPAIR_ATTEMPTS`` times per request —
+mirrors ``join_path_check.py``'s bounded counter rather than a one-shot flag,
+since a reconstruction can trade one wrong key for another (a real key that
+exists but is the wrong sibling) and a second pass, now armed with the
+sibling-container list the first mismatch surfaced, often converges. The
+graph's shared ``reconstruction_count > 5`` cap (see
+``text_to_sql_graph._make_soft_check_router``) already bounds the
+pathological case, so this only needs to stop *this* check from being the
+sole thing driving many of those reconstructions, not prevent looping itself.
 """
 
 from __future__ import annotations
@@ -28,6 +35,12 @@ from gsf.retrieval.text_to_sql.db_probe.jsonb_path_check import (
 )
 from gsf.retrieval.text_to_sql.state import AgentState
 
+# Same cap as join_path_check.py's _MAX_REPAIR_ATTEMPTS, and for the same
+# reason: bounded rather than one-shot, since a reconstruction can trade one
+# wrong key for another (a real sibling key that exists but isn't the one
+# meant) rather than converging on the first attempt.
+_MAX_REPAIR_ATTEMPTS = 2
+
 
 class JsonbPathCheckAgent(BaseAgent):
     """Check JSONB key paths against real DB keys before executing the query."""
@@ -42,8 +55,8 @@ class JsonbPathCheckAgent(BaseAgent):
         path_state = dict(state.get("path_state", {}))
         sql_code = _get_sql_code(path_state)
 
-        # One-shot: never re-check after a repair, so we can't loop here.
-        if not sql_code.strip() or path_state.get("jsonb_path_repair_attempted"):
+        attempts = path_state.get("jsonb_path_repair_attempts", 0)
+        if not sql_code.strip() or attempts >= _MAX_REPAIR_ATTEMPTS:
             return {"decision": "valid_sql", "path_state": path_state}
 
         connectors = state.get("connectors") or []
@@ -100,7 +113,7 @@ class JsonbPathCheckAgent(BaseAgent):
                 len(mismatches),
             )
 
-        path_state["jsonb_path_repair_attempted"] = True
+        path_state["jsonb_path_repair_attempts"] = attempts + 1
 
         if not mismatches:
             # Every mismatch was self-applied — nothing left for reconstruction.
