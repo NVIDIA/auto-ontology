@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
+from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
 from gsf.retrieval.text_to_sql.base import AgentExecutionError, BaseAgent, agent_wrapper
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.text_to_sql.text_to_sql_graph import route_decision
@@ -48,6 +49,17 @@ def test_validation_failure_never_returns_an_empty_state_update() -> None:
         assert "invalid_fixture" in str(exc)
     else:
         raise AssertionError("missing failure decision must fail explicitly")
+
+
+def test_sql_validation_after_malformed_reconstruction_fails_explicitly() -> None:
+    state = _state("validate_sql_query")
+    state["path_state"] = {
+        "sql_code": "SELECT 1",
+        "error": "reconstruction returned no structured SQL result",
+    }
+
+    with pytest.raises(AgentExecutionError, match="sql_validation"):
+        agent_wrapper(SQLValidationAgent())(state)
 
 
 def test_execution_validation_failure_replaces_stale_intent_decision() -> None:
