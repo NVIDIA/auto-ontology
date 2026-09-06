@@ -8,11 +8,6 @@ The traversal gets most of the attention here, and one case in it gets more than
 the rest: **two columns that both point at the same attribute must not be joined
 to each other.** It is a wrong answer that looks completely reasonable — a join between two
 ``customer_id`` columns is exactly the sort of thing a reviewer nods at.
-
-Every path result is also checked against the recursive-CTE oracle in
-``JOIN_PATH_CTE_SQL``. Two independent implementations of the same traversal
-rules disagreeing is a much louder signal than either one disagreeing with a
-hand-written expectation.
 """
 
 from __future__ import annotations
@@ -24,7 +19,7 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
-from sqlalchemy import select, text  # noqa: E402
+from sqlalchemy import select  # noqa: E402
 
 from gsf.dal import attributes as a  # noqa: E402
 from gsf.dal import schema as s  # noqa: E402
@@ -32,64 +27,12 @@ from gsf.dal.session import store  # noqa: E402
 from gsf.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
 
 
-# --------------------------------------------------------------------------
-# _extract_column_hops -- pure, no DB needed
-# --------------------------------------------------------------------------
-
-
-def test_extract_column_hops_pairs_a_single_crossing() -> None:
-    path = [
-        {"id": "c1", "kind": "column"},
-        {"id": "attr1", "kind": "column_attribute"},
-        {"id": "c2", "kind": "column"},
-    ]
-    assert a._extract_column_hops(path) == [("c1", "c2")]
-
-
-def test_extract_column_hops_ignores_co_location_through_a_table() -> None:
-    """Two columns reachable only via a shared `table` node yield no hop.
-
-    This is the exact shape a "same table, no FK" false positive takes:
-    `column -> table -> column` with no `column_attribute` node between them.
-    """
-    path = [
-        {"id": "c1", "kind": "column"},
-        {"id": "t1", "kind": "table"},
-        {"id": "c2", "kind": "column"},
-    ]
-    assert a._extract_column_hops(path) == []
-
-
-def test_extract_column_hops_pairs_a_multi_hop_bridge_through_a_table() -> None:
-    """A table node between two crossings is still used to bridge them.
-
-    `c1 -> attr1 -> c2 -> t1 -> c3 -> attr2 -> c4`: `c2` and `c3` share a
-    table (a legitimate bridge/pivot table), but the table node itself never
-    counts as a crossing -- only the two column_attribute-mediated hops do.
-    """
-    path = [
-        {"id": "c1", "kind": "column"},
-        {"id": "attr1", "kind": "column_attribute"},
-        {"id": "c2", "kind": "column"},
-        {"id": "t1", "kind": "table"},
-        {"id": "c3", "kind": "column"},
-        {"id": "attr2", "kind": "column_attribute"},
-        {"id": "c4", "kind": "column"},
-    ]
-    assert a._extract_column_hops(path) == [("c1", "c2"), ("c3", "c4")]
-
-
-def test_extract_column_hops_empty_path_yields_no_hops() -> None:
-    assert a._extract_column_hops([]) == []
-    assert a._extract_column_hops([{"id": "c1", "kind": "column"}]) == []
-
-
 @pytest.fixture(scope="module", autouse=True)
 def require_schema():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
-        store().query_read("SELECT 1 FROM join_path_edge LIMIT 1")
+        store().query_read("SELECT 1 FROM catalog_table LIMIT 1")
     except Exception as exc:  # noqa: BLE001
         pytest.skip(f"gsf schema unavailable (alembic upgrade head): {exc}")
 
@@ -196,38 +139,6 @@ def world():
 
 
 # --------------------------------------------------------------------------
-# The CTE oracle
-# --------------------------------------------------------------------------
-
-
-def _oracle_path(anchor: str, dest: str) -> list[str] | None:
-    """Shortest path as a node-id list, via the recursive-CTE reference."""
-    rows = store().query_read(
-        text(a.JOIN_PATH_CTE_SQL),
-        {"anchor": anchor, "dest": dest, "max_depth": a.MAX_PATH_DEPTH},
-    )
-    return rows[0]["path"] if rows else None
-
-
-def _assert_agrees_with_oracle(anchor: str, dest: str) -> None:
-    """The two implementations must agree on whether a path exists, and how long.
-
-    Not on *which* path: with ties the BFS and the CTE can legitimately pick
-    different equal-length routes, and pinning one would be pinning an
-    implementation detail rather than the contract.
-    """
-    bfs = a._bfs_path(anchor, dest)
-    oracle = _oracle_path(anchor, dest)
-    assert (bfs is None) == (oracle is None), (
-        f"BFS and CTE disagree on reachability: {bfs} vs {oracle}"
-    )
-    if bfs is not None:
-        assert len(bfs) == len(oracle), (
-            f"BFS and CTE found different-length paths: {bfs} vs {oracle}"
-        )
-
-
-# --------------------------------------------------------------------------
 # find_join_path
 # --------------------------------------------------------------------------
 
@@ -260,9 +171,6 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
             "target_column": "id",
         }
     ]
-    _assert_agrees_with_oracle(
-        joined.columns["orders.customer_id"], joined.columns["customers.id"]
-    )
 
 
 def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None:
@@ -351,7 +259,6 @@ def test_unconnected_columns_yield_no_path(world) -> None:
     world.table("beta")
     world.column("beta", "y")
     assert a.find_join_path(world.columns["alpha.x"], world.columns["beta.y"]) == []
-    _assert_agrees_with_oracle(world.columns["alpha.x"], world.columns["beta.y"])
 
 
 def test_a_missing_column_yields_no_path(joined) -> None:
@@ -391,11 +298,10 @@ def test_two_columns_in_the_same_table_need_no_join(world) -> None:
     node on a BFS path by position would find the 2-edge path
     `column -> table -> column` and mistake co-location for a real crossing
     (confirmed live case: `therapy_details`/`medchg`, no FK between them,
-    reported as a false "1 hop" join). `find_join_path` now works at table
-    granularity and never runs that traversal when both endpoints share a
-    table. The equivalent guard for `find_table_bridge`, which still does
-    column-level BFS, is `_extract_column_hops` -- see
-    `test_extract_column_hops_ignores_co_location_through_a_table`.
+    reported as a false "1 hop" join). `find_join_path` and `find_table_bridge`
+    both now work at table granularity via `_find_table_join_hops`, which only
+    ever walks real semantic FK/owner edges and never the old containment
+    edges -- so the bug can no longer occur for either function.
     """
     world.table("customers")
     world.column("customers", "id", 1)
@@ -491,9 +397,6 @@ def test_a_multi_hop_path_pairs_its_columns_correctly(world) -> None:
         ("customers", "id"),
         ("addresses", "id"),
     ]
-    _assert_agrees_with_oracle(
-        world.columns["orders.customer_id"], world.columns["addresses.id"]
-    )
 
 
 def test_a_cycle_terminates(world) -> None:
@@ -518,7 +421,6 @@ def test_a_cycle_terminates(world) -> None:
     world.references("alpha.beta_id", "beta-id")
 
     assert a.find_join_path(world.columns["alpha.id"], world.columns["island.x"]) == []
-    _assert_agrees_with_oracle(world.columns["alpha.id"], world.columns["island.x"])
 
 
 def test_the_depth_bound_is_enforced(world, monkeypatch) -> None:
@@ -545,15 +447,16 @@ def test_the_depth_bound_is_enforced(world, monkeypatch) -> None:
     assert a.find_join_path(anchor, dest) == []
 
 
-def test_bfs_visits_each_node_once(world) -> None:
+def test_find_table_join_hops_queries_once_regardless_of_fan_out(world) -> None:
     """The property that separates this from a recursive CTE.
 
     A hub attribute referenced by many columns creates many distinct routes to
-    the same node. BFS with a shared visited set expands it once; a per-path
-    visited set expands it once per route. Asserted by counting queries, because
-    the returned path looks identical either way.
+    the same table. The whole database's semantic edges are fetched in one
+    query and walked in memory from there, so the query count never grows
+    with the number of routes through the hub, of which there are 8 here --
+    unlike a per-path traversal, which would re-expand the hub once per route.
     """
-    world.table("hub")
+    world.table("hub", pk=["id"])
     world.column("hub", "id")
     world.attribute("hub-id", owner="hub.id")
     for i in range(8):
@@ -573,13 +476,13 @@ def test_bfs_visits_each_node_once(world) -> None:
 
     a.store = counting_store
     try:
-        a._bfs_path(world.columns["spoke0.hub_id"], world.columns["island.x"])
+        a._find_table_join_hops(
+            world.tables["spoke0"], world.tables["island"], world.databases["shopdb"]
+        )
     finally:
         a.store = original
 
-    # One query per level, bounded by MAX_PATH_DEPTH -- not one per route
-    # through the hub, of which there are 8.
-    assert calls <= a.MAX_PATH_DEPTH
+    assert calls == 1
 
 
 # --------------------------------------------------------------------------
@@ -1079,19 +982,29 @@ def test_hub_siblings_uncapped_when_max_siblings_is_none(world) -> None:
     assert truncated == 0
 
 
-def test_table_bridge_cannot_reach_across_a_shared_hub(hub_and_spokes) -> None:
-    """Documents exactly why find_shared_hub_bridge has to exist separately.
+def test_table_bridge_reaches_across_a_pk_anchored_shared_hub(hub_and_spokes) -> None:
+    """A genuine identity hub is a real bridge, same as find_shared_hub_bridge finds.
 
-    find_table_bridge/find_join_path share a forward-only SEMANTIC_FK
-    traversal, so two spokes connected only through a shared hub (both FKs
-    point *at* the hub, neither points *out* of it) are structurally
-    unreachable from each other -- confirming the guard find_shared_hub_bridge
-    was written to work around, rather than lift.
+    Two spokes connected only through a shared hub (both FKs point *at* the
+    hub, neither points *out* of it) are reachable precisely because the hub
+    column is the hub table's own declared PK -- the same discipline
+    find_shared_hub_bridge applies. Without that PK check, this would be the
+    exact "two unrelated FK columns coincidentally sharing a target"
+    fabrication risk covered by
+    test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute.
     """
     bridge_tables, hops = a.find_table_bridge(
         hub_and_spokes.tables["spoke_a"], hub_and_spokes.tables["spoke_b"]
     )
-    assert (bridge_tables, hops) == ([], [])
+    assert [t["name"] for t in bridge_tables] == ["hub"]
+    assert [(h["source_table"], h["source_column"]) for h in hops] == [
+        ("spoke_a", "hub_id"),
+        ("hub", "id"),
+    ]
+    assert [(h["target_table"], h["target_column"]) for h in hops] == [
+        ("hub", "id"),
+        ("spoke_b", "hub_id"),
+    ]
 
 
 # --------------------------------------------------------------------------

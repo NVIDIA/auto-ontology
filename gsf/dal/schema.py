@@ -772,12 +772,17 @@ for _table in (
     Index(f"ix_{_table.name}_imported_id", _table.c.imported_id)
 
 # ---------------------------------------------------------------------------
-# join_path_edge view -- the traversal surface for find_join_path ONLY
+# join_path_edge view -- no longer read from Python; see note below.
 # ---------------------------------------------------------------------------
 
-#: Edge set for :func:`gsf.dal.attributes.find_join_path`, and **nothing else**.
-#: Named for that function rather than generically, because its contents are
-#: shaped by that one traversal's rules and are wrong for any other:
+#: Was the edge set for :func:`gsf.dal.attributes.find_join_path` and
+#: :func:`gsf.dal.attributes.find_table_bridge`; both now traverse
+#: ``_find_table_join_hops`` instead, which reads ``column__semantic_fk`` and
+#: ``column__has_attribute`` directly rather than through this view. Nothing
+#: in ``gsf/dal/attributes.py`` queries this view anymore -- it's kept
+#: (unused) rather than dropped here, since removing it is a migration
+#: decision, not a side effect of a traversal change. Its original shape,
+#: kept for that future cleanup:
 #:
 #: * ``CONTAINS`` (Table <-> Column) and ``HAS_ATTRIBUTE``
 #:   (Column <-> ColumnAttribute) appear in both directions.

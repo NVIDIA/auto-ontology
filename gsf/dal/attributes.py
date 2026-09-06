@@ -4,10 +4,9 @@
 
 """ColumnAttribute and SEMANTIC_FK reads and writes, plus join-path traversal.
 
-``find_join_path`` projects semantic FK/owner relationships into undirected
-table edges, then runs BFS over tables while retaining the exact join columns
-on every edge. The lower-level ``join_path_edge`` traversal remains as a
-directional graph oracle for its dedicated tests.
+``find_join_path`` and ``find_table_bridge`` both project semantic FK/owner
+relationships into undirected table edges (``_find_table_join_hops``), then
+run BFS over tables while retaining the exact join columns on every edge.
 """
 
 from __future__ import annotations
@@ -18,8 +17,6 @@ import logging
 from typing import Any
 
 from sqlalchemy import (
-    Text,
-    all_,
     and_,
     any_,
     bindparam,
@@ -29,7 +26,7 @@ from sqlalchemy import (
     select,
     update,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, insert
+from sqlalchemy.dialects.postgresql import insert
 
 from gsf.dal import schema as s
 from gsf.dal.datasources import fetch_col_table_contexts
@@ -606,38 +603,6 @@ def fetch_column_attribute_columns_map(
 # Join path traversal
 # ---------------------------------------------------------------------------
 
-#: One BFS level: every node reachable in one edge from the frontier, minus the
-#: nodes already seen. Two round trips per level would be needed to do the
-#: exclusion in Python, so both sets are sent.
-#:
-#: They go as **two array parameters**, ``= ANY(:frontier)`` and
-#: ``<> ALL(:visited)``, rather than as ``IN``/``NOT IN`` over expanding
-#: bindparams. Expanding bindparams render one placeholder per element, so the
-#: parameter count grows with the reachable component -- and the visited set
-#: only ever grows, one level feeding the next. On a hub attribute like
-#: ``customer id``, fanning out across hundreds of columns, that means a SQL
-#: string of a different shape on every level (so a fresh parse and plan each
-#: time, and the statement cache never hits) and, far enough out, Postgres'
-#: 65535-parameter ceiling. Passing arrays makes the statement one fixed shape
-#: with two parameters, whatever the search costs.
-#:
-#: ``= ANY(array)`` is still an index lookup on ``src_id``; this trades nothing
-#: away for it.
-_EXPAND_LEVEL = (
-    select(
-        s.join_path_edge.c.src_kind,
-        s.join_path_edge.c.src_id,
-        s.join_path_edge.c.dst_kind,
-        s.join_path_edge.c.dst_id,
-    )
-    .where(
-        s.join_path_edge.c.src_id == any_(bindparam("frontier", type_=ARRAY(Text))),
-        s.join_path_edge.c.dst_id != all_(bindparam("visited", type_=ARRAY(Text))),
-    )
-    .distinct()
-)
-
-
 _fk_column = s.catalog_column.alias("join_fk_column")
 _fk_table = s.catalog_table.alias("join_fk_table")
 _fk_schema = s.catalog_schema.alias("join_fk_schema")
@@ -746,120 +711,18 @@ def _find_table_join_hops(
     return []
 
 
-def _bfs_path(
-    anchor_col_id: str,
-    dest_col_id: str,
-    *,
-    anchor_kind: str = "column",
-    log_label: str = "find_join_path",
-) -> list[dict[str, Any]] | None:
-    """Shortest path as a node list, or ``None`` when there is none.
-
-    Level-at-a-time BFS with the visited set held here rather than in SQL, and
-    that is not a stylistic choice. A recursive CTE tracks visited nodes *per
-    path*, so every distinct route to a node is expanded separately — fine on a
-    fixture, exponential on a catalog where a hub attribute like ``customer id``
-    fans out across hundreds of columns. A shared visited set bounds the cost by
-    the size of the reachable component, however many paths run through it.
-
-    Real paths are 2-4 hops, so this is typically 3-5 indexed queries.
-
-    *anchor_kind* defaults to ``"column"``; :func:`find_table_bridge` passes
-    ``"table"`` to reuse the same BFS engine (and the same ``join_path_edge``
-    traversal rules) starting from a Table node instead. :func:`find_join_path`
-    no longer goes through here — it uses :func:`_find_table_join_hops`.
-    """
-    visited: dict[str, tuple[str, str | None]] = {anchor_col_id: (anchor_kind, None)}
-    frontier = [anchor_col_id]
-
-    for _ in range(MAX_PATH_DEPTH):
-        if not frontier:
-            return None
-        rows = store().query_read(
-            _EXPAND_LEVEL,
-            {"frontier": frontier, "visited": list(visited)},
+def _table_database_id(table_id: str) -> str | None:
+    """The database a table belongs to, for scoping :func:`_find_table_join_hops`."""
+    rows = store().query_read(
+        select(s.catalog_schema.c.database_id)
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_table.c.schema_id == s.catalog_schema.c.id
+            )
         )
-        next_frontier: list[str] = []
-        for row in rows:
-            node = row["dst_id"]
-            if node in visited:
-                # Two edges into the same node within one level: the first wins,
-                # which is what BFS means. Without this the parent pointer could
-                # be overwritten by a longer route discovered in the same batch.
-                continue
-            visited[node] = (row["dst_kind"], row["src_id"])
-            next_frontier.append(node)
-            if node == dest_col_id:
-                return _walk_back(visited, dest_col_id)
-        frontier = next_frontier
-
-    logger.warning(
-        "%s: gave up after %s levels for %s -> %s",
-        log_label,
-        MAX_PATH_DEPTH,
-        anchor_col_id,
-        dest_col_id,
+        .where(s.catalog_table.c.id == table_id)
     )
-    return None
-
-
-def _walk_back(
-    visited: dict[str, tuple[str, str | None]], dest: str
-) -> list[dict[str, Any]]:
-    """Follow parent pointers back to the anchor and return the path forwards."""
-    path: list[dict[str, Any]] = []
-    node: str | None = dest
-    while node is not None:
-        kind, parent = visited[node]
-        path.append({"id": node, "kind": kind})
-        node = parent
-    path.reverse()
-    return path
-
-
-def _extract_column_hops(path: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    """Reconstruct real crossings (column -> column_attribute -> column) from a BFS path.
-
-    A BFS path over ``join_path_edge`` can interleave ``column <-> table`` edges
-    (purely structural containment — a table has many columns) with the actual
-    semantic crossings (``column <-> column_attribute``, via HAS_ATTRIBUTE /
-    SEMANTIC_FK). Filtering the path down to column-kind nodes and pairing them
-    by position (0&1, 2&3, ...) silently discards what actually connects each
-    pair — so two columns that merely share a table (column -> table -> column,
-    no attribute in between at all) would be asserted as a join. Confirmed
-    live in the Neo4j-era code this replaces: two columns sharing a table with
-    zero FK relationship between them were reported as a "1 hop" join.
-
-    This walks the path in order and only emits a hop where a column reaches a
-    column_attribute, and that same attribute is reached by another column —
-    i.e. an actual FK crossing, not co-location. A ``table`` node is still
-    needed and still used, just never as the crossing itself: it's how the
-    path steps from a crossing's landing column, through its table, to a
-    *different* column that continues the next crossing (e.g. bridging two
-    hops through a shared pivot table).
-
-    Pre-existing on main, not branch-specific: the Postgres rewrite of
-    find_join_path/find_table_bridge dropped this guard when it moved off
-    Cypher, independent of anything in this branch's own history. Worth
-    surfacing to whoever owns main, since any other branch built on top of
-    it inherits the same false positive.
-
-    Returns a list of (source_column_id, target_column_id) pairs, in path order.
-    """
-    hops: list[tuple[str, str]] = []
-    pending_src: str | None = None
-    for i in range(len(path) - 1):
-        cur, nxt = path[i], path[i + 1]
-        if cur["kind"] == "column" and nxt["kind"] == "column_attribute":
-            pending_src = cur["id"]
-        elif (
-            pending_src is not None
-            and cur["kind"] == "column_attribute"
-            and nxt["kind"] == "column"
-        ):
-            hops.append((pending_src, nxt["id"]))
-            pending_src = None
-    return hops
+    return rows[0]["database_id"] if rows else None
 
 
 def _name_columns(node_ids: list[str]) -> dict[str, str]:
@@ -1190,28 +1053,29 @@ def find_table_bridge(
 ) -> tuple[list[dict], list[dict]]:
     """Find bridge tables AND their join hops (if any) needed to connect two tables.
 
-    Runs the same forward-only traversal as :func:`find_join_path`, but
-    starts from table_a as a whole rather than a single representative
-    column — a table's own primary key is usually a pure identity column
-    with no outgoing FK of its own (the real FK, e.g. ``member_fan_pivot``,
-    is a *different* column on the same table), so anchoring on the PK
-    alone would miss the real connection or find an unrelated coincidental
-    one. Starting from the Table node and letting CONTAINS (undirected, same
-    as find_join_path) walk into every one of its own columns finds the real
-    path regardless of which specific column carries the FK. Tried in both
-    directions since SEMANTIC_FK is forward-only.
+    Delegates to :func:`_find_table_join_hops`, the same table-level
+    traversal :func:`find_join_path` uses — table_a and table_b are already
+    table IDs, so there's no need for find_join_path's column-to-table
+    resolution step.
+
+    Tried in both directions, same as before: the traversal isn't fully
+    symmetric even now. A real outgoing FK (table_a -> owner) is always a
+    legitimate step; entering a table from its *owner* side only works when
+    that table's own declared PK is the shared attribute (see
+    ``_find_table_join_hops``'s docstring) — so a table reachable as the
+    anchor isn't guaranteed reachable as the destination, or vice versa.
 
     IMPORTANT: an unrestricted traversal can find a real but coincidental
-    forward path through a table that was never presented to (or judged by)
-    the relevance filter at all — e.g. two tables that both happen to FK
-    into an unrelated "preferences" table for reasons having nothing to do
-    with the actual question. That's not "the filter missed a bridge it
-    should have kept", it's introducing information the filter never had a
-    chance to accept or reject. So when *allowed_table_ids* is given, a
-    found path is only returned if every intermediate table on it is a
-    member of that set (typically: the tables that were candidates *before*
-    the relevance filter ran) — this keeps the function to "restore a
-    bridge the filter had and dropped", never "discover a new one".
+    path through a table that was never presented to (or judged by) the
+    relevance filter at all — e.g. two tables that both happen to FK into an
+    unrelated "preferences" table for reasons having nothing to do with the
+    actual question. That's not "the filter missed a bridge it should have
+    kept", it's introducing information the filter never had a chance to
+    accept or reject. So when *allowed_table_ids* is given, a found path is
+    only returned if every intermediate table on it is a member of that set
+    (typically: the tables that were candidates *before* the relevance
+    filter ran) — this keeps the function to "restore a bridge the filter
+    had and dropped", never "discover a new one".
 
     Returns ``(bridge_tables, hops)``:
       - ``bridge_tables``: ``{id, name}`` dicts for every distinct table
@@ -1226,14 +1090,16 @@ def find_table_bridge(
         and downstream SQL-gen had to guess the join, which produced a
         fabricated join between two unrelated PK columns.
 
-    Both empty if no path exists in either direction, or the only path
-    found steps outside *allowed_table_ids*.
+    Both empty if the tables aren't in the same database, no path exists in
+    either direction, or the only path found steps outside
+    *allowed_table_ids*.
     """
     for src, dst in ((table_a_id, table_b_id), (table_b_id, table_a_id)):
+        database_id = _table_database_id(src)
+        if not database_id:
+            continue
         try:
-            path = _bfs_path(
-                src, dst, anchor_kind="table", log_label="find_table_bridge"
-            )
+            hop_pairs = _find_table_join_hops(src, dst, database_id)
         except Exception:
             logger.warning(
                 "find_table_bridge: query failed for %s -> %s",
@@ -1242,14 +1108,22 @@ def find_table_bridge(
                 exc_info=True,
             )
             continue
-        if not path:
+        if not hop_pairs:
             continue
 
-        bridge_ids = [
-            n["id"]
-            for n in path
-            if n["kind"] == "table" and n["id"] not in (table_a_id, table_b_id)
-        ]
+        col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
+        names = _name_columns(col_ids)
+        col_ctx = fetch_col_table_contexts(col_ids)
+
+        # Every hop's target table is the next table on the path; the last
+        # hop's target is dst itself, so everything before it is a bridge.
+        bridge_ids = list(
+            dict.fromkeys(
+                col_ctx.get(target_id, {}).get("table_id")
+                for _, target_id in hop_pairs[:-1]
+            )
+        )
+        bridge_ids = [tid for tid in bridge_ids if tid]
         if not bridge_ids:
             continue
         if allowed_table_ids is not None and not set(bridge_ids).issubset(
@@ -1262,26 +1136,6 @@ def find_table_bridge(
                 dst,
             )
             continue
-
-        # Only the real SEMANTIC_FK/HAS_ATTRIBUTE crossings count as join hops
-        # -- a bridge table with no column reaching another column through a
-        # column_attribute node has no real crossing at all, just co-location
-        # (see find_join_path and _extract_column_hops, which this reuses),
-        # and is rejected rather than handed back as a table we can't
-        # actually explain how to join.
-        hop_pairs = _extract_column_hops(path)
-        if not hop_pairs:
-            logger.warning(
-                "find_table_bridge: path %s -> %s found bridge table(s) but "
-                "no real FK crossing — discarding (co-location, not a join)",
-                src,
-                dst,
-            )
-            continue
-
-        col_ids = list(dict.fromkeys(cid for pair in hop_pairs for cid in pair))
-        names = _name_columns(col_ids)
-        col_ctx = fetch_col_table_contexts(col_ids)
 
         hops: list[dict] = []
         for source_id, target_id in hop_pairs:
@@ -1374,28 +1228,3 @@ def find_kept_table_bridges(
             len(pairs),
         )
     return list(found.values()), bridge_paths, skipped
-
-
-#: The same traversal as a recursive CTE, used by the tests as a cross-check.
-#:
-#: Correct, and *not* what :func:`_bfs_path` does -- its ``path`` array is a
-#: per-path visited set, so it re-expands every distinct route to a node rather
-#: than visiting each once, which is the scaling problem described there. Kept
-#: beside the BFS rather than in the test file so the two sit together and a
-#: change to the edge rules is obviously a change to both.
-JOIN_PATH_CTE_SQL = """
-WITH RECURSIVE walk(node_id, node_kind, path, depth) AS (
-    SELECT CAST(:anchor AS text), 'column'::text, ARRAY[CAST(:anchor AS text)], 0
-  UNION ALL
-    SELECT e.dst_id, e.dst_kind, w.path || e.dst_id, w.depth + 1
-      FROM walk w
-      JOIN join_path_edge e ON e.src_id = w.node_id
-     WHERE NOT e.dst_id = ANY(w.path)
-       AND w.depth < :max_depth
-       AND w.node_id <> CAST(:dest AS text)
-)
-SELECT path, depth FROM walk
- WHERE node_id = CAST(:dest AS text)
- ORDER BY depth, path
- LIMIT 1
-"""

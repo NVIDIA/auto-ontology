@@ -1652,11 +1652,10 @@ def _term_link_edges():
 def _link_path_bfs(anchor_id: str, dest_id: str) -> list[dict[str, Any]] | None:
     """Shortest term-to-term path as a node list, or ``None`` when there is none.
 
-    Level-at-a-time BFS with the visited set held in Python, for the same reason
-    :func:`gsf.dal.attributes._bfs_path` does it that way: a recursive CTE tracks
-    visited nodes per *path*, so a hub attribute shared by hundreds of columns
-    fans out exponentially. A shared visited set bounds the work by the size of
-    the reachable component instead.
+    Level-at-a-time BFS with the visited set held in Python rather than as a
+    recursive CTE: a CTE tracks visited nodes per *path*, so a hub attribute
+    shared by hundreds of columns fans out exponentially. A shared visited set
+    bounds the work by the size of the reachable component instead.
 
     Each entry of the returned list is ``{id, kind, relationship}``, where
     ``relationship`` is the edge type walked to *reach* that node -- ``None`` on
