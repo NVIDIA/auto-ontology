@@ -19,6 +19,7 @@ def _hit(
     table_name: str = "target_table",
     schema_name: str = "public",
     source_column: str = "id",
+    database_name: str = "database",
 ) -> dict:
     return {
         "metadata": {
@@ -28,6 +29,7 @@ def _hit(
             "schema_name": schema_name,
             "source_column": source_column,
             "is_unique": True,
+            "database_name": database_name,
         },
         "score": score,
         "text": f"ColumnAttribute {attr_id}",
@@ -44,6 +46,22 @@ def test_evidence_policy_defaults_and_validates(
     monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "guess")
     with pytest.raises(ValueError, match="SEMANTIC_FK_EVIDENCE_POLICY"):
         semantic_fk._evidence_policy()
+
+
+def test_invalid_evidence_policy_fails_before_reading_or_writing_edges(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "guess")
+
+    with (
+        patch("gsf.semantic.semantic_fk.find_unlinked_fk_columns") as find_candidates,
+        patch("gsf.semantic.semantic_fk.merge_semantic_fk") as merge_edge,
+        pytest.raises(ValueError, match="SEMANTIC_FK_EVIDENCE_POLICY"),
+    ):
+        semantic_fk.resolve_semantic_fks("database")
+
+    find_candidates.assert_not_called()
+    merge_edge.assert_not_called()
 
 
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
@@ -100,7 +118,14 @@ def test_vdb_resolution_scopes_inference_to_source_schema(
 ) -> None:
     retriever = MagicMock()
     retriever.query.side_effect = [
-        [_hit("target-attr", "table-2", schema_name="commerce")],
+        [
+            _hit(
+                "target-attr",
+                "table-2",
+                schema_name="commerce",
+                database_name="catalog",
+            )
+        ],
         [],
     ]
     column = {
@@ -127,7 +152,14 @@ def test_vdb_resolution_rejects_cross_schema_hits_client_side(
 ) -> None:
     retriever = MagicMock()
     retriever.query.side_effect = [
-        [_hit("manufacturing-order", "table-2", schema_name="manufacturing")],
+        [
+            _hit(
+                "manufacturing-order",
+                "table-2",
+                schema_name="manufacturing",
+                database_name="catalog",
+            )
+        ],
         [],
     ]
     column = {
@@ -135,6 +167,34 @@ def test_vdb_resolution_rejects_cross_schema_hits_client_side(
         "name": "order_id",
         "table_id": "table-1",
         "table_name": "order_details",
+        "schema_name": "commerce",
+    }
+
+    assert semantic_fk._resolve_via_vdb(column, retriever, "catalog") is None
+    mock_llm_pick.assert_not_called()
+
+
+@patch("gsf.semantic.semantic_fk._llm_pick_hit")
+def test_vdb_resolution_rejects_cross_database_hits_client_side(
+    mock_llm_pick: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    retriever.query.side_effect = [
+        [
+            _hit(
+                "other-customer",
+                "table-2",
+                schema_name="commerce",
+                database_name="other-catalog",
+            )
+        ],
+        [],
+    ]
+    column = {
+        "id": "source-column",
+        "name": "customer_id",
+        "table_id": "table-1",
+        "table_name": "transactions",
         "schema_name": "commerce",
     }
 
@@ -150,10 +210,18 @@ def test_vdb_resolution_prefers_exact_column_names_over_semantic_distractors(
 ) -> None:
     retriever = MagicMock()
     exact = _hit(
-        "customer-id", "customers", source_column="CUSTOMER_ID", schema_name="commerce"
+        "customer-id",
+        "customers",
+        source_column="CUSTOMER_ID",
+        schema_name="commerce",
+        database_name="catalog",
     )
     distractor = _hit(
-        "row-guid", "aw-customers", source_column="rowguid", schema_name="commerce"
+        "row-guid",
+        "aw-customers",
+        source_column="rowguid",
+        schema_name="commerce",
+        database_name="catalog",
     )
     retriever.query.side_effect = [[distractor, exact], []]
     column = {
@@ -180,7 +248,12 @@ def test_required_evidence_policy_rejects_selection_without_samples(
 ) -> None:
     monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "required")
     retriever = MagicMock()
-    hit = _hit("target-attr", "table-2", schema_name="commerce")
+    hit = _hit(
+        "target-attr",
+        "table-2",
+        schema_name="commerce",
+        database_name="catalog",
+    )
     retriever.query.side_effect = [[hit], []]
     column = {
         "id": "source-column",

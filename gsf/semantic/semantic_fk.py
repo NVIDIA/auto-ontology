@@ -83,6 +83,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     Runs after the taxonomy while-loop in ``compile_semantic_layer``.
     Returns the total number of SEMANTIC_FK edges created.
     """
+    evidence_policy = _evidence_policy()
     candidates = find_unlinked_fk_columns(database_name)
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
@@ -156,7 +157,13 @@ def resolve_semantic_fks(database_name: str) -> int:
     def _resolve_one(index: int, col: dict[str, Any]) -> bool:
         _log_start(index, col)
         try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
+            attr_id = _resolve_via_vdb(
+                col,
+                retriever,
+                database_name,
+                connector,
+                evidence_policy=evidence_policy,
+            )
             if attr_id:
                 merge_semantic_fk(col["id"], attr_id)
                 logger.debug(
@@ -248,6 +255,8 @@ def _resolve_via_vdb(
     retriever: Retriever,
     database_name: str,
     connector: SQLDatabase | None = None,
+    *,
+    evidence_policy: str | None = None,
 ) -> str | None:
     """Search the semantic VDB for a matching ColumnAttribute and return its id.
 
@@ -290,12 +299,21 @@ def _resolve_via_vdb(
     # Server-side metadata filtering is the primary boundary; repeat schema
     # enforcement client-side so a backend that ignores/partially supports the
     # filter cannot leak a cross-domain candidate into the LLM decision.
-    if schema_name and merged:
+    if merged:
         merged = [
             hit
             for hit in merged
-            if str((hit.get("metadata") or {}).get("schema_name") or "").casefold()
-            == schema_name.casefold()
+            if str(
+                (hit.get("metadata") or {}).get("database_name") or ""
+            ).casefold()
+            == database_name.casefold()
+            and (
+                not schema_name
+                or str(
+                    (hit.get("metadata") or {}).get("schema_name") or ""
+                ).casefold()
+                == schema_name.casefold()
+            )
         ]
 
     source_table_id = col.get("table_id")
@@ -340,7 +358,8 @@ def _resolve_via_vdb(
         # behavior. False means the source samples disproved the LLM-selected
         # relationship, which must not become authoritative.
         if corroborated is True or (
-            corroborated is None and _evidence_policy() == "when_available"
+            corroborated is None
+            and (evidence_policy or _evidence_policy()) == "when_available"
         ):
             return selected
         reason = "sample mismatch" if corroborated is False else "evidence unavailable"
