@@ -11,6 +11,27 @@ from gsf.retrieval.text_to_sql.agents.sql_reconstruction import (
     SQLReconstructionAgent,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
+from gsf.retrieval.text_to_sql.text_to_sql_graph import route_sql_validation
+
+
+def test_reconstruction_visits_activate_the_existing_graph_budget() -> None:
+    path_state: dict = {}
+
+    for expected in range(1, 7):
+        assert sql_reconstruction._increment_reconstruction_count(path_state) == expected
+
+    assert path_state["reconstruction_count"] == 6
+    assert (
+        route_sql_validation({"decision": "valid_sql", "path_state": path_state})
+        == "skip_intent_validation"
+    )
+
+
+def test_reconstruction_counter_preserves_existing_attempts() -> None:
+    path_state = {"reconstruction_count": 3}
+
+    assert sql_reconstruction._increment_reconstruction_count(path_state) == 4
+    assert path_state["reconstruction_count"] == 4
 
 
 @pytest.mark.parametrize(

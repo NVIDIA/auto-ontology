@@ -131,6 +131,13 @@ search_queries empty."""
 # ------------------------------------------------------------------
 
 
+def _increment_reconstruction_count(path_state: dict) -> int:
+    """Record one reconstruction node visit for the graph's retry budget."""
+    count = int(path_state.get("reconstruction_count", 0)) + 1
+    path_state["reconstruction_count"] = count
+    return count
+
+
 class SQLReconstructionAgent(BaseAgent):
     """Reconstruct failed SQL, diagnosing root cause and tracking history."""
 
@@ -275,6 +282,8 @@ class SQLReconstructionAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
+        reconstruction_count = _increment_reconstruction_count(path_state)
+        self.logger.info("SQL reconstruction visit: %d", reconstruction_count)
         llm = state["llm"]
         error = path_state.get("error", "")
         incorrect_response = path_state.get("sql_generation_result")
