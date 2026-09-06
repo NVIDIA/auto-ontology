@@ -11,11 +11,11 @@ from contextlib import contextmanager
 from typing import Any, Iterator
 
 from gsf.utils import get_embed_params
-from gsf.utils.embedding import batch_embed
+from gsf.utils.embedding import batch_embed_chunks
 from gsf.utils.embedding_rows import (
     CatalogEmbeddingRowsOp,
 )
-from nemo_retriever.operators.vdb import IngestVdbOperator
+from nemo_retriever.common.vdb.records import to_client_vdb_records
 from gsf.connectors.base import SQLDatabase
 
 from gsf.catalog import ingest_catalog
@@ -67,7 +67,13 @@ def run_ingest(connector: SQLDatabase) -> None:
     Three straight-line steps, formerly a ``Graph()`` chain of three operators.
     Only the middle one is still a library operator; the catalog write is
     GSF-owned (:func:`gsf.catalog.ingest_catalog`) and the embed step goes
-    through :func:`gsf.utils.embedding.batch_embed`.
+    through :func:`gsf.utils.embedding.batch_embed_chunks`.
+
+    Embedding is the long pole — minutes of remote round trips against tens of
+    seconds for everything else — so its chunks are written to pgvector as they
+    arrive rather than buffered into one DataFrame. That keeps peak memory to a
+    chunk, overlaps the write with the next chunk's embed, and means a failure
+    three minutes in has already persisted most of the catalog.
     """
     if connector is None:
         raise ValueError("Connector is not set")
@@ -84,14 +90,25 @@ def run_ingest(connector: SQLDatabase) -> None:
     embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(
         (tables_df, columns_df)
     )
-    result_df = batch_embed(embed_rows, embed_params)
 
+    data_vdb = None
     rows_written = 0
-    if result_df is not None and not result_df.empty:
-        rows_written = len(result_df)
-        data_vdb = get_data_vdb(database_name=database_name, reset=True)
-        ingest_op = IngestVdbOperator(vdb=data_vdb)
-        ingest_op(result_df.to_dict(orient="records"))
+    for chunk in batch_embed_chunks(embed_rows, embed_params, label=database_name):
+        records = to_client_vdb_records(chunk)
+        if not records:
+            # Every row in the chunk came back without an embedding. Already
+            # logged as a warning by the embed step; nothing to write.
+            continue
+        if data_vdb is None:
+            # Reset lazily, on the first chunk that actually has something to
+            # write. Resetting up front would delete the live catalog and then
+            # spend minutes embedding, so a failed embed — a bad key, a dead
+            # endpoint — would leave retrieval with nothing instead of with the
+            # previous run's rows.
+            data_vdb = get_data_vdb(database_name=database_name, reset=True)
+        rows_written += data_vdb.run(records)
+
+    if rows_written:
         logger.info("Tabular ingest result: %d rows written to pgvector", rows_written)
     else:
         # Previously silent, which read exactly like a successful embed. An empty

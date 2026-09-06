@@ -21,7 +21,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { z } from 'zod';
@@ -53,6 +53,7 @@ const repoRoot = resolve(frontendDir, '..');
 const apiDir = resolve(frontendDir, 'app/api');
 const backendSpecPath = resolve(repoRoot, 'docs/openapi/backend.json');
 const outputPath = resolve(repoRoot, 'docs/openapi/gsf-api.json');
+const mcpSpecPath = resolve(repoRoot, 'mcp/gsf_mcp/gsf-api.json');
 
 /** `app/api/terms/[term_id]/route.ts` → `/api/terms/{term_id}`. */
 const routePath = (filePath: string): string => {
@@ -641,6 +642,12 @@ writeFileSync(outputPath, `${JSON.stringify(spec, null, 2)}\n`);
 execFileSync('npx', ['prettier', '--write', '--log-level', 'silent', outputPath], {
 	cwd: frontendDir,
 });
+
+// The MCP server builds its tool surface from this spec and has to run from an
+// ordinary `pip`/`uvx` install, where there is no docs/ directory to read — so a
+// copy ships inside the package. Copied after Prettier so the two are
+// byte-identical; CI diffs both paths, and gsf-mcp's tests compare them.
+copyFileSync(outputPath, mcpSpecPath);
 
 const paths = Object.keys(spec.paths as Json).length;
 console.log(`${relative(repoRoot, outputPath)}: ${paths} paths, ${operations.length} operations`);

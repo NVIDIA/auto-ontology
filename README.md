@@ -242,6 +242,12 @@ The web UI manages the UUID automatically. An API-created conversation can be
 opened in the UI at `/chat?focus=<conversation_id>` when it belongs to the
 signed-in user.
 
+## MCP server
+
+Agent harnesses such as Cursor and Claude Desktop can query your data through
+GSF's [MCP](https://modelcontextprotocol.io) server. See
+[`mcp/`](./mcp/) to run it and [`docs/mcp.md`](./docs/mcp.md) for the details.
+
 ## License
 
 GSF is licensed under the [Apache License, Version 2.0](./LICENSE).

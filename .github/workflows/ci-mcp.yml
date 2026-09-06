@@ -1,0 +1,125 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: MCP CI
+
+# gsf-mcp is its own distribution with its own lightweight dependency set, so
+# it gets its own workflow rather than riding along with the backend's: it needs
+# no database drivers, no model tooling, and no NGC access, and installs in
+# seconds.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mcp/**'
+      - '.github/workflows/ci-mcp.yml'
+
+jobs:
+  lint_and_format:
+    name: Ruff Check & Format
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Ruff lint
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: '0.15.9'
+          args: check
+          src: './mcp'
+
+      - name: Ruff format check
+        uses: astral-sh/ruff-action@v3
+        with:
+          version: '0.15.9'
+          args: format --check
+          src: './mcp'
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # Installs the package itself, so the tests exercise the same import
+      # path and packaged spec that a user's `uvx gsf-mcp` would.
+      - name: Sync dependencies
+        working-directory: mcp
+        run: uv sync
+
+      - name: Pytest
+        working-directory: mcp
+        run: uv run pytest -q
+
+  packaging:
+    name: Wheel installs and runs standalone
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      # The failure this guards is specific: the server reads the OpenAPI spec
+      # from disk, so a wheel that omits it builds and installs cleanly and then
+      # dies at startup. Building and running outside the source tree is the
+      # only way to catch that.
+      - name: Build wheel
+        working-directory: mcp
+        run: uv build --wheel --out-dir dist
+
+      - name: Install the wheel into a clean environment
+        run: |
+          uv venv /tmp/probe
+          VIRTUAL_ENV=/tmp/probe uv pip install mcp/dist/*.whl
+
+      - name: Server starts and lists its tools from outside the repo
+        run: |
+          cd /tmp
+          /tmp/probe/bin/python - <<'PY'
+          import asyncio
+          from fastmcp import Client
+          from gsf_mcp.config import load_settings
+          from gsf_mcp.server import build_server
+          from gsf_mcp.tools import CURATED
+
+          mcp, client = build_server(load_settings())
+
+          # Derived rather than a literal count: the curated tools exist only if
+          # the wheel carried the spec, which is what this job is guarding, and a
+          # tool added or renamed upstream should not have to be restated here.
+          expected = {spec.name for spec in CURATED} | {"ask_question", "check_readiness"}
+
+          async def main() -> None:
+              try:
+                  async with Client(mcp) as session:
+                      names = {t.name for t in await session.list_tools()}
+                      icons = session.initialize_result.serverInfo.icons or []
+              finally:
+                  await client.aclose()
+              assert names == expected, sorted(names ^ expected)
+              # The icon is read from disk too, so it fails the same way.
+              assert icons, "the wheel did not carry the icon"
+              print(f"ok: {len(names)} tools and an icon from an installed wheel")
+
+          asyncio.run(main())
+          PY

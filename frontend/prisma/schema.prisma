@@ -113,6 +113,9 @@ model User {
   conversations Conversation[]
   analytics     ConversationAnalytics[]
   apiKeys       Apikey[]
+  oauthApps     OauthApplication[]
+  oauthTokens   OauthAccessToken[]
+  oauthConsents OauthConsent[]
 
   @@unique([email])
   @@map("user")
@@ -231,5 +234,87 @@ model Apikey {
   @@index([referenceId])
   @@index([key])
   @@map("apikey")
+  @@schema("frontend")
+}
+
+// OAuth tables owned by the Better Auth `mcp` plugin, which makes GSF the
+// authorization server MCP clients log in against. Field names and types must
+// match the plugin's schema exactly, like the other Better Auth tables above.
+//
+// The models are `Oauth*`, not `OAuth*`, for the same reason `Apikey` is not
+// `ApiKey`: the adapter looks a model up as `prisma[<plugin's model name>]`, and
+// the plugin names these `oauthApplication`, `oauthAccessToken`, and
+// `oauthConsent`. Prisma derives the delegate from the model name, so
+// `OAuthApplication` would generate `prisma.oAuthApplication` and every call
+// would fail at runtime.
+//
+// A client that registers itself has no owning user, so `userId` is optional
+// here even though the plugin declares it required — a dynamically registered
+// MCP client belongs to no one until someone consents to it.
+//
+// These sit in `frontend` with the rest of Better Auth. `public` is Alembic's
+// (see `gsf/dal/schema.py`); listing it on the datasource would let Prisma
+// propose dropping GSF tables.
+model OauthApplication {
+  id           String   @id
+  name         String
+  icon         String?
+  metadata     String?
+  clientId     String   @unique
+  clientSecret String?
+  redirectUrls String
+  type         String
+  disabled     Boolean? @default(false)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accessTokens OauthAccessToken[]
+  consents     OauthConsent[]
+
+  @@index([userId])
+  @@map("oauthApplication")
+  @@schema("frontend")
+}
+
+// `refreshToken` is nullable although the plugin declares it required: not every
+// grant issues one, and a NOT NULL column would turn that into a failed insert.
+// Postgres permits many nulls under a unique index, so uniqueness still holds
+// for the tokens that do exist.
+model OauthAccessToken {
+  id                    String            @id
+  accessToken           String            @unique
+  refreshToken          String?           @unique
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  clientId              String
+  application           OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                String?
+  user                  User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes                String
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthAccessToken")
+  @@schema("frontend")
+}
+
+model OauthConsent {
+  id           String            @id
+  clientId     String
+  application  OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes       String
+  consentGiven Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthConsent")
   @@schema("frontend")
 }
