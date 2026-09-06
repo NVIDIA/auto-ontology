@@ -4,8 +4,8 @@
 
 import os
 
-# Shared with entity_coverage — controls how many entity noun phrases are extracted.
-_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "5"))
+# Controls how many entity noun phrases are extracted for SQL generation.
+_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "

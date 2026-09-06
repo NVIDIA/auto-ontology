@@ -8,9 +8,15 @@ from __future__ import annotations
 
 import os
 
-# Maximum number of entity noun phrases to extract per question.
-# Raise via ENTITY_EXTRACTION_MAX_ENTITIES env var for complex multi-metric queries.
-_MAX_ENTITIES: int = int(os.environ.get("ENTITY_EXTRACTION_MAX_ENTITIES", "10"))
+# Maximum number of entity noun phrases to extract per question during clarification.
+# Raise via CLARIFICATION_MAX_ENTITIES env var for complex multi-metric queries.
+# Falls back to SQL_GEN_MAX_ENTITIES (then 5) when unset.
+_MAX_ENTITIES: int = int(
+    os.environ.get(
+        "CLARIFICATION_MAX_ENTITIES",
+        os.environ.get("SQL_GEN_MAX_ENTITIES", "5"),
+    )
+)
 
 
 def format_glossary_section(glossary: list[dict[str, str]] | None) -> str:
