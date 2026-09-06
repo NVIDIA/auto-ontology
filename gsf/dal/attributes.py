@@ -724,6 +724,13 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
             target_context.get("schema_name", ""),
             target_context.get("table_name", ""),
         )
+        if not all(source_relation) or not all(target_relation):
+            logger.warning(
+                "find_join_path: rejected incomplete table context for %s -> %s",
+                source["id"],
+                target["id"],
+            )
+            return []
         if source_relation == target_relation:
             logger.warning(
                 "find_join_path: rejected same-table cross-column hop %s.%s -> %s.%s",

@@ -45,6 +45,21 @@ def test_same_table_cross_column_path_is_rejected(target_column: str) -> None:
         assert attributes.find_join_path("source", "target") == []
 
 
+def test_incomplete_table_context_is_rejected() -> None:
+    with (
+        patch("gsf.dal.attributes._bfs_path", return_value=_path()),
+        patch(
+            "gsf.dal.attributes._name_columns",
+            return_value={"source": "customer_id", "target": "id"},
+        ),
+        patch(
+            "gsf.dal.attributes.fetch_col_table_contexts",
+            return_value={"source": _context("orders")},
+        ),
+    ):
+        assert attributes.find_join_path("source", "target") == []
+
+
 def test_cross_table_path_is_preserved() -> None:
     with (
         patch("gsf.dal.attributes._bfs_path", return_value=_path()),
