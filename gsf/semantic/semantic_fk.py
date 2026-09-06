@@ -19,6 +19,7 @@ Algorithm
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -49,6 +50,7 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
+_EVIDENCE_POLICIES = {"when_available", "required"}
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
 description and a list of candidate primary-key columns retrieved from a \
@@ -61,6 +63,18 @@ Rules:
 - Only pick a candidate when you are confident it is the PK being referenced.
 - Do NOT guess. If unsure, return null.
 """
+
+
+def _evidence_policy() -> str:
+    value = os.environ.get(
+        "SEMANTIC_FK_EVIDENCE_POLICY", "when_available"
+    ).strip().lower()
+    if value not in _EVIDENCE_POLICIES:
+        raise ValueError(
+            "SEMANTIC_FK_EVIDENCE_POLICY must be one of: "
+            + ", ".join(sorted(_EVIDENCE_POLICIES))
+        )
+    return value
 
 
 def resolve_semantic_fks(database_name: str) -> int:
@@ -325,10 +339,14 @@ def _resolve_via_vdb(
         # None means no connector/samples were available, preserving existing
         # behavior. False means the source samples disproved the LLM-selected
         # relationship, which must not become authoritative.
-        if corroborated is not False:
+        if corroborated is True or (
+            corroborated is None and _evidence_policy() == "when_available"
+        ):
             return selected
+        reason = "sample mismatch" if corroborated is False else "evidence unavailable"
         logger.warning(
-            "semantic FK candidate rejected by sample mismatch: %s.%s -> %s",
+            "semantic FK candidate rejected (%s): %s.%s -> %s",
+            reason,
             col.get("table_name"),
             col.get("name"),
             selected,

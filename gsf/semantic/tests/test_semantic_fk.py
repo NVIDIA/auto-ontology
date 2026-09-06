@@ -34,6 +34,18 @@ def _hit(
     }
 
 
+def test_evidence_policy_defaults_and_validates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SEMANTIC_FK_EVIDENCE_POLICY", raising=False)
+    assert semantic_fk._evidence_policy() == "when_available"
+    monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "required")
+    assert semantic_fk._evidence_policy() == "required"
+    monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "guess")
+    with pytest.raises(ValueError, match="SEMANTIC_FK_EVIDENCE_POLICY"):
+        semantic_fk._evidence_policy()
+
+
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
     # Legacy Column nodes still store sample_values as a JSON string.
     assert semantic_fk._format_sample_values('["1", "2"]') == "sample_values: 1, 2"
@@ -157,6 +169,29 @@ def test_vdb_resolution_prefers_exact_column_names_over_semantic_distractors(
         == "customer-id"
     )
     assert mock_llm_pick.call_args.args[1] == [exact]
+
+
+@patch("gsf.semantic.semantic_fk._match_hit_by_sample_values", return_value=None)
+@patch("gsf.semantic.semantic_fk._llm_pick_hit", return_value="target-attr")
+def test_required_evidence_policy_rejects_selection_without_samples(
+    _mock_llm_pick: MagicMock,
+    _mock_sql_fallback: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SEMANTIC_FK_EVIDENCE_POLICY", "required")
+    retriever = MagicMock()
+    hit = _hit("target-attr", "table-2", schema_name="commerce")
+    retriever.query.side_effect = [[hit], []]
+    column = {
+        "id": "source-column",
+        "name": "customer_id",
+        "table_id": "table-1",
+        "table_name": "transactions",
+        "schema_name": "commerce",
+        "sample_values": None,
+    }
+
+    assert semantic_fk._resolve_via_vdb(column, retriever, "catalog") is None
 
 
 @patch("gsf.semantic.semantic_fk._llm_pick_hit")
