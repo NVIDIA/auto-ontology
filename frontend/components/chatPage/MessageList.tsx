@@ -31,9 +31,14 @@ export const MessageList = ({
 }: MessageListProps) => {
 	const bottomRef = useRef<HTMLDivElement>(null);
 
+	// Re-pin to the bottom whenever the rendered content grows. `steps` is
+	// tracked by identity rather than length because a step event that only
+	// attaches a node's thought keeps the list the same length while making it
+	// taller, and `liveSql` because the SQL block lands between step events —
+	// neither would scroll into view otherwise.
 	useEffect(() => {
 		bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-	}, [messages.length, isLoading, steps.length]);
+	}, [messages.length, isLoading, steps, liveSql]);
 
 	if (messageListLoading) {
 		return (
