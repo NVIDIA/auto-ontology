@@ -274,6 +274,12 @@ def stream_agent_response(
                 if (chunk or {}).get("type") == NODE_START_EVENT:
                     started = chunk.get("node")
                     if started:
+                        # A node that raises never produces an update, so
+                        # tracking only completions would blame whichever node
+                        # last succeeded — or report ``graph_start`` when the
+                        # very first node fails. The announcement is the only
+                        # signal that names the node actually running.
+                        last_node = started
                         yield {
                             "type": "step",
                             "phase": "start",
