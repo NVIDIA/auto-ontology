@@ -24,7 +24,10 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from gsf.retrieval.text_to_sql.agents.empty_like_result_check import _get_sql_code
+from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
+    _get_sql_code,
+    _set_sql_code,
+)
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
@@ -98,13 +101,7 @@ class JsonbPathCheckAgent(BaseAgent):
         # matched this pattern anyway).
         fixed_sql, mismatches = try_self_apply_fixes(mismatches, sql_code)
         if fixed_sql != sql_code:
-            response = path_state.get("sql_generation_result")
-            if response is not None:
-                path_state["sql_generation_result"] = response.model_copy(
-                    update={"sql_code": fixed_sql}
-                )
-            else:
-                path_state["sql_code"] = fixed_sql
+            _set_sql_code(path_state, fixed_sql)
             sql_code = fixed_sql
             self.logger.info(
                 "[%s] JSONB path check — self-applied flattened-key fix(es), "

@@ -37,7 +37,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from gsf.dal.datasources import fetch_tables_by_ids, find_table_id_by_name
-from gsf.retrieval.text_to_sql.agents.empty_like_result_check import _get_sql_code
+from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
+    _get_sql_code,
+    _set_sql_code,
+)
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import (
     detect_degenerate_sql,
     detect_missing_aggregation,
@@ -250,15 +253,10 @@ class JoinPathCheckAgent(BaseAgent):
 
     @staticmethod
     def _write_sql_code(path_state: Dict[str, Any], sql_code: str) -> None:
-        """Store a self-applied *sql_code* back onto whichever field the
-        rest of the pipeline reads it from."""
-        response = path_state.get("sql_generation_result")
-        if response is not None:
-            path_state["sql_generation_result"] = response.model_copy(
-                update={"sql_code": sql_code}
-            )
-        else:
-            path_state["sql_code"] = sql_code
+        """Store a self-applied *sql_code* — see ``_set_sql_code`` for why
+        this must update every field a downstream consumer might read it
+        from, not just one."""
+        _set_sql_code(path_state, sql_code)
 
     @staticmethod
     def _merge_missing_bridge_tables(

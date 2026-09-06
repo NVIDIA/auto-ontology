@@ -703,7 +703,7 @@ Rules:
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 
-{domain_rules}{custom_analyses}{join_paths}User's question:
+{domain_rules}{custom_analyses}{join_paths}{enriched_question}User's question:
 {question}
 
 Candidate tables:

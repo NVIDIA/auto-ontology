@@ -977,12 +977,32 @@ class CandidatePreparationAgent(BaseAgent):
                 sorted(chains) if chains else "(no cross-table chains found)",
             )
 
+        # Optional and not specific to any one caller — only present when an
+        # upstream flow (e.g. interactive clarification) populated
+        # state["enriched_question"]. Deliberately NOT the full
+        # state["evidence"] blob: that also carries sort/scalar/output-shape
+        # hints and a raw Phase 1 SQL reference, which are noise for a
+        # table-relevance decision. Guard sentence lives inside this block
+        # (not a standalone Rules bullet) so the prompt is byte-identical to
+        # before when no enriched question is present.
+        enriched_question_text = (state.get("enriched_question") or "").strip()
+        enriched_question_section = ""
+        if enriched_question_text:
+            enriched_question_section = (
+                "The expanded question below is the same question with all formulas, "
+                "thresholds, and terms resolved. Use it for context when deciding "
+                "which tables are relevant.\n"
+                "Expanded question:\n"
+                f"{enriched_question_text}\n\n"
+            )
+
         prompt_text = TABLE_RELEVANCE_FILTER_PROMPT.format(
             question=question,
             tables_summary=tables_summary,
             domain_rules=domain_rules_section,
             custom_analyses=ca_section,
             join_paths=join_paths_section,
+            enriched_question=enriched_question_section,
         )
 
         messages = [

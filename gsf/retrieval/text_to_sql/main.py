@@ -100,6 +100,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "llm": llm_client,
         "initial_question": processing_question,
         "evidence": payload.get("evidence") or "",
+        "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,

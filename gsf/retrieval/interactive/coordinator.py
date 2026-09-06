@@ -341,6 +341,13 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     payload: TextToSQLPayload = {
         "question": question,
         "evidence": evidence,
+        # Same merged/clarified question that expanded_question_note carries
+        # into evidence above, minus the hint blocks and SQL reference —
+        # for consumers (e.g. the relevance filter) that want the clarified
+        # intent but not sort/scalar/output-shape noise.
+        "enriched_question": (
+            session.working_question if session.working_question != question else ""
+        ),
         "data_retriever": session.data_retriever,
         "semantic_retriever": session.semantic_retriever,
         "connectors": session.connectors,

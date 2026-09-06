@@ -806,10 +806,26 @@ def try_self_apply_missing_bridge_fixes(
                 # graph-known column, not whatever was originally written.
                 _set_column_name(prior_col, hop_prior["source_column"])
                 prior_col_sql = prior_col.sql(dialect=d)
+                # Both quoted for the same reason _value_overlap's probe SQL
+                # quotes its identifiers: hub_table is a table this self-apply
+                # is introducing for the first time, not one already present
+                # in relevant_tables — so the "Re-run
+                # quote_known_mixed_case_identifiers" pass after self-apply
+                # (join_path_check.py agent, right below this call site)
+                # has no metadata for it and can't fix its casing after the
+                # fact. Left unquoted, an unquoted mixed-case name like
+                # "Communication" gets silently case-folded by Postgres to
+                # "communication", which then doesn't exist — this was the
+                # exact cause of two observed "relation ... does not exist"
+                # submission failures (a self-applied bridge join to a real,
+                # correctly-identified table that nonetheless failed at
+                # execution because it was never quoted).
                 hub_prior_col_sql = exp.column(
-                    hop_prior["target_column"], table=alias
+                    hop_prior["target_column"], table=alias, quoted=True
                 ).sql(dialect=d)
-                hub_table_sql = exp.table_(hub_table, alias=alias).sql(dialect=d)
+                hub_table_sql = exp.table_(hub_table, alias=alias, quoted=True).sql(
+                    dialect=d
+                )
                 try:
                     new_join = sqlglot.parse_one(
                         f"SELECT 1 FROM x JOIN {hub_table_sql} "

@@ -36,6 +36,10 @@ class TextToSQLPayload(TypedDict):
 
     question: str
     evidence: NotRequired[str]
+    # The clarified/merged question on its own — no hint blocks or SQL
+    # references mixed in (unlike `evidence`, which carries those too).
+    # Omitted by callers that never enrich the question.
+    enriched_question: NotRequired[str]
     processing_question: NotRequired[str]
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]
@@ -55,6 +59,7 @@ class AgentState(TypedDict):
     llm: ChatNVIDIA
     initial_question: str
     evidence: NotRequired[str]
+    enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str
     # Caller-supplied branch override; see TextToSQLPayload.prediction.

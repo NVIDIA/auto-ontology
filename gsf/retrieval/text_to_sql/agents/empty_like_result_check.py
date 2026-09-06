@@ -174,6 +174,30 @@ def _get_sql_code(path_state: dict) -> str:
     return getattr(llm_result, "sql_code", "") or ""
 
 
+def _set_sql_code(path_state: dict, sql_code: str) -> None:
+    """Store a self-applied *sql_code* onto every field a downstream
+    consumer might read it from.
+
+    ``path_state["sql_code"]`` and ``path_state["sql_generation_result"].sql_code``
+    are two separate copies read with different precedence by different
+    consumers (``_get_sql_code`` above — used by ``sql_execution`` and the
+    other combined_precheck sub-checks — prefers ``sql_code``; ``response.py``'s
+    ``calculation_response``, which builds what actually gets submitted,
+    reads only ``sql_generation_result.sql_code``). Writing just one of them
+    left the two out of sync: a self-applied precheck fix (e.g. a
+    missing-bridge join rewrite) could land in ``sql_generation_result`` only,
+    so ``sql_execution`` validated the pre-fix SQL while submission sent the
+    post-fix one — never executed or validated at all. Always write both so
+    they can't diverge, regardless of which one a given reader prefers.
+    """
+    path_state["sql_code"] = sql_code
+    response = path_state.get("sql_generation_result")
+    if response is not None:
+        path_state["sql_generation_result"] = response.model_copy(
+            update={"sql_code": sql_code}
+        )
+
+
 def build_empty_like_reconstruction_error(
     essential: list[str],
     non_essential: list[str],
