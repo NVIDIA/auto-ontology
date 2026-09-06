@@ -69,6 +69,32 @@ _RETRYABLE_TOKENS = (
     "litellm",
 )
 
+# Exception *type* names that are always transient/retryable regardless of
+# message text. Needed because str(exception) for openai's typed errors
+# (e.g. openai.InternalServerError) returns only the message body — never
+# the class name — so a message like "upstream connect error or
+# disconnect/reset before headers... Connection refused" silently fails
+# every _RETRYABLE_TOKENS substring check above even though
+# "InternalServerError" is right there in the token list. Matching on
+# type(e).__name__ catches these regardless of how the provider phrases
+# the underlying message.
+_RETRYABLE_EXCEPTION_TYPES = frozenset(
+    {
+        "InternalServerError",
+        "APIConnectionError",
+        "APITimeoutError",
+        "RateLimitError",
+        "ServiceUnavailableError",
+    }
+)
+
+
+def _is_retryable(e: Exception) -> bool:
+    """Whether *e* signals a transient, retryable server condition."""
+    return any(tok in str(e) for tok in _RETRYABLE_TOKENS) or (
+        type(e).__name__ in _RETRYABLE_EXCEPTION_TYPES
+    )
+
 
 class _TimeoutSession(_requests.Session):
     """requests.Session that enforces a default timeout on every request."""
@@ -274,7 +300,7 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
                 continue
             raise
         except Exception as e:
-            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
@@ -350,7 +376,7 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
-            is_retryable = any(tok in str(e) for tok in _RETRYABLE_TOKENS)
+            is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
