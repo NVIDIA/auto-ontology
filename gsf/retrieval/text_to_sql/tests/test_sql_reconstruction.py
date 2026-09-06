@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import SimpleNamespace
 from typing import cast
 
 import pytest
@@ -25,6 +26,52 @@ def test_reconstruction_visits_activate_the_existing_graph_budget() -> None:
         route_sql_validation({"decision": "valid_sql", "path_state": path_state})
         == "skip_intent_validation"
     )
+
+
+def test_execute_persists_reconstruction_visit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    agent = SQLReconstructionAgent()
+    monkeypatch.setattr(
+        agent,
+        "_analyze_error",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            error_type=sql_reconstruction.ErrorType.FIXABLE,
+            search_queries=[],
+            explanation="",
+        ),
+    )
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            sql_code="SELECT 1",
+            thought="preserved intent",
+            response="ok",
+        ),
+    )
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "Return one row",
+            "messages": [],
+            "llm": object(),
+            "path_state": {
+                "error": "invalid SQL",
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT broken",
+                    thought="initial interpretation",
+                    response="",
+                ),
+                "relevant_tables": [],
+            },
+        },
+    )
+
+    result = agent.execute(state)
+
+    assert result["path_state"]["reconstruction_count"] == 1
+    assert result["path_state"]["sql_generation_result"].sql_code == "SELECT 1"
 
 
 def test_reconstruction_counter_preserves_existing_attempts() -> None:
