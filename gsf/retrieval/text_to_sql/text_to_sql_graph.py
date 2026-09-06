@@ -221,16 +221,13 @@ def log_node_visit(state, node_name: str):
 def announce_node_start(node_name: str) -> None:
     """Tell the stream this node is starting, before it does its work.
 
-    ``app.stream()`` only yields a node's update once that node has *finished*,
-    so a client driven by those updates always displays the previous node's
-    label — a 20s reconstruction shows up as "Validating intent" hanging.
-    LangGraph's custom stream channel is the way out: what a node writes here
-    is streamed the moment it is written, so the label the user sees is the
-    work actually in progress. Paired with the ``phase: "end"`` event that the
-    node's update produces (which carries its ``thought``) — see
-    ``stream_agent_response``.
+    ``app.stream()`` only yields a node's update once it has *finished*, so a
+    client driven by updates alone shows the previous node's label — a 20s
+    reconstruction appears as "Validating intent" hanging. The custom channel
+    is streamed the moment it is written, which is what makes the label track
+    the work in progress. See ``stream_agent_response``.
 
-    Never fatal: outside a streaming context there is no writer to get, and a
+    Best-effort: outside a streaming context there is no writer to get, and a
     missing progress event must not take the run down with it.
     """
     try:

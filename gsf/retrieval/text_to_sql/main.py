@@ -156,27 +156,16 @@ def _extract_answer(final_state: dict) -> dict:
 def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
     """The SQL this node just cleared for execution, or ``""``.
 
-    Deliberately *not* emitted when a generation node produces SQL: syntax
-    validation and intent validation both send the query back for
-    reconstruction, so a draft shown at generation time is frequently not the
-    query that runs. Emitting only once a node has cleared it means the block
-    the user sees is always exactly what executes.
+    Deliberately not emitted at generation time: both validations routinely
+    send a query back for reconstruction, so a draft is frequently not what
+    runs. The consequence is that a run which never clears its final gate
+    (``unconstructable`` after 8 attempts) shows no SQL at all.
 
-    Which node is the *last* one before ``execute_sql_query`` depends on how
-    the graph was built (see ``create_graph``):
-
-    * with the proactive value check in the graph, every route to execution is
-      funnelled through ``precheck_value_repair``, so only its ``valid_sql``
-      counts — an ``intent_valid`` query can still be bounced from there to
-      reconstruction over a literal mismatch;
-    * without it, ``validate_intent`` accepting the query (``intent_valid``)
-      is the last gate, or ``validate_sql_query`` returning ``valid_sql``
-      after more than ``INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions,
-      the branch where ``route_sql_validation`` bypasses intent validation
-      entirely.
-
-    The trade-off this accepts: a run that never gets a query past its final
-    gate (``unconstructable`` after 8 attempts) shows no SQL at all.
+    Which node *is* the final gate is decided by ``create_graph`` and is not
+    visible here: the proactive value check, when built in, sits after intent
+    validation and can still bounce a query to reconstruction, and past
+    ``INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions intent validation is
+    skipped entirely.
     """
     decision = (node_output or {}).get("decision") or ""
 
@@ -192,10 +181,8 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
     if not cleared:
         return ""
 
-    # ``SQLValidationAgent`` copies the accepted query into ``sql_code``, and
-    # that is what ``SQLExecutionAgent`` runs. Fall back to the generation
-    # result only for the intent-validation early return that fires when
-    # there is no validated SQL to check.
+    # ``sql_code`` is what ``SQLExecutionAgent`` runs; the generation result
+    # only covers intent validation's early return when there is no SQL.
     sql = (node_path_state.get("sql_code") or "").strip()
     if sql:
         return sql
@@ -259,12 +246,10 @@ def stream_agent_response(
 
     last_node: str | None = None
     try:
-        # Two channels, and the distinction is the whole point of the "start"
-        # event: ``custom`` payloads are streamed the instant a node writes
-        # one (i.e. as it begins), while ``updates`` only arrive once that
-        # node has returned. Reading updates alone means the label on screen
-        # is always the previously finished node, so a slow reconstruction
-        # looks like the *validation* before it has hung.
+        # ``custom`` payloads stream the instant a node writes one (as it
+        # begins); ``updates`` only arrive once it has returned. Reading
+        # updates alone would label the screen with the previously finished
+        # node, so a slow reconstruction looks like a hung validation.
         for mode, chunk in app.stream(
             state,
             stream_mode=["updates", "custom"],
@@ -274,11 +259,8 @@ def stream_agent_response(
                 if (chunk or {}).get("type") == NODE_START_EVENT:
                     started = chunk.get("node")
                     if started:
-                        # A node that raises never produces an update, so
-                        # tracking only completions would blame whichever node
-                        # last succeeded — or report ``graph_start`` when the
-                        # very first node fails. The announcement is the only
-                        # signal that names the node actually running.
+                        # A node that raises produces no update, so tracking
+                        # completions alone would blame the node before it.
                         last_node = started
                         yield {
                             "type": "step",
@@ -304,8 +286,7 @@ def stream_agent_response(
                 if thoughts_log and thoughts_log[-1].get("node") == node_name:
                     thought = thoughts_log[-1].get("text")
 
-                # Closes the step its "start" event opened, and is the only
-                # place a thought can be attached: the node has to finish
+                # Only place a thought can be attached: the node has to finish
                 # before it has one to report.
                 yield {
                     "type": "step",
