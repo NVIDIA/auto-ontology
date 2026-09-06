@@ -26,6 +26,7 @@ previous version of this code had two copies of it that drifted:
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any
 
 from sqlalchemy import (
@@ -59,6 +60,98 @@ from gsf.semantic.constants import (
 from gsf.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
+
+_TERM_SCOPE_POLICIES = {"global", "database", "schema"}
+
+
+class _TermScopeConflictError(RuntimeError):
+    """Automatic compilation tried to merge one Term across forbidden scopes."""
+
+
+def _term_scope_policy() -> str:
+    policy = os.environ.get("TERM_AUTO_MERGE_SCOPE", "global").strip().lower()
+    if policy not in _TERM_SCOPE_POLICIES:
+        raise ValueError(
+            "TERM_AUTO_MERGE_SCOPE must be one of: "
+            + ", ".join(sorted(_TERM_SCOPE_POLICIES))
+        )
+    return policy
+
+
+def _scope_conflicts(
+    policy: str,
+    target: tuple[str, str],
+    represented: set[tuple[str, str]],
+) -> bool:
+    if policy == "global" or not represented:
+        return False
+    target_database, target_schema = target
+    if policy == "database":
+        return any(database != target_database for database, _schema in represented)
+    return any(
+        (database, schema) != (target_database, target_schema)
+        for database, schema in represented
+    )
+
+
+def _guard_term_scope(name: str, table_id: str) -> None:
+    """Reject an automatic exact-name merge outside the configured scope."""
+    policy = _term_scope_policy()
+    if policy == "global":
+        return
+    target_rows = store().query_read(
+        select(
+            s.catalog_database.c.name.label("database_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            ).join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.catalog_table.c.id == table_id)
+        .limit(1)
+    )
+    if not target_rows:
+        return
+    target = (
+        str(target_rows[0]["database_name"]),
+        str(target_rows[0]["schema_name"]),
+    )
+    represented_rows = store().query_read(
+        select(
+            s.catalog_database.c.name.label("database_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id)
+            .join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.term.c.name == name, s.term.c.source == SEMANTIC_SOURCE)
+        .distinct()
+    )
+    represented = {
+        (str(row["database_name"]), str(row["schema_name"]))
+        for row in represented_rows
+    }
+    if _scope_conflicts(policy, target, represented):
+        raise _TermScopeConflictError(
+            f"Automatic Term {name!r} already represents tables outside "
+            f"the target {policy} scope {target!r}; explicit reviewed model "
+            "import is required to merge across scopes"
+        )
 
 
 def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -412,6 +505,8 @@ def merge_term(
         select(s.catalog_table.c.id).where(s.catalog_table.c.id == table_id)
     ):
         return None
+
+    _guard_term_scope(name, table_id)
 
     statement = insert(s.term).values(
         name=name,
