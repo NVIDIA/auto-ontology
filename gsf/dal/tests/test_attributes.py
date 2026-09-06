@@ -235,7 +235,7 @@ def _assert_agrees_with_oracle(anchor: str, dest: str) -> None:
 @pytest.fixture
 def joined(world):
     """`orders.customer_id` references the attribute `customers.id` owns."""
-    world.table("customers")
+    world.table("customers", pk=["id"])
     world.column("customers", "id")
     world.table("orders")
     world.column("orders", "customer_id")
@@ -283,6 +283,44 @@ def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None
         ("customers", "id"),
         ("invoices", "customer_id"),
     ]
+
+
+def test_sibling_fks_do_not_join_through_a_non_identity_shared_attribute(
+    world,
+) -> None:
+    """The fabrication risk routing-through-the-owner has to guard against.
+
+    `buyers.buyer_status_id` and `sellers.seller_status_id` both reference
+    `lookup.status_code` -- but `status_code` is *not* `lookup`'s own declared
+    PK, just an attribute they happen to share. Unlike the customers/orders/
+    invoices case above, joining these two columns through `lookup` would be
+    fabricated: nothing says a buyer and a seller with the same status code
+    are related. Entering a table from its owner side (as opposed to via a
+    real outgoing FK) is only ever legitimate when the shared attribute is
+    that table's own identity -- see `_find_table_join_hops`'s docstring, and
+    `find_shared_hub_bridge`, which applies the identical discipline for the
+    one shape this still can't reach.
+    """
+    world.table("lookup")
+    world.column("lookup", "id", 1)
+    world.column("lookup", "status_code", 2)
+    world.attribute("status-code", owner="lookup.status_code")
+
+    world.table("buyers")
+    world.column("buyers", "buyer_status_id")
+    world.references("buyers.buyer_status_id", "status-code")
+
+    world.table("sellers")
+    world.column("sellers", "seller_status_id")
+    world.references("sellers.seller_status_id", "status-code")
+
+    assert (
+        a.find_join_path(
+            world.columns["buyers.buyer_status_id"],
+            world.columns["sellers.seller_status_id"],
+        )
+        == []
+    )
 
 
 def test_join_path_is_oriented_from_anchor_table_in_both_directions(joined) -> None:
@@ -399,13 +437,13 @@ def test_endpoints_are_tables_to_connect_not_required_join_columns(world) -> Non
 
 def test_path_can_enter_and_leave_an_intermediate_fk_table(world) -> None:
     """Cities -> suppliers -> categories requires opposite FK directions."""
-    world.table("cities")
+    world.table("cities", pk=["id"])
     world.column("cities", "id", 1)
     world.column("cities", "name", 2)
     world.table("suppliers")
     world.column("suppliers", "city_id", 1)
     world.column("suppliers", "category_id", 2)
-    world.table("categories")
+    world.table("categories", pk=["id"])
     world.column("categories", "id", 1)
     world.column("categories", "name", 2)
 

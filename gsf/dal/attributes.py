@@ -651,6 +651,7 @@ _SEMANTIC_TABLE_EDGES = (
         _fk_column.c.id.label("fk_column_id"),
         _owner_table.c.id.label("owner_table_id"),
         _owner_column.c.id.label("owner_column_id"),
+        (_owner_column.c.name == any_(_owner_table.c.pk)).label("owner_is_pk"),
     )
     .select_from(
         s.column__semantic_fk.join(
@@ -686,10 +687,20 @@ def _find_table_join_hops(
 ) -> list[tuple[str, str]]:
     """Find table-to-table joins, oriented from anchor table to destination.
 
-    Each semantic relationship becomes one undirected table edge whose payload
-    is the actual FK/owner column pair. Searching this projection makes input
-    column choice and FK direction irrelevant without ever turning two FKs
-    that reference the same attribute into a direct join.
+    Each semantic relationship becomes a table edge whose payload is the
+    actual FK/owner column pair, letting input column choice be irrelevant.
+    The FK -> owner direction is always a real join (that is what a foreign
+    key means) and is added both ways. The reverse, owner -> FK, is only
+    added when the owner column is the owner table's own declared primary
+    key — i.e. a genuine identity, not just any attribute two unrelated FK
+    columns happen to share. Without that check, two FK columns referencing
+    the same non-identity attribute (e.g. two different tables' FKs into a
+    shared, non-PK status-code column) would read as joinable to each other
+    through it, which is a fabricated join: the columns merely reference the
+    same thing, not each other. See :func:`find_shared_hub_bridge`, which
+    applies the identical PK-only discipline for the one case this still
+    can't reach (both endpoints are FK columns *into* the same identity hub,
+    so there's no forward edge on either side to start from).
     """
     rows = store().query_read(
         _SEMANTIC_TABLE_EDGES,
@@ -704,9 +715,10 @@ def _find_table_join_hops(
         adjacency[fk_table_id].append(
             (owner_table_id, row["fk_column_id"], row["owner_column_id"])
         )
-        adjacency[owner_table_id].append(
-            (fk_table_id, row["owner_column_id"], row["fk_column_id"])
-        )
+        if row["owner_is_pk"]:
+            adjacency[owner_table_id].append(
+                (fk_table_id, row["owner_column_id"], row["fk_column_id"])
+            )
     for edges in adjacency.values():
         edges.sort()
 
