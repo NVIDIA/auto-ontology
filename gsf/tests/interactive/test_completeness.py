@@ -32,7 +32,7 @@ CASES = [
                 "for each site is rounded to 2 decimal places."
             ),
         },
-        "relevant_kg": "None",
+        "relevant_kb": "None",
         "expected_incomplete": [
             "SQS",
             "noise",
@@ -49,7 +49,7 @@ CASES = [
             "q": "Should the ranking be in descending order?",
             "a": "Yes, highest quality first.",
         },
-        "relevant_kg": (
+        "relevant_kb": (
             "- NTM Classification System\n"
             "  Description: A tiered classification system for Narrowband Technological Markers.\n"
             "  Definition: Three-tier classification: 'Strong NTM' (BFR < 0.0001 AND FreqDriftHzs < 0.1 "
@@ -74,7 +74,7 @@ CASES = [
             "q": "What is the exact formula for the bandwidth ratio (BFR)?",
             "a": "BFR = BandwidthHz / (FreqMhz * 1,000,000).",
         },
-        "relevant_kg": "None",
+        "relevant_kb": "None",
         "expected_incomplete": ["NTM"],  # BFR resolved; NTM still open
         "should_not_flag": ["BFR", "bandwidth ratio"],
     },
@@ -90,7 +90,7 @@ CASES = [
             "q": "What is the exact formula for the bandwidth ratio (BFR)?",
             "a": "BFR = BandwidthHz / (FreqMhz * 1,000,000). This is the ratio of signal bandwidth to center frequency.",
         },
-        "relevant_kg": "None",
+        "relevant_kb": "None",
         "expected_incomplete": [],  # not used — see should_not_flag below
         "should_not_flag": [
             "BFR",
@@ -109,14 +109,14 @@ def test_completeness_comparison(case):
     r_gaps = detect_incomplete_formulas(
         case["working_question"],
         case["last_turn"],
-        case["relevant_kg"],
+        case["relevant_kb"],
         prior,
         reasoning,
     )
     nr_gaps = detect_incomplete_formulas(
         case["working_question"],
         case["last_turn"],
-        case["relevant_kg"],
+        case["relevant_kb"],
         prior,
         non_reasoning,
     )

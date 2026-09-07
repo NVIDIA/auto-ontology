@@ -14,7 +14,7 @@ A: {new_a}
 
 External knowledge (for context only — already passed to SQL generation separately; \
 use it to avoid coining pseudo-column names):
-{relevant_kg}
+{relevant_kb}
 
 Rewrite the current question to incorporate the new clarification. Rules:
 - Preserve every formula, definition, constraint, and column name already in the current question, \
@@ -41,13 +41,13 @@ def merge_clarification(
     current_question: str,
     new_turn: dict,
     llm,
-    relevant_kg: str = "",
+    relevant_kb: str = "",
 ) -> str:
     """Incrementally refine current_question with one new Q&A turn."""
     prompt = _MERGE_PROMPT.format(
         current_question=current_question,
         new_q=new_turn["q"],
         new_a=new_turn["a"],
-        relevant_kg=relevant_kg or "None",
+        relevant_kb=relevant_kb or "None",
     )
     return safe_invoke_text(llm, prompt).strip()

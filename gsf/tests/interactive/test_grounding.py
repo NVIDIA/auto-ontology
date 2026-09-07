@@ -60,7 +60,7 @@ def test_ground_passes_question_and_kg_to_prompt():
     assert "churn rate" in prompt_text
 
 
-# ── wiring: _run_sql_generation injects grounded_kg into custom_prompts ───────
+# ── wiring: _run_sql_generation injects grounded_kb into custom_prompts ───────
 #
 # coordinator._run_sql_generation does a lazy `from gsf.retrieval.text_to_sql.main import ...`
 # which triggers module-level LLM client initialisation (requires REASONING_API_KEY).
@@ -89,7 +89,7 @@ def test_run_sql_generation_sets_custom_prompts():
         task_id="t1",
         db_name="solar",
         db_schema="TABLE panels ...",
-        external_kg="- PPR: Panel Performance Ratio",
+        external_kb="- PPR: Panel Performance Ratio",
         original_question="What is the average PPR?",
         working_question="What is the average PPR?",
     )
@@ -130,7 +130,7 @@ def test_run_sql_generation_empty_kg_gives_empty_custom_prompts():
         task_id="t1",
         db_name="solar",
         db_schema="TABLE panels ...",
-        external_kg="",
+        external_kb="",
         original_question="How many panels?",
         working_question="How many panels?",
     )

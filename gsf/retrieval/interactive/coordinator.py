@@ -10,14 +10,14 @@ from concurrent.futures import ThreadPoolExecutor
 
 from .clarify import (
     should_clarify,
-    refresh_grounded_kg,
+    refresh_grounded_kb,
     prune_resolved_terms,
     _STUCK_PHRASES,
     should_inject_default_sort,
     _DEFAULT_SORT_HINT,
     _format_resolved_schema_terms,
 )
-from .kg_coverage import expand_kg_with_children
+from .kb_coverage import expand_kb_with_children
 from .output_type import (
     output_type_enabled,
     should_skip_output_type_question,
@@ -176,8 +176,8 @@ def _apply_follow_up_seed(
 
     # Carry the full Phase 1 KB union into Phase 2 Evidence generation,
     # then reset so Phase 2 accumulates its own entries fresh.
-    session.prior_round_grounded_kg = session.cumulative_grounded_kg
-    session.cumulative_grounded_kg = ""
+    session.prior_round_grounded_kb = session.cumulative_grounded_kb
+    session.cumulative_grounded_kb = ""
     # Phase 2 asks a different question — don't carry Phase 1's cross-turn
     # KB/VDB disambiguation bookkeeping into it (see clarify.py).
     session._ever_kb_covered_norms = set()
@@ -225,14 +225,14 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     from gsf.retrieval.text_to_sql.state import TextToSQLPayload
 
     # For debug turns that skip clarification, run grounding now to get KB context.
-    # For normal turns, cumulative_grounded_kg already has everything from clarification.
-    extra_kg = ""
-    if session._grounded_kg_for != session.working_question:
-        expanded_kg = expand_kg_with_children(
-            session.external_kg, session.external_kg_children_map
+    # For normal turns, cumulative_grounded_kb already has everything from clarification.
+    extra_kb = ""
+    if session._grounded_kb_for != session.working_question:
+        expanded_kb = expand_kb_with_children(
+            session.external_kb, session.external_kb_children_map
         )
-        extra_kg = ground_external_knowledge(
-            session.working_question, expanded_kg, _get_fast_llm()
+        extra_kb = ground_external_knowledge(
+            session.working_question, expanded_kb, _get_fast_llm()
         )
 
     p1_sql = session.prior_round_sql or ""
@@ -241,10 +241,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     # Build Evidence from the union of: Phase 1 carry-over + this-phase KB turns + debug extra.
     # VDB resolved hits are column descriptions, not formulas — the SQL generator
     # rediscovers schema mappings via its own VDB; they only benefit the decide-LLM prompt.
-    combined_kg = "\n".join(
+    combined_kb = "\n".join(
         filter(
             None,
-            [session.prior_round_grounded_kg, session.cumulative_grounded_kg, extra_kg],
+            [session.prior_round_grounded_kb, session.cumulative_grounded_kb, extra_kb],
         )
     )
 
@@ -293,7 +293,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         )
 
     resolved_terms_section = build_grounded_terms_hint(session)
-    evidence = generate_evidence(evidence_question, combined_kg, resolved_terms_section)
+    evidence = generate_evidence(evidence_question, combined_kb, resolved_terms_section)
     if session._collision_resolution_notes:
         # Injected directly rather than left to evidence-gen's LLM to relay —
         # that step isn't reliable about preserving instructions passed through it.
@@ -353,7 +353,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         "connectors": session.connectors,
         "path_state": dict(session.path_state),  # copy so GSF doesn't mutate in place
         "acronyms": [],
-        "custom_prompts": combined_kg,  # full union as low-priority fallback
+        "custom_prompts": combined_kb,  # full union as low-priority fallback
     }
     result = get_agent_response_with_state(payload)
 
@@ -402,24 +402,24 @@ def create_session(
     task_id: str,
     db_name: str,
     db_schema: str,
-    external_kg: str,
+    external_kb: str,
     question: str,
     data_retriever: Any,
     semantic_retriever: Any,
     connectors: list,
     max_clarify_turns: int = 5,
-    external_kg_children_map: dict | None = None,
+    external_kb_children_map: dict | None = None,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
         task_id=task_id,
         db_name=db_name,
         db_schema=db_schema,
-        external_kg=external_kg,
+        external_kb=external_kb,
         original_question=question,
         working_question=question,
         max_clarify_turns=max_clarify_turns,
-        external_kg_children_map=external_kg_children_map or {},
+        external_kb_children_map=external_kb_children_map or {},
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
@@ -520,8 +520,8 @@ def step(
             return AskUserAction(question=question)
     elif turn_type != TurnType.DEBUG and not under_budget:
         # No clarification allowed (Phase 2 or budget exhausted) but still run
-        # KB coverage to update cumulative_grounded_kg for Evidence generation.
-        refresh_grounded_kg(session)
+        # KB coverage to update cumulative_grounded_kb for Evidence generation.
+        refresh_grounded_kb(session)
 
     # Decision to proceed (whatever the reason — turn budget exhausted, or
     # should_clarify judging PROCEED above) — resolve any still-open ambiguous
@@ -560,7 +560,7 @@ def step(
 
             session._ambiguity_resolution_notes = resolve_pending_ambiguities(
                 session.working_question,
-                session.cumulative_grounded_kg,
+                session.cumulative_grounded_kb,
                 pending,
             )
             if session._ambiguity_resolution_notes:
@@ -583,7 +583,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
     if not user_could_not_answer and session.clarify_history:
         last_turn = session.clarify_history[-1]
-        relevant_kg = session._grounded_kg or ""
+        relevant_kb = session._grounded_kb or ""
 
         with ThreadPoolExecutor(max_workers=3) as pool:
             merge_future = pool.submit(
@@ -591,13 +591,13 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                 session.working_question,
                 last_turn,
                 _get_fast_llm(),
-                relevant_kg=relevant_kg,
+                relevant_kb=relevant_kb,
             )
             completeness_future = pool.submit(
                 detect_incomplete_formulas,
                 session.working_question,
                 last_turn,
-                relevant_kg,
+                relevant_kb,
                 list(session.incomplete_formula_terms),
                 _get_llm(),
                 None,

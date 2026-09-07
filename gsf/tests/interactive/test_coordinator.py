@@ -18,7 +18,7 @@ def _make_session(**kwargs):
         task_id="t1",
         db_name="alien",
         db_schema="TABLE aliens ...",
-        external_kg="[]",
+        external_kb="[]",
         original_question="test question",
         working_question="test question",
     )

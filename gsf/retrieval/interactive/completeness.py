@@ -21,7 +21,7 @@ Q: {last_q}
 A: {last_a}
 
 Relevant external knowledge (may contain partial or ambiguous definitions):
-{relevant_kg}
+{relevant_kb}
 
 Schema columns already resolved by VDB (drop a gap only if the description directly resolves it):
 {resolved_schema_terms}
@@ -70,7 +70,7 @@ Working question (for context on what SQL operations are needed):
 {working_question}
 
 Relevant external knowledge:
-{relevant_kg}
+{relevant_kb}
 
 Schema entities found in the database but with NO formula in the external knowledge base \
 (the question may or may not require computing a formula for these — check each one):
@@ -136,7 +136,7 @@ def _parse_gaps(
 def detect_incomplete_formulas(
     working_question: str,
     last_turn: dict | None,
-    relevant_kg: str,
+    relevant_kb: str,
     current_gaps: list[tuple[str, str]],
     llm,
     vdb_only_entities: list[str] | None = None,
@@ -160,7 +160,7 @@ def detect_incomplete_formulas(
         )
         prompt = _COMPLETENESS_PROMPT_KB_ONLY.format(
             working_question=working_question,
-            relevant_kg=relevant_kg or "None",
+            relevant_kb=relevant_kb or "None",
             vdb_only_section=vdb_section,
             resolved_schema_terms=resolved_schema_terms or "None",
         )
@@ -175,7 +175,7 @@ def detect_incomplete_formulas(
             prior_gaps=prior_text,
             last_q=last_turn["q"],
             last_a=last_turn["a"],
-            relevant_kg=relevant_kg or "None",
+            relevant_kb=relevant_kb or "None",
             resolved_schema_terms=resolved_schema_terms or "None",
         )
 

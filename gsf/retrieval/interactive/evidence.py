@@ -13,7 +13,7 @@ _EVIDENCE_PROMPT = """\
 Working question: {question}
 
 Relevant external knowledge (one entry per term):
-{grounded_kg}
+{grounded_kb}
 {resolved_terms_section}
 Extract any formulas, calculation rules, threshold/filter conditions or definitions from the relevant \
 external knowledge that are directly needed to answer the working question above. For each such entry, output one \
@@ -70,14 +70,14 @@ def build_grounded_terms_hint(session: InteractiveSessionState) -> str:
 
 
 def generate_evidence(
-    question: str, grounded_kg: str, resolved_terms_section: str = ""
+    question: str, grounded_kb: str, resolved_terms_section: str = ""
 ) -> str:
     """Convert grounded KB text into a short Evidence string for the SQL generator."""
-    if not grounded_kg:
+    if not grounded_kb:
         return ""
     prompt = _EVIDENCE_PROMPT.format(
         question=question,
-        grounded_kg=grounded_kg,
+        grounded_kb=grounded_kb,
         resolved_terms_section=resolved_terms_section,
     )
     response = safe_invoke_text_nr(prompt).strip()

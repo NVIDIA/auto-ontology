@@ -40,7 +40,7 @@ CASES = [
             "a squared dampening function to penalize higher noise values. The final average SQS "
             "for each site is rounded to 2 decimal places for reporting purposes."
         ),
-        "relevant_kg": "None",
+        "relevant_kb": "None",
         "should_not_contain": [
             "pointdense / scanresolmm",
             "PointDense / ScanResolMm",
@@ -64,7 +64,7 @@ CASES = [
             "The bandwidth ratio (BFR) is calculated by dividing the bandwidth in Hz by the "
             "center frequency in MHz converted to Hz. Specifically, BFR = BandwidthHz / (FreqMhz * 1,000,000)."
         ),
-        "relevant_kg": "None",
+        "relevant_kb": "None",
         "should_contain": ["BandwidthHz", "FreqMhz", "1,000,000", "1000000"],
     },
 ]
@@ -78,10 +78,10 @@ def test_merge_comparison(case):
     turn = {"q": case["new_q"], "a": case["new_a"]}
 
     r_result = merge_clarification(
-        case["current_question"], turn, reasoning, case["relevant_kg"]
+        case["current_question"], turn, reasoning, case["relevant_kb"]
     )
     nr_result = merge_clarification(
-        case["current_question"], turn, non_reasoning, case["relevant_kg"]
+        case["current_question"], turn, non_reasoning, case["relevant_kb"]
     )
 
     print(f"\n{'=' * 60}")

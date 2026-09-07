@@ -7,14 +7,14 @@ and whether either model produces the known false positive (Equipment Problems f
 Equipment Problems is not relevant).
 
 Run with:
-    uv run pytest gsf/tests/interactive/test_kg_coverage.py -s -v
+    uv run pytest gsf/tests/interactive/test_kb_coverage.py -s -v
 """
 
 import time
 
-from gsf.retrieval.interactive.kg_coverage import (
-    _slim_kg_for_coverage,
-    _KG_COVERAGE_PROMPT,
+from gsf.retrieval.interactive.kb_coverage import (
+    _slim_kb_for_coverage,
+    _KB_COVERAGE_PROMPT,
 )
 from gsf.utils.llm_invoke import (
     get_llm_client,
@@ -59,13 +59,13 @@ FALSE_POSITIVE_ENTRY = "equipment problems"
 
 
 def _run_coverage(
-    llm, entities: list[str], formatted_kg: str, question: str = ""
+    llm, entities: list[str], formatted_kb: str, question: str = ""
 ) -> tuple[dict[str, list[str]], float]:
     """Run coverage LLM and return (term → matched_entries, elapsed_seconds)."""
     entity_list = "\n".join(f"- {e}" for e in entities)
-    slim_kg = _slim_kg_for_coverage(formatted_kg)
-    prompt = _KG_COVERAGE_PROMPT.format(
-        formatted_kg=slim_kg,
+    slim_kb = _slim_kb_for_coverage(formatted_kb)
+    prompt = _KB_COVERAGE_PROMPT.format(
+        formatted_kb=slim_kb,
         entity_list=entity_list,
         question=question or "(not provided)",
     )

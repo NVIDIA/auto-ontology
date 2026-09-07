@@ -1,7 +1,7 @@
 """External-knowledge (KB) parsing, formatting, and coverage matching.
 
 Split out of clarify.py: this module owns the "does external knowledge cover
-this term" concern — parsing the formatted_kg string into entries, slimming
+this term" concern — parsing the formatted_kb string into entries, slimming
 it for cheap coverage prompts, and expanding parent entries with their
 children. Entity extraction / VDB resolution lives in entity_resolution.py;
 clarification-turn orchestration lives in clarify.py.
@@ -20,12 +20,12 @@ from gsf.utils.llm_invoke import safe_invoke_text_nr, RETRY_MAX_ATTEMPTS
 
 logger = logging.getLogger(__name__)
 
-_KG_COVERAGE_PROMPT = """\
+_KB_COVERAGE_PROMPT = """\
 User question (for context only — use it to understand what each term means in this query):
 {question}
 
 External knowledge:
-{formatted_kg}
+{formatted_kb}
 
 For each term below, identify the external knowledge entries that directly define or provide \
 the formula/threshold for that term as it is used in the question above. Only include entries \
@@ -64,12 +64,12 @@ def _norm_key(s: str) -> str:
     return unicodedata.normalize("NFC", s).translate(_UNICODE_HYPHENS).lower()
 
 
-def _parse_kg_entries(formatted_kg: str) -> dict[str, str]:
+def _parse_kb_entries(formatted_kb: str) -> dict[str, str]:
     """Parse formatted KB string into {normalized_entry_name: full_entry_text}."""
     entries: dict[str, str] = {}
     current_name: str | None = None
     current_lines: list[str] = []
-    for line in formatted_kg.splitlines():
+    for line in formatted_kb.splitlines():
         if line.startswith("- "):
             if current_name is not None:
                 entries[_norm_key(current_name)] = "\n".join(current_lines)
@@ -82,16 +82,16 @@ def _parse_kg_entries(formatted_kg: str) -> dict[str, str]:
     return entries
 
 
-def _slim_kg_for_coverage(formatted_kg: str) -> str:
+def _slim_kb_for_coverage(formatted_kb: str) -> str:
     """Strip Definition lines so the coverage prompt is ~3x smaller.
 
     The coverage LLM only needs entry names and descriptions to decide
     which KB entries match an extracted entity. The full definitions are
-    looked up separately from the original formatted_kg, so nothing is lost.
+    looked up separately from the original formatted_kb, so nothing is lost.
     """
     return "\n".join(
         line
-        for line in formatted_kg.splitlines()
+        for line in formatted_kb.splitlines()
         if not line.startswith("  Definition:")
     )
 
@@ -101,27 +101,27 @@ _MAX_CHILDREN_PER_PARENT = 5
 
 def _filter_covered_by_external_knowledge(
     entities: list[str],
-    formatted_kg: str,
+    formatted_kb: str,
     question: str = "",
     children_map: dict[str, list[str]] | None = None,
 ) -> tuple[set[str], str, dict[str, list[str]]]:
     """Check which entities are covered by external knowledge.
 
-    Returns (covered_set, relevant_kg_text, entry_to_original_terms).
+    Returns (covered_set, relevant_kb_text, entry_to_original_terms).
     entry_to_original_terms maps each confirmed KB entry name to the original
-    natural-language terms that matched it, so callers can annotate cumulative_grounded_kg.
+    natural-language terms that matched it, so callers can annotate cumulative_grounded_kb.
     The LLM outputs YES | <entry name>
     for each covered term; we look up the verbatim entry ourselves so the content
     is never hallucinated. Uses the non-reasoning model for speed.
 
     When children_map is provided, child entries of any matched parent are appended
-    to relevant_kg_text with their full text (name + description + definition),
+    to relevant_kb_text with their full text (name + description + definition),
     bypassing the coverage LLM. Capped at _MAX_CHILDREN_PER_PARENT per parent.
     """
     entity_list = "\n".join(f"- {e}" for e in entities)
-    slim_kg = _slim_kg_for_coverage(formatted_kg)
-    prompt = _KG_COVERAGE_PROMPT.format(
-        formatted_kg=slim_kg,
+    slim_kb = _slim_kb_for_coverage(formatted_kb)
+    prompt = _KB_COVERAGE_PROMPT.format(
+        formatted_kb=slim_kb,
         entity_list=entity_list,
         question=question or "(not provided)",
     )
@@ -182,7 +182,7 @@ def _filter_covered_by_external_knowledge(
             )
     logger.debug("Clarify — coverage LLM raw response:\n%s", response)
 
-    kg_entries = _parse_kg_entries(formatted_kg)
+    kb_entries = _parse_kb_entries(formatted_kb)
 
     # Parse term → claimed entry names from coverage response.
     # Do NOT mark a term as covered yet — only do so after the KB lookup confirms
@@ -220,7 +220,7 @@ def _filter_covered_by_external_knowledge(
             match = next(
                 (
                     k
-                    for k in kg_entries
+                    for k in kb_entries
                     if k.startswith(entry_name) or entry_name.startswith(k)
                 ),
                 None,
@@ -233,7 +233,7 @@ def _filter_covered_by_external_knowledge(
             if match:
                 if match not in seen_names:
                     seen_names.add(match)
-                    relevant_lines.append(kg_entries[match])
+                    relevant_lines.append(kb_entries[match])
                     covered.add(term)  # confirmed: real KB entry exists
                 # Inject children even if parent text was already added (dedup via seen_names
                 # prevents duplicate text, but grandchildren would be silently skipped if we
@@ -308,14 +308,14 @@ def _filter_covered_by_external_knowledge(
                                     match,
                                 )
 
-    relevant_kg_text = "\n".join(relevant_lines)
-    logger.info("Clarify — external_kg covers: %s", covered or "none")
+    relevant_kb_text = "\n".join(relevant_lines)
+    logger.info("Clarify — external_kb covers: %s", covered or "none")
     logger.debug(
-        "Clarify — relevant_kg_text stored (%d chars): %r",
-        len(relevant_kg_text),
-        relevant_kg_text[:300] if relevant_kg_text else "",
+        "Clarify — relevant_kb_text stored (%d chars): %r",
+        len(relevant_kb_text),
+        relevant_kb_text[:300] if relevant_kb_text else "",
     )
-    return covered, relevant_kg_text, entry_to_original_terms
+    return covered, relevant_kb_text, entry_to_original_terms
 
 
 def _compact_schema(db_schema: str) -> str:
@@ -351,17 +351,17 @@ def _compact_schema(db_schema: str) -> str:
     return "\n".join(result) or db_schema[:3000]
 
 
-def expand_kg_with_children(
-    formatted_kg: str, children_map: dict[str, list[str]]
+def expand_kb_with_children(
+    formatted_kb: str, children_map: dict[str, list[str]]
 ) -> str:
-    """Return formatted_kg with child entries appended for every parent already present.
+    """Return formatted_kb with child entries appended for every parent already present.
 
     Used by the debug/grounding path where the coverage LLM sees the full KB and
     children need to be visible inline. Deduplicates by normalized entry name.
     """
-    if not children_map or not formatted_kg:
-        return formatted_kg
-    existing = set(_parse_kg_entries(formatted_kg).keys())
+    if not children_map or not formatted_kb:
+        return formatted_kb
+    existing = set(_parse_kb_entries(formatted_kb).keys())
     extra: list[str] = []
     for parent_name, child_texts in children_map.items():
         if _norm_key(parent_name) not in existing:
@@ -372,5 +372,5 @@ def expand_kg_with_children(
                 existing.add(child_name)
                 extra.append(child_text)
     if not extra:
-        return formatted_kg
-    return formatted_kg + "\n" + "\n".join(extra)
+        return formatted_kb
+    return formatted_kb + "\n" + "\n".join(extra)

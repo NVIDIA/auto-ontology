@@ -4,7 +4,7 @@ Split out of clarify.py: this module owns "what entities does the question
 mention, and which schema column/attribute does each one resolve to" —
 running the entity-coverage LangGraph, checking VDB-hit ambiguity, and
 resolving collisions where two entities land on the same column. External
-knowledge (KB) coverage lives in kg_coverage.py; clarification-turn
+knowledge (KB) coverage lives in kb_coverage.py; clarification-turn
 orchestration lives in clarify.py.
 """
 
@@ -24,7 +24,7 @@ from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.semantic.constants import LABEL_COLUMN_ATTRIBUTE
 from gsf.utils.llm_invoke import get_llm_client, safe_invoke_text_nr
 
-from .kg_coverage import _filter_covered_by_external_knowledge, _parse_kg_entries
+from .kb_coverage import _filter_covered_by_external_knowledge, _parse_kb_entries
 
 logger = logging.getLogger(__name__)
 
@@ -422,7 +422,7 @@ name.
 
 Question: {question}
 
-Relevant knowledge: {relevant_kg}
+Relevant knowledge: {relevant_kb}
 
 Terms and their top candidate columns (best match first):
 {candidates_block}
@@ -458,7 +458,7 @@ Question: {question}
 Terms and their close-scoring candidate columns (best match first):
 {candidates_block}
 
-Potentially relevant knowledge: {relevant_kg}
+Potentially relevant knowledge: {relevant_kb}
 
 For each term, output exactly one line:
 <term>: <chosen candidate id>
@@ -542,7 +542,7 @@ def _clean_chosen_id(chosen: str) -> str:
 
 def resolve_ambiguous_entities(
     question: str,
-    relevant_kg: str,
+    relevant_kb: str,
     entity_candidates: dict[str, list[dict]],
 ) -> dict[str, str] | None:
     """Ask a fast LLM to pick the correct candidate id for each ambiguous entity.
@@ -558,7 +558,7 @@ def resolve_ambiguous_entities(
         blocks.append(f'"{entity}":\n{lines}')
     prompt = _AMBIGUITY_RESOLUTION_PROMPT.format(
         question=question,
-        relevant_kg=relevant_kg or "(none)",
+        relevant_kb=relevant_kb or "(none)",
         candidates_block="\n\n".join(blocks),
     )
     try:
@@ -590,7 +590,7 @@ def resolve_ambiguous_entities(
 
 def resolve_pending_ambiguities(
     question: str,
-    relevant_kg: str,
+    relevant_kb: str,
     ambiguous_hits: dict[str, list[dict]],
 ) -> list[str]:
     """Resolve every still-open ambiguous entity in *ambiguous_hits* and return
@@ -607,7 +607,7 @@ def resolve_pending_ambiguities(
     """
     if not ambiguous_hits:
         return []
-    decision = resolve_ambiguous_entities(question, relevant_kg, ambiguous_hits)
+    decision = resolve_ambiguous_entities(question, relevant_kb, ambiguous_hits)
     if decision is None:
         logger.warning(
             "Clarify — ambiguity resolution unresolved for all of: %s",
@@ -629,7 +629,7 @@ def resolve_pending_ambiguities(
 
 def _llm_disambiguate_collision(
     question: str,
-    relevant_kg: str,
+    relevant_kb: str,
     entity_candidates: dict[str, list[dict]],
 ) -> dict[str, str] | None:
     """Ask a fast LLM to assign each colliding entity to a distinct candidate id.
@@ -649,7 +649,7 @@ def _llm_disambiguate_collision(
         blocks.append(f'"{entity}":\n{lines}')
     prompt = _COLLISION_LLM_PROMPT.format(
         question=question,
-        relevant_kg=relevant_kg or "(none)",
+        relevant_kb=relevant_kb or "(none)",
         candidates_block="\n\n".join(blocks),
     )
     try:
@@ -681,7 +681,7 @@ def _llm_disambiguate_collision(
 
 def _resolve_collisions(
     question: str,
-    relevant_kg_text: str,
+    relevant_kb_text: str,
     best_hit_per_entity: dict[str, dict],
     semantic_retriever: object,
     db_name: str | None,
@@ -847,7 +847,7 @@ def _resolve_collisions(
                     ] + cands
                 entity_candidates[e] = cands
             decision = _llm_disambiguate_collision(
-                question, relevant_kg_text, entity_candidates
+                question, relevant_kb_text, entity_candidates
             )
             if decision is None:
                 for e in entities:
@@ -995,7 +995,7 @@ def _resolve_collisions(
 
         entity_candidates = {e: fresh_hits[e][:3] for e in [winner, *needs_llm]}
         decision = _llm_disambiguate_collision(
-            question, relevant_kg_text, entity_candidates
+            question, relevant_kb_text, entity_candidates
         )
         if decision is None:
             # Fail safe: don't guess. Drop the lower-confidence entities so they
@@ -1090,7 +1090,7 @@ def _find_unresolvable_entities(
     question: str,
     semantic_retriever: object,
     db_name: str | None,
-    formatted_kg: str = "",
+    formatted_kb: str = "",
     children_map: dict[str, list[str]] | None = None,
     hit_verdicts: dict[str, bool] | None = None,
     ambiguous_hits_out: dict[str, list[dict]] | None = None,
@@ -1104,7 +1104,7 @@ def _find_unresolvable_entities(
     set[str],
     list[str],
 ]:
-    """Return (unresolvable_entities, resolved_hits, relevant_kg_text, all_norms,
+    """Return (unresolvable_entities, resolved_hits, relevant_kb_text, all_norms,
     entry_to_original_terms, vdb_only_norms, json_shared_notes).
 
     Flow:
@@ -1113,7 +1113,7 @@ def _find_unresolvable_entities(
       2. Ambiguity check: any entity with 2+ column-attribute hits within CLARIFY_MAX_DISTANCE
          is demoted to unresolvable regardless of coverage grade.
       3. KB check on ALL extracted entities (not just VDB-uncovered): populates
-         relevant_kg_text for the prompt and identifies KB-covered entities.
+         relevant_kb_text for the prompt and identifies KB-covered entities.
       3b. Collision resolution: entities whose best hit collided with another
           entity's are auto-resolved (JSON-shared / margin-based) or sent to a
           small LLM disambiguation call — see _resolve_collisions.
@@ -1126,7 +1126,7 @@ def _find_unresolvable_entities(
     since hit_text is only a display label and isn't guaranteed unique or consistently
     formatted across hits.
     entry_to_original_terms maps each confirmed KB entry name
-    to the original natural-language terms that matched it (for cumulative_grounded_kg).
+    to the original natural-language terms that matched it (for cumulative_grounded_kb).
     json_shared_notes are "these terms share a JSON column, use distinct sub-keys" notes
     to inject verbatim into SQL-gen evidence — see _resolve_collisions.
 
@@ -1248,28 +1248,28 @@ def _find_unresolvable_entities(
                 best_hit_per_entity[entity] = hit
 
     # --- Step 3: KB check on ALL extracted entities ---
-    # Run on all search_norms (not just uncovered) so relevant_kg_text is complete
+    # Run on all search_norms (not just uncovered) so relevant_kb_text is complete
     # and entities explained by KB don't end up in the unresolvable list.
-    # Done before collision resolution below so relevant_kg_text is available to
+    # Done before collision resolution below so relevant_kb_text is available to
     # the LLM disambiguation fallback.
-    relevant_kg_text = ""
+    relevant_kb_text = ""
     entry_to_original_terms: dict[str, list[str]] = {}
     kb_covered_norms: set[str] = set()
-    if formatted_kg and search_norms:
+    if formatted_kb and search_norms:
         kb_entities = [norm_to_original.get(norm, norm) for norm in search_norms]
         orig_lower_to_norm = {
             norm_to_original.get(n, n).lower(): n for n in search_norms
         }
-        covered_originals, relevant_kg_text, entry_to_original_terms = (
+        covered_originals, relevant_kb_text, entry_to_original_terms = (
             _filter_covered_by_external_knowledge(
-                kb_entities, formatted_kg, question, children_map
+                kb_entities, formatted_kb, question, children_map
             )
         )
         kb_covered_norms = {
             orig_lower_to_norm.get(orig, orig) for orig in covered_originals
         }
         # Covered-entry names are already logged inside
-        # _filter_covered_by_external_knowledge ("external_kg covers: ...") —
+        # _filter_covered_by_external_knowledge ("external_kb covers: ...") —
         # no need to repeat the same set here.
 
     # Per-term KB formula (name, text), for _resolve_collisions' merged
@@ -1280,7 +1280,7 @@ def _find_unresolvable_entities(
     # cross-reference it against.
     kb_text_by_norm: dict[str, tuple[str, str]] = {}
     if entry_to_original_terms:
-        kb_entries_parsed = _parse_kg_entries(relevant_kg_text)
+        kb_entries_parsed = _parse_kb_entries(relevant_kb_text)
         for entry_name, matched_terms in entry_to_original_terms.items():
             entry_text = next(
                 (
@@ -1300,7 +1300,7 @@ def _find_unresolvable_entities(
     entities_before_resolution = set(best_hit_per_entity.keys())
     json_notes = _resolve_collisions(
         question,
-        relevant_kg_text,
+        relevant_kb_text,
         best_hit_per_entity,
         semantic_retriever,
         db_name,
@@ -1376,7 +1376,7 @@ def _find_unresolvable_entities(
     return (
         unresolvable,
         resolved_hits,
-        relevant_kg_text,
+        relevant_kb_text,
         all_norms,
         entry_to_original_terms,
         vdb_only_norms,
