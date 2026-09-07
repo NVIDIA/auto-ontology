@@ -1228,6 +1228,107 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/configurations/column-profiling": {
+      "get": {
+        "tags": ["configurations"],
+        "summary": "Report whether semantic compilation samples live column values.",
+        "description": "Report whether semantic compilation samples live column values.",
+        "operationId": "get_api_configurations_column_profiling",
+        "responses": {
+          "200": {
+            "description": "Whether semantic compilation samples live column values. On when unset, unlike semantic compilation itself.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/configurations/column-profiling/route.ts",
+        "x-gsf-permissions": {
+          "semanticCompilation": ["read"]
+        },
+        "x-gsf-proxied": false
+      },
+      "put": {
+        "tags": ["configurations"],
+        "summary": "Turn column profiling on or off instance-wide (admin-only).",
+        "description": "Turn column profiling on or off instance-wide (admin-only).\n\nDeliberately does NOT trigger a compilation run. The flag is read at the top\nof each run, so it applies from the next one onward — flipping it is a change\nof policy, not a request to recompile. Operators who want it applied now can\nuse Reset, which is on the same page.",
+        "operationId": "put_api_configurations_column_profiling",
+        "requestBody": {
+          "required": true,
+          "description": "Anything other than `true` turns the flag off.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored flag. Takes effect from the next compilation run; this does not trigger one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/configurations/column-profiling/route.ts",
+        "x-gsf-permissions": {
+          "semanticCompilation": ["manage"]
+        },
+        "x-gsf-proxied": false
+      }
+    },
     "/api/configurations/semantic-compilation": {
       "get": {
         "tags": ["configurations"],

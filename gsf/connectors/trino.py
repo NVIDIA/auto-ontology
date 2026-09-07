@@ -318,6 +318,15 @@ class TrinoDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._catalog
 
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Prepend the bound catalog: Trino names are ``catalog.schema.table``.
+
+        A connection binds one catalog, and a bare ``schema.table`` resolves
+        against the session default instead -- so the base two-level default
+        would point profiling probes at the wrong catalog.
+        """
+        return _qualified(*(p for p in (self._catalog, schema, table) if p))
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------

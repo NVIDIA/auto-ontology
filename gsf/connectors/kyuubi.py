@@ -507,6 +507,16 @@ class KyuubiDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._catalog
 
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Prepend the bound catalog: Spark names are ``catalog.schema.table``.
+
+        The base two-level default would resolve against ``spark_catalog``, not
+        the Iceberg catalog this connection binds, so every probe would raise
+        TABLE_OR_VIEW_NOT_FOUND. Matches how :meth:`get_tables` and the
+        ``DESCRIBE TABLE`` pass already qualify.
+        """
+        return _qualified(*(p for p in (self._catalog, schema, table) if p))
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------

@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { semanticCompilationApi } from '@/api/settings';
+import { columnProfilingApi, semanticCompilationApi } from '@/api/settings';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal } from '@/common/modal';
@@ -16,14 +16,18 @@ import { ToastVariant } from '@/enums/toast';
 
 export const SemanticCompilationForm = ({
 	initialEnabled,
+	initialProfilingEnabled,
 	hasDatabases,
 }: {
 	initialEnabled: boolean;
+	initialProfilingEnabled: boolean;
 	hasDatabases: boolean;
 }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
 	// paint; updated optimistically and rolled back if the save fails.
 	const [enabled, setEnabled] = useState(initialEnabled);
+	const [profilingEnabled, setProfilingEnabled] = useState(initialProfilingEnabled);
+	const [savingProfiling, setSavingProfiling] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -85,6 +89,32 @@ export const SemanticCompilationForm = ({
 			setError('Failed to update semantic compilation. Please try again.');
 		} finally {
 			setSaving(false);
+		}
+	};
+
+	const handleProfilingToggle = async () => {
+		if (savingProfiling) return;
+		const next = !profilingEnabled;
+		setSavingProfiling(true);
+		setError(null);
+		setMessage(null);
+		setProfilingEnabled(next);
+
+		try {
+			const result = await columnProfilingApi.setEnabled(next);
+			setProfilingEnabled(result.enabled);
+			// No run is triggered: the flag is read at the start of each run, so
+			// say when it takes effect rather than implying something happened now.
+			setMessage(
+				result.enabled
+					? 'Column value profiling enabled — applies from the next compilation run.'
+					: 'Column value profiling disabled — applies from the next compilation run.',
+			);
+		} catch {
+			setProfilingEnabled(!next); // roll back the optimistic update
+			setError('Failed to update column value profiling. Please try again.');
+		} finally {
+			setSavingProfiling(false);
 		}
 	};
 
@@ -173,6 +203,28 @@ export const SemanticCompilationForm = ({
 								</span>
 							</div>
 						)}
+
+						{/* Above the compilation toggle on purpose: this is a property of
+						    how compilation runs, so it can be set before turning
+						    compilation on, and stays editable afterwards. */}
+						<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+							<div className="flex flex-col pr-4">
+								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+									Profiling Column Values
+								</span>
+								<span className="text-xs text-zinc-500">
+									{profilingEnabled
+										? 'Samples live values from each table to capture example values, uniqueness and date formats.'
+										: 'Off — the semantic layer is built from names and types only.'}
+								</span>
+							</div>
+							<Toggle
+								checked={profilingEnabled}
+								aria-label="Profiling Column Values"
+								disabled={savingProfiling}
+								onChange={handleProfilingToggle}
+							/>
+						</div>
 
 						<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 							<div className="flex flex-col">

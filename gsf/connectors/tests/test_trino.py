@@ -386,3 +386,13 @@ def test_close_releases_the_connection() -> None:
 
     assert fake.closed
     assert database._connection is None  # noqa: SLF001 - asserting on the test double
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Trino objects are catalog.schema.table; a two-level name resolves against
+    # the session default catalog instead of the one this connection binds.
+    assert _database().qualify("raw", "events") == '"hive"."raw"."events"'
+
+
+def test_qualify_without_a_schema_still_carries_the_catalog() -> None:
+    assert _database().qualify(None, "events") == '"hive"."events"'

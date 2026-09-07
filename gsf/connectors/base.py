@@ -38,6 +38,8 @@ from typing import Optional
 
 import pandas as pd
 
+from gsf.utils.sql_identifiers import qualified_name
+
 
 class SQLDatabase(ABC):
     """Abstract SQL database connector.
@@ -164,6 +166,34 @@ class SQLDatabase(ABC):
         Returns:
             The database name as reported by the backend (e.g. ``"mydb"``).
         """
+
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Return a quoted, fully-qualified reference to *table*.
+
+        Deliberately concrete rather than abstract: the two-level
+        ``schema.table`` default is right for every engine whose connection
+        binds a database, so connectors only override when it is not.
+
+        Engines with a three-level namespace (``catalog.schema.table`` --
+        Kyuubi, Trino, Databricks) MUST override this to prepend the bound
+        catalog. Without it a bare ``schema.table`` resolves against the
+        session's default catalog, where the tables do not exist, and every
+        profiling probe fails with TABLE_OR_VIEW_NOT_FOUND -- silently, since
+        the caller treats a failed probe as "no profile available".
+
+        Do not reach for :attr:`database_name` to build this at the call site:
+        it means the catalog on those three connectors but the database on the
+        rest, where ``mydb.public.orders`` is invalid. Qualification is the
+        connector's rule, not the caller's.
+
+        Args:
+            schema: Owning schema, or ``None`` for an unqualified table.
+            table: Table name.
+
+        Returns:
+            A reference safe to interpolate into SQL for this dialect.
+        """
+        return qualified_name(schema, table, dialect=self.dialect)
 
     # ------------------------------------------------------------------
     # Lifecycle

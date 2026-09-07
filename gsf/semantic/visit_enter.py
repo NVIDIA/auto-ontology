@@ -12,8 +12,6 @@ from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
 
-from sqlglot import exp
-
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
@@ -29,6 +27,7 @@ from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
+from gsf.utils.sql_identifiers import quoted_identifier
 
 if TYPE_CHECKING:
     from gsf.connectors.base import SQLDatabase
@@ -119,24 +118,6 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
-def _quoted_identifier(name: str, dialect: str | None) -> str:
-    """Quote a schema, table or column name for *dialect*.
-
-    Names carrying a space or a reserved word have to be quoted or the probe
-    below silently loses the table: ``SELECT * FROM main.Sales Orders`` parses
-    as table ``main.Sales``, raises "no such table", and the caller drops every
-    column of that table from profiling. The quote character is dialect-specific
-    (backticks on MySQL and Spark, double quotes elsewhere), so the naive
-    hard-coded ``"`` would trade a SQLite bug for a MySQL one.
-    """
-    try:
-        return exp.to_identifier(name, quoted=True).sql(dialect=dialect or None)
-    except Exception:
-        # Unknown dialect: fall back to the SQL-standard quote rather than
-        # emitting a bare identifier, since bare is what breaks on spaces.
-        return '"' + name.replace('"', '""') + '"'
-
-
 def _json_ready_sample(value: Any) -> Any:
     """Convert a live warehouse value to a JSON-serializable Python native.
 
@@ -217,7 +198,7 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
+    quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = connector.execute(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
@@ -266,13 +247,10 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    dialect = getattr(connector, "dialect", None)
-    quoted_table = _quoted_identifier(table_name, dialect)
-    qualified = (
-        f"{_quoted_identifier(schema_name, dialect)}.{quoted_table}"
-        if schema_name
-        else quoted_table
-    )
+    # Qualification is the connector's rule, not ours: engines with a
+    # catalog.schema.table namespace prepend their bound catalog here, and a
+    # two-level name would resolve against the wrong catalog.
+    qualified = connector.qualify(schema_name, table_name)
 
     try:
         df = connector.execute(
@@ -391,16 +369,28 @@ def process_table(
     domain_summary: DomainSummary | None,
     embedder: SemanticEmbedder | None = None,
     database_name: str | None = None,
+    profile_columns: bool = True,
 ) -> ProcessTableResult:
-    """Build taxonomy nodes for one table: Term and ColumnAttributes."""
+    """Build taxonomy nodes for one table: Term and ColumnAttributes.
+
+    ``profile_columns`` mirrors the "Profiling Column Values" setting, read once
+    per run by the caller. Defaults to True so a direct caller keeps the
+    historical behaviour.
+    """
     table_id = table["id"]
     table_name = table["name"]
 
-    # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values, is_unique, and format onto Column nodes.
-    connector = _resolve_connector(database_name)
+    # Columns profiling — requires a live connector; skipped when unavailable
+    # or when the operator turned it off. Persists sample_values, is_unique,
+    # and format onto Column nodes.
+    connector = _resolve_connector(database_name) if profile_columns else None
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
-    if connector is not None:
+    if not profile_columns:
+        logger.info(
+            "[%s] Skipping value sampling — column profiling is disabled",
+            table_name,
+        )
+    elif connector is not None:
         column_count = len(ctx.get("columns", []))
         try:
             with _step(table_name, f"Sampling column values ({column_count} columns)"):
