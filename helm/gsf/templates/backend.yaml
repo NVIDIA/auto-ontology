@@ -38,6 +38,7 @@ spec:
       {{- include "gsf.imagePullSecrets" . | nindent 6 }}
       initContainers:
         {{- include "gsf.waitForDeps" . | nindent 8 }}
+        {{- include "gsf.waitForCatalogSchema" . | nindent 8 }}
       containers:
         - name: backend
           image: "{{ include "gsf.image" .Values.backend.image }}"
@@ -62,8 +63,11 @@ spec:
             initialDelaySeconds: 15
             periodSeconds: 10
           livenessProbe:
+            # Deliberately not /api/health: that one probes Postgres, and a
+            # liveness probe gated on an external dependency restarts a healthy
+            # backend whenever the database is slow.
             httpGet:
-              path: /api/health
+              path: /api/health/live
               port: 3001
             initialDelaySeconds: 30
             periodSeconds: 15

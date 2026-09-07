@@ -2,14 +2,25 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j read/write for Term nodes.
+"""Term reads and writes.
 
-ColumnAttribute and SemanticFK operations live in gsf/dal/attributes.py.
-Also contains find_term_link_path, which traverses REPRESENTS / CONTAINS /
-HAS_ATTRIBUTE / SEMANTIC_FK / PROPERTY_OF edges to resolve the real hop
-chain behind a term↔term Exploration edge — the same traversal one level
-down (Column-to-Column instead of Term-to-Term) as attributes.py's own
-find_join_path, whose shared find_shortest_labeled_path helper this reuses.
+ColumnAttribute and SEMANTIC_FK operations live in :mod:`gsf.dal.attributes`.
+
+Three rules are shared by almost everything here, and each one exists because a
+previous version of this code had two copies of it that drifted:
+
+* **What counts as a Term** — a semantic Term with at least one table
+  representing it (:func:`_semantic_terms`). The list, its total, and the
+  single-id check all read it from one place, so they cannot disagree about
+  which terms are real.
+* **All-or-nothing table visibility** (:func:`_in_scope`). A term represented by
+  *any* out-of-zone table is hidden entirely. Not a relevance filter — an
+  authorization boundary.
+* **What "related" means** (:func:`fetch_term_table_pairs`). Three paths from a
+  table to a term, and the related list, the per-term badge, and the Exploration
+  graph's edges all count the same rows. Spelling them out separately is what
+  once let a card's badge, the "Relationships" column, and the length of the
+  list behind them each report a different number.
 """
 
 from __future__ import annotations
@@ -17,19 +28,27 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
-
-from gsf.dal.attributes import (
-    fetch_column_attribute_columns_map,
-    find_shortest_labeled_path,
+from sqlalchemy import (
+    String,
+    and_,
+    bindparam,
+    case,
+    func,
+    literal,
+    select,
+    update,
 )
-from gsf.dal.cypher_fragments import and_condition, paging_clause
+from sqlalchemy.dialects.postgresql import insert
+
+from gsf.catalog.constants import Edges, Labels
+from gsf.dal import schema as s
+from gsf.dal.attributes import fetch_column_attribute_columns_map
 from gsf.dal.datasources import fetch_col_table_contexts
-from gsf.dal.users import resolve_accessible_catalog_ids, resolve_table_filter
+from gsf.dal.session import store, write_transaction
+from gsf.dal.users import resolve_accessible_catalog_ids
+from gsf.dal.zones import fetch_table_zones_map, zone_covers_table
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
-    LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
     REL_HAS_ATTRIBUTE,
     REL_PROPERTY_OF,
@@ -37,159 +56,206 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
-from gsf.server.zones.constants import (
-    LABEL_ZONE_DISABLED,
-    REL_ZONE_OF,
-    ZONE_LABEL_PATTERN,
-)
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
 
-# Shared RETURN projection for ColumnAttribute rows. Expects `attr` bound, plus
-# a `col` (the HAS_ATTRIBUTE owner, possibly null) so `col.sample_values`
-# — profiled at ingestion time — is available.
-_COLUMN_ATTRIBUTE_FIELDS = """attr.id            AS id,
-               attr.name          AS name,
-               attr.description   AS description,
-               attr.term_name     AS term_name,
-               attr.source_column AS source_column,
-               attr.datatype      AS datatype,
-               attr.table_id      AS table_id,
-               col.sample_values  AS sample_values,
-               coalesce(attr.certified, false) AS certified"""
-
 
 def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Normalize ``sample_values`` on each row via ``parse_sample_values``."""
+    """Render ``sample_values`` on each row as the string list callers expect.
+
+    These rows serve both the terms API and semantic embedding text, so the
+    typed values stored as JSON are rendered once here rather than at each use.
+    """
     for row in rows:
-        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+        row["sample_values"] = stringify_sample_values(row.get("sample_values"))
     return rows
 
 
-# All-or-nothing table visibility for a Term: a Term represented by any table
-# outside the accessible set is hidden entirely. Expects a `$table_ids` param
-# and binds `term`. See fetch_all_terms for the rationale.
-_TERM_TABLE_SCOPE_CONDITION = (
-    f"NOT EXISTS {{"
-    f" (other:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)"
-    f" WHERE NOT other.id IN $table_ids"
-    f" }}"
-)
-
-# What it means for a Term to exist as far as the UI is concerned: a semantic
-# Term with at least one Table representing it. Binds `t` and `term`, expects a
-# `$source` param, and pairs with the _semantic_term_filter clause. fetch_all_terms,
-# count_terms and term_is_in_scope all interpolate this rather than spelling the
-# pattern out, so the list, its total and the single-id check cannot come to
-# disagree about which terms are real.
-_SEMANTIC_TERM_MATCH = (
-    f"MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->"
-    f"(term:{LABEL_TERM} {{source: $source}})"
-)
-
-# Maps the `flags` list built by _certification_flags_clause onto the
-# three-state status the frontend renders.
-_CERTIFICATION_CASE = """CASE
-                   WHEN size([f IN flags WHERE f]) = size(flags) THEN 'certified'
-                   WHEN size([f IN flags WHERE f]) = 0           THEN 'pending'
-                   ELSE 'partial'
-               END"""
+# ---------------------------------------------------------------------------
+# The shared filters
+# ---------------------------------------------------------------------------
 
 
-def _term_zone_condition(
-    zone_ids: list[str] | None,
-    data_ids_by_zone: dict[str, set[str]] | None = None,
-) -> tuple[str, dict[str, Any], dict[str, set[str]] | None]:
-    """Pair :data:`_TERM_TABLE_SCOPE_CONDITION` with the ``$table_ids`` it needs.
+def _in_scope(table_ids: list[str] | None):
+    """All-or-nothing table visibility, or ``None`` when unscoped.
 
-    Returns ``(condition, params, resolved_data_ids_by_zone)``. *condition* is
-    ``""`` when there is no zone scoping, so the caller decides whether it
-    opens a ``WHERE`` or extends one; an empty *condition* also means
-    ``$table_ids`` is absent, which is exactly when
-    ``_certification_flags_clause`` must not be zone-scoped.
-
-    Every Term read that applies the all-or-nothing rule resolves it here.
-    Four call sites used to do this plumbing themselves, in two different
-    spellings of one rule — half branching on *zone_ids*, half on the resolved
-    ids — which held only because ``resolve_accessible_catalog_ids`` returns
-    ``None`` for exactly ``zone_ids is None``.
+    A term represented by any table outside *table_ids* is hidden entirely,
+    matching the rule ``list_custom_analyses`` applies. Phrased in the negative
+    — "no representing table is out of scope" — because the positive form would
+    show a term that also represents something the caller cannot see.
     """
-    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    if resolved is None:
-        return "", {}, None
-    return (
-        _TERM_TABLE_SCOPE_CONDITION,
-        {"table_ids": list(resolved["table_ids"])},
-        resolved,
+    if table_ids is None:
+        return None
+    return ~(
+        select(literal(1))
+        .select_from(s.table__term)
+        .where(
+            s.table__term.c.term_id == s.term.c.id,
+            s.table__term.c.table_id.notin_(table_ids),
+        )
+        .correlate(s.term)
+        .exists()
     )
 
 
-def _certification_flags_clause(*, zone_scoped: bool) -> str:
-    """Cypher fragment building a Term's aggregate certification ``flags`` list.
+def _scope_table_ids(
+    zone_ids: list[str] | None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+) -> list[str] | None:
+    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
+    return None if resolved is None else list(resolved["table_ids"])
 
-    This is the single definition of a Term's aggregate certification —
-    ``fetch_all_terms`` (list cards), ``get_full_term_by_id`` (detail page) and
-    ``get_term_certification`` (certification writes) all project it through
-    :data:`_CERTIFICATION_CASE`, so those three surfaces can never disagree.
 
-    The flags are the Term's own name/description booleans plus one boolean per
-    column and sql attribute. Because the Term flags are always present the
-    list is never empty, and a Term with no attributes is decided by its own
-    two flags alone.
+def _represented():
+    """The term has at least one table representing it.
 
-    When *zone_scoped*, each attribute comprehension applies the same
-    visibility rule as the endpoint that lists those attributes — plain
-    ``table_id`` membership for ColumnAttribute (see
-    ``fetch_column_attribute_counts``) and all-or-nothing over the tables a
-    SqlAttribute's SQL touches (see ``_sql_attr_zone_filter``) — so the
-    aggregate never reflects an attribute the caller isn't allowed to see.
-    Expects `term` in scope and a ``$table_ids`` param.
+    Half of what it means for a Term to exist as far as the UI is concerned;
+    the other half is ``source = 'semantic'``.
     """
-    if zone_scoped:
-        column_where = "WHERE ca.table_id IN $table_ids "
-        sql_where = (
-            f"WHERE NOT EXISTS {{"
-            f" (sa)-[:{Edges.HAS_SQL}]->(:{Labels.SQL})"
-            f"-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
-            f" WHERE NOT tbl.id IN $table_ids"
-            f" }} "
+    return (
+        select(literal(1))
+        .where(s.table__term.c.term_id == s.term.c.id)
+        .correlate(s.term)
+        .exists()
+    )
+
+
+def _semantic_terms(
+    zone_ids: list[str] | None = None,
+    search: str | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+    *,
+    term_id: str | None = None,
+):
+    """The predicate list every read of the visible Term set applies.
+
+    ``fetch_all_terms`` and ``count_terms`` must select exactly the same terms —
+    otherwise the total does not describe the list being paged — and
+    ``term_is_in_scope`` must answer for one id whatever those two would answer
+    for the whole set. All three take their filter from here.
+    """
+    conditions = [s.term.c.source == SEMANTIC_SOURCE, _represented()]
+    scope = _in_scope(_scope_table_ids(zone_ids, data_ids_by_zone))
+    if scope is not None:
+        conditions.append(scope)
+    if term_id is not None:
+        conditions.append(s.term.c.id == term_id)
+    if search:
+        # Escaped: the caller means a literal substring. Unescaped, `_`
+        # matches any character (so `customer_id` also finds `customerXid`)
+        # and a lone `%` returns the entire glossary.
+        needle = (
+            search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         )
-    else:
-        column_where = ""
-        sql_where = ""
-    return f"""[coalesce(term.name_certified, false),
-              coalesce(term.description_certified, false)]
-             + [(term)<-[:{REL_PROPERTY_OF}]-(ca:{LABEL_COLUMN_ATTRIBUTE})
-                {column_where}| coalesce(ca.certified, false)]
-             + [(term)<-[:{REL_PROPERTY_OF}]-(sa:{LABEL_SQL_ATTRIBUTE})
-                {sql_where}| coalesce(sa.certified, false)] AS flags"""
+        conditions.append(s.term.c.name.ilike(f"%{needle}%", escape="\\"))
+    return conditions
+
+
+def _certification(table_ids: list[str] | None):
+    """A Term's aggregate certification: ``certified``, ``partial`` or ``pending``.
+
+    The single definition of the rollup — the list cards, the detail page and
+    the certification writes all project this, so the three cannot disagree.
+
+    The flags are the Term's own two booleans plus one per column and sql
+    attribute. Because the Term's two are always present the set is never empty,
+    and a Term with no attributes is decided by them alone.
+
+    When *table_ids* is given, each attribute count applies the same visibility
+    rule as the endpoint that lists those attributes — plain ``table_id``
+    membership for ColumnAttribute, all-or-nothing over the tables a
+    SqlAttribute's SQL touches — so the badge never reflects an attribute the
+    caller is not allowed to see.
+    """
+
+    def counts(link_table, attribute_table, extra=None):
+        conditions = [
+            link_table.c.term_id == s.term.c.id,
+            link_table.c.attribute_id == attribute_table.c.id,
+        ]
+        if extra is not None:
+            conditions.append(extra)
+        total = (
+            select(func.count())
+            .select_from(link_table.join(attribute_table, conditions[1]))
+            .where(*conditions)
+            .correlate(s.term)
+            .scalar_subquery()
+        )
+        certified = (
+            select(func.count())
+            .select_from(link_table.join(attribute_table, conditions[1]))
+            .where(*conditions, attribute_table.c.certified.is_(True))
+            .correlate(s.term)
+            .scalar_subquery()
+        )
+        return total, certified
+
+    column_visible = None
+    sql_visible = None
+    if table_ids is not None:
+        column_visible = s.column_attribute.c.table_id.in_(table_ids)
+        sql_visible = ~(
+            select(literal(1))
+            .select_from(
+                s.sql_attribute__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.sql_attribute__sql.c.sql_query_id,
+                )
+            )
+            .where(
+                s.sql_attribute__sql.c.attribute_id == s.sql_attribute.c.id,
+                s.sql_query__table.c.table_id.notin_(table_ids),
+            )
+            .correlate(s.sql_attribute)
+            .exists()
+        )
+
+    column_total, column_certified = counts(
+        s.column_attribute__term, s.column_attribute, column_visible
+    )
+    sql_total, sql_certified = counts(
+        s.sql_attribute__term, s.sql_attribute, sql_visible
+    )
+
+    own_certified = case((s.term.c.name_certified, 1), else_=0) + case(
+        (s.term.c.description_certified, 1), else_=0
+    )
+    certified = own_certified + column_certified + sql_certified
+    total = literal(2) + column_total + sql_total
+
+    return case(
+        (certified == total, "certified"),
+        (certified == 0, "pending"),
+        else_="partial",
+    )
+
+
+# ---------------------------------------------------------------------------
+# Single-term reads
+# ---------------------------------------------------------------------------
 
 
 def get_term_certification(
     term_id: str,
     zone_ids: list[str] | None = None,
 ) -> str | None:
-    """Return one Term's aggregate certification status, or None when missing.
+    """One Term's aggregate certification, or ``None`` when it is not visible.
 
-    Certification writes call this to hand the caller a freshly recomputed
-    aggregate, so the Terms list card can be updated without the frontend
-    duplicating the rollup rule (or refetching the whole list).
+    Certification writes call this so the list card can be updated without the
+    frontend duplicating the rollup rule or refetching the whole list.
     """
-    condition, params, _ = _term_zone_condition(zone_ids)
-    term_filter = f"WHERE {condition}" if condition else ""
-    params["term_id"] = term_id
-
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        {term_filter}
-        WITH term, {_certification_flags_clause(zone_scoped=bool(condition))}
-        RETURN {_CERTIFICATION_CASE} AS certification
-        LIMIT 1
-        """,
-        params,
+    table_ids = _scope_table_ids(zone_ids)
+    statement = select(_certification(table_ids).label("certification")).where(
+        s.term.c.id == term_id
     )
+    scope = _in_scope(table_ids)
+    if scope is not None:
+        statement = statement.where(scope)
+
+    rows = store().query_read(statement.limit(1))
     return rows[0]["certification"] if rows else None
 
 
@@ -198,75 +264,58 @@ def term_is_in_scope(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> bool:
-    """True if *term_id* is a semantic Term that ``fetch_all_terms`` would return.
+    """Would ``fetch_all_terms`` return this term?
 
-    Runs ``fetch_all_terms``'s own :data:`_SEMANTIC_TERM_MATCH` and
-    ``_semantic_term_filter``, narrowed to one id, so it can never answer for
-    a single term something the list would contradict — for callers that only
-    need to check one id (e.g. before paging a single term's related nodes)
-    instead of building the whole in-scope set.
-
-    Scope is that glossary set, not whichever nodes an Exploration graph
-    payload happens to carry: a term dropped by
-    ``MAX_EXPLORATION_GRAPH_NODES`` truncation is still in scope, and has to
-    be, since the graph's relationship counts are computed untruncated.
-
-    Pass a pre-resolved *data_ids_by_zone* (see
-    ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request, to skip a repeat Neo4j round trip.
+    Scope is the glossary set, not whichever nodes an Exploration payload
+    happens to carry: a term dropped by graph truncation is still in scope, and
+    has to be, since the relationship counts are computed untruncated.
     """
-    term_filter, params, _ = _semantic_term_filter(
-        zone_ids, data_ids_by_zone=data_ids_by_zone, term_id=term_id
-    )
-    rows = get_neo4j_conn().query_read(
-        f"""
-        {_SEMANTIC_TERM_MATCH}
-        {term_filter}
-        RETURN term.id AS id LIMIT 1
-        """,
-        params,
+    rows = store().query_read(
+        select(s.term.c.id)
+        .where(
+            *_semantic_terms(
+                zone_ids, data_ids_by_zone=data_ids_by_zone, term_id=term_id
+            )
+        )
+        .limit(1)
     )
     return bool(rows)
 
 
 def semantic_layer_calculated() -> bool:
-    """True if at least one semantic Term exists in the graph."""
-    rows = get_neo4j_conn().query_read(
-        f"MATCH (term:{LABEL_TERM} {{source: $source}}) RETURN term.id AS id LIMIT 1",
-        {"source": SEMANTIC_SOURCE},
+    """Has the semantic layer been built at all?"""
+    return bool(
+        store().query_read(
+            select(s.term.c.id).where(s.term.c.source == SEMANTIC_SOURCE).limit(1)
+        )
     )
-    return bool(rows)
 
 
 def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
-    """Return ``{id, name, description}`` for the Term that REPRESENTS *table_id*.
-
-    Returns ``None`` when the table has no REPRESENTS Term.
-    """
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        RETURN term.id AS id,
-               term.name AS name,
-               coalesce(term.description, '') AS description
-        LIMIT 1
-        """,
-        {"table_id": table_id, "source": SEMANTIC_SOURCE},
+    """``{id, name, description}`` for the Term a table represents."""
+    rows = store().query_read(
+        select(
+            s.term.c.id,
+            s.term.c.name,
+            func.coalesce(s.term.c.description, "").label("description"),
+        )
+        .select_from(s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id))
+        .where(
+            s.table__term.c.table_id == table_id,
+            s.term.c.source == SEMANTIC_SOURCE,
+        )
+        .order_by(s.term.c.id)
+        .limit(1)
     )
     return dict(rows[0]) if rows else None
 
 
 def get_slim_term_by_id(term_id: str) -> dict[str, str] | None:
-    """Return ``{id, name}`` of a Term, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (t:{LABEL_TERM} {{id: $term_id}})
-        RETURN t.id AS id, t.name AS name LIMIT 1
-        """,
-        {"term_id": term_id},
+    """``{id, name}``, for callers that only need to name a term."""
+    rows = store().query_read(
+        select(s.term.c.id, s.term.c.name).where(s.term.c.id == term_id).limit(1)
     )
-    return rows[0] if rows else None
+    return dict(rows[0]) if rows else None
 
 
 def update_term(
@@ -277,35 +326,73 @@ def update_term(
     name_certified: bool | None = None,
     description_certified: bool | None = None,
 ) -> dict[str, Any] | None:
-    """Update a Term and return old/new values, or None when missing."""
-    rows = get_neo4j_conn().query_write(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        WITH term, term.name AS old_name
-        SET term.name = coalesce($name, term.name),
-            term.description = coalesce($description, term.description),
-            term.name_certified = coalesce($name_certified, term.name_certified),
-            term.description_certified =
-                coalesce($description_certified, term.description_certified)
-        WITH term, old_name
-        OPTIONAL MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term)
-        SET attr.term_name = term.name
-        RETURN term.id AS id,
-               old_name,
-               term.name AS name,
-               term.description AS description,
-               coalesce(term.name_certified, false)        AS name_certified,
-               coalesce(term.description_certified, false) AS description_certified
-        """,
-        {
-            "term_id": term_id,
-            "name": name,
-            "description": description,
-            "name_certified": name_certified,
-            "description_certified": description_certified,
-        },
-    )
-    return dict(rows[0]) if rows else None
+    """Update a Term, returning old and new values, or ``None`` when missing.
+
+    ``old_name`` is in the return because the caller needs it: renaming a Term
+    invalidates its embeddings, which are keyed on the old text.
+
+    A rename also rewrites ``term_name`` on every ColumnAttribute of the Term.
+    That is a denormalised copy, and keeping it in step here is not optional —
+    ``fetch_column_attributes_by_term_id`` matches attributes to their term
+    *through it*, so a stale copy silently empties a term's attribute list.
+    """
+    # One transaction: the rename and the denormalised copy on every
+    # ColumnAttribute are the same fact. If the second statement fails on its
+    # own, `fetch_column_attributes_by_term_id` matches through the stale copy
+    # and the Term's attribute list reads as empty from then on.
+    with write_transaction():
+        # Read the old name first. RETURNING gives the *new* one, and the caller
+        # compares the two to decide whether a rename happened -- with it always
+        # None, `name_changed` was true for every edit, so a description-only
+        # PATCH cleared description_suggestion on every SqlAttribute of the term
+        # and re-embedded all of them.
+        previous = store().query_read(
+            select(s.term.c.name).where(s.term.c.id == term_id)
+        )
+        old_name = previous[0]["name"] if previous else None
+
+        rows = store().query_write(
+            update(s.term)
+            .where(s.term.c.id == term_id)
+            .values(
+                name=func.coalesce(literal(name, String), s.term.c.name),
+                description=func.coalesce(
+                    literal(description, String), s.term.c.description
+                ),
+                name_certified=func.coalesce(name_certified, s.term.c.name_certified),
+                description_certified=func.coalesce(
+                    description_certified, s.term.c.description_certified
+                ),
+            )
+            .returning(
+                s.term.c.id,
+                s.term.c.name,
+                s.term.c.description,
+                s.term.c.name_certified,
+                s.term.c.description_certified,
+            )
+        )
+        if not rows:
+            return None
+        result = dict(rows[0])
+        result["old_name"] = old_name
+
+        # Read before the UPDATE would have been simpler, but RETURNING gives
+        # the new name and the old one is only knowable beforehand -- so it is
+        # fetched first, above, by way of this second statement being the
+        # *rename*.
+        store().query_write(
+            update(s.column_attribute)
+            .where(
+                s.column_attribute.c.id.in_(
+                    select(s.column_attribute__term.c.attribute_id).where(
+                        s.column_attribute__term.c.term_id == term_id
+                    )
+                )
+            )
+            .values(term_name=result["name"])
+        )
+    return result
 
 
 def merge_term(
@@ -314,91 +401,84 @@ def merge_term(
     table_id: str,
     synonyms: list[str] | None = None,
 ) -> str | None:
-    """Merge the Term node and return its persistent ``id`` (UUID)."""
-    rows = get_neo4j_conn().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})
-        MERGE (term:{LABEL_TERM} {{name: $name, source: $source}})
-        ON CREATE SET term.id = randomUUID()
-        SET term.description = $description,
-            term.synonyms = $synonyms
-        MERGE (t)-[:{REL_REPRESENTS}]->(term)
-        RETURN term.id AS id
-        """,
-        {
-            "table_id": table_id,
-            "name": name,
-            "description": description,
-            "synonyms": synonyms or [],
-            "source": SEMANTIC_SOURCE,
-        },
+    """Upsert a Term and link the table to it. ``None`` if the table is missing.
+
+    Unlike ``merge_column_attribute``, ``description`` is **assigned** rather
+    than coalesced, so a re-run of the semantic build overwrites a hand-edited
+    description. Deliberate, and worth knowing before changing it: a rebuild is
+    meant to be authoritative.
+    """
+    if not store().query_read(
+        select(s.catalog_table.c.id).where(s.catalog_table.c.id == table_id)
+    ):
+        return None
+
+    statement = insert(s.term).values(
+        name=name,
+        source=SEMANTIC_SOURCE,
+        description=description,
+        synonyms=synonyms or [],
     )
-    return rows[0]["id"] if rows else None
+    # One transaction, as `update_term` above. A term with no `table__term` link
+    # is excluded by `_represented()`, so it is invisible to every read while
+    # still occupying `uq_term_name_source` -- it blocks its own name forever.
+    with write_transaction():
+        rows = store().query_write(
+            statement.on_conflict_do_update(
+                constraint="uq_term_name_source",
+                set_={
+                    "description": statement.excluded.description,
+                    "synonyms": statement.excluded.synonyms,
+                },
+            ).returning(s.term.c.id)
+        )
+        term_id = rows[0]["id"]
+        store().query_write(
+            insert(s.table__term)
+            .values(table_id=table_id, term_id=term_id)
+            .on_conflict_do_nothing()
+        )
+    return term_id
 
 
 def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:
-    """Fetch synonyms for Terms connected to the given ColumnAttribute IDs.
+    """``{term_name: [synonym, ...]}`` for the terms behind these attributes.
 
-    Returns a mapping of term_name -> list[synonym].
+    Keyed by *name*, not id, because the caller matches synonyms against text.
+    Terms with no synonyms are omitted rather than mapped to an empty list.
     """
     if not attr_ids:
         return {}
-    query = """
-    UNWIND $attr_ids AS attr_id
-    MATCH (attr:ColumnAttribute {id: attr_id})-[:PROPERTY_OF]->(term:Term)
-    WHERE term.synonyms IS NOT NULL AND size(term.synonyms) > 0
-    RETURN DISTINCT term.name AS term_name, term.synonyms AS synonyms
-    """
     try:
-        rows = get_neo4j_conn().query_read(query, {"attr_ids": attr_ids})
+        rows = store().query_read(
+            select(s.term.c.name, s.term.c.synonyms)
+            .select_from(
+                s.column_attribute__term.join(
+                    s.term, s.term.c.id == s.column_attribute__term.c.term_id
+                )
+            )
+            .where(
+                s.column_attribute__term.c.attribute_id.in_(list(attr_ids)),
+                s.term.c.synonyms.isnot(None),
+                func.array_length(s.term.c.synonyms, 1) > 0,
+            )
+            .distinct()
+        )
     except Exception:
-        logger.warning("fetch_term_synonyms: Neo4j query failed", exc_info=True)
+        logger.warning("fetch_term_synonyms: query failed", exc_info=True)
         return {}
+
     result: dict[str, list[str]] = {}
     for row in rows:
-        name = row.get("term_name")
-        syns = row.get("synonyms") or []
-        if name and syns:
-            result[name] = [s for s in syns if s]
+        synonyms = [synonym for synonym in (row["synonyms"] or []) if synonym]
+        if row["name"] and synonyms:
+            result[row["name"]] = synonyms
     return result
 
 
-def _semantic_term_filter(
-    zone_ids: list[str] | None,
-    search: str | None = None,
-    data_ids_by_zone: dict[str, set[str]] | None = None,
-    *,
-    term_id: str | None = None,
-) -> tuple[str, dict[str, Any], dict[str, set[str]] | None]:
-    """Build the ``WHERE`` clause every read of the visible Term set applies.
-
-    Returns ``(where_clause, params, resolved_data_ids_by_zone)``, to be
-    interpolated after :data:`_SEMANTIC_TERM_MATCH`. ``fetch_all_terms`` and
-    ``count_terms`` have to select exactly the same terms — otherwise the
-    total wouldn't describe the list being paged — and ``term_is_in_scope``
-    has to answer for one id whatever those two would answer for the whole
-    set, so all three take their filter from here.
-
-    *search* filters on the term's name (case-insensitively); *term_id*
-    narrows to a single term. Both are optional and independent of the zone
-    scoping, which is resolved by ``_term_zone_condition``.
-    """
-    condition, params, data_ids_by_zone = _term_zone_condition(
-        zone_ids, data_ids_by_zone
-    )
-    params["source"] = SEMANTIC_SOURCE
-    conditions = [condition] if condition else []
-
-    if term_id is not None:
-        params["term_id"] = term_id
-        conditions.append("term.id = $term_id")
-
-    if search:
-        params["search"] = search.strip().lower()
-        conditions.append("toLower(term.name) CONTAINS $search")
-
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-    return where, params, data_ids_by_zone
+# ---------------------------------------------------------------------------
+# The Term list
+# ---------------------------------------------------------------------------
 
 
 def fetch_all_terms(
@@ -409,74 +489,64 @@ def fetch_all_terms(
     skip: int = 0,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Scan semantic Term nodes in Neo4j.
+    """The glossary, paged.
 
-    *zone_ids* is a hard authorization boundary (the zones the requesting
-    user has been granted access to), not a relevance filter.  A Term can be
-    represented by more than one Table (see ``merge_term``), so when
-    *zone_ids* is supplied a term is only returned when **every** table that
-    represents it is reachable through those zones — a term that also
-    represents an out-of-zone table is excluded entirely, mirroring the
-    all-or-nothing rule used for CustomAnalysis
-    (see ``gsf.dal.custom_analyses.list_custom_analyses``).  Pass ``None``
-    (or omit) to return all terms (admin / internal callers).
+    *zone_ids* is a hard authorization boundary. A Term can be represented by
+    more than one table, so it is returned only when **every** representing
+    table is reachable — a term also representing an out-of-zone table is
+    excluded outright. ``None`` returns everything, for admin callers.
 
-    *search* is a case-insensitive substring filter applied to the term's
-    name. Pass ``None`` (or omit, or an empty string) to skip filtering.
+    Each row carries its ``zones`` and its aggregate ``certification``, both
+    scoped to the same boundary, so the list renders chips and badges from one
+    response rather than a request per card.
 
-    Each term row additionally carries a ``zones`` list, resolved via
-    ``fetch_term_zones_map`` — the same attribute → column → table → zone
-    path used by ``get_full_term_by_id`` — so callers (the ``/terms`` list
-    and the Exploration graph) render Zone chips from one response instead
-    of a second per-page request.
-
-    Each row also carries the aggregate ``certification`` status (see
-    ``_certification_flags_clause``), zone-scoped to the same boundary, so
-    the Terms list renders a per-card badge without fetching attributes.
-
-    Pass a pre-resolved *data_ids_by_zone* (see
-    ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request — e.g.
-    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` — to skip the
-    repeat Neo4j round trip this function would otherwise make on its own.
-
-    Rows come back ordered by name (case-insensitively, then by id to break
-    ties between same-named terms), which is what makes *skip* and *limit*
-    meaningful: pass them to read one page of that order and pair them with
-    ``count_terms`` for the total. Omit *limit* to return every matching term
-    (the Exploration graph and the bulk re-embed both need the whole set).
+    Ordered by name case-insensitively then by id — the id breaks ties between
+    same-named terms, without which a page boundary could repeat one and skip
+    another. Pair with ``count_terms`` for the total.
     """
-    conn = get_neo4j_conn()
-    term_filter, term_params, data_ids_by_zone = _semantic_term_filter(
-        zone_ids, search, data_ids_by_zone
+    table_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
+    schema_names = (
+        select(func.array_agg(func.distinct(s.catalog_schema.c.name)))
+        .select_from(
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+            ).join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(s.table__term.c.term_id == s.term.c.id)
+        .correlate(s.term)
+        .scalar_subquery()
     )
-    paging = paging_clause(skip, limit, term_params)
 
-    terms = conn.query_read(
-        f"""
-        {_SEMANTIC_TERM_MATCH}
-        {term_filter}
-        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-        WITH term, collect(DISTINCT sch.name) AS schemas
-        WITH term, schemas,
-             {_certification_flags_clause(zone_scoped=data_ids_by_zone is not None)}
-        RETURN term.name AS name, term.description AS description,
-               term.synonyms AS synonyms, term.id AS id,
-               schemas AS schema_names,
-               coalesce(term.name_certified, false)        AS name_certified,
-               coalesce(term.description_certified, false) AS description_certified,
-               {_CERTIFICATION_CASE} AS certification
-        ORDER BY toLower(name), id
-        {paging}
-        """,
-        term_params,
+    statement = (
+        select(
+            s.term.c.name,
+            s.term.c.description,
+            s.term.c.synonyms,
+            s.term.c.id,
+            schema_names.label("schema_names"),
+            s.term.c.name_certified,
+            s.term.c.description_certified,
+            _certification(table_ids).label("certification"),
+        )
+        .where(*_semantic_terms(zone_ids, search, data_ids_by_zone))
+        .order_by(func.lower(s.term.c.name), s.term.c.id)
+        .offset(skip)
     )
-    # Scoped to the rows just read, so paging the list doesn't resolve zones
-    # for the rest of the glossary on every page.
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    terms = [dict(r) for r in store().query_read(statement)]
+    # Scoped to the rows just read, so paging does not resolve zones for the
+    # rest of the glossary on every page.
     zones_by_term = fetch_term_zones_map(
         zone_ids, term_ids=[row["id"] for row in terms]
     )
-    return [{**dict(row), "zones": zones_by_term.get(row["id"], [])} for row in terms]
+    for row in terms:
+        row["schema_names"] = row["schema_names"] or []
+        row["zones"] = zones_by_term.get(row["id"], [])
+    return terms
 
 
 def count_terms(
@@ -484,219 +554,210 @@ def count_terms(
     search: str | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> int:
-    """Return how many Terms ``fetch_all_terms`` would return unpaged.
-
-    The paged Terms list needs this to know whether more pages exist; Neo4j
-    can't report it alongside a ``SKIP``/``LIMIT`` result, hence the separate
-    query. Takes the same arguments, and the same filter, as
-    ``fetch_all_terms``.
-    """
-    term_filter, term_params, _ = _semantic_term_filter(
-        zone_ids, search, data_ids_by_zone
+    """The unpaged size of :func:`fetch_all_terms`, from the same filter."""
+    rows = store().query_read(
+        select(func.count(func.distinct(s.term.c.id)).label("total")).where(
+            *_semantic_terms(zone_ids, search, data_ids_by_zone)
+        )
     )
-    rows = get_neo4j_conn().query_read(
-        f"""
-        {_SEMANTIC_TERM_MATCH}
-        {term_filter}
-        RETURN count(DISTINCT term) AS total
-        """,
-        term_params,
-    )
-    return rows[0]["total"] if rows else 0
+    return int(rows[0]["total"]) if rows else 0
 
 
 def fetch_all_terms_and_attributes(
     zone_ids: list[str] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Scan every semantic Term and ColumnAttribute node in Neo4j.
+    """Every Term and every ColumnAttribute, for a one-shot bulk re-embed.
 
-    Used only by ``embed_all_semantic_nodes`` for a one-shot bulk re-embed of
-    the whole graph: unlike ``fetch_all_terms``, this also runs a second,
-    global Neo4j scan for every ColumnAttribute (needed to rebuild each
-    Term's embedding text). Callers that only need Term rows — the
-    ``/terms`` list, the Exploration semantic graph — should call
-    ``fetch_all_terms`` instead and skip that second query entirely. Pass
-    ``None`` (or omit) to scan the whole graph (admin / internal callers).
+    Only ``embed_all_semantic_nodes`` wants this. The second scan is global and
+    expensive; callers that need Term rows alone — the ``/terms`` list, the
+    Exploration graph — should call :func:`fetch_all_terms` and skip it.
     """
-    conn = get_neo4j_conn()
     terms = fetch_all_terms(zone_ids=zone_ids)
 
-    attr_filter, attr_params = resolve_table_filter(
-        zone_ids,
-        "t.id",
-        extra_params={"source": SEMANTIC_SOURCE},
+    statement = (
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.name.label("column_name"),
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(s.column_attribute.c.source == SEMANTIC_SOURCE)
     )
-    attrs = conn.query_read(
-        f"""
-        MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-        {attr_filter}
-        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-        RETURN attr.name AS name,
-               attr.description AS description,
-               attr.term_name AS term_name,
-               attr.source_column AS source_column,
-               col.name AS column_name,
-               col.sample_values AS sample_values,
-               col.is_unique AS is_unique,
-               attr.id AS id,
-               t.id AS table_id,
-               t.name AS table_name,
-               sch.name AS schema_name
-        """,
-        attr_params,
-    )
-    return terms, attrs
+    table_ids = _scope_table_ids(zone_ids)
+    if table_ids is not None:
+        statement = statement.where(s.catalog_table.c.id.in_(table_ids))
+
+    return terms, [dict(r) for r in store().query_read(statement)]
 
 
 def get_full_term_by_id(
     term_id: str,
     zone_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Return a single Term node by its id with table count and zones, or None.
+    """One Term with its tables, table count, zones and certification.
 
-    *zone_ids* is a hard authorization boundary, not a relevance filter. A
-    Term can be represented by more than one Table (see ``merge_term``), so
-    when *zone_ids* is supplied the term is only returned when **every**
-    table that represents it is reachable through those zones — matching the
-    all-or-nothing rule used by ``fetch_all_terms`` for the
-    ``/terms`` list, so a viewer can't bypass list-level zone scoping by
-    requesting a term directly by id.  Returns ``None`` (→ 404) when the
-    check fails.  Pass ``None`` to skip the check (admin / internal callers).
+    Applies the same all-or-nothing rule as :func:`fetch_all_terms`, so a viewer
+    cannot bypass list-level scoping by requesting a term directly by id —
+    ``None`` here becomes a 404.
 
-    ``zones`` is resolved via **both** attribute paths a term can carry
-    content through: ColumnAttribute → Column → Table, and SqlAttribute →
-    Sql → Table (a term's SqlAttribute can reference tables no
-    ColumnAttribute touches, e.g. a custom cross-table formula) — a term
-    participates in a zone when either path reaches a table belonging to
-    it. When *zone_ids* is supplied, the returned ``zones`` are additionally
-    restricted to that set, so a viewer never sees zone names/colors they
-    don't have access to — disabled zones are excluded outright in that
-    case, so a viewer never sees a disabled zone chip even if its id ended
-    up in *zone_ids*. Pass ``None`` to skip the check and include disabled
-    zones (with ``enabled: False``) so admins can see and manage them.
+    ``zones`` is resolved through **both** paths a term carries content by:
+    ColumnAttribute → Column → Table, and SqlAttribute → Sql → Table. A term's
+    SqlAttribute can reference tables no ColumnAttribute touches (a cross-table
+    formula, say), and the term participates in a zone when *either* path
+    reaches it.
     """
-    conn = get_neo4j_conn()
-    condition, term_params, _ = _term_zone_condition(zone_ids)
-    term_filter = f"WHERE {condition}" if condition else ""
-    term_params["term_id"] = term_id
+    table_ids = _scope_table_ids(zone_ids)
+    statement = select(
+        s.term.c.name,
+        s.term.c.description,
+        s.term.c.synonyms,
+        s.term.c.id,
+        s.term.c.name_certified,
+        s.term.c.description_certified,
+        _certification(table_ids).label("certification"),
+    ).where(s.term.c.id == term_id)
+    scope = _in_scope(table_ids)
+    if scope is not None:
+        statement = statement.where(scope)
 
-    rows = conn.query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        {term_filter}
-        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
-        WITH term, collect(DISTINCT CASE WHEN t IS NULL THEN NULL ELSE {{
-                 id: t.id,
-                 name: t.name,
-                 schema_id: sch.id,
-                 db_id: db.id
-             }} END) AS raw_tables
-        WITH term, [tbl IN raw_tables WHERE tbl IS NOT NULL] AS tables
-        WITH term, tables,
-             {_certification_flags_clause(zone_scoped=bool(condition))}
-        RETURN term.name AS name, term.description AS description,
-               term.synonyms AS synonyms, term.id AS id,
-               size(tables) AS table_count,
-               tables AS tables,
-               coalesce(term.name_certified, false)        AS name_certified,
-               coalesce(term.description_certified, false) AS description_certified,
-               {_CERTIFICATION_CASE} AS certification
-        LIMIT 1
-        """,
-        term_params,
-    )
+    rows = store().query_read(statement.limit(1))
     if not rows:
         return None
     result = dict(rows[0])
 
-    # Reuses `fetch_term_zones_map`'s own two-path (ColumnAttribute and
-    # SqlAttribute) zone resolution rather than re-running the identical
-    # `CONTAINS*0..2` traversal here — this is just that function narrowed
-    # to one term, so the two can't drift apart the way this used to
-    # duplicate it verbatim.
+    tables = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_schema.c.id.label("schema_id"),
+            s.catalog_database.c.id.label("db_id"),
+        )
+        .select_from(
+            s.table__term.join(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+            )
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.table__term.c.term_id == term_id)
+        .order_by(s.catalog_table.c.id)
+    )
+    result["tables"] = [dict(r) for r in tables]
+    result["table_count"] = len(result["tables"])
     result["zones"] = fetch_term_zones_map(zone_ids, term_ids=[term_id]).get(
         term_id, []
     )
     return result
 
 
+def _term_zone_rows(path_join, term_filter):
+    """Zone rows reachable from a Term along one attribute path."""
+    return (
+        select(
+            s.term.c.id.label("term_id"),
+            s.zone.c.id,
+            s.zone.c.name,
+            s.zone.c.color,
+            s.zone.c.enabled,
+        )
+        .select_from(path_join)
+        .where(*term_filter)
+        .distinct()
+    )
+
+
 def fetch_term_zones_map(
     zone_ids: list[str] | None = None,
     term_ids: list[str] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Return ``{term_id: [zone, ...]}`` for every Term reachable via *zone_ids*.
+    """``{term_id: [zone, ...]}``, resolving many terms in one pass.
 
-    Mirrors the per-term zone resolution in ``get_full_term_by_id`` — the
-    union of the ColumnAttribute (attribute → column → table → zone) and
-    SqlAttribute (attribute → sql → table → zone) paths — but resolves many
-    Terms in one query, so the Exploration graph and the Terms list can
-    render Zone chips without a per-node request. When *zone_ids* is
-    supplied, the returned zone names/colors are restricted to that set and
-    disabled zones are excluded outright — a viewer never sees a disabled
-    zone chip, even if its id ended up in *zone_ids*. Pass ``None`` to
-    return zones for every term, disabled included, so admins can see and
-    manage them (admin / internal callers).
+    The union of the two paths :func:`get_full_term_by_id` describes, so the
+    Terms list and the Exploration graph render chips without a request per
+    node — and, more to the point, agree with the detail page.
 
-    Pass *term_ids* to restrict the scan to a known subset — the paged Terms
-    list passes the ids on the page it is about to render, so reading one
-    page doesn't cost a walk over every Term in the graph. It never widens
-    access: *zone_ids* still decides which zones come back.
+    *term_ids* narrows the scan; it never widens access, which *zone_ids* alone
+    decides. An empty list means no terms, not all of them.
     """
-    zone_filter = (
-        ""
-        if zone_ids is None
-        else f"WHERE z.id IN $zone_ids AND NOT z:{LABEL_ZONE_DISABLED}"
+    if term_ids is not None and not term_ids:
+        return {}
+
+    column_path = (
+        s.term.join(
+            s.column_attribute__term,
+            s.column_attribute__term.c.term_id == s.term.c.id,
+        )
+        .join(
+            s.column__has_attribute,
+            s.column__has_attribute.c.attribute_id
+            == s.column_attribute__term.c.attribute_id,
+        )
+        .join(
+            s.catalog_column,
+            s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+        )
+        .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+        .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
+        .join(s.zone_target, zone_covers_table())
+        .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
     )
-    params: dict[str, Any] = {}
-    if zone_ids is not None:
-        params["zone_ids"] = zone_ids
+    sql_path = (
+        s.term.join(
+            s.sql_attribute__term, s.sql_attribute__term.c.term_id == s.term.c.id
+        )
+        .join(
+            s.sql_attribute__sql,
+            s.sql_attribute__sql.c.attribute_id == s.sql_attribute__term.c.attribute_id,
+        )
+        .join(
+            s.sql_query__table,
+            s.sql_query__table.c.sql_query_id == s.sql_attribute__sql.c.sql_query_id,
+        )
+        .join(s.catalog_table, s.catalog_table.c.id == s.sql_query__table.c.table_id)
+        .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
+        .join(s.zone_target, zone_covers_table())
+        .join(s.zone, s.zone.c.id == s.zone_target.c.zone_id)
+    )
 
-    term_filter = ""
+    term_filter: list[Any] = []
     if term_ids is not None:
-        if not term_ids:
-            return {}
-        params["term_ids"] = term_ids
-        term_filter = "WHERE term.id IN $term_ids"
+        term_filter.append(s.term.c.id.in_(list(term_ids)))
+    if zone_ids is not None:
+        # A viewer never sees a disabled zone's chip, even when its id is in
+        # zone_ids -- access may have been granted before it was retired.
+        term_filter.append(s.zone.c.id.in_(list(zone_ids)))
+        term_filter.append(s.zone.c.enabled.is_(True))
 
-    # See the comment in get_full_term_by_id: chaining every MATCH through
-    # `item` (rather than matching `t` and zone/item independently and
-    # filtering via WHERE) avoids a cartesian product — without `term_ids`
-    # this walks every Term in the graph, so it matters even more here.
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM})<-[:{REL_PROPERTY_OF}]-(:{LABEL_COLUMN_ATTRIBUTE})
-              <-[:{REL_HAS_ATTRIBUTE}]-(:{Labels.COLUMN})
-              <-[:{Edges.CONTAINS}]-(t:{Labels.TABLE})
-        {term_filter}
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT term.id AS term_id,
-                        z.id     AS id,
-                        z.name   AS name,
-                        z.color  AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-
-        UNION
-
-        MATCH (term:{LABEL_TERM})<-[:{REL_PROPERTY_OF}]-(:{LABEL_SQL_ATTRIBUTE})
-              -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
-              -[:{Edges.SQL}]->(t:{Labels.TABLE})
-        {term_filter}
-        MATCH (item)-[:{Edges.CONTAINS}*0..2]->(t)
-        MATCH (z:{ZONE_LABEL_PATTERN})-[:{REL_ZONE_OF}]->(item)
-        {zone_filter}
-        RETURN DISTINCT term.id AS term_id,
-                        z.id     AS id,
-                        z.name   AS name,
-                        z.color  AS color,
-                        NOT z:{LABEL_ZONE_DISABLED} AS enabled
-        """,
-        params,
+    rows = store().query_read(
+        _term_zone_rows(column_path, term_filter).union(
+            _term_zone_rows(sql_path, term_filter)
+        )
     )
     result: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
@@ -709,202 +770,358 @@ def fetch_term_zones_map(
             }
         )
     for term_id, zones in result.items():
-        result[term_id] = sorted(zones, key=lambda z: z["name"])
+        result[term_id] = sorted(zones, key=lambda zone: zone["name"])
     return result
 
 
-def fetch_table_schema_map(database_name: str) -> dict[str, str]:
-    """Return ``{table_name_lower: schema_name}`` for every table in *database_name*.
+# ---------------------------------------------------------------------------
+# Suggester and embedding inputs
+# ---------------------------------------------------------------------------
 
-    Used by the SqlAttribute suggester to qualify bare table names in
-    generated SELECT statements with their canonical schema prefix.
+
+def fetch_table_schema_map(database_name: str) -> dict[str, str]:
+    """``{table_name_lower: schema_name}`` for one database.
+
+    The SqlAttribute suggester uses it to qualify bare table names in generated
+    SELECTs. Lower-cased keys, and last write wins on a collision — two schemas
+    with the same table name resolve arbitrarily, as before.
     """
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (db:{Labels.DB} {{name: $db_name}})-[:{Edges.CONTAINS}]->
-              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t:{Labels.TABLE})
-        RETURN t.name AS table_name, sch.name AS schema_name
-        """,
-        {"db_name": database_name},
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            ).join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(s.catalog_table.c.id)
     )
     return {
         row["table_name"].lower(): row["schema_name"]
         for row in rows
-        if row.get("table_name") and row.get("schema_name")
+        if row["table_name"] and row["schema_name"]
     }
 
 
 def fetch_terms_with_sqls() -> list[dict[str, Any]]:
-    """Return every semantic Term with ingestion SQL from its connected tables.
+    """Every semantic Term with the **ingestion** SQL of its tables.
 
-    Each row contains:
-      term_id, term_name, term_description,
-      sqls — list of {sql_text, props} where *props* holds all Sql node
-              properties (including count_monthly_YYYY_MM counters).
+    Statements owned by a SqlAttribute or CustomAnalysis are excluded, so
+    generated semantic SQL cannot feed the next round of suggestions — a
+    feedback loop where the suggester learns from itself.
 
-    Ingestion-created Sql nodes point directly to their referenced tables.
-    Sql nodes created for SqlAttributes and CustomAnalyses additionally have
-    an incoming HAS_SQL relationship from their owner; those are excluded to
-    prevent generated semantic SQL from feeding subsequent suggestions.
+    Terms with no ingestion query are omitted.
 
-    Only terms that have at least one associated ingestion query are returned.
+    ``props`` is the statement row itself. There are no per-month counters —
+    they were measured as unread by anything, and the schema does not carry
+    them.
     """
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{source: $source}})
-        MATCH (t:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
-        MATCH (sql:{Labels.SQL})-[:{Edges.SQL}]->(t)
-        WHERE NOT EXISTS {{ (sql)<-[:{Edges.HAS_SQL}]-() }}
-        WITH term,
-             collect({{sql_text: sql.sql_full_query,
-                       sql_id:   sql.id,
-                       props:    properties(sql)}}) AS sqls
-        RETURN term.id          AS term_id,
-               term.name        AS term_name,
-               term.description AS term_description,
-               sqls
-        """,
-        {"source": SEMANTIC_SOURCE},
+    owned = (
+        select(literal(1))
+        .where(s.sql_attribute__sql.c.sql_query_id == s.sql_query.c.id)
+        .correlate(s.sql_query)
+        .exists()
+    ) | (
+        select(literal(1))
+        .where(s.custom_analysis__sql.c.sql_query_id == s.sql_query.c.id)
+        .correlate(s.sql_query)
+        .exists()
+    )
+
+    rows = store().query_read(
+        select(
+            s.term.c.id.label("term_id"),
+            s.term.c.name.label("term_name"),
+            s.term.c.description.label("term_description"),
+            s.sql_query,
+        )
+        .select_from(
+            s.term.join(s.table__term, s.table__term.c.term_id == s.term.c.id)
+            .join(
+                s.sql_query__table,
+                s.sql_query__table.c.table_id == s.table__term.c.table_id,
+            )
+            .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
+        )
+        .where(s.term.c.source == SEMANTIC_SOURCE, ~owned)
+        .distinct()
+        .order_by(s.term.c.id, s.sql_query.c.id)
+    )
+
+    grouped: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        entry = grouped.setdefault(
+            row["term_id"],
+            {
+                "term_id": row["term_id"],
+                "term_name": row["term_name"],
+                "term_description": row["term_description"],
+                "sqls": [],
+            },
+        )
+        props = {
+            key: value
+            for key, value in row.items()
+            if key not in {"term_id", "term_name", "term_description"}
+        }
+        entry["sqls"].append(
+            {
+                "sql_text": props.get("sql_full_query"),
+                "sql_id": props.get("id"),
+                "props": props,
+            }
+        )
+    return list(grouped.values())
+
+
+def _embedding_attrs_for_table(table_id: str):
+    return (
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(
+            s.catalog_table.c.id == table_id,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+        )
     )
 
 
 def fetch_terms_and_attributes_for_table(
     table_id: str,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Return (terms, attrs) written for a single table — used for inline embedding."""
-    conn = get_neo4j_conn()
-    params = {"table_id": table_id, "source": SEMANTIC_SOURCE}
-    terms = conn.query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{REL_REPRESENTS}]->
-              (term:{LABEL_TERM} {{source: $source}})
-        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-        RETURN term.name AS name, term.description AS description,
-               term.synonyms AS synonyms, term.id AS id,
-               collect(DISTINCT sch.name) AS schema_names
-        """,
-        params,
+    """``(terms, attrs)`` written for one table — the inline embedding input."""
+    terms = store().query_read(
+        select(
+            s.term.c.name,
+            s.term.c.description,
+            s.term.c.synonyms,
+            s.term.c.id,
+            func.array_agg(func.distinct(s.catalog_schema.c.name)).label(
+                "schema_names"
+            ),
+        )
+        .select_from(
+            s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id)
+            .join(s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id)
+            .join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+        )
+        .where(
+            s.table__term.c.table_id == table_id,
+            s.term.c.source == SEMANTIC_SOURCE,
+        )
+        .group_by(s.term.c.id)
     )
-    attrs = conn.query_read(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->(t)
-        RETURN attr.name AS name,
-               attr.description AS description,
-               attr.term_name AS term_name,
-               attr.source_column AS source_column,
-               col.sample_values AS sample_values,
-               col.is_unique AS is_unique,
-               attr.id AS id,
-               t.id AS table_id,
-               t.name AS table_name,
-               sch.name AS schema_name
-        """,
-        params,
-    )
-    return terms, attrs
+    attrs = store().query_read(_embedding_attrs_for_table(table_id))
+    return [dict(r) for r in terms], [dict(r) for r in attrs]
 
 
 def fetch_term_and_column_attributes_for_embedding(
     term_id: str,
 ) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
-    """Return one Term and its ColumnAttributes for semantic VDB re-embedding."""
-    conn = get_neo4j_conn()
-    params = {"term_id": term_id}
-    terms = conn.query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term)
-        RETURN term.name AS name,
-               term.description AS description,
-               term.synonyms AS synonyms,
-               term.id AS id,
-               head(collect(DISTINCT db.name)) AS database_name
-        LIMIT 1
-        """,
-        params,
+    """One Term and its ColumnAttributes, for a semantic VDB re-embed."""
+    terms = store().query_read(
+        select(
+            s.term.c.name,
+            s.term.c.description,
+            s.term.c.synonyms,
+            s.term.c.id,
+            s.catalog_database.c.name.label("database_name"),
+        )
+        .select_from(
+            s.term.outerjoin(s.table__term, s.table__term.c.term_id == s.term.c.id)
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.table__term.c.table_id
+            )
+            .outerjoin(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .outerjoin(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.term.c.id == term_id)
+        # Ordered so a term spanning two databases reports the same one on
+        # every call.
+        .order_by(s.catalog_database.c.id)
+        .limit(1)
     )
     if not terms:
         return None, []
 
-    attrs = conn.query_read(
-        f"""
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->
-              (term:{LABEL_TERM} {{id: $term_id}})
-        // ColumnAttribute embeddings include sample values from the owning Column.
-        OPTIONAL MATCH (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        RETURN attr.name AS name,
-               attr.description AS description,
-               attr.term_name AS term_name,
-               attr.source_column AS source_column,
-               col.sample_values AS sample_values,
-               col.is_unique AS is_unique,
-               attr.id AS id,
-               table.id AS table_id,
-               table.name AS table_name,
-               sch.name AS schema_name
-        """,
-        params,
+    attrs = store().query_read(
+        select(
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+        )
+        .select_from(
+            s.column_attribute__term.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column_attribute__term.c.attribute_id,
+            )
+            .outerjoin(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .outerjoin(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            # Outer, like the join above it: an attribute need not reach a
+            # column, and an inner join here would drop those attributes
+            # entirely rather than leaving their table fields null.
+            .outerjoin(
+                s.catalog_table,
+                s.catalog_table.c.id == s.catalog_column.c.table_id,
+            )
+        )
+        .where(s.column_attribute__term.c.term_id == term_id)
+        .order_by(s.column_attribute.c.id)
     )
-    return dict(terms[0]), [dict(attr) for attr in attrs]
+    return dict(terms[0]), [dict(r) for r in attrs]
 
 
 def fetch_column_attribute_embedding_contexts_by_column_id(
     column_id: str,
 ) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
-    """Return Term + ColumnAttribute contexts affected by a Column sample update."""
-    conn = get_neo4j_conn()
-    rows = conn.query_read(
-        f"""
-        MATCH (col:{Labels.COLUMN} {{id: $column_id}})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE})-[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
-        RETURN term.name AS term_name,
-               term.description AS term_description,
-               term.synonyms AS term_synonyms,
-               term.id AS term_id,
-               head(collect(DISTINCT db.name)) AS database_name,
-               collect({{
-                   name: attr.name,
-                   description: attr.description,
-                   term_name: attr.term_name,
-                   source_column: attr.source_column,
-                   sample_values: col.sample_values,
-                   is_unique: col.is_unique,
-                   id: attr.id,
-                   table_id: table.id,
-                   table_name: table.name,
-                   schema_name: sch.name
-               }}) AS attrs
-        """,
-        {"column_id": column_id},
-    )
-    contexts: list[tuple[dict[str, Any], list[dict[str, Any]]]] = []
-    for row in rows:
-        term_id = row.get("term_id")
-        if not term_id:
-            continue
-        contexts.append(
-            (
-                {
-                    "name": row.get("term_name") or "",
-                    "description": row.get("term_description") or "",
-                    "synonyms": row.get("term_synonyms") or [],
-                    "id": term_id,
-                    "database_name": row.get("database_name") or "",
-                },
-                [dict(attr) for attr in row.get("attrs") or []],
+    """The Term contexts a column's sample-value update invalidates.
+
+    Sample values are part of a ColumnAttribute's embedding text, so profiling a
+    column stales every attribute on it and every term behind those.
+    """
+    rows = store().query_read(
+        select(
+            s.term.c.name.label("term_name"),
+            s.term.c.description.label("term_description"),
+            s.term.c.synonyms.label("term_synonyms"),
+            s.term.c.id.label("term_id"),
+            s.catalog_database.c.name.label("database_name"),
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column_attribute.c.id,
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            )
+            .join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+            .join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .outerjoin(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .outerjoin(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
             )
         )
-    return contexts
+        .where(s.catalog_column.c.id == column_id)
+        .order_by(s.term.c.id, s.column_attribute.c.id)
+    )
+
+    contexts: dict[str, tuple[dict[str, Any], list[dict[str, Any]]]] = {}
+    for row in rows:
+        term_id = row["term_id"]
+        if not term_id:
+            continue
+        if term_id not in contexts:
+            contexts[term_id] = (
+                {
+                    "name": row["term_name"] or "",
+                    "description": row["term_description"] or "",
+                    "synonyms": row["term_synonyms"] or [],
+                    "id": term_id,
+                    "database_name": row["database_name"] or "",
+                },
+                [],
+            )
+        contexts[term_id][1].append(
+            {
+                "name": row["name"],
+                "description": row["description"],
+                "term_name": row["term_name"],
+                "source_column": row["source_column"],
+                "sample_values": row["sample_values"],
+                "id": row["id"],
+            }
+        )
+    return list(contexts.values())
+
+
+# ---------------------------------------------------------------------------
+# ColumnAttributes of a Term
+# ---------------------------------------------------------------------------
+
+
+def _column_attribute_scope(term_id: str, zone_ids: list[str] | None):
+    """A ColumnAttribute is owned by exactly one table, via ``attr.table_id``.
+
+    So a plain membership filter is enough here — no all-or-nothing check, which
+    is a genuine difference from the Term rule and not an oversight.
+    """
+    conditions = [
+        s.column_attribute.c.source == SEMANTIC_SOURCE,
+        s.column_attribute.c.term_name
+        == select(s.term.c.name).where(s.term.c.id == term_id).scalar_subquery(),
+    ]
+    table_ids = _scope_table_ids(zone_ids)
+    if table_ids is not None:
+        conditions.append(s.column_attribute.c.table_id.in_(table_ids))
+    return conditions
 
 
 def fetch_column_attribute_counts(
@@ -912,72 +1129,33 @@ def fetch_column_attribute_counts(
     data_ids_by_zone: dict[str, set[str]] | None = None,
     term_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return per-term ColumnAttribute counts, zone-scoped when zone_ids are provided.
-
-    A ColumnAttribute is owned by exactly one table (via its ``table_id``
-    property), so a plain membership filter is sufficient here — no
-    all-or-nothing check is needed, matching ``fetch_column_attributes``.
-
-    Pass a pre-resolved *data_ids_by_zone* (see
-    ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request, to skip a repeat Neo4j round trip.
-
-    *term_ids* narrows the scan to those terms — the paged Terms list passes
-    the ids on the page it is about to render, so the response doesn't carry
-    counts for the rest of the glossary. ``None`` counts every term.
-
-    Each entry is ``{term_id: str, count: int}``. Terms with zero
-    ColumnAttributes are omitted.
-    """
-    table_filter, params = resolve_table_filter(
-        zone_ids,
-        "attr.table_id",
-        extra_params={"source": SEMANTIC_SOURCE},
-        data_ids_by_zone=data_ids_by_zone,
+    """``[{term_id, count}]`` per Term. Terms with none are omitted."""
+    statement = (
+        select(
+            s.column_attribute__term.c.term_id,
+            func.count(func.distinct(s.column_attribute.c.id)).label("count"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+        )
+        .where(s.column_attribute.c.source == SEMANTIC_SOURCE)
+        .group_by(s.column_attribute__term.c.term_id)
     )
+    table_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
+    if table_ids is not None:
+        statement = statement.where(s.column_attribute.c.table_id.in_(table_ids))
     if term_ids is not None:
-        params["term_ids"] = term_ids
-        table_filter = and_condition(table_filter, "term.id IN $term_ids")
-    return get_neo4j_conn().query_read(
-        f"""
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM})
-        {table_filter}
-        RETURN term.id AS term_id, count(DISTINCT attr) AS count
-        """,
-        params,
-    )
+        statement = statement.where(
+            s.column_attribute__term.c.term_id.in_(list(term_ids))
+        )
 
-
-def _fetch_attr_zones_by_table(
-    rows: list[dict[str, Any]],
-    zone_ids: list[str] | None,
-) -> dict[str, list[dict[str, Any]]]:
-    """Return ``{table_id: [zone, ...]}`` for the owning tables of *rows*.
-
-    A ColumnAttribute is owned by exactly one table (``attr.table_id``), so its
-    zones are its table's zones. This reuses ``fetch_table_zones_map`` rather
-    than duplicating the table→zone resolution. Imported locally because
-    ``gsf.dal.exploration`` imports from this module (avoids a circular import).
-    """
-    from gsf.dal.exploration import fetch_table_zones_map
-
-    table_ids = list({row["table_id"] for row in rows if row.get("table_id")})
-    if not table_ids:
-        return {}
-    return fetch_table_zones_map(zone_ids=zone_ids, table_ids=table_ids)
-
-
-def _column_attributes_by_term_filter(
-    term_id: str,
-    zone_ids: list[str] | None,
-) -> tuple[str, dict[str, Any]]:
-    """Filter shared by one Term's ColumnAttribute page and its total count."""
-    return resolve_table_filter(
-        zone_ids,
-        "attr.table_id",
-        extra_params={"term_id": term_id, "source": SEMANTIC_SOURCE},
-    )
+    return [
+        {"term_id": r["term_id"], "count": int(r["count"])}
+        for r in store().query_read(statement)
+    ]
 
 
 def fetch_column_attributes_by_term_id(
@@ -987,52 +1165,62 @@ def fetch_column_attributes_by_term_id(
     skip: int = 0,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ColumnAttribute nodes for a single Term.
+    """One Term's ColumnAttributes, with their columns and zones.
 
-    *zone_ids* is a hard authorization boundary; when supplied, only
-    attributes owned by tables reachable through those zones are returned —
-    a ColumnAttribute is owned by exactly one table, so a plain membership
-    filter is sufficient here (no all-or-nothing check needed).
+    One row per attribute even when several columns declare it: the sample
+    values come from the lowest-id one. Without that collapse the rows outnumber
+    the total the pager was handed, and the last attributes become unreachable.
 
-    Rows are ordered by name (then id, to break ties between same-named
-    attributes), so *skip* and *limit* read one page of that order; pair them
-    with ``count_column_attributes_by_term_id`` for the total. Omit *limit*
-    for every attribute of the term.
-
-    One row per attribute, even for an attribute several Columns declare via
-    HAS_ATTRIBUTE: the sample values come from the lowest-id one. Without
-    that collapse the rows would outnumber the ``count(DISTINCT attr)`` total
-    the pager is given, putting the last attributes out of its reach.
-
-    Each attribute includes ``primary_column`` (HAS_ATTRIBUTE owner) and
-    ``referenced_columns`` (SEMANTIC_FK sources) with catalog path ids for
-    navigation.
+    Ordered by name then id, so *skip* and *limit* page it stably; pair with
+    ``count_column_attributes_by_term_id``.
     """
-    table_filter, params = _column_attributes_by_term_filter(term_id, zone_ids)
-    paging = paging_clause(skip, limit, params)
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
-        {table_filter}
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        WITH attr, col ORDER BY col.id
-        WITH attr, head(collect(col)) AS col
-        RETURN {_COLUMN_ATTRIBUTE_FIELDS}
-        ORDER BY name, id
-        {paging}
-        """,
-        params,
+    sample_values = (
+        select(s.catalog_column.c.sample_values)
+        .select_from(
+            s.column__has_attribute.join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+        )
+        .where(s.column__has_attribute.c.attribute_id == s.column_attribute.c.id)
+        .order_by(s.catalog_column.c.id)
+        .limit(1)
+        .correlate(s.column_attribute)
+        .scalar_subquery()
     )
-    attr_ids = [row["id"] for row in rows]
-    zones_by_table = _fetch_attr_zones_by_table(rows, zone_ids)
-    columns_by_attr = fetch_column_attribute_columns_map(attr_ids)
-    empty_columns = {"primary_column": None, "referenced_columns": []}
+    statement = (
+        select(
+            s.column_attribute.c.id,
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.column_attribute.c.datatype,
+            s.column_attribute.c.table_id,
+            sample_values.label("sample_values"),
+            s.column_attribute.c.certified,
+        )
+        .where(*_column_attribute_scope(term_id, zone_ids))
+        .order_by(s.column_attribute.c.name, s.column_attribute.c.id)
+        .offset(skip)
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    rows = [dict(r) for r in store().query_read(statement)]
+    table_ids = [row["table_id"] for row in rows if row["table_id"]]
+    zones_by_table = (
+        fetch_table_zones_map(zone_ids=zone_ids, table_ids=list(set(table_ids)))
+        if table_ids
+        else {}
+    )
+    columns_by_attr = fetch_column_attribute_columns_map([row["id"] for row in rows])
+    empty = {"primary_column": None, "referenced_columns": []}
     return [
         {
             **row,
             "zones": zones_by_table.get(row["table_id"], []),
-            **columns_by_attr.get(row["id"], empty_columns),
+            **columns_by_attr.get(row["id"], empty),
         }
         for row in _with_parsed_sample_values(rows)
     ]
@@ -1042,36 +1230,144 @@ def count_column_attributes_by_term_id(
     term_id: str,
     zone_ids: list[str] | None = None,
 ) -> int:
-    """Return how many ColumnAttributes one Term has, under the same zone scoping.
-
-    Companion to ``fetch_column_attributes_by_term_id`` when it is called with
-    a *limit*: Neo4j won't report the unpaged size of a ``LIMIT``-ed result,
-    so the caller's pager needs this second query.
-    """
-    table_filter, params = _column_attributes_by_term_filter(term_id, zone_ids)
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM} {{id: $term_id}})
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{term_name: term.name, source: $source}})
-        {table_filter}
-        RETURN count(DISTINCT attr) AS total
-        """,
-        params,
+    """The unpaged size of :func:`fetch_column_attributes_by_term_id`."""
+    rows = store().query_read(
+        select(func.count(func.distinct(s.column_attribute.c.id)).label("total")).where(
+            *_column_attribute_scope(term_id, zone_ids)
+        )
     )
-    return rows[0]["total"] if rows else 0
+    return int(rows[0]["total"]) if rows else 0
 
 
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
-    """Return the id of the ColumnAttribute connected to a given Column, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (col:{Labels.COLUMN} {{id: $col_id}})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-        RETURN attr.id AS id LIMIT 1
-        """,
-        {"col_id": column_id, "source": SEMANTIC_SOURCE},
+    """The semantic ColumnAttribute a column carries.
+
+    Re-exported from :mod:`gsf.dal.attributes`: callers import it from both
+    modules, so both keep it.
+    """
+    from gsf.dal.attributes import find_column_attribute_by_column_id as delegate
+
+    return delegate(column_id)
+
+
+# ---------------------------------------------------------------------------
+# Related terms
+# ---------------------------------------------------------------------------
+
+
+def fetch_term_table_pairs(
+    zone_ids: list[str] | None = None,
+    data_ids_by_zone: dict[str, set[str]] | None = None,
+    *,
+    term_ids: list[str] | None = None,
+    table_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """``{term_id, table_id}`` — the one definition of "related".
+
+    A term is linked to a table by REPRESENTS, or through a ColumnAttribute
+    reached by HAS_ATTRIBUTE **or** SEMANTIC_FK. That third path is what links,
+    say, ``Request`` to ``User`` when ``requests.creator_id`` references
+    ``users.id``.
+
+    Shared by the related list, the per-term count and the Exploration graph, so
+    a term's badge, the "Relationships" column, and the length of the list
+    behind them cannot report three different numbers.
+
+    Both branches require ``source = 'semantic'`` on the Term, matching
+    ``fetch_all_terms``: a non-semantic Term never appears in the semantic
+    graph, so counting it as a neighbour would put a number on a card no list
+    can reach.
+
+    ``path`` names which of those three links actually connected this
+    particular pair (``REPRESENTS``, ``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``), so a
+    caller that cares *why* a term and a table are linked -- not just *that*
+    they are -- does not have to re-run the match itself;
+    :func:`gsf.dal.exploration.fetch_semantic_exploration_graph` uses it to
+    label term↔term edges with the real relationship type(s) behind them.
+
+    *term_ids* and *table_ids* narrow the scan; neither widens access, both
+    being intersected with what *zone_ids* already allows.
+    """
+    scope_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
+
+    def restrict(statement, table_column):
+        conditions: list[Any] = [s.term.c.source == SEMANTIC_SOURCE]
+        if scope_ids is not None:
+            conditions.append(table_column.in_(scope_ids))
+            conditions.append(_in_scope(scope_ids))
+        if term_ids is not None:
+            conditions.append(s.term.c.id.in_(list(term_ids)))
+        if table_ids is not None:
+            conditions.append(table_column.in_(list(table_ids)))
+        return statement.where(*conditions)
+
+    represents = restrict(
+        select(
+            s.term.c.id.label("term_id"),
+            s.table__term.c.table_id.label("table_id"),
+            literal(REL_REPRESENTS).label("path"),
+        ).select_from(
+            s.table__term.join(s.term, s.term.c.id == s.table__term.c.term_id)
+        ),
+        s.table__term.c.table_id,
     )
-    return rows[0]["id"] if rows else None
+
+    # The link's own type is carried along so ``path`` can name it below -- the
+    # two legs are otherwise identical, and unioning them first would lose which
+    # one matched.
+    link = (
+        select(
+            s.column__has_attribute.c.column_id,
+            s.column__has_attribute.c.attribute_id,
+            literal(REL_HAS_ATTRIBUTE).label("rel_type"),
+        )
+        .union(
+            select(
+                s.column__semantic_fk.c.column_id,
+                s.column__semantic_fk.c.attribute_id,
+                literal(REL_SEMANTIC_FK).label("rel_type"),
+            )
+        )
+        .subquery("attribute_link")
+    )
+    via_attribute = restrict(
+        select(
+            s.term.c.id.label("term_id"),
+            s.catalog_column.c.table_id.label("table_id"),
+            link.c.rel_type.label("path"),
+        ).select_from(
+            s.catalog_column.join(link, link.c.column_id == s.catalog_column.c.id)
+            .join(
+                s.column_attribute,
+                and_(
+                    s.column_attribute.c.id == link.c.attribute_id,
+                    s.column_attribute.c.source == SEMANTIC_SOURCE,
+                ),
+            )
+            .join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+        ),
+        s.catalog_column.c.table_id,
+    )
+
+    return [dict(r) for r in store().query_read(represents.union(via_attribute))]
+
+
+def build_term_table_maps(
+    pairs: list[dict[str, Any]],
+) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
+    """Split ``{term_id, table_id}`` rows into term→tables and table→terms."""
+    term_tables: dict[str, set[str]] = {}
+    table_terms: dict[str, set[str]] = {}
+    for row in pairs:
+        term_id, table_id = row.get("term_id"), row.get("table_id")
+        if term_id and table_id:
+            term_tables.setdefault(term_id, set()).add(table_id)
+            table_terms.setdefault(table_id, set()).add(term_id)
+    return term_tables, table_terms
 
 
 def fetch_related_term_ids(
@@ -1079,35 +1375,28 @@ def fetch_related_term_ids(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[str]:
-    """Return the ids of every Term related to *term_id*.
+    """Ids of every Term sharing a table with *term_id*.
 
-    The relation and its zone scoping are described on ``fetch_related_terms``,
-    which is this plus the Term rows themselves. Split out because the two
-    steps page differently: which terms are related is a property of the whole
-    accessible graph (and is what a pager's total counts), while the rows for
-    one page are a bounded read that ``fetch_terms_by_ids`` can do on its own.
-    The ids come back sorted only so the list is stable; the order a reader
-    sees is the name order ``fetch_terms_by_ids`` imposes.
-
-    Pass a pre-resolved *data_ids_by_zone* (see
-    ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request: both passes below would otherwise re-resolve
-    it independently.
+    Split from :func:`fetch_related_terms` because the two steps page
+    differently: which terms are related is a property of the whole accessible
+    graph, and is what a pager's total counts, while one page of rows is a
+    bounded read. The sort is only for stability — the order a reader sees is
+    the name order :func:`fetch_terms_by_ids` imposes.
     """
     resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
     own_pairs = fetch_term_table_pairs(zone_ids, resolved, term_ids=[term_id])
-    shared_table_ids = sorted({r["table_id"] for r in own_pairs if r.get("table_id")})
-    if not shared_table_ids:
+    shared = sorted({r["table_id"] for r in own_pairs if r.get("table_id")})
+    if not shared:
         return []
 
     _, table_terms = build_term_table_maps(
-        fetch_term_table_pairs(zone_ids, resolved, table_ids=shared_table_ids)
+        fetch_term_table_pairs(zone_ids, resolved, table_ids=shared)
     )
-    related_ids: set[str] = set()
-    for table_id in shared_table_ids:
-        related_ids.update(table_terms.get(table_id, set()))
-    related_ids.discard(term_id)
-    return sorted(related_ids)
+    related: set[str] = set()
+    for table_id in shared:
+        related.update(table_terms.get(table_id, set()))
+    related.discard(term_id)
+    return sorted(related)
 
 
 def fetch_terms_by_ids(
@@ -1116,28 +1405,21 @@ def fetch_terms_by_ids(
     skip: int = 0,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ``{id, name, description}`` for *term_ids*, ordered by name.
+    """``{id, name, description}`` for *term_ids*, ordered and paged in SQL.
 
-    Ordering and paging both happen in Neo4j, so reading one page of a long
-    related-terms list costs one bounded read instead of every row followed by
-    a slice in Python. *term_ids* is a plain id list — whatever produced it
-    (e.g. ``fetch_related_term_ids``) owns the zone scoping.
+    *term_ids* is a plain id list — whatever produced it owns the zone scoping.
     """
     if not term_ids:
         return []
-    params: dict[str, Any] = {"term_ids": term_ids}
-    paging = paging_clause(skip, limit, params)
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (term:{LABEL_TERM})
-        WHERE term.id IN $term_ids
-        RETURN term.id AS id, term.name AS name, term.description AS description
-        ORDER BY toLower(term.name), term.id
-        {paging}
-        """,
-        params,
+    statement = (
+        select(s.term.c.id, s.term.c.name, s.term.c.description)
+        .where(s.term.c.id.in_(list(term_ids)))
+        .order_by(func.lower(s.term.c.name), s.term.c.id)
+        .offset(skip)
     )
-    return [dict(r) for r in rows]
+    if limit is not None:
+        statement = statement.limit(limit)
+    return [dict(r) for r in store().query_read(statement)]
 
 
 def fetch_related_terms(
@@ -1148,44 +1430,14 @@ def fetch_related_terms(
     skip: int = 0,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Return Term nodes related to *term_id* by co-location in the same table.
+    """Terms related to *term_id* by sharing a table, paged by name.
 
-    Two terms are considered related when they are both connected to the same
-    Table node.  A term is connected to a table through any of three paths:
+    Related means co-located: both terms connect to the same table, by any of
+    the three paths :func:`fetch_term_table_pairs` defines.
 
-    * REPRESENTS — the table directly represents the term;
-    * PROPERTY_OF — the table owns a column whose ColumnAttribute is
-      PROPERTY_OF the term (``Table → Column → ColumnAttribute → Term``);
-    * SEMANTIC_FK — the table owns a foreign-key column that points, via a
-      SEMANTIC_FK edge, to a ColumnAttribute of the term
-      (``Table → Column → [SEMANTIC_FK] → ColumnAttribute → Term``).  This is
-      what links, e.g. ``Request`` (represented by ``requests``) to ``User``
-      when ``requests.creator_id`` references ``users.id``.
-
-    Those three paths are not spelled out here: both steps read them from
-    ``fetch_term_table_pairs``, the same rows ``fetch_related_terms_counts``
-    and ``fetch_semantic_exploration_graph`` count. Spelling them out twice
-    is what let this list and those counts drift apart — one copy required a
-    semantic ``ColumnAttribute`` while the other required a semantic
-    ``Term`` — so a term's card badge, the "Relationships" column and the
-    length of this list could each report a different number.
-
-    Step 1 — collect every table connected to *term_id* (all three paths).
-    Step 2 — collect every other term connected to those same tables (all three).
-
-    *zone_ids* is a hard authorization boundary, not a relevance filter.
-    When supplied, both steps apply the all-or-nothing rule
-    ``fetch_term_table_pairs`` applies: only tables reachable through those
-    zones are considered, and a term only contributes when *every* table
-    that REPRESENTS it is reachable too — so a related term the caller
-    couldn't otherwise open (it would 404 via ``get_full_term_by_id``) is
-    never shown as a chip.  Pass ``None`` to skip zone scoping (admin /
-    internal callers).
-
-    Rows come back ordered by name (case-insensitively, then by id), which is
-    what makes *skip* and *limit* meaningful: pass them to read one page of
-    that order and pair them with the length of ``fetch_related_term_ids`` for
-    the total. Omit *limit* for every related term.
+    When *zone_ids* is supplied both steps apply the all-or-nothing rule, so a
+    related term the caller could not actually open — it would 404 through
+    ``get_full_term_by_id`` — is never shown as a chip.
     """
     related_ids = fetch_related_term_ids(term_id, zone_ids, data_ids_by_zone)
     return fetch_terms_by_ids(related_ids, skip=skip, limit=limit)
@@ -1196,198 +1448,280 @@ def fetch_related_terms_counts(
     term_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return per-term related-term counts for all terms.
+    """``[{term_id, count}]`` — how many terms each one shares a table with.
 
-    Builds a ``term_id → set(table_id)`` map and a ``table_id → set(term_id)``
-    reverse map from Neo4j, then computes for each term the number of distinct
-    other terms that share at least one table with it.  A term is connected to
-    a table via REPRESENTS, PROPERTY_OF (its own ColumnAttribute) **or**
-    SEMANTIC_FK (a foreign-key column that references one of its
-    ColumnAttributes) — the same three paths used by ``fetch_related_terms``.
-
-    *zone_ids* is a hard authorization boundary, not a relevance filter. A
-    Term can be represented by more than one Table (see ``merge_term``), so
-    a term only contributes pairs — via **either** the REPRESENTS or the
-    ColumnAttribute path — when **every** table that represents it (via
-    REPRESENTS) is reachable through *zone_ids*.  This is the same
-    all-or-nothing rule applied consistently to both paths — a term whose
-    ColumnAttribute happens to live on an in-zone table doesn't get a free
-    pass if it also REPRESENTS an out-of-zone table — so this function stays
-    in agreement with ``fetch_all_terms`` (the ``/terms``
-    list) and ``fetch_related_terms`` (the single-term related list): a
-    term's count here always matches how many terms actually show up on its
-    detail page.  Pass ``None`` to return counts for all terms (admin /
-    internal callers).
-
-    *term_ids* restricts which terms get an entry — the paged Terms list asks
-    only for the ids on the page it renders, and the pairs are then read in
-    two passes scoped to those terms and the tables they touch instead of one
-    over every term/table pair in the graph. It does not restrict what counts
-    as related: neighbours are still resolved across the whole accessible
-    graph, so a term's count doesn't shrink just because the terms it relates
-    to landed on another page. ``None`` returns an entry per term.
-
-    Pass a pre-resolved *data_ids_by_zone* (see
-    ``resolve_accessible_catalog_ids``) when the caller already resolved
-    *zone_ids* for this request: the two passes below would otherwise
-    re-resolve it once each, on top of whatever the caller already paid.
-
-    Each entry is ``{term_id: str, count: int}``.
+    *term_ids* restricts which terms get an **entry**, not what counts as
+    related: neighbours are resolved across the whole accessible graph, so a
+    term's count does not shrink because the terms it relates to landed on
+    another page.
     """
     resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
     if term_ids is None:
         term_tables, table_terms = build_term_table_maps(
             fetch_term_table_pairs(zone_ids, resolved)
         )
-        wanted_ids: list[str] = list(term_tables)
+        wanted = list(term_tables)
     else:
         if not term_ids:
             return []
         own_pairs = fetch_term_table_pairs(zone_ids, resolved, term_ids=term_ids)
         term_tables, _ = build_term_table_maps(own_pairs)
-        touched_table_ids = sorted({row["table_id"] for row in own_pairs})
+        touched = sorted({r["table_id"] for r in own_pairs})
         _, table_terms = build_term_table_maps(
-            fetch_term_table_pairs(zone_ids, resolved, table_ids=touched_table_ids)
-            if touched_table_ids
+            fetch_term_table_pairs(zone_ids, resolved, table_ids=touched)
+            if touched
             else []
         )
-        wanted_ids = term_ids
+        wanted = term_ids
 
     result: list[dict[str, Any]] = []
-    for term_id in wanted_ids:
+    for term_id in wanted:
         related: set[str] = set()
-        for tab_id in term_tables.get(term_id, set()):
-            related.update(table_terms.get(tab_id, set()))
+        for table_id in term_tables.get(term_id, set()):
+            related.update(table_terms.get(table_id, set()))
         related.discard(term_id)
         result.append({"term_id": term_id, "count": len(related)})
     return result
 
 
-def fetch_term_table_pairs(
-    zone_ids: list[str] | None = None,
-    data_ids_by_zone: dict[str, set[str]] | None = None,
-    *,
-    term_ids: list[str] | None = None,
-    table_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
-    """Return ``{term_id, table_id, path}`` rows linking Terms to their tables.
+# ---------------------------------------------------------------------------
+# Term-to-term link paths
+# ---------------------------------------------------------------------------
 
-    A term is linked to a table via REPRESENTS or via its ColumnAttribute
-    (PROPERTY_OF, reached through HAS_ATTRIBUTE or SEMANTIC_FK) — the same
-    three paths used by ``fetch_related_terms``. ``path`` names which of
-    those Neo4j relationship types actually connected this particular pair
-    (``REPRESENTS``, ``HAS_ATTRIBUTE`` or ``SEMANTIC_FK``) so callers that
-    care *why* a term and table are linked — not just *that* they are —
-    don't have to re-run the match themselves;
-    ``gsf.dal.exploration.fetch_semantic_exploration_graph`` uses it to
-    label term↔term edges with the real relationship type(s) behind them.
-    Shared by ``fetch_related_terms``, ``fetch_related_terms_counts`` and
-    that graph builder so a term's related list, its per-term count and the
-    Exploration graph's term↔term edges are always computed from one
-    definition of "related".
+#: Path length ceiling, in **edges**. The longest chain worth showing is
+#: ``Term -REPRESENTS- Table -CONTAINS- Column -SEMANTIC_FK- ColumnAttribute
+#: -PROPERTY_OF- Term`` at four; ten leaves room for the join-table shapes
+#: without letting a pathological catalog walk the whole graph.
+_MAX_LINK_PATH_DEPTH = 10
 
-    Both branches require ``source: SEMANTIC_SOURCE`` on the Term, matching
-    ``fetch_all_terms``: a non-semantic Term never appears in the semantic
-    graph, so counting it as a neighbour would put a number on a card that
-    no list behind it can reach.
+#: Node kind (as carried through the traversal below) → the label the API reports.
+_LINK_PATH_LABELS = {
+    "term": LABEL_TERM,
+    "table": Labels.TABLE,
+    "column": Labels.COLUMN,
+    "column_attribute": LABEL_COLUMN_ATTRIBUTE,
+}
 
-    *zone_ids* applies the same all-or-nothing scoping as
-    ``fetch_related_terms_counts``. Pass a pre-resolved *data_ids_by_zone*
-    (see ``resolve_accessible_catalog_ids``) when the caller already
-    resolved *zone_ids* for this request, to skip a repeat Neo4j round trip.
 
-    Pass *term_ids* and/or *table_ids* to additionally restrict the scan to
-    a known subset — e.g. paging one Exploration node's related terms only
-    needs pairs touching that node's own terms/tables, not the whole
-    accessible graph. Neither widens access: both are intersected with
-    whatever *zone_ids* already allows.
+def _term_link_edges():
+    """Every edge a term↔term path may walk, **undirected**, tagged with its type.
+
+    Unlike :data:`~gsf.dal.schema.JOIN_PATH_EDGE_VIEW_SQL`, SEMANTIC_FK is
+    emitted in *both* directions here. A term↔term edge already means the two
+    terms genuinely share a table under :func:`fetch_term_table_pairs`'s rules,
+    so tracing some real path between them cannot fabricate a link the way
+    ``find_join_path``'s column-to-column search could -- it can only surface a
+    chain that already exists. It has to be undirected for the join-table shape:
+    when both terms reach their shared table only through SEMANTIC_FK, the path
+    must step *against* one of the two stored (column -> attribute) directions
+    whichever end it starts from.
+
+    Not a database view, deliberately: one function reads it, and a view would
+    have to be kept in step through a migration for no gain.
     """
-    conn = get_neo4j_conn()
-    resolved = resolve_accessible_catalog_ids(zone_ids, data_ids_by_zone)
-    conditions: list[str] = []
-    params: dict[str, Any] = {"source": SEMANTIC_SOURCE}
-    if resolved is not None:
-        params["table_ids"] = list(resolved["table_ids"])
-        conditions.append("ta.id IN $table_ids")
-        conditions.append(_TERM_TABLE_SCOPE_CONDITION)
-    if term_ids is not None:
-        params["filter_term_ids"] = term_ids
-        conditions.append("term.id IN $filter_term_ids")
-    if table_ids is not None:
-        params["filter_table_ids"] = table_ids
-        conditions.append("ta.id IN $filter_table_ids")
-    filter_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
 
-    return conn.query_read(
-        f"""
-        MATCH (ta:{Labels.TABLE})-[:{REL_REPRESENTS}]->(term:{LABEL_TERM} {{source: $source}})
-        {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id, '{REL_REPRESENTS}' AS path
-        UNION
-        MATCH (ta:{Labels.TABLE})-[:{Edges.CONTAINS}]->(:{Labels.COLUMN})
-              -[attr_rel:{REL_HAS_ATTRIBUTE}|{REL_SEMANTIC_FK}]->
-              (:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{source: $source}})
-        {filter_clause}
-        RETURN term.id AS term_id, ta.id AS table_id, type(attr_rel) AS path
-        """,
-        params,
+    def leg(src_kind, src_id, dst_kind, dst_id, rel_type, source):
+        return select(
+            literal(src_kind).label("src_kind"),
+            src_id.label("src_id"),
+            literal(dst_kind).label("dst_kind"),
+            dst_id.label("dst_id"),
+            literal(rel_type).label("rel_type"),
+        ).select_from(source)
+
+    tt, ct, ca, cf, ha = (
+        s.table__term,
+        s.catalog_column,
+        s.column_attribute__term,
+        s.column__semantic_fk,
+        s.column__has_attribute,
+    )
+    return (
+        leg("table", tt.c.table_id, "term", tt.c.term_id, REL_REPRESENTS, tt)
+        .union_all(
+            leg("term", tt.c.term_id, "table", tt.c.table_id, REL_REPRESENTS, tt),
+            leg("table", ct.c.table_id, "column", ct.c.id, Edges.CONTAINS, ct),
+            leg("column", ct.c.id, "table", ct.c.table_id, Edges.CONTAINS, ct),
+            leg(
+                "column",
+                ha.c.column_id,
+                "column_attribute",
+                ha.c.attribute_id,
+                REL_HAS_ATTRIBUTE,
+                ha,
+            ),
+            leg(
+                "column_attribute",
+                ha.c.attribute_id,
+                "column",
+                ha.c.column_id,
+                REL_HAS_ATTRIBUTE,
+                ha,
+            ),
+            leg(
+                "column",
+                cf.c.column_id,
+                "column_attribute",
+                cf.c.attribute_id,
+                REL_SEMANTIC_FK,
+                cf,
+            ),
+            leg(
+                "column_attribute",
+                cf.c.attribute_id,
+                "column",
+                cf.c.column_id,
+                REL_SEMANTIC_FK,
+                cf,
+            ),
+            leg(
+                "column_attribute",
+                ca.c.attribute_id,
+                "term",
+                ca.c.term_id,
+                REL_PROPERTY_OF,
+                ca,
+            ),
+            leg(
+                "term",
+                ca.c.term_id,
+                "column_attribute",
+                ca.c.attribute_id,
+                REL_PROPERTY_OF,
+                ca,
+            ),
+        )
+        .subquery("term_link_edge")
     )
 
 
-def build_term_table_maps(
-    pairs: list[dict[str, Any]],
-) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
-    """Split ``{term_id, table_id}`` rows into term→tables and table→terms maps."""
-    term_tables: dict[str, set[str]] = {}
-    table_terms: dict[str, set[str]] = {}
-    for row in pairs:
-        tid = row.get("term_id")
-        tab = row.get("table_id")
-        if tid and tab:
-            term_tables.setdefault(tid, set()).add(tab)
-            table_terms.setdefault(tab, set()).add(tid)
-    return term_tables, table_terms
+def _link_path_bfs(anchor_id: str, dest_id: str) -> list[dict[str, Any]] | None:
+    """Shortest term-to-term path as a node list, or ``None`` when there is none.
+
+    Level-at-a-time BFS with the visited set held in Python, for the same reason
+    :func:`gsf.dal.attributes._bfs_path` does it that way: a recursive CTE tracks
+    visited nodes per *path*, so a hub attribute shared by hundreds of columns
+    fans out exponentially. A shared visited set bounds the work by the size of
+    the reachable component instead.
+
+    Each entry of the returned list is ``{id, kind, relationship}``, where
+    ``relationship`` is the edge type walked to *reach* that node -- ``None`` on
+    the anchor, which nothing was walked to reach.
+    """
+    edges = _term_link_edges()
+    expand = (
+        select(edges.c.src_id, edges.c.dst_kind, edges.c.dst_id, edges.c.rel_type)
+        .where(
+            edges.c.src_id.in_(bindparam("frontier", expanding=True)),
+            edges.c.dst_id.notin_(bindparam("visited", expanding=True)),
+        )
+        .distinct()
+    )
+
+    #: node id -> (kind, parent id, relationship walked from that parent)
+    visited: dict[str, tuple[str, str | None, str | None]] = {
+        anchor_id: ("term", None, None)
+    }
+    frontier = [anchor_id]
+
+    for _ in range(_MAX_LINK_PATH_DEPTH):
+        if not frontier:
+            return None
+        rows = store().query_read(
+            expand, {"frontier": frontier, "visited": list(visited)}
+        )
+        next_frontier: list[str] = []
+        for row in rows:
+            node = row["dst_id"]
+            if node in visited:
+                # Two edges into the same node within one level: the first wins,
+                # which is what BFS means. Without this the parent pointer could
+                # be overwritten by a longer route found in the same batch.
+                continue
+            visited[node] = (row["dst_kind"], row["src_id"], row["rel_type"])
+            next_frontier.append(node)
+            if node == dest_id:
+                path: list[dict[str, Any]] = []
+                current: str | None = node
+                while current is not None:
+                    kind, parent, relationship = visited[current]
+                    path.append(
+                        {"id": current, "kind": kind, "relationship": relationship}
+                    )
+                    current = parent
+                path.reverse()
+                return path
+        frontier = next_frontier
+
+    logger.warning(
+        "find_term_link_path: gave up after %s levels for %s -> %s",
+        _MAX_LINK_PATH_DEPTH,
+        anchor_id,
+        dest_id,
+    )
+    return None
 
 
-# ---------------------------------------------------------------------------
-# Term link path traversal
-# ---------------------------------------------------------------------------
+def _name_link_path_nodes(path: list[dict[str, Any]]) -> dict[str, str]:
+    """``node id -> name`` for every node on the path, one query per kind."""
+    by_kind = {
+        "term": (s.term.c.id, s.term.c.name),
+        "table": (s.catalog_table.c.id, s.catalog_table.c.name),
+        "column": (s.catalog_column.c.id, s.catalog_column.c.name),
+        "column_attribute": (s.column_attribute.c.id, s.column_attribute.c.name),
+    }
+    names: dict[str, str] = {}
+    for kind, (id_column, name_column) in by_kind.items():
+        ids = [node["id"] for node in path if node["kind"] == kind]
+        if not ids:
+            continue
+        names.update(
+            {
+                row["id"]: row["name"]
+                for row in store().query_read(
+                    select(id_column.label("id"), name_column.label("name")).where(
+                        id_column.in_(ids)
+                    )
+                )
+            }
+        )
+    return names
 
 
-def _enrich_catalog_path_nodes(path_nodes: list[dict]) -> None:
-    """Attach catalog ids/names onto each Table/Column node in *path_nodes*,
-    in place.
+def _enrich_catalog_path_nodes(path_nodes: list[dict[str, Any]]) -> None:
+    """Attach catalog ids/names onto each Table/Column node, in place.
 
-    `find_term_link_path`'s own traversal excludes Schema/Database from the
-    path (see its own ``labelFilter``), so a Table/Column hop otherwise
-    carries nothing beyond a bare id/name — not enough for a client to
-    expand either one any further the way every other Table/Column
-    expansion does (see ``expandTableNode``/``expandColumnNode`` in
-    ``ExplorationView.tsx``, which need a Table's own database/schema ids,
-    or a Column's own owning Table id, respectively). Best-effort: a failed
-    lookup just leaves those nodes without the extra fields, same as if
-    this were never called.
+    The traversal never walks through a Schema or Database, so a Table/Column
+    hop otherwise carries nothing beyond a bare id and name -- not enough for a
+    client to expand it any further the way every other Table/Column expansion
+    does (``expandTableNode``/``expandColumnNode`` in ``ExplorationView.tsx``
+    need a Table's own database/schema ids, and a Column's own owning Table id).
+    Best-effort: a failed lookup leaves those nodes without the extra fields,
+    the same as if this were never called.
     """
     table_ids = list(
-        {
-            node["id"]
-            for node in path_nodes
-            if node.get("label") == Labels.TABLE and node.get("id")
-        }
+        {n["id"] for n in path_nodes if n.get("label") == Labels.TABLE and n.get("id")}
     )
     if table_ids:
         try:
-            rows = get_neo4j_conn().query_read(
-                f"""
-                MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-                      (s:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-                      (t:{Labels.TABLE})
-                WHERE t.id IN $table_ids
-                RETURN t.id AS table_id, db.id AS database_id, db.name AS database_name,
-                       s.id AS schema_id, s.name AS schema_name
-                """,
-                {"table_ids": table_ids},
+            rows = store().query_read(
+                select(
+                    s.catalog_table.c.id.label("table_id"),
+                    s.catalog_database.c.id.label("database_id"),
+                    s.catalog_database.c.name.label("database_name"),
+                    s.catalog_schema.c.id.label("schema_id"),
+                    s.catalog_schema.c.name.label("schema_name"),
+                )
+                .select_from(
+                    s.catalog_table.join(
+                        s.catalog_schema,
+                        s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                    ).join(
+                        s.catalog_database,
+                        s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                    )
+                )
+                .where(s.catalog_table.c.id.in_(table_ids))
             )
         except Exception:
             logger.warning(
@@ -1396,103 +1730,94 @@ def _enrich_catalog_path_nodes(path_nodes: list[dict]) -> None:
                 exc_info=True,
             )
             rows = []
-
-        by_table_id = {row["table_id"]: row for row in rows if row.get("table_id")}
+        by_table_id = {row["table_id"]: row for row in rows}
         for node in path_nodes:
             if node.get("label") != Labels.TABLE:
                 continue
-            info = by_table_id.get(node.get("id"))
+            info = by_table_id.get(node["id"])
             if info is not None:
-                node["database_id"] = info.get("database_id")
-                node["database_name"] = info.get("database_name")
-                node["schema_id"] = info.get("schema_id")
-                node["schema_name"] = info.get("schema_name")
+                node["database_id"] = info["database_id"]
+                node["database_name"] = info["database_name"]
+                node["schema_id"] = info["schema_id"]
+                node["schema_name"] = info["schema_name"]
 
     column_ids = list(
-        {
-            node["id"]
-            for node in path_nodes
-            if node.get("label") == Labels.COLUMN and node.get("id")
-        }
+        {n["id"] for n in path_nodes if n.get("label") == Labels.COLUMN and n.get("id")}
     )
     if column_ids:
-        col_ctx = fetch_col_table_contexts(column_ids)
+        contexts = fetch_col_table_contexts(column_ids)
         for node in path_nodes:
             if node.get("label") != Labels.COLUMN:
                 continue
-            info = col_ctx.get(node.get("id") or "")
+            info = contexts.get(node["id"])
             if info is not None:
-                node["table_id"] = info.get("table_id")
-                node["table_name"] = info.get("table_name")
-                node["database_id"] = info.get("database_id")
-                node["database_name"] = info.get("database_name")
-                node["schema_id"] = info.get("schema_id")
-                node["schema_name"] = info.get("schema_name")
+                node.update(
+                    {
+                        key: info.get(key)
+                        for key in (
+                            "table_id",
+                            "table_name",
+                            "database_id",
+                            "database_name",
+                            "schema_id",
+                            "schema_name",
+                        )
+                    }
+                )
 
 
-def find_term_link_path(term_a_id: str, term_b_id: str) -> list[dict]:
-    """Find the shortest semantic path connecting two Term nodes.
+def find_term_link_path(term_a_id: str, term_b_id: str) -> list[dict[str, Any]]:
+    """The shortest semantic path connecting two Terms, as ordered hop dicts.
 
-    One level up from ``find_join_path``'s (in ``gsf.dal.attributes``)
-    Column-to-Column traversal: this walks Term-to-Term across whichever of
-    REPRESENTS (Table-Term), CONTAINS (Table-Column),
-    HAS_ATTRIBUTE/SEMANTIC_FK (Column-ColumnAttribute) and PROPERTY_OF
-    (ColumnAttribute-Term) actually connects them — the same edges
-    ``fetch_semantic_exploration_graph`` folds into one term↔term edge's
-    collapsed ``relationship_types`` label, but returned here as the real
-    ordered hop chain a client can graft/highlight instead — e.g. Term1
-    <-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK-> ColumnAttribute
-    -PROPERTY_OF-> Term2 — rather than just the relationship type names
-    involved.
+    One level up from :func:`gsf.dal.attributes.find_join_path`'s
+    column-to-column traversal: this walks term to term across whichever of
+    REPRESENTS, CONTAINS, HAS_ATTRIBUTE, SEMANTIC_FK and PROPERTY_OF actually
+    connects them -- the same links ``fetch_semantic_exploration_graph`` folds
+    into one term↔term edge's collapsed ``relationship_types`` label, but
+    returned here as the real ordered chain a client can graft and highlight,
+    e.g. ``Term1 <-REPRESENTS- Table -CONTAINS-> Column -SEMANTIC_FK->
+    ColumnAttribute -PROPERTY_OF-> Term2``.
 
-    Unlike ``find_join_path``, SEMANTIC_FK is traversed *undirected* here
-    rather than outgoing-only: a term↔term edge already means the two
-    terms genuinely share a table under ``fetch_semantic_exploration_graph``'s
-    own rules, so tracing *some* real path between them can't fabricate a
-    join the way ``find_join_path``'s Column-to-Column search could — it
-    can only ever surface a real, already-existing relationship chain.
-    This matters for join-table-shaped connections where *both* terms
-    reach their shared table only via SEMANTIC_FK (e.g. a
-    ``request_attribute_values`` table with one FK column pointing at
-    Term1's own id attribute and another pointing at Term2's): tracing
-    that chain needs to step *against* one of the two SEMANTIC_FK edges'
-    stored (Column -> ColumnAttribute) direction no matter which term the
-    search starts from, which an outgoing-only filter would always reject
-    from one side or the other.
+    Returns, ordered from *term_a_id* to *term_b_id*::
 
-    Returns a list of hop dicts, ordered from *term_a_id* to *term_b_id*:
-        [{relationship: str,
-          source: {id, name, label}, target: {id, name, label}}, ...]
-    Returns [] when the two ids are equal, either Term doesn't exist, or no
-    such path connects them (shouldn't happen for a real Exploration graph
-    edge, but guards a stale/hand-crafted request).
+        [{relationship, source: {id, name, label, ...},
+                        target: {id, name, label, ...}}, ...]
+
+    ``[]`` when the two ids are equal, either Term is missing, or nothing
+    connects them -- which should not happen for a real Exploration graph edge,
+    but guards a stale or hand-crafted request.
     """
-    # `labelFilter` keeps Schema/Database out of the path (a Term never
-    # needs to walk through either to reach a Table/Column) — unlike
-    # `find_join_path`, SEMANTIC_FK carries no `>` direction marker here
-    # (see this function's own docstring for why that's safe).
-    path_nodes, path_rel_types = find_shortest_labeled_path(
-        term_a_id,
-        term_b_id,
-        node_label=LABEL_TERM,
-        relationship_filter=(
-            f"{REL_REPRESENTS}|{Edges.CONTAINS}|{REL_HAS_ATTRIBUTE}|"
-            f"{REL_SEMANTIC_FK}|{REL_PROPERTY_OF}"
-        ),
-        label_filter=f"-{Labels.SCHEMA}|-{Labels.DB}",
-        max_level=10,
-        log_label="find_term_link_path",
-    )
-    if len(path_nodes) < 2 or len(path_rel_types) != len(path_nodes) - 1:
+    if not term_a_id or not term_b_id or term_a_id == term_b_id:
         return []
 
-    _enrich_catalog_path_nodes(path_nodes)
+    try:
+        path = _link_path_bfs(term_a_id, term_b_id)
+    except Exception:
+        logger.warning(
+            "find_term_link_path: query failed for %s -> %s",
+            term_a_id,
+            term_b_id,
+            exc_info=True,
+        )
+        return []
+    if not path or len(path) < 2:
+        return []
 
+    names = _name_link_path_nodes(path)
+    nodes = [
+        {
+            "id": node["id"],
+            "name": names.get(node["id"], ""),
+            "label": _LINK_PATH_LABELS[node["kind"]],
+        }
+        for node in path
+    ]
+    _enrich_catalog_path_nodes(nodes)
     return [
         {
-            "relationship": path_rel_types[i],
-            "source": path_nodes[i],
-            "target": path_nodes[i + 1],
+            "relationship": path[index + 1]["relationship"],
+            "source": nodes[index],
+            "target": nodes[index + 1],
         }
-        for i in range(len(path_rel_types))
+        for index in range(len(nodes) - 1)
     ]

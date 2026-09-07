@@ -15,7 +15,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 import pandas as pd
 import snowflake.connector
 from cryptography.hazmat.primitives import serialization
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -210,6 +211,11 @@ class SnowflakeDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+        """
         return "snowflake"
 
     @property
@@ -275,7 +281,7 @@ class SnowflakeDatabase(SQLDatabase):
                 TABLE_NAME       AS "table_name",
                 COLUMN_NAME      AS "column_name",
                 DATA_TYPE        AS "data_type",
-                IS_NULLABLE      AS "is_nullable",
+                IS_NULLABLE = 'YES' AS "is_nullable",
                 ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS
             WHERE TABLE_SCHEMA != 'INFORMATION_SCHEMA'

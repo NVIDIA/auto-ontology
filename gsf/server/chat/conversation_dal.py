@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import psycopg
 from psycopg.rows import dict_row
 
-from gsf.infra.postgres import get_postgres_connection_string
+from gsf.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +104,8 @@ def prepare_conversation(
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(
-                """
-                INSERT INTO conversations (id, user_id, title, created_at, updated_at)
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.conversations (id, user_id, title, created_at, updated_at)
                 VALUES (%s, %s, %s, NOW(), NOW())
                 ON CONFLICT (id) DO NOTHING
                 RETURNING user_id
@@ -115,7 +115,7 @@ def prepare_conversation(
             owner = cur.fetchone()
             if owner is None:
                 cur.execute(
-                    "SELECT user_id FROM conversations WHERE id = %s FOR UPDATE",
+                    f"SELECT user_id FROM {FRONTEND_SCHEMA}.conversations WHERE id = %s FOR UPDATE",
                     (conversation_str,),
                 )
                 owner = cur.fetchone()
@@ -123,9 +123,9 @@ def prepare_conversation(
                 raise ConversationAccessError(conversation_str)
 
             cur.execute(
-                """
+                f"""
                 SELECT role, content, sql_code, sql_response
-                FROM messages
+                FROM {FRONTEND_SCHEMA}.messages
                 WHERE conversation_id = %s
                 ORDER BY created_at ASC, id ASC
                 """,
@@ -134,23 +134,23 @@ def prepare_conversation(
             history = _rows_to_history([dict(row) for row in cur.fetchall()])
 
             cur.execute(
-                """
-                INSERT INTO messages
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.messages
                     (id, conversation_id, role, content, created_at)
                 VALUES (%s, %s, 'user', %s, NOW())
                 """,
                 (str(uuid.uuid4()), conversation_str, question),
             )
             cur.execute(
-                """
-                INSERT INTO conversation_analytics
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.conversation_analytics
                     (id, user_id, source, question, question_timestamp)
                 VALUES (%s, %s, %s, %s, NOW())
                 """,
                 (analytics_id, user_id, source, question),
             )
             cur.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = %s",
+                f"UPDATE {FRONTEND_SCHEMA}.conversations SET updated_at = NOW() WHERE id = %s",
                 (conversation_str,),
             )
 
@@ -171,29 +171,29 @@ def persist_assistant_result(
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM conversations WHERE id = %s AND user_id = %s",
+                f"SELECT 1 FROM {FRONTEND_SCHEMA}.conversations WHERE id = %s AND user_id = %s",
                 (conversation_str, user_id),
             )
             if cur.fetchone() is None:
                 raise ConversationAccessError(conversation_str)
             cur.execute(
-                """
-                INSERT INTO messages
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.messages
                     (id, conversation_id, role, content, sql_code, created_at)
                 VALUES (%s, %s, 'assistant', %s, %s, NOW())
                 """,
                 (str(uuid.uuid4()), conversation_str, response, sql_code),
             )
             cur.execute(
-                """
-                UPDATE conversation_analytics
+                f"""
+                UPDATE {FRONTEND_SCHEMA}.conversation_analytics
                 SET response = %s, sql = %s, response_timestamp = NOW()
                 WHERE id = %s AND user_id = %s
                 """,
                 (response, sql_code, analytics_id, user_id),
             )
             cur.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = %s",
+                f"UPDATE {FRONTEND_SCHEMA}.conversations SET updated_at = NOW() WHERE id = %s",
                 (conversation_str,),
             )
 
@@ -217,21 +217,23 @@ def persist_result_message(
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT 1 FROM conversations WHERE id = %s AND user_id = %s",
+                f"SELECT 1 FROM {FRONTEND_SCHEMA}.conversations "
+                "WHERE id = %s AND user_id = %s",
                 (conversation_str, user_id),
             )
             if cur.fetchone() is None:
                 raise ConversationAccessError(conversation_str)
             cur.execute(
-                """
-                INSERT INTO messages
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.messages
                     (id, conversation_id, role, content, sql_response, created_at)
                 VALUES (%s, %s, 'assistant', %s, %s, NOW())
                 """,
                 (str(uuid.uuid4()), conversation_str, content, sql_response),
             )
             cur.execute(
-                "UPDATE conversations SET updated_at = NOW() WHERE id = %s",
+                f"UPDATE {FRONTEND_SCHEMA}.conversations "
+                "SET updated_at = NOW() WHERE id = %s",
                 (conversation_str,),
             )
 
@@ -243,8 +245,8 @@ def create_stateless_analytics(*, user_id: str, question: str, source: str) -> s
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                INSERT INTO conversation_analytics
+                f"""
+                INSERT INTO {FRONTEND_SCHEMA}.conversation_analytics
                     (id, user_id, source, question, question_timestamp)
                 VALUES (%s, %s, %s, %s, NOW())
                 """,
@@ -265,8 +267,8 @@ def persist_analytics_result(
     with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
-                UPDATE conversation_analytics
+                f"""
+                UPDATE {FRONTEND_SCHEMA}.conversation_analytics
                 SET response = %s, sql = %s, response_timestamp = NOW()
                 WHERE id = %s AND user_id = %s
                 """,

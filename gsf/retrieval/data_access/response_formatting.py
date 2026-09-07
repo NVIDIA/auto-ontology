@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import re
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 from gsf.retrieval.data_access.graph_schemas import fetch_item_by_id
 
 logger = logging.getLogger(__name__)

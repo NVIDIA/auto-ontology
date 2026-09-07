@@ -2,18 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j data access for ``PqlAnalysis`` nodes (the predictive twin of CustomAnalysis).
+"""``PqlAnalysis`` reads and writes — the predictive twin of CustomAnalysis.
 
 A PqlAnalysis is a verified natural-language question paired with a KumoRFM PQL
-query. Unlike a CustomAnalysis it does not parse into an ``Sql``/``Table`` subgraph
-(PQL resolves its tables against the prediction graph at predict time), so the PQL
-text is stored directly as a property on the node — no child node or edge.
+query. Unlike a CustomAnalysis it does not parse into a statement/table
+subgraph — PQL resolves its tables against the prediction graph at predict time
+— so the PQL text is a plain column with no link table behind it.
 
-These nodes live under their own label (:data:`LABEL_PQL_ANALYSIS`) so they never
-enter the SQL text-to-SQL retrieval; they are embedded to the vector store and
+These are kept out of SQL text-to-SQL retrieval entirely; they are embedded and
 retrieved only as few-shot examples for PQL generation.
-
-Contains only functions that call ``get_neo4j_conn()`` directly.
 """
 
 from __future__ import annotations
@@ -22,8 +19,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert
 
+from gsf.dal import schema as s
+from gsf.dal.session import store
 from gsf.semantic.constants import LABEL_PQL_ANALYSIS
 
 if TYPE_CHECKING:
@@ -33,11 +33,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _LABEL = LABEL_PQL_ANALYSIS
-
-
-# ---------------------------------------------------------------------------
-# Domain errors (raised by write helpers; surfaced as HTTP 409 by the router)
-# ---------------------------------------------------------------------------
 
 
 class PqlAnalysisNameConflict(Exception):
@@ -54,100 +49,91 @@ class PqlAnalysisPqlConflict(Exception):
 
 
 def list_pql_analyses() -> list[dict[str, Any]]:
-    """Return all ``PqlAnalysis`` nodes as ``{id, name, description, pql}``."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (pa:{_LABEL})
-        WITH pa
-        ORDER BY pa.name
-        RETURN collect({{
-            id: pa.id,
-            name: pa.name,
-            description: pa.description,
-            pql: pa.pql
-        }}) AS analyses
-        """,
-        {},
+    """Every PqlAnalysis as ``{id, name, description, pql}``, by name."""
+    return [
+        dict(r)
+        for r in store().query_read(
+            select(
+                s.pql_analysis.c.id,
+                s.pql_analysis.c.name,
+                s.pql_analysis.c.description,
+                s.pql_analysis.c.pql,
+            ).order_by(s.pql_analysis.c.name)
+        )
+    ]
+
+
+def _find_conflict(column, value: str, exclude_id: str | None):
+    """Another analysis already using *value* in *column*, or ``None``.
+
+    *exclude_id* is the analysis being edited — without it, saving one unchanged
+    reports a conflict with itself.
+    """
+    statement = select(s.pql_analysis.c.id, s.pql_analysis.c.name).where(
+        column == value
     )
-    return rows[0]["analyses"] if rows else []
+    if exclude_id is not None:
+        statement = statement.where(s.pql_analysis.c.id != exclude_id)
+    rows = store().query_read(statement.order_by(s.pql_analysis.c.id).limit(1))
+    return {"id": rows[0]["id"], "name": rows[0]["name"]} if rows else None
 
 
 def find_pql_analysis_by_name(
     name: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (other:{_LABEL} {{name: $name}})
-        WHERE $exclude_id IS NULL OR other.id <> $exclude_id
-        RETURN other.id AS id, other.name AS name
-        LIMIT 1
-        """,
-        {"name": name, "exclude_id": exclude_id},
-    )
-    if not rows:
-        return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+    return _find_conflict(s.pql_analysis.c.name, name, exclude_id)
 
 
 def find_pql_analysis_by_pql(
     pql: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (other:{_LABEL} {{pql: $pql}})
-        WHERE $exclude_id IS NULL OR other.id <> $exclude_id
-        RETURN other.id AS id, other.name AS name
-        LIMIT 1
-        """,
-        {"pql": pql, "exclude_id": exclude_id},
-    )
-    if not rows:
-        return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+    return _find_conflict(s.pql_analysis.c.pql, pql, exclude_id)
 
 
 def get_pql_analysis_by_id(analysis_id: str) -> str | None:
-    """Return the id of the PqlAnalysis, or None if it doesn't exist."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (pa:{_LABEL} {{id: $analysis_id}})
-        RETURN pa.id AS id
-        LIMIT 1
-        """,
-        {"analysis_id": analysis_id},
+    """The analysis id if it exists, else ``None`` — an existence check."""
+    rows = store().query_read(
+        select(s.pql_analysis.c.id).where(s.pql_analysis.c.id == analysis_id).limit(1)
     )
     return rows[0]["id"] if rows else None
 
 
 def fetch_pql_analyses_by_ids(analysis_ids: list[str]) -> dict[str, dict[str, str]]:
-    """Fetch ``{id: {id, name, description, pql}}`` for the given PqlAnalysis ids."""
+    """``{id: {id, name, description, pql}}``.
+
+    Values are stripped, and a missing one becomes ``""`` — these go straight
+    into a prompt, where ``None`` would render as the word "None".
+
+    Returns ``{}`` on failure rather than raising: this decorates retrieval
+    results, and losing the examples beats losing the answer.
+    """
     if not analysis_ids:
         return {}
-    query = f"""
-    UNWIND $ids AS analysis_id
-    MATCH (pa:{_LABEL} {{id: analysis_id}})
-    RETURN pa.id AS id, pa.name AS name, pa.description AS description, pa.pql AS pql
-    """
     try:
-        rows = get_neo4j_conn().query_read(query, {"ids": analysis_ids})
+        rows = store().query_read(
+            select(
+                s.pql_analysis.c.id,
+                s.pql_analysis.c.name,
+                s.pql_analysis.c.description,
+                s.pql_analysis.c.pql,
+            ).where(s.pql_analysis.c.id.in_(list(analysis_ids)))
+        )
     except Exception:
-        logger.warning("fetch_pql_analyses_by_ids: Neo4j query failed", exc_info=True)
+        logger.warning("fetch_pql_analyses_by_ids: query failed", exc_info=True)
         return {}
 
-    out: dict[str, dict[str, str]] = {}
-    for row in rows:
-        pid = row.get("id") or ""
-        if not pid:
-            continue
-        out[pid] = {
-            "id": pid,
-            "name": (row.get("name") or "").strip(),
-            "description": (row.get("description") or "").strip(),
-            "pql": (row.get("pql") or "").strip(),
+    return {
+        row["id"]: {
+            "id": row["id"],
+            "name": (row["name"] or "").strip(),
+            "description": (row["description"] or "").strip(),
+            "pql": (row["pql"] or "").strip(),
         }
-    return out
+        for row in rows
+        if row["id"]
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -161,35 +147,62 @@ def upsert_pql_analysis_node(
     description: str,
     pql: str,
 ) -> None:
-    """MERGE a ``PqlAnalysis`` node by id, setting name/description/pql."""
-    get_neo4j_conn().query_write(
-        f"""
-        MERGE (pa:{_LABEL} {{id: $analysis_id}})
-        SET pa.name = $name, pa.description = $description, pa.pql = $pql
-        """,
-        {
-            "analysis_id": analysis_id,
-            "name": name,
-            "description": description,
-            "pql": pql,
-        },
+    """Create or overwrite an analysis by id.
+
+    The caller supplies the id — this is an upsert *by id*, not a merge by name,
+    so the service layer can decide identity before writing. Every field is
+    assigned rather than coalesced: it is a PUT, and the conflict checks above
+    have already run.
+    """
+    statement = insert(s.pql_analysis).values(
+        id=analysis_id, name=name, description=description, pql=pql
+    )
+    store().query_write(
+        statement.on_conflict_do_update(
+            index_elements=[s.pql_analysis.c.id],
+            set_={
+                "name": statement.excluded.name,
+                "description": statement.excluded.description,
+                "pql": statement.excluded.pql,
+            },
+        )
     )
 
 
 def delete_pql_analysis_node(analysis_id: str) -> None:
-    """DETACH DELETE the PqlAnalysis node."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (pa:{_LABEL} {{id: $analysis_id}})
-        DETACH DELETE pa
-        """,
-        {"analysis_id": analysis_id},
+    """Delete the analysis. Nothing hangs off it, so nothing cascades."""
+    store().query_write(
+        delete(s.pql_analysis).where(s.pql_analysis.c.id == analysis_id)
     )
 
 
 # ---------------------------------------------------------------------------
-# Embedding helper (called by the write path)
+# Embedding
 # ---------------------------------------------------------------------------
+
+
+def _pql_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
+    """Embedding-ready docs — **the question text only**.
+
+    The PQL body is deliberately not embedded. Retrieval here is
+    question-to-question similarity, so the PQL is payload, fetched by id once a
+    match is found. Embedding it would push the vector toward query syntax and
+    away from the question a user actually asks.
+    """
+    statement = select(
+        s.pql_analysis.c.id, s.pql_analysis.c.name, s.pql_analysis.c.description
+    )
+    if analysis_id is not None:
+        statement = statement.where(s.pql_analysis.c.id == analysis_id)
+
+    docs: list[dict[str, Any]] = []
+    for row in store().query_read(statement.order_by(s.pql_analysis.c.id)):
+        description = row["description"]
+        text = row["name"]
+        if description is not None and str(description).strip():
+            text += f": {description}"
+        docs.append({"text": text, "name": row["name"], "id": row["id"]})
+    return docs
 
 
 def embed_pql_analyses(
@@ -198,32 +211,12 @@ def embed_pql_analyses(
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:
-    """Fetch ``PqlAnalysis`` docs from Neo4j, embed them, and append to *vdb*."""
+    """Embed PqlAnalysis docs and append them to *vdb*."""
     import pandas as pd
     from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
     from nemo_retriever.operators.vdb import IngestVdbOperator
 
-    # Embed the QUESTION text only (name + description), not the PQL body:
-    # retrieval is question-to-question similarity, so the PQL is carried as
-    # payload (fetched by id at retrieval time), never embedded.
-    query = f"""
-        MATCH (pa:{_LABEL})
-        WHERE $analysis_id IS NULL OR pa.id = $analysis_id
-        WITH DISTINCT pa,
-             CASE
-                 WHEN pa.description IS NOT NULL AND trim(toString(pa.description)) <> ''
-                 THEN pa.description
-                 ELSE ''
-             END AS desc
-        RETURN collect({{
-            text: pa.name +
-                  CASE WHEN desc <> '' THEN ': ' + desc ELSE '' END,
-            name: pa.name,
-            id: pa.id
-        }}) AS docs
-    """
-    result = get_neo4j_conn().query_read(query, parameters={"analysis_id": analysis_id})
-    docs = result[0].get("docs") if result else None
+    docs = _pql_analysis_docs(analysis_id)
     if not docs:
         logger.info(
             "No PqlAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
@@ -234,7 +227,10 @@ def embed_pql_analyses(
     rows = []
     for item in docs:
         node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        # An opaque provenance key. Nothing matches on it -- deletes go
+        # through `metadata["id"]` -- but changing it leaves rows already
+        # written carrying the old value.
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": _LABEL,

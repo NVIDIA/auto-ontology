@@ -12,9 +12,18 @@ type ModalProps = {
 	onClose: () => void;
 	children: ReactNode;
 	className?: string;
+	overlayClassName?: string;
+	align?: 'center' | 'top';
 };
 
-export const Modal = ({ open, onClose, children, className = '' }: ModalProps) => {
+export const Modal = ({
+	open,
+	onClose,
+	children,
+	className = '',
+	overlayClassName,
+	align = 'center',
+}: ModalProps) => {
 	useEffect(() => {
 		if (!open) return;
 		const prev = document.body.style.overflow;
@@ -36,7 +45,11 @@ export const Modal = ({ open, onClose, children, className = '' }: ModalProps) =
 	if (!open) return null;
 
 	return createPortal(
-		<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+		<div
+			className={`fixed inset-0 z-50 flex justify-center ${
+				align === 'top' ? 'items-start' : 'items-center'
+			} ${overlayClassName ?? (align === 'top' ? 'p-4 pt-16' : 'p-4')}`}
+		>
 			<div
 				className="absolute inset-0 bg-black/40 transition-opacity"
 				onClick={onClose}

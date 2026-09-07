@@ -5,6 +5,9 @@
 import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
+// Imported from the barrel, not `better-auth/plugins/mcp`: the package exports
+// only the plugin's client subpath, so the server plugin is reachable here.
+import { mcp } from 'better-auth/plugins';
 import { nextCookies } from 'better-auth/next-js';
 import { sso } from '@better-auth/sso';
 import { apiKey } from '@better-auth/api-key';
@@ -73,6 +76,15 @@ export const auth = betterAuth({
 			// die), but callers may opt into an expiry up to a year out.
 			keyExpiration: { defaultExpiresIn: null, maxExpiresIn: 365 },
 		}),
+		// Makes GSF the authorization server that MCP clients log in against, so
+		// the MCP server holds no client credentials and NVIDIA never needs a
+		// redirect URI registered for it — the only one it ever sees is GSF's,
+		// which SSO already uses. Clients register themselves, and those
+		// registrations live in Postgres rather than on an MCP pod's disk.
+		//
+		// `loginPage` is where an unauthenticated authorize request is sent; from
+		// there the existing SSO flow takes over, so human login is unchanged.
+		mcp({ loginPage: '/login' }),
 		// Must be the last plugin so it can set cookies on outgoing responses.
 		nextCookies(),
 	],

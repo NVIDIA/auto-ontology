@@ -16,8 +16,8 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 
 - **Natural-language querying** of structured data — questions are translated to
   SQL and executed against connected databases, powered by NVIDIA NIM.
-- **Semantic catalog / ontology layer** over relational sources, stored as a
-  graph in Neo4j.
+- **Semantic catalog / ontology layer** over relational sources, stored in
+  Postgres alongside the catalog it describes.
 - **Authentication & RBAC** —using [Better Auth](https://github.com/better-auth/better-auth).
 - **Web UI** for chat, analysis, data catalog, analytics, and settings.
 - **Flexible deployment** — Helm chart for Kubernetes or Docker Compose for a
@@ -30,8 +30,7 @@ Generative Semantic Fabric adds the structured-data ontology layer to any partne
 | Frontend            | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway        | 3000         |
 | Backend             | FastAPI (Python 3.12+), NeMo-Retriever, LangChain                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
 | Ingestion worker    | FastAPI (Python 3.12+), NeMo-Retriever                                 | Ingests tabular data and writes embeddings | 3002         |
-| Postgres + pgvector | Relational Database                                                    | App metadata and vector store              | 5432         |
-| Neo4j               | Graph Database                                                         | Ontology graph                             | 7474 / 7687  |
+| Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
 | HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
 
 ### NVIDIA NIM
@@ -94,7 +93,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    ```
 
 2. Create your environment file (.env) from the template and fill in the values
-   (Postgres/Neo4j credentials, `DEFAULT_MODELS_API_KEY`, `CONNECTION_STRINGS`, etc.).
+   (Postgres credentials, `DEFAULT_MODELS_API_KEY`, `CONNECTION_STRINGS`, etc.).
    See [`.env.example`](./.env.example) for the full list of variables:
 
    ```bash
@@ -116,7 +115,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    ```
 
    This builds the backend (`gsf`) and frontend (`gsf-frontend`) images, brings
-   up Postgres, Neo4j, and pgAdmin, runs the one-shot `frontend-migrate` job to
+   up Postgres and pgAdmin, runs the one-shot `frontend-migrate` job to
    sync the database schema, and starts the app (backend, ingestion service,
    and frontend).
 
@@ -134,12 +133,12 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 GSF resolves the source databases it connects to from two sources:
 
 1. **Added through the UI** — connections created from within the app. With this
-   option the connection credentials are **stored in plaintext in Neo4j unless
+   option the connection credentials are **stored in plaintext in Postgres unless
    Vault is configured**:
    - **Without Vault:** the full connection object (including the password) is
-     JSON-serialized and stored, unencrypted, on the database's Neo4j node.
+     JSON-serialized and stored, unencrypted, on the catalog's database row.
    - **With Vault:** the credentials are written to Vault, keyed by the database
-     name, and the Neo4j node stores no credentials (the database name is the
+     name, and the catalog row stores no credentials (the database name is the
      lookup key — there is no separate reference field).
 
    Vault is enabled only when all of `VAULT_ADDR`, `VAULT_NAMESPACE`,
@@ -242,6 +241,12 @@ without `conversation_id` remains stateless; a direct request with
 The web UI manages the UUID automatically. An API-created conversation can be
 opened in the UI at `/chat?focus=<conversation_id>` when it belongs to the
 signed-in user.
+
+## MCP server
+
+Agent harnesses such as Cursor and Claude Desktop can query your data through
+GSF's [MCP](https://modelcontextprotocol.io) server. See
+[`mcp/`](./mcp/) to run it and [`docs/mcp.md`](./docs/mcp.md) for the details.
 
 ## License
 

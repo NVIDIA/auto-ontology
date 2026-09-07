@@ -13,7 +13,7 @@ export type ImportModelOptions = {
 };
 
 export const modelInterchangeApi = {
-	/** Export the scoped model (Neo4j catalog + semantic layer) as a YAML file blob in `format`. */
+	/** Export the scoped model (catalog + semantic layer) as a YAML file blob in `format`. */
 	exportModel: (
 		databaseIds: string[],
 		format: ModelFormat,
@@ -21,7 +21,7 @@ export const modelInterchangeApi = {
 		requests.postBlob('model/export', { databases: databaseIds, format }),
 
 	/**
-	 * Import a native GSF or Apache Ossie model YAML file, applying it to Neo4j and
+	 * Import a native GSF or Apache Ossie model YAML file, applying it and
 	 * optionally refreshing VDB embeddings. The backend detects the format from the file.
 	 */
 	importModel: (

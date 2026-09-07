@@ -35,7 +35,7 @@ from typing import Any
 from typing import Protocol
 
 from langchain_core.language_models import BaseChatModel
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.retrieval.kumo.prompts import build_pql_prompt
 from gsf.utils.llm_invoke import invoke_text

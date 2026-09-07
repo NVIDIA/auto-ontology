@@ -10,6 +10,7 @@ export enum ConnectionType {
 	SNOWFLAKE = 'snowflake',
 	HEAVYDB = 'heavydb',
 	KYUUBI = 'kyuubi',
+	TRINO = 'trino',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -19,6 +20,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.SNOWFLAKE]: 'Snowflake',
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
 	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
+	[ConnectionType.TRINO]: 'Trino',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -41,6 +43,7 @@ export type ConnectionFieldKey =
 	| 'truststore_file'
 	| 'truststore_password'
 	| 'schema'
+	| 'http_scheme'
 	| 'sso_federation';
 
 export type ConnectionField = {
@@ -192,6 +195,31 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			key: 'truststore_password',
 			label: 'Truststore password',
 			secret: true,
+			optional: true,
+		},
+	],
+	[ConnectionType.TRINO]: [
+		{ key: 'host', label: 'Host', placeholder: 'trino.example.com' },
+		{ key: 'port', label: 'Port', placeholder: '8080', optional: true },
+		{
+			key: 'user',
+			label: 'User',
+			placeholder: 'analyst',
+			hint: 'On an unauthenticated cluster this is only the identity Trino records against the query.',
+		},
+		{
+			key: 'password',
+			label: 'Password',
+			secret: true,
+			optional: true,
+			hint: 'Leave empty for an unauthenticated cluster. A password switches the connection to HTTPS, which Trino requires before it will accept one.',
+		},
+		{ key: 'database', label: 'Catalog', placeholder: 'hive' },
+		{
+			key: 'schema',
+			label: 'Schema',
+			placeholder: 'Leave empty to choose from a list',
+			hint: 'Ingest only this schema. Leave empty to pick schemas from a list instead.',
 			optional: true,
 		},
 	],

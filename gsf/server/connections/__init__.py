@@ -2,4 +2,4 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j-backed connection listing (catalog ``db`` nodes)."""
+"""Connection listing, read from the catalog's database rows."""

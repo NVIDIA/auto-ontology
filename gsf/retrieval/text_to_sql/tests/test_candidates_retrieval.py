@@ -167,6 +167,7 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
 
     monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
     monkeypatch.setattr(candidates_retrieval, "_llm_filter_both", fake_filter)
+    monkeypatch.setattr(candidates_retrieval, "custom_analysis_exists", lambda *_: True)
 
     result = CandidateRetrievalAgent().execute(
         _state(["revenue", "region", "customer"])
@@ -297,6 +298,7 @@ def test_explicit_target_db_preserves_existing_search_behavior(
         "_llm_filter_both",
         lambda _llm, _question, custom, sql: (custom, sql),
     )
+    monkeypatch.setattr(candidates_retrieval, "custom_analysis_exists", lambda *_: True)
 
     result = CandidateRetrievalAgent().execute(
         _state(["revenue", "region"], target_db="db-a")

@@ -31,7 +31,6 @@
    ```bash
    helm install gsf gsf-0.0.1.tgz \
      --set defaultModelsApiKey=<API-KEY> \
-     --set neo4jPassword=<NEO4J-PASSWORD> \
      --set postgresPassword=<POSTGRES-PASSWORD> \
      --set connectionStrings=<CONNECTION-STRINGS>
    ```

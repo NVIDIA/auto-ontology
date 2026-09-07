@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import { Button, SelectButton } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
@@ -51,7 +52,17 @@ const getLoadingSkeletonCount = () =>
 	);
 
 export const AnalysisView = () => {
-	const [mode, setMode] = useState<AnalysisMode>('sql');
+	const searchParams = useSearchParams();
+	const focusId = searchParams.get('focus');
+	const urlMode: AnalysisMode = searchParams.get('mode') === 'pql' ? 'pql' : 'sql';
+	const [tabOverride, setTabOverride] = useState<AnalysisMode | null>(null);
+	const [focusSeen, setFocusSeen] = useState<string | null>(null);
+	if (focusId !== focusSeen) {
+		setFocusSeen(focusId);
+		setTabOverride(null);
+	}
+	const mode: AnalysisMode = tabOverride ?? urlMode;
+	const setMode = (next: AnalysisMode) => setTabOverride(next);
 	const [items, setItems] = useState<AnalysisItem[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
@@ -133,6 +144,13 @@ export const AnalysisView = () => {
 			cancelled = true;
 		};
 	}, [mode, isPql]);
+
+	useEffect(() => {
+		if (focusId == null || loading) return;
+		document
+			.getElementById(`analysis-${focusId}`)
+			?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+	}, [focusId, items, loading]);
 
 	const openCreateModal = () => {
 		setEditingId(null);
@@ -370,7 +388,12 @@ export const AnalysisView = () => {
 						{items.map((a) => (
 							<li
 								key={a.id}
-								className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900"
+								id={`analysis-${a.id}`}
+								className={`rounded-2xl border bg-white p-5 shadow-sm dark:bg-zinc-900 ${
+									a.id === focusId
+										? 'border-[#76b900] ring-2 ring-[#76b900]/30 dark:border-[#76b900]'
+										: 'border-zinc-200 dark:border-zinc-800'
+								}`}
 							>
 								<div className="flex items-start justify-between gap-3">
 									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />

@@ -34,6 +34,23 @@ def _hit(
     }
 
 
+def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
+    # Legacy Column nodes still store sample_values as a JSON string.
+    assert semantic_fk._format_sample_values('["1", "2"]') == "sample_values: 1, 2"
+    # Current writers store a native list.
+    assert semantic_fk._format_sample_values(["1", "2"]) == "sample_values: 1, 2"
+    assert semantic_fk._format_sample_values(None) == ""
+    assert semantic_fk._format_sample_values(["1", None, "2"]) == "sample_values: 1, 2"
+    assert (
+        semantic_fk._format_sample_values('["1", null, "2"]') == "sample_values: 1, 2"
+    )
+
+
+def test_distinct_samples_drops_none_and_preserves_order() -> None:
+    assert semantic_fk._distinct_samples(["a", None, "b", "a"]) == ["a", "b"]
+    assert semantic_fk._distinct_samples('["a", null, "b", "a"]') == ["a", "b"]
+
+
 @patch("gsf.semantic.semantic_fk._match_hit_by_sample_values")
 @patch("gsf.semantic.semantic_fk._llm_pick_hit", return_value="other-attr")
 def test_vdb_resolution_excludes_same_table_candidates(

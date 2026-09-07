@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Candidate retrieval: vector hits + Neo4j graph enrichment.
+"""Candidate retrieval: vector hits + catalog enrichment.
 
 * :func:`gsf.dal.candidates.expand_info` pulls graph properties for the
   (label, id) pairs returned by :func:`semantic_search.search_semantic_index`.
@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from gsf.catalog.constants import Labels
 
 from gsf.semantic.constants import LABEL_SQL_ATTRIBUTE
 
@@ -50,7 +50,7 @@ def _get_candidates_information(
 
     Runs one query per label with a server-side ``where`` predicate
     (label + *database_name*) keeping at most *per_label_k* per label,
-    then enriches each hit with Neo4j graph properties.
+    then enriches each hit with catalog properties.
     """
     results: list[dict] = list(
         search_semantic_index(

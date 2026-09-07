@@ -5,9 +5,9 @@
 """Resolve configured connections for the ingestion-service schedulers.
 
 Connections come from the ``CONNECTION_STRINGS`` env var when set, otherwise
-from the Neo4j catalog (Vault-resolved). Both the data and semantic schedulers
+from the catalog (Vault-resolved). Both the data and semantic schedulers
 resolve through here so they see the *same* set — in particular env-var
-connections, which never reach Neo4j.
+connections, which never reach the catalog.
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def resolve_connection_strings() -> list[str]:
-    """Return the connection strings to process this pass (env var or Neo4j)."""
+    """Return the connection strings to process this pass (env var or the catalog)."""
     raw = os.environ.get("CONNECTION_STRINGS", "")
     connections = [cs.strip() for cs in raw.split(",") if cs.strip()]
     if connections:
@@ -33,7 +33,7 @@ def resolve_connection_strings() -> list[str]:
     try:
         return [build_connection_string(conn) for conn in list_connections()]
     except Exception:
-        logger.exception("connections: failed to load from Neo4j")
+        logger.exception("connections: failed to load from the store")
         return []
 
 
@@ -41,7 +41,7 @@ def resolve_database_names() -> list[str]:
     """Return the distinct database names behind the configured connections.
 
     The name is read from the connector (``SELECT current_database()`` on
-    Postgres, etc.) so it matches exactly what ingestion used as the Neo4j /
+    Postgres, etc.) so it matches exactly what ingestion used as the catalog /
     VDB key — the same value ``run_ingest`` derives. A connection that can't be
     opened is skipped rather than failing the whole pass.
     """

@@ -2,38 +2,44 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j read/write for ColumnAttribute and SemanticFK entities.
+"""ColumnAttribute and SEMANTIC_FK reads and writes, plus join-path traversal.
 
-Also contains find_join_path, which traverses SEMANTIC_FK / HAS_ATTRIBUTE /
-CONTAINS edges to resolve multi-hop join routes at retrieval time, and the
-shared find_shortest_labeled_path helper underneath it — reused by
-gsf.dal.terms.find_term_link_path for the same traversal one level up
-(Term-to-Term instead of Column-to-Column) for the Exploration graph.
+``find_join_path`` projects semantic FK/owner relationships into undirected
+table edges, then runs BFS over tables while retaining the exact join columns
+on every edge. The lower-level ``join_path_edge`` traversal remains as a
+directional graph oracle for its dedicated tests.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict, deque
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from sqlalchemy import Text, all_, and_, any_, bindparam, func, literal, select, update
+from sqlalchemy.dialects.postgresql import ARRAY, insert
 
-from gsf.semantic.constants import (
-    LABEL_COLUMN_ATTRIBUTE,
-    LABEL_TERM,
-    REL_HAS_ATTRIBUTE,
-    REL_PROPERTY_OF,
-    REL_SEMANTIC_FK,
-    SEMANTIC_SOURCE,
-)
+from gsf.dal import schema as s
 from gsf.dal.datasources import fetch_col_table_contexts
+from gsf.dal.session import store, write_transaction
+from gsf.semantic.constants import SEMANTIC_SOURCE
 
 logger = logging.getLogger(__name__)
 
+#: Path length ceiling, in **edges**.
+#:
+#: It is tempting to lower this on the grounds that real join paths are 2-4
+#: hops. That reasoning is wrong, and the depth-bound test catches it: a *hop*
+#: here is four edges, not one. Getting from one FK column to the next runs
+#: Column -SEMANTIC_FK-> ColumnAttribute -HAS_ATTRIBUTE-> Column -CONTAINS->
+#: Table -CONTAINS-> Column, so an n-hop join path is ``4n - 2`` edges. A
+#: perfectly ordinary 4-hop path is 14, and a ceiling of 10 would have silently
+#: returned "no path" for it.
+MAX_PATH_DEPTH = 30
+
 
 # ---------------------------------------------------------------------------
-# ColumnAttribute CRUD
+# ColumnAttribute
 # ---------------------------------------------------------------------------
 
 
@@ -46,37 +52,95 @@ def merge_column_attribute(
     datatype: str,
     description: str | None,
 ) -> str | None:
-    """Merge the ColumnAttribute node and return its persistent ``id`` (UUID)."""
-    rows = get_neo4j_conn().query_write(
-        f"""
-        MATCH (t:{Labels.TABLE} {{id: $table_id}})-[:{Edges.CONTAINS}]->
-              (col:{Labels.COLUMN} {{name: $source_column}})
-        MATCH (term:{LABEL_TERM} {{name: $term_name, source: $source}})
-        MERGE (attr:{LABEL_COLUMN_ATTRIBUTE} {{
-            name: $attr_name,
-            source_column: $source_column,
-            term_name: $term_name,
-            table_id: $table_id,
-            source: $source
-        }})
-        ON CREATE SET attr.id = randomUUID()
-        SET attr.datatype = $datatype,
-            attr.description = coalesce($description, attr.description)
-        MERGE (col)-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        MERGE (attr)-[:{REL_PROPERTY_OF}]->(term)
-        RETURN attr.id AS id
-        """,
-        {
-            "table_id": table_id,
-            "source_column": source_column,
-            "term_name": term_name,
-            "attr_name": attr_name,
-            "datatype": datatype,
-            "description": description,
-            "source": SEMANTIC_SOURCE,
-        },
+    """Upsert a ColumnAttribute and link it to its column and Term.
+
+    Returns ``None`` when the column or the Term does not exist — the guards
+    below refuse rather than create an attribute that dangles.
+
+    ``description`` is coalesced, not assigned: a merge that has nothing to say
+    about the description must not erase a curated one. ``datatype`` *is*
+    assigned, as before — it describes the column, not the human's opinion of it.
+    """
+    column = store().query_read(
+        select(s.catalog_column.c.id).where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.name == source_column,
+        )
     )
-    return rows[0]["id"] if rows else None
+    term = store().query_read(
+        select(s.term.c.id).where(
+            s.term.c.name == term_name, s.term.c.source == SEMANTIC_SOURCE
+        )
+    )
+    if not column or not term:
+        return None
+    column_id, term_id = column[0]["id"], term[0]["id"]
+
+    statement = insert(s.column_attribute).values(
+        name=attr_name,
+        source_column=source_column,
+        term_name=term_name,
+        table_id=table_id,
+        source=SEMANTIC_SOURCE,
+        datatype=datatype,
+        description=description,
+    )
+    # One transaction: the attribute and its two links are a single fact. Without
+    # this each statement autocommits, so a failure on the second leaves a
+    # ColumnAttribute with no link to its column and no link to its Term --
+    # visible in the Term's list, uncounted by the certification rollup, and
+    # permanent. This runs inside the ingestion thread fan-out against a bounded
+    # pool, so a pool timeout mid-way is the realistic trigger, not a crash.
+    with write_transaction():
+        rows = store().query_write(
+            statement.on_conflict_do_update(
+                constraint="uq_column_attribute_merge_key",
+                set_={
+                    "datatype": statement.excluded.datatype,
+                    "description": func.coalesce(
+                        statement.excluded.description,
+                        s.column_attribute.c.description,
+                    ),
+                },
+            ).returning(s.column_attribute.c.id)
+        )
+        attribute_id = rows[0]["id"]
+
+        for table, values in (
+            (
+                s.column__has_attribute,
+                {"column_id": column_id, "attribute_id": attribute_id},
+            ),
+            (
+                s.column_attribute__term,
+                {"attribute_id": attribute_id, "term_id": term_id},
+            ),
+        ):
+            store().query_write(insert(table).values(**values).on_conflict_do_nothing())
+
+    return attribute_id
+
+
+def fetch_column_attribute_column(attr_id: str) -> dict[str, Any] | None:
+    """Return ``{id, data_type}`` of the Column owning a ColumnAttribute.
+
+    ``None`` when the attribute is missing or has no owning Column. Read on
+    its own, ahead of ``update_column_attribute``, so a sample-value edit can
+    be refused against the Column's declared type before any metadata is
+    written (see ``gsf.server.terms.service.update_column_attribute``).
+    """
+    rows = store().query_read(
+        select(s.catalog_column.c.id, s.catalog_column.c.data_type)
+        .select_from(
+            s.catalog_column.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            )
+        )
+        .where(s.column__has_attribute.c.attribute_id == attr_id)
+        .limit(1)
+    )
+    return dict(rows[0]) if rows else None
 
 
 def update_column_attribute(
@@ -87,55 +151,111 @@ def update_column_attribute(
     description: str | None = None,
     certified: bool | None = None,
 ) -> dict[str, Any] | None:
-    """Update ColumnAttribute metadata and return its embedding context."""
-    rows = get_neo4j_conn().query_write(
-        f"""
-        MATCH (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: $attr_id}})
-              -[:{REL_PROPERTY_OF}]->(term:{LABEL_TERM} {{id: $term_id}})
-        SET attr.name = coalesce($name, attr.name),
-            attr.description = coalesce($description, attr.description),
-            attr.certified = coalesce($certified, attr.certified)
-        WITH attr, term
-        OPTIONAL MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->(attr)
-        OPTIONAL MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->
-              (sch:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-              (table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
-        RETURN attr.id AS id,
-               attr.name AS name,
-               attr.description AS description,
-               attr.term_name AS term_name,
-               attr.source_column AS source_column,
-               col.id AS column_id,
-               col.sample_values AS sample_values,
-               col.is_unique AS is_unique,
-               table.id AS table_id,
-               table.name AS table_name,
-               sch.name AS schema_name,
-               term.id AS term_id,
-               term.synonyms AS term_synonyms,
-               head(collect(DISTINCT db.name)) AS database_name,
-               coalesce(attr.certified, false) AS certified
-        """,
-        {
-            "attr_id": attr_id,
-            "term_id": term_id,
-            "name": name,
-            "description": description,
-            "certified": certified,
-        },
+    """Update an attribute's metadata and return the context an embed needs.
+
+    ``None`` when the attribute does not exist *or* is not a property of
+    *term_id*. The pairing is the point: the caller has both ids from a URL, and
+    accepting a mismatched pair would let one term's request edit another's
+    attribute.
+
+    Every field is coalesced, so omitting one leaves it alone rather than
+    nulling it — this is a PATCH, not a PUT.
+
+    **A rename can fail.** ``name`` is part of the five-part merge key, which
+    is a unique constraint, so renaming onto an existing key raises
+    ``IntegrityError``. Left to surface rather than caught: the constraint is
+    describing a genuine conflict between two attributes, and swallowing it
+    would leave a duplicate no read can choose between.
+    """
+    owned = (
+        select(literal(1))
+        .where(
+            s.column_attribute__term.c.attribute_id == attr_id,
+            s.column_attribute__term.c.term_id == term_id,
+        )
+        .exists()
+    )
+    updated = store().query_write(
+        update(s.column_attribute)
+        .where(s.column_attribute.c.id == attr_id, owned)
+        .values(
+            name=func.coalesce(name, s.column_attribute.c.name),
+            description=func.coalesce(description, s.column_attribute.c.description),
+            certified=func.coalesce(certified, s.column_attribute.c.certified),
+        )
+        .returning(s.column_attribute.c.id)
+    )
+    if not updated:
+        return None
+
+    # An attribute reaches at most one column, but order the pick anyway so
+    # repeated calls agree with each other.
+    rows = store().query_read(
+        select(
+            s.column_attribute.c.id,
+            s.column_attribute.c.name,
+            s.column_attribute.c.description,
+            s.column_attribute.c.term_name,
+            s.column_attribute.c.source_column,
+            s.column_attribute.c.certified,
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.sample_values,
+            s.term.c.id.label("term_id"),
+            s.term.c.synonyms.label("term_synonyms"),
+            s.catalog_database.c.name.label("database_name"),
+        )
+        .select_from(
+            s.column_attribute.join(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .join(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+            .outerjoin(
+                s.column__has_attribute,
+                s.column__has_attribute.c.attribute_id == s.column_attribute.c.id,
+            )
+            .outerjoin(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .outerjoin(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .outerjoin(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.column_attribute.c.id == attr_id, s.term.c.id == term_id)
+        .order_by(s.catalog_column.c.id)
+        .limit(1)
     )
     return dict(rows[0]) if rows else None
 
 
 def find_column_attribute_by_column_id(column_id: str) -> str | None:
-    """Return the id of the ColumnAttribute connected to a given Column, or None."""
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (col:{Labels.COLUMN} {{id: $col_id}})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{source: $source}})
-        RETURN attr.id AS id LIMIT 1
-        """,
-        {"col_id": column_id, "source": SEMANTIC_SOURCE},
+    """The semantic ColumnAttribute a column carries, if any.
+
+    ``LIMIT 1`` over a genuinely one-to-many link, as before. Ordered by id so
+    the arbitrary choice is at least a consistent one.
+    """
+    rows = store().query_read(
+        select(s.column_attribute.c.id)
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+        )
+        .where(
+            s.column__has_attribute.c.column_id == column_id,
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+        )
+        .order_by(s.column_attribute.c.id)
+        .limit(1)
     )
     return rows[0]["id"] if rows else None
 
@@ -145,123 +265,232 @@ def fetch_attr_column_contexts(
     *,
     database_name: str | None,
 ) -> dict[str, dict]:
-    """Fetch Column + Table + Schema context for ColumnAttribute IDs.
+    """Catalog context for each attribute id, keyed by that id.
 
-    Returns a mapping of attr_id -> {attr_name, attr_description, col_id,
-    col_name, table_id, table_name, schema_name, database_name, term_name}.
+    **Reads SEMANTIC_FK backwards**, and is the reason the stored direction and
+    the traversal direction have to be kept apart: it binds an attribute and
+    finds the columns pointing *at* it. ``join_path_edge`` deliberately omits
+    that row, so this queries :data:`~gsf.dal.schema.column__semantic_fk`
+    directly.
+
+    Returns ``{}`` on failure rather than raising — this decorates results, and
+    losing the decoration beats losing the result.
+
+    One entry per attribute even though an attribute may be referenced by many
+    columns: **the owning column wins** — the one linked by ``HAS_ATTRIBUTE``
+    rather than one merely pointing at the attribute through ``SEMANTIC_FK``.
+
+    That distinction matters. The attribute *describes* its owning column, so
+    returning a referencing column's name and table as the attribute's context
+    is simply wrong.
     """
     if not attr_ids:
         return {}
-    query = """
-    UNWIND $attr_ids AS attr_id
-    MATCH (attr:ColumnAttribute {id: attr_id})
-    OPTIONAL MATCH (col:Column)-[:SEMANTIC_FK|HAS_ATTRIBUTE]->(attr)
-    OPTIONAL MATCH (col)<-[:CONTAINS]-(tbl:Table)<-[:CONTAINS]-(sch:Schema)
-    OPTIONAL MATCH (sch)<-[:CONTAINS]-(db:Database)
-    WHERE $database_name IS NULL OR db.name = $database_name
-    OPTIONAL MATCH (attr)-[:PROPERTY_OF]->(term:Term)
-    RETURN attr.id AS attr_id, attr.name AS attr_name,
-           attr.description AS attr_description,
-           col.id AS col_id, col.name AS col_name,
-           tbl.id AS table_id, tbl.name AS table_name, sch.name AS schema_name,
-           db.name AS database_name, term.name AS term_name
-    """
-    try:
-        rows = get_neo4j_conn().query_read(
-            query,
-            {"attr_ids": attr_ids, "database_name": database_name},
+
+    # The database filter lives in the JOIN condition, not the WHERE. In the
+    # WHERE it would delete the attribute's row outright when its column belongs
+    # to another database. On the join it leaves the attribute in place with a
+    # null database, and the empty-string defaults below take over. Callers read
+    # these keys directly, so the difference would show up as a missing entry
+    # rather than an error.
+    database_join = s.catalog_database.c.id == s.catalog_schema.c.database_id
+    if database_name is not None:
+        database_join = and_(database_join, s.catalog_database.c.name == database_name)
+
+    # 0 for the owning link, 1 for a referencing one -- the sort key that makes
+    # "which column describes this attribute" a decision rather than an accident.
+    link = (
+        select(
+            s.column__has_attribute.c.attribute_id,
+            s.column__has_attribute.c.column_id,
+            literal(0).label("rank"),
         )
+        .union(
+            select(
+                s.column__semantic_fk.c.attribute_id,
+                s.column__semantic_fk.c.column_id,
+                literal(1).label("rank"),
+            )
+        )
+        .subquery("link")
+    )
+    statement = (
+        select(
+            s.column_attribute.c.id.label("attr_id"),
+            s.column_attribute.c.name.label("attr_name"),
+            s.column_attribute.c.description.label("attr_description"),
+            s.catalog_column.c.id.label("col_id"),
+            s.catalog_column.c.name.label("col_name"),
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_database.c.name.label("database_name"),
+            s.term.c.name.label("term_name"),
+        )
+        .select_from(
+            s.column_attribute.outerjoin(
+                link, link.c.attribute_id == s.column_attribute.c.id
+            )
+            .outerjoin(s.catalog_column, s.catalog_column.c.id == link.c.column_id)
+            .outerjoin(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .outerjoin(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            )
+            .outerjoin(s.catalog_database, database_join)
+            .outerjoin(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id == s.column_attribute.c.id,
+            )
+            .outerjoin(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+        )
+        .where(s.column_attribute.c.id.in_(list(attr_ids)))
+        .order_by(s.column_attribute.c.id, link.c.rank, s.catalog_column.c.id)
+    )
+    try:
+        rows = store().query_read(statement)
     except Exception:
-        logger.warning("fetch_attr_column_contexts: Neo4j query failed", exc_info=True)
+        logger.warning("fetch_attr_column_contexts: query failed", exc_info=True)
         return {}
+
+    # First row per attribute wins, and the ORDER BY above put the owning
+    # column first. `setdefault` rather than a comprehension, which would keep
+    # the last.
     result: dict[str, dict] = {}
     for row in rows:
-        aid = row.get("attr_id")
-        if not aid:
+        if not row["attr_id"]:
             continue
-        result[aid] = {
-            "attr_name": row.get("attr_name") or "",
-            "attr_description": row.get("attr_description") or "",
-            "col_id": row.get("col_id"),
-            "col_name": row.get("col_name") or "",
-            "table_id": row.get("table_id"),
-            "table_name": row.get("table_name") or "",
-            "schema_name": row.get("schema_name") or "",
-            "database_name": row.get("database_name") or "",
-            "term_name": row.get("term_name") or "",
-        }
+        result.setdefault(
+            row["attr_id"],
+            {
+                "attr_name": row["attr_name"] or "",
+                "attr_description": row["attr_description"] or "",
+                "col_id": row["col_id"],
+                "col_name": row["col_name"] or "",
+                "table_id": row["table_id"],
+                "table_name": row["table_name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "database_name": row["database_name"] or "",
+                "term_name": row["term_name"] or "",
+            },
+        )
     return result
 
 
 # ---------------------------------------------------------------------------
-# SemanticFK
+# SEMANTIC_FK
 # ---------------------------------------------------------------------------
+
+
+#: The FK target side of the join. Aliased because `catalog_column` and
+#: `catalog_table` already appear as the *source* side of the same statement.
+_fk_target_column = s.catalog_column.alias("fk_target_column")
+_fk_target_table = s.catalog_table.alias("fk_target_table")
 
 
 def find_unlinked_fk_columns(
     database_name: str | None = None,
 ) -> list[dict[str, Any]]:
-    """Return Column nodes with no SEMANTIC_FK and no HAS_ATTRIBUTE edge.
+    """Columns carrying neither a SEMANTIC_FK nor a HAS_ATTRIBUTE link.
 
-    These are FK columns that have not yet been linked to a ColumnAttribute.
+    The work list for FK resolution. Scoped to one database when asked, for the
+    same reason as ``fetch_all_tables_without_term``: several databases share a
+    store, and a compile pass tags its output with one database's name.
 
-    When *database_name* is provided, only columns belonging to that database
-    are returned. Multiple databases can be co-resident in the same Neo4j
-    graph (e.g. the BIRD benchmark), so scoping keeps each compile pass'
-    FK-resolution isolated to a single database. When omitted, every unlinked
-    FK column in the graph is returned.
+    ``fk_target_col_id`` comes from an outer join, so a column with no declared
+    foreign key still appears with ``None`` — those are exactly the ones the
+    semantic resolver is for.
     """
+    statement = (
+        select(
+            s.catalog_column.c.id,
+            s.catalog_column.c.name,
+            s.catalog_column.c.description,
+            s.catalog_column.c.sample_values,
+            s.catalog_column.c.is_unique,
+            s.catalog_table.c.id.label("table_id"),
+            s.catalog_table.c.name.label("table_name"),
+            s.column__foreign_key.c.target_column_id.label("fk_target_col_id"),
+            # The FK target's *table*, not just its column: `resolve_semantic_fks`
+            # skips a candidate whose target table is the source table, which it
+            # cannot tell without this.
+            _fk_target_table.c.id.label("fk_target_table_id"),
+        )
+        .select_from(
+            s.catalog_column.join(
+                s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+            )
+            .outerjoin(
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == s.catalog_column.c.id,
+            )
+            .outerjoin(
+                _fk_target_column,
+                _fk_target_column.c.id == s.column__foreign_key.c.target_column_id,
+            )
+            .outerjoin(
+                _fk_target_table,
+                _fk_target_table.c.id == _fk_target_column.c.table_id,
+            )
+        )
+        .where(
+            ~select(s.column__semantic_fk.c.attribute_id)
+            .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+            .exists(),
+            ~select(s.column__has_attribute.c.attribute_id)
+            .where(s.column__has_attribute.c.column_id == s.catalog_column.c.id)
+            .exists(),
+        )
+    )
     if database_name is not None:
-        result = get_neo4j_conn().query_read(
-            f"""
-            MATCH (d:{Labels.DB} {{name: $database_name}})-[:{Edges.CONTAINS}]->
-                  (:{Labels.SCHEMA})-[:{Edges.CONTAINS}]->
-                  (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
-            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
-            RETURN col.id          AS id,
-                   col.name        AS name,
-                   col.description AS description,
-                   col.sample_values AS sample_values,
-                   t.id            AS table_id,
-                   t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id,
-                   tgt_table.id    AS fk_target_table_id
-            """,
-            {"database_name": database_name},
+        statement = statement.select_from(
+            s.catalog_schema.join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        ).where(
+            s.catalog_table.c.schema_id == s.catalog_schema.c.id,
+            s.catalog_database.c.name == database_name,
         )
-    else:
-        result = get_neo4j_conn().query_read(
-            f"""
-            MATCH (t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col:{Labels.COLUMN})
-            WHERE NOT (col)-[:{REL_SEMANTIC_FK}]->()
-              AND NOT (col)-[:{REL_HAS_ATTRIBUTE}]->()
-            OPTIONAL MATCH (col)-[:{Edges.FOREIGN_KEY}]->(tgt:{Labels.COLUMN})
-            OPTIONAL MATCH (tgt_table:{Labels.TABLE})-[:{Edges.CONTAINS}]->(tgt)
-            RETURN col.id          AS id,
-                   col.name        AS name,
-                   col.description AS description,
-                   col.sample_values AS sample_values,
-                   t.id            AS table_id,
-                   t.name          AS table_name,
-                   tgt.id          AS fk_target_col_id,
-                   tgt_table.id    AS fk_target_table_id
-            """
-        )
-    return result
+
+    return [dict(r) for r in store().query_read(statement)]
 
 
-_COLUMN_PATH_RETURN = (
-    "col.id AS id, col.name AS column_name, "
-    "t.id AS table_id, t.name AS table_name, "
-    "sch.id AS schema_id, db.id AS db_id"
-)
+def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
+    """Point a column at the attribute it references. Idempotent."""
+    store().query_write(
+        insert(s.column__semantic_fk)
+        .values(column_id=src_column_id, attribute_id=tgt_attr_id)
+        .on_conflict_do_nothing()
+    )
+
+
+def _column_path_select(link_table):
+    """Column with its full catalog path, joined through *link_table*."""
+    return select(
+        link_table.c.attribute_id.label("attr_id"),
+        s.catalog_column.c.id,
+        s.catalog_column.c.name.label("column_name"),
+        s.catalog_table.c.id.label("table_id"),
+        s.catalog_table.c.name.label("table_name"),
+        s.catalog_schema.c.id.label("schema_id"),
+        s.catalog_database.c.id.label("db_id"),
+    ).select_from(
+        link_table.join(
+            s.catalog_column, s.catalog_column.c.id == link_table.c.column_id
+        )
+        .join(s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id)
+        .join(s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id)
+        .join(
+            s.catalog_database,
+            s.catalog_database.c.id == s.catalog_schema.c.database_id,
+        )
+    )
 
 
 def _column_path_dict(row: dict[str, Any]) -> dict[str, Any]:
-    """Project a Neo4j column-path row into the API column-ref shape."""
+    """The API's column-ref shape: path ids for navigation, names for display."""
     return {
         "id": row["id"],
         "column_name": row["column_name"],
@@ -275,211 +504,353 @@ def _column_path_dict(row: dict[str, Any]) -> dict[str, Any]:
 def fetch_column_attribute_columns_map(
     attr_ids: list[str],
 ) -> dict[str, dict[str, Any]]:
-    """Return primary/referenced columns keyed by ColumnAttribute id.
+    """``attr_id -> {primary_column, referenced_columns}``.
 
-    Each value is ``{primary_column, referenced_columns}``. Missing
-    attributes are omitted; callers should default to
-    ``primary_column=None`` / ``referenced_columns=[]``.
+    The primary column *has* the attribute; the referenced columns point at it.
+    Every requested id gets an entry, defaulted rather than omitted, so callers
+    need no ``.get`` dance.
 
-    Each column dict includes catalog path ids (``db_id``, ``schema_id``,
-    ``table_id``, ``id``) plus display names so the UI can navigate to
-    ``/data?focus=db|schema|table|column``.
+    ``primary_column`` keeps the **first** row and ignores later ones, ordered
+    by column id so "first" is the same first each time.
     """
     if not attr_ids:
         return {}
 
-    conn = get_neo4j_conn()
-    primary_rows = conn.query_read(
-        f"""
-        UNWIND $attr_ids AS attr_id
-        MATCH (col:{Labels.COLUMN})-[:{REL_HAS_ATTRIBUTE}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
-              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
-        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
-        """,
-        {"attr_ids": attr_ids},
+    ids = list(attr_ids)
+    primary = store().query_read(
+        _column_path_select(s.column__has_attribute)
+        .where(s.column__has_attribute.c.attribute_id.in_(ids))
+        .order_by(s.catalog_column.c.id)
     )
-    referenced_rows = conn.query_read(
-        f"""
-        UNWIND $attr_ids AS attr_id
-        MATCH (col:{Labels.COLUMN})-[:{REL_SEMANTIC_FK}]->
-              (attr:{LABEL_COLUMN_ATTRIBUTE} {{id: attr_id}})
-        MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
-              -[:{Edges.CONTAINS}]->(t:{Labels.TABLE})-[:{Edges.CONTAINS}]->(col)
-        RETURN attr.id AS attr_id, {_COLUMN_PATH_RETURN}
-        ORDER BY t.name, col.name
-        """,
-        {"attr_ids": attr_ids},
+    referenced = store().query_read(
+        _column_path_select(s.column__semantic_fk)
+        .where(s.column__semantic_fk.c.attribute_id.in_(ids))
+        .order_by(s.catalog_table.c.name, s.catalog_column.c.name)
     )
 
     result: dict[str, dict[str, Any]] = {
-        attr_id: {"primary_column": None, "referenced_columns": []}
-        for attr_id in attr_ids
+        attr_id: {"primary_column": None, "referenced_columns": []} for attr_id in ids
     }
-    for row in primary_rows:
-        attr_id = row["attr_id"]
-        if attr_id in result and result[attr_id]["primary_column"] is None:
-            result[attr_id]["primary_column"] = _column_path_dict(row)
-    for row in referenced_rows:
-        attr_id = row["attr_id"]
-        if attr_id in result:
-            result[attr_id]["referenced_columns"].append(_column_path_dict(row))
+    for row in primary:
+        entry = result.get(row["attr_id"])
+        if entry is not None and entry["primary_column"] is None:
+            entry["primary_column"] = _column_path_dict(row)
+    for row in referenced:
+        entry = result.get(row["attr_id"])
+        if entry is not None:
+            entry["referenced_columns"].append(_column_path_dict(row))
     return result
-
-
-def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> None:
-    """Create a SEMANTIC_FK edge from a source Column to a target ColumnAttribute."""
-    get_neo4j_conn().query_write(
-        f"""
-        MATCH (src:{Labels.COLUMN} {{id: $src_id}})
-        MATCH (tgt:{LABEL_COLUMN_ATTRIBUTE} {{id: $tgt_id}})
-        MERGE (src)-[:{REL_SEMANTIC_FK}]->(tgt)
-        """,
-        {"src_id": src_column_id, "tgt_id": tgt_attr_id},
-    )
 
 
 # ---------------------------------------------------------------------------
 # Join path traversal
 # ---------------------------------------------------------------------------
 
+#: One BFS level: every node reachable in one edge from the frontier, minus the
+#: nodes already seen. Two round trips per level would be needed to do the
+#: exclusion in Python, so both sets are sent.
+#:
+#: They go as **two array parameters**, ``= ANY(:frontier)`` and
+#: ``<> ALL(:visited)``, rather than as ``IN``/``NOT IN`` over expanding
+#: bindparams. Expanding bindparams render one placeholder per element, so the
+#: parameter count grows with the reachable component -- and the visited set
+#: only ever grows, one level feeding the next. On a hub attribute like
+#: ``customer id``, fanning out across hundreds of columns, that means a SQL
+#: string of a different shape on every level (so a fresh parse and plan each
+#: time, and the statement cache never hits) and, far enough out, Postgres'
+#: 65535-parameter ceiling. Passing arrays makes the statement one fixed shape
+#: with two parameters, whatever the search costs.
+#:
+#: ``= ANY(array)`` is still an index lookup on ``src_id``; this trades nothing
+#: away for it.
+_EXPAND_LEVEL = (
+    select(
+        s.join_path_edge.c.src_kind,
+        s.join_path_edge.c.src_id,
+        s.join_path_edge.c.dst_kind,
+        s.join_path_edge.c.dst_id,
+    )
+    .where(
+        s.join_path_edge.c.src_id == any_(bindparam("frontier", type_=ARRAY(Text))),
+        s.join_path_edge.c.dst_id != all_(bindparam("visited", type_=ARRAY(Text))),
+    )
+    .distinct()
+)
 
-def find_shortest_labeled_path(
-    anchor_id: str,
-    dest_id: str,
-    *,
-    node_label: str,
-    relationship_filter: str,
-    label_filter: str,
-    max_level: int,
-    log_label: str,
-) -> tuple[list[dict], list[str]]:
-    """Run `apoc.path.expandConfig` for the shortest path between two same-labeled nodes.
 
-    The actual Neo4j traversal shared by `find_join_path` below
-    (Column-to-Column) and `gsf.dal.terms.find_term_link_path`
-    (Term-to-Term) — apoc.path.expandConfig is used instead of a plain
-    Cypher variable-length pattern because a variable-length pattern
-    applies a single direction to every relationship type, whereas both
-    callers need one relationship type (SEMANTIC_FK) to behave differently
-    from the others (see each function's own docstring for *why* it picks
-    the direction it does). Everything else — which relationship types are
-    even walkable, which labels the path may pass through, how far it's
-    allowed to search, and what the raw node/relationship chain gets
-    turned into afterwards — differs enough between the two callers that
-    only this innermost "run the query, hand back the raw
-    nodes/relationship types" part is actually shared. Deliberately kept
-    here (rather than moved alongside `find_term_link_path` into
-    `gsf.dal.terms`) so `find_join_path` doesn't have to reach into that
-    module for it — `gsf.dal.terms` already imports from here for other
-    helpers (e.g. `fetch_column_attribute_columns_map`), so the dependency
-    only has to run one way. `bfs: true` + `limit: 1` yields the shortest
-    path; `uniqueness: 'NODE_GLOBAL'` keeps the search from revisiting a
-    node.
+_fk_column = s.catalog_column.alias("join_fk_column")
+_fk_table = s.catalog_table.alias("join_fk_table")
+_fk_schema = s.catalog_schema.alias("join_fk_schema")
+_owner_column = s.catalog_column.alias("join_owner_column")
+_owner_table = s.catalog_table.alias("join_owner_table")
+_owner_schema = s.catalog_schema.alias("join_owner_schema")
 
-    Returns `(path_nodes, path_rel_types)` — both empty when the two ids
-    are equal, either endpoint doesn't exist, no such path exists, or the
-    query itself fails (logged as a warning tagged with *log_label*).
-    """
-    if not anchor_id or not dest_id or anchor_id == dest_id:
-        return [], []
-
-    path_query = f"""
-    MATCH (anchor:{node_label} {{id: $anchor_id}})
-    MATCH (dest:{node_label} {{id: $dest_id}})
-    CALL apoc.path.expandConfig(anchor, {{
-        relationshipFilter: '{relationship_filter}',
-        labelFilter: '{label_filter}',
-        terminatorNodes: [dest],
-        bfs: true,
-        uniqueness: 'NODE_GLOBAL',
-        minLevel: 1,
-        maxLevel: {max_level},
-        limit: 1
-    }}) YIELD path
-    RETURN [n IN nodes(path) | {{id: n.id, name: n.name, label: labels(n)[0]}}] AS path_nodes,
-           [r IN relationships(path) | type(r)] AS path_rel_types
-    """
-    try:
-        rows = get_neo4j_conn().query_read(
-            path_query, {"anchor_id": anchor_id, "dest_id": dest_id}
+_SEMANTIC_TABLE_EDGES = (
+    select(
+        _fk_table.c.id.label("fk_table_id"),
+        _fk_column.c.id.label("fk_column_id"),
+        _owner_table.c.id.label("owner_table_id"),
+        _owner_column.c.id.label("owner_column_id"),
+    )
+    .select_from(
+        s.column__semantic_fk.join(
+            _fk_column,
+            _fk_column.c.id == s.column__semantic_fk.c.column_id,
         )
-    except Exception:
-        logger.warning(
-            "%s: Neo4j query failed for %s -> %s",
-            log_label,
-            anchor_id,
-            dest_id,
-            exc_info=True,
+        .join(_fk_table, _fk_table.c.id == _fk_column.c.table_id)
+        .join(_fk_schema, _fk_schema.c.id == _fk_table.c.schema_id)
+        .join(
+            s.column__has_attribute,
+            s.column__has_attribute.c.attribute_id
+            == s.column__semantic_fk.c.attribute_id,
         )
-        return [], []
+        .join(
+            _owner_column,
+            _owner_column.c.id == s.column__has_attribute.c.column_id,
+        )
+        .join(_owner_table, _owner_table.c.id == _owner_column.c.table_id)
+        .join(_owner_schema, _owner_schema.c.id == _owner_table.c.schema_id)
+    )
+    .where(
+        _fk_schema.c.database_id == bindparam("database_id"),
+        _owner_schema.c.database_id == bindparam("database_id"),
+    )
+    .distinct()
+)
 
-    if not rows:
-        return [], []
-    return rows[0].get("path_nodes") or [], rows[0].get("path_rel_types") or []
+
+def _find_table_join_hops(
+    anchor_table_id: str,
+    dest_table_id: str,
+    database_id: str,
+) -> list[tuple[str, str]]:
+    """Find table-to-table joins, oriented from anchor table to destination.
+
+    Each semantic relationship becomes one undirected table edge whose payload
+    is the actual FK/owner column pair. Searching this projection makes input
+    column choice and FK direction irrelevant without ever turning two FKs
+    that reference the same attribute into a direct join.
+    """
+    rows = store().query_read(
+        _SEMANTIC_TABLE_EDGES,
+        {"database_id": database_id},
+    )
+    adjacency: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
+    for row in rows:
+        fk_table_id = row["fk_table_id"]
+        owner_table_id = row["owner_table_id"]
+        if fk_table_id == owner_table_id:
+            continue
+        adjacency[fk_table_id].append(
+            (owner_table_id, row["fk_column_id"], row["owner_column_id"])
+        )
+        adjacency[owner_table_id].append(
+            (fk_table_id, row["owner_column_id"], row["fk_column_id"])
+        )
+    for edges in adjacency.values():
+        edges.sort()
+
+    max_hops = (MAX_PATH_DEPTH + 2) // 4
+    parents: dict[str, tuple[str, str, str] | None] = {anchor_table_id: None}
+    frontier: deque[tuple[str, int]] = deque([(anchor_table_id, 0)])
+    while frontier:
+        table_id, depth = frontier.popleft()
+        if depth >= max_hops:
+            continue
+        for next_table_id, source_col_id, target_col_id in adjacency.get(table_id, []):
+            if next_table_id in parents:
+                continue
+            parents[next_table_id] = (table_id, source_col_id, target_col_id)
+            if next_table_id == dest_table_id:
+                hops: list[tuple[str, str]] = []
+                current = dest_table_id
+                while parents[current] is not None:
+                    previous, source_col_id, target_col_id = parents[current]
+                    hops.append((source_col_id, target_col_id))
+                    current = previous
+                hops.reverse()
+                return hops
+            frontier.append((next_table_id, depth + 1))
+    return []
+
+
+def _bfs_path(anchor_col_id: str, dest_col_id: str) -> list[dict[str, Any]] | None:
+    """Shortest path as a node list, or ``None`` when there is none.
+
+    Level-at-a-time BFS with the visited set held here rather than in SQL, and
+    that is not a stylistic choice. A recursive CTE tracks visited nodes *per
+    path*, so every distinct route to a node is expanded separately — fine on a
+    fixture, exponential on a catalog where a hub attribute like ``customer id``
+    fans out across hundreds of columns. A shared visited set bounds the cost by
+    the size of the reachable component, however many paths run through it.
+
+    Real paths are 2-4 hops, so this is typically 3-5 indexed queries.
+    """
+    visited: dict[str, tuple[str, str | None]] = {anchor_col_id: ("column", None)}
+    frontier = [anchor_col_id]
+
+    for _ in range(MAX_PATH_DEPTH):
+        if not frontier:
+            return None
+        rows = store().query_read(
+            _EXPAND_LEVEL,
+            {"frontier": frontier, "visited": list(visited)},
+        )
+        next_frontier: list[str] = []
+        for row in rows:
+            node = row["dst_id"]
+            if node in visited:
+                # Two edges into the same node within one level: the first wins,
+                # which is what BFS means. Without this the parent pointer could
+                # be overwritten by a longer route discovered in the same batch.
+                continue
+            visited[node] = (row["dst_kind"], row["src_id"])
+            next_frontier.append(node)
+            if node == dest_col_id:
+                return _walk_back(visited, dest_col_id)
+        frontier = next_frontier
+
+    logger.warning(
+        "find_join_path: gave up after %s levels for %s -> %s",
+        MAX_PATH_DEPTH,
+        anchor_col_id,
+        dest_col_id,
+    )
+    return None
+
+
+def _walk_back(
+    visited: dict[str, tuple[str, str | None]], dest: str
+) -> list[dict[str, Any]]:
+    """Follow parent pointers back to the anchor and return the path forwards."""
+    path: list[dict[str, Any]] = []
+    node: str | None = dest
+    while node is not None:
+        kind, parent = visited[node]
+        path.append({"id": node, "kind": kind})
+        node = parent
+    path.reverse()
+    return path
+
+
+def _name_columns(node_ids: list[str]) -> dict[str, str]:
+    if not node_ids:
+        return {}
+    return {
+        r["id"]: r["name"]
+        for r in store().query_read(
+            select(s.catalog_column.c.id, s.catalog_column.c.name).where(
+                s.catalog_column.c.id.in_(node_ids)
+            )
+        )
+    }
 
 
 def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
-    """Find the shortest semantic join path between two Column nodes.
+    """The shortest semantic join route between the columns' tables.
 
-    SEMANTIC_FK is directional (Column -> ColumnAttribute) and is followed
-    only in that outgoing direction: an FK column points at the attribute it
-    references. Traversing it undirected would hop from one FK column up to a
-    shared target attribute and back down a *different* FK column, fabricating
-    a join between two unrelated columns that merely reference the same target
-    (e.g. two person-id columns). HAS_ATTRIBUTE and CONTAINS stay undirected.
+    The endpoint columns identify the tables to connect; they do not have to be
+    the join columns. Returned hops contain the actual columns for each
+    adjacent table crossing.
 
-    Returns a list of hop dicts:
-        [{source_schema, source_table, source_column,
-          target_schema, target_table, target_column}, ...]
-    Returns [] when anchor == dest or no path exists.
+    ``[]`` when both columns belong to the same table, no semantic route exists,
+    either endpoint is missing, or the endpoints belong to different databases.
     """
-    path_nodes, _ = find_shortest_labeled_path(
-        anchor_col_id,
-        dest_col_id,
-        node_label=Labels.COLUMN,
-        relationship_filter=f"{REL_SEMANTIC_FK}>|{REL_HAS_ATTRIBUTE}|{Edges.CONTAINS}",
-        label_filter=f"-{Labels.SCHEMA}",
-        max_level=30,
-        log_label="find_join_path",
-    )
-    col_nodes = [n for n in path_nodes if n.get("label") == Labels.COLUMN]
-    if len(col_nodes) < 2:
+    if anchor_col_id == dest_col_id:
         return []
 
-    col_ids = [n["id"] for n in col_nodes if n.get("id")]
-    col_ctx = fetch_col_table_contexts(col_ids)
-    database_names = {
+    endpoint_contexts = fetch_col_table_contexts([anchor_col_id, dest_col_id])
+    anchor_context = endpoint_contexts.get(anchor_col_id)
+    dest_context = endpoint_contexts.get(dest_col_id)
+    if not anchor_context or not dest_context:
+        return []
+    if anchor_context["table_id"] == dest_context["table_id"]:
+        return []
+    if anchor_context["database_id"] != dest_context["database_id"]:
+        logger.warning(
+            "find_join_path: rejected cross-database path %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+        )
+        return []
+
+    try:
+        hop_pairs = _find_table_join_hops(
+            anchor_context["table_id"],
+            dest_context["table_id"],
+            anchor_context["database_id"],
+        )
+    except Exception:
+        logger.warning(
+            "find_join_path: query failed for %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return []
+
+    if not hop_pairs:
+        return []
+
+    col_ids = list(dict.fromkeys(col_id for pair in hop_pairs for col_id in pair))
+    names = _name_columns(col_ids)
+    contexts = fetch_col_table_contexts(col_ids)
+
+    databases = {
         context.get("database_name")
-        for context in col_ctx.values()
+        for context in contexts.values()
         if context.get("database_name")
     }
-    if len(database_names) > 1:
+    if len(databases) > 1:
+        # Only reachable through a shared ColumnAttribute -- Database is not a
+        # node in the view, so there is no other way across.
         logger.warning(
             "find_join_path: rejected cross-database path %s -> %s (%s)",
             anchor_col_id,
             dest_col_id,
-            ", ".join(sorted(database_names)),
+            ", ".join(sorted(databases)),
         )
         return []
 
     hops: list[dict] = []
-    for i in range(0, len(col_nodes) - 1, 2):
-        src = col_nodes[i]
-        tgt = col_nodes[i + 1]
-        src_ctx = col_ctx.get(src.get("id") or "", {})
-        tgt_ctx = col_ctx.get(tgt.get("id") or "", {})
+    for source_id, target_id in hop_pairs:
+        source_context = contexts.get(source_id, {})
+        target_context = contexts.get(target_id, {})
         hops.append(
             {
-                "source_database": src_ctx.get("database_name", ""),
-                "source_schema": src_ctx.get("schema_name", ""),
-                "source_table": src_ctx.get("table_name", ""),
-                "source_column": src.get("name", ""),
-                "target_database": tgt_ctx.get("database_name", ""),
-                "target_schema": tgt_ctx.get("schema_name", ""),
-                "target_table": tgt_ctx.get("table_name", ""),
-                "target_column": tgt.get("name", ""),
+                "source_database": source_context.get("database_name", ""),
+                "source_schema": source_context.get("schema_name", ""),
+                "source_table": source_context.get("table_name", ""),
+                "source_column": names.get(source_id, ""),
+                "target_database": target_context.get("database_name", ""),
+                "target_schema": target_context.get("schema_name", ""),
+                "target_table": target_context.get("table_name", ""),
+                "target_column": names.get(target_id, ""),
             }
         )
     return hops
+
+
+#: The same traversal as a recursive CTE, used by the tests as a cross-check.
+#:
+#: Correct, and *not* what :func:`_bfs_path` does -- its ``path`` array is a
+#: per-path visited set, so it re-expands every distinct route to a node rather
+#: than visiting each once, which is the scaling problem described there. Kept
+#: beside the BFS rather than in the test file so the two sit together and a
+#: change to the edge rules is obviously a change to both.
+JOIN_PATH_CTE_SQL = """
+WITH RECURSIVE walk(node_id, node_kind, path, depth) AS (
+    SELECT CAST(:anchor AS text), 'column'::text, ARRAY[CAST(:anchor AS text)], 0
+  UNION ALL
+    SELECT e.dst_id, e.dst_kind, w.path || e.dst_id, w.depth + 1
+      FROM walk w
+      JOIN join_path_edge e ON e.src_id = w.node_id
+     WHERE NOT e.dst_id = ANY(w.path)
+       AND w.depth < :max_depth
+       AND w.node_id <> CAST(:dest AS text)
+)
+SELECT path, depth FROM walk
+ WHERE node_id = CAST(:dest AS text)
+ ORDER BY depth, path
+ LIMIT 1
+"""

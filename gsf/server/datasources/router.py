@@ -348,5 +348,8 @@ def update_node(
 ) -> dict:
     """Update mutable properties of any catalog node."""
     props = body.model_dump(exclude_none=True)
-    result = dal.update_node_properties(node_id, props)
+    try:
+        result = dal.update_node_properties(node_id, props)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return result

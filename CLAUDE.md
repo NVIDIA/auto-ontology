@@ -19,11 +19,16 @@ Frontend commands run from `/frontend`:
 | `pnpm build` | Build the frontend |
 | `pnpm lint` | ESLint the frontend |
 
-Backend command runs from the repo root:
+Backend commands run from the repo root:
 
 | Command | Description |
 |---|---|
-| `uv run uvicorn gsf.server.main:app --reload --host 127.0.0.1 --port 3001 --app-dir .` | Start FastAPI on :3001 |
+| `uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001` | Start FastAPI on :3001 with hot reload |
+| `uv run python -m gsf.server` | Start FastAPI on :3001 without reload (what the container runs) |
+| `uv run python -m gsf.ingestion_service` | Start the ingestion service on :3002 |
+
+The app factory is `create_app()` in `gsf/server/__main__.py` — there is no
+`gsf/server/main.py`.
 
 To install dependencies:
 - Frontend: `pnpm install` from `/frontend`
@@ -42,6 +47,7 @@ To install dependencies:
 
 ## Backend Rules
 
+- **The store is Postgres.** `gsf/dal/` queries it with SQLAlchemy Core (no ORM); `gsf/dal/schema.py` is the single source of truth for the schema and `gsf/dal/session.py` owns the pooled engine. Schema changes go through Alembic — `uv run alembic revision --autogenerate -m "..."` — never by hand-editing a migration that has been applied. Several column types and constraints are deliberate and non-obvious — read the comments in `schema.py` before changing a table.
 - **Formatting/Linting**: Ruff (line-length: 88). Run `uv run ruff check gsf/` and `uv run ruff format gsf/` from repo root before committing.
 - **Dependencies**: Managed with `uv`. Add dependencies via `uv add`, not pip. Do not edit `pyproject.toml` manually for deps.
 - **API prefix**: All routes under `/api/`. Routes live in `gsf/server/datasources/router.py`, orchestration in `gsf/server/datasources/service.py`.
@@ -52,3 +58,26 @@ To install dependencies:
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
 - Branch from `main`. Current working branch: `fix/architecture`.
+
+### Opening a PR
+
+**A PR is not done until every GitHub Actions workflow passes.** After opening
+one, poll `gh pr checks <number>` until no check is pending, then fix whatever
+failed and push again — repeat until the run is green. Report the final state
+honestly; do not hand back a PR with unexamined or failing checks.
+
+Run these locally first — they are the same gates CI applies, and catching a
+failure here costs seconds instead of a CI round-trip:
+
+| Check | Command | Catches |
+|---|---|---|
+| Ruff | `uv run ruff check gsf/ && uv run ruff format --check gsf/` | Backend lint/format |
+| Pytest | `uv run pytest gsf dev_tools -q` | Backend tests |
+| OpenAPI | `uv run python -m dev_tools.generate_backend_openapi` | **Stale `docs/openapi/*.json`** |
+| Frontend | `cd frontend && npx prettier --check . && pnpm lint && pnpm build` | Format, lint, build |
+
+The OpenAPI one is the easy one to miss: `docs/openapi/backend.json` and
+`ingestion.json` are committed, and the spec embeds each route's **docstring**.
+Editing a docstring on any `@router` handler — not just changing a signature or
+model — makes the committed spec stale and fails "Backend spec is up to date".
+Regenerate and commit the result whenever a route's code or docs change.

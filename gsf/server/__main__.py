@@ -10,7 +10,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from nemo_retriever.tabular_data.neo4j import neo4j_connection
 import uvicorn
 from gsf.env import load_env
 
@@ -26,6 +25,8 @@ load_env()
 logger = logging.getLogger(__name__)
 
 from gsf.version import get_app_version  # noqa: E402
+from gsf.dal import close_store  # noqa: E402
+from gsf.dal.schema_version import require_current_schema  # noqa: E402
 from gsf.server.chat.router import router as chat_router  # noqa: E402
 from gsf.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from gsf.server.connections.router import router as connections_router  # noqa: E402
@@ -42,10 +43,19 @@ from gsf.server.terms.router import router as terms_router  # noqa: E402
 from gsf.server.model_interchange.router import (  # noqa: E402
     router as model_interchange_router,
 )
+from gsf.server.search.router import router as search_router  # noqa: E402
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    # Before anything else: refuse to serve against a schema this build does not
+    # expect. Here rather than in `create_app` deliberately — the OpenAPI spec
+    # generator builds the app with no database at all (see that docstring), so
+    # requiring one to construct it would break the spec check in CI. The
+    # lifespan runs only when the app is actually served, which covers both
+    # documented commands: `python -m gsf.server` and `uvicorn ... --factory`.
+    require_current_schema()
+
     # Kick off the chat worker pool's initial warm spawn at boot. The pool
     # itself is lazy on first use, but eagerly initialising here means the
     # very first chat request doesn't pay a cold start.
@@ -55,9 +65,7 @@ async def lifespan(_app: FastAPI):
     finally:
         # Tear down warm subprocesses before exiting so we don't leak them.
         shutdown_pool()
-        if neo4j_connection._conn is not None:
-            neo4j_connection._conn.close()
-            neo4j_connection._conn = None
+        close_store()
 
 
 def create_app() -> FastAPI:
@@ -97,6 +105,7 @@ def create_app() -> FastAPI:
     app.include_router(
         model_interchange_router, prefix="/api", tags=["model-interchange"]
     )
+    app.include_router(search_router, prefix="/api", tags=["search"])
 
     return app
 

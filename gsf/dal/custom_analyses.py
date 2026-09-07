@@ -2,13 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j data access for CustomAnalysis / Sql subgraph.
+"""``CustomAnalysis`` reads and writes.
 
-Contains only functions that call ``graph()`` directly.
+A CustomAnalysis is a user-authored, named SQL statement. The zone rule here is
+the same all-or-nothing one SqlAttribute uses, and for a sharper reason: the
+analysis's **SQL text is returned to the caller**, so an analysis touching one
+out-of-zone table would leak that table's name and columns even if no rows ever
+came back.
 
-Non-Neo4j helpers remain in their original locations:
-  - get_custom_analyses_ids, build_custom_analyses_section,
-    get_relevant_queries  →  retrieval/data_access/custom_analyses.py
+Orchestration stays in ``gsf/server/custom_analyses/service.py``.
 """
 
 from __future__ import annotations
@@ -17,10 +19,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Edges, Labels
+from sqlalchemy import delete, literal, select
 
-from gsf.dal.cypher_fragments import column_description_expr
-from gsf.dal.neo4j_tx import graph
+from gsf.dal import schema as s
+from gsf.dal.session import store, write_transaction
+from gsf.dal.sql_fragments import column_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
 
@@ -29,11 +32,6 @@ if TYPE_CHECKING:
     from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Domain errors (raised by write helpers; surfaced as HTTP 409/422 by router)
-# ---------------------------------------------------------------------------
 
 
 class CustomAnalysisNameConflict(Exception):
@@ -49,6 +47,68 @@ class CustomAnalysisSqlError(SqlParseError):
 
 
 # ---------------------------------------------------------------------------
+# Shared traversal
+# ---------------------------------------------------------------------------
+
+
+def _sql_text():
+    """The analysis's SQL, from its lowest-id statement.
+
+    An analysis carries one statement in practice, but the link table permits
+    more; taking the lowest id keeps one row per analysis and keeps repeated
+    reads agreeing with each other.
+    """
+    return (
+        select(s.sql_query.c.sql_full_query)
+        .select_from(
+            s.custom_analysis__sql.join(
+                s.sql_query, s.sql_query.c.id == s.custom_analysis__sql.c.sql_query_id
+            )
+        )
+        .where(s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id)
+        .order_by(s.sql_query.c.id)
+        .limit(1)
+        .correlate(s.custom_analysis)
+        .scalar_subquery()
+    )
+
+
+def _has_sql():
+    """An analysis with no statement is invisible to every read here.
+
+    The SQL's ``HAS_SQL`` match was not optional except in
+    ``fetch_custom_analyses_with_sql``, which used ``OPTIONAL MATCH`` — that
+    difference is real and preserved.
+    """
+    return (
+        select(literal(1))
+        .where(s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id)
+        .correlate(s.custom_analysis)
+        .exists()
+    )
+
+
+def _out_of_zone(table_ids: list[str]):
+    """True when the analysis's SQL touches a table outside *table_ids*."""
+    return (
+        select(literal(1))
+        .select_from(
+            s.custom_analysis__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.custom_analysis__sql.c.sql_query_id,
+            )
+        )
+        .where(
+            s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
+            s.sql_query__table.c.table_id.notin_(table_ids),
+        )
+        .correlate(s.custom_analysis)
+        .exists()
+    )
+
+
+# ---------------------------------------------------------------------------
 # Reads
 # ---------------------------------------------------------------------------
 
@@ -56,164 +116,368 @@ class CustomAnalysisSqlError(SqlParseError):
 def list_custom_analyses(
     zone_ids: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Return ``CustomAnalysis`` nodes joined with their ``Sql`` node.
+    """Analyses with their SQL text, ordered by name.
 
-    *zone_ids* is a hard authorization boundary (the zones the requesting
-    user has been granted access to), not a relevance filter.  When supplied,
-    an analysis is only returned when **every** table its SQL references is
-    reachable through those zones — an analysis that touches even one
-    out-of-zone table is excluded entirely, since its SQL text would
-    otherwise leak the names/columns of tables the caller isn't authorized
-    to see.  Pass ``None`` (or omit) to return all analyses (admin /
-    internal callers).
+    *zone_ids* is an authorization boundary, not a relevance filter: an analysis
+    touching even one out-of-zone table is excluded outright, because returning
+    its SQL would disclose the names and columns of tables the caller may not
+    see. ``None`` returns everything, for admin callers.
     """
-    params: dict[str, Any] = {}
-    if zone_ids is not None:
-        data_ids_by_zone = resolve_accessible_catalog_ids(zone_ids)
-        params["table_ids"] = list(data_ids_by_zone["table_ids"])
-        zone_filter = (
-            f"WHERE NOT EXISTS {{"
-            f" (sql)-[:{Edges.SQL}]->(tbl:{Labels.TABLE})"
-            f" WHERE NOT tbl.id IN $table_ids"
-            f" }}"
+    statement = (
+        select(
+            s.custom_analysis.c.id,
+            s.custom_analysis.c.name,
+            s.custom_analysis.c.description,
+            _sql_text().label("sql"),
         )
-    else:
-        zone_filter = ""
-
-    rows = graph().query_read(
-        f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        {zone_filter}
-        WITH ca, sql
-        ORDER BY ca.name
-
-        RETURN collect({{
-            id: ca.id,
-            name: ca.name,
-            description: ca.description,
-            sql: sql.sql_full_query
-        }}) AS analyses
-        """,
-        params,
+        .where(_has_sql())
+        .order_by(s.custom_analysis.c.name)
     )
-    return rows[0]["analyses"]
+    if zone_ids is not None:
+        resolved = resolve_accessible_catalog_ids(zone_ids)
+        statement = statement.where(~_out_of_zone(list(resolved["table_ids"])))
+
+    return [dict(r) for r in store().query_read(statement)]
 
 
 def find_analysis_by_name(
     name: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = graph().query_read(
-        f"""
-        MATCH (other:{Labels.CUSTOM_ANALYSIS} {{name: $name}})
-        WHERE $exclude_id IS NULL OR other.id <> $exclude_id
-        RETURN other.id AS id, other.name AS name
-        LIMIT 1
-        """,
-        {"name": name, "exclude_id": exclude_id},
+    """Another analysis already using *name*, or ``None``."""
+    statement = select(s.custom_analysis.c.id, s.custom_analysis.c.name).where(
+        s.custom_analysis.c.name == name
     )
-    if not rows:
-        return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+    if exclude_id is not None:
+        statement = statement.where(s.custom_analysis.c.id != exclude_id)
+    rows = store().query_read(statement.order_by(s.custom_analysis.c.id).limit(1))
+    return {"id": rows[0]["id"], "name": rows[0]["name"]} if rows else None
 
 
 def find_analysis_by_sql(
     sql: str,
     exclude_id: str | None,
 ) -> dict[str, str] | None:
-    rows = graph().query_read(
-        f"""
-        MATCH (other:{Labels.CUSTOM_ANALYSIS})
-              -[:{Edges.HAS_SQL}]->(:{Labels.SQL} {{sql_full_query: $sql}})
-        WHERE $exclude_id IS NULL OR other.id <> $exclude_id
-        RETURN other.id AS id, other.name AS name
-        LIMIT 1
-        """,
-        {"sql": sql, "exclude_id": exclude_id},
+    """Another analysis already linked to this exact SQL, or ``None``.
+
+    Exact text, not normalised — unlike ``find_attr_by_expression``, which
+    collapses whitespace and case. The difference is inherited: this compared
+    ``sql_full_query`` directly, and loosening it here would start rejecting
+    saves that succeed today.
+    """
+    statement = (
+        select(s.custom_analysis.c.id, s.custom_analysis.c.name)
+        .select_from(
+            s.custom_analysis.join(
+                s.custom_analysis__sql,
+                s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
+            ).join(
+                s.sql_query, s.sql_query.c.id == s.custom_analysis__sql.c.sql_query_id
+            )
+        )
+        .where(s.sql_query.c.sql_full_query == sql)
     )
-    if not rows:
-        return None
-    return {"id": rows[0]["id"], "name": rows[0]["name"]}
+    if exclude_id is not None:
+        statement = statement.where(s.custom_analysis.c.id != exclude_id)
+    rows = store().query_read(statement.order_by(s.custom_analysis.c.id).limit(1))
+    return {"id": rows[0]["id"], "name": rows[0]["name"]} if rows else None
 
 
-def detach_existing_sql_edges(analysis_id: str) -> None:
-    """Drop every ``HAS_SQL`` edge leaving the given CustomAnalysis."""
-    graph().query_write(
-        f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
-              -[r:{Edges.HAS_SQL}]->(:{Labels.SQL})
-        DELETE r
-        """,
-        {"analysis_id": analysis_id},
+def get_custom_analysis_by_id(analysis_id: str) -> str | None:
+    """The analysis id if it exists, else ``None`` — an existence check."""
+    rows = store().query_read(
+        select(s.custom_analysis.c.id)
+        .where(s.custom_analysis.c.id == analysis_id)
+        .limit(1)
     )
+    return rows[0]["id"] if rows else None
 
 
 def fetch_custom_analyses() -> list[dict[str, str]]:
-    """Fetch all CustomAnalysis nodes from Neo4j and return as domain rules.
+    """Analyses as domain rules: ``{name, description}``, SQL folded into the text.
 
-    Each analysis becomes ``{"name": <name>, "description": <sql>}``.
+    The ``description`` here is a *rendered blob*, not the column — description
+    and SQL joined by a newline — because the caller feeds it to a prompt as
+    one piece of guidance. An analysis with neither is dropped, since a rule
+    with an empty body is noise in a prompt.
+
+    Returns ``[]`` on failure: missing domain rules degrade a prompt, a raised
+    exception loses the request.
     """
-    query = (
-        f"MATCH (n:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL}) "
-        "RETURN n.name AS name, n.description AS description, sql.sql_full_query AS sql_code"
-    )
     try:
-        results = graph().query_read(query=query, parameters={})
-    except Exception as e:
-        logger.warning("Failed to fetch custom analyses from Neo4j: %s", e)
+        rows = store().query_read(
+            select(
+                s.custom_analysis.c.name,
+                s.custom_analysis.c.description,
+                _sql_text().label("sql_code"),
+            )
+            .where(_has_sql())
+            .order_by(s.custom_analysis.c.name)
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Failed to fetch custom analyses: %s", exc)
         return []
 
     rules: list[dict[str, str]] = []
-    for row in results or []:
-        name = row.get("name", "")
-        description = row.get("description", "")
-        sql_code = row.get("sql_code", "")
-        if not name:
+    for row in rows:
+        if not row["name"]:
             continue
         parts = []
-        if description:
-            parts.append(description)
-        if sql_code:
-            parts.append(f"SQL: {sql_code}")
+        if row["description"]:
+            parts.append(row["description"])
+        if row["sql_code"]:
+            parts.append(f"SQL: {row['sql_code']}")
         if parts:
-            rules.append({"name": name, "description": "\n".join(parts)})
-    logger.info("Fetched %d custom analyses from Neo4j as domain rules", len(rules))
+            rules.append({"name": row["name"], "description": "\n".join(parts)})
+    logger.info("Fetched %d custom analyses as domain rules", len(rules))
     return rules
 
 
-# ---------------------------------------------------------------------------
-# Embedding helper (called by server/custom_analyses/service.py write path)
-# ---------------------------------------------------------------------------
+def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, str]]:
+    """``{id, name, description, sql}`` per analysis, values stripped.
+
+    Unlike the reads above, an analysis with **no** statement still comes back
+    with an empty ``sql`` — the SQL used ``OPTIONAL MATCH`` here alone.
+    Preserved: the caller asked for specific ids and a silently missing entry is
+    harder to notice than an empty one.
+    """
+    if not analysis_ids:
+        return []
+    try:
+        rows = store().query_read(
+            select(
+                s.custom_analysis.c.id,
+                s.custom_analysis.c.name,
+                s.custom_analysis.c.description,
+                _sql_text().label("sql_text"),
+            ).where(s.custom_analysis.c.id.in_(list(analysis_ids)))
+        )
+    except Exception:
+        logger.warning("fetch_custom_analyses_with_sql: query failed", exc_info=True)
+        return []
+
+    return [
+        {
+            "id": row["id"] or "",
+            "name": (row["name"] or "").strip(),
+            "description": (row["description"] or "").strip(),
+            "sql": (row["sql_text"] or "").strip(),
+        }
+        for row in rows
+    ]
+
+
+def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
+    """The tables these analyses' SQL references, with column summaries."""
+    if not analysis_ids:
+        return []
+    try:
+        rows = store().query_read(
+            select(
+                s.catalog_table.c.id,
+                s.catalog_table.c.name,
+                s.catalog_table.c.description,
+                s.catalog_table.c.pk,
+                s.catalog_database.c.name.label("database_name"),
+                s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_column.c.name.label("column_name"),
+                s.catalog_column.c.data_type,
+                s.catalog_column.c.ordinal_position,
+                column_description_expr().label("column_description"),
+            )
+            .select_from(
+                s.custom_analysis__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.custom_analysis__sql.c.sql_query_id,
+                )
+                .join(
+                    s.catalog_table,
+                    s.catalog_table.c.id == s.sql_query__table.c.table_id,
+                )
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+                .join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
+                .join(
+                    s.catalog_column,
+                    s.catalog_column.c.table_id == s.catalog_table.c.id,
+                )
+            )
+            .where(s.custom_analysis__sql.c.analysis_id.in_(list(analysis_ids)))
+            .distinct()
+            .order_by(s.catalog_table.c.id, s.catalog_column.c.ordinal_position)
+        )
+    except Exception:
+        logger.warning("fetch_tables_from_custom_analyses: query failed", exc_info=True)
+        return []
+
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"] or "",
+                "description": row["description"] or "",
+                "database_name": row["database_name"] or "",
+                "schema_name": row["schema_name"] or "",
+                "label": "Table",
+                # The prediction graph keys its entities on this: a table
+                # that arrives without a pk reaches KumoRFM with no identity,
+                # which costs it every edge and makes it unusable in
+                # `FOR EACH`. It has to survive every path to relevant_tables.
+                "pk": row.get("pk") or [],
+                "columns": [],
+            },
+        )
+        if row["column_name"]:
+            table["columns"].append(
+                {
+                    "name": row["column_name"],
+                    "data_type": row["data_type"],
+                    "description": row["column_description"],
+                }
+            )
+    return list(tables.values())
 
 
 def custom_analysis_exists(database_name: str | None = None) -> bool:
-    """Return True if at least one CustomAnalysis node exists in the graph.
+    """Is there at least one custom analysis, optionally in *database_name*?
 
-    When *database_name* is supplied the check is scoped to analyses whose SQL
-    references tables belonging to that database.  When omitted (or ``None``)
-    any CustomAnalysis node satisfies the check.
+    Scoped by *database_name* to analyses whose statement references a table in
+    that database; any analysis at all satisfies the unscoped check.
 
-    This is a cheap ``LIMIT 1`` existence probe — callers use it to skip the
-    VDB search entirely when the graph has no candidates for the target database.
+    A ``LIMIT 1`` existence probe, so retrieval can skip the embedding search
+    outright when nothing could match. **Fails open** — a failed probe returns
+    ``True`` rather than silently suppressing a search that might have hit.
     """
+    statement = select(literal(1)).select_from(s.custom_analysis).limit(1)
     if database_name:
-        query = f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(:{Labels.SQL})
-              -[:{Edges.SQL}]->(:{Labels.TABLE})<-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
-              <-[:{Edges.CONTAINS}]-(db:{Labels.DB} {{name: $db}})
-        RETURN ca.id LIMIT 1
-        """
-        params: dict = {"db": database_name}
-    else:
-        query = f"MATCH (ca:{Labels.CUSTOM_ANALYSIS}) RETURN ca.id LIMIT 1"
-        params = {}
-
+        statement = statement.where(
+            select(literal(1))
+            .select_from(
+                s.custom_analysis__sql.join(
+                    s.sql_query__table,
+                    s.sql_query__table.c.sql_query_id
+                    == s.custom_analysis__sql.c.sql_query_id,
+                )
+                .join(
+                    s.catalog_table,
+                    s.catalog_table.c.id == s.sql_query__table.c.table_id,
+                )
+                .join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                )
+                .join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
+            )
+            .where(
+                s.custom_analysis__sql.c.analysis_id == s.custom_analysis.c.id,
+                s.catalog_database.c.name == database_name,
+            )
+            .correlate(s.custom_analysis)
+            .exists()
+        )
     try:
-        rows = graph().query_read(query, params)
-        return bool(rows)
+        return bool(store().query_read(statement))
     except Exception:
-        logger.warning("custom_analysis_exists: Neo4j query failed", exc_info=True)
-        return True  # fail-open: don't suppress the search on error
+        logger.warning("custom_analysis_exists: query failed", exc_info=True)
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Writes
+# ---------------------------------------------------------------------------
+
+
+def detach_existing_sql_edges(analysis_id: str) -> None:
+    """Unlink every statement from the analysis, leaving the statements alone."""
+    store().query_write(
+        delete(s.custom_analysis__sql).where(
+            s.custom_analysis__sql.c.analysis_id == analysis_id
+        )
+    )
+
+
+def delete_custom_analysis_node(analysis_id: str) -> None:
+    """Delete the analysis **and the statements it owns**.
+
+    The SQL's ``DETACH DELETE ca, sql`` deleted both, and that is preserved
+    rather than left to the cascade — which would only remove the link row. An
+    analysis's statement is not shared: it is parsed from text the user typed
+    into this analysis, so leaving it behind accumulates unreachable rows that
+    still show up in query-history reads.
+    """
+    owned = select(s.custom_analysis__sql.c.sql_query_id).where(
+        s.custom_analysis__sql.c.analysis_id == analysis_id
+    )
+
+    # One unit: deleting the analysis first drops the link rows by cascade, so
+    # a failure before the second delete loses the only route back to those
+    # statements. They then survive as exactly the unreachable rows this
+    # function exists to prevent.
+    with write_transaction():
+        sql_ids = [r["sql_query_id"] for r in store().query_read(owned)]
+        store().query_write(
+            delete(s.custom_analysis).where(s.custom_analysis.c.id == analysis_id)
+        )
+        if sql_ids:
+            store().query_write(
+                delete(s.sql_query).where(s.sql_query.c.id.in_(sql_ids))
+            )
+
+
+# ---------------------------------------------------------------------------
+# Embedding
+# ---------------------------------------------------------------------------
+
+
+def _custom_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
+    """Embedding-ready docs.
+
+    The text format is what gets embedded, so a changed separator silently
+    invalidates every stored vector for these analyses and nothing downstream
+    fails — retrieval just quietly degrades. Reproduced literally, including a
+    blank description being omitted rather than rendered as an empty clause.
+    """
+    statement = (
+        select(
+            s.custom_analysis.c.id,
+            s.custom_analysis.c.name,
+            s.custom_analysis.c.description,
+            _sql_text().label("sql_text"),
+        )
+        .where(_has_sql())
+        .order_by(s.custom_analysis.c.id)
+    )
+    if analysis_id is not None:
+        statement = statement.where(s.custom_analysis.c.id == analysis_id)
+
+    docs: list[dict[str, Any]] = []
+    for row in store().query_read(statement):
+        description = row["description"]
+        text = f"custom_analysis: {row['name']}"
+        if description is not None and str(description).strip():
+            text += f", description: {description}"
+        if row["sql_text"] is not None:
+            text += f", sql: {row['sql_text']}"
+        docs.append(
+            {
+                "text": text,
+                "name": row["name"],
+                "label": "CustomAnalysis",
+                "id": row["id"],
+            }
+        )
+    return docs
 
 
 def embed_custom_analyses(
@@ -222,39 +486,12 @@ def embed_custom_analyses(
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:
-    """Fetch ``CustomAnalysis`` docs from Neo4j, embed them, and append to *vdb*."""
+    """Embed CustomAnalysis docs and append them to *vdb*."""
     import pandas as pd
     from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
     from nemo_retriever.operators.vdb import IngestVdbOperator
 
-    query = f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS})-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        WHERE $analysis_id IS NULL OR ca.id = $analysis_id
-        WITH DISTINCT ca, sql,
-             CASE
-                 WHEN ca.description IS NOT NULL AND trim(toString(ca.description)) <> ''
-                 THEN ca.description
-                 ELSE ''
-             END AS desc,
-             CASE
-                 WHEN sql.sql_full_query IS NOT NULL
-                 THEN ', sql: ' + sql.sql_full_query
-                 ELSE ''
-             END AS sql_text
-        RETURN collect({{
-            text: 'custom_analysis: ' + ca.name +
-                  CASE WHEN desc <> '' THEN ', description: ' + desc ELSE '' END +
-                  sql_text,
-            name: ca.name,
-            label: labels(ca)[0],
-            id: ca.id
-        }}) AS docs
-    """
-    result = graph().query_read(
-        query,
-        parameters={"analysis_id": analysis_id},
-    )
-    docs = result[0].get("docs") if result else None
+    docs = _custom_analysis_docs(analysis_id)
     if not docs:
         logger.info(
             "No CustomAnalysis rows found for analysis_id=%r; skipping VDB upsert.",
@@ -265,7 +502,9 @@ def embed_custom_analyses(
     rows = []
     for item in docs:
         node_id = item.get("id")
-        path = f"neo4j:{node_id}" if node_id is not None else "neo4j:unknown"
+        # A stored row key, not a reference to the store -- see the note in
+        # pg/pql_analyses.py.
+        path = f"gsf:{node_id}" if node_id is not None else "gsf:unknown"
         tabular_fields = {
             "id": node_id,
             "label": item.get("label", ""),
@@ -318,145 +557,47 @@ def embed_custom_analyses(
     )
 
 
-# ---------------------------------------------------------------------------
-# Retrieval-time helpers (extracted from candidates_preparation.py)
-# ---------------------------------------------------------------------------
-
-
-def fetch_custom_analyses_with_sql(analysis_ids: list[str]) -> list[dict[str, str]]:
-    """Fetch id, name, description and sql for each CustomAnalysis via HAS_SQL -> Sql.
-
-    Returns a list of dicts with keys: id, name, description, sql.
-    """
-    if not analysis_ids:
-        return []
-
-    query = f"""
-    UNWIND $ids AS analysis_id
-    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
-    OPTIONAL MATCH (ca)-[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-    RETURN ca.id AS ca_id, ca.name AS name, ca.description AS description,
-           sql.sql_full_query AS sql_text
-    """
-    try:
-        rows = graph().query_read(query, {"ids": analysis_ids})
-    except Exception:
-        logger.warning(
-            "fetch_custom_analyses_with_sql: Neo4j query failed", exc_info=True
-        )
-        return []
-
-    seen_ids: set[str] = set()
-    result: list[dict[str, str]] = []
-    for row in rows:
-        ca_id = row.get("ca_id") or ""
-        if ca_id in seen_ids:
-            continue
-        seen_ids.add(ca_id)
-        result.append(
-            {
-                "id": ca_id,
-                "name": (row.get("name") or "").strip(),
-                "description": (row.get("description") or "").strip(),
-                "sql": (row.get("sql_text") or "").strip(),
-            }
-        )
-    return result
-
-
-def get_custom_analysis_by_id(analysis_id: str) -> str | None:
-    """Return the id of the CustomAnalysis, or None if it doesn't exist."""
-    rows = graph().query_read(
-        f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
-        RETURN ca.id AS id
-        LIMIT 1
-        """,
-        {"analysis_id": analysis_id},
-    )
-    return rows[0]["id"] if rows else None
-
-
-def delete_custom_analysis_node(analysis_id: str) -> None:
-    """DETACH DELETE the CustomAnalysis and its linked Sql node."""
-    graph().query_write(
-        f"""
-        MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
-              -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-        DETACH DELETE ca, sql
-        """,
-        {"analysis_id": analysis_id},
-    )
-
-
 def fetch_database_name_for_analysis(analysis_id: str) -> str | None:
-    """Return the database whose tables an analysis's SQL references."""
-    query = f"""
-    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: $analysis_id}})
-          -[:{Edges.HAS_SQL}]->(:{Labels.SQL})
-          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-          <-[:{Edges.CONTAINS}]-(:{Labels.SCHEMA})
-          <-[:{Edges.CONTAINS}]-(db:{Labels.DB})
-    RETURN DISTINCT db.name AS database_name
-    LIMIT 1
-    """
-    try:
-        rows = graph().query_read(query, {"analysis_id": analysis_id})
-    except Exception:
-        logger.warning(
-            "fetch_database_name_for_analysis: Neo4j query failed", exc_info=True
-        )
-        return None
-    if not rows:
-        return None
-    database_name = rows[0].get("database_name")
-    return str(database_name) if database_name is not None else None
+    """Return the database whose tables an analysis's SQL references.
 
+    Retrieval filters semantic hits on ``database_name``
+    (:func:`gsf.retrieval.data_access.semantic_search.search_semantic_index`),
+    so an analysis embedded without one is invisible to every scoped search.
 
-def fetch_tables_from_custom_analyses(analysis_ids: list[str]) -> list[dict[str, Any]]:
-    """Fetch Tables referenced by CustomAnalysis nodes via HAS_SQL -> Sql -> SQL -> Table."""
-    if not analysis_ids:
-        return []
-    query = f"""
-    UNWIND $ids AS analysis_id
-    MATCH (ca:{Labels.CUSTOM_ANALYSIS} {{id: analysis_id}})
-          -[:{Edges.HAS_SQL}]->(sql:{Labels.SQL})
-          -[:{Edges.SQL}]->(tbl:{Labels.TABLE})
-    MATCH (db:{Labels.DB})-[:{Edges.CONTAINS}]->(sch:{Labels.SCHEMA})
-          -[:{Edges.CONTAINS}]->(tbl)
-    MATCH (tbl)-[:CONTAINS]->(col:Column)
-    WITH db, tbl, sch, collect({{name: col.name, data_type: col.data_type,
-                             description: {column_description_expr("col")}}}) AS cols
-    RETURN tbl.id AS id, tbl.name AS name, tbl.description AS description,
-           db.name AS database_name, sch.name AS schema_name, tbl.pk AS pk, cols
+    The relational path mirrors the edges this replaced -- analysis -> its SQL
+    -> the tables that SQL reads -> schema -> database.
+
+    ``DISTINCT ... LIMIT 1`` is deliberate, and lossy: an analysis whose SQL
+    joins across two databases has two answers and this returns one of them.
+    That matches the behaviour being ported rather than quietly improving on
+    it; the column it feeds holds a single value.
     """
-    try:
-        rows = graph().query_read(query, {"ids": analysis_ids})
-    except Exception:
-        logger.warning(
-            "fetch_tables_from_custom_analyses: Neo4j query failed", exc_info=True
+    rows = store().query_read(
+        select(s.catalog_database.c.name)
+        .select_from(
+            s.custom_analysis__sql.join(
+                s.sql_query__table,
+                s.sql_query__table.c.sql_query_id
+                == s.custom_analysis__sql.c.sql_query_id,
+            )
+            .join(
+                s.catalog_table,
+                s.catalog_table.c.id == s.sql_query__table.c.table_id,
+            )
+            .join(
+                s.catalog_schema,
+                s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+            )
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
         )
-        return []
-    tables = []
-    seen: set[str] = set()
-    for row in rows:
-        tid = row.get("id")
-        if not tid or str(tid) in seen:
-            continue
-        seen.add(str(tid))
-        cols = [c for c in (row.get("cols") or []) if c.get("name")]
-        tables.append(
-            {
-                "id": tid,
-                "name": row.get("name") or "",
-                "description": row.get("description") or "",
-                "database_name": row.get("database_name") or "",
-                "schema_name": row.get("schema_name") or "",
-                "label": Labels.TABLE,
-                # Keyless tables are unusable as a prediction entity, so this has
-                # to survive every path that reaches ``relevant_tables``.
-                "pk": row.get("pk") or [],
-                "columns": cols,
-            }
-        )
-    return tables
+        .where(s.custom_analysis__sql.c.analysis_id == analysis_id)
+        .distinct()
+        # Stable across calls: without it two databases would alternate, and the
+        # embedding's scope would depend on plan order.
+        .order_by(s.catalog_database.c.name)
+        .limit(1)
+    )
+    return str(rows[0]["name"]) if rows else None

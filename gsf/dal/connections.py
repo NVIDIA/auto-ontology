@@ -2,13 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Neo4j data access for UI-managed database connections.
+"""UI-managed database connections.
 
-Connection metadata is stored directly on ``Labels.DB`` nodes so that the UI
-connection and the catalog database share a single node.  A DB node is treated
-as a UI-managed connection when it has a ``connection`` set (a JSON string of
-the structured form fields); the catalog database name (``db.name``) doubles as
-the connection's identity and label.
+Connection metadata lives on the catalog database row, so the UI connection and
+the catalog database are the same record and cannot drift apart. A database is a
+UI-managed connection when it has a ``connection`` value; the catalog name
+doubles as the connection's identity.
 """
 
 from __future__ import annotations
@@ -17,39 +16,42 @@ import json
 import logging
 from typing import Any
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
-from nemo_retriever.tabular_data.neo4j import get_neo4j_conn
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert
 
 from gsf.connectors.vault import read_secret
+from gsf.dal import schema as s
+from gsf.dal.session import store
 
 logger = logging.getLogger(__name__)
 
 
 def list_connections() -> list[dict[str, Any]]:
-    """Return the resolved connection object for every catalog database.
+    """Every catalog database's resolved connection.
 
-    Each connection is resolved from Vault when a secret exists for that
-    database name; otherwise it falls back to the ``connection`` stored on the
-    Neo4j DB node. Databases with neither are skipped.
+    Vault wins when it holds a secret for the database name; otherwise the
+    stored value is used. Databases with neither are skipped, which is what
+    makes this "connections" rather than "databases" — an ingested catalog with
+    no UI connection has nothing to return.
     """
-    rows = get_neo4j_conn().query_read(
-        f"""
-        MATCH (db:{Labels.DB})
-        RETURN properties(db) AS props
-        ORDER BY db.name
-        """
-    )
     connections: list[dict[str, Any]] = []
-    for row in rows:
-        props = dict(row["props"])
-        database_name = str(props.get("name"))
-        secret = read_secret(database_name)
+    for row in store().query_read(
+        select(s.catalog_database.c.name, s.catalog_database.c.connection).order_by(
+            s.catalog_database.c.name
+        )
+    ):
+        secret = read_secret(str(row["name"]))
         if secret:
             connections.append(secret)
             continue
-        connection_raw = props.get("connection")
-        if connection_raw:
-            connections.append(json.loads(connection_raw))
+        stored = row["connection"]
+        if stored:
+            # jsonb here, a JSON *string* on the graph node. Callers get the
+            # object either way, so decoding a string keeps a database written
+            # before this column existed readable.
+            connections.append(
+                json.loads(stored) if isinstance(stored, str) else stored
+            )
     return connections
 
 
@@ -58,26 +60,35 @@ def insert_connection(
     connection: str,
     database_name: str,
 ) -> dict[str, Any]:
-    """Attach the JSON-encoded connection metadata to the catalog DB node.
+    """Attach connection metadata to the catalog database, creating it if needed.
 
-    Returns the public payload (the node's properties).
+    Creating it matters: a connection is normally configured *before* anything
+    is ingested, so there is usually no database row to attach to yet.
     """
-    rows = get_neo4j_conn().query_write(
-        f"""
-        MERGE (db:{Labels.DB} {{name: $database_name}})
-        ON CREATE SET db.id = randomUUID()
-        SET db.connection = $connection
-        RETURN properties(db) AS props
-        """,
-        {
-            "database_name": database_name,
-            "connection": connection,
-        },
+    # An empty string means "no connection JSON on the row" -- the Vault path
+    # writes the credentials to Vault and deliberately keeps them off the
+    # catalog. `json.loads("")` raises, and because the Vault write happens
+    # first, the secret was already stored when the insert 500s: no
+    # catalog_database row, so the connection is invisible to list_connections
+    # and cannot be ingested.
+    payload = json.loads(connection) if connection and connection.strip() else None
+    statement = insert(s.catalog_database).values(
+        name=database_name, connection=payload
     )
-    assert rows
-    return dict(rows[0]["props"])
+    rows = store().query_write(
+        statement.on_conflict_do_update(
+            index_elements=[s.catalog_database.c.name],
+            set_={"connection": statement.excluded.connection},
+        ).returning(s.catalog_database)
+    )
+    return dict(rows[0])
 
 
 def verify_connectivity() -> None:
-    """Probe the Neo4j connection. Raises if the database is unreachable."""
-    get_neo4j_conn().verify_connectivity()
+    """Probe the store. Raises if it is unreachable.
+
+    Backs the health endpoint, so it must fail rather than report healthy — the
+    ``SELECT 1`` is deliberately the cheapest statement that still proves a
+    connection can be checked out of the pool and used.
+    """
+    store().query_read("SELECT 1")

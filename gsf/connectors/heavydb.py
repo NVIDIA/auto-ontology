@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import heavydb
 import pandas as pd
 from heavydb.common.ttypes import TDatumType
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 if TYPE_CHECKING:
     from heavydb.connection import Connection
@@ -232,9 +232,16 @@ class HeavyDBDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
-        # sqlglot has no dedicated HeavyDB dialect. HeavyDB's SQL is a
-        # Calcite-based, largely PostgreSQL-compatible dialect, so "postgres"
-        # is the closest fit for the text-to-SQL agent's SQL generation.
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+
+        sqlglot has no dedicated HeavyDB dialect. HeavyDB's SQL is a
+        Calcite-based, largely PostgreSQL-compatible dialect, so ``postgres``
+        is the closest fit for the text-to-SQL agent's SQL generation, and
+        substituting it here keeps the substitution in one place.
+        """
         return "postgres"
 
     @property
@@ -305,7 +312,7 @@ class HeavyDBDatabase(SQLDatabase):
                             "table_name": meta.table_name,
                             "column_name": name,
                             "data_type": _type_name(type_info),
-                            "is_nullable": "YES" if type_info.nullable else "NO",
+                            "is_nullable": bool(type_info.nullable),
                             "ordinal_position": position,
                         }
                     )

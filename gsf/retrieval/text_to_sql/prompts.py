@@ -182,7 +182,7 @@ def create_sql_from_candidates_prompt(
     """System prompt for SQL generation from semantic retrieval candidates.
 
     Table naming is gated on the **dialect**, not on ``target_db``: schema-less
-    dialects (SQLite/DuckDB, incl. BIRD) use bare table names, while schema
+    dialects (SQLite/DuckDB) use bare table names, while schema
     dialects (Postgres/Snowflake) keep the ``schema.table`` qualifier. Scoping a
     query to one database (``target_db``) removes only the *database* prefix — the
     schema is still required to resolve the table, so it is never dropped here.
@@ -221,7 +221,7 @@ ORDER BY total_sales DESC;"""
 
     evidence_block = (
         "## Evidence Priority\n"
-        'The question includes an "Evidence:" section — treat it as authoritative '
+        "The request includes evidence — treat it as authoritative "
         "ground truth. Evidence overrides semantic hints, examples, descriptions, and "
         "your own interpretation. Apply every evidence clause exactly: use named "
         "columns/tables, formulas, filters, synonyms, ranking rules, and LIKE patterns "

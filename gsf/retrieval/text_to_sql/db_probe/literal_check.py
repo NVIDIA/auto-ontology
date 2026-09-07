@@ -46,20 +46,6 @@ def _first_value(row: dict) -> Any:
 # absent and do not repair.
 _CLOSE_MATCH_CUTOFF = 0.6
 
-_SQLGLOT_DIALECTS = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-    "sqlite": "sqlite",
-    "duckdb": "duckdb",
-    "snowflake": "snowflake",
-    "mysql": "mysql",
-    "bigquery": "bigquery",
-}
-
-
-def _sqlglot_dialect(dialect: Optional[str]) -> Optional[str]:
-    return _SQLGLOT_DIALECTS.get((dialect or "").lower())
-
 
 def _norm(value: Any) -> str:
     return str(value).strip().casefold()
@@ -141,7 +127,7 @@ def _fetch_distinct(
     ``None`` when the column isn't in this table, the probe fails, or the column
     is high-cardinality (so we never judge a free-text/name column).
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     # Bare column (drop table qualifier) so it works regardless of alias scoping.
     col_ref = exp.column(col.this).sql(dialect=d)
     table_ref = table_node.sql(dialect=d)
@@ -171,7 +157,7 @@ def find_literal_mismatches(
     has no close real counterpart and the empty result is legitimate).
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("literal_check: could not parse SQL (%s)", exc)
         return []

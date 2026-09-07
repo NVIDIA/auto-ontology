@@ -22,6 +22,7 @@ export const openapi: OpenApiRoute = {
 				'statelessly, with no history and no chart step.',
 			schema: z.object({
 				question: z.string().min(1),
+				evidence: z.string().nullish(),
 				conversation_id: z.string().uuid().nullish(),
 				target_db: z.string().nullish(),
 				prediction: z.boolean().nullish(),

@@ -28,13 +28,18 @@ const API_TOKEN_HEADER = 'x-api-key';
  * Pull a GSF API token out of the request headers.
  *
  * `x-api-key` is the canonical spelling, but `Authorization: Bearer` is also
- * accepted because it is what most HTTP clients reach for by default. That
- * header is shared with SSO bearer tokens (see auth/bearer.ts), so we claim it
- * only for values carrying our prefix — anything else is left for the JWT path.
+ * accepted because it is what most HTTP clients reach for by default.
+ *
+ * Both headers are claimed only for values carrying our prefix. `Authorization`
+ * is shared with SSO bearer tokens, and `x-api-key` is a header gateways
+ * routinely stamp with their own credential — claiming any non-empty value made
+ * `resolveUser` treat such a request as offering a GSF token, so a valid SSO id
+ * token alongside it produced a hard 401 instead of falling through to the JWT
+ * path.
  */
 export function extractApiToken(headers: Headers): string | null {
 	const direct = headers.get(API_TOKEN_HEADER)?.trim();
-	if (direct) return direct;
+	if (direct) return direct.startsWith(API_TOKEN_PREFIX) ? direct : null;
 
 	const authorization = headers.get('authorization');
 	if (!authorization) return null;

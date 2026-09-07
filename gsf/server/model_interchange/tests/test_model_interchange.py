@@ -2,33 +2,27 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unit tests for GSF model YAML export/import."""
+"""Model-interchange service tests.
+
+Unit tests for GSF model YAML export/import, run against mocks.
+
+The storage-level behaviour these do not reach — portable ``imported_id``
+matching, and the export/import round-trip — is covered against a live database
+by ``gsf/dal/tests/test_model_interchange.py`` and by the recorded golden
+reads."""
 
 from __future__ import annotations
 
-import json
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_gsf import GSFConversionError, convert_gsf_to_ossie
+from ossie_nvidia_gsf import GSFConversionError, convert_gsf_to_ossie
 
 from gsf.dal.model_interchange import (
-    _EXPORT_CATALOG_QUERY,
-    _EXPORT_CUSTOM_ANALYSES_QUERY,
-    _EXPORT_FKS_QUERY,
-    _EXPORT_JOINS_QUERY,
-    _EXPORT_SEMANTIC_FKS_QUERY,
-    _EXPORT_SQL_ATTRIBUTES_QUERY,
-    _EXPORT_TERMS_QUERY,
-    UnknownDatabaseIdsError,
-    _changed_entity_ids,
-    _resolve_entity,
-    _resolve_entities_batch,
     assemble_export_document,
     resolve_sql_column_ids,
-    validate_database_ids,
 )
 from gsf.semantic.constants import (
     SQL_ATTR_SOURCE_BRIDGE,
@@ -52,8 +46,32 @@ from gsf.server.model_interchange.schemas import (
 
 @contextmanager
 def _null_transaction():
-    """Stand in for ``write_transaction`` so unit tests need no live Neo4j."""
+    """Stand in for ``write_transaction`` so unit tests need no live database."""
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_live_connection_lookup():
+    """Sever the two connection lookups ``export_model`` reaches through.
+
+    ``service.export_model`` calls ``_dialect_by_database_name()``, which reads
+    ``get_connectors()`` and ``list_connections()`` — and the latter queries
+    Postgres. Patching only the ``dal`` calls each test names leaves that path
+    live, so these mock-backed tests quietly opened a connection and failed with
+    ``OperationalError`` on any machine without the local stack up. CI never
+    caught it: the workflow provides a Postgres service, so the call succeeded
+    there and returned nothing.
+
+    Autouse rather than per-test decorators so a test added later cannot
+    reopen the hole. Both boundaries are stubbed instead of
+    ``_dialect_by_database_name`` itself, which keeps its merge logic under
+    test; a test that wants real dialects can patch these with its own values.
+    """
+    with (
+        patch("gsf.server.model_interchange.service.get_connectors", return_value=[]),
+        patch("gsf.server.model_interchange.service.list_connections", return_value=[]),
+    ):
+        yield
 
 
 def _catalog_rows(*, db_id: str = "db-1", db_name: str = "retail") -> list[dict]:
@@ -179,6 +197,66 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.table) == 1
     assert len(document.semantic_layer.sql_attributes.sql) == 1
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
+
+
+def test_assemble_export_document_keeps_sample_value_types() -> None:
+    """An integer column must leave as numbers, or a re-import cannot restore them."""
+    rows = _export_rows()
+    rows["catalog"] = [{**_catalog_rows()[0], "sample_values": [1, 2]}]
+
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    column = document.data_layer.databases[0].schemas[0].tables[0].columns[0]
+    assert column.sample_values == [1, 2]
+    assert all(type(value) is int for value in column.sample_values)
+
+
+@pytest.mark.parametrize(
+    ("supplied", "expected"),
+    [
+        ([1, 2], "[1, 2]"),
+        (["1", "2"], '["1", "2"]'),
+        ([{"k": 1}], '[{"k": 1}]'),
+        # JSON carries the type with each value, so a column whose samples
+        # disagree is stored as it arrived rather than narrowed.
+        (["a", 1], '["a", 1]'),
+        ([], None),
+    ],
+)
+@patch("gsf.dal.model_interchange._resolve_entities_batch")
+def test_import_catalog_encodes_supplied_sample_values(
+    mock_resolve: MagicMock,
+    supplied: list,
+    expected: str | None,
+) -> None:
+    """Types survive the round trip, so a re-import restores what was exported."""
+    from collections import defaultdict
+
+    from gsf.dal import schema as s
+    from gsf.dal.model_interchange import _import_catalog
+
+    mock_resolve.side_effect = lambda _table, items, **_kw: {
+        imported_id: (f"live-{imported_id}", True) for imported_id, _ in items
+    }
+    rows = _export_rows()
+    rows["catalog"] = [{**_catalog_rows()[0], "sample_values": supplied}]
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+
+    _import_catalog(document, {}, defaultdict(int), defaultdict(int), None, {})
+
+    column_calls = [
+        call for call in mock_resolve.call_args_list if call[0][0] is s.catalog_column
+    ]
+    props = column_calls[0][0][1][0][1]
+    assert props["sample_values"] == expected
 
 
 def _in_scope_export_rows() -> dict:
@@ -540,16 +618,6 @@ def test_import_model_reports_gsf_format(mock_apply: MagicMock) -> None:
     assert summary["format"] == ModelFormat.GSF.value
 
 
-@patch("gsf.dal.model_interchange.graph")
-def test_validate_database_ids_raises_for_unknown(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = [{"ids": ["db-1"]}]
-
-    with pytest.raises(UnknownDatabaseIdsError) as exc:
-        validate_database_ids(["db-1", "missing"])
-
-    assert exc.value.database_ids == ["missing"]
-
-
 @patch("gsf.server.model_interchange.service.flush_import_embeddings")
 @patch("gsf.server.model_interchange.service.dal.apply_import_model")
 def test_import_model_flushes_embeddings_when_embed_true(
@@ -644,353 +712,3 @@ def test_resolve_sql_column_ids_returns_parser_column_ids(
         "col-1",
         "col-2",
     ]
-
-
-@patch("gsf.dal.model_interchange.graph")
-def test_resolve_entity_skips_when_imported_id_exists(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = [{"id": "live-1"}]
-
-    live_id, created = _resolve_entity("Database", "yaml-1")
-
-    assert live_id == "live-1"
-    assert created is False
-    mock_conn.return_value.query_write.assert_called()
-    mock_conn.return_value.query_read.assert_called_once()
-
-
-@patch("gsf.dal.model_interchange.graph")
-def test_resolve_entity_creates_with_imported_id(mock_conn: MagicMock) -> None:
-    mock_conn.return_value.query_read.return_value = []
-    mock_conn.return_value.query_write.return_value = [{"id": "new-1"}]
-
-    live_id, created = _resolve_entity(
-        "Table",
-        "yaml-table",
-        create_props={"name": "orders"},
-    )
-
-    assert live_id == "new-1"
-    assert created is True
-    write_params = mock_conn.return_value.query_write.call_args[0][1]
-    assert write_params["props"]["imported_id"] == "yaml-table"
-    assert write_params["props"]["name"] == "orders"
-
-
-def test_export_queries_use_portable_ids() -> None:
-    assert "coalesce(db.imported_id, db.id) AS db_id" in _EXPORT_CATALOG_QUERY
-    assert "coalesce(sch.imported_id, sch.id) AS schema_id" in _EXPORT_CATALOG_QUERY
-    assert "coalesce(tbl.imported_id, tbl.id) AS table_id" in _EXPORT_CATALOG_QUERY
-    assert "coalesce(col.imported_id, col.id) AS column_id" in _EXPORT_CATALOG_QUERY
-    assert "coalesce(src.imported_id, src.id)" in _EXPORT_FKS_QUERY
-    assert "coalesce(t1.imported_id, t1.id)" in _EXPORT_JOINS_QUERY
-    assert "coalesce(term.imported_id, term.id) AS id" in _EXPORT_TERMS_QUERY
-    assert "coalesce(attr.imported_id, attr.id)" in _EXPORT_SEMANTIC_FKS_QUERY
-    assert "coalesce(attr.imported_id, attr.id) AS id" in _EXPORT_SQL_ATTRIBUTES_QUERY
-    assert "coalesce(ca.imported_id, ca.id) AS id" in _EXPORT_CUSTOM_ANALYSES_QUERY
-
-
-@patch("gsf.dal.model_interchange.graph")
-def test_changed_entity_ids_returns_only_modified_payloads(
-    mock_conn: MagicMock,
-) -> None:
-    mock_conn.return_value.query_read.return_value = [
-        {
-            "id": "unchanged",
-            "props": {"name": "Orders", "description": "", "source": "GSF"},
-        },
-        {
-            "id": "changed",
-            "props": {"name": "Orders", "description": "old", "source": "GSF"},
-        },
-    ]
-
-    changed = _changed_entity_ids(
-        "Term",
-        {
-            "unchanged": {"name": "Orders", "description": "", "source": "GSF"},
-            "changed": {"name": "Orders", "description": "new", "source": "GSF"},
-        },
-    )
-
-    assert changed == {"changed"}
-
-
-@patch("gsf.dal.model_interchange.graph")
-def test_resolve_entities_batch_migrates_database_by_name(
-    mock_conn: MagicMock,
-) -> None:
-    mock_conn.return_value.query_read.side_effect = [
-        [],
-        [{"imported_id": "portable-db-id", "live_ids": ["legacy-live-id"]}],
-    ]
-
-    result = _resolve_entities_batch(
-        "Database",
-        [("portable-db-id", {"name": "dor_prod"})],
-        match_by_name=True,
-    )
-
-    assert result == {"portable-db-id": ("legacy-live-id", False)}
-    write_params = mock_conn.return_value.query_write.call_args[0][1]
-    assert write_params["rows"] == [
-        {
-            "id": "legacy-live-id",
-            "imported_id": "portable-db-id",
-            "replace_imported_id": True,
-        }
-    ]
-
-
-@patch("gsf.dal.model_interchange._database_names_for_columns")
-@patch("gsf.dal.model_interchange._persist_sql_object")
-@patch("gsf.dal.model_interchange.detach_ca_sql_edges")
-@patch("gsf.dal.model_interchange._ids_missing_has_sql")
-@patch("gsf.dal.model_interchange._custom_analysis_ids_with_changed_payload")
-@patch("gsf.dal.model_interchange._resolve_entities_batch")
-def test_import_custom_analyses_replace_restores_changed_name(
-    mock_resolve_batch: MagicMock,
-    mock_changed_payload: MagicMock,
-    mock_missing_sql: MagicMock,
-    mock_detach: MagicMock,
-    mock_persist_sql: MagicMock,
-    mock_db_names: MagicMock,
-) -> None:
-    """A replace import restores the exported name instead of silently skipping it."""
-    from gsf.dal.model_interchange import _import_custom_analyses
-
-    mock_resolve_batch.return_value = {"yaml-analysis": ("live-analysis", False)}
-    mock_missing_sql.return_value = set()
-    mock_changed_payload.return_value = {"live-analysis"}
-    mock_db_names.return_value = {}
-    document = GsfModelDocument.model_validate(
-        {
-            "semantic_layer": {
-                "custom_analyses": [
-                    {
-                        "id": "yaml-analysis",
-                        "name": "exported name",
-                        "description": "description",
-                        "sql": "SELECT 1",
-                    },
-                ],
-            },
-        },
-    )
-
-    buffer = ImportEmbedBuffer()
-    _import_custom_analyses(
-        document,
-        {},
-        {"custom_analyses": 0},
-        {"custom_analyses": 0},
-        buffer,
-        {},
-        replace=True,
-    )
-
-    mock_changed_payload.assert_called_once_with(
-        document.semantic_layer.custom_analyses,
-        {"yaml-analysis": "live-analysis"},
-    )
-    mock_detach.assert_called_once_with("live-analysis")
-    assert mock_persist_sql.call_args.kwargs["name"] == "exported name"
-    assert len(buffer.semantic_rows) == 1
-
-
-@patch("gsf.dal.model_interchange._database_names_for_columns")
-@patch("gsf.dal.model_interchange._persist_sql_object")
-@patch("gsf.dal.model_interchange.detach_ca_sql_edges")
-@patch("gsf.dal.model_interchange._ids_missing_has_sql")
-@patch("gsf.dal.model_interchange._custom_analysis_ids_with_changed_payload")
-@patch("gsf.dal.model_interchange._resolve_entities_batch")
-def test_import_custom_analyses_uses_stable_id(
-    mock_resolve_batch: MagicMock,
-    mock_changed_payload: MagicMock,
-    mock_missing_sql: MagicMock,
-    _mock_detach: MagicMock,
-    _mock_persist_sql: MagicMock,
-    mock_db_names: MagicMock,
-) -> None:
-    """Only a matching stable id can select an existing analysis."""
-    from gsf.dal.model_interchange import _import_custom_analyses
-
-    mock_resolve_batch.return_value = {"yaml-analysis": ("stable-match", False)}
-    mock_changed_payload.return_value = set()
-    mock_missing_sql.return_value = set()
-    mock_db_names.return_value = {}
-    document = GsfModelDocument.model_validate(
-        {
-            "semantic_layer": {
-                "custom_analyses": [
-                    {
-                        "id": "yaml-analysis",
-                        "name": "exported name",
-                        "description": "description",
-                        "sql": "SELECT 1",
-                    },
-                ],
-            },
-        },
-    )
-
-    _import_custom_analyses(
-        document,
-        {},
-        {"custom_analyses": 0},
-        {"custom_analyses": 0},
-        None,
-        {},
-        replace=True,
-    )
-
-    batch_items = mock_resolve_batch.call_args[0][1]
-    assert [key for key, _props in batch_items] == ["yaml-analysis"]
-
-
-@patch("gsf.dal.model_interchange.add_query")
-@patch("gsf.dal.model_interchange.Neo4jNode")
-@patch("gsf.dal.model_interchange.validate_sql")
-def test_persist_sql_object_overwrites_existing_node_properties(
-    mock_validate_sql: MagicMock,
-    mock_neo4j_node: MagicMock,
-    _mock_add_query: MagicMock,
-) -> None:
-    """A replace import must overwrite, not merely find, an existing analysis."""
-    from gsf.dal.model_interchange import _persist_sql_object
-
-    query_obj = MagicMock()
-    query_obj.edges = []
-    mock_validate_sql.return_value = query_obj
-
-    _persist_sql_object(
-        node_label="CustomAnalysis",
-        node_id="live-analysis",
-        name="exported name",
-        description="exported description",
-        sql="SELECT 1",
-        database_name=None,
-        schema_cache={None: (["sqlite"], {})},
-    )
-
-    assert mock_neo4j_node.call_args.kwargs["override_existing_props"] == {
-        "name": "exported name",
-        "description": "exported description",
-    }
-
-
-@patch("gsf.dal.model_interchange.graph")
-def test_import_joins_stores_join_columns_as_a_json_string(
-    mock_conn: MagicMock,
-) -> None:
-    """Neo4j properties can't be a list of maps; join_columns must be JSON-encoded.
-
-    Writing the raw ``list[dict]`` straight to a relationship property (as
-    the code used to) makes Neo4j reject the query with a CypherTypeError
-    the moment a model with a non-empty join gets imported.
-    """
-    from gsf.dal.model_interchange import _import_joins
-
-    document = GsfModelDocument.model_validate(
-        {
-            "data_layer": {
-                "joins": [
-                    {
-                        "source_table_id": "tbl-1",
-                        "target_table_id": "tbl-2",
-                        "join_columns": [{"source": "customer_id", "target": "id"}],
-                    },
-                ],
-            },
-        },
-    )
-
-    _import_joins(document, {"tbl-1": "live-tbl-1", "tbl-2": "live-tbl-2"})
-
-    write_params = mock_conn.return_value.query_write.call_args[0][1]
-    row = write_params["rows"][0]
-    assert isinstance(row["join_columns"], str)
-    assert json.loads(row["join_columns"]) == [
-        {"source": "customer_id", "target": "id"},
-    ]
-
-
-def test_assemble_export_document_parses_join_columns_json_string() -> None:
-    """The DAL must read back what it now writes: a JSON-encoded property."""
-    rows = _export_rows()
-    rows["catalog"] = [
-        *_catalog_rows(),
-        {**_catalog_rows()[0], "table_id": "tbl-2", "table_name": "customers"},
-    ]
-    rows["joins"][0]["join_columns"] = '[{"source": "customer_id", "target": "id"}]'
-
-    document = assemble_export_document(
-        rows,
-        dialect_by_db_name={"retail": "sqlite"},
-        sql_column_resolver=lambda _sql, _db: [],
-    )
-
-    assert document.data_layer.joins[0].join_columns == [
-        {"source": "customer_id", "target": "id"},
-    ]
-
-
-@patch("gsf.dal.model_interchange._ensure_import_indexes")
-@patch("gsf.dal.model_interchange.write_transaction", _null_transaction)
-@patch("gsf.dal.model_interchange._import_custom_analyses")
-@patch("gsf.dal.model_interchange._import_sql_attributes")
-@patch("gsf.dal.model_interchange._import_semantic_fks")
-@patch("gsf.dal.model_interchange._import_column_attributes")
-@patch("gsf.dal.model_interchange._import_terms")
-@patch("gsf.dal.model_interchange._import_joins")
-@patch("gsf.dal.model_interchange._import_foreign_keys")
-@patch("gsf.dal.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.model_interchange._import_catalog")
-def test_apply_import_model_creates_when_catalog_missing(
-    mock_catalog: MagicMock,
-    mock_delete: MagicMock,
-    *_mocks: MagicMock,
-) -> None:
-    from gsf.dal.model_interchange import apply_import_model
-
-    mock_catalog.return_value = ["live-db"]
-    document = assemble_export_document(
-        _export_rows(),
-        dialect_by_db_name={"retail": "sqlite"},
-        sql_column_resolver=lambda _sql, _db: [],
-    )
-
-    summary = apply_import_model(document, replace=True, embed_buffer=None)
-
-    mock_catalog.assert_called_once()
-    assert summary["database_ids"] == ["live-db"]
-    assert "created" in summary
-    assert "skipped" in summary
-
-
-@patch("gsf.dal.model_interchange._ensure_import_indexes")
-@patch("gsf.dal.model_interchange._import_terms", side_effect=RuntimeError("bad sql"))
-@patch("gsf.dal.model_interchange._import_joins")
-@patch("gsf.dal.model_interchange._import_foreign_keys")
-@patch("gsf.dal.model_interchange._delete_scoped_semantics_not_in_payload")
-@patch("gsf.dal.model_interchange._import_catalog")
-@patch("gsf.dal.model_interchange.write_transaction")
-def test_apply_import_model_runs_in_one_transaction(
-    mock_transaction: MagicMock,
-    mock_catalog: MagicMock,
-    *_mocks: MagicMock,
-) -> None:
-    """A failure part-way through must not escape the transaction scope."""
-    from gsf.dal.model_interchange import apply_import_model
-
-    mock_transaction.return_value = _null_transaction()
-    mock_catalog.return_value = ["live-db"]
-    document = assemble_export_document(
-        _export_rows(),
-        dialect_by_db_name={"retail": "sqlite"},
-        sql_column_resolver=lambda _sql, _db: [],
-    )
-
-    with pytest.raises(RuntimeError, match="bad sql"):
-        apply_import_model(document, replace=True, embed_buffer=None)
-
-    mock_transaction.assert_called_once()

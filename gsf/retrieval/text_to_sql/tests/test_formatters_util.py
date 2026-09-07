@@ -42,6 +42,47 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     assert "dw.dw." not in rendered
 
 
+def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "columns": [
+                    {
+                        "name": "status",
+                        "data_type": "varchar",
+                        "sample_values": ["open", "closed"],
+                    },
+                    # Legacy nodes still hold a JSON-encoded string.
+                    {
+                        "name": "channel",
+                        "data_type": "varchar",
+                        "sample_values": '["web", "store"]',
+                    },
+                ],
+            }
+        ]
+    )
+    assert "status (varchar) | sample values: open, closed" in rendered
+    assert "channel (varchar) | sample values: web, store" in rendered
+    assert "['open'" not in rendered
+
+
+def test_prompt_omits_sample_values_when_absent() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "columns": [
+                    {"name": "id", "data_type": "int", "sample_values": None},
+                    {"name": "note", "data_type": "text"},
+                ],
+            }
+        ]
+    )
+    assert "sample values" not in rendered
+
+
 def test_prompt_renders_date_format_when_present() -> None:
     rendered = format_tables_for_prompt(
         [

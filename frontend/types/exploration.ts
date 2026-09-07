@@ -39,11 +39,9 @@ export type ExplorationDataNode = {
 export type ExplorationNode = ExplorationTermNode | ExplorationDataNode;
 
 /**
- * One FK column pair joining two tables in an `ExplorationLink`. Unlike
- * `DataGraphForeignKeyDto` above, these two are always already normalized
- * via `parseSampleValues` (see `buildDataGraph`) — every other type in this
- * file that carries sample values gets the same plain-array-or-`null`
- * guarantee straight from the client's own DTOs.
+ * One FK column pair joining two tables in an `ExplorationLink`. Mirrors
+ * `DataGraphForeignKeyDto` (see `buildDataGraph`) — the server already
+ * guarantees a plain array-or-`null` shape here.
  */
 export type ExplorationForeignKey = {
 	sourceColumn: string;
@@ -139,7 +137,7 @@ export type ExplorationLinkPathNodeDto = {
 	table_name?: string | null;
 };
 
-/** One real Neo4j relationship traversed along a term↔term path. */
+/** One relationship traversed along a term↔term path. */
 export type ExplorationLinkPathHopDto = {
 	relationship: string;
 	source: ExplorationLinkPathNodeDto;
@@ -161,18 +159,15 @@ export type ExplorationLinkPathDto = {
 
 /**
  * Server DTO for one FK column pair joining two tables in a
- * `DataGraphEdgeDto`. Unlike every other `sample_values` field in the API,
- * these two come straight off the Column node unparsed (see
- * `ForeignKeyRef` in `gsf/server/models.py`) — profiling stores them as a
- * JSON string, a catalog PATCH stores a real array, so either shape can
- * land here. Normalize with `parseSampleValues` (`@/lib/data/sample-values`)
- * before treating them as a plain string array.
+ * `DataGraphEdgeDto` (see `ForeignKeyRef` in `gsf/server/models.py`). The
+ * server renders both through `stringify_sample_values` before responding, so
+ * these always land here as a plain string array (or `null`).
  */
 export type DataGraphForeignKeyDto = {
 	source_column: string;
 	target_column: string;
-	source_sample_values: string[] | string | null;
-	target_sample_values: string[] | string | null;
+	source_sample_values: string[] | null;
+	target_sample_values: string[] | null;
 };
 
 /** Server DTO for a data-layer Exploration edge (Table ↔ Table). */
@@ -200,7 +195,7 @@ export type TableExplorationDetails = {
 		name: string;
 		description: string | null;
 		/**
-		 * The underlying Neo4j relationship type(s) connecting this term to the
+		 * The relationship kind(s) connecting this term to the
 		 * table (e.g. `['REPRESENTS']`, `['HAS_ATTRIBUTE', 'SEMANTIC_FK']`) —
 		 * shown as a label on the expansion edge, mirroring
 		 * `ExplorationLink.relationshipTypes`.
@@ -222,7 +217,7 @@ export type TermExplorationDetails = {
 		schema_id: string | null;
 		schema_name: string | null;
 		/**
-		 * The underlying Neo4j relationship type(s) connecting this table to
+		 * The relationship kind(s) connecting this table to
 		 * the term — mirrors `TableExplorationDetails.terms[].relationship_types`,
 		 * just walked from the other end.
 		 */
@@ -249,7 +244,7 @@ export type ColumnExplorationDetails = {
 		id: string;
 		name: string | null;
 		description: string | null;
-		/** The underlying Neo4j relationship type — `HAS_ATTRIBUTE` or `SEMANTIC_FK`. */
+		/** The relationship kind — `HAS_ATTRIBUTE` or `SEMANTIC_FK`. */
 		relationship_type: string | null;
 	} | null;
 	foreign_key_column: {
@@ -332,9 +327,8 @@ export type SqlAttributeExplorationDetails = {
  * every column a parsed query references), enriched with each column's
  * owning Table/Schema/Database ids and names so it can be grafted onto the
  * graph as a fully expandable Column node. `tables` is every visible Table
- * the Sql node's own `SQL` edges reach directly — the same edge Neo4j
- * Browser itself shows expanding a `Sql` node (e.g.
- * `query_...-[:SQL]->orders`) — enriched with each table's owning
+ * the Sql node's own `SQL` edges reach directly — one hop out from the
+ * statement — enriched with each table's owning
  * Schema/Database ids and names so it can be grafted on as a fully
  * expandable Table node, same as `expandTermNode`'s own Table neighbours.
  * `sql_attributes` is every visible SqlAttribute that backs this same Sql
@@ -468,7 +462,7 @@ export type ExpansionEntity = {
 	 */
 	dataType?: string;
 	/**
-	 * A `columnAttribute` entity's own underlying Neo4j relationship type to
+	 * A `columnAttribute` entity's own relationship kind to
 	 * its owning Column — `HAS_ATTRIBUTE` or `SEMANTIC_FK` (see
 	 * `expandColumnNode`'s own `column_attribute.relationship_type`) —
 	 * shown on `ActiveExpansionCard` so an FK-shaped attribute (like
@@ -486,7 +480,7 @@ export type ExpansionEntity = {
 	sqlText?: string;
 	/**
 	 * A `connection` entity's own `ExplorationLink.relationshipTypes` — the
-	 * underlying Neo4j relationship type(s) (`REPRESENTS`, `HAS_ATTRIBUTE`,
+	 * relationship kind(s) (`REPRESENTS`, `HAS_ATTRIBUTE`,
 	 * `SEMANTIC_FK`) reaching the two terms' shared table, same as drawn on
 	 * the Semantic-layer edge itself. `undefined` for every other kind.
 	 */

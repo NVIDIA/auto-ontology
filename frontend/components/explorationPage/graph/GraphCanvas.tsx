@@ -32,7 +32,7 @@ export type HoveredNode = {
 // A node's border reuses its own icon accent color (rather than a single
 // neutral outline for every kind) so the ring reads as "this node's own
 // color, just more saturated" instead of a generic UI chrome line — the same
-// pastel-fill/vivid-accent pairing Neo4j Browser uses for its node styling.
+// pastel-fill/vivid-accent pairing this file uses throughout.
 // `NODE_TYPE_ACCENT_COLOR` lives in `nodeTypeColors.ts` (rather than here)
 // so `ExplorationView.tsx`'s own "Viewing: ..." legend can color its
 // per-kind swatches with these exact same values too, without a
@@ -69,8 +69,8 @@ const NodeCircleBorderProgram = createNodeCompoundProgram([NodeCircleProgram, No
 // drawn on — purely so a hovered node visually sits in front of any
 // overlapping siblings. For Sigma's own default label placement (beside the
 // node) that second draw doesn't matter, but `drawNodeLabel` below instead
-// draws each caption centered *inside* its own node's circle (à la Neo4j
-// Browser) — so redrawing that same opaque disc a second time, on a layer
+// draws each caption centered *inside* its own node's circle — so
+// redrawing that same opaque disc a second time, on a layer
 // above the one the caption was just drawn on, blots it right back out, in
 // the exact place users look right when they mouse over a node. Bringing
 // hovered/active nodes to the front is already handled by the `zIndex`
@@ -103,8 +103,8 @@ class NoopNodeProgram {
 // `dark:` variants — node/label colors have to be swapped by hand based on
 // the OS-level color scheme instead. Light values are pale tints of each
 // type's own `NODE_TYPE_ACCENT_COLOR` hue (the same pastel-fill/vivid-accent
-// node styling Neo4j Browser uses, just with this file's own more evenly
-// spread hues — see that module's own doc comment); dark values are muted
+// node styling used throughout, with evenly spread hues — see that module's
+// own doc comment); dark values are muted
 // tints of the same hues (rather than that same near-white pastel) so nodes
 // read as colored shapes instead of glowing white blobs against a black
 // canvas.
@@ -544,8 +544,8 @@ const buildGraphologyGraph = (
 		// A Data-layer (Table↔Table) edge used to open its own `LinkPathCard`
 		// with the SQL query/foreign key behind it — no longer wanted, so
 		// these are drawn as plain `structural` edges instead: click-inert,
-		// with no pointer cursor on hover (see `handleClickEdge`/
-		// `handleEnterEdge` below). A Semantic-layer (Term↔Term) edge still
+		// so hover keeps the canvas `grab` cursor rather than `pointer` (see
+		// `syncCanvasCursor`). A Semantic-layer (Term↔Term) edge still
 		// opens its own `connection` card, so it keeps the `relationship` kind.
 		const isDataLayerEdge = graphology.getNodeAttribute(link.source, 'kind') === 'table';
 		graphology.addEdgeWithKey(`${link.source}:${link.target}`, link.source, link.target, {
@@ -709,8 +709,8 @@ export const GraphCanvas = ({
 		};
 
 		// The persistent (non-hover) caption: always drawn, centered *inside*
-		// the node's own circle (à la Neo4j Browser) rather than Sigma's
-		// default placement to the right of it. A stroked halo behind the
+		// the node's own circle rather than Sigma's default placement to
+		// the right of it. A stroked halo behind the
 		// fill keeps the caption legible over the node's own color and icon
 		// artwork underneath, the same trick used for text labels on maps.
 		const drawNodeLabel: NodeLabelDrawingFunction<GraphNodeAttributes, GraphEdgeAttributes> = (
@@ -730,8 +730,7 @@ export const GraphCanvas = ({
 			context.textBaseline = 'middle';
 
 			// Truncated with an ellipsis instead of letting long names spill
-			// past the node's own circle, mirroring how Neo4j clips captions
-			// that don't fit inside their node.
+			// past the node's own circle.
 			const maxWidth = data.size * 1.6;
 			let { label } = data;
 			if (context.measureText(label).width > maxWidth) {
@@ -956,31 +955,25 @@ export const GraphCanvas = ({
 		// allowed to re-freeze `customBBox`. Only ever armed right before a
 		// `simulation...restart()` call that grows/shrinks the *graph itself*
 		// (the initial layout, or `addExpansion`/`removeExpansion` below) —
-		// never by a drag's own `alphaTarget(0.3)` reheat (see
-		// `handleDownNode`, which explicitly disarms it). Repositioning one
-		// node still nudges its neighbours (and, transitively, faint amounts
-		// of the whole graph) toward a new equilibrium as it settles, which
-		// shifts this *live* extent by a few pixels even with nothing
-		// structurally new to fit — re-freezing to that slightly-different
-		// box on every single drag was what made the entire canvas visibly
-		// hop by a few pixels a moment after every drop, even though only
-		// one node had actually moved.
+		// never by a node drag. Dragging pins every node and stops the
+		// simulation (see `handleDownNode`), so a drop has nothing new to
+		// fit; re-freezing the box there would still hop the canvas if the
+		// dragged node had been pulled past the last-frozen extent.
 		let bboxFreezeArmed = true;
 
-		// Computed by hand (rather than `renderer.getBBox()`, which is just
-		// Sigma's own live extent over *every* node) so that even when armed
-		// above, re-freezing deliberately excludes any currently-pinned
-		// (`fx`/`fy` set) node: one dropped far from the rest of the graph
-		// would otherwise balloon the box out to include it, on top of the
-		// disarming above.
+		// Isolated drag pins every existing node (see `handleDownNode`), so
+		// filtering to unpinned nodes would after an expansion fit only the
+		// handful of newly grafted children and zoom the canvas onto that
+		// cluster. Always use the full live extent; `setCustomBBox` is not
+		// applied during drag, so a node pulled off-frame still doesn't
+		// rescale the canvas live. `resetExtent` remains the way to bring
+		// it back.
 		const computeStableBBox = (): { x: [number, number]; y: [number, number] } | null => {
-			const unpinned = simNodes.filter((node) => node.fx == null && node.fy == null);
-			const source = unpinned.length > 0 ? unpinned : simNodes;
 			let minX = Infinity;
 			let maxX = -Infinity;
 			let minY = Infinity;
 			let maxY = -Infinity;
-			source.forEach((node) => {
+			simNodes.forEach((node) => {
 				if (node.x == null || node.y == null) return;
 				minX = Math.min(minX, node.x);
 				maxX = Math.max(maxX, node.x);
@@ -1030,27 +1023,13 @@ export const GraphCanvas = ({
 		// d3-force's own default `alphaDecay` (`1 - alphaMin^(1/300)`, ≈0.0228)
 		// gives a reheat ~300 ticks (~4-5s) to fully cool — plenty of time for
 		// the charge/collision forces to finish re-relaxing a newly-grown or
-		// -shrunk graph after `addExpansion`/`removeExpansion` below, so that
-		// case deliberately keeps it. A drag's own reheat has nothing new to
-		// relax, though — just one manually-placed node's neighbours nudging
-		// back into equilibrium around it — so it's set to decay much faster
-		// (`handleDownNode` below) purely so that gentle post-drag settling
-		// actually finishes in a second or so instead of visibly lingering.
+		// -shrunk graph after `addExpansion`/`removeExpansion` below.
 		const DEFAULT_ALPHA_DECAY = 1 - 0.001 ** (1 / 300);
-		const DRAG_ALPHA_DECAY = 0.06;
 
 		const simulation = forceSimulation<SimNode>(simNodes)
 			// More damping than d3-force's own default (0.4) so a reheated
 			// simulation settles into place rather than visibly overshooting
-			// and bouncing back a few times first. Deliberately *not* paired
-			// with a faster `alphaDecay` here — that also speeds up how long
-			// an `addExpansion`/`removeExpansion` reheat (see `DRAG_ALPHA_DECAY`
-			// below for why only a *drag's* own reheat wants that) gets to
-			// actually run, cutting the charge/collision forces' work short
-			// before they'd naturally finish spreading the newly-grown graph
-			// back out — the layout would visibly end up more cramped/"zoomed
-			// in" than before the expansion, simply because it never got to
-			// fully re-relax.
+			// and bouncing back a few times first.
 			.velocityDecay(0.55)
 			// Stronger repulsion (and a proportionally longer reach) plus a
 			// wider collision margin than the link `distance` above alone
@@ -1090,10 +1069,10 @@ export const GraphCanvas = ({
 			// `computeStableBBox` comments above) every time the physics
 			// naturally comes to rest with a structural change armed — the
 			// initial layout, or an `addExpansion`/`removeExpansion` grows or
-			// shrinks the graph — but never for a drag's own reheat decaying
-			// back down. Doing it only here (never mid-tick) is what keeps the
-			// canvas's scale/pan rock steady while nodes are actually moving,
-			// while still letting it grow to fit legitimately new content.
+			// shrinks the graph — but never after a drag. Doing it only here
+			// (never mid-tick) is what keeps the canvas's scale/pan rock
+			// steady while nodes are actually moving, while still letting it
+			// grow to fit legitimately new content.
 			.on('end', () => {
 				if (!bboxFreezeArmed) return;
 				animateCustomBBoxTo(computeStableBBox() ?? renderer.getBBox());
@@ -1101,39 +1080,136 @@ export const GraphCanvas = ({
 			});
 
 		let draggedNode: string | null = null;
+		// Empty-canvas pan (mousedown on the stage, not a node). Distinct
+		// from `draggedNode`: that one moves a single term, this one slides
+		// the whole camera. Cursor language matches the two gestures —
+		// `pointer` on a node ("this is clickable/draggable"), `grab` /
+		// `grabbing` on the background ("you can pan the view"), never
+		// `pointer` on empty space, which would promise a click target.
+		let isPanning = false;
 
-		const handleDownNode = ({ node }: { node: string }) => {
+		const setCanvasCursor = (cursor: string) => {
+			if (containerRef.current) containerRef.current.style.cursor = cursor;
+		};
+		const syncCanvasCursor = () => {
+			if (draggedNode != null) {
+				setCanvasCursor('pointer');
+				return;
+			}
+			if (isPanning) {
+				setCanvasCursor('grabbing');
+				return;
+			}
+			if (hoveredNodeIdRef.current != null) {
+				setCanvasCursor('pointer');
+				return;
+			}
+			if (
+				hoveredEdgeIdRef.current != null &&
+				graphology.hasEdge(hoveredEdgeIdRef.current) &&
+				graphology.getEdgeAttribute(hoveredEdgeIdRef.current, 'kind') === 'relationship'
+			) {
+				setCanvasCursor('pointer');
+				return;
+			}
+			setCanvasCursor('grab');
+		};
+
+		const handleDownNode = ({ node, event }: { node: string; event: MouseCoords }) => {
+			// Stop Sigma treating this as a camera pan — otherwise the whole
+			// graph slides with the cursor even when node positions are frozen.
+			event.preventSigmaDefault();
 			draggedNode = node;
-			const simNode = simNodesById.get(node);
-			if (simNode) {
+			// Pin *every* node at its current position and stop the simulation
+			// for the whole drag. The previous reheat-on-drag let link /
+			// charge forces pull neighbours (and, transitively, the rest of
+			// the graph) along with the dragged node — first-degree children
+			// of a Term especially, since they're on a short, strong edge.
+			// Isolated drag is what the exploration-page review asked for:
+			// only the grabbed node moves, everyone else stays put. Leaving
+			// `fx`/`fy` set after drop (see `endDrag`) keeps that freeze so
+			// nothing settles into a new equilibrium the instant the mouse
+			// is released. Newly grafted expansion nodes stay unpinned until
+			// the next drag, so `addExpansion` can still lay them out.
+			simNodes.forEach((simNode) => {
 				simNode.fx = simNode.x;
 				simNode.fy = simNode.y;
-			}
-			// Reheats the simulation (like d3's standard drag pattern) so the
-			// dragged node's neighbours keep reacting live for as long as it's
-			// held, the same way Neo4j Browser's physics behaves, instead of
-			// staying frozen at whatever alpha the initial layout settled to.
-			// Explicitly disarmed (see `bboxFreezeArmed`'s own comment) so
-			// *this* reheat's own eventual settle never re-freezes the bbox.
+				simNode.vx = 0;
+				simNode.vy = 0;
+			});
 			bboxFreezeArmed = false;
-			simulation.alphaDecay(DRAG_ALPHA_DECAY).alphaTarget(0.3).restart();
+			simulation.alphaTarget(0).alpha(0).stop();
+			// Camera pan is a second, independent gesture on the same
+			// mousedown+move. Even with the per-move `preventSigmaDefault()`
+			// that `handleMoveBody` below issues, one un-prevented move (mouse
+			// slipping off the node disc, or onto a chrome overlay at the
+			// canvas edge) would slide the *whole* graph. Lock panning for the
+			// duration of the node drag.
+			renderer.getCamera().enabledPanning = false;
+			syncCanvasCursor();
 		};
-		const stopDrag = () => {
-			// Deliberately leaves `fx`/`fy` set (rather than nulling them back
-			// out) so the node stays pinned exactly where it was dropped,
-			// mirroring Neo4j Browser — without this, the layout forces would
-			// immediately pull it back toward wherever it "wants" to be,
-			// undoing the manual placement the instant the mouse is released.
-			draggedNode = null;
-			simulation.alphaTarget(0);
+		const handleDownStage = () => {
+			isPanning = true;
+			syncCanvasCursor();
+		};
+		// Single funnel for "the gesture is over": the real `mouseup` plus the
+		// recovery paths below, for releases the page never sees at all.
+		// Idempotent, so calling it spuriously costs nothing.
+		const endDrag = () => {
+			const wasNodeDrag = draggedNode != null;
+			isPanning = false;
+			// Sigma's captor bails out of its own `handleUp` unless
+			// `isMouseDown` is set, and pans the camera on every move while it
+			// stays set. On the recovery paths it never got its `mouseup`
+			// either, so clear it here or the graph slides along with a cursor
+			// that isn't pressing anything. No-op after a real `mouseup`,
+			// which clears the flag before emitting.
+			renderer.getMouseCaptor().isMouseDown = false;
+			if (wasNodeDrag) {
+				// Deliberately leaves every node's `fx`/`fy` set (rather than
+				// nulling the non-dragged ones back out) so the rest of the graph
+				// cannot start sliding toward a new equilibrium after drop.
+				draggedNode = null;
+				renderer.getCamera().enabledPanning = true;
+				renderer.refresh();
+			}
+			syncCanvasCursor();
 		};
 		const handleMoveBody = (coords: MouseCoords) => {
+			// Also bound on `document`, so this fires for the move back *into*
+			// the page after a release the page never saw — the button let go
+			// outside the browser window delivers no `mouseup`, and no `blur`
+			// either, since focus never left. No button held while a gesture is
+			// still armed is the earliest available evidence that it ended.
+			const { original } = coords;
+			if ('buttons' in original && original.buttons === 0) {
+				if (draggedNode != null || isPanning) endDrag();
+				return;
+			}
 			if (draggedNode == null) return;
 			const simNode = simNodesById.get(draggedNode);
 			if (!simNode) return;
 			const position = renderer.viewportToGraph({ x: coords.x, y: coords.y });
 			simNode.fx = position.x;
 			simNode.fy = position.y;
+			simNode.x = position.x;
+			simNode.y = position.y;
+			// The simulation is stopped for the drag, so the `'tick'` handler
+			// above will not copy this over — write the live graphology
+			// position ourselves. `partialGraph` + `skipIndexation` updates
+			// only this node and its edges: a full `refresh()` would re-run
+			// `process()`, recompute `nodeExtent` from the dragged-out
+			// position, and (if `customBBox` isn't frozen yet) rescale the
+			// entire canvas every frame — the "whole graph follows the node
+			// to the border" glitch.
+			graphology.mergeNodeAttributes(draggedNode, { x: position.x, y: position.y });
+			renderer.refresh({
+				skipIndexation: true,
+				partialGraph: {
+					nodes: [draggedNode],
+					edges: graphology.hasNode(draggedNode) ? graphology.edges(draggedNode) : [],
+				},
+			});
 			coords.preventSigmaDefault();
 		};
 
@@ -1427,6 +1503,7 @@ export const GraphCanvas = ({
 		};
 		const handleEnterNode = ({ node, event }: { node: string; event: MouseCoords }) => {
 			hoveredNodeIdRef.current = node;
+			syncCanvasCursor();
 			const displayData = renderer.getNodeDisplayData(node);
 			const radius = displayData ? renderer.scaleSize(displayData.size) : 0;
 			onHoverNode({ id: node, x: event.x + radius + 8, y: event.y + radius + 8 });
@@ -1434,24 +1511,15 @@ export const GraphCanvas = ({
 		const handleLeaveNode = () => {
 			hoveredNodeIdRef.current = null;
 			onHoverNode(null);
+			syncCanvasCursor();
 		};
 		const handleEnterEdge = ({ edge }: { edge: string }) => {
 			hoveredEdgeIdRef.current = edge;
-			// Only a `relationship` edge is actually clickable (see
-			// `GraphEdgeAttributes.kind`'s own comment) — a `structural` one
-			// (table→schema/column/term) is click-inert, so the cursor stays
-			// the default arrow over those instead of falsely promising a
-			// click will do something.
-			if (
-				containerRef.current &&
-				graphology.getEdgeAttribute(edge, 'kind') === 'relationship'
-			) {
-				containerRef.current.style.cursor = 'pointer';
-			}
+			syncCanvasCursor();
 		};
 		const handleLeaveEdge = () => {
 			hoveredEdgeIdRef.current = null;
-			if (containerRef.current) containerRef.current.style.cursor = '';
+			syncCanvasCursor();
 		};
 		const handleCameraUpdated = () => {
 			onHoverNode(null);
@@ -1477,13 +1545,16 @@ export const GraphCanvas = ({
 			}
 			if (hoveredEdgeIdRef.current != null) {
 				hoveredEdgeIdRef.current = null;
-				if (containerRef.current) containerRef.current.style.cursor = '';
 				staleHoverCleared = true;
 			}
-			if (staleHoverCleared) renderer.refresh();
+			if (staleHoverCleared) {
+				syncCanvasCursor();
+				renderer.refresh();
+			}
 		};
 
 		renderer.on('downNode', handleDownNode);
+		renderer.on('downStage', handleDownStage);
 		renderer.on('clickStage', handleClickStage);
 		renderer.on('clickNode', handleClickNode);
 		renderer.on('doubleClickNode', handleDoubleClickNode);
@@ -1493,8 +1564,21 @@ export const GraphCanvas = ({
 		renderer.on('enterEdge', handleEnterEdge);
 		renderer.on('leaveEdge', handleLeaveEdge);
 		renderer.getMouseCaptor().on('mousemovebody', handleMoveBody);
-		renderer.getMouseCaptor().on('mouseup', stopDrag);
-		renderer.getMouseCaptor().on('mouseleave', stopDrag);
+		// mouseup is bound on `document` inside Sigma's captor, so a release
+		// outside the canvas still drops the node. Deliberately *not* also
+		// listening to `mouseleave`: treating "cursor hit the canvas edge /
+		// a chrome overlay" as a drop cancelled the drag and let the next
+		// move pan the camera, which is the "graph goes weird at the border"
+		// bug.
+		renderer.getMouseCaptor().on('mouseup', endDrag);
+		// Alt-tabbing mid-gesture (or anything else that pulls focus away:
+		// devtools, an OS dialog) means the eventual release lands in another
+		// window and no `mouseup` ever reaches the captor. Without this, a node
+		// drag leaves `enabledPanning` `false` for the rest of the component's
+		// life, and a stage pan leaves `isPanning` — hence a "grabbing" cursor
+		// — stuck the same way.
+		const handleWindowBlur = () => endDrag();
+		window.addEventListener('blur', handleWindowBlur);
 		renderer.getCamera().on('updated', handleCameraUpdated);
 
 		// The graph starts from a random scatter (see `buildGraphologyGraph`
@@ -1552,6 +1636,7 @@ export const GraphCanvas = ({
 				containerRef.current.style.transition = 'opacity 300ms ease-out';
 				containerRef.current.style.opacity = '1';
 				containerRef.current.style.pointerEvents = 'auto';
+				syncCanvasCursor();
 			}
 		}, 1200);
 
@@ -1588,10 +1673,6 @@ export const GraphCanvas = ({
 			getCamera: () => renderer.getCamera(),
 			refresh: () => renderer.refresh(),
 			resetExtent: () => {
-				// Deliberately `renderer.getBBox()` (the live extent over *every*
-				// node) rather than `computeStableBBox()` above, which excludes
-				// pinned nodes on purpose — here a dragged/pinned node going
-				// off-frame is exactly the case this exists to recover from.
 				renderer.setCustomBBox(renderer.getBBox());
 				renderer.refresh();
 			},
@@ -1604,6 +1685,7 @@ export const GraphCanvas = ({
 			window.clearTimeout(centerTimeout);
 			if (bboxAnimationFrame != null) cancelAnimationFrame(bboxAnimationFrame);
 			colorSchemeQuery.removeEventListener('change', handleColorSchemeChange);
+			window.removeEventListener('blur', handleWindowBlur);
 			resizeObserver.disconnect();
 			onControllerChange(null);
 			onHoverNode(null);

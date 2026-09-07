@@ -6,13 +6,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import pandas as pd
-from nemo_retriever.graph import Graph
 from nemo_retriever.common.params.models import EmbedParams
-from nemo_retriever.operators.embed.operators import _BatchEmbedActor
 from nemo_retriever.operators.vdb import IngestVdbOperator
 
+from gsf.utils.embedding import batch_embed
 from gsf.utils.model_config import resolve
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -26,11 +25,9 @@ class SemanticEmbedder:
     database_name: str
     embed_params: EmbedParams
     vdb: PostgresVDB
-    embed_graph: Graph = field(init=False)
     ingest_op: IngestVdbOperator = field(init=False)
 
     def __post_init__(self) -> None:
-        self.embed_graph = Graph() >> _BatchEmbedActor(params=self.embed_params)
         self.ingest_op = IngestVdbOperator(vdb=self.vdb)
 
     _SIMILARITY_THRESHOLD = 0.7
@@ -84,7 +81,7 @@ class SemanticEmbedder:
         ``term`` entries: ``{"name", "description", "id"}``.
         ``attrs`` entries include ``name``, ``term_name``, ``source_column``,
         ``description``, ``id``, and the owning table metadata.
-        ``id`` is the Neo4j node ``id`` property (UUID) and, when present, lands
+        ``id`` is the catalog ``id`` (UUID) and, when present, lands
         in the embedded row's metadata.
         Returns the number of rows actually written to the VDB.
         """
@@ -92,8 +89,7 @@ class SemanticEmbedder:
         if not rows:
             return 0
 
-        results = self.embed_graph.execute(pd.DataFrame(rows))
-        embedded_df = results[0] if results else None
+        embedded_df = batch_embed(rows, self.embed_params)
         if embedded_df is None or embedded_df.empty:
             logger.warning(
                 "Inline embed produced no rows for Term %s", term.get("name")
@@ -152,7 +148,7 @@ def build_semantic_embedder(
 def embed_all_semantic_nodes(
     embedder: SemanticEmbedder,
 ) -> int:
-    """Embed every Term + ColumnAttribute currently in Neo4j in a single batch.
+    """Embed every Term + ColumnAttribute currently in the store in a single batch.
 
     Fetches all semantic nodes, builds one combined DataFrame, makes a single
     HTTP call to the embed endpoint, and writes all results to the VDB in one
@@ -196,8 +192,7 @@ def embed_all_semantic_nodes(
         logger.info("embed_all_semantic_nodes: no rows to embed")
         return 0
 
-    results = embedder.embed_graph.execute(pd.DataFrame(all_rows))
-    embedded_df = results[0] if results else None
+    embedded_df = batch_embed(all_rows, embedder.embed_params)
     if embedded_df is None or embedded_df.empty:
         logger.warning("embed_all_semantic_nodes: embed produced no rows")
         return 0
@@ -218,20 +213,12 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: str | list[Any] | None) -> str:
+def _format_sample_values(raw: Any) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
-    if not raw:
+    values = stringify_sample_values(raw, max_len=30)
+    if not values:
         return ""
-    try:
-        import json
-
-        values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
-        if not non_null:
-            return ""
-        return " Sample values: " + ", ".join(non_null) + "."
-    except Exception:
-        return ""
+    return " Sample values: " + ", ".join(values) + "."
 
 
 def _build_rows(

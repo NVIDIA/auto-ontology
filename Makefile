@@ -68,6 +68,11 @@ help:
 	@echo "  make publish     Build + push backend image"
 	@echo "  make publish-frontend    Build + push frontend image"
 	@echo "  make login NGC_TOKEN=... docker login nvcr.io via NGC API token"
+	@echo ""
+	@echo "Schema targets (backend owns the \`gsf\` schema; Prisma owns \`public\`):"
+	@echo "  make migrate             Apply Alembic migrations (alembic upgrade head)"
+	@echo "  make migrate-check       Fail if the schema has drifted from the metadata"
+	@echo "  make migrate-revision m=\"...\"  Autogenerate a revision from gsf/dal/schema.py"
 	@echo
 	@echo "Required for publish*: REGISTRY=nvcr.io/<org>/<team>"
 	@echo "Current REGISTRY=$(REGISTRY) TAG=$(TAG) NEMO=$(NEMO)"
@@ -114,3 +119,23 @@ require-registry:
 	  echo "       e.g. make publish REGISTRY=nvcr.io/nvidian/sw-gsf"; \
 	  exit 2; \
 	fi
+
+# --- Schema migrations -------------------------------------------------
+# The backend owns the `gsf` Postgres schema. Prisma owns `public` and migrates
+# separately (frontend/prisma/migrate.sh); the two are independent.
+
+migrate:
+	uv run alembic upgrade head
+
+# Fails when gsf/dal/schema.py and the database disagree. Run this in CI:
+# a schema change committed without its migration is invisible until deploy.
+migrate-check:
+	uv run alembic check
+
+migrate-revision:
+	@test -n "$(m)" || (echo 'usage: make migrate-revision m="what changed"' >&2; exit 2)
+	uv run alembic revision --autogenerate -m "$(m)"
+
+.PHONY: migrate migrate-check migrate-revision
+
+

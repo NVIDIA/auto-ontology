@@ -57,7 +57,7 @@ _cache: dict[tuple[str, str], _CachedToken] = {}
 _cache_lock = threading.Lock()
 
 # --- SSO-federation flag cache -----------------------------------------------
-# any_connection_uses_sso_federation() queries Neo4j + Vault on every call.
+# any_connection_uses_sso_federation() queries the catalog + Vault on every call.
 # Cache the result for a short window so the check is cheap on the chat hot
 # path. 30 s means a toggled connection is effective within half a minute.
 _SSO_FEDERATION_TTL_S = 30.0
@@ -87,7 +87,7 @@ def any_connection_uses_sso_federation() -> bool:
     token rather than taking chat down.
 
     The result is cached for :data:`_SSO_FEDERATION_TTL_S` seconds to avoid a
-    Neo4j + Vault round-trip on every chat completion request.
+    catalog + Vault round-trip on every chat completion request.
     """
     global _sso_federation_result, _sso_federation_expires
 

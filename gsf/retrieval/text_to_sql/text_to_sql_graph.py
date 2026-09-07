@@ -4,6 +4,7 @@
 
 import logging
 import os
+from typing import Any, Callable, Dict
 
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableLambda
@@ -50,13 +51,27 @@ from gsf.retrieval.text_to_sql.db_probe.config import (
 
 logger = logging.getLogger(__name__)
 
+# Tag on the payload a node writes to the custom stream channel as it starts.
+# ``stream_agent_response`` turns it into the client's "this step is running
+# now" event; keep the two in step.
+NODE_START_EVENT = "step_start"
+
+# Reconstructions after which ``route_sql_validation`` stops re-validating
+# intent and routes straight from syntax validation to execution. Exported
+# rather than inlined because ``stream_agent_response`` has to know the same
+# threshold to tell which node is the last gate before execution on that
+# branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
+# stop the ``sql`` event firing there.
+INTENT_VALIDATION_SKIPPED_AFTER = 5
+
 
 def route_sql_validation(state: AgentState) -> str:
     """
     Route based on SQL validation result.
 
     Handles SQL validation attempts and fallback logic:
-    - "skip_intent_validation" if SQL is valid but reconstruction_count > 5 (skip intent validation)
+    - "skip_intent_validation" if SQL is valid but reconstruction_count exceeds
+      INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
     - "fallback" after 4 attempts (try constructing from tables)
@@ -93,7 +108,7 @@ def route_sql_validation(state: AgentState) -> str:
     else:
         # SQL is valid - check if we should skip intent validation
         reconstruction_count = state["path_state"].get("reconstruction_count", 0)
-        if reconstruction_count > 5:
+        if reconstruction_count > INTENT_VALIDATION_SKIPPED_AFTER:
             logger.info(
                 f"Skipping intent validation after {reconstruction_count} reconstructions"
             )
@@ -210,12 +225,36 @@ def log_node_visit(state, node_name: str):
     logger.info(f"🔁 Node visits: {counts} | Total visits this run: {total}")
 
 
-def wrap_node_with_logging(node_name: str, fn):
+def announce_node_start(node_name: str) -> None:
+    """Tell the stream this node is starting, before it does its work.
+
+    ``app.stream()`` only yields a node's update once it has *finished*, so a
+    client driven by updates alone shows the previous node's label — a 20s
+    reconstruction appears as "Validating intent" hanging. The custom channel
+    is streamed the moment it is written, which is what makes the label track
+    the work in progress. See ``stream_agent_response``.
+
+    Best-effort: outside a streaming context there is no writer to get, and a
+    missing progress event must not take the run down with it.
+    """
+    try:
+        from langgraph.config import get_stream_writer
+
+        get_stream_writer()({"type": NODE_START_EVENT, "node": node_name})
+    except Exception:  # noqa: BLE001 — progress reporting is best-effort
+        logger.debug("No stream writer for node %s", node_name, exc_info=True)
+
+
+def wrap_node_with_logging(
+    node_name: str,
+    fn: Callable[[AgentState], Dict[str, Any]],
+) -> Callable[[AgentState], Dict[str, Any]]:
     """
     Wrap a node callable so it logs node visits automatically.
     """
 
-    def wrapped(state):
+    def wrapped(state: AgentState) -> Dict[str, Any]:
+        announce_node_start(node_name)
         log_node_visit(state, node_name)
         return fn(state)
 
@@ -479,6 +518,8 @@ def create_graph():
 
 
 __all__ = [
+    "INTENT_VALIDATION_SKIPPED_AFTER",
+    "NODE_START_EVENT",
     "TextToSQLPayload",
     "AgentState",
     "create_graph",

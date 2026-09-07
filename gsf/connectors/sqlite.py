@@ -15,8 +15,8 @@ from urllib.parse import unquote, urlparse
 
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +78,11 @@ class SQLiteDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+        """
         return "sqlite"
 
     @property
@@ -124,7 +129,7 @@ class SQLiteDatabase(SQLDatabase):
                         "table_name": table_name,
                         "column_name": name,
                         "data_type": data_type or "TEXT",
-                        "is_nullable": "NO" if notnull else "YES",
+                        "is_nullable": not notnull,
                         "ordinal_position": cid + 1,
                     }
                 )

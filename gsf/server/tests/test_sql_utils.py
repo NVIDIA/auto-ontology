@@ -14,7 +14,7 @@ import sqlglot
 from gsf.server import sql_utils
 
 
-def _connector(database_name: str, dialect: str | None) -> MagicMock:
+def _connector(database_name: str, dialect: str) -> MagicMock:
     connector = MagicMock()
     connector.database_name = database_name
     connector.dialect = dialect
@@ -47,18 +47,7 @@ def test_uses_the_matching_connector_dialect(mock_connectors: MagicMock) -> None
 
 
 @patch("gsf.server.sql_utils.get_connectors")
-def test_unrecognised_connector_dialects_are_dropped(
-    mock_connectors: MagicMock,
-) -> None:
-    mock_connectors.return_value = [_connector("retail", "not-a-dialect")]
+def test_falls_back_when_there_are_no_connectors(mock_connectors: MagicMock) -> None:
+    mock_connectors.return_value = []
 
-    assert sql_utils.get_dialects("retail") == sql_utils._DEFAULT_DIALECTS
-
-
-@patch("gsf.server.sql_utils.get_connectors")
-def test_missing_dialect_does_not_reach_the_parser(
-    mock_connectors: MagicMock,
-) -> None:
-    mock_connectors.return_value = [_connector("retail", None)]
-
-    assert sql_utils.get_dialects("retail") == sql_utils._DEFAULT_DIALECTS
+    assert sql_utils.get_dialects() == sql_utils._DEFAULT_DIALECTS

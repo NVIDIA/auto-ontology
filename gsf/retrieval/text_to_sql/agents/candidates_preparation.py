@@ -75,6 +75,10 @@ def _qualified_name(t: dict) -> str:
 
 logger = logging.getLogger(__name__)
 
+#: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
+#: wide candidate set cannot starve the rest of the request.
+_JOIN_PATH_WORKERS = 4
+
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
 # (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
@@ -174,7 +178,7 @@ class CandidatePreparationAgent(BaseAgent):
                 target_db,
             )
 
-            # --- 2. Enrich ColumnAttributes with Neo4j context and build join paths ---
+            # --- 2. Enrich ColumnAttributes with the store context and build join paths ---
             primary_attribute: dict | None = None
             attribute_join_paths: list[dict] = []
             attr_contexts: dict[str, dict] = {}
@@ -193,7 +197,7 @@ class CandidatePreparationAgent(BaseAgent):
                     database_name=target_db,
                 )
                 self.logger.info(
-                    "Fetched Neo4j context for %d/%d column attributes",
+                    "Fetched the store context for %d/%d column attributes",
                     len(attr_contexts),
                     len(attr_ids),
                 )
@@ -223,7 +227,14 @@ class CandidatePreparationAgent(BaseAgent):
                         for did, dctx in attr_contexts.items()
                         if did != anchor_id
                     ]
-                    with ThreadPoolExecutor(max_workers=len(dest_items) or 1) as pool:
+                    # Bounded, not one worker per destination. Each worker runs
+                    # find_join_path, which is several sequential checkouts from a
+                    # 10-connection pool; a wide fan-out exhausts it, and
+                    # find_join_path catches the QueuePool timeout and returns []
+                    # -- so the failure shows up as missing joins in the prompt
+                    # rather than as an error.
+                    workers = min(len(dest_items) or 1, _JOIN_PATH_WORKERS)
+                    with ThreadPoolExecutor(max_workers=workers) as pool:
                         futures = {
                             pool.submit(
                                 find_join_path, anchor_ctx["col_id"], dctx["col_id"]
@@ -302,7 +313,7 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
-        # --- 4b. Add tables referenced by custom analyses via Neo4j ---
+        # --- 4b. Add tables referenced by custom analyses via the store ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
@@ -319,7 +330,7 @@ class CandidatePreparationAgent(BaseAgent):
                 [t["name"] for t in ca_linked_tables],
             )
 
-        # --- 4c. Enrich SqlAttributes with SQL + term from Neo4j ---
+        # --- 4c. Enrich SqlAttributes with SQL + term from the store ---
         sql_attributes: list[dict] = []
         if sql_attributes_raw:
             sa_ids = [
@@ -328,7 +339,7 @@ class CandidatePreparationAgent(BaseAgent):
             sa_ids = list(dict.fromkeys(sa_ids))
             sql_attributes = fetch_sql_attributes_with_sql(sa_ids)
             self.logger.info(
-                "Fetched %d/%d SqlAttribute details from Neo4j",
+                "Fetched %d/%d SqlAttribute details from the store",
                 len(sql_attributes),
                 len(sa_ids),
             )

@@ -9,7 +9,7 @@ scan CSV/Parquet/JSON files directly from the filesystem.  No server or Docker
 service is required — DuckDB runs fully in-process.
 
 This is the reference implementation of
-:class:`~nemo_retriever.tabular_data.sql_database.SQLDatabase`.
+:class:`~gsf.connectors.base.SQLDatabase`.
 
 Example
 -------
@@ -32,7 +32,7 @@ import duckdb
 import pandas as pd
 from typing import Optional
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,11 @@ class DuckDBDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+        """
         return "duckdb"
 
     @property
@@ -117,7 +122,7 @@ class DuckDBDatabase(SQLDatabase):
                 table_name,
                 column_name,
                 data_type,
-                is_nullable,
+                is_nullable = 'YES' AS is_nullable,
                 ordinal_position
             FROM information_schema.columns
             ORDER BY table_schema, table_name, ordinal_position

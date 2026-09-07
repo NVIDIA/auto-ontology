@@ -11,7 +11,7 @@ import os
 import re
 from urllib.parse import urlparse
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.databricks import DatabricksDatabase
@@ -22,9 +22,23 @@ from gsf.connectors.mysql import MySQLDatabase
 from gsf.connectors.postgres import PostgresDatabase
 from gsf.connectors.snowflake import SnowflakeDatabase
 from gsf.connectors.sqlite import SQLiteDatabase
+from gsf.connectors.trino import TrinoDatabase
 
 logger = logging.getLogger(__name__)
 
+# Every connector here MUST expose a ``dialect`` that sqlglot recognises
+# (one of ``sqlglot.dialects.DIALECTS``). Callers pass ``connector.dialect``
+# straight into ``sqlglot.parse_one(read=...)`` / ``Expression.sql(dialect=...)``
+# with no translation layer in between, and sqlglot raises on an unknown
+# dialect *name* before it ever looks at the SQL — so a bad name is a hard
+# error, not a silent fall back to the generic parser.
+#
+# An engine sqlglot has no dialect for must map itself onto the closest one it
+# does have; see ``HeavyDBDatabase.dialect``, which reports ``"postgres"``.
+# ``test_registry_dialects.py`` enforces this.
+#
+# Note the keys below are connection-string schemes, NOT dialects: ``postgresql``,
+# ``heavydb`` and ``kyuubi`` are valid keys but none is a sqlglot dialect name.
 CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "postgres": PostgresDatabase,
     "postgresql": PostgresDatabase,
@@ -35,6 +49,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
     "sqlite": SQLiteDatabase,
+    "trino": TrinoDatabase,
 }
 
 _connectors: list[SQLDatabase] | None = None
@@ -92,7 +107,7 @@ def create_connector(
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
     connectors that support schema filtering (currently Databricks, Snowflake,
-    and Kyuubi); for others it is ignored so their behaviour is unchanged.
+    Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
     """
     try:
         parsed = urlparse(connection_string)
@@ -114,6 +129,7 @@ def create_connector(
             DatabricksDatabase,
             SnowflakeDatabase,
             KyuubiDatabase,
+            TrinoDatabase,
         ):
             return connector_class(connection_string, schemas=schemas)
         return connector_class(connection_string)
@@ -192,9 +208,9 @@ def get_connectors_for_subject_token(
 def get_connectors() -> list[SQLDatabase]:
     """Return cached connectors for all configured connections.
 
-    NeMo text-to-SQL resolves the execution connector from
+    Text-to-SQL resolves the execution connector from
     ``relevant_tables[*].database_name`` (see
-    ``nemo_retriever.tabular_data.retrieval.text_to_sql.connector_routing``).
+    ``gsf.retrieval.text_to_sql.connector_routing``).
     Each connector's ``database_name`` must therefore be unique across the
     returned list — use ``metadata_database`` on Snowflake URLs (or distinct
     physical databases) when wiring multiple connections.
@@ -205,7 +221,7 @@ def get_connectors() -> list[SQLDatabase]:
 
         # Each spec is (connection_string, schema_allowlist). The schema filter
         # is honoured only during ingestion introspection (Databricks,
-        # Snowflake, and Kyuubi); it is inert for retrieval, which executes SQL
+        # Snowflake, Kyuubi, and Trino); it is inert for retrieval, which executes SQL
         # rather than introspecting.
         try:
             specs: list[tuple[str, list[str] | None]] = [
@@ -213,7 +229,7 @@ def get_connectors() -> list[SQLDatabase]:
                 for conn in list_connections()
             ]
         except Exception:
-            logger.exception("Failed to load connection strings from Neo4j DB nodes")
+            logger.exception("Failed to load connection strings from the catalog")
             specs = []
         if not specs:
             raw = os.environ.get("CONNECTION_STRINGS", "")

@@ -2,8 +2,22 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { Suspense } from 'react';
 import { AnalysisView } from '@/components/analysisPage';
+import { SkeletonCard } from '@/common/Skeleton';
 
 export default function AnalysisPage() {
-	return <AnalysisView />;
+	return (
+		<Suspense
+			fallback={
+				<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
+					<div className="flex-1 px-6 py-6">
+						<SkeletonCard rows={4} />
+					</div>
+				</div>
+			}
+		>
+			<AnalysisView />
+		</Suspense>
+	);
 }

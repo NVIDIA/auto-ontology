@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 
 def resolve_target_database_name(
@@ -79,6 +79,17 @@ def resolve_connector_from_tables(
         database_name = str(table.get("database_name") or "").strip()
         if database_name:
             table_database_names.add(database_name)
+
+    if len(table_database_names) > 1:
+        # Picking one arbitrarily would run the statement against the wrong
+        # database. `test_rejects_cross_database_tables` has asserted this
+        # message since #179; the check itself was never written, so the test
+        # failed on main as well.
+        raise ValueError(
+            "Relevant tables span multiple databases "
+            f"({', '.join(sorted(table_database_names))}); "
+            "a single statement cannot be routed across them."
+        )
 
     if table_database_names:
         database_name = next(iter(table_database_names))

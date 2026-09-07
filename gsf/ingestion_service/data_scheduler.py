@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import timedelta
 
 from gsf.connectors.registry import get_connectors, invalidate_connectors_cache
@@ -50,10 +51,34 @@ class DataScheduler(IntervalScheduler):
             return
 
         logger.info("ingest: starting (%s connection(s))", len(connectors))
+        started = time.monotonic()
+        succeeded = failed = 0
         for connector in connectors:
             database_name = getattr(connector, "database_name", "?")
             try:
                 await asyncio.to_thread(run_ingest, connector)
+                succeeded += 1
             except Exception:
+                failed += 1
                 logger.exception("ingest: failed for connection %s", database_name)
-        logger.info("ingest: finished")
+
+        # A per-connection failure is caught above so the remaining connections
+        # still run, which means reaching this point says nothing on its own.
+        # Report the tally rather than a bare "finished": the old line was
+        # indistinguishable whether all connections ingested or all of them threw.
+        elapsed = time.monotonic() - started
+        if failed:
+            logger.warning(
+                "ingest: finished with errors — %d of %d connection(s) succeeded, "
+                "%d failed in %.1fs",
+                succeeded,
+                len(connectors),
+                failed,
+                elapsed,
+            )
+        else:
+            logger.info(
+                "ingest: finished successfully — %d connection(s) ingested in %.1fs",
+                succeeded,
+                elapsed,
+            )

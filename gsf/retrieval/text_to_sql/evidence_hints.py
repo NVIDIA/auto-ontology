@@ -2,17 +2,15 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Derive short, deterministic SQL hints from BIRD-style evidence text.
+"""Derive short, deterministic SQL hints from evidence text.
 
-Only runs when the question includes an Evidence section. Returns an empty
-string when no evidence is present or no known patterns match.
+Returns an empty string when no evidence is provided or no known patterns match.
 """
 
 from __future__ import annotations
 
 import re
 
-_EVIDENCE_SPLIT = re.compile(r"\n\nEvidence:\s*", re.IGNORECASE)
 _TIME_LITERAL = re.compile(r"\b(0:\d{1,2}:\d{2})\b")
 _LIKE_M_SS = re.compile(
     r"(\w+(?:\.\w+)?)\s+LIKE\s+'M:SS%'",
@@ -39,27 +37,11 @@ _SLASH_DATE_IN_Q = re.compile(r"\b20\d{2}/\d{1,2}/\d{1,2}\b")
 
 
 def _normalize_time_for_like(literal: str) -> str | None:
-    """Map question time `0:01:54` to BIRD LIKE prefix `1:54`."""
+    """Map question time `0:01:54` to LIKE prefix `1:54`."""
     match = re.match(r"0:(\d{1,2}):(\d{2})$", literal)
     if not match:
         return None
     return f"{int(match.group(1))}:{match.group(2)}"
-
-
-def extract_evidence(question: str) -> str | None:
-    """Return the Evidence body, or None if the question has no Evidence section."""
-    if not question:
-        return None
-    parts = _EVIDENCE_SPLIT.split(question, maxsplit=1)
-    if len(parts) < 2:
-        return None
-    body = parts[1].strip()
-    return body or None
-
-
-def _question_without_evidence(question: str) -> str:
-    parts = _EVIDENCE_SPLIT.split(question, maxsplit=1)
-    return parts[0].strip()
 
 
 def _time_like_hints(evidence: str, question: str) -> list[str]:
@@ -68,7 +50,7 @@ def _time_like_hints(evidence: str, question: str) -> list[str]:
         return []
     column = col_match.group(1)
     hints: list[str] = []
-    for literal in _TIME_LITERAL.findall(_question_without_evidence(question)):
+    for literal in _TIME_LITERAL.findall(question):
         pattern = _normalize_time_for_like(literal)
         if not pattern:
             continue
@@ -99,7 +81,7 @@ def _refers_to_hints(evidence: str, *, skip_columns: set[str]) -> list[str]:
 def _table_routing_hints(evidence: str, question: str) -> list[str]:
     """Route between per-transaction vs monthly tables from evidence patterns."""
     hints: list[str] = []
-    q = _question_without_evidence(question)
+    q = question
     ql = q.lower()
     el = evidence.lower()
     has_iso_day = bool(_REPRESENTED_BY_ISO_DATE.search(evidence))
@@ -162,9 +144,8 @@ def _table_routing_hints(evidence: str, question: str) -> list[str]:
     return hints
 
 
-def build_evidence_hints_block(question: str) -> str:
+def build_evidence_hints_block(question: str, evidence: str) -> str:
     """Build a compact hint block for the SQL prompt, or '' if not applicable."""
-    evidence = extract_evidence(question)
     if not evidence:
         return ""
 
@@ -184,4 +165,4 @@ def build_evidence_hints_block(question: str) -> str:
     return "## Evidence-derived rules\n" + "\n".join(hints)
 
 
-__all__ = ["extract_evidence", "build_evidence_hints_block"]
+__all__ = ["build_evidence_hints_block"]

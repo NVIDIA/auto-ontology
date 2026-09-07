@@ -2,4 +2,4 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Custom-analysis catalog API (Neo4j) — DAL."""
+"""Custom-analysis catalog API — DAL."""

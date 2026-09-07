@@ -29,9 +29,6 @@ podAnnotations: {}
 postgresUser: gsf
 postgresPassword: ""
 postgresDatabase: gsf
-# Neo4j
-neo4jUsername: neo4j
-neo4jPassword: ""
 # pgAdmin
 pgadminEmail: admin@example.com
 pgadminPassword: admin
@@ -121,32 +118,16 @@ pgadmin:
       memory: 128Mi
 
 # ------------------------------------------------------------------
-# Neo4j
 # ------------------------------------------------------------------
-neo4j:
-  image:
-    repository: neo4j
-    tag: latest
-  service:
-    httpPort: 7474
-    boltPort: 7687
-  persistence:
-    dataSize: 5Gi
-    logsSize: 1Gi
-    pluginsSize: 1Gi
-    importSize: 1Gi
-    # Set to a specific class on clusters without a default dynamic provisioner
-    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
-    storageClassName: ""
-  resources:
-    requests:
-      cpu: 200m
-      memory: 1Gi
-
 # ------------------------------------------------------------------
 # GSF FastAPI backend
 # ------------------------------------------------------------------
 backend:
+  # The Alembic head revision this chart's image ships. The backend's
+  # wait-for-catalog-schema init container blocks until public.alembic_version
+  # matches it, so new Pods never serve against a schema the migration Job has
+  # not finished applying. Bump this with the migration, in the same commit.
+  alembicRevision: 8c3d5b17a204
   image:
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1

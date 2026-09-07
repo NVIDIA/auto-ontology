@@ -1,6 +1,11 @@
+// `frontend` only, and deliberately: `db push` reconciles every schema listed
+// here against this file, so naming `public` would hand Prisma authority over
+// GSF's own tables — it proposed dropping `alembic_version` the moment it was
+// added. GSF's schema is Alembic's (see `gsf/dal/schema.py`), and the two stay
+// out of each other's way by each listing only what it owns.
 datasource db {
   provider = "postgresql"
-  schemas  = ["public"]
+  schemas  = ["frontend"]
 }
 
 generator client {
@@ -19,7 +24,7 @@ model Conversation {
 
   @@index([user_id])
   @@map("conversations")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Message {
@@ -34,7 +39,7 @@ model Message {
 
   @@index([conversation_id, created_at])
   @@map("messages")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Prompt {
@@ -42,7 +47,7 @@ model Prompt {
   content String @default("")
 
   @@map("prompts")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // Generic key/value application settings (e.g. feature flags). Read by the
@@ -59,26 +64,7 @@ model Configuration {
   updated_at DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("configurations")
-  @@schema("public")
-}
-
-// Owned and written by GSF (Python) via psycopg — see
-// gsf/ingestion_service/history.py, which creates this table itself
-// (`CREATE TABLE IF NOT EXISTS`) rather than through a Prisma migration.
-//
-// Declared here purely so `prisma db push` recognizes it as part of the
-// desired schema and leaves it alone. Without this, `db push` treats it as
-// drift (an "unknown" table) and offers to drop it on every `pnpm dev`
-// restart — which is exactly what wiped its history previously. The
-// frontend does not read or write this table directly.
-model SemanticCompilationHistory {
-  id          BigInt    @id @default(autoincrement())
-  started_at  DateTime  @db.Timestamptz
-  finished_at DateTime? @db.Timestamptz
-  status      String?
-
-  @@map("semantic_compilation_history")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Acronym {
@@ -89,7 +75,7 @@ model Acronym {
   updated_at  DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
   @@map("acronyms")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model ConversationAnalytics {
@@ -105,7 +91,7 @@ model ConversationAnalytics {
 
   @@index([user_id])
   @@map("conversation_analytics")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // Auto generated from https://better-auth.com/docs/concepts/database#generating-schema
@@ -127,10 +113,13 @@ model User {
   conversations Conversation[]
   analytics     ConversationAnalytics[]
   apiKeys       Apikey[]
+  oauthApps     OauthApplication[]
+  oauthTokens   OauthAccessToken[]
+  oauthConsents OauthConsent[]
 
   @@unique([email])
   @@map("user")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Session {
@@ -148,7 +137,7 @@ model Session {
   @@unique([token])
   @@index([userId])
   @@map("session")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Account {
@@ -169,7 +158,7 @@ model Account {
 
   @@index([userId])
   @@map("account")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model Verification {
@@ -182,7 +171,7 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 model SsoProvider {
@@ -198,7 +187,7 @@ model SsoProvider {
 
   @@unique([providerId])
   @@map("ssoProvider")
-  @@schema("public")
+  @@schema("frontend")
 }
 
 // API tokens for machine-to-machine access (scripts, CI, notebooks). Owned and
@@ -245,5 +234,87 @@ model Apikey {
   @@index([referenceId])
   @@index([key])
   @@map("apikey")
-  @@schema("public")
+  @@schema("frontend")
+}
+
+// OAuth tables owned by the Better Auth `mcp` plugin, which makes GSF the
+// authorization server MCP clients log in against. Field names and types must
+// match the plugin's schema exactly, like the other Better Auth tables above.
+//
+// The models are `Oauth*`, not `OAuth*`, for the same reason `Apikey` is not
+// `ApiKey`: the adapter looks a model up as `prisma[<plugin's model name>]`, and
+// the plugin names these `oauthApplication`, `oauthAccessToken`, and
+// `oauthConsent`. Prisma derives the delegate from the model name, so
+// `OAuthApplication` would generate `prisma.oAuthApplication` and every call
+// would fail at runtime.
+//
+// A client that registers itself has no owning user, so `userId` is optional
+// here even though the plugin declares it required — a dynamically registered
+// MCP client belongs to no one until someone consents to it.
+//
+// These sit in `frontend` with the rest of Better Auth. `public` is Alembic's
+// (see `gsf/dal/schema.py`); listing it on the datasource would let Prisma
+// propose dropping GSF tables.
+model OauthApplication {
+  id           String   @id
+  name         String
+  icon         String?
+  metadata     String?
+  clientId     String   @unique
+  clientSecret String?
+  redirectUrls String
+  type         String
+  disabled     Boolean? @default(false)
+  userId       String?
+  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  accessTokens OauthAccessToken[]
+  consents     OauthConsent[]
+
+  @@index([userId])
+  @@map("oauthApplication")
+  @@schema("frontend")
+}
+
+// `refreshToken` is nullable although the plugin declares it required: not every
+// grant issues one, and a NOT NULL column would turn that into a failed insert.
+// Postgres permits many nulls under a unique index, so uniqueness still holds
+// for the tokens that do exist.
+model OauthAccessToken {
+  id                    String            @id
+  accessToken           String            @unique
+  refreshToken          String?           @unique
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  clientId              String
+  application           OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                String?
+  user                  User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes                String
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthAccessToken")
+  @@schema("frontend")
+}
+
+model OauthConsent {
+  id           String            @id
+  clientId     String
+  application  OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId       String
+  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  scopes       String
+  consentGiven Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([clientId])
+  @@index([userId])
+  @@map("oauthConsent")
+  @@schema("frontend")
 }

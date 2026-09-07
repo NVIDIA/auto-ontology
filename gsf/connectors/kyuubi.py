@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Apache Kyuubi connector implementing the NeMo-Retriever SQLDatabase ABC.
+"""Apache Kyuubi connector implementing GSF's SQLDatabase ABC.
 
 Kyuubi fronts a Spark SQL engine over the HiveServer2 Thrift protocol, so it is
 reached with a Hive client rather than a REST driver. NVIDIA's ProcR / Cloud
@@ -57,7 +57,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 from gsf.connectors.db_errors import is_session_lost
 
@@ -494,7 +494,13 @@ class KyuubiDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
-        """Kyuubi executes Spark SQL, so the agent should generate Spark SQL."""
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+
+        Kyuubi executes Spark SQL, so the agent should generate Spark SQL.
+        """
         return "spark"
 
     @property

@@ -26,7 +26,7 @@ from typing import Dict, Any
 import sqlglot
 from sqlglot import expressions as exp
 
-from nemo_retriever.tabular_data.ingestion.services.queries import parse_query_single
+from gsf.catalog.sql_parse import parse_query_single
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
@@ -36,18 +36,6 @@ from gsf.retrieval.data_access.graph_schemas import (
 )
 
 logger = logging.getLogger(__name__)
-
-# sqlglot dialect names differ slightly from our connector dialect strings.
-_SQLGLOT_DIALECTS = {
-    "sqlite": "sqlite",
-    "postgres": "postgres",
-    "postgresql": "postgres",
-    "snowflake": "snowflake",
-    "duckdb": "duckdb",
-    "mysql": "mysql",
-    "heavydb": "postgres",
-    "spark": "spark",
-}
 
 
 def _unwrap_projection(e: exp.Expression) -> exp.Expression:
@@ -86,9 +74,8 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     if not sql or not sql.strip():
         return "the generated SQL is empty"
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         # Unparseable here → let the normal parse validator handle it.
         return ""

@@ -134,10 +134,17 @@ def _worker_loop(
         if tag != _MSG_ASK:
             continue
 
-        question, prediction, target_db, subject_token, conversation_history = payload
+        (
+            question,
+            prediction,
+            target_db,
+            subject_token,
+            conversation_history,
+            evidence,
+        ) = payload
         try:
-            # Connections are resolved from Neo4j once at worker init. If that
-            # lookup came back empty — Neo4j not yet reachable when this
+            # Connections are resolved once at worker init. If that
+            # lookup came back empty — the store not yet reachable when this
             # subprocess booted, or the first connection created afterwards —
             # the snapshot would stay empty for the life of the process and
             # every question would fail with "missing required 'connectors'"
@@ -176,6 +183,7 @@ def _worker_loop(
 
             agent_payload = {
                 "question": question,
+                "evidence": evidence or "",
                 "processing_question": processing_question,
                 "prediction": prediction,
                 "data_retriever": data_retriever,
@@ -235,6 +243,7 @@ class PrewarmedWorker:
         target_db: str | None = None,
         subject_token: str | None = None,
         conversation_history: list[dict[str, str | None]] | None = None,
+        evidence: str | None = None,
     ) -> None:
         """Ask *question*, optionally forcing the prediction/SQL branch.
 
@@ -244,6 +253,8 @@ class PrewarmedWorker:
         *subject_token* is the caller's SSO JWT. When present the worker builds
         per-user connectors for this question instead of using the prewarmed
         ones, so SQL executes under that user's own Databricks grants.
+        *evidence* is optional authoritative evidence kept separate from
+        the question.
         """
         self._in_q.put(
             (
@@ -254,6 +265,7 @@ class PrewarmedWorker:
                     target_db,
                     subject_token,
                     conversation_history or [],
+                    evidence,
                 ),
             )
         )

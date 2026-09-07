@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime
+from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
+import numpy as np
 import pandas as pd
 
 import pytest
 
 from gsf.semantic.visit_enter import (
+    _json_ready_sample,
+    _keep_persisted_sample,
     _quoted_identifier,
+    _sample_key,
     calculate_columns_profiling,
     process_table,
 )
@@ -30,6 +36,50 @@ def test_quoted_identifier_per_dialect(dialect: str | None, expected: str) -> No
     # Backticks on MySQL/Spark, double quotes elsewhere; an unknown dialect
     # still quotes, since a bare identifier is what loses the table.
     assert _quoted_identifier("Sales Orders", dialect) == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (np.int64(7), 7),
+        (np.float64(1.5), 1.5),
+        (np.bool_(True), True),
+        (Decimal("10"), 10),
+        (Decimal("10.5"), 10.5),
+        (datetime(2020, 1, 2, 3, 4, 5), "2020-01-02T03:04:05"),
+        (date(2020, 1, 2), "2020-01-02"),
+        (b"bytes", "bytes"),
+        (["a", np.int64(1)], ["a", 1]),
+        ({"k": Decimal("2")}, {"k": 2}),
+        ("plain", "plain"),
+        (None, None),
+    ],
+)
+def test_json_ready_sample_converts_driver_types(raw: object, expected: object) -> None:
+    converted = _json_ready_sample(raw)
+    assert converted == expected
+    # numpy scalars compare equal to their Python counterparts, so identity of
+    # the type is the only thing that shows the unwrap actually happened.
+    assert type(converted) is type(expected)
+
+
+def test_sample_key_separates_values_a_str_key_would_merge() -> None:
+    # str() would render all three as "1"/"True" collisions across types.
+    assert len({_sample_key(1), _sample_key("1"), _sample_key(True)}) == 3
+    # Unhashable values still get a key, and equal ones share it.
+    assert _sample_key(["a", "b"]) == _sample_key(["a", "b"])
+    assert _sample_key({"k": 1}) != _sample_key({"k": 2})
+
+
+def test_keep_persisted_sample_caps_text_only() -> None:
+    assert _keep_persisted_sample("short") is True
+    assert _keep_persisted_sample("x" * 31) is False
+    assert _keep_persisted_sample(10**40) is True
+    assert _keep_persisted_sample(1.5) is True
+    assert _keep_persisted_sample(False) is True
+    # Non-scalars are judged by how long they render.
+    assert _keep_persisted_sample(["a", "b"]) is True
+    assert _keep_persisted_sample(["x" * 40]) is False
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -90,6 +140,14 @@ def test_calculate_columns_profiling_unhashable_values(
     assert result["tags"]["is_unique"] is False  # ["a","b"] repeated
     assert result["meta"]["is_unique"] is True
     assert result["id"]["is_unique"] is True
+
+    # Containers stay containers rather than being flattened to their repr.
+    assert result["tags"]["sample_values"] == [["a", "b"]]
+    assert result["meta"]["sample_values"] == [{"k": 1}, {"k": 2}]
+
+    stored = mock_store_samples.call_args[0][1]
+    assert stored["id"] == [1, 2]
+    assert stored["tags"] == [["a", "b"]]
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -160,6 +218,62 @@ def test_calculate_columns_profiling(
     assert "created_at" not in stored
     assert "token" not in stored
     assert stored["status"][0] == "open"
+    assert stored["id"] == [1, 2, 3, 4]
+    assert all(type(v) is int for v in stored["id"])
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_preserves_scalar_types(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """Numbers and booleans profile as themselves, not as their str() form."""
+    df = pd.DataFrame(
+        {
+            "amount": [10, 20, 10, 30],
+            "ratio": [1.5, 2.5, 1.5, 3.5],
+            "active": [True, False, True, True],
+            # Wider than the 30-char cap once rendered — the cap is about prose,
+            # so a number is kept however many digits it has.
+            "big": [10**40, 10**41, 10**40, 10**42],
+            "label": ["a" * 40, "b", "a" * 40, "c"],
+        }
+    )
+    connector = MagicMock()
+    connector.dialect = "postgres"
+    # Only `label` is text with fewer than 5 distinct values, so it is the one
+    # column that triggers a DISTINCT probe; return empty to keep the top-N set.
+    connector.execute.side_effect = [df, pd.DataFrame({"label": []})]
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "amount", "data_type": "integer"},
+        {"name": "ratio", "data_type": "numeric"},
+        {"name": "active", "data_type": "boolean"},
+        {"name": "big", "data_type": "numeric"},
+        {"name": "label", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["amount"]["sample_values"] == [10, 20, 30]
+    assert result["ratio"]["sample_values"] == [1.5, 2.5, 3.5]
+    assert result["active"]["sample_values"] == [True, False]
+    assert all(isinstance(v, int) for v in result["amount"]["sample_values"])
+    assert all(isinstance(v, float) for v in result["ratio"]["sample_values"])
+    assert all(isinstance(v, bool) for v in result["active"]["sample_values"])
+
+    stored = mock_store_samples.call_args[0][1]
+    assert stored["amount"] == [10, 20, 30]
+    assert stored["ratio"] == [1.5, 2.5, 3.5]
+    assert stored["active"] == [True, False]
+    # The length cap applies to text only: the huge numbers survive, the
+    # 40-char string does not.
+    assert stored["big"] == [10**40, 10**41, 10**42]
+    assert stored["label"] == ["b", "c"]
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")

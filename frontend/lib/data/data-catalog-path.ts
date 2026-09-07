@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Catalog selection is stored in the `focus` query param: pipe-separated Neo4j element ids
+ * Catalog selection is stored in the `focus` query param: pipe-separated catalog ids
  * from root to node (`dbId|schemaId|tableId|columnId`). Truncated prefixes address ancestors.
  */
 

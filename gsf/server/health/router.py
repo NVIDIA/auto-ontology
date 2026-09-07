@@ -2,63 +2,79 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Liveness/readiness endpoint — probes Neo4j and Postgres connectivity."""
+"""Health endpoints.
+
+Two, deliberately. ``/health`` proves the dependencies are usable and backs
+**readiness**. ``/health/live`` proves only that this process is serving and
+backs **liveness** — a liveness probe that depends on Postgres asks the kubelet
+to restart a healthy backend whenever the database is slow or its pool is
+saturated, which removes capacity exactly when there is least to spare and can
+kill a process mid-write.
+"""
 
 from __future__ import annotations
 
 from typing import Any
 
-import psycopg
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from gsf.dal.connections import verify_connectivity
-from gsf.infra.postgres import get_postgres_connection_string
+from gsf.server.health.checks import check_schema, check_store
 from gsf.server.responses import HealthResponse
 
 router = APIRouter()
 
 
-def _check_neo4j() -> dict[str, str]:
-    try:
-        verify_connectivity()
-        return {"status": "ok"}
-    except Exception as exc:
-        return {"status": "error", "detail": (str(exc) or type(exc).__name__)[:200]}
-
-
-def _check_postgres() -> dict[str, str]:
-    try:
-        with psycopg.connect(
-            get_postgres_connection_string(), connect_timeout=3
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
-        return {"status": "ok"}
-    except Exception as exc:
-        return {"status": "error", "detail": (str(exc) or type(exc).__name__)[:200]}
-
-
 @router.get(
     "/health",
+    # Infrastructure, not API surface: Kubernetes and Docker poll these URLs
+    # directly and never read the spec, so publishing them only adds noise a
+    # client might mistake for something to call.
+    include_in_schema=False,
     responses={
         200: {"model": HealthResponse, "description": "All dependencies reachable"},
-        503: {"model": HealthResponse, "description": "Neo4j or Postgres unreachable"},
+        503: {"model": HealthResponse, "description": "Postgres unreachable"},
     },
 )
 def health() -> JSONResponse:
-    """Liveness/readiness probe for the API service.
+    """Readiness probe for the API service.
 
-    Probes Neo4j and Postgres on every call and reports each one separately, so
-    a degraded response names the dependency that is down. 200 when both are
-    reachable, 503 otherwise — suitable for a Kubernetes readiness probe.
+    Two independent checks, because they fail independently and only one of
+    them used to be made:
+
+    * **postgres** — can this process get a usable connection out of its pool.
+    * **migrations** — is that database at the revision this build expects.
+
+    A reachable database with no tables in it passes the first and fails the
+    second, and until the second existed this endpoint answered
+    ``200 {"status": "ok"}`` for exactly that state while every catalog
+    endpoint returned 500. A readiness probe that a load balancer believes has
+    to be right about the second case too.
+
+    This backs **readiness** only. Liveness is /health/live, which checks
+    nothing: restarting the process cannot fix an unreachable database, so a
+    liveness probe gated on one turns a database blip into a rolling restart.
     """
-    neo4j = _check_neo4j()
-    postgres = _check_postgres()
-    healthy = neo4j["status"] == "ok" and postgres["status"] == "ok"
+    postgres = check_store()
+    migrations = check_schema()
+    healthy = postgres["status"] == "ok" and migrations["status"] == "ok"
     body: dict[str, Any] = {
         "status": "ok" if healthy else "degraded",
-        "neo4j": neo4j,
         "postgres": postgres,
+        "migrations": migrations,
     }
     return JSONResponse(status_code=200 if healthy else 503, content=body)
+
+
+@router.get(
+    "/health/live",
+    include_in_schema=False,
+    responses={200: {"description": "The process is serving requests"}},
+)
+def liveness() -> JSONResponse:
+    """Liveness only: no dependency is checked, and this must never fail.
+
+    Restarting the process cannot fix an unreachable database, so making this
+    depend on one converts a database blip into a rolling restart.
+    """
+    return JSONResponse(status_code=200, content={"status": "ok"})

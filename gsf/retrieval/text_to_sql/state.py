@@ -17,7 +17,7 @@ from langchain_core.messages import HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from nemo_retriever.graph.retriever import Retriever
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.connectors.base import SQLDatabase
 
 
 class AgentPayload(TypedDict):
@@ -35,6 +35,7 @@ class TextToSQLPayload(TypedDict):
     """Payload for the text-to-SQL agent flow (data + semantic retrievers)."""
 
     question: str
+    evidence: NotRequired[str]
     processing_question: NotRequired[str]
     data_retriever: Retriever
     semantic_retriever: NotRequired[Retriever]
@@ -53,6 +54,7 @@ class AgentState(TypedDict):
 
     llm: ChatNVIDIA
     initial_question: str
+    evidence: NotRequired[str]
     messages: list[HumanMessage]
     decision: str
     # Caller-supplied branch override; see TextToSQLPayload.prediction.

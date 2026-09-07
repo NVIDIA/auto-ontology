@@ -29,10 +29,34 @@ const LoginLoading = () => (
 	</div>
 );
 
+// An MCP client sends a user here to sign in, by way of an authorize request
+// that arrived without a session (see the `mcp` plugin's `loginPage` in
+// auth/auth.ts). Its OAuth parameters come along on the query string, and
+// signing in has to hand the user back to the authorize endpoint with them —
+// otherwise the browser lands on /chat and the client that started the flow
+// waits for a code that will never come.
+const AUTHORIZE_PATH = '/api/auth/mcp/authorize';
+
+const resumeAuthorize = (params: URLSearchParams): string | null =>
+	params.has('client_id') && params.get('response_type') === 'code'
+		? `${AUTHORIZE_PATH}?${params.toString()}`
+		: null;
+
 const LoginForm = () => {
 	const router = useRouter();
 	const params = useSearchParams();
-	const next = params.get('next') || '/chat';
+	const next = params.get('next') || resumeAuthorize(params) || '/chat';
+
+	// The authorize endpoint is a route handler, not a page, so the client router
+	// cannot render it — it needs a real navigation to follow the redirect back
+	// to the waiting client.
+	const goTo = (destination: string) => {
+		if (destination.startsWith('/api/')) {
+			window.location.assign(destination);
+			return;
+		}
+		router.push(destination);
+	};
 
 	const [email, setEmail] = useState('');
 	const [password, setPassword] = useState('');
@@ -59,9 +83,12 @@ const LoginForm = () => {
 	}, []);
 
 	useEffect(() => {
-		if (session) {
-			router.replace(next);
+		if (!session) return;
+		if (next.startsWith('/api/')) {
+			window.location.assign(next);
+			return;
 		}
+		router.replace(next);
 	}, [session, router, next]);
 
 	const ssoEnabled = providers.length > 0;
@@ -76,7 +103,7 @@ const LoginForm = () => {
 			setSubmitting(false);
 			return;
 		}
-		router.push(next);
+		goTo(next);
 		router.refresh();
 	};
 

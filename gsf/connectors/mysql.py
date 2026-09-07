@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""MySQL connector implementing the NeMo-Retriever SQLDatabase ABC."""
+"""MySQL connector implementing GSF's SQLDatabase ABC."""
 
 from __future__ import annotations
 
@@ -12,8 +12,8 @@ from urllib.parse import unquote, urlparse
 import mysql.connector
 import pandas as pd
 
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import TableTypes
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
+from gsf.catalog.constants import TableTypes
+from gsf.connectors.base import SQLDatabase
 
 
 def _parse_connection_string(connection_string: str) -> dict[str, Any]:
@@ -47,6 +47,11 @@ class MySQLDatabase(SQLDatabase):
 
     @property
     def dialect(self) -> str:
+        """Return this engine's sqlglot dialect name.
+
+        Must be a member of ``sqlglot.dialects.DIALECTS`` — callers pass it
+        straight to sqlglot without translation. See ``CONNECTOR_REGISTRY``.
+        """
         return "mysql"
 
     @property
