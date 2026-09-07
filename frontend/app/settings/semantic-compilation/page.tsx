@@ -5,10 +5,11 @@
 import { connectionsApi } from '@/api/connections';
 import { requireAdmin } from '@/auth/auth-guards';
 import { getPrisma } from '@/lib/prisma';
+import { DISTINCT_VALUE_PROBING_ENABLED_KEY, readOptOutFlag } from '@/lib/configurations';
 import { SemanticCompilationForm } from './SemanticCompilationForm';
 
 const CONFIG_KEY = 'semantic_compilation_enabled';
-const PROBING_CONFIG_KEY = 'distinct_value_probing_enabled';
+const PROBING_CONFIG_KEY = DISTINCT_VALUE_PROBING_ENABLED_KEY;
 
 const SemanticCompilationPage = async () => {
 	await requireAdmin();
@@ -30,8 +31,10 @@ const SemanticCompilationPage = async () => {
 		<SemanticCompilationForm
 			initialEnabled={row?.value === 'true'}
 			// Opt-out, so absent reads as on — see the route for why the two
-			// flags default in opposite directions.
-			initialProbingEnabled={probingRow?.value !== 'false'}
+			// flags default in opposite directions. Canonicalized through the
+			// shared reader so this first paint cannot disagree with the
+			// ingestion service about what the stored value means.
+			initialProbingEnabled={readOptOutFlag(probingRow?.value)}
 			hasDatabases={hasDatabases}
 		/>
 	);

@@ -4,6 +4,7 @@
 
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
+import { DISTINCT_VALUE_PROBING_ENABLED_KEY, readOptOutFlag } from '@/lib/configurations';
 import { withPermission } from '@/auth/with-auth';
 import { distinctValueProbingBody } from './openapi';
 
@@ -11,19 +12,18 @@ import { distinctValueProbingBody } from './openapi';
 // reads this same key (see gsf/infra/feature_flags.py) once per compilation run
 // to decide whether to run the per-column SELECT DISTINCT probes. It does NOT
 // gate the bounded row sample, which always runs.
-const CONFIG_KEY = 'distinct_value_probing_enabled';
-
+//
 // Unlike semantic compilation, this flag is opt-OUT: an instance that has never
 // touched the toggle still probes, which is what every deployment predating the
-// toggle did. Absent row therefore reads as `true`, and the backend default in
-// feature_flags.py has to agree.
-const readEnabled = (value: string | undefined) => value !== 'false';
+// toggle did. `readOptOutFlag` is what keeps this end in step with the Python
+// reader, down to the whitespace and casing it tolerates.
+const CONFIG_KEY = DISTINCT_VALUE_PROBING_ENABLED_KEY;
 
 // Report whether compilation scans low-cardinality columns for distinct values.
 export const GET = withPermission({ semanticCompilation: ['read'] })(async () => {
 	const prisma = getPrisma();
 	const row = await prisma.configuration.findUnique({ where: { key: CONFIG_KEY } });
-	return NextResponse.json({ enabled: readEnabled(row?.value) });
+	return NextResponse.json({ enabled: readOptOutFlag(row?.value) });
 });
 
 // Turn distinct value scanning on or off instance-wide (admin-only).
