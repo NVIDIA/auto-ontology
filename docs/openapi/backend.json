@@ -49,6 +49,18 @@
             "description": "Stable thread UUID. When supplied, prior completed turns for it are loaded and the new turn \u2014 including the chart/table bubble, once ready \u2014 is persisted to it. An unknown UUID creates the conversation; one owned by another user is rejected with 404. Omitting it runs the question statelessly, with no history and no chart step.",
             "title": "Conversation Id"
           },
+          "evidence": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional authoritative evidence supplied separately from the question.",
+            "title": "Evidence"
+          },
           "prediction": {
             "anyOf": [
               {
@@ -1392,6 +1404,23 @@
         "title": "DataResponse[Zone]",
         "type": "object"
       },
+      "DataResponse_dict_str__int__": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Data",
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[dict[str, int]]",
+        "type": "object"
+      },
       "DataResponse_dict_str__list_ZoneChip___": {
         "additionalProperties": true,
         "properties": {
@@ -1896,7 +1925,7 @@
       },
       "ForeignKeyRef": {
         "additionalProperties": true,
-        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values come straight off the Column node, unparsed \u2014 profiling\nstores them as a JSON string, a catalog PATCH stores a list.",
+        "description": "One foreign-key column pair behind an exploration edge.\n\n``source_column`` always names a column on the edge's ``source``. The\nsample values are rendered through ``stringify_sample_values`` before\nreaching this model, so the types a column stores arrive here as a plain\nstring list.",
         "properties": {
           "source_column": {
             "anyOf": [
@@ -1916,9 +1945,6 @@
                   "type": "string"
                 },
                 "type": "array"
-              },
-              {
-                "type": "string"
               },
               {
                 "type": "null"
@@ -1946,9 +1972,6 @@
                 "type": "array"
               },
               {
-                "type": "string"
-              },
-              {
                 "type": "null"
               }
             ],
@@ -1956,6 +1979,176 @@
           }
         },
         "title": "ForeignKeyRef",
+        "type": "object"
+      },
+      "GlobalSearchBreadcrumb": {
+        "additionalProperties": true,
+        "description": "One hop in a global-search hit's catalog/semantic path.",
+        "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "GlobalSearchBreadcrumb",
+        "type": "object"
+      },
+      "GlobalSearchFilters": {
+        "properties": {
+          "description": {
+            "default": false,
+            "title": "Description",
+            "type": "boolean"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          }
+        },
+        "title": "GlobalSearchFilters",
+        "type": "object"
+      },
+      "GlobalSearchItem": {
+        "additionalProperties": true,
+        "description": "One global-search hit: identity plus optional certified/parent path.\n\n``type`` is the entity's label (``Term``, ``Table``, ``ColumnAttribute``, \u2026).\n``table_type`` is set on ``Table`` nodes so the client can tell views apart.",
+        "properties": {
+          "breadcrumbs": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalSearchBreadcrumb"
+            },
+            "title": "Breadcrumbs",
+            "type": "array"
+          },
+          "certified": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Certified"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Id"
+          },
+          "synonyms": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Synonyms",
+            "type": "array"
+          },
+          "table_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Type"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ],
+        "title": "GlobalSearchItem",
+        "type": "object"
+      },
+      "GlobalSearchRequest": {
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/GlobalSearchFilters"
+          },
+          "search_term": {
+            "minLength": 0,
+            "title": "Search Term",
+            "type": "string"
+          },
+          "text_match_option": {
+            "default": "contains",
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": [
+          "search_term"
+        ],
+        "title": "GlobalSearchRequest",
         "type": "object"
       },
       "GraphLink": {
@@ -2077,6 +2270,28 @@
           "count"
         ],
         "title": "ListResponse[ExplorationEdge]",
+        "type": "object"
+      },
+      "ListResponse_GlobalSearchItem_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/GlobalSearchItem"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[GlobalSearchItem]",
         "type": "object"
       },
       "ListResponse_PqlAnalysis_": {
@@ -4814,7 +5029,7 @@
     },
     "/api/chat/completions": {
       "post": {
-        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits the SQL and formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).",
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits a ``sql`` event once the agent has a validated query, just before it\nexecutes, so callers can show the SQL while it runs. Emits the final SQL\nand formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {
@@ -6488,6 +6703,90 @@
         "tags": [
           "datasources",
           "connectors"
+        ]
+      }
+    },
+    "/api/search/global-search": {
+      "post": {
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first.",
+        "operationId": "post_global_search_api_search_global_search_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_GlobalSearchItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Global Search",
+        "tags": [
+          "search"
+        ]
+      }
+    },
+    "/api/search/global-search/count": {
+      "post": {
+        "description": "Hit counts by type for the same query as ``/search/global-search``.",
+        "operationId": "post_global_search_count_api_search_global_search_count_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GlobalSearchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_dict_str__int__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Post Global Search Count",
+        "tags": [
+          "search"
         ]
       }
     },

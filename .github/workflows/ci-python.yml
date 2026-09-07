@@ -139,11 +139,11 @@ jobs:
         run: uv sync --locked
 
       # Everything below is the documented local setup from
-      # dev_tools/sql/README.md, in the same order. No credentials: the fixture
-      # SQL is committed, and the graph fixture is hand-authored with embedding
+      # dev_tools/fixtures/sql/README.md, in the same order. No credentials:
+      # the fixture SQL is committed, and the graph fixture is hand-authored with embedding
       # stubbed out precisely so it needs no LLM or embedding endpoint.
       - name: Seed the fixture databases (pagila, chinook)
-        run: uv run --no-sync python -m dev_tools.seed_fixtures
+        run: uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
 
       - name: Migrate the GSF schema
         run: uv run --no-sync alembic upgrade head
@@ -151,8 +151,8 @@ jobs:
       - name: Seed the deterministic graph fixture
         env:
           CONNECTION_STRINGS: >-
-            postgresql://gsf:gsf@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/sql/chinook.sqlite
-        run: uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+            postgresql://gsf:gsf@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/fixtures/sql/chinook.sqlite
+        run: uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
 
       # `make migrate-check` — the migrations must describe the models. Placed
       # after the upgrade because `alembic check` compares a live database
@@ -165,7 +165,7 @@ jobs:
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
       - name: Run the test suite
-        run: uv run --no-sync pytest gsf -q --durations=10
+        run: uv run --no-sync pytest gsf dev_tools -q --durations=10
 
       # A skip guard naming the wrong dependency turns a suite off silently and
       # still reports green -- which is how the golden replay and the live
@@ -173,13 +173,14 @@ jobs:
       # (GSF_LIVE_DATABRICKS / GSF_LIVE_MYSQL) may skip here.
       - name: Fail if the fixture-backed tests silently skipped
         run: |
-          skipped=$(uv run --no-sync pytest gsf -q -rs 2>/dev/null \
+          skipped=$(uv run --no-sync pytest gsf dev_tools -q -rs 2>/dev/null \
             | grep -c '^SKIPPED' || true)
           echo "skipped: $skipped"
           if [ "$skipped" -gt 2 ]; then
             echo "::error::$skipped tests skipped; expected at most 2 (live" \
                  "Databricks and MySQL). A fixture is probably unreachable, so" \
                  "this run proved less than it appears to."
-            uv run --no-sync pytest gsf -q -rs 2>/dev/null | grep '^SKIPPED' || true
+            uv run --no-sync pytest gsf dev_tools -q -rs 2>/dev/null \
+              | grep '^SKIPPED' || true
             exit 1
           fi

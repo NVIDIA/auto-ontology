@@ -173,8 +173,28 @@ def test_sample_values_are_omitted_when_absent(world) -> None:
         col["name"]: col
         for col in result[world.columns["id"]]["relevant_tables"][0]["columns"]
     }
-    assert columns["id"]["sample_values"] == '["1", "2"]'
+    assert columns["id"]["sample_values"] == ["1", "2"]
     assert columns["total"]["sample_values"] is None
+
+
+def test_typed_sample_values_are_rendered_as_text(world) -> None:
+    """The stored JSON keeps types; a prompt needs strings.
+
+    Both copies are rendered: the one on the column item itself and the one
+    inside the parent table's ``columns``.
+    """
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["id"])
+        .values(sample_values="[10, 1.5, true]")
+    )
+    entry = c.expand_info([{"id": world.columns["id"], "label": Labels.COLUMN}])[
+        world.columns["id"]
+    ]
+    columns = {col["name"]: col for col in entry["relevant_tables"][0]["columns"]}
+
+    assert entry["sample_values"] == ["10", "1.5", "True"]
+    assert columns["id"]["sample_values"] == ["10", "1.5", "True"]
 
 
 def test_two_columns_of_one_table_are_both_expanded(world) -> None:

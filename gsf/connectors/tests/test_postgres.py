@@ -11,7 +11,7 @@ connector used to drop silently. Skipped when no fixture database is reachable.
 Set up with::
 
     docker compose up -d postgres
-    uv run --no-sync python -m dev_tools.seed_fixtures
+    uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from gsf.connectors.registry import create_connector
 @pytest.fixture(scope="module")
 def pagila():
     if not os.environ.get("POSTGRES_USER"):
-        pytest.skip("POSTGRES_* not set; run dev_tools.seed_fixtures first")
+        pytest.skip("POSTGRES_* not set; run dev_tools.fixtures.seed_fixtures first")
     host = os.environ.get("POSTGRES_HOST", "localhost")
     port = os.environ.get("POSTGRES_PORT", "5432")
     user = os.environ["POSTGRES_USER"]

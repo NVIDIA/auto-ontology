@@ -10,6 +10,8 @@ from typing import Generator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.retrieval.text_to_sql.text_to_sql_graph import (
+    INTENT_VALIDATION_SKIPPED_AFTER,
+    NODE_START_EVENT,
     _prediction_enabled,
     create_graph,
 )
@@ -24,6 +26,22 @@ from gsf.utils.llm_invoke import get_llm_client
 
 logger = logging.getLogger(__name__)
 
+
+class AgentRunError(RuntimeError):
+    """Graph failure carrying the last node and recoverable partial answer."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        node: str | None = None,
+        partial_answer: dict | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.node = node
+        self.partial_answer = partial_answer or {}
+
+
 try:
     llm_client = get_llm_client()
 except ValueError as e:
@@ -32,6 +50,13 @@ except ValueError as e:
 
 graph = create_graph()
 app = graph.compile()
+
+# Whether the combined precheck sits between validation and execution.
+# Read off the graph that was actually built rather than re-reading
+# the probe flags: ``create_graph`` evaluates them once at import, so a later
+# change would leave the two disagreeing about which node is the last gate
+# before execution. See ``_sql_about_to_run``.
+_COMBINED_PRECHECK_IN_GRAPH = "precheck_combined" in graph.nodes
 
 
 def _build_state(payload: TextToSQLPayload) -> AgentState:
@@ -130,6 +155,46 @@ def _extract_answer(final_state: dict) -> dict:
     return {"response": str(final_response)}
 
 
+def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
+    """The SQL this node just cleared for execution, or ``""``.
+
+    Deliberately not emitted at generation time: both validations routinely
+    send a query back for reconstruction, so a draft is frequently not what
+    runs. The consequence is that a run which never clears its final gate
+    (``unconstructable`` after 8 attempts) shows no SQL at all.
+
+    Which node *is* the final gate is decided by ``create_graph`` and is not
+    visible here: the proactive value check, when built in, sits after intent
+    validation and can still bounce a query to reconstruction, and past
+    ``INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions intent validation is
+    skipped entirely.
+    """
+    decision = (node_output or {}).get("decision") or ""
+
+    if _COMBINED_PRECHECK_IN_GRAPH:
+        cleared = node_name == "precheck_combined" and decision == "valid_sql"
+    else:
+        cleared = decision == "intent_valid" or (
+            node_name == "validate_sql_query"
+            and decision == "valid_sql"
+            and max(
+                len(node_path_state.get("failed_attempts") or []),
+                node_path_state.get("reconstruction_count", 0) or 0,
+            )
+            > INTENT_VALIDATION_SKIPPED_AFTER
+        )
+    if not cleared:
+        return ""
+
+    # ``sql_code`` is what ``SQLExecutionAgent`` runs; the generation result
+    # only covers intent validation's early return when there is no SQL.
+    sql = (node_path_state.get("sql_code") or "").strip()
+    if sql:
+        return sql
+    generated = node_path_state.get("sql_generation_result")
+    return (getattr(generated, "sql_code", "") or "").strip()
+
+
 def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
     """Concatenate the run's per-node thought entries into one summary string.
 
@@ -146,24 +211,73 @@ def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def _extract_partial_answer(final_state: dict) -> dict:
+    """Return generated SQL/response that existed before a downstream failure."""
+    path_state = final_state.get("path_state", {})
+    generation = path_state.get("sql_generation_result")
+    sql_code = path_state.get("sql_code") or getattr(generation, "sql_code", "")
+    response = getattr(generation, "response", "")
+    thought = getattr(generation, "thought", "")
+    if not sql_code and not response:
+        return {}
+    return {
+        "sql_code": str(sql_code or ""),
+        "response": str(response or ""),
+        "thought": str(thought or ""),
+    }
+
+
 def stream_agent_response(
     payload: TextToSQLPayload,
 ) -> Generator[dict, None, None]:
-    """Yield ``{"type": "step", "node": ..., "thought": ...}`` for each graph
-    node, then ``{"type": "result", "answer": ...}`` with the final answer
-    (its ``thoughts`` key summarizes every ``thought`` collected along the
-    way). On error yields ``{"type": "error", "message": ...}``."""
+    """Yield two ``{"type": "step", "node": ..., "phase": ...}`` events per
+    graph node — ``"start"`` as it begins (so a client can label the work in
+    progress) and ``"end"`` when it returns, carrying its ``thought`` — plus
+    ``{"type": "sql", "node": ..., "sql": ...}`` once a query has cleared
+    validation and is about to run (see ``_sql_about_to_run``), then
+    ``{"type": "result", "answer": ...}`` with the final answer (its
+    ``thoughts`` key summarizes every ``thought`` collected along the way).
+    On error yields ``{"type": "error", "message": ...}``."""
     t0 = time.perf_counter()
 
     logger.info("Text-to-SQL agent started for question: %s", payload["question"])
 
     state = _build_state(payload)
     final_state = dict(state)
+    # Last SQL surfaced to the client. A query can clear its final gate more
+    # than once (an empty result sends it back through validation unchanged),
+    # so dedupe rather than re-emitting the same query.
+    streamed_sql: str | None = None
 
+    last_node: str | None = None
     try:
-        for step in app.stream(state, config={"recursion_limit": 45}):
+        # ``custom`` payloads stream the instant a node writes one (as it
+        # begins); ``updates`` only arrive once it has returned. Reading
+        # updates alone would label the screen with the previously finished
+        # node, so a slow reconstruction looks like a hung validation.
+        for mode, chunk in app.stream(
+            state,
+            stream_mode=["updates", "custom"],
+            config={"recursion_limit": 45},
+        ):
+            if mode == "custom":
+                if (chunk or {}).get("type") == NODE_START_EVENT:
+                    started = chunk.get("node")
+                    if started:
+                        # A node that raises produces no update, so tracking
+                        # completions alone would blame the node before it.
+                        last_node = started
+                        yield {
+                            "type": "step",
+                            "phase": "start",
+                            "node": started,
+                            "thought": None,
+                        }
+                continue
+
             logger.info("--- AGENT STEP ---")
-            for node_name, node_output in step.items():
+            for node_name, node_output in chunk.items():
+                last_node = node_name
                 logger.info("Node: %s", node_name)
 
                 # A node records its own thought (if any) at the tail of
@@ -177,7 +291,24 @@ def stream_agent_response(
                 if thoughts_log and thoughts_log[-1].get("node") == node_name:
                     thought = thoughts_log[-1].get("text")
 
-                yield {"type": "step", "node": node_name, "thought": thought}
+                # Only place a thought can be attached: the node has to finish
+                # before it has one to report.
+                yield {
+                    "type": "step",
+                    "phase": "end",
+                    "node": node_name,
+                    "thought": thought,
+                }
+
+                # Surface the SQL once a node has cleared it for execution,
+                # so it is on screen while the database runs it rather than
+                # only landing with the final answer. Drafts that validation
+                # is about to send back for reconstruction are deliberately
+                # not shown — see ``_sql_about_to_run``.
+                node_sql = _sql_about_to_run(node_name, node_output, node_path_state)
+                if node_sql and node_sql != streamed_sql:
+                    streamed_sql = node_sql
+                    yield {"type": "sql", "node": node_name, "sql": node_sql}
 
                 if node_output:
                     if "path_state" in node_output:
@@ -199,22 +330,13 @@ def stream_agent_response(
 
     except Exception as exc:
         logger.exception("Error during agent stream")
-        # Same fallback as get_agent_response_with_state: surface whatever
-        # SQL had already been reconstructed/executed before the crash
-        # (e.g. GraphRecursionError) instead of forcing an empty submission.
-        interrupted_path_state = final_state.get("path_state") or {}
-        fallback_sql = interrupted_path_state.get("sql_code", "") or ""
-        if fallback_sql:
-            yield {
-                "type": "result",
-                "answer": {
-                    "response": f"Agent failed: {exc}",
-                    "sql_code": fallback_sql,
-                    "path_state": interrupted_path_state,
-                },
-            }
-        else:
-            yield {"type": "error", "message": f"Agent failed: {exc}"}
+        yield {
+            "type": "error",
+            "message": f"Agent failed after {last_node or 'graph_start'}: {exc}",
+            "node": last_node,
+            "error_type": type(exc).__name__,
+            "partial_answer": _extract_partial_answer(final_state),
+        }
 
 
 def get_agent_response(payload: TextToSQLPayload) -> dict:
@@ -223,7 +345,11 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
         if event["type"] == "result":
             return event["answer"]
         if event["type"] == "error":
-            raise RuntimeError(event["message"])
+            raise AgentRunError(
+                event["message"],
+                node=event.get("node"),
+                partial_answer=event.get("partial_answer"),
+            )
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
@@ -311,4 +437,5 @@ __all__ = [
     "app",
     "graph",
     "llm_client",
+    "AgentRunError",
 ]

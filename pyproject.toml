@@ -89,4 +89,7 @@ select = ["E4", "E7", "E9", "F"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
-addopts = "--import-mode=importlib"
+# mcp/ is a separate project with its own venv and CI workflow. It must stay out
+# of this suite: pythonpath = ["."] would otherwise make the mcp/ directory
+# shadow the installed mcp SDK as a namespace package.
+addopts = "--import-mode=importlib --ignore=mcp"

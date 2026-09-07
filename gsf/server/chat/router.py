@@ -159,6 +159,19 @@ _DISCONNECT_POLL_S = 0.1
 # has caught up to the live tail. Also the SSE heartbeat cadence.
 _BUFFER_POLL_S = 0.25
 
+# Headers every SSE response here carries. Shared so the two endpoints cannot
+# drift apart — ``/chat/watch`` is a GET, so it is the one a shared cache would
+# actually be willing to store.
+#
+# ``no-store``, not ``no-cache``: the latter permits storing the response and
+# only requires revalidation before reuse, and these bodies carry the user's
+# SQL and the rows it returned. ``X-Accel-Buffering`` is what stops nginx from
+# buffering the stream; the cache directive has no bearing on that.
+_SSE_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Accel-Buffering": "no",
+}
+
 
 def _resolve_chat_target_db(target_db: str | None) -> str | None:
     """Resolve a catalog database UUID or name to its canonical name."""
@@ -216,6 +229,14 @@ class _Slot:
     # i.e. once ``buffer`` is complete and no more events will ever be
     # appended.
     finished: threading.Event = field(default_factory=threading.Event)
+    # Last SQL the run streamed out (from a ``sql`` event). A failure after
+    # the query was validated — execution errors that exhaust the retry
+    # budget, or a hard error — produces an answer with no ``sql_code``, so
+    # without remembering it here the query the user just watched fail would
+    # vanish from the persisted turn the moment the page reloaded. A run that
+    # never got a query past validation has no ``sql`` event and so persists
+    # none. See ``_pump``.
+    last_sql: str | None = None
 
 
 # Keyed by authenticated user + conversation_id (or a per-request unique key
@@ -382,10 +403,14 @@ def _pump(slot: _Slot) -> None:
         if event_type == "result":
             answer = event.get("answer") or {}
             response = str(answer.get("response") or "")
-            sql_code = answer.get("sql_code")
+            # An answer the agent gave up on (``unconstructable_sql_response``)
+            # carries no SQL, even when a query did run earlier in the turn.
+            # Fall back to the last one streamed so the failed query is still
+            # in history, matching what the user watched live.
+            sql_code = answer.get("sql_code") or slot.last_sql
         elif event_type == "error":
             response = str(event.get("message") or "")
-            sql_code = None
+            sql_code = slot.last_sql
         else:
             return
         if not response and not sql_code:
@@ -422,6 +447,10 @@ def _pump(slot: _Slot) -> None:
             if event.get("type") == "step":
                 node_name = event.get("node", "")
                 event = {**event, "label": NODE_LABELS.get(node_name, node_name)}
+            elif event.get("type") == "sql":
+                # Streamed straight through for the live view; remembered so
+                # the failure paths above have something to persist.
+                slot.last_sql = str(event.get("sql") or "") or None
             persist_event(event)
             with slot.buffer_lock:
                 slot.buffer.append(event)
@@ -511,7 +540,9 @@ async def chat_completions(
 ) -> StreamingResponse:
     """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
 
-    Emits the SQL and formatted answer as a ``result`` event, then — if that
+    Emits a ``sql`` event once the agent has a validated query, just before it
+    executes, so callers can show the SQL while it runs. Emits the final SQL
+    and formatted answer as a ``result`` event, then — if that
     answer has an executed result — generates and persists the chart/table
     bubble itself and streams it back as a ``charts`` event before the stream
     closes with ``[DONE]``. Callers that only care about the text/SQL answer
@@ -625,6 +656,7 @@ async def chat_completions(
         target_db=target_db,
         subject_token=subject_token,
         conversation_history=conversation_history,
+        evidence=request.evidence,
     )
     threading.Thread(target=_pump, args=(slot,), daemon=True).start()
     asyncio.create_task(_watch_disconnect(http_request, slot))
@@ -632,10 +664,7 @@ async def chat_completions(
     return StreamingResponse(
         _stream_slot(slot),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 
@@ -670,19 +699,13 @@ async def chat_watch(conversation_id: UUID, request: Request) -> StreamingRespon
         return StreamingResponse(
             iter(["data: [DONE]\n\n"]),
             media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-            },
+            headers=_SSE_HEADERS,
         )
 
     return StreamingResponse(
         _stream_slot(slot),
         media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
+        headers=_SSE_HEADERS,
     )
 
 

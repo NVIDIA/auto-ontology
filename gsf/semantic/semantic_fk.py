@@ -42,7 +42,7 @@ from gsf.utils.llm_invoke import (
     invoke_with_structured_output,
 )
 from gsf.utils.model_config import resolve
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.semantic.models import FkHitSelection
 from gsf.vdb import get_semantic_vdb
 
@@ -241,20 +241,12 @@ def _build_query_text(col: dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _format_sample_values(raw: str | None) -> str:
+def _format_sample_values(raw: Any) -> str:
     """Return a 'sample_values: ...' string, or empty when unavailable."""
-    if not raw:
+    values = stringify_sample_values(raw, max_len=30)
+    if not values:
         return ""
-    try:
-        import json
-
-        values = json.loads(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= 30]
-        if not non_null:
-            return ""
-        return "sample_values: " + ", ".join(non_null)
-    except Exception:
-        return ""
+    return "sample_values: " + ", ".join(values)
 
 
 def _resolve_via_vdb(
@@ -391,9 +383,14 @@ def _match_hit_by_sample_values(
 
 
 def _distinct_samples(raw: Any) -> list[str]:
-    """Parse, deduplicate, and preserve the order of stored sample values."""
-    values = parse_sample_values(raw) or []
-    return list(dict.fromkeys(value for value in values if value is not None))
+    """Parse, deduplicate, and preserve the order of stored sample values.
+
+    Rendered as strings because ``_sample_match_sql`` casts the candidate
+    column to TEXT and probes it with string literals, so a numeric sample has
+    to be compared in its rendered form either way.
+    """
+    values = stringify_sample_values(raw) or []
+    return list(dict.fromkeys(values))
 
 
 def _sample_match_sql(

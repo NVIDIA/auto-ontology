@@ -28,7 +28,10 @@ export type ComposerTagListSection = {
 	title: string;
 	values: string[];
 	editable?: boolean;
-	/** Optional hint shown under the input while editing. */
+	/**
+	 * Note shown while the page is in edit mode: under the input when the section
+	 * is editable, under the values when it is not — where it says why.
+	 */
 	hint?: string;
 };
 

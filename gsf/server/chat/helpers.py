@@ -33,6 +33,12 @@ class ChatRequest(BaseModel):
     """Payload sent by the frontend to start a chat completion."""
 
     question: str = Field(..., min_length=1)
+    evidence: str | None = Field(
+        default=None,
+        description=(
+            "Optional authoritative evidence supplied separately from the question."
+        ),
+    )
     conversation_id: UUID | None = Field(
         default=None,
         description=(

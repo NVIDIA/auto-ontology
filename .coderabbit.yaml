@@ -1,0 +1,185 @@
+# yaml-language-server: $schema=https://storage.googleapis.com/coderabbit_public_assets/schema.v2.json
+# CodeRabbit Configuration
+#
+# The CI workflows already enforce ruff, prettier, eslint, pytest, `alembic
+# check` and OpenAPI spec drift deterministically. This config deliberately
+# does not ask CodeRabbit to duplicate any of that; it points the review at
+# what CI cannot check — design, data integrity, and the conventions in
+# CLAUDE.md — plus the linters no CI job covers (workflows, Dockerfiles,
+# secrets).
+language: en-US
+
+# Steer the review at substance rather than style; formatting is already a hard
+# CI gate and needs no opinion here.
+tone_instructions: 'Be concise and technical. Prioritise correctness, data-integrity and security issues over style; formatting is enforced by CI.'
+
+reviews:
+  # `chill` is the balanced profile. `assertive` adds more feedback but mostly
+  # style feedback, which ruff and prettier already settle in CI.
+  profile: chill # Options: quiet | chill | assertive
+  # Left false on purpose: a review should inform the merge, not gate it. The
+  # required checks live in .github/workflows.
+  request_changes_workflow: false
+  high_level_summary: true
+  collapse_walkthrough: true
+  estimate_code_review_effort: true
+  assess_linked_issues: true
+  related_issues: true
+  related_prs: true
+  suggested_reviewers: true
+  poem: false
+  in_progress_fortune: false
+
+  auto_review:
+    enabled: true # Enables automatic reviews on Pull Requests
+    auto_incremental_review: true # Re-review on each push
+    # The default (5) silently stops reviewing long-lived branches after five
+    # reviewed commits, which is exactly when a review is still wanted.
+    auto_pause_after_reviewed_commits: 0
+    drafts: false
+    ignore_title_keywords:
+      - 'wip'
+      - 'do not merge'
+      - 'no review'
+
+  # Negative-only, and for a reason: adding a positive pattern here would make
+  # everything *not* listed excluded. These paths are generated, vendored or
+  # bulk fixture data, and CodeRabbit cannot say anything useful about them.
+  # Note that filtered paths are dropped from the review context entirely, so
+  # the guarantees for them must come from CI (they do — see ci-openapi.yml).
+  path_filters:
+    - '!docs/openapi/**' # Generated; drift is a CI failure already
+    - '!frontend/generated/**' # Prisma client output
+    - '!frontend/pnpm-lock.yaml'
+    - '!uv.lock'
+    - '!vendor/**'
+    - '!dev_tools/fixtures/sql/*.sql' # ~1.7 MB of pagila/chinook dumps
+    - '!**/*.duckdb'
+    - '!**/*.min.js'
+
+  # The rules that live in CLAUDE.md and frontend/AGENTS.md, restated where the
+  # reviewer will actually apply them.
+  path_instructions:
+    - path: 'gsf/dal/**/*.py'
+      instructions: >-
+        The store is Postgres, queried with SQLAlchemy Core — flag any ORM
+        usage. schema.py is the single source of truth for the schema and its
+        column types and constraints are deliberate; a change to them needs a
+        justification in the PR. Schema changes require an Alembic revision.
+        Sessions come from gsf/dal/session.py's pooled engine; flag
+        hand-rolled engines or connections.
+    - path: 'alembic/versions/**/*.py'
+      instructions: >-
+        Never edit a migration that has already been applied — it must be
+        superseded by a new revision. Check that down_revision chains
+        correctly and that the downgrade path is real, not a stub.
+    - path: 'gsf/server/**/*.py'
+      instructions: >-
+        Routes belong under the /api/ prefix in datasources/router.py with
+        orchestration in service.py; flag business logic in route handlers.
+        Type hints are required on every signature. @app.exception_handler
+        functions must be plain `def`, not `async def`. Any change to a
+        request or response model needs the committed OpenAPI spec
+        regenerated.
+    - path: 'gsf/**/*.py'
+      instructions: >-
+        Type hints are required on all function signatures. Flag broad
+        `except Exception` without re-raise or logging, blocking I/O inside
+        async functions, and secrets or connection strings read from anywhere
+        other than the settings layer.
+    - path: 'frontend/**/*.{ts,tsx}'
+      instructions: >-
+        Next.js 16 and React 19 — flag patterns removed in Next 16 (for
+        example synchronous access to params, searchParams, cookies or
+        headers). HTTP calls must go through the `requests` wrapper in
+        frontend/api/requests.ts, never axios or fetch directly. Components
+        are arrow functions; no class components. Styling is Tailwind CSS 4 —
+        no inline styles or component CSS files. TypeScript is strict: `any`
+        needs an explanatory comment. Types go in /frontend/types and enums in
+        /frontend/enums.
+    - path: '.github/workflows/**'
+      instructions: >-
+        Check that `paths:` filters still cover every input a job depends on —
+        a job that skips because an input changed outside its filter reports a
+        green run that proved nothing. Actions should be pinned and tool
+        versions kept consistent with the versions used elsewhere in the repo.
+    - path: 'helm/**'
+      instructions: >-
+        Check that new or renamed values are documented in values.yaml with a
+        sane default, and that templates do not hardcode secrets, image tags
+        or environment-specific hostnames.
+
+  # Advisory only (`warning`), so nothing here can block a merge.
+  pre_merge_checks:
+    title:
+      mode: warning
+      requirements: >-
+        Concise imperative summary of the change, matching the repository's
+        commit style (for example "Add Trino connector"). No bare ticket IDs
+        and no "WIP".
+    description:
+      mode: warning
+    # Off deliberately: this codebase documents intent in prose comments rather
+    # than uniform docstrings, so a coverage threshold would fail honest PRs.
+    # Quoted: bare `off` is parsed as the boolean false, not the enum value.
+    docstrings:
+      mode: 'off'
+    custom_checks:
+      - name: Tests for backend behaviour changes
+        mode: warning
+        instructions: >-
+          If the PR changes behaviour under gsf/ (not just types, comments or
+          formatting), it should add or update tests under gsf/tests or
+          dev_tools. Pass if tests were added or updated, if the change is
+          non-behavioural, or if the PR explains why a test is impractical.
+      - name: Migration accompanies schema change
+        mode: warning
+        instructions: >-
+          If gsf/dal/schema.py is modified, an Alembic revision under
+          alembic/versions must be added in the same PR. Pass if a revision is
+          present or if the schema.py edit only touches comments or docstrings.
+
+  tools:
+    # Not covered by any CI job — this is the real added value.
+    actionlint:
+      enabled: true
+    zizmor: # Workflow security (injection, over-broad permissions)
+      enabled: true
+    hadolint:
+      enabled: true
+    gitleaks:
+      enabled: true
+    semgrep:
+      enabled: true
+    # Also run in CI, kept on so problems surface inline on the diff instead of
+    # as a red job.
+    ruff:
+      enabled: true
+    # Off: `pnpm lint` in ci-client.yml is the authority on the frontend, and a
+    # second run here only repeats it on the diff.
+    eslint:
+      enabled: false
+    # Off: the frontend is prettier + eslint, and Biome's formatter would argue
+    # with prettier over the same lines.
+    biome:
+      enabled: false
+    # Off: helm/gsf/templates are Go templates, not YAML, so a YAML linter
+    # reports syntax errors on every one of them.
+    yamllint:
+      enabled: false
+
+chat:
+  auto_reply: true
+
+knowledge_base:
+  learnings:
+    scope: auto
+  # Read the repo's own instruction files as review criteria, so the rules stay
+  # in one place instead of being duplicated into this file forever.
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - '**/CLAUDE.md'
+      - '**/AGENTS.md'
+      - '.cursor/rules/**/*.md'
+      - 'docs/**/*.md'

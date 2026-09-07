@@ -56,14 +56,19 @@ from gsf.semantic.constants import (
     REL_SEMANTIC_FK,
     SEMANTIC_SOURCE,
 )
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import stringify_sample_values
 
 logger = logging.getLogger(__name__)
 
 
 def _with_parsed_sample_values(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Render ``sample_values`` on each row as the string list callers expect.
+
+    These rows serve both the terms API and semantic embedding text, so the
+    typed values stored as JSON are rendered once here rather than at each use.
+    """
     for row in rows:
-        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+        row["sample_values"] = stringify_sample_values(row.get("sample_values"))
     return rows
 
 

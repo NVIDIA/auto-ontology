@@ -30,6 +30,7 @@ import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
 import { ToastVariant } from '@/enums/toast';
 import { attributeStatus } from '@/lib/certification';
+import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
@@ -271,6 +272,9 @@ export const TermsView = () => {
 		setColumnAttrEditing(false);
 		setColumnAttrEditError(null);
 		setCertError(null);
+		// Leaving the term drops the detail copy; moving between terms keeps the
+		// old one on screen until the new term's fetch lands.
+		if (focusId == null) setFocusedTermDetail(null);
 	}
 	const [sqlEditModalOpen, setSqlEditModalOpen] = useState(false);
 	const [sqlEditValue, setSqlEditValue] = useState('');
@@ -280,6 +284,24 @@ export const TermsView = () => {
 	const [sqlEditValidated, setSqlEditValidated] = useState(false);
 	const [sqlEditSubmitting, setSqlEditSubmitting] = useState(false);
 	const [sqlEditError, setSqlEditError] = useState<string | null>(null);
+
+	// Attribute deep-links (`?focus=&colAttr=` / `?sqlAttr=`) skip the term
+	// single-page fetch, so the header would otherwise fall back to the term
+	// id. Load the term whenever an attribute page is open.
+	useEffect(() => {
+		if (focusId == null) return;
+		if (colAttrId == null && sqlAttrId == null) return;
+
+		const termId = focusId;
+		let cancelled = false;
+		void termsApi.get(termId).then((res) => {
+			if (cancelled || res.error || res.data == null) return;
+			setFocusedTermDetail(res.data);
+		});
+		return () => {
+			cancelled = true;
+		};
+	}, [focusId, colAttrId, sqlAttrId]);
 
 	const fetchTermsPage = useCallback(
 		async (skip: number, limit: number) => {
@@ -821,6 +843,9 @@ export const TermsView = () => {
 			const primaryColumn = attr.primary_column ?? null;
 			const referencedColumns = attr.referenced_columns ?? [];
 			const userZoneIds: string[] | null = null;
+			// Sample values live on the owning Column, so its declared SQL type is
+			// what decides whether they can be edited here.
+			const samplesEditable = sampleValuesEditable(attr.datatype);
 
 			return {
 				header: {
@@ -843,7 +868,8 @@ export const TermsView = () => {
 						id: 'sample_values',
 						title: 'Sample Values',
 						values: Array.isArray(attr.sample_values) ? attr.sample_values : [],
-						editable: true,
+						editable: samplesEditable,
+						hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(attr.datatype),
 					},
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,
@@ -1101,7 +1127,7 @@ export const TermsView = () => {
 	const termCertificationStatus = focusedTerm?.certification ?? CertificationStatus.Pending;
 
 	if (focusId != null && sqlAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
+		const termTitle = focusedTerm?.name ?? focusedSqlAttr?.term_name ?? focusId;
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
@@ -1246,7 +1272,7 @@ export const TermsView = () => {
 	}
 
 	if (focusId != null && colAttrId != null) {
-		const termTitle = focusedTerm?.name ?? focusId;
+		const termTitle = focusedTerm?.name ?? focusedColAttr?.term_name ?? focusId;
 		const colAttrTitle = focusedColAttr?.name ?? colAttrId;
 		return (
 			<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">

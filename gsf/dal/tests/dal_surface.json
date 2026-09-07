@@ -2,6 +2,7 @@
   "attributes": {
     "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
+    "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
@@ -122,6 +123,16 @@
     "head_revision": "() -> 'str | None'",
     "require_current_schema": "() -> 'None'",
     "schema_state": "() -> 'SchemaState'"
+  },
+  "search": {
+    "count_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None) -> 'dict[str, int]'",
+    "fetch_global_search": "(tokens: 'list[str]', object_types: 'set[str]', *, include_description: 'bool', synonym_tokens: 'list[str] | None' = None, limit: 'int' = 200, synonym_limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "filter_special_characters": "(input_string: 'str') -> 'str'",
+    "is_view_table_type": "(table_type: 'str | None') -> 'bool'",
+    "search_object_type": "(label: 'str | None', table_type: 'str | None' = None) -> 'str | None'",
+    "search_tokens": "(search_term: 'str') -> 'list[str]'",
+    "synonym_matches_tokens": "(synonym: 'str', tokens: 'list[str]') -> 'bool'",
+    "synonym_word_tokens": "(search_term: 'str') -> 'list[str]'"
   },
   "session": {
     "StoreConn": "class(object)",

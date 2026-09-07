@@ -4,7 +4,7 @@
 
 """Local ingest: docker-compose Postgres source → pgvector embeddings store.
 
-Run after ``docker compose up -d`` and ``dev_tools.seed_local_postgres``.
+Run after ``docker compose up -d`` and ``dev_tools.fixtures.seed_local_postgres``.
 
 Usage::
 

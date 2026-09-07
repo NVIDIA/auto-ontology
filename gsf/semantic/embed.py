@@ -11,6 +11,7 @@ from nemo_retriever.operators.vdb import IngestVdbOperator
 
 from gsf.utils.embedding import batch_embed
 from gsf.utils.model_config import resolve
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.vdb import get_semantic_vdb
 from gsf.vdb.postgres import PostgresVDB
 
@@ -226,9 +227,7 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(
-    raw: str | list[Any] | None, data_type: str | None = None
-) -> str:
+def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
     """Return a ' Sample values: ...' suffix string, or empty string if unavailable.
 
     *data_type* is the owning column's declared type. JSON-typed columns get a
@@ -237,23 +236,15 @@ def _format_sample_values(
     ``key [e.g. 'value']`` strings, not bare values — every other column keeps
     the original cutoff unchanged.
     """
-    if not raw:
+    max_len = (
+        _MAX_EMBEDDED_JSON_SAMPLE_LEN
+        if "json" in (data_type or "").lower()
+        else _MAX_EMBEDDED_SAMPLE_LEN
+    )
+    values = stringify_sample_values(raw, max_len=max_len)
+    if not values:
         return ""
-    try:
-        import json
-
-        max_len = (
-            _MAX_EMBEDDED_JSON_SAMPLE_LEN
-            if "json" in (data_type or "").lower()
-            else _MAX_EMBEDDED_SAMPLE_LEN
-        )
-        values = json.loads(raw) if isinstance(raw, str) else list(raw)
-        non_null = [str(v) for v in values if v is not None and len(str(v)) <= max_len]
-        if not non_null:
-            return ""
-        return " Sample values: " + ", ".join(non_null) + "."
-    except Exception:
-        return ""
+    return " Sample values: " + ", ".join(values) + "."
 
 
 def _build_rows(

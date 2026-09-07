@@ -337,10 +337,13 @@ const ReadOnlyTagList = ({
 	title,
 	values,
 	sectionId,
+	hint,
 }: {
 	title: string;
 	values: string[];
 	sectionId: string;
+	/** Shown under the values; used to say why they stayed read-only in edit mode. */
+	hint?: string;
 }) => {
 	const nonEmptyValues = values.filter((v) => v.trim() !== '');
 	return (
@@ -360,6 +363,9 @@ const ReadOnlyTagList = ({
 					))}
 				</ul>
 			)}
+			{hint ? (
+				<p className="mt-3 text-[11px] text-zinc-500 dark:text-zinc-400">{hint}</p>
+			) : null}
 		</div>
 	);
 };
@@ -427,6 +433,9 @@ function renderComposerSection(
 					title={section.title}
 					values={section.values}
 					sectionId={section.id}
+					// A section that stays read-only through an edit owes the user a
+					// reason; an editable one shows its hint on the input instead.
+					hint={isEditingActive && section.editable !== true ? section.hint : undefined}
 				/>
 			);
 		case ComposerSectionKind.INFO_GRID:

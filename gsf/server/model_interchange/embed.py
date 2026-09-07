@@ -47,7 +47,7 @@ class ColumnCatalogMeta:
     name: str
     description: str
     data_type: str
-    sample_values: list[str]
+    sample_values: list[Any]
     is_unique: bool
     table_yaml_id: str
     table_name: str
@@ -61,7 +61,7 @@ def build_column_data_row(
     column_name: str,
     column_description: str,
     data_type: str,
-    sample_values: list[str],
+    sample_values: list[Any],
     table_name: str,
     schema_name: str,
     database_name: str,
@@ -145,7 +145,7 @@ def build_column_attribute_semantic_rows(
     table_id: str,
     table_name: str,
     is_unique: bool,
-    sample_values: list[str] | str | None,
+    sample_values: list[Any] | None,
     schema_name: str | None = None,
 ) -> list[dict[str, Any]]:
     """Build semantic-layer embed rows for a ColumnAttribute."""

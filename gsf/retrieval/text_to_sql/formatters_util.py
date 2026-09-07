@@ -2,6 +2,23 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from gsf.utils.sample_values import stringify_sample_values
+
+
+def _format_sample_values(raw: Any) -> str:
+    """Render sample values as ``a, b, c``, or empty when there are none.
+
+    Matches how every other model-facing renderer spells them out (see
+    ``gsf.semantic.embed``); interpolating the list itself would leak Python
+    repr punctuation into the prompt.
+    """
+    values = stringify_sample_values(raw)
+    if not values:
+        return ""
+    return ", ".join(values)
+
 
 def qualify_table(database_name: str, schema_name: str, table_name: str) -> str:
     """Build the qualified identifier the model is expected to copy verbatim.
@@ -129,7 +146,7 @@ def format_tables_for_prompt(
                     col_name = col.get("name", "UNKNOWN")
                     col_type = col.get("data_type", "UNKNOWN")
                     col_desc = col.get("description", "")
-                    sample_values = col.get("sample_values")
+                    sample_values = _format_sample_values(col.get("sample_values"))
 
                     col_line = f"    - {col_name} ({col_type})"
                     if col_desc:

@@ -15,7 +15,11 @@ from gsf.dal import terms as terms_dal
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.embed import build_semantic_embedder
 from gsf.server.datasources import service as datasources_service
-from gsf.utils import get_embed_params, parse_sample_values
+from gsf.utils import (
+    get_embed_params,
+    sample_values_edit_error,
+    stringify_sample_values,
+)
 from gsf.utils.embedding import embed_docs_into_vdb
 
 logger = logging.getLogger(__name__)
@@ -101,7 +105,21 @@ def update_column_attribute(
 
     The certification flag carries no embedding content, so a
     certification-only update skips the VDB refresh entirely.
+
+    Raises ``ValueError`` when the owning Column's declared SQL type does not
+    accept hand-written samples.
     """
+    if sample_values is not None:
+        # Refused ahead of the metadata write below, so a rejected patch does
+        # not leave a renamed attribute behind. A missing attribute or Column
+        # is left to that write, which answers 404 rather than a type
+        # complaint; the Column write itself re-checks the type.
+        owning_column = attributes_dal.fetch_column_attribute_column(attr_id)
+        if owning_column is not None:
+            error = sample_values_edit_error(owning_column.get("data_type"))
+            if error is not None:
+                raise ValueError(error)
+
     row = attributes_dal.update_column_attribute(
         attr_id,
         term_id,
@@ -116,7 +134,7 @@ def update_column_attribute(
         name is not None or description is not None or sample_values is not None
     )
     if not content_changed:
-        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+        row["sample_values"] = stringify_sample_values(row.get("sample_values"))
         return row
 
     if sample_values is not None:
@@ -135,7 +153,7 @@ def update_column_attribute(
         )
         row["sample_values"] = sample_values
     else:
-        row["sample_values"] = parse_sample_values(row.get("sample_values"))
+        row["sample_values"] = stringify_sample_values(row.get("sample_values"))
 
     embedder = build_semantic_embedder(row.get("database_name") or "", reset=False)
     if embedder is not None:

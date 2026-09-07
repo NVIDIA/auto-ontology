@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
+from gsf.semantic.fk_suggester import (
+    _format_sample_values,
+    suggest_potential_foreign_keys,
+)
 from gsf.semantic.models import FkAndPkResult
 
 
@@ -101,6 +104,54 @@ def test_uuid_without_profiling_not_suggested(
 
     messages = _mock_invoke.call_args.args[1]
     assert "is_unique:" not in messages[1].content
+
+
+def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
+    # Legacy Column nodes still store sample_values as a JSON string.
+    assert _format_sample_values('["a", "b", "b"]') == "samples: a, b, b"
+    # Current writers store a native list.
+    assert _format_sample_values(["a", "b", "b"]) == "samples: a, b, b"
+    assert _format_sample_values(None) == ""
+    assert _format_sample_values([]) == ""
+    assert _format_sample_values(["a", None, "b"]) == "samples: a, b"
+    assert _format_sample_values('["a", null, "b"]') == "samples: a, b"
+
+
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
+@patch(
+    "gsf.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
+)
+def test_candidate_column_samples_included_regardless_of_stored_shape(
+    _mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    table = {"id": "t1", "name": "events", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            # Legacy JSON-string shape.
+            {
+                "name": "legacy_col",
+                "data_type": "varchar",
+                "sample_values": '["x", "y"]',
+            },
+            # Current native-list shape.
+            {
+                "name": "current_col",
+                "data_type": "varchar",
+                "sample_values": ["x", "y"],
+            },
+        ],
+        "fks": [],
+    }
+
+    suggest_potential_foreign_keys(table, ctx)
+
+    prompt = _mock_invoke.call_args.args[1][1].content
+    assert "legacy_col (varchar) [samples: x, y]" in prompt
+    assert "current_col (varchar) [samples: x, y]" in prompt
 
 
 @patch(

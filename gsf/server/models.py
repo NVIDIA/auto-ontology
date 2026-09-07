@@ -44,6 +44,8 @@ __all__ = [
     "ExplorationRelatedNode",
     "ExplorationRelatedNodes",
     "ForeignKeyRef",
+    "GlobalSearchBreadcrumb",
+    "GlobalSearchItem",
     "GraphLink",
     "IdRef",
     "NodeUpdateResult",
@@ -112,6 +114,32 @@ class NodeUpdateResult(ApiModel):
     description: str | None = None
     sample_values: list[str] | None = None
     description_certified: bool | None = None
+
+
+class GlobalSearchBreadcrumb(ApiModel):
+    """One hop in a global-search hit's catalog/semantic path."""
+
+    name: str
+    type: str
+    id: str | None = None
+
+
+class GlobalSearchItem(ApiModel):
+    """One global-search hit: identity plus optional certified/parent path.
+
+    ``type`` is the entity's label (``Term``, ``Table``, ``ColumnAttribute``, …).
+    ``table_type`` is set on ``Table`` nodes so the client can tell views apart.
+    """
+
+    id: str
+    name: str | None = None
+    type: str
+    table_type: str | None = None
+    description: str | None = None
+    certified: bool | str | None = None
+    parent_id: str | None = None
+    breadcrumbs: list[GlobalSearchBreadcrumb] = Field(default_factory=list)
+    synonyms: list[str] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -377,14 +405,15 @@ class ForeignKeyRef(ApiModel):
     """One foreign-key column pair behind an exploration edge.
 
     ``source_column`` always names a column on the edge's ``source``. The
-    sample values come straight off the Column node, unparsed — profiling
-    stores them as a JSON string, a catalog PATCH stores a list.
+    sample values are rendered through ``stringify_sample_values`` before
+    reaching this model, so the types a column stores arrive here as a plain
+    string list.
     """
 
     source_column: str | None = None
     target_column: str | None = None
-    source_sample_values: list[str] | str | None = None
-    target_sample_values: list[str] | str | None = None
+    source_sample_values: list[str] | None = None
+    target_sample_values: list[str] | None = None
 
 
 class ExplorationEdge(ApiModel):

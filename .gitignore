@@ -2,6 +2,10 @@
 .venv/
 **/__pycache__/
 
+# Build artefacts (e.g. gsf-mcp wheels from `uv build`)
+dist/
+*.egg-info/
+
 
 # dependencies
 node_modules
@@ -58,8 +62,8 @@ openmetadata-eval/
 dev_tools/pgadmin/
 
 # Generated SQLite fixture DBs — built from the vendored .sql by
-# dev_tools.build_sqlite_fixtures; text is the source of truth, not the blob.
-dev_tools/sql/*.sqlite
+# dev_tools.fixtures.build_sqlite_fixtures; text is the source of truth, not the blob.
+dev_tools/fixtures/sql/*.sqlite
 
 # Local minikube deploy helper. Machine-specific by nature — it names one
 # checkout's paths and reads API keys from the environment — so it stays out of

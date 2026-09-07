@@ -12,19 +12,19 @@ plausible answer after a change, rather than the right one.
 code changed is the test doing its job::
 
     docker compose up -d postgres
-    uv run --no-sync python -m dev_tools.seed_fixtures
-    uv run --no-sync python -m dev_tools.seed_graph_fixture --reset
+    uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
+    uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
     uv run --no-sync pytest gsf/dal/tests/test_golden.py
 
 Re-record only when a change to DAL output is *intended*::
 
-    uv run --no-sync python -m dev_tools.capture_dal_golden
+    uv run --no-sync python -m dev_tools.fixtures.capture_dal_golden
 
 Results are normalised before comparison — ids become stable tokens, timestamps
 are redacted, and undirected edges are oriented consistently. See
-``dev_tools/capture_dal_golden.normalise``; note in particular that **list order
-is not covered**, deliberately, because most DAL queries lack a total
-``ORDER BY``.
+``dev_tools/fixtures/capture_dal_golden.normalise``; note in particular that
+**list order is not covered**, deliberately, because most DAL queries lack a
+total ``ORDER BY``.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from typing import Any
 
 import pytest
 
-from dev_tools import capture_dal_golden
+from dev_tools.fixtures import capture_dal_golden
 
 GOLDEN = capture_dal_golden.load_golden()
 
@@ -65,7 +65,7 @@ def test_golden_file_exists() -> None:
     """A missing golden must fail loudly, not make every comparison vacuous."""
     assert GOLDEN["results"], (
         "no recorded goldens. Capture them with: "
-        "uv run --no-sync python -m dev_tools.capture_dal_golden"
+        "uv run --no-sync python -m dev_tools.fixtures.capture_dal_golden"
     )
 
 

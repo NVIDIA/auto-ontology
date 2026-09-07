@@ -52,6 +52,7 @@ from gsf.dal.terms import (
     term_is_in_scope,
 )
 from gsf.dal.users import resolve_accessible_catalog_ids
+from gsf.utils.sample_values import stringify_sample_values
 from gsf.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
     LABEL_TERM,
@@ -392,12 +393,12 @@ def fetch_data_exploration_edges(
         detail = {
             "source_column": row["target_column" if flipped else "source_column"],
             "target_column": row["source_column" if flipped else "target_column"],
-            "source_sample_values": row[
-                "target_sample_values" if flipped else "source_sample_values"
-            ],
-            "target_sample_values": row[
-                "source_sample_values" if flipped else "target_sample_values"
-            ],
+            "source_sample_values": stringify_sample_values(
+                row["target_sample_values" if flipped else "source_sample_values"]
+            ),
+            "target_sample_values": stringify_sample_values(
+                row["source_sample_values" if flipped else "target_sample_values"]
+            ),
         }
         edge = edges.get(key)
         if edge is None:

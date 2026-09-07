@@ -25,11 +25,33 @@ export type ChatRequest = {
 	target_db?: string | null;
 };
 
+/**
+ * A graph node starting (`start`) or returning (`end`). Both are sent for
+ * every node: the backend can only attach a node's `thought` once it has
+ * finished, but waiting for that to show the label would leave the UI naming
+ * the *previous* node for the whole time this one runs — a 20s reconstruction
+ * displayed as "Validating intent". `phase` is absent on older backends, in
+ * which case an event is treated as a plain "next step" as before.
+ */
 export type StepEvent = {
 	type: 'step';
 	node: string;
 	label: string;
+	phase?: 'start' | 'end';
 	thought?: string | null;
+};
+
+/**
+ * The query the agent is about to run, sent once it has cleared syntax and
+ * intent validation, so the UI can show it while the database works rather
+ * than only alongside the final answer. Drafts that validation rejects are
+ * never sent, so what arrives here is always what executes. A query that
+ * fails at execution and is rebuilt sends a new event; the newest one wins.
+ */
+export type SqlEvent = {
+	type: 'sql';
+	node: string;
+	sql: string;
 };
 
 /** Shape of the executed SQL result, as returned by `sql_response_from_db`. */
@@ -63,7 +85,7 @@ export type ChartsEvent = {
 	sql_response?: string | null;
 };
 
-export type ChatStreamEvent = StepEvent | ResultEvent | ErrorEvent | ChartsEvent;
+export type ChatStreamEvent = StepEvent | SqlEvent | ResultEvent | ErrorEvent | ChartsEvent;
 
 export type GraphStep = {
 	node: string;

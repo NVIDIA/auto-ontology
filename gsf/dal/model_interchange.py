@@ -17,7 +17,6 @@ behind rather than a catalog with half its semantics on top.
 
 from __future__ import annotations
 
-import json
 import logging
 from collections.abc import Callable, Iterable
 from typing import Any
@@ -69,7 +68,7 @@ from gsf.server.model_interchange.schemas import (
     ModelTerm,
 )
 from gsf.server.sql_utils import get_dialects, get_schemas, validate_sql
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import dump_sample_values, parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -647,6 +646,9 @@ def _assemble_databases(
                     name=row.get("column_name") or "",
                     description=row.get("column_description") or "",
                     type=row.get("column_type") or "",
+                    # Decoded, not rendered: the exported document is
+                    # re-importable, so an integer column has to leave as
+                    # numbers to come back as numbers.
                     sample_values=parse_sample_values(row.get("sample_values")) or [],
                     is_nullable=_nullable_or_default(row.get("is_nullable")),
                     is_unique=bool(row.get("is_unique") or False),
@@ -1108,10 +1110,11 @@ def _import_catalog(
                                 "name": column.name,
                                 "description": column.description,
                                 "data_type": column.type,
-                                "sample_values": (
-                                    json.dumps(column.sample_values)
-                                    if column.sample_values
-                                    else None
+                                # Encoded the same way a profiled column is, so
+                                # an imported document round-trips with its
+                                # types intact.
+                                "sample_values": dump_sample_values(
+                                    column.sample_values
                                 ),
                                 "is_unique": column.is_unique,
                                 "is_nullable": column.is_nullable,

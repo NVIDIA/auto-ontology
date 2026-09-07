@@ -130,6 +130,28 @@ def merge_column_attribute(
     return attribute_id
 
 
+def fetch_column_attribute_column(attr_id: str) -> dict[str, Any] | None:
+    """Return ``{id, data_type}`` of the Column owning a ColumnAttribute.
+
+    ``None`` when the attribute is missing or has no owning Column. Read on
+    its own, ahead of ``update_column_attribute``, so a sample-value edit can
+    be refused against the Column's declared type before any metadata is
+    written (see ``gsf.server.terms.service.update_column_attribute``).
+    """
+    rows = store().query_read(
+        select(s.catalog_column.c.id, s.catalog_column.c.data_type)
+        .select_from(
+            s.catalog_column.join(
+                s.column__has_attribute,
+                s.column__has_attribute.c.column_id == s.catalog_column.c.id,
+            )
+        )
+        .where(s.column__has_attribute.c.attribute_id == attr_id)
+        .limit(1)
+    )
+    return dict(rows[0]) if rows else None
+
+
 def update_column_attribute(
     attr_id: str,
     term_id: str,

@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import threading
 import time
-from collections import defaultdict
+from collections import Counter, defaultdict
 from contextlib import contextmanager
+from datetime import date, datetime, time as dt_time
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
 
 from sqlglot import exp
@@ -186,17 +189,82 @@ def _quoted_identifier(name: str, dialect: str | None) -> str:
         return '"' + name.replace('"', '""') + '"'
 
 
+def _json_ready_sample(value: Any) -> Any:
+    """Convert a live warehouse value to a JSON-serializable Python native.
+
+    Drivers hand back types that no downstream consumer can serialize as-is:
+    numpy scalars, ``Decimal``, ``datetime``, and the lists/dicts Postgres
+    returns for array and JSON columns. Stringifying the whole sample up front
+    is what this replaces — a number that survives as ``int`` stays a number
+    all the way into storage, and only genuinely non-scalar values are
+    rendered as text.
+
+    numpy scalars are unwrapped by duck-typing ``.item()`` rather than by
+    importing numpy, which is only present here transitively through pandas.
+    """
+    unwrap = getattr(value, "item", None)
+    if callable(unwrap) and not isinstance(value, (str, bytes, bytearray)):
+        try:
+            value = unwrap()
+        except Exception:
+            pass
+
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, (datetime, date, dt_time)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, dict):
+        return {str(k): _json_ready_sample(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_json_ready_sample(v) for v in value]
+    return str(value)
+
+
+def _sample_key(value: Any) -> str:
+    """Stable grouping key for a sample value, including unhashable ones.
+
+    Uniqueness and most-common counts both need to group equal values, but
+    array and JSON columns come back as lists and dicts, which cannot go in a
+    set. Keying on the JSON rendering keeps those columns countable while
+    holding ``1``, ``"1"`` and ``True`` apart, which a plain ``str()`` key
+    would collapse.
+    """
+    try:
+        return json.dumps(value, sort_keys=True, default=str)
+    except (TypeError, ValueError):
+        return str(value)
+
+
+def _keep_persisted_sample(value: Any) -> bool:
+    """Whether a profiled value is short enough to persist as a sample.
+
+    The length cap exists to keep prose and blobs out of prompts, so it only
+    means anything for text: numbers and booleans are always worth persisting
+    however many digits they have. Non-scalars are judged by their rendered
+    length, since that is what a reader ultimately sees.
+    """
+    if isinstance(value, (bool, int, float)):
+        return True
+    if isinstance(value, str):
+        return len(value) <= _MAX_SAMPLE_VALUE_LEN
+    return len(_sample_key(value)) <= _MAX_SAMPLE_VALUE_LEN
+
+
 def _distinct_values_if_low_cardinality(
     connector: "SQLDatabase",
     qualified: str,
     col_name: str,
     cap: int,
-) -> list[str] | None:
+) -> list[Any] | None:
     """Return the full distinct value set for a low-cardinality column.
 
     Runs ``SELECT DISTINCT <col> ... LIMIT cap + 1``. Returns the distinct
-    values (as strings) when the column has at most *cap* distinct non-null
-    values; returns ``None`` for high-cardinality columns (more than *cap*
+    values (in their native types) when the column has at most *cap* distinct
+    non-null values; returns ``None`` for high-cardinality columns (more than *cap*
     distinct values) or on any error, so the caller falls back to the
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
@@ -211,7 +279,7 @@ def _distinct_values_if_low_cardinality(
         return None
     if df is None or df.empty:
         return None
-    values = [str(v) for v in df.iloc[:, 0].tolist()]
+    values = [_json_ready_sample(v) for v in df.iloc[:, 0].tolist()]
     if len(values) > cap:
         return None
     return values
@@ -229,6 +297,12 @@ def calculate_columns_profiling(
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
+
+    Sample values keep the type the warehouse returned (see
+    ``_json_ready_sample``): a numeric column profiles as ``[10, 20, 30]``,
+    not ``["10", "20", "30"]``. The types survive storage, since a column's
+    ``sample_values`` is persisted as JSON; only readers that need display
+    text coerce through ``stringify_sample_values``.
 
     Persists to catalog columns: ``is_unique`` for every column,
     ``format`` for date/time-typed or text columns whose sampled values share
@@ -285,13 +359,22 @@ def calculate_columns_profiling(
     for column in df.columns:
         col_name = str(column)
         try:
-            # Cast to string first: some columns hold unhashable values (e.g.
-            # Postgres array columns come back as Python lists, JSON/JSONB as
-            # dict/list), and both is_unique and value_counts hash values.
-            series = df[column].dropna().map(str)
+            series = df[column].dropna()
+            values = [_json_ready_sample(v) for v in series.tolist()]
+            # Group through _sample_key rather than the values themselves:
+            # Postgres array columns come back as Python lists and JSON/JSONB
+            # as dict/list, neither of which can go in a set or a Counter.
+            keys = [_sample_key(value) for value in values]
 
-            is_unique = bool(len(series) > 0 and series.is_unique)
-            top5 = list(series.value_counts().head(_PROFILING_TOP_N).index)
+            is_unique = bool(keys and len(set(keys)) == len(keys))
+
+            first_by_key: dict[str, Any] = {}
+            for key, value in zip(keys, values):
+                first_by_key.setdefault(key, value)
+            top5 = [
+                first_by_key[key]
+                for key, _ in Counter(keys).most_common(_PROFILING_TOP_N)
+            ]
         except Exception:
             logger.warning(
                 "[%s] profiling failed for column %r — skipping column",
@@ -321,8 +404,11 @@ def calculate_columns_profiling(
             )
             if distinct_vals is not None:
                 merged = list(top5)
+                seen_keys = {_sample_key(value) for value in merged}
                 for value in distinct_vals:
-                    if value not in merged:
+                    key = _sample_key(value)
+                    if key not in seen_keys:
+                        seen_keys.add(key)
                         merged.append(value)
                 col_values = merged
 
@@ -514,7 +600,7 @@ def calculate_columns_profiling(
                 sample_values[col_name] = json_keys[:20]
             continue
 
-        filtered = [v for v in col_values if len(v) <= _MAX_SAMPLE_VALUE_LEN]
+        filtered = [v for v in col_values if _keep_persisted_sample(v)]
         if _is_text_sample_type(declared_type):
             # Checked against the full up-to-1000-row sample, not just the
             # top-5/distinct values kept for display — a minority format can

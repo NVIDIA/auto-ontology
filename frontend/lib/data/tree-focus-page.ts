@@ -15,6 +15,7 @@ import type { Column, Database, Schema, Table } from '@/types/datasources';
 import type { ComposerCertification, ComposerSection } from '@/types/composer-section';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
+import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 
 export type TreeResolved =
 	| { type: TreeFocusState.NONE }
@@ -283,6 +284,7 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.COLUMN: {
 			const { column } = resolvedFocus;
+			const samplesEditable = sampleValuesEditable(column.data_type);
 			sections.push(
 				{
 					type: ComposerSectionKind.TEXT_CARD,
@@ -297,7 +299,8 @@ export function buildTreeFocusPageFormat(
 					id: 'sample_values',
 					title: 'Sample Values',
 					values: Array.isArray(column.sample_values) ? column.sample_values : [],
-					editable: true,
+					editable: samplesEditable,
+					hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(column.data_type),
 				},
 				{
 					type: ComposerSectionKind.INFO_GRID,

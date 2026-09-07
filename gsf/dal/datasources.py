@@ -18,7 +18,6 @@ Two shapes recur and are easy to break:
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -42,7 +41,11 @@ from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr, table_description_expr
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
-from gsf.utils.sample_values import parse_sample_values
+from gsf.utils.sample_values import (
+    dump_sample_values,
+    parse_sample_values,
+    stringify_sample_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -471,14 +474,24 @@ def _set_column_property(table_id: str, values: dict[str, Any], column: str) -> 
 
 
 def store_column_sample_values(table_id: str, samples: dict[str, list]) -> None:
-    """Write sample values, JSON-encoded, onto a table's columns."""
+    """Write sample values, JSON-encoded, onto a table's columns.
+
+    The values keep the type profiling reported, so a numeric column persists
+    as ``[10, 20, 30]`` and readers can tell it from a text column holding
+    ``["10", "20", "30"]``. Callers that want display text render it on read,
+    through ``stringify_sample_values``.
+
+    A column whose samples are all null is left alone rather than written as an
+    empty list — see ``dump_sample_values``.
+    """
     if not samples:
         return
-    _set_column_property(
-        table_id,
-        {name: json.dumps(values) for name, values in samples.items()},
-        "sample_values",
-    )
+    encoded = {
+        name: dumped
+        for name, values in samples.items()
+        if (dumped := dump_sample_values(values)) is not None
+    }
+    _set_column_property(table_id, encoded, "sample_values")
 
 
 def store_column_uniqueness(table_id: str, uniqueness: dict[str, bool]) -> None:
@@ -631,10 +644,16 @@ def patch_catalog_node(
     tried in turn. Properties with no matching column are dropped rather than
     rejected: callers set properties opportunistically, and refusing would fail
     writes that work today.
+
+    ``sample_values`` arrives from a client as a list and is encoded here, so
+    an edit lands in the same JSON form profiling writes. A list emptied by
+    that becomes NULL — clearing the samples is what an empty patch means.
     """
     for label, table in _NODE_TABLES.items():
         columns = {c.name for c in table.columns}
         values = {k: v for k, v in properties.items() if k in columns and k != "id"}
+        if isinstance(values.get("sample_values"), list):
+            values["sample_values"] = dump_sample_values(values["sample_values"])
         rows = store().query_read(select(table.c.id).where(table.c.id == node_id))
         if not rows:
             continue
@@ -800,9 +819,8 @@ def fetch_all_tables_without_term(
     """Tables not yet assigned a Term — the work list for term compilation.
 
     Scoped to one database when *database_name* is given. Several databases can
-    share a store (the BIRD benchmark puts dozens in one), and each compile pass
-    tags its embeddings with a database name, so an unscoped pass would attribute
-    one database's tables to another.
+    share a store, and each compile pass tags its embeddings with a database name,
+    so an unscoped pass would attribute one database's tables to another.
 
     Note this reads the table's *own* description, not the fallback: a table
     with no Term has no Term description to fall back to.
@@ -884,7 +902,10 @@ def fetch_columns_for_table(
 
     table = dict(header[0])
     table["columns"] = [
-        {**dict(r), "sample_values": parse_sample_values(r["sample_values"])}
+        # Rendered, not just decoded: `ColumnSummary.sample_values` is a string
+        # list, so the stored types are display text by the time a client sees
+        # them.
+        {**dict(r), "sample_values": stringify_sample_values(r["sample_values"])}
         for r in store().query_read(page)
     ]
     return table
@@ -1054,10 +1075,11 @@ def fetch_tables_and_columns_by_node_ids(
 
     columns_df = pd.DataFrame(
         [
-            # ``sample_values`` is stored as a JSON string. It has to be parsed
-            # here: the operator downstream slices it to five, and on a string
-            # that takes five *characters* rather than five values.
-            {**dict(r), "sample_values": parse_sample_values(r["sample_values"])}
+            # ``sample_values`` is stored as a JSON string. It has to be
+            # rendered here: the operator downstream slices it to five and
+            # renders the result into embedding text, and on a string that
+            # takes five *characters* rather than five values.
+            {**dict(r), "sample_values": stringify_sample_values(r["sample_values"])}
             for r in conn.query_read(
                 select(
                     s.catalog_column.c.id,

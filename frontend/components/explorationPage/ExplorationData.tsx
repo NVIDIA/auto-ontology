@@ -22,7 +22,6 @@ import type {
 	ExplorationLink,
 } from '@/types/exploration';
 import { ZonesRow } from '@/common/SinglePageComposer';
-import { parseSampleValues } from '@/lib/data/sample-values';
 
 /** Build the data-layer graph (Tables/Views + their relationships) from the server DTO. */
 export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph => {
@@ -59,8 +58,8 @@ export const buildDataGraph = (graph: DataExplorationGraph): ExplorationGraph =>
 			foreignKeys: (link.foreign_keys ?? []).map((fk) => ({
 				sourceColumn: fk.source_column,
 				targetColumn: fk.target_column,
-				sourceSampleValues: parseSampleValues(fk.source_sample_values),
-				targetSampleValues: parseSampleValues(fk.target_sample_values),
+				sourceSampleValues: fk.source_sample_values,
+				targetSampleValues: fk.target_sample_values,
 			})),
 			relationshipTypes: link.relationship_types ?? [],
 		}));

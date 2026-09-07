@@ -772,6 +772,47 @@ for _table in (
     Index(f"ix_{_table.name}_imported_id", _table.c.imported_id)
 
 # ---------------------------------------------------------------------------
+# Trigram indexes for global search
+# ---------------------------------------------------------------------------
+
+#: Every table global search reads, and so every table that needs the indexes
+#: below. ``View`` is absent because it is not a table of its own -- it is
+#: ``catalog_table`` filtered by ``table_type``. ``gsf.dal.search`` maps labels
+#: onto these, and a test there asserts the two sets have not drifted apart.
+TRIGRAM_SEARCH_TABLES = (
+    catalog_database,
+    catalog_schema,
+    catalog_table,
+    catalog_column,
+    custom_analysis,
+    term,
+    column_attribute,
+    sql_attribute,
+    pql_analysis,
+)
+
+#: Global search matches a *substring*: typing ``mount`` has to find
+#: ``total_amount``. Nothing else indexes that. A btree needs a left anchor, so
+#: it cannot serve an unanchored ``LIKE`` at all, and ``tsvector`` reaches only
+#: the front of a token -- ``to_tsquery('mount:*')`` misses the word it sits
+#: inside. ``pg_trgm`` indexes a string's three-character sequences, which is
+#: what makes ``ILIKE '%mount%'`` indexable rather than a sequential scan of
+#: every catalog row on every keystroke.
+#:
+#: Both columns are indexed because a search matches either one, ``description``
+#: only when the caller asks for it. Neither carries ``lower()``: ``gin_trgm_ops``
+#: folds case itself, so ``ILIKE`` uses these exactly as written -- adding
+#: ``lower()`` here would build an index that ``ILIKE`` then could not match.
+for _table in TRIGRAM_SEARCH_TABLES:
+    for _column in ("name", "description"):
+        Index(
+            f"ix_{_table.name}_{_column}_trgm",
+            _table.c[_column],
+            postgresql_using="gin",
+            postgresql_ops={_column: "gin_trgm_ops"},
+        )
+
+# ---------------------------------------------------------------------------
 # join_path_edge view -- no longer read from Python; see note below.
 # ---------------------------------------------------------------------------
 
@@ -841,6 +882,7 @@ join_path_edge = Table(
 
 __all__ = [
     "METADATA",
+    "TRIGRAM_SEARCH_TABLES",
     "column__join",
     "column__union",
     "VIEWS",

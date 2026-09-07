@@ -73,9 +73,14 @@ def test_absent_falls_back_to_classification(_no_llm: list) -> None:
 def test_chat_request_defaults_to_none() -> None:
     from gsf.server.chat.helpers import ChatRequest
 
-    assert ChatRequest(question="hi").prediction is None
+    request = ChatRequest(question="hi")
+    assert request.prediction is None
+    assert request.evidence is None
     assert ChatRequest(question="hi", prediction=True).prediction is True
     assert ChatRequest(question="hi", prediction=False).prediction is False
+    assert (
+        ChatRequest(question="hi", evidence="authoritative").evidence == "authoritative"
+    )
 
 
 def test_chat_request_validates_conversation_uuid() -> None:
@@ -109,8 +114,8 @@ def test_worker_submit_passes_prediction_through() -> None:
     worker.submit("q", prediction=True)
     worker.submit("q2")
 
-    assert sent[0][1] == ("q", True, None, None, [])
-    assert sent[1][1] == ("q2", None, None, None, [])
+    assert sent[0][1] == ("q", True, None, None, [], None)
+    assert sent[1][1] == ("q2", None, None, None, [], None)
 
 
 def test_worker_submit_accepts_every_field_by_keyword() -> None:
@@ -127,9 +132,17 @@ def test_worker_submit_accepts_every_field_by_keyword() -> None:
         prediction=False,
         target_db="analytics",
         subject_token="jwt",
+        evidence="authoritative",
     )
 
-    assert sent[0][1] == ("q", False, "analytics", "jwt", [])
+    assert sent[0][1] == (
+        "q",
+        False,
+        "analytics",
+        "jwt",
+        [],
+        "authoritative",
+    )
 
 
 def test_worker_payload_unpacks_as_the_loop_expects() -> None:
@@ -142,6 +155,7 @@ def test_worker_payload_unpacks_as_the_loop_expects() -> None:
 
     worker.submit("q", prediction=True, target_db="db", subject_token="tok")
 
-    question, prediction, target_db, subject_token, history = sent[0][1]
+    question, prediction, target_db, subject_token, history, evidence = sent[0][1]
     assert (question, prediction, target_db, subject_token) == ("q", True, "db", "tok")
     assert history == []
+    assert evidence is None

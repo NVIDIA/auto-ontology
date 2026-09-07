@@ -41,6 +41,7 @@ export const ChatView = () => {
 		messages,
 		setMessages,
 		steps,
+		liveSql,
 		isLoading,
 		sendMessage,
 		resumeIfRunning,
@@ -237,6 +238,7 @@ export const ChatView = () => {
 							messages={messages}
 							isLoading={isLoading}
 							steps={steps}
+							liveSql={liveSql}
 							messageListLoading={messageListLoading}
 						/>
 

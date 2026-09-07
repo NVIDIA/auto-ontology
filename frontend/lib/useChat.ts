@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { cancelChat, streamChat, watchChat } from '@/api/chat';
 import { conversationsApi, toConversation } from '@/api/conversations';
 import { GENERIC_ANSWER_ERROR, buildSqlAnswerMessage, isResultMessage } from '@/lib/answerMessages';
-import type { ChartsEvent, ChatMessage, GraphStep, ResultEvent } from '@/types/chat';
+import type { ChartsEvent, ChatMessage, GraphStep, ResultEvent, StepEvent } from '@/types/chat';
 
 let nextId = 0;
 const uid = () => `msg-${Date.now()}-${nextId++}`;
@@ -23,9 +23,48 @@ const sleep = (ms: number) =>
 		setTimeout(resolve, ms);
 	});
 
+/**
+ * Fold one step event into the list. A node sends two: `start`, which opens
+ * the step and is what keeps the visible label honest while the node works,
+ * and `end`, which only carries the thought the node produced — so `end`
+ * updates the entry its `start` opened instead of adding a duplicate.
+ *
+ * An `end` with no matching open step (a backend that doesn't send `start`,
+ * or a replay joined mid-node) falls through to appending, which is exactly
+ * the behaviour before `phase` existed.
+ */
+const applyStepEvent = (prev: GraphStep[], event: StepEvent): GraphStep[] => {
+	if (event.phase === 'end') {
+		const open = prev[prev.length - 1];
+		if (open?.node === event.node) {
+			return [...prev.slice(0, -1), { ...open, thought: event.thought ?? open.thought }];
+		}
+	}
+
+	return [
+		...prev.map((step) => ({ ...step, status: 'completed' as const })),
+		{
+			node: event.node,
+			label: event.label,
+			thought: event.thought,
+			status: 'active' as const,
+		},
+	];
+};
+
 export const useChat = () => {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [steps, setSteps] = useState<GraphStep[]>([]);
+	// The validated query the running agent is executing, rendered inside the
+	// thinking bubble so the user can read it while it runs instead of only
+	// seeing it arrive with the answer. Replaced in place if execution fails
+	// and the query is rebuilt; the answer bubble takes over once the run
+	// resolves.
+	const [liveSql, setLiveSql] = useState<string | null>(null);
+	// Same value for the stream callbacks, which need it without re-creating
+	// themselves on every SQL rewrite — `onError` reads it to keep the failed
+	// query on screen.
+	const liveSqlRef = useRef<string | null>(null);
 	const [isLoading, setIsLoading] = useState(false);
 	const controllerRef = useRef<AbortController | null>(null);
 	// Bumped on every `sendMessage`/`stopGeneration`/`clearConversation` so a
@@ -48,6 +87,14 @@ export const useChat = () => {
 	useEffect(() => {
 		messagesRef.current = messages;
 	}, [messages]);
+
+	// Keeps the ref and the rendered value in step. `null` clears the block —
+	// done at the start of every run so a new question never briefly shows the
+	// previous one's SQL.
+	const updateLiveSql = useCallback((sql: string | null) => {
+		liveSqlRef.current = sql;
+		setLiveSql(sql);
+	}, []);
 
 	// Purely local UI state — the chat proxy route persists both the user's
 	// and the assistant's turns to the conversation server-side (so history
@@ -177,6 +224,7 @@ export const useChat = () => {
 
 			resumeControllerRef.current?.abort();
 			setSteps([]);
+			updateLiveSql(null);
 			// Supersedes any charts event still pending from this tab's own
 			// previous send, so its bubble can't land on top of this run.
 			const requestId = (requestIdRef.current += 1);
@@ -187,21 +235,14 @@ export const useChat = () => {
 					sawActivity = true;
 					activeRunConvIdRef.current = conversationId;
 					setIsLoading(true);
-					setSteps((prev) => {
-						const completed = prev.map((s) => ({
-							...s,
-							status: 'completed' as const,
-						}));
-						return [
-							...completed,
-							{
-								node: event.node,
-								label: event.label,
-								thought: event.thought,
-								status: 'active',
-							},
-						];
-					});
+					setSteps((prev) => applyStepEvent(prev, event));
+				},
+
+				// The buffered stream replays every event from the start, so a
+				// tab that reattaches mid-run catches up to whatever SQL the
+				// agent is on right now, exactly like one that watched all along.
+				onSql(event) {
+					updateLiveSql(event.sql);
 				},
 
 				// Message 1 lands here; Message 2 (chart/table) arrives as its own
@@ -226,6 +267,9 @@ export const useChat = () => {
 						return cut === prev.length ? prev : prev.slice(0, cut);
 					});
 					appendSqlAnswerMessage(event.answer);
+					// The answer bubble carries the SQL from here on; leaving the
+					// live copy up would show it twice through the chart step.
+					updateLiveSql(null);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 
 					if (!event.answer.sql_response_from_db) {
@@ -273,7 +317,11 @@ export const useChat = () => {
 						return;
 					}
 					const message = event.message.trim() || GENERIC_ANSWER_ERROR;
-					appendAssistantMessage(message);
+					// Keep the query that failed attached to the error bubble —
+					// the backend persists it the same way, so a reload shows the
+					// same thing.
+					appendAssistantMessage(message, { sql: liveSqlRef.current ?? undefined });
+					updateLiveSql(null);
 					setSteps((prev) => prev.map((s) => ({ ...s, status: 'completed' as const })));
 					setIsLoading(false);
 				},
@@ -317,6 +365,7 @@ export const useChat = () => {
 			appendAssistantMessage,
 			appendChartsMessage,
 			pollForPersistedAssistant,
+			updateLiveSql,
 		],
 	);
 
@@ -344,6 +393,7 @@ export const useChat = () => {
 			// roll it back so the transcript still matches what was persisted.
 			setMessages((prev) => [...prev, userMsg]);
 			setSteps([]);
+			updateLiveSql(null);
 			setIsLoading(true);
 			const requestId = (requestIdRef.current += 1);
 			activeRunConvIdRef.current = conversationId;
@@ -374,25 +424,17 @@ export const useChat = () => {
 					},
 
 					onStep(event) {
-						setSteps((prev) => {
-							const completed = prev.map((s) => ({
-								...s,
-								status: 'completed' as const,
-							}));
-							return [
-								...completed,
-								{
-									node: event.node,
-									label: event.label,
-									thought: event.thought,
-									status: 'active',
-								},
-							];
-						});
+						setSteps((prev) => applyStepEvent(prev, event));
+					},
+
+					onSql(event) {
+						updateLiveSql(event.sql);
 					},
 
 					onResult(event) {
 						appendSqlAnswerMessage(event.answer);
+						// The answer bubble owns the SQL from here on.
+						updateLiveSql(null);
 
 						if (!event.answer.sql_response_from_db) {
 							// No executed result to visualize — the backend won't send a
@@ -443,7 +485,12 @@ export const useChat = () => {
 							return;
 						}
 
-						appendAssistantMessage(message);
+						// Keep the query that failed attached to the error bubble;
+						// the backend persists it the same way, so a reload matches.
+						appendAssistantMessage(message, {
+							sql: liveSqlRef.current ?? undefined,
+						});
+						updateLiveSql(null);
 						settle(true);
 					},
 				},
@@ -452,7 +499,13 @@ export const useChat = () => {
 			controllerRef.current = controller;
 			return accepted;
 		},
-		[appendAssistantMessage, appendSqlAnswerMessage, appendChartsMessage, resumeIfRunning],
+		[
+			appendAssistantMessage,
+			appendSqlAnswerMessage,
+			appendChartsMessage,
+			resumeIfRunning,
+			updateLiveSql,
+		],
 	);
 
 	// Leaves the run alone server-side: it keeps streaming into the buffer and
@@ -461,12 +514,14 @@ export const useChat = () => {
 		stopGeneration(false);
 		setMessages([]);
 		setSteps([]);
-	}, [stopGeneration]);
+		updateLiveSql(null);
+	}, [stopGeneration, updateLiveSql]);
 
 	return {
 		messages,
 		setMessages,
 		steps,
+		liveSql,
 		isLoading,
 		sendMessage,
 		resumeIfRunning,
