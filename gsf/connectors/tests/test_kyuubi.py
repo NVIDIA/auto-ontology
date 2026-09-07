@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import pytest
 
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.kyuubi import KyuubiDatabase, _parse_connection_string
 from gsf.connectors.registry import CONNECTOR_REGISTRY
@@ -266,6 +267,20 @@ def test_undescribable_table_is_dropped_from_tables_too() -> None:
     assert set(zip(tables["table_schema"], tables["table_name"])) == {("kpi", "events")}
     assert set(tables["table_schema"]) == set(columns["table_schema"])
     assert "system" not in set(tables["table_schema"])
+
+
+def test_describing_nothing_at_all_raises_instead_of_emptying_the_catalog() -> None:
+    """Dropping one unreadable table is a skip; dropping every one is a failure.
+
+    A dead session or a revoked catalog grant fails every DESCRIBE alike. Silently
+    dropping the lot yields an empty catalog that is indistinguishable from a
+    database with nothing in it.
+    """
+    db = _database()
+    _stub_with_failing_describe(db, {"events", "table_creation_locks"})
+
+    with pytest.raises(IncompleteCatalogExtractionError, match="could not describe"):
+        db.get_tables()
 
 
 def test_every_reported_schema_has_columns() -> None:

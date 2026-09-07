@@ -25,7 +25,7 @@ class IncompleteCatalogExtractionError(RuntimeError):
     """Raised when listed relations do not have a complete column inventory."""
 
 
-def _relation_keys(frame: Any) -> set[tuple[str, str]]:
+def _relation_keys(frame: "pd.DataFrame | None") -> set[tuple[str, str]]:
     if frame is None or frame.empty:
         return set()
     keys: set[tuple[str, str]] = set()
@@ -39,8 +39,26 @@ def _relation_keys(frame: Any) -> set[tuple[str, str]]:
     return keys
 
 
-def _validate_relation_column_coverage(tables: Any, columns: Any) -> None:
-    """Fail closed when a connector lists relations it could not describe."""
+def _validate_relation_column_coverage(
+    tables: "pd.DataFrame | None", columns: "pd.DataFrame | None"
+) -> None:
+    """Fail closed when a connector lists relations it could not describe.
+
+    The contract every connector owes this function: **never report a relation
+    in ``get_tables()``/``get_views()`` that ``get_columns()`` has no rows for.**
+    A table map with zero columns is what a partial extraction looks like from
+    here, and it is indistinguishable from a complete one — the catalog lands,
+    retrieval offers the table, and every generated query against it fails.
+
+    Meeting the contract is the connector's job, not this function's, because
+    only the connector knows whether one relation failed or the whole scope did.
+    :meth:`gsf.connectors.kyuubi.KyuubiDatabase._introspect` and
+    :meth:`gsf.connectors.databricks.DatabricksDatabase._describe_pass` both drop
+    a relation they cannot describe from *both* frames, and both raise when the
+    failure is scope-wide rather than per-relation. This is the backstop for a
+    connector that gets that wrong: it turns a silently incomplete catalog into
+    a loud failure before anything is written.
+    """
     listed = _relation_keys(tables)
     if not listed:
         return

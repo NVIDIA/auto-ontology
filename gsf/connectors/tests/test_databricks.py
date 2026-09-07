@@ -303,12 +303,26 @@ def test_single_schema_lists_tables_with_show_tables() -> None:
             }
         )
 
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        issued.append(" ".join(sql_text.split()))
+        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+
     db.execute = fake_execute  # type: ignore[method-assign]
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
     tables = db.get_tables()
 
+    # get_tables() describes as well as lists: a relation it cannot describe has to
+    # be withheld from the frame it is about to hand back.
     assert issued == [
         "SHOW TABLES IN `main`.`nbu_dmt_explorer`",
         "SHOW VIEWS IN `main`.`nbu_dmt_explorer`",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders`",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`customers`",
     ]
     assert not any("information_schema" in q for q in issued)
     assert list(tables["table_name"]) == ["orders", "customers"]
@@ -383,7 +397,13 @@ def test_multiple_schemas_still_use_information_schema() -> None:
 
 
 def test_show_columns_skips_a_table_it_cannot_read() -> None:
-    """A dropped table or a missing grant must not abandon the rest of the schema."""
+    """A dropped table or a missing grant must not abandon the rest of the schema.
+
+    The skipped table has to leave the tables frame too. Reporting it as a table
+    with no columns is precisely what the extraction coverage gate rejects, and it
+    rejects the entire ingest — so a narrower skip that only removed the columns
+    would take the readable tables down with it.
+    """
     from databricks.sql.exc import Error as DatabricksError
 
     db = DatabricksDatabase(_connection_string(), schemas=["s"])
@@ -401,9 +421,49 @@ def test_show_columns_skips_a_table_it_cannot_read() -> None:
 
     db._connect = fake_connect  # type: ignore[method-assign]
     db._run = fake_run  # type: ignore[method-assign]
+    db.execute = lambda sql_text, *a, **k: fake_run(None, sql_text)  # type: ignore[method-assign]
+
+    tables = db.get_tables()
     columns = db.get_columns()
 
     assert list(columns["table_name"]) == ["ok"]
+    assert list(tables["table_name"]) == ["ok"]
+
+
+def test_described_columns_use_the_schema_name_the_warehouse_reports() -> None:
+    """Unity Catalog folds identifiers, so the allowlist spelling cannot be trusted.
+
+    A connection configured for ``Sales`` gets ``sales`` back from SHOW TABLES.
+    Labelling columns with the configured spelling leaves a tables frame and a
+    columns frame that share no (schema, table) key, which reads to the coverage
+    gate as every table having failed to describe.
+    """
+    db = DatabricksDatabase(_connection_string(), schemas=["Sales"])
+
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        if sql_text.startswith("SHOW TABLES"):
+            return pd.DataFrame({"database": ["sales"], "tablename": ["orders"]})
+        if sql_text.startswith("SHOW VIEWS"):
+            return pd.DataFrame(columns=["namespace", "viewname"])
+        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
+    db.execute = lambda sql_text, *a, **k: fake_run(None, sql_text)  # type: ignore[method-assign]
+
+    tables = db.get_tables()
+    columns = db.get_columns()
+
+    assert set(zip(tables["table_schema"], tables["table_name"])) == {
+        ("sales", "orders")
+    }
+    assert set(zip(columns["table_schema"], columns["table_name"])) == {
+        ("sales", "orders")
+    }
 
 
 def test_schema_scope_permission_denial_aborts_after_first_table() -> None:

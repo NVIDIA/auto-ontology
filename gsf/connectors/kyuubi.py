@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.base import SQLDatabase
 
 if TYPE_CHECKING:
@@ -608,6 +609,16 @@ class KyuubiDatabase(SQLDatabase):
         down with it. ``nvdp.system.table_creation_locks`` does exactly that:
         it is listed by ``SHOW TABLES`` but ``DESCRIBE`` returns Nessie 403.
 
+        This is the same contract
+        :func:`gsf.catalog.extract._validate_relation_column_coverage` enforces
+        for every connector: never report a relation you have no columns for.
+        Dropping is right for *one* unreadable table, but it cannot be right for
+        all of them -- a dead session or a revoked catalog grant fails every
+        ``DESCRIBE`` alike, and silently dropping the lot yields an empty catalog
+        that looks exactly like a database with nothing in it. So if tables were
+        listed and not one could be described, that is raised rather than
+        dropped.
+
         Results are cached for the connector's lifetime: introspection is a read
         of slow-moving metadata, and each DESCRIBE is a separate Spark round
         trip.
@@ -653,6 +664,13 @@ class KyuubiDatabase(SQLDatabase):
                         )
                 views_by_schema[schema] = kept_views
 
+            if skipped and not table_rows:
+                raise IncompleteCatalogExtractionError(
+                    f"Kyuubi listed {len(skipped)} relation(s) and could not describe "
+                    f"any of them: {', '.join(skipped[:10])}"
+                    f"{'' if len(skipped) <= 10 else f' (+{len(skipped) - 10} more)'}. "
+                    "Refusing to ingest an empty catalog."
+                )
             if skipped:
                 logger.warning(
                     "Skipped %d Kyuubi table(s) whose columns could not be read: %s",
