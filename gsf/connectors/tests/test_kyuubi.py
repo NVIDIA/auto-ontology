@@ -526,8 +526,11 @@ def test_qualify_prepends_the_bound_catalog() -> None:
     assert _database().qualify("raw", "events") == "`nvdp`.`raw`.`events`"
 
 
-def test_qualify_without_a_schema_still_carries_the_catalog() -> None:
-    assert _database().qualify(None, "events") == "`nvdp`.`events`"
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `nvdp`.`events` would not mean "catalog nvdp": Spark reads a two-part
+    # name as schema.table, so the catalog would land in the schema position.
+    with pytest.raises(ValueError, match="requires a schema"):
+        _database().qualify(None, "events")
 
 
 def test_qualify_quotes_names_with_spaces() -> None:

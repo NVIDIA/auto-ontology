@@ -781,5 +781,7 @@ def test_qualify_prepends_the_bound_catalog() -> None:
     assert database.qualify("analytics", "events") == "`main`.`analytics`.`events`"
 
 
-def test_qualify_without_a_schema_still_carries_the_catalog() -> None:
-    assert DatabricksDatabase(_connection_string()).qualify(None, "e") == "`main`.`e`"
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `main`.`e` would be read as schema.table, not catalog.table.
+    with pytest.raises(ValueError, match="requires a schema"):
+        DatabricksDatabase(_connection_string()).qualify(None, "e")

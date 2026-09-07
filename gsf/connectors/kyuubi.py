@@ -514,8 +514,20 @@ class KyuubiDatabase(SQLDatabase):
         the Iceberg catalog this connection binds, so every probe would raise
         TABLE_OR_VIEW_NOT_FOUND. Matches how :meth:`get_tables` and the
         ``DESCRIBE TABLE`` pass already qualify.
+
+        Raises:
+            ValueError: *schema* is missing. Spark reads a two-part name as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve to
+                something else -- every table here lives in a schema, so an
+                absent one is a bug worth surfacing.
         """
-        return _qualified(*(p for p in (self._catalog, schema, table) if p))
+        if not schema:
+            raise ValueError(
+                f"Kyuubi requires a schema to qualify {table!r} "
+                f"in catalog {self._catalog!r}"
+            )
+        return _qualified(self._catalog, schema, table)
 
     # ------------------------------------------------------------------
     # Execution

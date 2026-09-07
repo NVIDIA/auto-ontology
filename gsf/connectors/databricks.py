@@ -188,9 +188,19 @@ class DatabricksDatabase(SQLDatabase):
         ``_database_name`` is the catalog here (see ``SHOW TABLES IN
         <catalog>.<schema>`` in :meth:`get_tables`), so the base two-level
         default would drop it and probes would miss the catalog entirely.
+
+        Raises:
+            ValueError: *schema* is missing. A two-part name is read as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve elsewhere.
         """
+        if not schema:
+            raise ValueError(
+                f"Databricks requires a schema to qualify {table!r} "
+                f"in catalog {self._database_name!r}"
+            )
         parts = (self._database_name, schema, table)
-        return ".".join(_quoted_identifier(p) for p in parts if p)
+        return ".".join(_quoted_identifier(p) for p in parts)
 
     @property
     def auth_mode(self) -> str:

@@ -324,8 +324,18 @@ class TrinoDatabase(SQLDatabase):
         A connection binds one catalog, and a bare ``schema.table`` resolves
         against the session default instead -- so the base two-level default
         would point profiling probes at the wrong catalog.
+
+        Raises:
+            ValueError: *schema* is missing. A two-part name is read as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve elsewhere.
         """
-        return _qualified(*(p for p in (self._catalog, schema, table) if p))
+        if not schema:
+            raise ValueError(
+                f"Trino requires a schema to qualify {table!r} "
+                f"in catalog {self._catalog!r}"
+            )
+        return _qualified(self._catalog, schema, table)
 
     # ------------------------------------------------------------------
     # Execution
