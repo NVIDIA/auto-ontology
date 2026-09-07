@@ -61,13 +61,16 @@ def _generation_step(sql: str) -> dict[str, Any]:
     }
 
 
-def _syntax_ok_step(sql: str, reconstruction_count: int = 0) -> dict[str, Any]:
+def _syntax_ok_step(sql: str, failed_attempt_count: int = 0) -> dict[str, Any]:
     return {
         "validate_sql_query": {
             "path_state": {
                 "sql_generation_result": _generated(sql),
                 "sql_code": sql,
-                "reconstruction_count": reconstruction_count,
+                "failed_attempts": [
+                    {"sql": "SELECT failed", "error": "test error"}
+                    for _ in range(failed_attempt_count)
+                ],
             },
             "decision": "valid_sql",
         }

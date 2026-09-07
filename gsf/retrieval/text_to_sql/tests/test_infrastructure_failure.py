@@ -79,7 +79,7 @@ def test_router_honours_a_decision_to_give_up() -> None:
 
 
 def test_router_still_retries_invalid_sql() -> None:
-    state = _state(decision="invalid_sql", path_state={"sql_attempts": 0})
+    state = _state(decision="invalid_sql", path_state={"failed_attempts": []})
 
     assert route_sql_validation(state) == "invalid_sql"
 
@@ -87,7 +87,10 @@ def test_router_still_retries_invalid_sql() -> None:
 def test_router_gives_up_past_the_attempt_limit() -> None:
     """Counts above the limit must route, not fall through returning None."""
     for attempts in (8, 9, 20):
-        state = _state(decision="invalid_sql", path_state={"sql_attempts": attempts})
+        state = _state(
+            decision="invalid_sql",
+            path_state={"failed_attempts": [{} for _ in range(attempts)]},
+        )
 
         assert route_sql_validation(state) == "unconstructable"
 
@@ -116,14 +119,14 @@ def test_falls_back_to_a_generic_explanation() -> None:
     assert final["response"] == "SQL can't be constructed from the data."
 
 
-def test_the_loop_makes_eight_reconstruction_attempts_before_giving_up() -> None:
+def test_the_loop_uses_seven_reconstructions_and_one_fallback() -> None:
     """Drive the router the way the graph does: one call per failed attempt.
 
-    ``route_sql_validation`` owns the retry budget and is the only thing that
-    increments ``sql_attempts``, so replaying it against a single
-    ``path_state`` reproduces the loop without standing up the graph.
+    ``SQLReconstructionAgent`` appends to ``failed_attempts`` whenever the
+    router sends the graph to reconstruction. Replay that state transition
+    here without standing up the graph.
     """
-    path_state: dict[str, Any] = {}
+    path_state: dict[str, Any] = {"failed_attempts": []}
     routes: list[str] = []
 
     # Generous bound: the budget has to stop the loop on its own. A change that
@@ -136,6 +139,10 @@ def test_the_loop_makes_eight_reconstruction_attempts_before_giving_up() -> None
         routes.append(route)
         if route == "unconstructable":
             break
+        if route == "invalid_sql":
+            path_state["failed_attempts"].append(
+                {"sql": "SELECT failed", "error": "test error"}
+            )
 
     # Eight attempts go back for another try -- seven rewrites plus the one
     # switch to building from tables -- and the ninth call gives up.
@@ -150,4 +157,5 @@ def test_the_loop_makes_eight_reconstruction_attempts_before_giving_up() -> None
         "invalid_sql",
     ]
     assert routes[-1] == "unconstructable"
-    assert path_state["sql_attempts"] == 9
+    assert len(path_state["failed_attempts"]) == 7
+    assert path_state["table_fallback_attempted"] is True

@@ -63,6 +63,10 @@ NODE_START_EVENT = "step_start"
 # branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
 # stop the ``sql`` event firing there.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
+# Preserve the existing retry budget: seven reconstruction calls plus one
+# table-based fallback before the run becomes unconstructable.
+MAX_RECONSTRUCTION_ATTEMPTS = 7
+TABLE_FALLBACK_AFTER = 4
 
 
 def route_sql_validation(state: AgentState) -> str:
@@ -70,12 +74,12 @@ def route_sql_validation(state: AgentState) -> str:
     Route based on SQL validation result.
 
     Handles SQL validation attempts and fallback logic:
-    - "skip_intent_validation" if SQL is valid but reconstruction_count exceeds
+    - "skip_intent_validation" if SQL is valid but the reconstruction count exceeds
       INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
-    - "fallback" after 4 attempts (try constructing from tables)
-    - "unconstructable" after 8 attempts, or when a node already gave up
+    - "fallback" after 4 reconstructions (try constructing from tables once)
+    - "unconstructable" after 7 reconstructions, or when a node already gave up
       (e.g. an unreachable database, which no rewrite can fix)
 
     Args:
@@ -90,30 +94,34 @@ def route_sql_validation(state: AgentState) -> str:
         # send an already-abandoned run on to intent validation.
         return "unconstructable"
 
+    path_state = state["path_state"]
+    failed_attempt_count = len(path_state.get("failed_attempts") or [])
+
     if state["decision"] == "invalid_sql":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Construct sql attempt: {attempts}")
-        state["path_state"]["sql_attempts"] = attempts + 1
-        if attempts == 4:
+        logger.info("SQL reconstruction attempts completed: %s", failed_attempt_count)
+        if failed_attempt_count >= MAX_RECONSTRUCTION_ATTEMPTS:
+            logger.error(
+                "SQL construction failed after %s reconstructions",
+                failed_attempt_count,
+            )
+            return "unconstructable"
+        if failed_attempt_count == TABLE_FALLBACK_AFTER and not path_state.get(
+            "table_fallback_attempted"
+        ):
+            path_state["table_fallback_attempted"] = True
             logger.info(
                 "Can not construct sql from snippets, try from relevant tables. Fallback."
             )
             return "fallback"  # try constructing from tables, not only snippets
-        elif attempts < 8:
-            return "invalid_sql"
-        else:
-            logger.error("SQL construction failed after 8 attempts")
-            return "unconstructable"
+        return "invalid_sql"
 
-    else:
-        # SQL is valid - check if we should skip intent validation
-        reconstruction_count = state["path_state"].get("reconstruction_count", 0)
-        if reconstruction_count > INTENT_VALIDATION_SKIPPED_AFTER:
-            logger.info(
-                f"Skipping intent validation after {reconstruction_count} reconstructions"
-            )
-            return "skip_intent_validation"
-        return "valid_sql"
+    # SQL is valid - check if we should skip intent validation
+    if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
+        logger.info(
+            f"Skipping intent validation after {failed_attempt_count} reconstructions"
+        )
+        return "skip_intent_validation"
+    return "valid_sql"
 
 
 def route_intent_validation(state: AgentState) -> str:
@@ -133,8 +141,8 @@ def route_intent_validation(state: AgentState) -> str:
     decision = state.get("decision", "")
 
     if decision == "intent_invalid":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Intent validation failed at attempt: {attempts}")
+        attempts = len(state["path_state"].get("failed_attempts") or [])
+        logger.info("Intent validation failed after %s reconstructions", attempts)
         # Route back to reconstruction to fix intent issues
         return "invalid_sql"
     else:
