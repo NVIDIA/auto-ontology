@@ -35,8 +35,8 @@ def compile_semantic_layer(
     # Read once per run, not once per table: the flag lives in Postgres and
     # tables are processed in parallel, so a per-table read would be hundreds
     # of connections and could also change mid-run.
-    profile_columns = is_column_profiling_enabled()
-    if not profile_columns:
+    is_profile_columns = is_column_profiling_enabled()
+    if not is_profile_columns:
         logger.info(
             "Column value profiling is disabled in settings — "
             "compiling from metadata only"
@@ -58,7 +58,7 @@ def compile_semantic_layer(
                 domain_summary=summary,
                 embedder=embedder,
                 database_name=database_name,
-                profile_columns=profile_columns,
+                profile_columns=is_profile_columns,
             )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)
