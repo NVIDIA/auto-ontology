@@ -38,8 +38,8 @@ def compile_semantic_layer(
     is_profile_columns = is_column_profiling_enabled()
     if not is_profile_columns:
         logger.info(
-            "Column value profiling is disabled in settings — "
-            "compiling from metadata only"
+            "Column value profiling is disabled in settings — sampling rows as "
+            "usual, but skipping the per-column DISTINCT probes"
         )
 
     def _process(table: dict, index: int) -> ProcessTableResult | None:
@@ -58,7 +58,7 @@ def compile_semantic_layer(
                 domain_summary=summary,
                 embedder=embedder,
                 database_name=database_name,
-                profile_columns=is_profile_columns,
+                probe_distinct_values=is_profile_columns,
             )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)

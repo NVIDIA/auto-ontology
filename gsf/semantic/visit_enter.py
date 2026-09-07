@@ -218,6 +218,8 @@ def calculate_columns_profiling(
     table: dict[str, Any],
     columns: list[dict[str, Any]],
     connector: "SQLDatabase",
+    *,
+    probe_distinct_values: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Profile a table's columns from a live sample of up to 1000 rows.
 
@@ -226,6 +228,13 @@ def calculate_columns_profiling(
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
+
+    ``probe_distinct_values`` gates only that second step. The bounded
+    ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
+    unbounded one (a full-column scan per column on warehouses where
+    ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
+    "Profiling Column Values" setting turns off. With it off, a column keeps
+    the top-N values from the row sample rather than gaining nothing.
 
     Sample values keep the type the warehouse returned (see
     ``_json_ready_sample``): a numeric column profiles as ``[10, 20, 30]``,
@@ -313,7 +322,8 @@ def calculate_columns_profiling(
         # per column on warehouses where DISTINCT + LIMIT does not early-stop.
         col_values = top5
         if (
-            not is_unique
+            probe_distinct_values
+            and not is_unique
             and len(top5) < _PROFILING_TOP_N
             and _is_text_sample_type(declared_type)
         ):
@@ -369,33 +379,33 @@ def process_table(
     domain_summary: DomainSummary | None,
     embedder: SemanticEmbedder | None = None,
     database_name: str | None = None,
-    profile_columns: bool = True,
+    probe_distinct_values: bool = True,
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
 
-    ``profile_columns`` mirrors the "Profiling Column Values" setting, read once
-    per run by the caller. Defaults to True so a direct caller keeps the
-    historical behaviour.
+    ``probe_distinct_values`` mirrors the "Profiling Column Values" setting,
+    read once per run by the caller. It gates only the per-column ``SELECT
+    DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
+    a direct caller keeps the historical behaviour.
     """
     table_id = table["id"]
     table_name = table["name"]
 
-    # Columns profiling — requires a live connector; skipped when unavailable
-    # or when the operator turned it off. Persists sample_values, is_unique,
-    # and format onto Column nodes.
-    connector = _resolve_connector(database_name) if profile_columns else None
+    # Columns profiling — requires a live connector; skipped only when one is
+    # unavailable. The bounded SELECT * ... LIMIT sample runs unconditionally;
+    # the setting gates the unbounded DISTINCT probes inside. Persists
+    # sample_values, is_unique, and format onto Column nodes.
+    connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
-    if not profile_columns:
-        logger.info(
-            "[%s] Skipping value sampling — column profiling is disabled",
-            table_name,
-        )
-    elif connector is not None:
+    if connector is not None:
         column_count = len(ctx.get("columns", []))
         try:
             with _step(table_name, f"Sampling column values ({column_count} columns)"):
                 columns_profiling_samples = calculate_columns_profiling(
-                    table, ctx.get("columns", []), connector
+                    table,
+                    ctx.get("columns", []),
+                    connector,
+                    probe_distinct_values=probe_distinct_values,
                 )
         except Exception:
             logger.warning(

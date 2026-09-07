@@ -74,11 +74,13 @@ def read_configuration_flag(key: str, *, default: bool) -> bool:
 
 
 def is_column_profiling_enabled() -> bool:
-    """Whether semantic compilation should sample live column values.
+    """Whether compilation may run per-column ``SELECT DISTINCT`` probes.
 
-    Profiling runs a ``SELECT *`` and a handful of ``SELECT DISTINCT`` probes
-    per table against the source warehouse. That is the only part of
-    compilation that reads user data rather than metadata, and on a large or
-    metered warehouse it is the expensive part -- hence the switch.
+    Scoped to those probes only. The bounded ``SELECT * ... LIMIT 1000`` row
+    sample always runs -- it is one cheap query per table. The DISTINCT probes
+    are the unbounded ones: one per low-cardinality text column, and a full
+    column scan on warehouses where ``DISTINCT`` + ``LIMIT`` does not
+    early-stop, which is what makes them worth switching off on a large or
+    metered warehouse.
     """
     return read_configuration_flag(COLUMN_PROFILING_ENABLED_KEY, default=True)

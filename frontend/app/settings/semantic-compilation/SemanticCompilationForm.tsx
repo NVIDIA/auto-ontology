@@ -214,8 +214,8 @@ export const SemanticCompilationForm = ({
 								</span>
 								<span className="text-xs text-zinc-500">
 									{profilingEnabled
-										? 'Samples live values from each table to capture example values, uniqueness and date formats.'
-										: 'Off — the semantic layer is built from names and types only.'}
+										? 'Scans low-cardinality text columns for their full value set, so rare categories are captured too.'
+										: 'Off — columns keep only the values seen in each table’s row sample.'}
 								</span>
 							</div>
 							<Toggle
