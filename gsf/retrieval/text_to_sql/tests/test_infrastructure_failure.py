@@ -149,8 +149,8 @@ def test_the_loop_uses_seven_reconstructions_and_one_fallback() -> None:
         "invalid_sql",
         "invalid_sql",
         "invalid_sql",
-        "fallback",
         "invalid_sql",
+        "fallback",
         "invalid_sql",
         "invalid_sql",
     ]

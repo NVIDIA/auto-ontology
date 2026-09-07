@@ -63,10 +63,10 @@ NODE_START_EVENT = "step_start"
 # branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
 # stop the ``sql`` event firing there.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
-# Preserve the existing retry budget: seven reconstruction calls plus one
-# table-based fallback before the run becomes unconstructable.
+# Seven reconstruction calls are allowed, with one table-based fallback
+# triggered after the fifth reconstruction.
 MAX_RECONSTRUCTION_ATTEMPTS = 7
-TABLE_FALLBACK_AFTER = 4
+TABLE_FALLBACK_AFTER = 5
 
 
 def route_sql_validation(state: AgentState) -> str:
@@ -105,7 +105,7 @@ def route_sql_validation(state: AgentState) -> str:
                 failed_attempt_count,
             )
             return "unconstructable"
-        if failed_attempt_count == TABLE_FALLBACK_AFTER and not path_state.get(
+        if failed_attempt_count >= TABLE_FALLBACK_AFTER and not path_state.get(
             "table_fallback_attempted"
         ):
             path_state["table_fallback_attempted"] = True
