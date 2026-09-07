@@ -41,7 +41,7 @@ inference API ([inference-api.nvidia.com](https://inference-api.nvidia.com)) or 
 - **LLM:**
   [aws/anthropic/bedrock-claude-opus-4-8](https://inference.nvidia.com/aws/anthropic/bedrock-claude-opus-4-8?search=opus)
 - **Embeddings:**
-  [llama-nemotron-embed-vl-1b-v2](https://inference.nvidia.com/nvidia/nvidia/llama-nemotron-embed-vl-1b-v2)
+  [nemotron-3-embed-1b](https://inference.nvidia.com/nvidia/nvidia/nemotron-3-embed-1b)
 
 The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
 `EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
