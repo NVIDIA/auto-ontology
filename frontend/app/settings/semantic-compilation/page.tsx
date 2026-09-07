@@ -8,15 +8,15 @@ import { getPrisma } from '@/lib/prisma';
 import { SemanticCompilationForm } from './SemanticCompilationForm';
 
 const CONFIG_KEY = 'semantic_compilation_enabled';
-const PROFILING_CONFIG_KEY = 'column_profiling_enabled';
+const PROBING_CONFIG_KEY = 'distinct_value_probing_enabled';
 
 const SemanticCompilationPage = async () => {
 	await requireAdmin();
 	// Fetch on the server so the toggles (and the connected-database hint)
 	// render in the correct state on first paint, with no client-side flash.
-	const [row, profilingRow, connections, isEnvSource] = await Promise.all([
+	const [row, probingRow, connections, isEnvSource] = await Promise.all([
 		getPrisma().configuration.findUnique({ where: { key: CONFIG_KEY } }),
-		getPrisma().configuration.findUnique({ where: { key: PROFILING_CONFIG_KEY } }),
+		getPrisma().configuration.findUnique({ where: { key: PROBING_CONFIG_KEY } }),
 		connectionsApi.getAll(),
 		connectionsApi.isEnvSource(),
 	]);
@@ -31,7 +31,7 @@ const SemanticCompilationPage = async () => {
 			initialEnabled={row?.value === 'true'}
 			// Opt-out, so absent reads as on — see the route for why the two
 			// flags default in opposite directions.
-			initialProfilingEnabled={profilingRow?.value !== 'false'}
+			initialProbingEnabled={probingRow?.value !== 'false'}
 			hasDatabases={hasDatabases}
 		/>
 	);

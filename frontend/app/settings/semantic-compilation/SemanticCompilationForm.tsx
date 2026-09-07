@@ -5,7 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { columnProfilingApi, semanticCompilationApi } from '@/api/settings';
+import { distinctValueProbingApi, semanticCompilationApi } from '@/api/settings';
 import { formatDate } from '@/common/date';
 import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal } from '@/common/modal';
@@ -16,18 +16,18 @@ import { ToastVariant } from '@/enums/toast';
 
 export const SemanticCompilationForm = ({
 	initialEnabled,
-	initialProfilingEnabled,
+	initialProbingEnabled,
 	hasDatabases,
 }: {
 	initialEnabled: boolean;
-	initialProfilingEnabled: boolean;
+	initialProbingEnabled: boolean;
 	hasDatabases: boolean;
 }) => {
 	// Seeded from the server (see page.tsx) so the correct state renders on first
 	// paint; updated optimistically and rolled back if the save fails.
 	const [enabled, setEnabled] = useState(initialEnabled);
-	const [profilingEnabled, setProfilingEnabled] = useState(initialProfilingEnabled);
-	const [savingProfiling, setSavingProfiling] = useState(false);
+	const [probingEnabled, setProbingEnabled] = useState(initialProbingEnabled);
+	const [savingProbing, setSavingProbing] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [confirmModalOpen, setConfirmModalOpen] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -92,29 +92,29 @@ export const SemanticCompilationForm = ({
 		}
 	};
 
-	const handleProfilingToggle = async () => {
-		if (savingProfiling) return;
-		const next = !profilingEnabled;
-		setSavingProfiling(true);
+	const handleProbingToggle = async () => {
+		if (savingProbing) return;
+		const next = !probingEnabled;
+		setSavingProbing(true);
 		setError(null);
 		setMessage(null);
-		setProfilingEnabled(next);
+		setProbingEnabled(next);
 
 		try {
-			const result = await columnProfilingApi.setEnabled(next);
-			setProfilingEnabled(result.enabled);
+			const result = await distinctValueProbingApi.setEnabled(next);
+			setProbingEnabled(result.enabled);
 			// No run is triggered: the flag is read at the start of each run, so
 			// say when it takes effect rather than implying something happened now.
 			setMessage(
 				result.enabled
-					? 'Column value profiling enabled — applies from the next compilation run.'
-					: 'Column value profiling disabled — applies from the next compilation run.',
+					? 'Distinct value scanning enabled — applies from the next compilation run.'
+					: 'Distinct value scanning disabled — applies from the next compilation run.',
 			);
 		} catch {
-			setProfilingEnabled(!next); // roll back the optimistic update
-			setError('Failed to update column value profiling. Please try again.');
+			setProbingEnabled(!next); // roll back the optimistic update
+			setError('Failed to update distinct value scanning. Please try again.');
 		} finally {
-			setSavingProfiling(false);
+			setSavingProbing(false);
 		}
 	};
 
@@ -210,19 +210,19 @@ export const SemanticCompilationForm = ({
 						<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 							<div className="flex flex-col pr-4">
 								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-									Profiling Column Values
+									Distinct Value Scanning
 								</span>
 								<span className="text-xs text-zinc-500">
-									{profilingEnabled
+									{probingEnabled
 										? 'Scans low-cardinality text columns for their full value set, so rare categories are captured too.'
 										: 'Off — columns keep only the values seen in each table’s row sample.'}
 								</span>
 							</div>
 							<Toggle
-								checked={profilingEnabled}
-								aria-label="Profiling Column Values"
-								disabled={savingProfiling}
-								onChange={handleProfilingToggle}
+								checked={probingEnabled}
+								aria-label="Distinct Value Scanning"
+								disabled={savingProbing}
+								onChange={handleProbingToggle}
 							/>
 						</div>
 

@@ -5,27 +5,28 @@
 import { NextResponse } from 'next/server';
 import { getPrisma } from '@/lib/prisma';
 import { withPermission } from '@/auth/with-auth';
-import { columnProfilingBody } from './openapi';
+import { distinctValueProbingBody } from './openapi';
 
 // Key/value stored in the `configurations` table. The Python ingestion service
 // reads this same key (see gsf/infra/feature_flags.py) once per compilation run
-// to decide whether to sample live column values.
-const CONFIG_KEY = 'column_profiling_enabled';
+// to decide whether to run the per-column SELECT DISTINCT probes. It does NOT
+// gate the bounded row sample, which always runs.
+const CONFIG_KEY = 'distinct_value_probing_enabled';
 
 // Unlike semantic compilation, this flag is opt-OUT: an instance that has never
-// touched the toggle profiles column values, which is what every deployment
-// predating the toggle did. Absent row therefore reads as `true`, and the
-// backend default in feature_flags.py has to agree.
+// touched the toggle still probes, which is what every deployment predating the
+// toggle did. Absent row therefore reads as `true`, and the backend default in
+// feature_flags.py has to agree.
 const readEnabled = (value: string | undefined) => value !== 'false';
 
-// Report whether semantic compilation samples live column values.
+// Report whether compilation scans low-cardinality columns for distinct values.
 export const GET = withPermission({ semanticCompilation: ['read'] })(async () => {
 	const prisma = getPrisma();
 	const row = await prisma.configuration.findUnique({ where: { key: CONFIG_KEY } });
 	return NextResponse.json({ enabled: readEnabled(row?.value) });
 });
 
-// Turn column profiling on or off instance-wide (admin-only).
+// Turn distinct value scanning on or off instance-wide (admin-only).
 //
 // Deliberately does NOT trigger a compilation run. The flag is read at the top
 // of each run, so it applies from the next one onward — flipping it is a change
@@ -36,7 +37,7 @@ export const GET = withPermission({ semanticCompilation: ['read'] })(async () =>
 // differs from the sibling configuration routes. Those flags are opt-in, so
 // coercing a malformed value to false lands on their default and is harmless.
 // This one is opt-out: coercion would silently turn OFF something that is on by
-// default, so `{"enabled": "true"}` from a shell client would disable profiling
+// default, so `{"enabled": "true"}` from a shell client would disable scanning
 // while reading as if it enabled it.
 export const PUT = withPermission({ semanticCompilation: ['manage'] })(async (req) => {
 	const prisma = getPrisma();
@@ -48,7 +49,7 @@ export const PUT = withPermission({ semanticCompilation: ['manage'] })(async (re
 		return NextResponse.json({ error: 'Body must be JSON.' }, { status: 400 });
 	}
 
-	const parsed = columnProfilingBody.safeParse(raw);
+	const parsed = distinctValueProbingBody.safeParse(raw);
 	if (!parsed.success) {
 		return NextResponse.json({ error: '`enabled` must be a boolean.' }, { status: 400 });
 	}

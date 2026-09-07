@@ -8,7 +8,7 @@ import type { OpenApiRoute } from '@/types/openapi';
 
 // Exported so route.ts enforces exactly what this spec advertises, rather than
 // the two drifting apart.
-export const columnProfilingBody = z.object({ enabled: z.boolean() });
+export const distinctValueProbingBody = z.object({ enabled: z.boolean() });
 
 export const openapi: OpenApiRoute = {
 	get: {
@@ -25,8 +25,8 @@ export const openapi: OpenApiRoute = {
 		body: {
 			description:
 				'`enabled` must be a boolean. This flag is opt-out, so coercing a ' +
-				'malformed value would silently turn profiling off.',
-			schema: columnProfilingBody,
+				'malformed value would silently turn scanning off.',
+			schema: distinctValueProbingBody,
 		},
 		responses: {
 			200: {

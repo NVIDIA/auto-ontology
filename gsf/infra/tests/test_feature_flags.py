@@ -13,7 +13,7 @@ import pytest
 
 from gsf.infra import feature_flags
 from gsf.infra.feature_flags import (
-    is_column_profiling_enabled,
+    is_distinct_value_probing_enabled,
     read_configuration_flag,
 )
 
@@ -90,16 +90,16 @@ def test_unrecognised_value_falls_back_to_the_default(
     """Must agree with the frontend, which reads opt-out flags as != 'false'.
 
     Treating junk as False would render the toggle ON while the backend
-    silently stopped profiling -- the divergence the route comment rules out.
+    silently stopped probing -- the divergence the route comment rules out.
     """
     with _patched(monkeypatch, (stored,)):
         assert read_configuration_flag("k", default=True) is True
         assert read_configuration_flag("k", default=False) is False
 
 
-def test_column_profiling_survives_a_junk_row(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_distinct_probing_survives_a_junk_row(monkeypatch: pytest.MonkeyPatch) -> None:
     with _patched(monkeypatch, ("",)):
-        assert is_column_profiling_enabled() is True
+        assert is_distinct_value_probing_enabled() is True
 
 
 def test_missing_row_falls_back_to_the_default(
@@ -126,17 +126,17 @@ def test_db_error_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) -> 
     assert read_configuration_flag("k", default=False) is False
 
 
-def test_column_profiling_defaults_to_enabled(
+def test_distinct_probing_defaults_to_enabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Opt-out: upgrading an existing instance must not silently stop profiling."""
+    """Opt-out: upgrading an existing instance must not silently stop probing."""
     with _patched(monkeypatch, None) as cursor:
-        assert is_column_profiling_enabled() is True
-    assert cursor.executed[0][1] == ("column_profiling_enabled",)
+        assert is_distinct_value_probing_enabled() is True
+    assert cursor.executed[0][1] == ("distinct_value_probing_enabled",)
 
 
-def test_column_profiling_honours_an_explicit_false(
+def test_distinct_probing_honours_an_explicit_false(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with _patched(monkeypatch, ("false",)):
-        assert is_column_profiling_enabled() is False
+        assert is_distinct_value_probing_enabled() is False

@@ -233,7 +233,7 @@ def calculate_columns_profiling(
     ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
     unbounded one (a full-column scan per column on warehouses where
     ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
-    "Profiling Column Values" setting turns off. With it off, a column keeps
+    "Distinct Value Scanning" setting turns off. With it off, a column keeps
     the top-N values from the row sample rather than gaining nothing.
 
     Sample values keep the type the warehouse returned (see
@@ -383,7 +383,7 @@ def process_table(
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
 
-    ``probe_distinct_values`` mirrors the "Profiling Column Values" setting,
+    ``probe_distinct_values`` mirrors the "Distinct Value Scanning" setting,
     read once per run by the caller. It gates only the per-column ``SELECT
     DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
     a direct caller keeps the historical behaviour.

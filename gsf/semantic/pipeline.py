@@ -6,7 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from gsf.dal.datasources import fetch_all_tables_without_term, fetch_table_context
-from gsf.infra.feature_flags import is_column_profiling_enabled
+from gsf.infra.feature_flags import is_distinct_value_probing_enabled
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.models import ProcessTableResult
@@ -35,10 +35,10 @@ def compile_semantic_layer(
     # Read once per run, not once per table: the flag lives in Postgres and
     # tables are processed in parallel, so a per-table read would be hundreds
     # of connections and could also change mid-run.
-    is_profile_columns = is_column_profiling_enabled()
-    if not is_profile_columns:
+    is_probe_distinct_values = is_distinct_value_probing_enabled()
+    if not is_probe_distinct_values:
         logger.info(
-            "Column value profiling is disabled in settings — sampling rows as "
+            "Distinct value probing is disabled in settings — sampling rows as "
             "usual, but skipping the per-column DISTINCT probes"
         )
 
@@ -58,7 +58,7 @@ def compile_semantic_layer(
                 domain_summary=summary,
                 embedder=embedder,
                 database_name=database_name,
-                probe_distinct_values=is_profile_columns,
+                probe_distinct_values=is_probe_distinct_values,
             )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)

@@ -87,11 +87,11 @@ export const semanticCompilationApi = {
 	reset: () => json<{ status: string }>('/api/semantic-compilation/reset', { method: 'POST' }),
 };
 
-export const columnProfilingApi = {
-	get: () => json<{ enabled: boolean }>('/api/configurations/column-profiling'),
+export const distinctValueProbingApi = {
+	get: () => json<{ enabled: boolean }>('/api/configurations/distinct-value-probing'),
 
 	setEnabled: (enabled: boolean) =>
-		json<{ enabled: boolean }>('/api/configurations/column-profiling', {
+		json<{ enabled: boolean }>('/api/configurations/distinct-value-probing', {
 			method: 'PUT',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({ enabled }),

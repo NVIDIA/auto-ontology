@@ -25,9 +25,9 @@ from gsf.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 logger = logging.getLogger(__name__)
 
 # Written by the Semantic Compilation settings tab. Opt-out: an instance that
-# has never touched the toggle profiles column values, which is what every
-# deployment predating the toggle did.
-COLUMN_PROFILING_ENABLED_KEY = "column_profiling_enabled"
+# has never touched the toggle still probes, which is what every deployment
+# predating the toggle did.
+DISTINCT_VALUE_PROBING_ENABLED_KEY = "distinct_value_probing_enabled"
 
 
 def read_configuration_flag(key: str, *, default: bool) -> bool:
@@ -73,7 +73,7 @@ def read_configuration_flag(key: str, *, default: bool) -> bool:
     return default
 
 
-def is_column_profiling_enabled() -> bool:
+def is_distinct_value_probing_enabled() -> bool:
     """Whether compilation may run per-column ``SELECT DISTINCT`` probes.
 
     Scoped to those probes only. The bounded ``SELECT * ... LIMIT 1000`` row
@@ -83,4 +83,4 @@ def is_column_profiling_enabled() -> bool:
     early-stop, which is what makes them worth switching off on a large or
     metered warehouse.
     """
-    return read_configuration_flag(COLUMN_PROFILING_ENABLED_KEY, default=True)
+    return read_configuration_flag(DISTINCT_VALUE_PROBING_ENABLED_KEY, default=True)
