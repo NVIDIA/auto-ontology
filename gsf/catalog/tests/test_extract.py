@@ -36,7 +36,9 @@ def test_empty_catalog_is_valid() -> None:
     assert columns.empty
 
 
-def test_nullable_relation_identifiers_are_normalized_without_boolean_coercion() -> None:
+def test_nullable_relation_identifiers_are_normalized_without_boolean_coercion() -> (
+    None
+):
     frame = pd.DataFrame(
         [
             {"table_schema": pd.NA, "table_name": "orders"},
