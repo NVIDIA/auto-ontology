@@ -140,9 +140,7 @@ def test_the_loop_uses_seven_reconstructions_and_one_fallback() -> None:
         if route == "unconstructable":
             break
         if route == "invalid_sql":
-            path_state["failed_attempts"].append(
-                {"sql": "SELECT failed", "error": "test error"}
-            )
+            path_state["failed_attempts"].append({})
 
     # Eight attempts go back for another try -- seven rewrites plus the one
     # switch to building from tables -- and the ninth call gives up.

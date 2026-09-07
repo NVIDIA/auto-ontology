@@ -67,10 +67,8 @@ def _syntax_ok_step(sql: str, failed_attempt_count: int = 0) -> dict[str, Any]:
             "path_state": {
                 "sql_generation_result": _generated(sql),
                 "sql_code": sql,
-                "failed_attempts": [
-                    {"sql": "SELECT failed", "error": "test error"}
-                    for _ in range(failed_attempt_count)
-                ],
+                # Only the number of completed attempts controls this branch.
+                "failed_attempts": [{} for _ in range(failed_attempt_count)],
             },
             "decision": "valid_sql",
         }
