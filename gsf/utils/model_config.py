@@ -34,7 +34,7 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "NON_REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "NON_REASONING_MODEL": "aws/anthropic/bedrock-claude-opus-4-8",
         "EMBED_ENDPOINT": "https://inference-api.nvidia.com/v1",
-        "EMBED_MODEL": "nvidia/nvidia/dfw-llama-3.2-nv-embedqa-1b",
+        "EMBED_MODEL": "nvidia/nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",
         "RERANK_MODEL": "nvidia/nvidia/llama-nemotron-rerank-vl-1b-v2",
     },
@@ -45,7 +45,7 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "NON_REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
         "NON_REASONING_MODEL": "nvidia/nemotron-3-nano-30b-a3b",
         "EMBED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "EMBED_MODEL": "nvidia/llama-nemotron-embed-vl-1b-v2",
+        "EMBED_MODEL": "nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": (
             "https://ai.api.nvidia.com/v1/retrieval/nvidia/"
             "llama-nemotron-rerank-vl-1b-v2/reranking"
