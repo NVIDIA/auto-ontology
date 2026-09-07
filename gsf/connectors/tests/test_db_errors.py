@@ -108,3 +108,52 @@ def test_a_real_diagnosis_survives_an_echoed_statement() -> None:
 
     assert is_session_lost(error, statement)
     assert is_infrastructure_error(error, statement)
+
+
+def test_a_marker_in_a_re_rendered_plan_is_not_a_diagnosis() -> None:
+    """Spark answers an analysis failure with the plan, not the SQL.
+
+    There is no ``== SQL ==`` delimiter and the literal loses its quotes, so
+    nothing in the message matches the statement verbatim -- but the phrase is
+    still the caller's own text, and the query is still worth rewriting.
+    """
+    statement = "SELECT * FROM logs WHERE msg = 'connection reset'"
+    error = (
+        "org.apache.spark.sql.AnalysisException: cannot resolve 'activity_typ' "
+        "given input columns: [msg, ts]; line 1 pos 7;\n"
+        "'Project [*]\n"
+        "+- 'Filter (msg = connection reset)\n"
+        "   +- 'UnresolvedRelation [logs]"
+    )
+
+    assert not is_infrastructure_error(error, statement)
+    assert not is_session_lost(error, statement)
+
+
+def test_a_re_indented_echo_still_strips() -> None:
+    """Engines re-wrap the statement they echo; collapsed forms still match."""
+    statement = "SELECT id\n  FROM t\n WHERE msg = 'broken pipe'"
+    error = (
+        "ParseException: Syntax error at or near 'FORM'\n"
+        "== SQL ==\n"
+        "SELECT id FROM t WHERE msg = 'broken pipe'"
+    )
+
+    assert not is_infrastructure_error(error, statement)
+
+
+def test_a_real_diagnosis_survives_a_re_rendered_plan() -> None:
+    """Stripping literals must not swallow the server's own verdict."""
+    statement = "SELECT * FROM logs WHERE msg = 'connection reset'"
+    error = f"Invalid SessionHandle: deadbeef (while running: {statement})"
+
+    assert is_session_lost(error, statement)
+    assert is_infrastructure_error(error, statement)
+
+
+def test_stripping_a_literal_cannot_splice_a_marker_into_existence() -> None:
+    """Fragments are replaced with a space, never deleted outright."""
+    statement = "SELECT 'ion ref' FROM t"
+    error = "cannot resolve 'connect'ion ref'used'"
+
+    assert not is_infrastructure_error(error, statement)

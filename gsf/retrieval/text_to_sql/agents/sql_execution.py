@@ -33,10 +33,20 @@ _INFRASTRUCTURE_MESSAGE = (
 
 
 class QueryResponse:
-    def __init__(self, result: list[str], sliced: bool, error: Optional[str] = None):
+    def __init__(
+        self,
+        result: list[str],
+        sliced: bool,
+        error: Optional[str] = None,
+        statement: Optional[str] = None,
+    ):
         self.result = result
         self.sliced = sliced
         self.error = error
+        # The SQL as executed, which is not always the SQL as generated -- see
+        # ``_sanitize_sql_for_dialect``. Classifying ``error`` means stripping
+        # the statement the driver echoed, so it has to be this text.
+        self.statement = statement
 
 
 def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
@@ -63,7 +73,7 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
         df = execute_chat_sql(connector, sql)
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
-        return QueryResponse(result=None, sliced=False, error=str(e))
+        return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
     payload = (
         df.to_json(orient="records", date_format="iso", default_handler=str)
         if len(df)
@@ -114,7 +124,9 @@ class SQLExecutionAgent(BaseAgent):
         if response_from_db.error:
             self.logger.info("SQL execution error: %s", response_from_db.error)
             path_state = {**path_state, "error": response_from_db.error}
-            if is_infrastructure_error(response_from_db.error, sql_code):
+            if is_infrastructure_error(
+                response_from_db.error, response_from_db.statement or sql_code
+            ):
                 # Rewriting the query cannot reach an unreachable database, so
                 # the reconstruction loop would spend every one of its attempts
                 # re-issuing statements that fail identically and then give up
