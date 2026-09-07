@@ -1273,11 +1273,11 @@
       "put": {
         "tags": ["configurations"],
         "summary": "Turn column profiling on or off instance-wide (admin-only).",
-        "description": "Turn column profiling on or off instance-wide (admin-only).\n\nDeliberately does NOT trigger a compilation run. The flag is read at the top\nof each run, so it applies from the next one onward — flipping it is a change\nof policy, not a request to recompile. Operators who want it applied now can\nuse Reset, which is on the same page.",
+        "description": "Turn column profiling on or off instance-wide (admin-only).\n\nDeliberately does NOT trigger a compilation run. The flag is read at the top\nof each run, so it applies from the next one onward — flipping it is a change\nof policy, not a request to recompile. Operators who want it applied now can\nuse Reset, which is on the same page.\n\nRejects a non-boolean `enabled` rather than coercing it, which is why this\ndiffers from the sibling configuration routes. Those flags are opt-in, so\ncoercing a malformed value to false lands on their default and is harmless.\nThis one is opt-out: coercion would silently turn OFF something that is on by\ndefault, so `{\"enabled\": \"true\"}` from a shell client would disable profiling\nwhile reading as if it enabled it.",
         "operationId": "put_api_configurations_column_profiling",
         "requestBody": {
           "required": true,
-          "description": "Anything other than `true` turns the flag off.",
+          "description": "`enabled` must be a boolean. This flag is opt-out, so coercing a malformed value would silently turn profiling off.",
           "content": {
             "application/json": {
               "schema": {
@@ -1309,6 +1309,9 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Body is not JSON, or `enabled` is not a boolean."
           },
           "401": {
             "description": "No authenticated caller could be resolved"

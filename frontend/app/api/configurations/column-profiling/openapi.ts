@@ -6,6 +6,10 @@ import { z } from 'zod';
 import { enabledFlagSchema } from '@/lib/openapiSchemas';
 import type { OpenApiRoute } from '@/types/openapi';
 
+// Exported so route.ts enforces exactly what this spec advertises, rather than
+// the two drifting apart.
+export const columnProfilingBody = z.object({ enabled: z.boolean() });
+
 export const openapi: OpenApiRoute = {
 	get: {
 		responses: {
@@ -19,8 +23,10 @@ export const openapi: OpenApiRoute = {
 	},
 	put: {
 		body: {
-			description: 'Anything other than `true` turns the flag off.',
-			schema: z.object({ enabled: z.boolean() }),
+			description:
+				'`enabled` must be a boolean. This flag is opt-out, so coercing a ' +
+				'malformed value would silently turn profiling off.',
+			schema: columnProfilingBody,
 		},
 		responses: {
 			200: {
@@ -29,6 +35,7 @@ export const openapi: OpenApiRoute = {
 					'this does not trigger one.',
 				schema: enabledFlagSchema,
 			},
+			400: { description: 'Body is not JSON, or `enabled` is not a boolean.' },
 		},
 	},
 };
