@@ -119,7 +119,7 @@ def test_falls_back_to_a_generic_explanation() -> None:
     assert final["response"] == "SQL can't be constructed from the data."
 
 
-def test_the_loop_uses_seven_reconstructions_and_one_fallback() -> None:
+def test_the_loop_uses_seven_reconstructions() -> None:
     """Drive the router the way the graph does: one call per failed attempt.
 
     ``SQLReconstructionAgent`` appends to ``failed_attempts`` whenever the
@@ -142,18 +142,15 @@ def test_the_loop_uses_seven_reconstructions_and_one_fallback() -> None:
         if route == "invalid_sql":
             path_state["failed_attempts"].append({})
 
-    # Eight attempts go back for another try -- seven rewrites plus the one
-    # switch to building from tables -- and the ninth call gives up.
+    # Seven attempts go back for reconstruction and the eighth call gives up.
     assert [route for route in routes if route != "unconstructable"] == [
         "invalid_sql",
         "invalid_sql",
         "invalid_sql",
         "invalid_sql",
         "invalid_sql",
-        "fallback",
         "invalid_sql",
         "invalid_sql",
     ]
     assert routes[-1] == "unconstructable"
     assert len(path_state["failed_attempts"]) == 7
-    assert path_state["table_fallback_attempted"] is True

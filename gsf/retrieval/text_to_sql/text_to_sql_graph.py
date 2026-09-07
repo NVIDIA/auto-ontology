@@ -40,7 +40,6 @@ from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationA
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
-from gsf.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
 from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
@@ -63,22 +62,19 @@ NODE_START_EVENT = "step_start"
 # branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
 # stop the ``sql`` event firing there.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
-# Seven reconstruction calls are allowed, with one table-based fallback
-# triggered after the fifth reconstruction.
+# Stop after seven reconstruction calls.
 MAX_RECONSTRUCTION_ATTEMPTS = 7
-TABLE_FALLBACK_AFTER = 5
 
 
 def route_sql_validation(state: AgentState) -> str:
     """
     Route based on SQL validation result.
 
-    Handles SQL validation attempts and fallback logic:
+    Handles SQL validation attempts and retry logic:
     - "skip_intent_validation" if SQL is valid but the reconstruction count exceeds
       INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
-    - "fallback" after 4 reconstructions (try constructing from tables once)
     - "unconstructable" after 7 reconstructions, or when a node already gave up
       (e.g. an unreachable database, which no rewrite can fix)
 
@@ -105,14 +101,6 @@ def route_sql_validation(state: AgentState) -> str:
                 failed_attempt_count,
             )
             return "unconstructable"
-        if failed_attempt_count >= TABLE_FALLBACK_AFTER and not path_state.get(
-            "table_fallback_attempted"
-        ):
-            path_state["table_fallback_attempted"] = True
-            logger.info(
-                "Can not construct sql from snippets, try from relevant tables. Fallback."
-            )
-            return "fallback"  # try constructing from tables, not only snippets
         return "invalid_sql"
 
     # SQL is valid - check if we should skip intent validation
@@ -282,7 +270,6 @@ def create_graph():
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
-    sql_from_tables_agent = SQLFromTablesAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
@@ -317,9 +304,6 @@ def create_graph():
         _make_node("precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent()))
         if proactive_enabled
         else None
-    )
-    construct_sql_not_from_snippets_node = _make_node(
-        "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
     )
     construct_sql_from_candidates_node = _make_node(
         "construct_sql_from_candidates",
@@ -362,9 +346,6 @@ def create_graph():
     graph.add_node("check_value_repair", value_repair_node)
     if proactive_value_node is not None:
         graph.add_node("precheck_value_repair", proactive_value_node)
-    graph.add_node(
-        "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
-    )
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
@@ -451,7 +432,6 @@ def create_graph():
             "valid_sql": "validate_intent",  # Validate intent after syntax validation succeeds
             "skip_intent_validation": pre_execute_target,  # Skip intent validation after 5+ reconstructions
             "invalid_sql": "reconstruct_sql",
-            "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
         },
     )
@@ -483,7 +463,6 @@ def create_graph():
         {
             "valid_sql": "check_empty_like_result",
             "invalid_sql": "reconstruct_sql",
-            "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
             "skip_intent_validation": "check_empty_like_result",
         },
@@ -508,14 +487,6 @@ def create_graph():
         },
     )
 
-    graph.add_conditional_edges(
-        "construct_sql_not_from_snippets",
-        route_decision,
-        {
-            "validate_sql_query": "validate_sql_query",
-            "unconstructable": "unconstructable_sql_response",
-        },
-    )
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
