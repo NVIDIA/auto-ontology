@@ -114,3 +114,40 @@ def test_falls_back_to_a_generic_explanation() -> None:
     final = SQLUnconstructableAgent().execute(state)["path_state"]["final_response"]
 
     assert final["response"] == "SQL can't be constructed from the data."
+
+
+def test_the_loop_makes_eight_reconstruction_attempts_before_giving_up() -> None:
+    """Drive the router the way the graph does: one call per failed attempt.
+
+    ``route_sql_validation`` owns the retry budget and is the only thing that
+    increments ``sql_attempts``, so replaying it against a single
+    ``path_state`` reproduces the loop without standing up the graph.
+    """
+    path_state: dict[str, Any] = {}
+    routes: list[str] = []
+
+    # Generous bound: the budget has to stop the loop on its own. A change that
+    # never returns "unconstructable" fails the assertions below rather than
+    # spinning until the graph's recursion limit.
+    for _ in range(50):
+        route = route_sql_validation(
+            _state(decision="invalid_sql", path_state=path_state)
+        )
+        routes.append(route)
+        if route == "unconstructable":
+            break
+
+    # Eight attempts go back for another try -- seven rewrites plus the one
+    # switch to building from tables -- and the ninth call gives up.
+    assert [route for route in routes if route != "unconstructable"] == [
+        "invalid_sql",
+        "invalid_sql",
+        "invalid_sql",
+        "invalid_sql",
+        "fallback",
+        "invalid_sql",
+        "invalid_sql",
+        "invalid_sql",
+    ]
+    assert routes[-1] == "unconstructable"
+    assert path_state["sql_attempts"] == 9
