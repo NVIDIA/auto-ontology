@@ -2,6 +2,9 @@
 
 Full-stack repo: Next.js frontend (`/frontend`) + FastAPI backend (`/gsf`).
 
+This file is for **GSF maintainers**. User/partner agent skills live in
+`skills/` — start at [`AGENTS.md`](./AGENTS.md).
+
 ## Structure
 
 ```

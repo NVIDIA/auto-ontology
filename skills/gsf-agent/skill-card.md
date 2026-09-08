@@ -1,0 +1,75 @@
+# Skill Card
+
+## Description
+
+gsf-agent scaffolds how an agent calls GSF: MCP-first reads, REST fallback and writes, semantic-layer discovery, and auth contracts (API token, MCP OAuth, SSO bearer for AI-Q).
+
+This skill is for research and development until a catalog eval run is recorded below.
+
+## Owner
+
+NVIDIA GSF Team
+
+## License/Terms of Use
+
+Apache 2.0
+
+## Use Case
+
+Partners embedding GSF in an agent harness, AI-Q, NemoClaw, or another app; developers asking how to list terms, ask questions, or authenticate.
+
+## Deployment Geography for Use
+
+Global
+
+### Requirements / Dependencies
+
+Requires API Key or External Credential: Yes
+Credential Type(s): MCP user login against GSF; or GSF API token; or SSO id token (AI-Q). Optional NVIDIA NIM key is a deployment concern (`gsf-install`), not this skill.
+
+Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate.
+
+## Known Risks and Mitigations
+
+Risk: An agent may call FastAPI `:3001` with `x-gsf-user-id` and impersonate a user, or share `conversation_id` across users.
+Mitigation: Skill requires the Next.js gateway for public clients; FastAPI is an internal boundary; conversation ids are per GSF user.
+
+Risk: SSO bearer verification does not check `aud`, so any token from the configured issuer is accepted.
+Mitigation: Document the intended AI-Q model; map to an existing GSF user; do not configure a deployment-wide MCP token.
+
+## References
+
+- `mcp/README.md`, `docs/mcp.md`, `mcp/gsf_mcp/tools.py`
+- `docs/openapi/gsf-api.json`
+- `frontend/auth/resolve-user.ts`, `frontend/auth/bearer.ts`
+- [references/stack.md](references/stack.md)
+- [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs
+
+## Skill Output
+
+Output type(s): MCP tool calls, HTTP API calls, configuration snippets
+Output format: Markdown with a small Python `requests` example (from the GSF README)
+Output parameters: No SDK or agent-framework template
+Other properties: Unopinionated scaffolding; MCP tool lists are not copied
+
+## Skill Version
+
+0.1.0 (source: frontmatter)
+
+## Evaluation Agents Used
+
+Not yet run.
+
+## Evaluation Tasks
+
+7 candidate tasks in [evals/evals.json](evals/evals.json). No isolated-pod eval has been executed.
+
+## Evaluation Results
+
+Not yet evaluated. Do not invent uplift numbers.
+
+## Ethical Considerations
+
+GSF answers are only as correct as the compiled ontology and the caller's permissions. Do not bypass the semantic layer to dump raw schemas. Report quality, risk, or security concerns through NVIDIA's published vulnerability process.
+
+Do not fabricate `skill.oms.sig`. Catalog signing is a follow-up with the nvidia/skills pipeline.

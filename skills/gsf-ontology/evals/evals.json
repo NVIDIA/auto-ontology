@@ -1,0 +1,86 @@
+[
+  {
+    "id": "ont-eval-001-mcp-readonly",
+    "question": "Use the GSF MCP server to add a SQL attribute named Gross Margin under the term Order.",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "MCP is read-only and cannot create SQL attributes. The agent uses REST POST /api/sql-attributes after POST /api/sql-attributes/validate, with catalog:edit and an API token that belongs to someone who can edit. It does not look for a write MCP tool or scrape the full OpenAPI list.",
+    "expected_behavior": [
+      "States that MCP cannot modify the glossary or catalog",
+      "Uses POST /api/sql-attributes/validate then POST /api/sql-attributes",
+      "Does not invent an MCP write tool"
+    ]
+  },
+  {
+    "id": "ont-eval-002-validate-422",
+    "question": "I POSTed /api/sql-attributes/validate with a broken expression. The response was 422. Is that the same as valid: false?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "No. A parse failure is HTTP 422, not a 200 with valid: false. Fix the expression and retry validate before POST /api/sql-attributes.",
+    "expected_behavior": [
+      "Treats 422 as a parse failure",
+      "Does not equate 422 with valid: false",
+      "Retries validate before create"
+    ]
+  },
+  {
+    "id": "ont-eval-003-reset-is-destructive",
+    "question": "I patched one term description. Should I POST /api/semantic-compilation/reset so chat picks it up?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "No. Reset deletes every database's compiled semantic layer, is behind semanticCompilation:manage, and is not a cleanup step after a small edit. Check GET /api/semantic-compilation/status instead, then verify with check_answerable / ask_question.",
+    "expected_behavior": [
+      "Refuses to treat reset as routine cleanup",
+      "Names semanticCompilation:manage and that the call is destructive",
+      "Suggests status + verify rather than reset"
+    ]
+  },
+  {
+    "id": "ont-eval-004-token-acts-as-owner",
+    "question": "I minted an API token as a viewer. Can I PATCH /api/terms/{id} with it?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "A token acts as its owner and carries no extra permissions. A viewer's token cannot perform catalog:edit. 403 means the owner's role lacks the permission.",
+    "expected_behavior": [
+      "States that a token acts as its owner",
+      "States catalog:edit is required for PATCH /api/terms/{term_id}",
+      "Does not claim the token elevates the viewer"
+    ]
+  },
+  {
+    "id": "ont-eval-005-import-replace",
+    "question": "POST /api/model/import with replace=true. What can go wrong?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "Import requires modelInterchange:import and can replace existing catalog and semantic-layer data. replace defaults to true. Confirm with the user before applying. Format is detected from the document root: GSF uses data_layer/semantic_layer; Ossie uses semantic_model.",
+    "expected_behavior": [
+      "Warns that import can replace existing data",
+      "Notes replace defaults to true and asks before proceeding",
+      "Names modelInterchange:import"
+    ]
+  },
+  {
+    "id": "ont-eval-006-lineage-semantic-layer",
+    "question": "What does the Orders table mean, and how is it connected to Customer?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "Use semantic-layer navigation: describe_table or GET /api/exploration/tables/{table_id}/details for terms and SQL attributes on the table; get_term_columns and GET /api/exploration/terms/{id}/path/{other} for the hop chain. Do not browse raw database schemas to answer meaning.",
+    "expected_behavior": [
+      "Uses describe_table / exploration details rather than raw schema listing",
+      "Uses the term path endpoint or get_term_columns for lineage",
+      "Does not recommend scraping information_schema"
+    ]
+  },
+  {
+    "id": "ont-eval-007-patch-vs-put-sql-attribute",
+    "question": "I need to change the SQL expression on an existing SqlAttribute. Is PATCH enough?",
+    "expected_skill": "gsf-ontology",
+    "expected_script": null,
+    "ground_truth": "No. PATCH /api/sql-attributes/{attr_id} updates metadata only (name/description) and does not touch the expression. Changing SQL requires PUT (re-parse + embedding refresh) after POST /api/sql-attributes/validate.",
+    "expected_behavior": [
+      "States PATCH does not change the SQL expression",
+      "Uses PUT to update the expression",
+      "Validates first"
+    ]
+  }
+]

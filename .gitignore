@@ -65,3 +65,6 @@ dev_tools/fixtures/sql/*.sqlite
 # checkout's paths and reads API keys from the environment — so it stays out of
 # the repo rather than shipping one developer's setup to everyone.
 helm.sh
+
+# Append-only GSF install log written by skills/gsf-install/scripts/log_install.sh
+.gsf-install.log

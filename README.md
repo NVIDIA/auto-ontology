@@ -242,6 +242,12 @@ The web UI manages the UUID automatically. An API-created conversation can be
 opened in the UI at `/chat?focus=<conversation_id>` when it belongs to the
 signed-in user.
 
+## Agent skills
+
+Coding agents: start at [`AGENTS.md`](./AGENTS.md). Skills live in
+[`skills/`](./skills/) (`gsf-install`, `gsf-ontology`, `gsf-agent`).
+Maintainers keep using [`CLAUDE.md`](./CLAUDE.md).
+
 ## MCP server
 
 Agent harnesses such as Cursor and Claude Desktop can query your data through
