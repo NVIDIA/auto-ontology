@@ -48,7 +48,7 @@ class InteractiveSessionState:
     # clarify.py) — a normalized term's KB coverage and VDB hit are re-derived fresh
     # each turn and can land on different turns, so these persist both signals instead
     # of only checking the current turn's snapshot. Reset at Phase 1→2 handoff, same
-    # as cumulative_grounded_kb, since Phase 2 is a different question.
+    # as cumulative_grounded_knowledge, since Phase 2 is a different question.
     _ever_kb_covered_norms: set = field(default_factory=set)
     _ever_vdb_hit_norms: dict = field(default_factory=dict)  # norm -> (col_text, score)
     _ever_term_to_kb_entry: dict = field(
@@ -64,12 +64,14 @@ class InteractiveSessionState:
     # turn. Backstop only: the primary fix is routing the same-turn overlap
     # through one decision (the merge); this catches the cross-turn gap.
     _kb_vdb_adjudicated_norms: set = field(default_factory=set)
-    _grounded_kb: Optional[str] = (
+    _grounded_knowledge: Optional[str] = (
         None  # relevant KB text extracted during coverage check
     )
-    _grounded_kb_for: Optional[str] = None  # working_question when _grounded_kb was set
-    prior_round_grounded_kb: str = ""  # snapshot of cumulative_grounded_kb at round-1 PROCEED, carried into round 2
-    cumulative_grounded_kb: str = ""  # union of all _grounded_kb values seen this phase (never replaced, only grows)
+    _grounded_knowledge_for: Optional[str] = (
+        None  # working_question when _grounded_knowledge was set
+    )
+    prior_round_grounded_knowledge: str = ""  # snapshot of cumulative_grounded_knowledge at round-1 PROCEED, carried into round 2
+    cumulative_grounded_knowledge: str = ""  # union of all _grounded_knowledge values seen this phase (never replaced, only grows)
     incomplete_formula_terms: list = field(
         default_factory=list
     )  # [(term, what_is_missing)]

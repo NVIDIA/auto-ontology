@@ -250,7 +250,7 @@ def should_clarify(
         (
             unresolvable,
             resolved_hits,
-            relevant_kb,
+            relevant_knowledge,
             extracted_norms,
             entry_to_original_terms,
             vdb_only_norms,
@@ -276,15 +276,15 @@ def should_clarify(
                 session._collision_resolution_notes.append(note)
         # Always replace with the fresh KB result — never carry stale content forward.
         # An empty result is valid (entities not covered by KB this turn).
-        session._grounded_kb = relevant_kb
-        session._grounded_kb_for = session.working_question
+        session._grounded_knowledge = relevant_knowledge
+        session._grounded_knowledge_for = session.working_question
         # Accumulate across turns: union of all KB entries seen this phase.
         # Annotate each new entry with the original natural-language terms that matched
         # it so the evidence builder can bridge phrasing gaps (e.g. "significant compliance
         # issues" → "High Audit Compliance Pressure") even when later turns stop linking them.
-        if relevant_kb:
-            existing = _parse_kb_entries(session.cumulative_grounded_kb)
-            for name, text in _parse_kb_entries(relevant_kb).items():
+        if relevant_knowledge:
+            existing = _parse_kb_entries(session.cumulative_grounded_knowledge)
+            for name, text in _parse_kb_entries(relevant_knowledge).items():
                 if name not in existing:
                     matched_from = entry_to_original_terms.get(name, [])
                     if matched_from:
@@ -294,9 +294,9 @@ def should_clarify(
                             + f"\n# matched from: {', '.join(matched_from)}"
                             + text[first_nl:]
                         )
-                    session.cumulative_grounded_kb = (
-                        session.cumulative_grounded_kb + "\n" + text
-                        if session.cumulative_grounded_kb
+                    session.cumulative_grounded_knowledge = (
+                        session.cumulative_grounded_knowledge + "\n" + text
+                        if session.cumulative_grounded_knowledge
                         else text
                     )
         # For terms covered by BOTH KB and VDB (score < 0.62), inject a
@@ -310,7 +310,7 @@ def should_clarify(
         # (e.g. KB confirms it turn 2, VDB only finds the column turn 3). Requiring
         # both to be true within a single turn's local resolved_hits/kb_covered_norms
         # silently missed every term whose two signals arrived a turn apart.
-        kb_entries_parsed = _parse_kb_entries(relevant_kb)
+        kb_entries_parsed = _parse_kb_entries(relevant_knowledge)
         for entry_name, matched_terms in entry_to_original_terms.items():
             entry_text = next(
                 (
@@ -349,7 +349,7 @@ def should_clarify(
                 continue
             # Dedup by KB entry name — stable across turns unlike norm phrasing
             marker = f"[DISAMBIGUATION for KB:'{entry_name}'"
-            if marker in session.cumulative_grounded_kb:
+            if marker in session.cumulative_grounded_knowledge:
                 continue
             note = (
                 f"\n{marker}: "
@@ -357,7 +357,7 @@ def should_clarify(
                 f"— but schema also has a direct column: {col_text[:120].strip()}. "
                 f"In evidence, choose whichever fits the question domain — not both.]"
             )
-            session.cumulative_grounded_kb += note
+            session.cumulative_grounded_knowledge += note
             logger.info(
                 "Clarify — KB+VDB disambiguation note added for KB entry %r (VDB score=%.3f)",
                 entry_name,
@@ -412,11 +412,11 @@ def should_clarify(
         ""  # Sort direction is handled by the default DESC hint at SQL gen time.
     )
 
-    grounded_kb_for_prompt = session._grounded_kb or "None"
+    grounded_knowledge_for_prompt = session._grounded_knowledge or "None"
     logger.debug(
         "Clarify — feeding to decide-LLM | relevant_knowledge (%d chars): %r",
-        len(grounded_kb_for_prompt),
-        grounded_kb_for_prompt[:300],
+        len(grounded_knowledge_for_prompt),
+        grounded_knowledge_for_prompt[:300],
     )
 
     # Turn-0 scan: run completeness before any Q&A to surface missing formulas.
@@ -428,7 +428,7 @@ def should_clarify(
     if (
         not session.clarify_history
         and not session.incomplete_formula_terms
-        and (session._grounded_kb or has_calc_vdb)
+        and (session._grounded_knowledge or has_calc_vdb)
     ):
         from .completeness import detect_incomplete_formulas
 
@@ -448,7 +448,7 @@ def should_clarify(
         gaps = detect_incomplete_formulas(
             session.working_question,
             last_turn=None,
-            relevant_kb=session._grounded_kb,
+            relevant_knowledge=session._grounded_knowledge,
             current_gaps=[],
             llm=llm,
             vdb_only_entities=vdb_only,
@@ -470,7 +470,7 @@ def should_clarify(
 
     prompt = _CLARIFY_PROMPT.format(
         db_schema=_compact_schema(session.db_schema),
-        relevant_knowledge=grounded_kb_for_prompt,
+        relevant_knowledge=grounded_knowledge_for_prompt,
         resolved_schema_terms=resolved_schema_text,
         question=session.working_question,
         history=history_text,
@@ -554,10 +554,10 @@ def _generate_forced_question(term: str, description: str, llm) -> str:
     return safe_invoke_text(llm, prompt).strip()
 
 
-def refresh_grounded_kb(session: "InteractiveSessionState") -> None:
+def refresh_grounded_knowledge(session: "InteractiveSessionState") -> None:
     """Run entity extraction and KB coverage without making a clarification decision.
 
-    Updates session._grounded_kb and session.cumulative_grounded_kb so Evidence
+    Updates session._grounded_knowledge and session.cumulative_grounded_knowledge so Evidence
     generation has current KB context. Used in Phase 2 where clarification questions
     are not allowed but KB grounding is still needed.
     """
@@ -567,7 +567,7 @@ def refresh_grounded_kb(session: "InteractiveSessionState") -> None:
     (
         unresolvable,
         resolved_hits,
-        relevant_kb,
+        relevant_knowledge,
         _,
         entry_to_original_terms,
         _vdb_only,
@@ -588,12 +588,12 @@ def refresh_grounded_kb(session: "InteractiveSessionState") -> None:
     for note in json_shared_notes:
         if note not in session._collision_resolution_notes:
             session._collision_resolution_notes.append(note)
-    session._grounded_kb = relevant_kb
-    session._grounded_kb_for = session.working_question
+    session._grounded_knowledge = relevant_knowledge
+    session._grounded_knowledge_for = session.working_question
     _cache_resolved_hits(session, resolved_hits)
-    if relevant_kb:
-        existing = _parse_kb_entries(session.cumulative_grounded_kb)
-        for name, text in _parse_kb_entries(relevant_kb).items():
+    if relevant_knowledge:
+        existing = _parse_kb_entries(session.cumulative_grounded_knowledge)
+        for name, text in _parse_kb_entries(relevant_knowledge).items():
             if name not in existing:
                 matched_from = entry_to_original_terms.get(name, [])
                 if matched_from:
@@ -603,8 +603,8 @@ def refresh_grounded_kb(session: "InteractiveSessionState") -> None:
                         + f"\n# matched from: {', '.join(matched_from)}"
                         + text[first_nl:]
                     )
-                session.cumulative_grounded_kb = (
-                    session.cumulative_grounded_kb + "\n" + text
-                    if session.cumulative_grounded_kb
+                session.cumulative_grounded_knowledge = (
+                    session.cumulative_grounded_knowledge + "\n" + text
+                    if session.cumulative_grounded_knowledge
                     else text
                 )

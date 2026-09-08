@@ -107,15 +107,15 @@ def _filter_covered_by_external_knowledge(
 ) -> tuple[set[str], str, dict[str, list[str]]]:
     """Check which entities are covered by external knowledge.
 
-    Returns (covered_set, relevant_kb_text, entry_to_original_terms).
+    Returns (covered_set, relevant_knowledge_text, entry_to_original_terms).
     entry_to_original_terms maps each confirmed KB entry name to the original
-    natural-language terms that matched it, so callers can annotate cumulative_grounded_kb.
+    natural-language terms that matched it, so callers can annotate cumulative_grounded_knowledge.
     The LLM outputs YES | <entry name>
     for each covered term; we look up the verbatim entry ourselves so the content
     is never hallucinated. Uses the non-reasoning model for speed.
 
     When children_map is provided, child entries of any matched parent are appended
-    to relevant_kb_text with their full text (name + description + definition),
+    to relevant_knowledge_text with their full text (name + description + definition),
     bypassing the coverage LLM. Capped at _MAX_CHILDREN_PER_PARENT per parent.
     """
     entity_list = "\n".join(f"- {e}" for e in entities)
@@ -308,14 +308,14 @@ def _filter_covered_by_external_knowledge(
                                     match,
                                 )
 
-    relevant_kb_text = "\n".join(relevant_lines)
+    relevant_knowledge_text = "\n".join(relevant_lines)
     logger.info("Clarify — external_kb covers: %s", covered or "none")
     logger.debug(
-        "Clarify — relevant_kb_text stored (%d chars): %r",
-        len(relevant_kb_text),
-        relevant_kb_text[:300] if relevant_kb_text else "",
+        "Clarify — relevant_knowledge_text stored (%d chars): %r",
+        len(relevant_knowledge_text),
+        relevant_knowledge_text[:300] if relevant_knowledge_text else "",
     )
-    return covered, relevant_kb_text, entry_to_original_terms
+    return covered, relevant_knowledge_text, entry_to_original_terms
 
 
 def _compact_schema(db_schema: str) -> str:
