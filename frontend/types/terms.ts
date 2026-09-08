@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CertificationStatus } from '@/enums/certification';
+import type { TagChip } from '@/types/tags';
 
 export type TermZone = {
 	id: string;
@@ -37,10 +38,15 @@ export type TermTable = {
 	db_id: string;
 };
 
+/**
+ * `tags` is on the detail rather than on `Term` because only `/terms/{id}`
+ * resolves it — the paged list returns cards, which render no chips.
+ */
 export type TermDetail = Term & {
 	table_count: number;
 	tables: TermTable[];
 	related_terms: RelatedTerm[];
+	tags: TagChip[];
 };
 
 export type AttributeColumnRef = {
@@ -63,6 +69,8 @@ export type ColumnAttribute = {
 	/** Profiled sample values from the owning Column, when available. */
 	sample_values: string[] | null;
 	zones: TermZone[];
+	/** Absent from the patch response, which echoes only the fields it wrote. */
+	tags?: TagChip[];
 	/** The Column that owns this attribute via `HAS_ATTRIBUTE`, if any. */
 	primary_column: AttributeColumnRef | null;
 	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
@@ -80,6 +88,7 @@ export type SqlAttribute = {
 	term_id: string;
 	term_name: string;
 	zones?: TermZone[];
+	tags?: TagChip[];
 	certified: boolean;
 };
 

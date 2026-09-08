@@ -87,6 +87,17 @@ export const semanticCompilationApi = {
 	reset: () => json<{ status: string }>('/api/semantic-compilation/reset', { method: 'POST' }),
 };
 
+export const distinctValueProbingApi = {
+	get: () => json<{ enabled: boolean }>('/api/configurations/distinct-value-probing'),
+
+	setEnabled: (enabled: boolean) =>
+		json<{ enabled: boolean }>('/api/configurations/distinct-value-probing', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		}),
+};
+
 // Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
 export const visualizationApi = {
 	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>

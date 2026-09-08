@@ -455,6 +455,13 @@ column_attribute = Table(
 )
 
 # PROPERTY_OF: ColumnAttribute -> Term.
+#
+# An edge table for what is really a one-to-many: the composite primary key only
+# forbids the same pair twice, so it is `UNIQUE(attribute_id)` below that holds
+# the rule the readers rely on -- **one Term per attribute**. Before it, the rule
+# lived only in `link_to_term`, which deletes any other link before inserting,
+# and every read that resolved an attribute's Term had to defend against a write
+# path that forgot to.
 column_attribute__term = Table(
     "column_attribute__term",
     METADATA,
@@ -467,6 +474,7 @@ column_attribute__term = Table(
     Column(
         "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
     ),
+    UniqueConstraint("attribute_id"),
 )
 
 # HAS_ATTRIBUTE and SEMANTIC_FK both run Column -> ColumnAttribute, but they
@@ -533,6 +541,12 @@ sql_attribute = Table(
 )
 
 # PROPERTY_OF: SqlAttribute -> Term.
+#
+# `UNIQUE(attribute_id)` for the reason given on `column_attribute__term`: the
+# two kinds of attribute are properties of exactly one Term in the same sense,
+# and the pages that list them read both the same way. A SqlAttribute reached
+# through a CustomAnalysis has no row here at all, which is a different thing
+# from having two.
 sql_attribute__term = Table(
     "sql_attribute__term",
     METADATA,
@@ -545,6 +559,7 @@ sql_attribute__term = Table(
     Column(
         "term_id", Text, ForeignKey(term.c.id, ondelete="CASCADE"), primary_key=True
     ),
+    UniqueConstraint("attribute_id"),
 )
 
 # HAS_SQL: SqlAttribute -> Sql.
@@ -691,6 +706,157 @@ zone_target = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Tags
+# ---------------------------------------------------------------------------
+
+tag = Table(
+    "tag",
+    METADATA,
+    _id(),
+    # Uniqueness is `uq_tag_name_lower`, not a UNIQUE on this column: the rule
+    # the application enforces is case-insensitive on the *trimmed* name, and a
+    # plain UNIQUE would admit "PII" beside "pii".
+    Column("name", Text, nullable=False),
+    Column(
+        "created",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    # Set by the database on insert and by SQLAlchemy's ``onupdate`` on every
+    # UPDATE the DAL issues, so no caller has to remember to touch it -- a
+    # rename advances it without `update_tag` naming this column at all. Equal
+    # to ``created`` until a tag is first renamed, which is why the settings
+    # page renders it as "Never" rather than repeating the creation date as if
+    # the tag had been changed.
+    Column(
+        "modified",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    ),
+    # Who created the tag and who last edited it, as Better Auth user ids --
+    # the `id` of a row in `frontend."user"`, which Prisma owns.
+    #
+    # Deliberately not foreign keys. That table is in another schema Alembic
+    # does not manage, so there is nothing here to reference; and a tag must
+    # outlive the account that made it, which a FK with any `ondelete` would
+    # either forbid or quietly rewrite.
+    #
+    # Nullable because the gateway's identity header is not guaranteed: FastAPI
+    # is reachable directly on the private network, so a caller that skips the
+    # gateway creates a tag with nobody to record. The settings page reads that
+    # as "Unknown" rather than inventing an author.
+    #
+    # `modified_by` is additionally null for a tag nothing has edited yet, which
+    # is the same fact `modified == created` states -- the page renders those
+    # two together as an edit that never happened.
+    #
+    # `SYSTEM_ACTOR` in `gsf/dal/tags.py` is the one value either column may
+    # hold that is not a user id, for a tag no person asked for.
+    Column("created_by", Text, nullable=True),
+    Column("modified_by", Text, nullable=True),
+    # The tag name rule as a constraint rather than a convention. Unlike
+    # `zone.name` -- whose rule is scoped to the databases a zone's items live
+    # in, which no index can express -- a tag name is unique across the whole
+    # deployment, so an expression index states the rule exactly. It also closes
+    # the window between the DAL's duplicate check and its insert, which two
+    # concurrent creates of the same name would otherwise slip through.
+    #
+    # Spelled as `text()` in Postgres's own deparsed form, and declared here
+    # rather than beside the other indexes below, for two reasons `alembic
+    # check` fails on otherwise: `func.lower(func.trim(...))` renders
+    # `lower(trim(name))` while reflection reports `lower(TRIM(BOTH FROM
+    # name))`, and a bare `text()` index outside a Table is attached to no
+    # table, so autogenerate reads it as an index the models no longer have.
+    Index("uq_tag_name_lower", text("lower(TRIM(BOTH FROM name))"), unique=True),
+)
+
+# TAGGED is polymorphic: a tag can label a Term, a Table, a Column, a
+# ColumnAttribute or a SqlAttribute. Same nullable-FKs-and-a-CHECK shape as
+# `zone_target`, and for the same reason -- a (kind, id) pair can carry no
+# foreign key, so deleting a column would leave a row pointing at nothing and
+# the tag's page would list objects that no longer exist. Here the cascade
+# removes the label with the thing it labelled.
+#
+# Databases and Schemas are deliberately absent. A tag is applied to the objects
+# a query names, and the two container tiers already reach their contents
+# through `zone_target`, which is what scopes access.
+tag_target = Table(
+    "tag_target",
+    METADATA,
+    _id(),
+    Column("tag_id", Text, ForeignKey(tag.c.id, ondelete="CASCADE"), nullable=False),
+    Column(
+        "term_id",
+        Text,
+        ForeignKey(term.c.id, ondelete="CASCADE"),
+        nullable=True,
+    ),
+    Column(
+        "table_id",
+        Text,
+        ForeignKey(catalog_table.c.id, ondelete="CASCADE"),
+        nullable=True,
+    ),
+    Column(
+        "column_id",
+        Text,
+        ForeignKey(catalog_column.c.id, ondelete="CASCADE"),
+        nullable=True,
+    ),
+    Column(
+        "column_attribute_id",
+        Text,
+        ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
+        nullable=True,
+    ),
+    Column(
+        "sql_attribute_id",
+        Text,
+        ForeignKey(sql_attribute.c.id, ondelete="CASCADE"),
+        nullable=True,
+    ),
+    # When the label was applied, for the "Tagged" column on the tag's page.
+    # No `tagged_by`: the attach endpoints carry no user identity, and a column
+    # no write path fills would read back null forever while looking like it
+    # meant "unknown".
+    Column(
+        "tagged",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "num_nonnulls(term_id, table_id, column_id, column_attribute_id, "
+        "sql_attribute_id) = 1",
+        name="exactly_one_target",
+    ),
+    # One row per (tag, object), as one constraint per target column rather than
+    # one across all of them. That works *because* Postgres treats NULLs as
+    # distinct: the columns that do not apply to a row are null, so those
+    # constraints never collide, while the one that does is enforced. A single
+    # UNIQUE over every column would enforce nothing at all, for the same reason.
+    #
+    # Each also gives a btree led by `tag_id`, which is the read behind a tag's
+    # page -- "the objects carrying this tag" -- so no separate index on `tag_id`
+    # is needed. The reverse read, "the tags on this object", leads with the
+    # target column instead and is served by the indexes declared below.
+    UniqueConstraint("tag_id", "term_id", name="uq_tag_target_tag_id_term_id"),
+    UniqueConstraint("tag_id", "table_id", name="uq_tag_target_tag_id_table_id"),
+    UniqueConstraint("tag_id", "column_id", name="uq_tag_target_tag_id_column_id"),
+    UniqueConstraint(
+        "tag_id",
+        "column_attribute_id",
+        name="uq_tag_target_tag_id_column_attribute_id",
+    ),
+    UniqueConstraint(
+        "tag_id", "sql_attribute_id", name="uq_tag_target_tag_id_sql_attribute_id"
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # Service bookkeeping
 # ---------------------------------------------------------------------------
 
@@ -757,6 +923,14 @@ Index("ix_zone_target_zone_id", zone_target.c.zone_id)
 Index("ix_zone_target_database_id", zone_target.c.database_id)
 Index("ix_zone_target_schema_id", zone_target.c.schema_id)
 Index("ix_zone_target_table_id", zone_target.c.table_id)
+
+# "The tags on this object", which every detail page asks for its own kind. The
+# unique constraints on tag_target lead with `tag_id` and so cannot serve it.
+Index("ix_tag_target_term_id", tag_target.c.term_id)
+Index("ix_tag_target_table_id", tag_target.c.table_id)
+Index("ix_tag_target_column_id", tag_target.c.column_id)
+Index("ix_tag_target_column_attribute_id", tag_target.c.column_attribute_id)
+Index("ix_tag_target_sql_attribute_id", tag_target.c.sql_attribute_id)
 
 # imported_id is matched alongside id during model import; non-unique.
 for _table in (

@@ -208,6 +208,20 @@
             ],
             "title": "Table Id"
           },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
+          },
           "term_name": {
             "anyOf": [
               {
@@ -821,6 +835,13 @@
               }
             ],
             "title": "Sample Values"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
           }
         },
         "required": [
@@ -1350,6 +1371,32 @@
           "data"
         ],
         "title": "DataResponse[TableExplorationDetails]",
+        "type": "object"
+      },
+      "DataResponse_TagDetail_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/TagDetail"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[TagDetail]",
+        "type": "object"
+      },
+      "DataResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Tag"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Tag]",
         "type": "object"
       },
       "DataResponse_TermDetail_": {
@@ -2382,6 +2429,50 @@
         "title": "ListResponse[TableSummary]",
         "type": "object"
       },
+      "ListResponse_TagChip_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[TagChip]",
+        "type": "object"
+      },
+      "ListResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Tag]",
+        "type": "object"
+      },
       "ListResponse_Zone_": {
         "additionalProperties": true,
         "properties": {
@@ -3029,6 +3120,20 @@
               }
             ],
             "title": "Sql Id"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TagChip"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags"
           },
           "term_id": {
             "anyOf": [
@@ -3983,6 +4088,13 @@
             ],
             "title": "Table Type"
           },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
           "terms_count": {
             "anyOf": [
               {
@@ -3999,6 +4111,283 @@
           "id"
         ],
         "title": "TableSummary",
+        "type": "object"
+      },
+      "Tag": {
+        "additionalProperties": true,
+        "description": "A tag, as both the list and the create endpoint return it.\n\nThe four columns describing *when* are required, unlike most of this\nmodule: each is ``NOT NULL`` and ``gsf.dal.tags`` selects them on every\npath.\n\n``created`` and ``modified`` are the first timestamps this module carries,\nso they set the convention: a timezone-aware ``datetime``, which Pydantic\nserialises as ISO 8601 and the client parses directly. They are read from\nthe database rather than the application clock, so a client comparing two\ntags is comparing one clock.\n\nThe two describing *who* are nullable, and each null says something\ndifferent. ``created_by`` is null for a tag made by a caller that reached\nFastAPI without the gateway's identity header. ``modified_by`` is\nadditionally null for a tag nobody has renamed, which is the same fact\n``modified == created`` states.\n\nBoth are opaque Better Auth user ids. Resolving one to a name is the\ngateway's job -- the accounts live in a schema this service does not own --\nso this API deliberately answers with the id it stored.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created",
+          "modified"
+        ],
+        "title": "Tag",
+        "type": "object"
+      },
+      "TagChip": {
+        "additionalProperties": true,
+        "description": "A tag as rendered beside the object it labels.\n\nDeliberately narrower than :class:`Tag`: a chip needs the name to show and\nthe id to remove itself by, and the timestamps describe the tag rather than\nthe labelling, so carrying them on every chip of every row would say\nnothing the tag's own page does not say better.\n\nHere rather than with the tag models below because every taggable thing\ncarries it, and the catalog ones are modelled before the tags themselves.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "TagChip",
+        "type": "object"
+      },
+      "TagCreate": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TagCreate",
+        "type": "object"
+      },
+      "TagDetail": {
+        "additionalProperties": true,
+        "description": "A tag together with everything it labels.\n\n``items`` is empty for a tag nothing carries \u2014 a freshly created tag, or one\nwhose last object was untagged \u2014 which the page renders as its empty state\nrather than as a failed read.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TagItem"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "created",
+          "modified"
+        ],
+        "title": "TagDetail",
+        "type": "object"
+      },
+      "TagItem": {
+        "additionalProperties": true,
+        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits \u2014 ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
+        "properties": {
+          "database_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "schema_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Id"
+          },
+          "table_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table Id"
+          },
+          "tagged": {
+            "format": "date-time",
+            "title": "Tagged",
+            "type": "string"
+          },
+          "term_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Term Id"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TagTargetType"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "type",
+          "tagged"
+        ],
+        "title": "TagItem",
+        "type": "object"
+      },
+      "TagTarget": {
+        "description": "The object to label: what kind it is, and which one.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TagTargetType"
+          }
+        },
+        "required": [
+          "type",
+          "id"
+        ],
+        "title": "TagTarget",
+        "type": "object"
+      },
+      "TagTargetType": {
+        "description": "Which of the five things a tag points at.\n\nUsed on both sides of tagging: it is the ``type`` of a :class:`TagItem` a\ntag's page reads, and the ``type`` the attach and detach routes validate\nagainst \u2014 which is what makes an unknown kind a 422 from FastAPI's own\nvalidation, listing the five it does accept.\n\nThe five strings are also the keys ``gsf.dal.tags`` resolves to a\n``tag_target`` column, and they are spelled out here rather than imported\nfrom it: this module is the shape of the API, and pulling a five-string\nvocabulary out of the DAL made every importer of it load SQLAlchemy and the\nwhole table metadata too. ``gsf/server/tests/test_tag_target_type.py`` is\nwhat keeps the two spellings identical, since a kind the DAL has no column\nfor would answer 500 rather than the 422 this enum exists to produce.",
+        "enum": [
+          "term",
+          "table",
+          "column",
+          "column_attribute",
+          "sql_attribute"
+        ],
+        "title": "TagTargetType",
+        "type": "string"
+      },
+      "TagUpdate": {
+        "description": "A rename. The name is the only part of a tag there is to edit.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "TagUpdate",
         "type": "object"
       },
       "Term": {
@@ -4121,7 +4510,7 @@
       },
       "TermDetail": {
         "additionalProperties": true,
-        "description": "One Term with the tables that represent it and its related terms.",
+        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is on the detail rather than on :class:`Term` because only this\nread resolves it: the paged list would need a second query per page to fill\nit, and its cards do not render chips.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -4219,6 +4608,13 @@
               "$ref": "#/components/schemas/TermTable"
             },
             "title": "Tables",
+            "type": "array"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
             "type": "array"
           },
           "zones": {
@@ -7248,6 +7644,316 @@
         "tags": [
           "datasources",
           "connectors"
+        ]
+      }
+    },
+    "/api/tags": {
+      "get": {
+        "description": "Return every tag.",
+        "operationId": "list_tags_api_tags_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Tags",
+        "tags": [
+          "tags"
+        ]
+      },
+      "post": {
+        "description": "Create a tag.\n\nThe author is read from the gateway's identity header rather than taken\nfrom the body: the Next.js route in front of this one has already resolved\nthe session, so the header is the one account that can be credited, and a\nbody field would let a caller name somebody else.\n\n``required=False`` because the identity is audit rather than authorization\n-- the route's permission gate is the gateway's -- so a direct call on the\nprivate network still creates the tag, with no author recorded.",
+        "operationId": "create_tag_api_tags_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Tag",
+        "tags": [
+          "tags"
+        ]
+      }
+    },
+    "/api/tags/{tag_id}": {
+      "delete": {
+        "description": "Delete one tag by id.\n\n404 rather than 204 for an id that is not there: the settings page deletes\nfrom a list it has already read, so a missing tag means its list is stale,\nand answering \"done\" would leave the row on screen with nothing to explain\nit.",
+        "operationId": "delete_tag_api_tags__tag_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Tag",
+        "tags": [
+          "tags"
+        ]
+      },
+      "get": {
+        "description": "Return one tag with every object it labels.\n\n404 for an unknown id, rather than an empty tag: the page opens this from a\nrow it has already read, so a missing tag means the row is stale, and a\nblank page titled with nothing would look like a tag with no items.\n\nAn *existing* tag with nothing tagged is the opposite case and answers 200\nwith ``items: []``, which the page renders as its empty state.",
+        "operationId": "get_tag_api_tags__tag_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_TagDetail_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Tag",
+        "tags": [
+          "tags"
+        ]
+      },
+      "patch": {
+        "description": "Rename a tag.\n\nAnswers with the whole tag rather than an echo of the name, because the\nrename has also advanced ``modified`` and recorded a ``modified_by`` \u2014 so\nthe settings page redraws the row it just edited from this one response\ninstead of re-reading the list to find out what they became.\n\nThe editor is read from the gateway's identity header, for the reason\n``create_tag`` reads the author from it.\n\n404 for an unknown id and 409 for a name another tag holds, as create and\ndelete answer: the page renames from a list it has already read, so either\nmeans that list is stale.\n\nA rename to the tag's own name is not a 409 \u2014 see ``update_tag`` in the DAL\n\u2014 and neither is one that only changes case, which is the ordinary way to\nfix a tag that was created shouting.",
+        "operationId": "update_tag_api_tags__tag_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Tag",
+        "tags": [
+          "tags"
+        ]
+      }
+    },
+    "/api/tags/{tag_id}/targets": {
+      "post": {
+        "description": "Label one object with this tag.\n\nBoth write routes live here rather than on ``/terms/{id}/tags`` and its two\nattribute equivalents, because ``tag_target`` is one polymorphic table and\nsix routes over three routers would spread that polymorphism across the\ncodebase to say the same thing.\n\nAnswers with the **object's** tags, so the page that added a chip redraws\nits whole set from one response instead of trusting its own optimistic\nedit. Labelling something that already carries the tag is a 201 with the\nsame body: two clicks on one tag are one intention.\n\n409 for a column or SQL attribute that is not a property of any term: it\nexists, so a 404 would be a lie, but it is unreachable \u2014 every list of\nattributes goes through the term that owns them \u2014 and a tag on it could\nnever be seen or taken off again.",
+        "operationId": "attach_tag_api_tags__tag_id__targets_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagTarget"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TagChip_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Attach Tag",
+        "tags": [
+          "tags"
+        ]
+      }
+    },
+    "/api/tags/{tag_id}/targets/{target_type}/{item_id}": {
+      "delete": {
+        "description": "Take this tag off one object.\n\n404 when the object was not carrying it \u2014 including when either side no\nlonger exists. The page removed a chip it had just rendered, so all three\nmean its view is stale, and answering \"done\" would leave the chip gone from\nthe screen and still on the object.",
+        "operationId": "detach_tag_api_tags__tag_id__targets__target_type___item_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "target_type",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/TagTargetType"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_TagChip_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Detach Tag",
+        "tags": [
+          "tags"
         ]
       }
     },

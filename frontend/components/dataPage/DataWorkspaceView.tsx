@@ -7,10 +7,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
+import type { NodePatch } from '@/api/types';
 import { EmptyState } from '@/common/EmptyState';
 import { IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
+import { DataModels } from '@/enums/datasources';
 import { EmptyStateVariant } from '@/enums/emptyState';
+import { TagItemType } from '@/enums/tags';
 import { ToastVariant } from '@/enums/toast';
 import { DataTree } from './DataTree';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
@@ -18,7 +21,8 @@ import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { Toast } from '@/common/Toast';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
-import { buildTreeFocusPageFormat } from '@/lib/data/tree-focus-page';
+import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
+import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
 import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
@@ -30,6 +34,21 @@ import { datasources } from '@/api/datasources';
 export type DataWorkspaceViewProps = Record<string, never>;
 
 type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & Partial<Column>;
+
+/**
+ * Which kind of tag target the focused node is, or null for the kinds that
+ * carry no tags.
+ *
+ * Read off the focus path — `dbId|schemaId|tableId|columnId` truncated to the
+ * depth opened — rather than off the tree, so it also answers before the branch
+ * has been hydrated, which is when the page decides whether to read the tags.
+ */
+const focusedTagType = (focusId: string | null): TagItemType | null => {
+	const depth = focusId?.split('|').filter((segment) => segment.length > 0).length ?? 0;
+	if (depth === 3) return TagItemType.Table;
+	if (depth === 4) return TagItemType.Column;
+	return null;
+};
 
 export function DataWorkspaceView() {
 	const searchParams = useSearchParams();
@@ -158,8 +177,13 @@ export function DataWorkspaceView() {
 
 	const getSinglePage = useCallback(
 		async (_dataId: string, treeFocus: string | null): Promise<SinglePageFormat> => {
-			if (treeFocus) await hydrateBranchForFocus(treeFocus);
-			return buildTreeFocusPageFormat(treeFocus, databasesRef.current);
+			// The picker's options are read only for the kinds that have a tags
+			// section, and beside the hydration rather than after it.
+			const [, tagOptions] = await Promise.all([
+				hydrateBranchForFocus(treeFocus),
+				focusedTagType(treeFocus) == null ? [] : fetchTagOptions(),
+			]);
+			return buildTreeFocusPageFormat(treeFocus, databasesRef.current, tagOptions);
 		},
 		[hydrateBranchForFocus],
 	);
@@ -181,14 +205,61 @@ export function DataWorkspaceView() {
 		setTreeDataEpoch((n) => n + 1);
 	}, []);
 
-	const syncEdits = useCallback(
-		(edits: Record<string, ComposerEditValue>) => {
-			if (focusedEntityId == null) return;
-			// Composer edits are keyed by section id, which for editable catalog
-			// sections maps onto `description` / `sample_values`.
-			applyNodePatch(focusedEntityId, edits as CatalogNodePatch);
+	/**
+	 * Saves the Edit toolbar's pending edits.
+	 *
+	 * Written out rather than left to the composer's default `updateNode` path
+	 * because tags do not go through that endpoint: they are their own writes,
+	 * against a different one, and the rest of the edits are keyed by section
+	 * id, which for the editable catalog sections is already `description` /
+	 * `sample_values`.
+	 *
+	 * Nothing is re-read afterwards — the catalog page renders the tree this
+	 * component holds, so each write is followed by patching the node it
+	 * changed, which is what redraws the page.
+	 */
+	const handleSave = useCallback(
+		async (edits: Record<string, ComposerEditValue>) => {
+			if (focusedEntityId == null) {
+				return { error: true, message: 'No catalog node is selected' };
+			}
+			const { [TAGS_SECTION_ID]: tagEdit, ...nodeEdits } = edits;
+
+			if (Object.keys(nodeEdits).length > 0) {
+				const res = await datasources.updateNode(focusedEntityId, nodeEdits as NodePatch);
+				if (res.error) {
+					return { error: true, message: res.message ?? 'Failed to save changes' };
+				}
+				applyNodePatch(focusedEntityId, nodeEdits as CatalogNodePatch);
+			}
+
+			const nextTagIds = stagedTagIds(tagEdit);
+			const tagType = focusedTagType(treeFocusId);
+			if (nextTagIds != null && tagType != null) {
+				const focused = resolveTreeNode(treeFocusId, databasesRef.current);
+				const current =
+					focused.type === DataModels.TABLE
+						? focused.table.tags
+						: focused.type === DataModels.COLUMN
+							? focused.column.tags
+							: [];
+				const { error, tags } = await syncTags({
+					type: tagType,
+					itemId: focusedEntityId,
+					current: current ?? [],
+					nextIds: nextTagIds,
+				});
+				// Whatever landed is what the node carries now, so the tree is
+				// brought up to it either way.
+				applyNodePatch(focusedEntityId, { tags });
+				if (error != null) {
+					return { error: true, message: error };
+				}
+			}
+
+			return { error: false };
 		},
-		[applyNodePatch, focusedEntityId],
+		[applyNodePatch, focusedEntityId, treeFocusId],
 	);
 
 	// Certification saves immediately, independent of the description Save
@@ -292,7 +363,7 @@ export function DataWorkspaceView() {
 					treeFocusId={treeFocusId}
 					treeDataEpoch={treeDataEpoch}
 					getSinglePage={getSinglePage}
-					onSave={syncEdits}
+					onPatchEdits={handleSave}
 					onCertificationChange={handleCertificationChange}
 					onDataTableCertificationChange={handleChildCertificationChange}
 				/>

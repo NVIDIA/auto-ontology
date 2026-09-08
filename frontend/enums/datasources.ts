@@ -34,6 +34,12 @@ export enum ComposerSectionKind {
 	ZONES_CHIPS = 'zonesChips',
 	RELATED_TERMS_CHIPS = 'relatedTermsChips',
 	ENTITY_CHIPS = 'entityChips',
+	/**
+	 * Tags the object carries, each removable, with a picker to add another.
+	 * Not to be confused with `TAG_LIST`, which is a list of plain strings a
+	 * field happens to hold (synonyms, sample values) and is edited as text.
+	 */
+	ENTITY_TAGS = 'entityTags',
 	SQL_BLOCK = 'sqlBlock',
 }
 

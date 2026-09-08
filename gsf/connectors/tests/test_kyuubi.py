@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import pytest
 
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.kyuubi import KyuubiDatabase, _parse_connection_string
 from gsf.connectors.registry import CONNECTOR_REGISTRY
@@ -268,6 +269,20 @@ def test_undescribable_table_is_dropped_from_tables_too() -> None:
     assert "system" not in set(tables["table_schema"])
 
 
+def test_describing_nothing_at_all_raises_instead_of_emptying_the_catalog() -> None:
+    """Dropping one unreadable table is a skip; dropping every one is a failure.
+
+    A dead session or a revoked catalog grant fails every DESCRIBE alike. Silently
+    dropping the lot yields an empty catalog that is indistinguishable from a
+    database with nothing in it.
+    """
+    db = _database()
+    _stub_with_failing_describe(db, {"events", "table_creation_locks"})
+
+    with pytest.raises(IncompleteCatalogExtractionError, match="could not describe"):
+        db.get_tables()
+
+
 def test_every_reported_schema_has_columns() -> None:
     """The invariant nemo's schemas_parser relies on, stated directly."""
     db = _database()
@@ -512,3 +527,28 @@ def test_invalid_uploaded_keystore_is_rejected_clearly() -> None:
 
     with pytest.raises(ValueError, match="not valid base64"):
         _write_temp_jks("not!base64!")
+
+
+# ----------------------------------------------------------------------
+# Qualification
+# ----------------------------------------------------------------------
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Spark resolves a bare schema.table against spark_catalog, not the Iceberg
+    # catalog this connection binds, so dropping the catalog made every
+    # profiling probe fail with TABLE_OR_VIEW_NOT_FOUND.
+    assert _database().qualify("raw", "events") == "`nvdp`.`raw`.`events`"
+
+
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `nvdp`.`events` would not mean "catalog nvdp": Spark reads a two-part
+    # name as schema.table, so the catalog would land in the schema position.
+    with pytest.raises(ValueError, match="requires a schema"):
+        _database().qualify(None, "events")
+
+
+def test_qualify_quotes_names_with_spaces() -> None:
+    assert _database().qualify("my schema", "my table") == (
+        "`nvdp`.`my schema`.`my table`"
+    )

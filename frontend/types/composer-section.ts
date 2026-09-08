@@ -138,6 +138,31 @@ export type ComposerEntitiesSection = {
 	entities: ComposerEntity[];
 };
 
+export type ComposerTagChip = {
+	id: string;
+	name: string;
+};
+
+export type ComposerEntityTagsSection = {
+	type: ComposerSectionKind.ENTITY_TAGS;
+	id: string;
+	title: string;
+	/** The tags the object carries, in the order they are rendered. */
+	tags: ComposerTagChip[];
+	/**
+	 * Every tag that exists, which the picker offers minus the assigned ones.
+	 * The section carries them so the composer stays a renderer of data rather
+	 * than a fetcher: the page that knows the object already read them.
+	 */
+	options: ComposerTagChip[];
+	/**
+	 * Adds the remove buttons and the picker, in edit mode only. The edit is a
+	 * pending one: Save hands `onPatchEdits` the section id mapped to the tag
+	 * ids the object should end up with, and Cancel drops it.
+	 */
+	editable?: boolean;
+};
+
 export type ComposerSqlBlockSection = {
 	type: ComposerSectionKind.SQL_BLOCK;
 	id: string;
@@ -155,6 +180,7 @@ export type ComposerSection =
 	| ComposerZonesSection
 	| ComposerRelatedTermsSection
 	| ComposerEntitiesSection
+	| ComposerEntityTagsSection
 	| ComposerSqlBlockSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
@@ -166,6 +192,7 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.ZONES_CHIPS,
 	ComposerSectionKind.RELATED_TERMS_CHIPS,
 	ComposerSectionKind.ENTITY_CHIPS,
+	ComposerSectionKind.ENTITY_TAGS,
 	ComposerSectionKind.SQL_BLOCK,
 ];
 

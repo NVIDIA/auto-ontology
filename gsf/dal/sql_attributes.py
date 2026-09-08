@@ -28,6 +28,7 @@ from sqlalchemy.dialects.postgresql import insert
 from gsf.dal import schema as s
 from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr
+from gsf.dal.tags import TARGET_SQL_ATTRIBUTE, fetch_tags_map
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.server.sql_utils import SqlParseError
 
@@ -300,6 +301,7 @@ def get_full_sql_attribute_by_id(
         )
 
     result["zones"] = [dict(r) for r in store().query_read(statement)]
+    result["tags"] = fetch_tags_map(TARGET_SQL_ATTRIBUTE, [attr_id]).get(attr_id, [])
     return result
 
 
@@ -319,13 +321,15 @@ def fetch_sql_attributes_by_term_id(
     without which a page boundary could repeat one and skip another. Pair with
     ``count_sql_attributes_by_term_id`` for the total.
     """
-    return _query_sql_attributes(
+    rows = _query_sql_attributes(
         term_id=term_id,
         zone_ids=zone_ids,
         order_by=(s.sql_attribute.c.name, s.sql_attribute.c.id),
         skip=skip,
         limit=limit,
     )
+    tags = fetch_tags_map(TARGET_SQL_ATTRIBUTE, [row["id"] for row in rows])
+    return [{**row, "tags": tags.get(row["id"], [])} for row in rows]
 
 
 def count_sql_attributes_by_term_id(

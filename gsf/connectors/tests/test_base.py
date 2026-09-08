@@ -124,3 +124,22 @@ def test_every_shipped_connector_subclasses_the_base() -> None:
 def test_the_base_is_re_exported_from_the_package() -> None:
     assert connectors.SQLDatabase is SQLDatabase
     assert "SQLDatabase" in connectors.__all__
+
+
+def test_qualify_defaults_to_two_levels() -> None:
+    """The default suits every engine whose connection binds a database.
+
+    ``_Fake`` does not implement ``qualify`` -- that is the point. It is a
+    concrete method rather than an abstract one precisely so existing
+    connectors and test doubles keep working untouched.
+    """
+    assert _Fake().qualify("public", "orders") == '"public"."orders"'
+
+
+def test_qualify_without_a_schema_is_the_bare_table() -> None:
+    assert _Fake().qualify(None, "orders") == '"orders"'
+
+
+def test_qualify_quotes_a_name_with_a_space() -> None:
+    # An unknown dialect still quotes; a bare identifier is what loses the table.
+    assert _Fake().qualify("main", "Sales Orders") == '"main"."Sales Orders"'

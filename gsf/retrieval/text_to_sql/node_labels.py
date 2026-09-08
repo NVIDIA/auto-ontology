@@ -26,7 +26,6 @@ NODE_LABELS: dict[str, str] = {
     "prepare_candidates": "Preparing candidates",
     "precheck_value_repair": "Checking filter values",
     "construct_sql_from_candidates": "Constructing SQL",
-    "construct_sql_not_from_snippets": "Constructing SQL",
     "reconstruct_sql": "Reconstructing SQL",
     "validate_sql_query": "Validating SQL",
     "validate_intent": "Validating intent",

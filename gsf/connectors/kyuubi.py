@@ -57,6 +57,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.base import SQLDatabase
 
 from gsf.connectors.db_errors import is_session_lost
@@ -507,6 +508,28 @@ class KyuubiDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._catalog
 
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Prepend the bound catalog: Spark names are ``catalog.schema.table``.
+
+        The base two-level default would resolve against ``spark_catalog``, not
+        the Iceberg catalog this connection binds, so every probe would raise
+        TABLE_OR_VIEW_NOT_FOUND. Matches how :meth:`get_tables` and the
+        ``DESCRIBE TABLE`` pass already qualify.
+
+        Raises:
+            ValueError: *schema* is missing. Spark reads a two-part name as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve to
+                something else -- every table here lives in a schema, so an
+                absent one is a bug worth surfacing.
+        """
+        if not schema:
+            raise ValueError(
+                f"Kyuubi requires a schema to qualify {table!r} "
+                f"in catalog {self._catalog!r}"
+            )
+        return _qualified(self._catalog, schema, table)
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
@@ -632,6 +655,16 @@ class KyuubiDatabase(SQLDatabase):
         down with it. ``nvdp.system.table_creation_locks`` does exactly that:
         it is listed by ``SHOW TABLES`` but ``DESCRIBE`` returns Nessie 403.
 
+        This is the same contract
+        :func:`gsf.catalog.extract._validate_relation_column_coverage` enforces
+        for every connector: never report a relation you have no columns for.
+        Dropping is right for *one* unreadable table, but it cannot be right for
+        all of them -- a dead session or a revoked catalog grant fails every
+        ``DESCRIBE`` alike, and silently dropping the lot yields an empty catalog
+        that looks exactly like a database with nothing in it. So if tables were
+        listed and not one could be described, that is raised rather than
+        dropped.
+
         Results are cached for the connector's lifetime: introspection is a read
         of slow-moving metadata, and each DESCRIBE is a separate Spark round
         trip.
@@ -677,6 +710,13 @@ class KyuubiDatabase(SQLDatabase):
                         )
                 views_by_schema[schema] = kept_views
 
+            if skipped and not table_rows:
+                raise IncompleteCatalogExtractionError(
+                    f"Kyuubi listed {len(skipped)} relation(s) and could not describe "
+                    f"any of them: {', '.join(skipped[:10])}"
+                    f"{'' if len(skipped) <= 10 else f' (+{len(skipped) - 10} more)'}. "
+                    "Refusing to ingest an empty catalog."
+                )
             if skipped:
                 logger.warning(
                     "Skipped %d Kyuubi table(s) whose columns could not be read: %s",

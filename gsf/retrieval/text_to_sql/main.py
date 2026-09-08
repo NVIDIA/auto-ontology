@@ -180,7 +180,7 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
         cleared = decision == "intent_valid" or (
             node_name == "validate_sql_query"
             and decision == "valid_sql"
-            and (node_path_state.get("reconstruction_count") or 0)
+            and len(node_path_state.get("failed_attempts") or [])
             > INTENT_VALIDATION_SKIPPED_AFTER
         )
     if not cleared:

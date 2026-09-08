@@ -6,6 +6,7 @@ import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from gsf.dal.datasources import fetch_all_tables_without_term, fetch_table_context
+from gsf.infra.feature_flags import is_distinct_value_probing_enabled
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.models import ProcessTableResult
@@ -31,6 +32,15 @@ def compile_semantic_layer(
     """
     summary = domain_summary or load_domain_summary(database_name)
     tables = fetch_all_tables_without_term(database_name)
+    # Read once per run, not once per table: the flag lives in Postgres and
+    # tables are processed in parallel, so a per-table read would be hundreds
+    # of connections and could also change mid-run.
+    is_probe_distinct_values = is_distinct_value_probing_enabled()
+    if not is_probe_distinct_values:
+        logger.info(
+            "Distinct value probing is disabled in settings — sampling rows as "
+            "usual, but skipping the per-column DISTINCT probes"
+        )
 
     def _process(table: dict, index: int) -> ProcessTableResult | None:
         table_name = table["name"]
@@ -48,6 +58,7 @@ def compile_semantic_layer(
                 domain_summary=summary,
                 embedder=embedder,
                 database_name=database_name,
+                probe_distinct_values=is_probe_distinct_values,
             )
         except Exception:
             logger.exception("Unexpected error processing table %s", table_name)

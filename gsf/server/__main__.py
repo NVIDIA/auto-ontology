@@ -39,6 +39,7 @@ from gsf.server.semantic_compilation.router import (  # noqa: E402
 )
 from gsf.server.sql_attributes.router import router as sql_attributes_router  # noqa: E402
 from gsf.server.zones.router import router as zones_router  # noqa: E402
+from gsf.server.tags.router import router as tags_router  # noqa: E402
 from gsf.server.terms.router import router as terms_router  # noqa: E402
 from gsf.server.model_interchange.router import (  # noqa: E402
     router as model_interchange_router,
@@ -101,6 +102,7 @@ def create_app() -> FastAPI:
         semantic_compilation_router, prefix="/api", tags=["semantic-compilation"]
     )
     app.include_router(zones_router, prefix="/api", tags=["zones"])
+    app.include_router(tags_router, prefix="/api", tags=["tags"])
     app.include_router(terms_router, prefix="/api", tags=["terms"])
     app.include_router(
         model_interchange_router, prefix="/api", tags=["model-interchange"]

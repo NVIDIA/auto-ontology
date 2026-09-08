@@ -8,7 +8,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from gsf.server.chat.identity import resolve_internal_user
+from gsf.server.identity import resolve_internal_user
 
 
 def _request(headers: dict[str, str]) -> Request:

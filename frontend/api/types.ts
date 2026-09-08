@@ -63,5 +63,6 @@ export type ColumnsEnvelope = {
 		| 'description'
 		| 'description_certified'
 		| 'sample_values'
+		| 'tags'
 	>[];
 };

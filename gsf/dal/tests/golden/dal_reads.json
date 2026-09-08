@@ -2677,7 +2677,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.description>",
           "ordinal_position": 3,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "film_id",
@@ -2686,7 +2687,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.film_id>",
           "ordinal_position": 1,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "fulltext",
@@ -2695,7 +2697,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.fulltext>",
           "ordinal_position": 14,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "language_id",
@@ -2704,7 +2707,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.language_id>",
           "ordinal_position": 5,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "last_update",
@@ -2713,7 +2717,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.last_update>",
           "ordinal_position": 12,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "length",
@@ -2722,7 +2727,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.length>",
           "ordinal_position": 9,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "original_language_id",
@@ -2731,7 +2737,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.original_language_id>",
           "ordinal_position": 6,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "rating",
@@ -2740,7 +2747,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.rating>",
           "ordinal_position": 11,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "release_year",
@@ -2749,7 +2757,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.release_year>",
           "ordinal_position": 4,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "rental_duration",
@@ -2758,7 +2767,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.rental_duration>",
           "ordinal_position": 7,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "rental_rate",
@@ -2767,7 +2777,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.rental_rate>",
           "ordinal_position": 8,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "replacement_cost",
@@ -2776,7 +2787,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.replacement_cost>",
           "ordinal_position": 10,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "special_features",
@@ -2785,7 +2797,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.special_features>",
           "ordinal_position": 13,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         },
         {
           "column_name": "title",
@@ -2794,7 +2807,8 @@
           "description_certified": false,
           "id": "<col:pagila.public.film.title>",
           "ordinal_position": 2,
-          "sample_values": null
+          "sample_values": null,
+          "tags": []
         }
       ],
       "database_name": "pagila",
@@ -3734,6 +3748,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 1
       },
       {
@@ -3746,6 +3761,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3758,6 +3774,7 @@
         "schema_name": "public",
         "sql_count": 2,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 1
       },
       {
@@ -3770,6 +3787,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "materialized view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3782,6 +3800,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3794,6 +3813,7 @@
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3806,6 +3826,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3818,6 +3839,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3830,6 +3852,7 @@
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3842,6 +3865,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3854,6 +3878,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3866,6 +3891,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3878,6 +3904,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3890,6 +3917,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3902,6 +3930,7 @@
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 1
       },
       {
@@ -3914,6 +3943,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3926,6 +3956,7 @@
         "schema_name": "public",
         "sql_count": 3,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 2
       },
       {
@@ -3938,6 +3969,7 @@
         "schema_name": "public",
         "sql_count": 1,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 2
       },
       {
@@ -3950,6 +3982,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "base table",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3962,6 +3995,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3974,6 +4008,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3986,6 +4021,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       },
       {
@@ -3998,6 +4034,7 @@
         "schema_name": "public",
         "sql_count": 0,
         "table_type": "view",
+        "tags": [],
         "terms_count": 0
       }
     ],
@@ -6071,6 +6108,7 @@
         "name": "films per category",
         "source": "bridgeTable",
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
+        "tags": [],
         "term_id": "<term:Film>",
         "term_name": "Film"
       },
@@ -6083,6 +6121,7 @@
         "name": "film count",
         "source": "sql",
         "sql": "SELECT count(film_id) FROM film",
+        "tags": [],
         "term_id": "<term:Film>",
         "term_name": "Film"
       }
@@ -6157,6 +6196,7 @@
       "name": "total revenue",
       "source": "manual",
       "sql": "SELECT sum(amount) FROM payment",
+      "tags": [],
       "term_id": "<term:Payment>",
       "term_name": "Payment",
       "zones": []
@@ -6696,6 +6736,7 @@
         "sample_values": null,
         "source_column": "film_id",
         "table_id": "<table:pagila.public.film>",
+        "tags": [],
         "term_name": "Film",
         "zones": [
           {
@@ -6724,6 +6765,7 @@
         "sample_values": null,
         "source_column": "rating",
         "table_id": "<table:pagila.public.film>",
+        "tags": [],
         "term_name": "Film",
         "zones": [
           {
@@ -6752,6 +6794,7 @@
         "sample_values": null,
         "source_column": "title",
         "table_id": "<table:pagila.public.film>",
+        "tags": [],
         "term_name": "Film",
         "zones": [
           {
@@ -7081,6 +7124,7 @@
           "schema_id": "<schema:pagila.public>"
         }
       ],
+      "tags": [],
       "zones": [
         {
           "color": "#4f46e5",

@@ -28,8 +28,16 @@ import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import { CertificationStatus } from '@/enums/certification';
+import { TagItemType } from '@/enums/tags';
 import { ToastVariant } from '@/enums/toast';
 import { attributeStatus } from '@/lib/certification';
+import {
+	TAGS_SECTION_ID,
+	entityTagsSection,
+	fetchTagOptions,
+	stagedTagIds,
+	syncTags,
+} from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
@@ -257,7 +265,9 @@ export const TermsView = () => {
 	const [sqlAttrEditError, setSqlAttrEditError] = useState<string | null>(null);
 	const [columnAttrEditing, setColumnAttrEditing] = useState(false);
 	const [columnAttrEditError, setColumnAttrEditError] = useState<string | null>(null);
-	const [certError, setCertError] = useState<string | null>(null);
+	// Every write that saves on its own rather than through the Save toolbar --
+	// the certification dropdowns -- reports its failure here.
+	const [writeError, setWriteError] = useState<string | null>(null);
 
 	const [prevFocusId, setPrevFocusId] = useState(focusId);
 	const [prevSqlAttrId, setPrevSqlAttrId] = useState(sqlAttrId);
@@ -271,7 +281,7 @@ export const TermsView = () => {
 		setSqlAttrEditError(null);
 		setColumnAttrEditing(false);
 		setColumnAttrEditError(null);
-		setCertError(null);
+		setWriteError(null);
 		// Leaving the term drops the detail copy; moving between terms keeps the
 		// old one on screen until the new term's fetch lands.
 		if (focusId == null) setFocusedTermDetail(null);
@@ -518,17 +528,43 @@ export const TermsView = () => {
 		if (description !== (focusedSqlAttr.description ?? '')) {
 			patch.description = description;
 		}
-		if (Object.keys(patch).length === 0) {
+		const nextTagIds = stagedTagIds(payload[TAGS_SECTION_ID]);
+		if (Object.keys(patch).length === 0 && nextTagIds == null) {
 			return { error: false };
 		}
 
-		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, patch);
-		if (res.error) {
-			return { error: true, message: res.message ?? 'Failed to update SQL attribute' };
+		if (Object.keys(patch).length > 0) {
+			const res = await sqlAttributesApi.patch(focusedSqlAttr.id, patch);
+			if (res.error) {
+				return { error: true, message: res.message ?? 'Failed to update SQL attribute' };
+			}
+			setSqlAttrs((prev) =>
+				prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
+			);
 		}
-		setSqlAttrs((prev) =>
-			prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
-		);
+
+		if (nextTagIds != null) {
+			const { error: tagError, tags } = await syncTags({
+				type: TagItemType.SqlAttribute,
+				itemId: focusedSqlAttr.id,
+				current: focusedSqlAttr.tags ?? [],
+				nextIds: nextTagIds,
+			});
+			// What the attribute carries now, which is what the *next* save has
+			// to diff against. Applied here rather than left to the refetch
+			// below, which lands a round trip later: re-opening Edit before it
+			// does would otherwise measure the change against the tags this
+			// save already replaced. On a partial failure this is whatever
+			// landed, so it holds either way.
+			setSqlAttrs((prev) =>
+				prev.map((attr) => (attr.id === focusedSqlAttr.id ? { ...attr, tags } : attr)),
+			);
+			if (tagError != null) {
+				setSqlAttrsEpoch((prev) => prev + 1);
+				return { error: true, message: tagError };
+			}
+		}
+
 		setSqlAttrsEpoch((prev) => prev + 1);
 		return { error: false };
 	};
@@ -565,26 +601,48 @@ export const TermsView = () => {
 		if (sampleValuesChanged) {
 			patch.sample_values = sampleValues;
 		}
-		if (Object.keys(patch).length === 0) {
+		const nextTagIds = stagedTagIds(payload[TAGS_SECTION_ID]);
+		if (Object.keys(patch).length === 0 && nextTagIds == null) {
 			return { error: false };
 		}
 
-		const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, patch);
-		if (res.error) {
-			return { error: true, message: res.message ?? 'Failed to update column attribute' };
+		if (Object.keys(patch).length > 0) {
+			const res = await termsApi.updateColumnAttribute(focusId, focusedColAttr.id, patch);
+			if (res.error) {
+				return { error: true, message: res.message ?? 'Failed to update column attribute' };
+			}
+			setColumnAttrs((prev) =>
+				prev.map((attr) =>
+					attr.id === focusedColAttr.id
+						? {
+								...attr,
+								name: res.data.name,
+								description: res.data.description,
+								sample_values: res.data.sample_values ?? sampleValues,
+							}
+						: attr,
+				),
+			);
 		}
-		setColumnAttrs((prev) =>
-			prev.map((attr) =>
-				attr.id === focusedColAttr.id
-					? {
-							...attr,
-							name: res.data.name,
-							description: res.data.description,
-							sample_values: res.data.sample_values ?? sampleValues,
-						}
-					: attr,
-			),
-		);
+
+		if (nextTagIds != null) {
+			const { error: tagError, tags } = await syncTags({
+				type: TagItemType.ColumnAttribute,
+				itemId: focusedColAttr.id,
+				current: focusedColAttr.tags ?? [],
+				nextIds: nextTagIds,
+			});
+			// As on the SQL attribute above: the baseline the next save diffs
+			// against cannot wait for the refetch.
+			setColumnAttrs((prev) =>
+				prev.map((attr) => (attr.id === focusedColAttr.id ? { ...attr, tags } : attr)),
+			);
+			if (tagError != null) {
+				setColumnAttrsEpoch((prev) => prev + 1);
+				return { error: true, message: tagError };
+			}
+		}
+
 		setColumnAttrsEpoch((prev) => prev + 1);
 		return { error: false };
 	};
@@ -612,16 +670,40 @@ export const TermsView = () => {
 		if (description !== (focusedTerm.description ?? '')) {
 			patch.description = description;
 		}
-		if (Object.keys(patch).length === 0) {
+		const nextTagIds = stagedTagIds(payload[TAGS_SECTION_ID]);
+		if (Object.keys(patch).length === 0 && nextTagIds == null) {
 			return { error: false };
 		}
 
-		const res = await termsApi.update(focusId, patch);
-		if (res.error) {
-			return { error: true, message: res.message ?? 'Failed to update term' };
+		if (Object.keys(patch).length > 0) {
+			const res = await termsApi.update(focusId, patch);
+			if (res.error) {
+				return { error: true, message: res.message ?? 'Failed to update term' };
+			}
+			patchTerm(focusId, { name: res.data.name, description: res.data.description });
 		}
 
-		patchTerm(focusId, { name: res.data.name, description: res.data.description });
+		if (nextTagIds != null) {
+			const { error: tagError, tags } = await syncTags({
+				type: TagItemType.Term,
+				itemId: focusId,
+				current: (focusedTermDetail?.id === focusId ? focusedTermDetail.tags : null) ?? [],
+				nextIds: nextTagIds,
+			});
+			// The baseline the next save diffs against, for the reason on the
+			// attribute handlers above. Not through `patchTerm`, which patches
+			// both copies of a `Term`: only the detail read resolves tags, so
+			// the list card has no `tags` to bring up to date.
+			setFocusedTermDetail((prev) => (prev?.id === focusId ? { ...prev, tags } : prev));
+			if (tagError != null) {
+				// Some of the writes may have landed, and the text edit — if
+				// there was one — is already saved, so the refetch has to
+				// happen even on this failure.
+				setSqlAttrsEpoch((prev) => prev + 1);
+				return { error: true, message: tagError };
+			}
+		}
+
 		setSqlAttrsEpoch((prev) => prev + 1);
 		return { error: false };
 	};
@@ -640,10 +722,10 @@ export const TermsView = () => {
 			id === 'name' ? { name_certified: certified } : { description_certified: certified };
 		const res = await termsApi.update(focusId, payload);
 		if (res.error) {
-			setCertError(res.message ?? 'Failed to update certification');
+			setWriteError(res.message ?? 'Failed to update certification');
 			return;
 		}
-		setCertError(null);
+		setWriteError(null);
 		patchTerm(focusId, {
 			name_certified: res.data.name_certified,
 			description_certified: res.data.description_certified,
@@ -660,10 +742,10 @@ export const TermsView = () => {
 			certified,
 		});
 		if (res.error) {
-			setCertError(res.message ?? 'Failed to update certification');
+			setWriteError(res.message ?? 'Failed to update certification');
 			return;
 		}
-		setCertError(null);
+		setWriteError(null);
 		setColumnAttrs((prev) =>
 			prev.map((attr) =>
 				attr.id === focusedColAttr.id
@@ -682,10 +764,10 @@ export const TermsView = () => {
 		if (focusedSqlAttr == null) return;
 		const res = await sqlAttributesApi.patch(focusedSqlAttr.id, { certified });
 		if (res.error) {
-			setCertError(res.message ?? 'Failed to update certification');
+			setWriteError(res.message ?? 'Failed to update certification');
 			return;
 		}
-		setCertError(null);
+		setWriteError(null);
 		setSqlAttrs((prev) =>
 			prev.map((attr) => (attr.id === focusedSqlAttr.id ? res.data : attr)),
 		);
@@ -706,10 +788,10 @@ export const TermsView = () => {
 			if (focusId == null) return;
 			const res = await termsApi.updateColumnAttribute(focusId, rowId, { certified });
 			if (res.error) {
-				setCertError(res.message ?? 'Failed to update certification');
+				setWriteError(res.message ?? 'Failed to update certification');
 				return;
 			}
-			setCertError(null);
+			setWriteError(null);
 			setColumnAttrs((prev) =>
 				prev.map((attr) =>
 					attr.id === rowId ? { ...attr, certified: res.data.certified } : attr,
@@ -720,10 +802,10 @@ export const TermsView = () => {
 		} else if (sectionId === 'sql_attributes') {
 			const res = await sqlAttributesApi.patch(rowId, { certified });
 			if (res.error) {
-				setCertError(res.message ?? 'Failed to update certification');
+				setWriteError(res.message ?? 'Failed to update certification');
 				return;
 			}
-			setCertError(null);
+			setWriteError(null);
 			setSqlAttrs((prev) => prev.map((attr) => (attr.id === rowId ? res.data : attr)));
 			applyTermCertification(res.data.term_id, res.term_certification);
 			setSqlAttrsEpoch((prev) => prev + 1);
@@ -829,7 +911,10 @@ export const TermsView = () => {
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
 			// client treats a viewer the same as an admin here (no zone fetch,
 			// userZoneIds = null → all zones accessible).
-			const res = await termsApi.getColumnAttributes(focusId);
+			const [res, tagOptions] = await Promise.all([
+				termsApi.getColumnAttributes(focusId),
+				fetchTagOptions(),
+			]);
 			const attrs = res.error ? [] : (res.data ?? []);
 			const attr = attrs.find((a) => a.id === attrId);
 			if (attr == null) {
@@ -883,6 +968,7 @@ export const TermsView = () => {
 						})),
 						userZoneIds,
 					},
+					entityTagsSection(attr.tags, tagOptions),
 					{
 						type: ComposerSectionKind.ENTITY_CHIPS,
 						id: 'primary_column',
@@ -920,7 +1006,10 @@ export const TermsView = () => {
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const res = await sqlAttributesApi.get(attrId);
+			const [res, tagOptions] = await Promise.all([
+				sqlAttributesApi.get(attrId),
+				fetchTagOptions(),
+			]);
 			if (res.error || !res.data) {
 				return {
 					sections: [],
@@ -974,6 +1063,7 @@ export const TermsView = () => {
 							enabled: z.enabled,
 						})),
 					},
+					entityTagsSection(attr.tags, tagOptions),
 				],
 			};
 		},
@@ -981,10 +1071,11 @@ export const TermsView = () => {
 	);
 
 	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const [res, attrsRes, sqlAttrsRes] = await Promise.all([
+		const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
 			termsApi.get(termId),
 			termsApi.getColumnAttributes(termId),
 			termsApi.getSqlAttributes(termId),
+			fetchTagOptions(),
 		]);
 		if (res.error || !res.data) {
 			return {
@@ -1041,6 +1132,7 @@ export const TermsView = () => {
 						focusId: [table.db_id, table.schema_id, table.id].join('|'),
 					})),
 				},
+				entityTagsSection(term.tags, tagOptions),
 				{
 					type: ComposerSectionKind.ZONES_CHIPS,
 					id: 'zones',
@@ -1211,12 +1303,12 @@ export const TermsView = () => {
 					/>
 				</main>
 				<Toast
-					open={sqlAttrEditError != null || certError != null}
-					message={sqlAttrEditError ?? certError ?? ''}
+					open={sqlAttrEditError != null || writeError != null}
+					message={sqlAttrEditError ?? writeError ?? ''}
 					variant={ToastVariant.Error}
 					onClose={() => {
 						setSqlAttrEditError(null);
-						setCertError(null);
+						setWriteError(null);
 					}}
 				/>
 				<ConfirmModal
@@ -1327,12 +1419,12 @@ export const TermsView = () => {
 					/>
 				</main>
 				<Toast
-					open={columnAttrEditError != null || certError != null}
-					message={columnAttrEditError ?? certError ?? ''}
+					open={columnAttrEditError != null || writeError != null}
+					message={columnAttrEditError ?? writeError ?? ''}
 					variant={ToastVariant.Error}
 					onClose={() => {
 						setColumnAttrEditError(null);
-						setCertError(null);
+						setWriteError(null);
 					}}
 				/>
 			</div>
@@ -1396,10 +1488,10 @@ export const TermsView = () => {
 					/>
 				</main>
 				<Toast
-					open={certError != null}
-					message={certError ?? ''}
+					open={writeError != null}
+					message={writeError ?? ''}
 					variant={ToastVariant.Error}
-					onClose={() => setCertError(null)}
+					onClose={() => setWriteError(null)}
 				/>
 				<ModalCreateNewItem
 					open={createSqlAttrModalOpen}

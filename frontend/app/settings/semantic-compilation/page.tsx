@@ -5,16 +5,19 @@
 import { connectionsApi } from '@/api/connections';
 import { requireAdmin } from '@/auth/auth-guards';
 import { getPrisma } from '@/lib/prisma';
+import { DISTINCT_VALUE_PROBING_ENABLED_KEY, readOptOutFlag } from '@/lib/configurations';
 import { SemanticCompilationForm } from './SemanticCompilationForm';
 
 const CONFIG_KEY = 'semantic_compilation_enabled';
+const PROBING_CONFIG_KEY = DISTINCT_VALUE_PROBING_ENABLED_KEY;
 
 const SemanticCompilationPage = async () => {
 	await requireAdmin();
-	// Fetch on the server so the toggle (and the connected-database hint)
+	// Fetch on the server so the toggles (and the connected-database hint)
 	// render in the correct state on first paint, with no client-side flash.
-	const [row, connections, isEnvSource] = await Promise.all([
+	const [row, probingRow, connections, isEnvSource] = await Promise.all([
 		getPrisma().configuration.findUnique({ where: { key: CONFIG_KEY } }),
+		getPrisma().configuration.findUnique({ where: { key: PROBING_CONFIG_KEY } }),
 		connectionsApi.getAll(),
 		connectionsApi.isEnvSource(),
 	]);
@@ -27,6 +30,11 @@ const SemanticCompilationPage = async () => {
 	return (
 		<SemanticCompilationForm
 			initialEnabled={row?.value === 'true'}
+			// Opt-out, so absent reads as on — see the route for why the two
+			// flags default in opposite directions. Canonicalized through the
+			// shared reader so this first paint cannot disagree with the
+			// ingestion service about what the stored value means.
+			initialProbingEnabled={readOptOutFlag(probingRow?.value)}
 			hasDatabases={hasDatabases}
 		/>
 	);
