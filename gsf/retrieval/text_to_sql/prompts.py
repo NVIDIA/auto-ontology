@@ -5,7 +5,7 @@
 import os
 
 # Controls how many entity noun phrases are extracted for SQL generation.
-_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
+SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
@@ -156,7 +156,9 @@ _POSTGRES_DIALECT_RULES = (
     "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n"
     "- LOG(x) is natural log (same as LN). For base-10 use LOG(10, x). "
     "- ROUND() requires numeric input — cast with ::numeric if needed.\n"
-    "- Integer division truncates — cast numerator or denominator with ::numeric when computing ratios or percentages (e.g. vendsucccount::numeric / vendtxcount).\n"
+    "- Integer division truncates — cast numerator or denominator with ::numeric "
+    "when computing ratios or percentages "
+    "(e.g. vendsucccount::numeric / vendtxcount).\n"
     "- PERCENTILE_CONT/PERCENTILE_DISC/MODE (ordered-set aggregates) cannot take an OVER() "
     "window — use WITHIN GROUP only; for a per-group value, compute it in a GROUP BY "
     "subquery/CTE and join it back.\n"
@@ -621,14 +623,16 @@ Check for CRITICAL issues ONLY (be lenient):
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
-If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain definitions — do not flag the generated query as invalid merely for following those patterns.{authoritative_note}
+If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
+definitions — do not flag the generated query as invalid merely for following those \
+patterns.{authoritative_note}
 
 Provide your analysis."""
 
 
 def create_entity_extraction_prompt(question: str) -> str:
     return f"""You are a database schema analyst. Given a question, populate the field \
-"required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database tables, \
+"required_entity_name" with 1–{SQL_GEN_MAX_ENTITIES} noun phrases that correspond to database tables, \
 columns, or relationships.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,

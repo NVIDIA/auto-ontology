@@ -61,6 +61,7 @@ from gsf.retrieval.text_to_sql.models import (
 )
 from gsf.retrieval.text_to_sql.prompts import (
     CUSTOM_ANALYSIS_RELEVANCE_FILTER_PROMPT,
+    SQL_GEN_MAX_ENTITIES,
     TABLE_RELEVANCE_FILTER_PROMPT,
 )
 from gsf.retrieval.text_to_sql.state import (
@@ -802,7 +803,7 @@ class CandidatePreparationAgent(BaseAgent):
         intended to run in a background thread in parallel with it.
         """
         search_queries = [question] + list(entities)
-        k_per_query = max(1, 10 // len(search_queries))
+        k_per_query = max(1, SQL_GEN_MAX_ENTITIES // len(search_queries))
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
             return get_relevant_tables(

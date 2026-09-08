@@ -9,6 +9,7 @@ from gsf.retrieval.text_to_sql.agents import candidates_preparation
 from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
+from gsf.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from gsf.retrieval.text_to_sql.state import AgentState
 
 
@@ -35,9 +36,8 @@ def test_retrieve_additional_tables_searches_question_and_entities(
     )
 
     assert [q for q, _, _ in seen] == ["q", "e1", "e2"]
-    # k_per_query = max(1, 10 // len(search_queries)) — see
-    # candidates_preparation.py's _retrieve_additional_tables.
-    assert all(k == 3 for _, k, _ in seen)
+    expected_k = max(1, SQL_GEN_MAX_ENTITIES // len(seen))
+    assert all(k == expected_k for _, k, _ in seen)
     assert all(db == "db" for _, _, db in seen)
     assert len(out) == 3
 
