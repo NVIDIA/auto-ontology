@@ -15,7 +15,7 @@ usage() {
 Usage:
   log_install.sh [--model NAME] -- command [args...]
 
-Appends timestamp, optional model, cwd, the exact command, redacted env,
+Appends timestamp, optional model, cwd, the redacted command, redacted env,
 and exit code to .gsf-install.log at the git repo root (or $GSF_INSTALL_LOG).
 EOF
 }
@@ -54,20 +54,112 @@ else
 	LOG_FILE="$PWD/.gsf-install.log"
 fi
 
+# Match env names and Helm camelCase (defaultModelsApiKey, connectionStrings).
+is_sensitive_key() {
+	local upper
+	upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z')"
+	case "$upper" in
+	*PASSWORD* | *SECRET* | *TOKEN* | *APIKEY* | *CONNECTIONSTRING* | *ROLEID*)
+		return 0
+		;;
+	esac
+	return 1
+}
+
 redact_value() {
 	local key="$1" value="$2"
-	local upper
-	upper="$(printf '%s' "$key" | tr '[:lower:]' '[:upper:]')"
-	case "$upper" in
-	*PASSWORD* | *SECRET* | *TOKEN* | *API_KEY* | *CONNECTION_STRINGS* | *ROLE_ID* | *SECRET_ID*)
+	if is_sensitive_key "$key"; then
 		if [[ -n "$value" ]]; then
 			printf '%s' '***'
 		fi
-		;;
-	*)
+	else
 		printf '%s' "$value"
-		;;
-	esac
+	fi
+}
+
+# Helm --set a=1,postgresPassword=secret  (and KEY=VALUE / --flag=VALUE).
+redact_csv_assignments() {
+	local remaining="$1" out="" piece key
+	while [[ -n "$remaining" ]]; do
+		if [[ "$remaining" == *,* ]]; then
+			piece="${remaining%%,*}"
+			remaining="${remaining#*,}"
+		else
+			piece="$remaining"
+			remaining=""
+		fi
+		if [[ "$piece" == *=* ]]; then
+			key="${piece%%=*}"
+			if is_sensitive_key "$key"; then
+				piece="${key}=***"
+			fi
+		fi
+		if [[ -n "$out" ]]; then
+			out="${out},${piece}"
+		else
+			out="$piece"
+		fi
+	done
+	printf '%s' "$out"
+}
+
+redact_assignment() {
+	local input="$1"
+	if [[ "$input" == --*=* ]]; then
+		local flag="${input%%=*}"
+		local rest="${input#*=}"
+		if is_sensitive_key "${flag#--}"; then
+			printf '%s=***' "$flag"
+			return
+		fi
+		printf '%s=%s' "$flag" "$(redact_csv_assignments "$rest")"
+		return
+	fi
+	redact_csv_assignments "$input"
+}
+
+redact_logged_command() {
+	local -a args=("$@") out=()
+	local i n arg skip_next=0
+	n=${#args[@]}
+	i=0
+	while [[ $i -lt $n ]]; do
+		if [[ $skip_next -eq 1 ]]; then
+			skip_next=0
+			i=$((i + 1))
+			continue
+		fi
+		arg="${args[$i]}"
+		case "$arg" in
+		--set | --set-string | --set-json | --set-file)
+			out+=("$arg")
+			if [[ $((i + 1)) -lt $n ]]; then
+				out+=("$(redact_csv_assignments "${args[$((i + 1))]}")")
+				skip_next=1
+			fi
+			;;
+		--password | --token | --secret | --docker-password)
+			out+=("$arg")
+			if [[ $((i + 1)) -lt $n ]]; then
+				out+=("***")
+				skip_next=1
+			fi
+			;;
+		--*=*)
+			out+=("$(redact_assignment "$arg")")
+			;;
+		*=*)
+			out+=("$(redact_csv_assignments "$arg")")
+			;;
+		*)
+			out+=("$arg")
+			;;
+		esac
+		i=$((i + 1))
+	done
+	if [[ ${#out[@]} -gt 0 ]]; then
+		printf '%q ' "${out[@]}"
+	fi
 }
 
 {
@@ -76,7 +168,7 @@ redact_value() {
 	echo "model=${MODEL:-}"
 	echo "cwd=$PWD"
 	printf 'command='
-	printf '%q ' "$@"
+	redact_logged_command "$@"
 	echo
 	echo "env:"
 	for key in \

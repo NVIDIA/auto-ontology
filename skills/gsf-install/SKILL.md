@@ -54,8 +54,8 @@ debuggable. Pass the model id when the harness knows it:
   ./dev_tools/setup_env.sh
 ```
 
-The script appends timestamp, model, cwd, the exact command and flags,
-redacted env, and exit code to `.gsf-install.log` (gitignored). Do not
+The script appends timestamp, model, cwd, the command (with secret flags
+redacted) and redacted env, and exit code to `.gsf-install.log` (gitignored). Do not
 restate flags in this skill; log what actually ran.
 
 ## One-time prep (local)

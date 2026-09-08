@@ -4,7 +4,7 @@
     "question": "Use the GSF MCP server to add a SQL attribute named Gross Margin under the term Order.",
     "expected_skill": "gsf-ontology",
     "expected_script": null,
-    "ground_truth": "MCP is read-only and cannot create SQL attributes. The agent uses REST POST /api/sql-attributes after POST /api/sql-attributes/validate, with catalog:edit and an API token that belongs to someone who can edit. It does not look for a write MCP tool or scrape the full OpenAPI list.",
+    "ground_truth": "MCP is read-only and cannot create SQL attributes. The agent uses REST POST /api/sql-attributes after POST /api/sql-attributes/validate, as any authenticated principal with catalog:edit (session, SSO bearer, or a GSF API token owned by someone who can edit). An API token is not required. It does not look for a write MCP tool or scrape the full OpenAPI list.",
     "expected_behavior": [
       "States that MCP cannot modify the glossary or catalog",
       "Uses POST /api/sql-attributes/validate then POST /api/sql-attributes",
