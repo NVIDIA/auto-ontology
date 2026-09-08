@@ -72,8 +72,6 @@ create_sql_user_prompt = (
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
-    "- When an ORDER BY clause is included and the question or evidence does not "
-    "specify a sort direction, default to DESC.\n"
     "- Infer LIMIT from the question's intent: "
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
@@ -328,6 +326,50 @@ Do NOT force a match if the tables are not relevant to the question."""
 
 
 INTENT_VALIDATION_SYSTEM_PROMPT = """You are a SQL
+validation expert. Your job is to check if a generated
+SQL query has any CRITICAL issues that would prevent it
+from answering the user's question.
+
+Be LENIENT - only mark as invalid if there are serious
+problems. Minor issues or alternative approaches are
+acceptable.
+
+Check for CRITICAL issues only:
+1. **Seriously Wrong Joins**: Flag only joins that are
+nonsensical or clearly break the question (e.g. joining
+unrelated tables, inventing keys). Alternate but plausible
+join paths that still answer the question are acceptable —
+including a different entity for a filter dimension, a
+different field/role for the same concept, a
+shorter/longer path, or another valid FK chain. Do NOT
+fail for those.
+2. **Clearly Wrong Aggregations**: Are aggregations
+completely incorrect? (e.g., COUNT when user explicitly
+asks for SUM) (Minor variations are acceptable)
+
+When DOMAIN-SPECIFIC CUSTOM ANALYSES are provided, treat
+their SQL patterns as intentional user-defined domain
+definitions. Fragments that look unusual, incomplete, or
+nonstandard in isolation are still valid if they follow
+those custom analyses — do NOT mark them as critical issues
+solely for that reason.
+
+When AUTHORITATIVE JOIN PATHS are provided, they come from
+the verified semantic model. If the generated SQL uses a
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
+
+IMPORTANT: Be generous in your validation. If the SQL
+could reasonably answer the question, mark it as valid.
+Only fail validation for serious, critical errors that
+would make the query unusable."""
+
+
+# INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE variant of the system prompt —
+# used only when a separate deterministic check (e.g. db_probe.join_path_check)
+# already validates join legality, so this LLM check can assume every join is
+# real and focus on whether it reaches the right entity. See intent_validation.py.
+INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE = """You are a SQL
 validation expert. Your job is to check if a generated
 SQL query has any CRITICAL issues that would prevent it
 from answering the user's question.

@@ -33,6 +33,7 @@ from gsf.retrieval.text_to_sql.formatters_util import format_semantic_context
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
+    INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
     create_intent_validation_prompt,
     format_custom_analyses_section,
 )
@@ -227,8 +228,13 @@ class IntentValidationAgent(BaseAgent):
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
         )
 
+        system_prompt = (
+            INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE
+            if _JOINS_VALIDATED_ELSEWHERE
+            else INTENT_VALIDATION_SYSTEM_PROMPT
+        )
         messages = [
-            SystemMessage(content=INTENT_VALIDATION_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=validation_prompt),
         ]
 
