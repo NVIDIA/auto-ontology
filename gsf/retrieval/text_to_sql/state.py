@@ -75,18 +75,33 @@ def get_original_question(state: AgentState) -> str:
     return state.get("initial_question", "")
 
 
+def get_standalone_question(state: AgentState) -> str:
+    """
+    Question carrying the full intent, before sanitization.
+
+    Uses the caller-provided ``path_state["processing_question"]`` (a follow-up
+    resolved against conversation history) when set, otherwise the exact submitted
+    ``initial_question``. Use this where a node needs the complete question but not
+    the retrieval-oriented rewrite ``get_question_for_processing`` returns.
+    """
+    path_state = state.get("path_state", {})
+    initial_question = state.get("initial_question", "")
+    processing_question = path_state.get("processing_question")
+
+    return processing_question or initial_question
+
+
 def get_question_for_processing(state: AgentState) -> str:
     """
     Question string for retrieval and semantic search.
 
-    Uses ``path_state["normalized_question"]`` when set (e.g. after sanitization),
-    otherwise ``initial_question``.
+    Uses ``path_state["normalized_question"]`` when set (e.g. after extraction),
+    otherwise falls back to the standalone question.
     """
     path_state = state.get("path_state", {})
     normalized_question = path_state.get("normalized_question")
-    if normalized_question:
-        return normalized_question
-    return state.get("initial_question", "")
+
+    return normalized_question or get_standalone_question(state)
 
 
 def rules_to_text(rules: list[dict[str, str]]) -> str:
@@ -104,6 +119,7 @@ __all__ = [
     "TextToSQLPayload",
     "AgentState",
     "get_original_question",
+    "get_standalone_question",
     "get_question_for_processing",
     "rules_to_text",
 ]
