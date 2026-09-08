@@ -943,7 +943,7 @@ def find_anchor_hub_siblings(
     proportional to how many siblings reference it.
 
     Sibling count is capped at *max_siblings* per hub, applied here in
-    Neo4j-return order (arbitrary — no relevance signal). *max_siblings=None*
+    DB-return order (arbitrary — no relevance signal). *max_siblings=None*
     skips capping entirely and returns every sibling; callers that want a
     relevance-ranked cap (e.g. embedding similarity to the question) should
     pass ``None`` here and rank+truncate themselves — see

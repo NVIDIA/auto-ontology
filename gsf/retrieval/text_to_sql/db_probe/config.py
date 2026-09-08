@@ -57,7 +57,7 @@ def is_db_probe_join_path_check() -> bool:
     """Whether the pre-execution join-path check is wired in.
 
     Off by default, same trade-off as the other proactive checks: on the
-    common case (join already correct) it's a handful of cheap Neo4j
+    common case (join already correct) it's a handful of cheap
     existence checks against the ``SEMANTIC_FK`` graph per query; it only
     falls back to a live value-overlap probe (a couple of extra DB
     round-trips) when the graph has no edge for a predicate at all. Catches

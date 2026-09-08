@@ -114,7 +114,7 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
 
 def _merge_column_lists(ca: list, cb: list) -> list:
     """Merge two column-dict lists by ``name``, filling missing fields on each column
-    from whichever side has them (e.g. ``sample_values`` present only in the Neo4j row).
+    from whichever side has them (e.g. ``sample_values`` present only in the DB row).
 
     A plain "pick the longer/richer list" swap is not enough here: the sparse and rich
     rows for the same table normally have the *same* columns, just with different fields

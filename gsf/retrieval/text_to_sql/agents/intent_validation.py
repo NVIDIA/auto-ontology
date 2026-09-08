@@ -52,7 +52,7 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "validate_intent"
 
 # Defaults to DB_PROBE_JOIN_PATH_CHECK's value (not a hardcoded "false") so the
-# two move together automatically: when that deterministic Neo4j/live-probe
+# two move together automatically: when that deterministic graph/live-probe
 # check is on, join legality is already covered, so this LLM check can afford
 # the more permissive "flag only if self-evidently broken, or you can name a
 # better-fitting relationship" wording and skip AUTHORITATIVE JOIN PATHS; when

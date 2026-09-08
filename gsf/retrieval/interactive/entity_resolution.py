@@ -308,7 +308,7 @@ def _is_composite_hit(hit: dict) -> bool:
     Prefers structured type metadata (``data_type``) when present; falls back
     to text checks on the hit's description otherwise.
 
-    ``data_type`` is now threaded through from Neo4j's ``attr.datatype``
+    ``data_type`` is now threaded through from the DB's ``attr.datatype``
     (dal/terms.py -> semantic/embed.py -> data_access/semantic_search.py), but
     only for rows embedded *after* that change landed — existing VDB rows
     won't carry it until the semantic index is re-embedded. Until then this
@@ -1332,7 +1332,7 @@ def _find_unresolvable_entities(
 
     # Build resolved_hits from entities cleanly covered at VDB (unambiguous, within
     # threshold, and post-collision-resolution). Use the pipeline's enriched candidates
-    # (Neo4j-resolved attribute+term names) rather than raw VDB text blobs. Fall back to
+    # (DB-resolved attribute+term names) rather than raw VDB text blobs. Fall back to
     # raw text when no enriched candidate is available.
     resolved_hits: list[tuple[str, str, float, str]] = []
     for entity, hit in best_hit_per_entity.items():
