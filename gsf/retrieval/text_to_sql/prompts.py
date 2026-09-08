@@ -347,13 +347,31 @@ Only fail validation for serious, critical errors that
 would make the query unusable."""
 
 
-def format_dual_question_block(original_question: str, sanitized_question: str) -> str:
-    """Format original and sanitized questions for SQL generation/validation."""
-    if original_question.strip() == sanitized_question.strip():
+def format_dual_question_block(
+    original_question: str,
+    sanitized_question: str,
+    processing_question: str = "",
+) -> str:
+    """Format original and sanitized questions for SQL generation/validation.
+
+    When ``processing_question`` is given (e.g. a follow-up resolved into a
+    standalone question), it is rendered alongside the other two so the model can
+    see what was actually asked, what it was resolved to, and what was retrieved on.
+    """
+    original = original_question.strip()
+    normalized = sanitized_question.strip()
+    processing = processing_question.strip()
+
+    if original == normalized:
         return sanitized_question
+
+    processing_block = ""
+    if processing and processing not in {original, normalized}:
+        processing_block = f"Standalone processing question:\n{processing}\n\n"
     return (
-        f"Original user request:\n{original_question}\n\n"
-        f"Sanitized SQL intent:\n{sanitized_question}"
+        f"Original user request:\n{original}\n\n"
+        f"{processing_block}"
+        f"Normalized retrieval question:\n{normalized}"
     )
 
 
@@ -512,13 +530,15 @@ Produce the PQL query."""
 
 def create_intent_validation_prompt(
     original_question: str,
+    processing_question: str,
     sanitized_question: str,
-    entities_text: str,
     sql_code: str,
     custom_analyses: str = "",
     join_paths: str = "",
 ) -> str:
-    question_block = format_dual_question_block(original_question, sanitized_question)
+    question_block = format_dual_question_block(
+        original_question, sanitized_question, processing_question
+    )
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
     join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
     return f"""User's Question:
