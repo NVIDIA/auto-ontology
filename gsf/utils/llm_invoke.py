@@ -4,12 +4,13 @@
 
 """LLM client construction and structured-output invocation wrappers."""
 
+import contextlib
 import logging
 import os
 import random
 import threading
 import time
-from typing import Type, TypeVar
+from typing import Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -23,11 +24,59 @@ logger = logging.getLogger(__name__)
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = 50
 
-# Bound total concurrent LLM requests across all worker threads so the pipeline's
-# nested parallelism (tables × terms) doesn't saturate the hosted endpoint's
-# per-worker request cap (which surfaces as HTTP 503 ResourceExhausted).
-LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "6"))
-_INFLIGHT = threading.BoundedSemaphore(LLM_MAX_INFLIGHT)
+# Concurrent LLM requests are unbounded here by default. A process-wide cap used
+# to live at this call site, defaulting to 6, to stop semantic compilation's
+# nested fan-out (tables x terms) from saturating the endpoint's per-worker
+# request cap and drawing HTTP 503s.
+#
+# The cost was paid by every caller. Callers that already bound their own
+# concurrency -- a server handling N requests, an eval running N questions --
+# gained nothing and hit a second, lower ceiling they could not see: measured on
+# a 60-question benchmark at 12 workers, lifting this cap cut wall clock 29%
+# with no change in error rate, because threads sat ~3s per node waiting on the
+# semaphore before reaching the network.
+#
+# Fan-out that needs a bound now asks for one with `limit_inflight`, which
+# applies it for the duration of a block. See `run_semantic_compilation`.
+LLM_MAX_INFLIGHT = int(os.environ.get("LLM_MAX_INFLIGHT", "0"))
+
+# None means unbounded. Swapped by `limit_inflight`; read without a lock on the
+# hot path, which is safe because the reference is only rebound while no bounded
+# section is active.
+_INFLIGHT: threading.BoundedSemaphore | None = (
+    threading.BoundedSemaphore(LLM_MAX_INFLIGHT) if LLM_MAX_INFLIGHT > 0 else None
+)
+_INFLIGHT_LOCK = threading.Lock()
+
+
+@contextlib.contextmanager
+def limit_inflight(max_inflight: int) -> Iterator[None]:
+    """Bound concurrent LLM invokes to *max_inflight* for the duration of the block.
+
+    For call paths whose own parallelism multiplies -- semantic compilation runs
+    tables in parallel and fans out again within each -- where the resulting
+    request rate can exceed what the endpoint will serve and come back as 503.
+
+    A value of 0 or less means no bound. Nesting restores the previous bound on
+    exit rather than clearing it.
+    """
+    global _INFLIGHT
+    replacement = threading.BoundedSemaphore(max_inflight) if max_inflight > 0 else None
+    with _INFLIGHT_LOCK:
+        previous = _INFLIGHT
+        _INFLIGHT = replacement
+    try:
+        yield
+    finally:
+        with _INFLIGHT_LOCK:
+            _INFLIGHT = previous
+
+
+def _inflight_guard() -> "contextlib.AbstractContextManager[object]":
+    """The active concurrency bound, or a no-op when unbounded."""
+    semaphore = _INFLIGHT
+    return semaphore if semaphore is not None else contextlib.nullcontext()
+
 
 # Substrings that indicate a transient, retryable server condition.
 _RETRYABLE_TOKENS = (
@@ -235,7 +284,7 @@ def safe_invoke_with_structured_output(
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
-            with _INFLIGHT:
+            with _inflight_guard():
                 result = model_llm.invoke(current_messages)
         except _requests.exceptions.ReadTimeout:
             logger.error(

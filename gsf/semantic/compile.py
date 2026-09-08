@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 
 from gsf.semantic.bridge_tables import build_bridge_tables_sql_attributes
@@ -11,8 +12,17 @@ from gsf.semantic.embed import build_semantic_embedder
 from gsf.semantic.semantic_fk import resolve_semantic_fks
 
 from gsf.semantic.pipeline import compile_semantic_layer
+from gsf.utils.llm_invoke import limit_inflight
 
 logger = logging.getLogger(__name__)
+
+# Semantic compilation runs tables in parallel and fans out again within each,
+# so its request rate is a product rather than a sum and can outrun what the
+# endpoint will serve -- previously seen as HTTP 503 ResourceExhausted. The
+# bound lives here, applied for the duration of a compilation, rather than at
+# the shared invoke call site where it also throttled callers that already
+# limit their own concurrency.
+SEMANTIC_LLM_MAX_INFLIGHT = int(os.environ.get("SEMANTIC_LLM_MAX_INFLIGHT", "6"))
 
 
 def run_semantic_compilation(
@@ -24,6 +34,16 @@ def run_semantic_compilation(
 
     Returns the number of tables processed.
     """
+    with limit_inflight(SEMANTIC_LLM_MAX_INFLIGHT):
+        return _run_semantic_compilation(database_name, domain_summary=domain_summary)
+
+
+def _run_semantic_compilation(
+    database_name: str,
+    *,
+    domain_summary: DomainSummary | None = None,
+) -> int:
+    """Body of :func:`run_semantic_compilation`, run under the concurrency bound."""
     summary = domain_summary or load_domain_summary(database_name)
 
     started = time.monotonic()
