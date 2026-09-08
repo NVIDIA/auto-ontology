@@ -81,11 +81,6 @@ create_sql_user_prompt = (
     "if a specific count is requested without a superlative, "
     "add LIMIT with that number; "
     "otherwise do not add LIMIT.\n"
-    "- When the question asks for entity IDs, use the primary identifier column — "
-    "not a foreign key referencing another table.\n"
-    # Rounding before filtering silently excludes boundary rows.
-    "- Apply ROUND and similar display functions only in SELECT, never in WHERE or HAVING — "
-    "always filter on the raw computed value.\n"
     "- Do NOT include comments in the SQL.\n"
     "- Do NOT use ellipsis as placeholder — output the complete SQL.\n"
 )
