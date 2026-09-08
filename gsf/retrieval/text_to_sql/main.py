@@ -109,8 +109,9 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
             initial_path_state["target_db"] = connector_db
 
     submitted_question = payload["question"].strip()
-    processing_question_override = (payload.get("processing_question") or "").strip()
-    processing_question = processing_question_override or submitted_question
+    processing_question = (
+        payload.get("processing_question") or ""
+    ).strip() or submitted_question
     # Keep the exact submitted turn separate from a standalone follow-up rewrite.
     # Question extraction may replace normalized_question later, while intent
     # validation must continue to see both representations.
