@@ -18,7 +18,7 @@ from langchain_core.messages import AIMessage
 
 from gsf.retrieval.kumo import run_prediction
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
+from gsf.retrieval.text_to_sql.state import AgentState, get_standalone_question
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +41,9 @@ class KumoPredictionAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
-        # Predict from the raw question (per requirement).
-        question = get_original_question(state)
+        # Predict from the unsanitized question (per requirement), resolved against
+        # conversation history.
+        question = get_standalone_question(state)
         context = path_state.get("prediction_context")
 
         if context is None:

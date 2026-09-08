@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.prompts import create_prediction_classification_prompt
-from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
+from gsf.retrieval.text_to_sql.state import AgentState, get_standalone_question
 from gsf.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
@@ -60,8 +60,9 @@ class PredictionClassificationAgent(BaseAgent):
             )
             return {"decision": decision}
 
-        # Classify on the raw question (per requirement), not the sanitized one.
-        question = get_original_question(state)
+        # Classify on the unsanitized question (per requirement), resolved against
+        # conversation history
+        question = get_standalone_question(state)
         if not question:
             return {"decision": "sql"}
 
