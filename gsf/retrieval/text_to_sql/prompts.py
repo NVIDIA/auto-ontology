@@ -154,19 +154,10 @@ _POSTGRES_DIALECT_RULES = (
     "- WHERE and HAVING cannot reference SELECT aliases. Repeat the full expression or wrap in a subquery/CTE.\n"
     "- GROUP BY cannot reference SELECT aliases. Repeat the full expression "
     "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n"
-    "- LOG(x) is natural log (same as LN). For base-10 use LOG(10, x). "
-    "- ROUND() requires numeric input — cast with ::numeric if needed.\n"
-    "- Integer division truncates — cast numerator or denominator with ::numeric "
-    "when computing ratios or percentages "
-    "(e.g. vendsucccount::numeric / vendtxcount).\n"
-    "- PERCENTILE_CONT/PERCENTILE_DISC/MODE (ordered-set aggregates) cannot take an OVER() "
-    "window — use WITHIN GROUP only; for a per-group value, compute it in a GROUP BY "
-    "subquery/CTE and join it back.\n"
     "- Postgres folds unquoted identifiers to lowercase. If a table or column name shown in "
     "AVAILABLE TABLES / KNOWN COLUMN MAPPINGS contains any uppercase letter, wrap it in double "
-    'quotes using the EXACT case shown, e.g. `FROM public."ArtifactsCore" AS ac` — leaving it '
-    "unquoted silently resolves to the wrong (lowercase) relation and errors as 'does not exist'. "
-    "All-lowercase names need no quoting.\n\n"
+    "quotes using the EXACT case shown — leaving it unquoted silently resolves to the wrong "
+    "(lowercase) relation and errors as 'does not exist'. All-lowercase names need no quoting.\n\n"
 )
 
 
