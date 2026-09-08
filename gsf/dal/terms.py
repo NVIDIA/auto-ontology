@@ -45,6 +45,7 @@ from gsf.dal import schema as s
 from gsf.dal.attributes import fetch_column_attribute_columns_map
 from gsf.dal.datasources import fetch_col_table_contexts
 from gsf.dal.session import store, write_transaction
+from gsf.dal.tags import TARGET_COLUMN_ATTRIBUTE, TARGET_TERM, fetch_tags_map
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.dal.zones import fetch_table_zones_map, zone_covers_table
 from gsf.semantic.constants import (
@@ -680,6 +681,7 @@ def get_full_term_by_id(
     result["zones"] = fetch_term_zones_map(zone_ids, term_ids=[term_id]).get(
         term_id, []
     )
+    result["tags"] = fetch_tags_map(TARGET_TERM, [term_id]).get(term_id, [])
     return result
 
 
@@ -1246,11 +1248,13 @@ def fetch_column_attributes_by_term_id(
         else {}
     )
     columns_by_attr = fetch_column_attribute_columns_map([row["id"] for row in rows])
+    tags_by_attr = fetch_tags_map(TARGET_COLUMN_ATTRIBUTE, [row["id"] for row in rows])
     empty = {"primary_column": None, "referenced_columns": []}
     return [
         {
             **row,
             "zones": zones_by_table.get(row["table_id"], []),
+            "tags": tags_by_attr.get(row["id"], []),
             **columns_by_attr.get(row["id"], empty),
         }
         for row in _with_parsed_sample_values(rows)

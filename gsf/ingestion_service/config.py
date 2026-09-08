@@ -17,9 +17,7 @@ from __future__ import annotations
 
 import logging
 
-import psycopg
-
-from gsf.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
+from gsf.infra.feature_flags import read_configuration_flag
 
 logger = logging.getLogger(__name__)
 
@@ -31,24 +29,7 @@ SEMANTIC_COMPILATION_ENABLED_KEY = "semantic_compilation_enabled"
 def is_semantic_compilation_enabled() -> bool:
     """Return whether semantic compilation is enabled in settings.
 
-    Best-effort: any DB error (including the table not existing yet) is treated
-    as "disabled" so a missing/unreachable config never crashes startup.
+    Opt-in: a missing row (or any DB error) is treated as "disabled", so an
+    instance that has never enabled it never starts compiling on its own.
     """
-    try:
-        with psycopg.connect(
-            get_postgres_connection_string(), connect_timeout=3
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT value FROM {FRONTEND_SCHEMA}.configurations WHERE key = %s",
-                    (SEMANTIC_COMPILATION_ENABLED_KEY,),
-                )
-                row = cur.fetchone()
-    except Exception:
-        logger.exception(
-            "Failed to read %s; treating semantic compilation as disabled",
-            SEMANTIC_COMPILATION_ENABLED_KEY,
-        )
-        return False
-
-    return bool(row) and str(row[0]).strip().lower() == "true"
+    return read_configuration_flag(SEMANTIC_COMPILATION_ENABLED_KEY, default=False)

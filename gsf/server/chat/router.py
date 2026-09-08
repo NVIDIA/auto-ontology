@@ -100,9 +100,9 @@ from gsf.server.chat.conversation_dal import (
     persist_result_message,
     prepare_conversation,
 )
-from gsf.server.chat.identity import resolve_internal_user
 from gsf.server.chat.settings_dal import is_visualization_enabled
 from gsf.server.chat.worker import PrewarmedWorker, get_pool
+from gsf.server.identity import resolve_internal_user
 from gsf.utils.llm_invoke import get_llm_client, get_non_reasoning_llm_client
 from gsf.server.responses import ChatCancelResponse
 

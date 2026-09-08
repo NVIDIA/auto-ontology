@@ -32,6 +32,12 @@ const statement = {
 	connection: ['read', 'manage'],
 	// Zones (settings): everyone may view; only admins may add/edit/delete.
 	zone: ['read', 'manage'],
+	// Tags: `manage` is the vocabulary — creating and deleting tags on the
+	// settings page — and stays admin-only. `read` goes to viewers too, because
+	// the term page offers every existing tag in its picker, and applying one is
+	// guarded by `catalog: ['edit']` instead: curating the list of tags and
+	// labelling an object with one already on it are different privileges.
+	tag: ['read', 'manage'],
 	// Semantic compilation (settings): admin-only toggle + manual trigger.
 	semanticCompilation: ['read', 'manage'],
 	// Agent settings: instance-wide visualization toggle, admin-only like the
@@ -63,6 +69,7 @@ export const roles = {
 		catalog: ['read', 'edit'],
 		connection: ['read', 'manage'],
 		zone: ['read', 'manage'],
+		tag: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
 		visualization: ['read', 'manage'],
 		modelInterchange: ['export', 'import'],
@@ -71,10 +78,11 @@ export const roles = {
 	// Viewer: read-only on glossary/prompts, full control of their own
 	// conversations, may run chat, may view custom analyses (not add/edit them),
 	// and may browse + edit the data catalog. No analytics, SSO, user mgmt, and
-	// no connection/zone management (admin-only). Viewers may read zones to
-	// display their own accessible zones in the term single page, and read
-	// connections to see which databases are wired up — the list route strips
-	// credentials, so only the shape of a connection is exposed.
+	// no connection/zone management (admin-only). Viewers may read zones and
+	// tags to display them in the term single page, and label objects with an
+	// existing tag under the catalog edit permission they already hold. They may
+	// also read connections to see which databases are wired up — the list route
+	// strips credentials, so only the shape of a connection is exposed.
 	[Role.Viewer]: ac.newRole({
 		// For now viewers may fully manage the glossary, custom prompts, and
 		// custom analyses (create/edit/delete), so the create + edit controls on
@@ -87,6 +95,7 @@ export const roles = {
 		catalog: ['read', 'edit'],
 		connection: ['read'],
 		zone: ['read'],
+		tag: ['read'],
 		apiToken: ['manage'],
 	}),
 };

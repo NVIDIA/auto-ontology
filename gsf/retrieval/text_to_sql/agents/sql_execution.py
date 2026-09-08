@@ -12,6 +12,7 @@ import logging
 import re
 from typing import Any, Dict, Optional
 
+from gsf.connectors.db_errors import is_infrastructure_error
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.chat_sql import execute_chat_sql
@@ -19,6 +20,16 @@ from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.connectors.base import SQLDatabase
 
 logger = logging.getLogger(__name__)
+
+# Shown when the database could not be reached. The user cannot act on a driver
+# stack trace, but "the question was fine, the connection was not" tells them
+# retrying is worthwhile and that nothing is wrong with how they asked.
+_INFRASTRUCTURE_MESSAGE = (
+    "I couldn't reach the database, so the query never ran. This is a "
+    "connection problem, not a problem with your question — please try again "
+    "in a moment. If it keeps happening, the database connection needs "
+    "attention."
+)
 
 # This agent's node name in the graph. ``stream_agent_response`` matches
 # ``record_thought`` entries against the *graph* node name, not the agent's,
@@ -39,10 +50,20 @@ def _short_error(error: str) -> str:
 
 
 class QueryResponse:
-    def __init__(self, result: list[str], sliced: bool, error: Optional[str] = None):
+    def __init__(
+        self,
+        result: list[str],
+        sliced: bool,
+        error: Optional[str] = None,
+        statement: Optional[str] = None,
+    ):
         self.result = result
         self.sliced = sliced
         self.error = error
+        # The SQL as executed, which is not always the SQL as generated -- see
+        # ``_sanitize_sql_for_dialect``. Classifying ``error`` means stripping
+        # the statement the driver echoed, so it has to be this text.
+        self.statement = statement
 
 
 def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
@@ -69,7 +90,7 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
         df = execute_chat_sql(connector, sql)
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
-        return QueryResponse(result=None, sliced=False, error=str(e))
+        return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
     payload = (
         df.to_json(orient="records", date_format="iso", default_handler=str)
         if len(df)
@@ -127,6 +148,33 @@ class SQLExecutionAgent(BaseAgent):
                 response_from_db.error,
             )
             path_state["error"] = response_from_db.error
+            if is_infrastructure_error(
+                response_from_db.error, response_from_db.statement or sql_code
+            ):
+                # Rewriting the query cannot reach an unreachable database, so
+                # the reconstruction loop would spend every one of its attempts
+                # re-issuing statements that fail identically and then give up
+                # anyway. Stop now and say what actually happened. This has to
+                # come before the thought below, which promises a rewrite that
+                # this path deliberately does not do.
+                self.logger.error(
+                    "SQL execution failed for infrastructure reasons; "
+                    "not attempting reconstruction: %s",
+                    response_from_db.error,
+                )
+                record_thought(
+                    path_state,
+                    _GRAPH_NODE_NAME,
+                    f"Couldn't reach the database: "
+                    f"{_short_error(response_from_db.error)}",
+                )
+                return {
+                    "decision": "unconstructable",
+                    "path_state": {
+                        **path_state,
+                        "unconstructable_explanation": _INFRASTRUCTURE_MESSAGE,
+                    },
+                }
             # Without this the retry is invisible: the graph loops back to
             # reconstruction and the user just watches the step list bounce
             # between "Generating SQL" and "Running query" with no reason

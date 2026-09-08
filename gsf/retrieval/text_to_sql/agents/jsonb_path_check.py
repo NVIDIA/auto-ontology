@@ -14,7 +14,7 @@ mirrors ``join_path_check.py``'s bounded counter rather than a one-shot flag,
 since a reconstruction can trade one wrong key for another (a real key that
 exists but is the wrong sibling) and a second pass, now armed with the
 sibling-container list the first mismatch surfaced, often converges. The
-graph's shared ``reconstruction_count > 5`` cap (see
+graph's shared failed-attempt cap (see
 ``text_to_sql_graph._make_soft_check_router``) already bounds the
 pathological case, so this only needs to stop *this* check from being the
 sole thing driving many of those reconstructions, not prevent looping itself.

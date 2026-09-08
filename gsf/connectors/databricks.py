@@ -20,6 +20,8 @@ from databricks.sql.exc import Error
 from gsf.catalog.constants import TableTypes
 from gsf.connectors.base import SQLDatabase
 
+from gsf.connectors.db_errors import is_session_lost
+
 logger = logging.getLogger(__name__)
 
 # The SQL connector logs several INFO lines per operation (session opened,
@@ -49,6 +51,16 @@ _FOREIGN_KEY_RE = re.compile(
     r"FOREIGN\s+KEY\s*\(([^)]*)\)\s*REFERENCES\s+([^\s(]+)\s*\(([^)]*)\)",
     re.IGNORECASE,
 )
+_SCOPE_PERMISSION_ERROR_RE = re.compile(
+    r"(?:PERMISSION_DENIED|INSUFFICIENT_PERMISSIONS).*?"
+    r"(?:USE\s+CATALOG|USE\s+SCHEMA|does\s+not\s+have\s+USE)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_scope_permission_error(error: BaseException) -> bool:
+    """Whether one metadata failure proves the whole catalog/schema is unreadable."""
+    return bool(_SCOPE_PERMISSION_ERROR_RE.search(str(error)))
 
 
 def _identifier_list(raw: str) -> list[str]:
@@ -164,6 +176,10 @@ class DatabricksDatabase(SQLDatabase):
         # Raw SHOW TABLES result from get_tables(); reused by _describe_pass to avoid
         # a second round-trip to the warehouse for the same metadata.
         self._show_tables_cache: pd.DataFrame | None = None
+        # (schema, table) pairs _describe_pass came back with columns for. Anything
+        # listed but absent from this set is withheld from get_tables()/get_views();
+        # see :meth:`_describe_pass`.
+        self._described_relations: set[tuple[str, str]] = set()
         # Connection held open across a batch of statements; see :meth:`reuse_connection`.
         self._shared_connection: Connection | None = None
 
@@ -179,6 +195,26 @@ class DatabricksDatabase(SQLDatabase):
     @property
     def database_name(self) -> str:
         return self._database_name
+
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Prepend the bound catalog: Unity Catalog names are three-level.
+
+        ``_database_name`` is the catalog here (see ``SHOW TABLES IN
+        <catalog>.<schema>`` in :meth:`get_tables`), so the base two-level
+        default would drop it and probes would miss the catalog entirely.
+
+        Raises:
+            ValueError: *schema* is missing. A two-part name is read as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve elsewhere.
+        """
+        if not schema:
+            raise ValueError(
+                f"Databricks requires a schema to qualify {table!r} "
+                f"in catalog {self._database_name!r}"
+            )
+        parts = (self._database_name, schema, table)
+        return ".".join(_quoted_identifier(p) for p in parts)
 
     @property
     def auth_mode(self) -> str:
@@ -207,18 +243,40 @@ class DatabricksDatabase(SQLDatabase):
             # Already inside a block; the outermost one owns the connection.
             yield
             return
-        connection = sql.connect(**self._connect_kwargs)
-        self._shared_connection = connection
+        self._shared_connection = sql.connect(**self._connect_kwargs)
         try:
             yield
         finally:
+            # Whatever is held now, which is not necessarily what was opened
+            # above: a statement that met a discarded session replaced it.
+            held = self._shared_connection
             self._shared_connection = None
+            if held is not None:
+                try:
+                    held.close()
+                except Exception:  # noqa: BLE001 - a failed close must not fail the run
+                    logger.debug(
+                        "databricks: shared connection close failed", exc_info=True
+                    )
+
+    def _reopen_shared_connection(self) -> Connection:
+        """Replace the connection held by :meth:`reuse_connection`, returning it.
+
+        Stored back on the instance rather than handed out alone, because the
+        statements after this one have to reach a live session too, and the
+        enclosing block's ``finally`` is what eventually closes it.
+        """
+        stale = self._shared_connection
+        self._shared_connection = None
+        if stale is not None:
             try:
-                connection.close()
+                stale.close()
             except Exception:  # noqa: BLE001 - a failed close must not fail the run
                 logger.debug(
-                    "databricks: shared connection close failed", exc_info=True
+                    "databricks: stale shared connection close failed", exc_info=True
                 )
+        self._shared_connection = sql.connect(**self._connect_kwargs)
+        return self._shared_connection
 
     @contextmanager
     def _connect(self, timeout_s: int | None = None) -> Iterator[Connection]:
@@ -356,13 +414,37 @@ class DatabricksDatabase(SQLDatabase):
 
         Ingestion leaves the cap off: metadata scans over a large
         ``information_schema`` legitimately take minutes.
+
+        Inside :meth:`reuse_connection` the session outlives the statement, so
+        the warehouse may have discarded it in the meantime. That comes back as
+        an ordinary statement error on a healthy connection, so it is reopened
+        and retried once rather than failing the whole batch.
         """
         started = time.perf_counter()
         with self._connect(timeout_s) as connection:
             connect_seconds = time.perf_counter() - started
-            return self._run(
-                connection, sql_text, parameters, connect_seconds=connect_seconds
-            )
+            shared = connection is self._shared_connection
+            try:
+                return self._run(
+                    connection, sql_text, parameters, connect_seconds=connect_seconds
+                )
+            except Exception as exc:
+                # Only a shared connection outlives its statement, so only it can
+                # be holding a session the warehouse has since dropped. A
+                # per-statement connection was opened moments ago, and reopening
+                # it would just repeat whatever went wrong.
+                if not shared or not is_session_lost(exc, sql_text):
+                    raise
+                logger.info(
+                    "databricks: shared session was rejected; "
+                    "reopening and retrying once"
+                )
+                return self._run(
+                    self._reopen_shared_connection(),
+                    sql_text,
+                    parameters,
+                    connect_seconds=connect_seconds,
+                )
 
     def get_schemas(self) -> list[str]:
         frame = self.execute(
@@ -511,6 +593,13 @@ class DatabricksDatabase(SQLDatabase):
         ``get_columns``, ``get_pks`` and ``get_fks`` separately, and re-describing every
         table three times would triple the cost. :meth:`get_tables` clears it, and it
         runs first in every extraction, so each ingest sees fresh metadata.
+
+        Relations this comes back empty-handed for are recorded in
+        ``_described_relations`` so :meth:`get_tables` can withhold them. A relation
+        listed as a table but carrying no columns is the failure
+        :func:`gsf.catalog.extract._validate_relation_column_coverage` rejects, and it
+        rejects the *whole* ingest — so a single unreadable table must be dropped here
+        rather than advertised and left for the coverage gate to trip over.
         """
         if self._describe_cache is not None:
             return self._describe_cache
@@ -519,6 +608,7 @@ class DatabricksDatabase(SQLDatabase):
         column_frames: list[pd.DataFrame] = []
         pk_rows: list[dict[str, Any]] = []
         fk_rows: list[dict[str, Any]] = []
+        described_relations: set[tuple[str, str]] = set()
 
         started = time.perf_counter()
         with self._connect() as connection:
@@ -537,45 +627,80 @@ class DatabricksDatabase(SQLDatabase):
                     schema,
                 )
 
-            for table_name in tables["table_name"].astype(str):
+            # The schema is taken per row rather than from the allowlist entry: Unity
+            # Catalog folds identifiers to lower case, so a connection configured for
+            # "Sales" gets "sales" back from SHOW TABLES. Labelling columns with the
+            # configured spelling while get_tables() labels tables with the reported
+            # one leaves two frames that cannot be joined on (schema, table).
+            for row_schema, table_name in zip(
+                tables["table_schema"].astype(str), tables["table_name"].astype(str)
+            ):
                 qualified = (
-                    f"{catalog}.{_quoted_identifier(schema)}"
+                    f"{catalog}.{_quoted_identifier(row_schema)}"
                     f".{_quoted_identifier(table_name)}"
                 )
                 try:
                     described = self._run(
                         connection, f"DESCRIBE TABLE EXTENDED {qualified}"
                     )
-                except Error:
-                    # One unreadable table (dropped mid-run, or no grant) must not
-                    # abandon the rest of the schema.
+                except Error as error:
+                    # A missing USE CATALOG/SCHEMA grant invalidates every remaining
+                    # relation. Stop after the first denial instead of issuing and
+                    # swallowing one doomed DESCRIBE per table.
+                    if _is_scope_permission_error(error):
+                        logger.error(
+                            "databricks: schema-scoped DESCRIBE denied for %s.%s "
+                            "(%s); aborting extraction",
+                            row_schema,
+                            table_name,
+                            type(error).__name__,
+                        )
+                        raise
+                    # One table can still disappear mid-run or carry a narrower grant.
+                    # It is dropped from the tables frame too (see the docstring), so
+                    # the rest of the schema still ingests as a consistent catalog.
                     logger.warning(
-                        "databricks: DESCRIBE failed for %s.%s; skipping",
-                        schema,
+                        "databricks: DESCRIBE failed for %s.%s (%s); "
+                        "dropping it from the catalog",
+                        row_schema,
                         table_name,
+                        type(error).__name__,
                     )
                     continue
 
                 columns = self._describe_columns_only(described)
-                if not columns.empty:
-                    frame = {
-                        "table_schema": schema,
-                        "table_name": table_name,
-                        "column_name": columns["col_name"].astype(str),
-                        "data_type": columns.get("data_type", pd.NA),
-                        "ordinal_position": range(1, len(columns) + 1),
-                    }
-                    if "comment" in columns.columns:
-                        # DESCRIBE reports the column comment, which normalize_columns
-                        # already types as the column description.
-                        frame["description"] = columns["comment"]
-                    column_frames.append(pd.DataFrame(frame))
+                if columns.empty:
+                    # DESCRIBE answered but named no columns. Reporting the relation
+                    # anyway is the "non-empty table map, zero columns" catalog the
+                    # coverage gate exists to reject.
+                    logger.warning(
+                        "databricks: DESCRIBE returned no columns for %s.%s; "
+                        "dropping it from the catalog",
+                        row_schema,
+                        table_name,
+                    )
+                    continue
+
+                frame = {
+                    "table_schema": row_schema,
+                    "table_name": table_name,
+                    "column_name": columns["col_name"].astype(str),
+                    "data_type": columns.get("data_type", pd.NA),
+                    "ordinal_position": range(1, len(columns) + 1),
+                }
+                if "comment" in columns.columns:
+                    # DESCRIBE reports the column comment, which normalize_columns
+                    # already types as the column description.
+                    frame["description"] = columns["comment"]
+                column_frames.append(pd.DataFrame(frame))
+                described_relations.add((row_schema, table_name))
 
                 for _name, definition in self._describe_constraints(described):
                     self._collect_constraint(
-                        definition, schema, table_name, pk_rows, fk_rows
+                        definition, row_schema, table_name, pk_rows, fk_rows
                     )
 
+        self._described_relations = described_relations
         self._describe_cache = (
             pd.concat(column_frames, ignore_index=True)
             if column_frames
@@ -638,18 +763,36 @@ class DatabricksDatabase(SQLDatabase):
                 }
             )
 
+    def _with_columns(self, listed: pd.DataFrame) -> pd.DataFrame:
+        """*listed* minus the relations :meth:`_describe_pass` found no columns for."""
+        if listed.empty:
+            return listed
+        keep = [
+            (row_schema, table_name) in self._described_relations
+            for row_schema, table_name in zip(
+                listed["table_schema"].astype(str), listed["table_name"].astype(str)
+            )
+        ]
+        return listed.loc[keep].reset_index(drop=True)
+
     def get_tables(self) -> pd.DataFrame:
         # First call of every extraction, so this is where the per-run caches reset.
         self._describe_cache = None
         self._show_tables_cache = None
+        self._described_relations = set()
         schema = self._single_schema()
         if schema:
             logger.info("databricks: listing tables via SHOW TABLES IN %s", schema)
-            result = self._tables_via_show(schema)
+            listed = self._tables_via_show(schema)
             # Cache the raw table list so _describe_pass can reuse it without a
             # second SHOW TABLES round-trip.
-            self._show_tables_cache = result
-            return result
+            self._show_tables_cache = listed
+            # Describe here rather than leaving it to get_columns(): the caller keeps
+            # whatever this returns, so a relation that turns out to have no columns
+            # has to be withheld now or not at all. The pass is cached, so get_columns()
+            # pays nothing for it.
+            self._describe_pass(schema)
+            return self._with_columns(listed)
 
         base_table = TableTypes.BASE_TABLE
         view = TableTypes.VIEW
@@ -718,7 +861,7 @@ class DatabricksDatabase(SQLDatabase):
                 return pd.DataFrame(
                     columns=["table_schema", "table_name", "view_definition"]
                 )
-            return pd.DataFrame(
+            views = pd.DataFrame(
                 {
                     # SHOW VIEWS reports the namespace it listed; fall back to the
                     # requested schema.
@@ -727,6 +870,13 @@ class DatabricksDatabase(SQLDatabase):
                     "view_definition": pd.NA,
                 }
             )
+            if self._describe_cache is None:
+                # get_views() before get_tables(): nothing has been described, so
+                # there is no coverage to filter against.
+                return views
+            # A view get_tables() withheld must not reappear here — the writer would
+            # take it as a relation with no columns.
+            return self._with_columns(views)
 
         return self._filter_by_schema(
             self.execute(f"""

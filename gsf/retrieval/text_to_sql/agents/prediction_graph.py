@@ -29,7 +29,7 @@ from gsf.retrieval.kumo import PredictionContext, build_prediction_context
 from gsf.retrieval.kumo.pql_gen import _TABLE_COL
 from gsf.retrieval.kumo.rag import fetch_pql_examples
 from gsf.retrieval.text_to_sql.base import BaseAgent
-from gsf.retrieval.text_to_sql.state import AgentState, get_original_question
+from gsf.retrieval.text_to_sql.state import AgentState, get_standalone_question
 
 logger = logging.getLogger(__name__)
 
@@ -109,7 +109,7 @@ class PredictionGraphAgent(BaseAgent):
         join_paths = path_state.get("attribute_join_paths") or []
         # Few-shot PQL examples retrieved from the verified PqlAnalysis corpus.
         examples = fetch_pql_examples(
-            state.get("semantic_retriever"), get_original_question(state)
+            state.get("semantic_retriever"), get_standalone_question(state)
         )
         # Enrich the table set with any table the examples reference before the
         # graph is built, so the LLM can never cite a table absent from the graph.

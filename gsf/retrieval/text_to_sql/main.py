@@ -108,9 +108,14 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         if connector_db:
             initial_path_state["target_db"] = connector_db
 
+    submitted_question = payload["question"].strip()
     processing_question = (
-        payload.get("processing_question") or payload["question"]
-    ).strip()
+        payload.get("processing_question") or ""
+    ).strip() or submitted_question
+    # Keep the exact submitted turn separate from a standalone follow-up rewrite.
+    # Question extraction may replace normalized_question later, while intent
+    # validation must continue to see both representations.
+    initial_path_state["processing_question"] = processing_question
 
     main_system_prompt = main_system_prompt_template.format(
         date=datetime.now(),
@@ -123,7 +128,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     state: dict = {
         "llm": llm_client,
-        "initial_question": processing_question,
+        "initial_question": submitted_question,
         "evidence": payload.get("evidence") or "",
         "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
@@ -177,10 +182,7 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
         cleared = decision == "intent_valid" or (
             node_name == "validate_sql_query"
             and decision == "valid_sql"
-            and max(
-                len(node_path_state.get("failed_attempts") or []),
-                node_path_state.get("reconstruction_count", 0) or 0,
-            )
+            and len(node_path_state.get("failed_attempts") or [])
             > INTENT_VALIDATION_SKIPPED_AFTER
         )
     if not cleared:

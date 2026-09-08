@@ -82,7 +82,9 @@ def test_no_unqualified_prisma_table_references() -> None:
     [
         "gsf/server/chat/conversation_dal.py",
         "gsf/server/chat/settings_dal.py",
-        "gsf/ingestion_service/config.py",
+        # The `configurations` reader that ingestion_service/config.py delegates
+        # to; it owns the SQL, so it is the file that has to qualify.
+        "gsf/infra/feature_flags.py",
     ],
 )
 def test_known_readers_qualify_and_interpolate(module: str) -> None:

@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { TableType } from '@/enums/datasources';
+import type { TagChip } from '@/types/tags';
 
 export type Column = {
 	id: string;
@@ -15,6 +16,8 @@ export type Column = {
 	description?: string;
 	sample_values?: string[];
 	description_certified?: boolean;
+	/** Absent until the table's columns have been read. */
+	tags?: TagChip[];
 };
 
 export type Table = {
@@ -29,6 +32,11 @@ export type Table = {
 	table_type: TableType;
 	description?: string;
 	description_certified?: boolean;
+	/**
+	 * Read with the schema's table list, since the catalog has no table detail
+	 * endpoint of its own. Absent on a table the tree only knows a count for.
+	 */
+	tags?: TagChip[];
 };
 
 export type Schema = {

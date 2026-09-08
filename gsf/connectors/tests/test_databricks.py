@@ -303,12 +303,26 @@ def test_single_schema_lists_tables_with_show_tables() -> None:
             }
         )
 
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        issued.append(" ".join(sql_text.split()))
+        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+
     db.execute = fake_execute  # type: ignore[method-assign]
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
     tables = db.get_tables()
 
+    # get_tables() describes as well as lists: a relation it cannot describe has to
+    # be withheld from the frame it is about to hand back.
     assert issued == [
         "SHOW TABLES IN `main`.`nbu_dmt_explorer`",
         "SHOW VIEWS IN `main`.`nbu_dmt_explorer`",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`orders`",
+        "DESCRIBE TABLE EXTENDED `main`.`nbu_dmt_explorer`.`customers`",
     ]
     assert not any("information_schema" in q for q in issued)
     assert list(tables["table_name"]) == ["orders", "customers"]
@@ -383,7 +397,13 @@ def test_multiple_schemas_still_use_information_schema() -> None:
 
 
 def test_show_columns_skips_a_table_it_cannot_read() -> None:
-    """A dropped table or a missing grant must not abandon the rest of the schema."""
+    """A dropped table or a missing grant must not abandon the rest of the schema.
+
+    The skipped table has to leave the tables frame too. Reporting it as a table
+    with no columns is precisely what the extraction coverage gate rejects, and it
+    rejects the entire ingest — so a narrower skip that only removed the columns
+    would take the readable tables down with it.
+    """
     from databricks.sql.exc import Error as DatabricksError
 
     db = DatabricksDatabase(_connection_string(), schemas=["s"])
@@ -401,9 +421,82 @@ def test_show_columns_skips_a_table_it_cannot_read() -> None:
 
     db._connect = fake_connect  # type: ignore[method-assign]
     db._run = fake_run  # type: ignore[method-assign]
+    db.execute = lambda sql_text, *a, **k: fake_run(None, sql_text)  # type: ignore[method-assign]
+
+    tables = db.get_tables()
     columns = db.get_columns()
 
     assert list(columns["table_name"]) == ["ok"]
+    assert list(tables["table_name"]) == ["ok"]
+
+
+def test_described_columns_use_the_schema_name_the_warehouse_reports() -> None:
+    """Unity Catalog folds identifiers, so the allowlist spelling cannot be trusted.
+
+    A connection configured for ``Sales`` gets ``sales`` back from SHOW TABLES.
+    Labelling columns with the configured spelling leaves a tables frame and a
+    columns frame that share no (schema, table) key, which reads to the coverage
+    gate as every table having failed to describe.
+    """
+    db = DatabricksDatabase(_connection_string(), schemas=["Sales"])
+
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        if sql_text.startswith("SHOW TABLES"):
+            return pd.DataFrame({"database": ["sales"], "tablename": ["orders"]})
+        if sql_text.startswith("SHOW VIEWS"):
+            return pd.DataFrame(columns=["namespace", "viewname"])
+        return pd.DataFrame({"col_name": ["id"], "data_type": ["bigint"]})
+
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
+    db.execute = lambda sql_text, *a, **k: fake_run(None, sql_text)  # type: ignore[method-assign]
+
+    tables = db.get_tables()
+    columns = db.get_columns()
+
+    assert set(zip(tables["table_schema"], tables["table_name"])) == {
+        ("sales", "orders")
+    }
+    assert set(zip(columns["table_schema"], columns["table_name"])) == {
+        ("sales", "orders")
+    }
+
+
+def test_schema_scope_permission_denial_aborts_after_first_table() -> None:
+    """A USE CATALOG/SCHEMA denial applies to every table and must fail fast."""
+    from databricks.sql.exc import Error as DatabricksError
+
+    db = DatabricksDatabase(_connection_string(), schemas=["s"])
+    issued: list[str] = []
+
+    @contextmanager
+    def fake_connect(*_args: Any, **_kwargs: Any) -> Any:
+        yield object()
+
+    def fake_run(_conn: Any, sql_text: str, *args: Any, **kwargs: Any) -> pd.DataFrame:
+        issued.append(" ".join(sql_text.split()))
+        if sql_text.startswith("SHOW TABLES"):
+            return pd.DataFrame(
+                {"database": ["s", "s"], "tablename": ["first", "second"]}
+            )
+        raise DatabricksError(
+            "PERMISSION_DENIED: User does not have USE CATALOG on Catalog 'main'."
+        )
+
+    db._connect = fake_connect  # type: ignore[method-assign]
+    db._run = fake_run  # type: ignore[method-assign]
+
+    with pytest.raises(DatabricksError, match="USE CATALOG"):
+        db.get_columns()
+
+    assert issued == [
+        "SHOW TABLES IN `main`.`s`",
+        "DESCRIBE TABLE EXTENDED `main`.`s`.`first`",
+    ]
 
 
 def _describe_rows(constraints: list[tuple[str, str]]) -> pd.DataFrame:
@@ -625,6 +718,106 @@ def test_reuse_connection_opens_once_for_every_statement(
     assert opened[0].closed  # ...and the block closes it on exit
 
 
+def test_a_discarded_shared_session_is_reopened_mid_batch(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Ingestion holds one session for the whole scan, so it can be retired under it.
+
+    Without this the first table to meet a dropped session fails the entire
+    ingest run, even though reconnecting costs one connect.
+    """
+    opened: list[Any] = []
+    executed: list[str] = []
+
+    class FakeCursor:
+        def __init__(self, connection: "FakeConnection") -> None:
+            self._connection = connection
+            self.description = [("n",)]
+
+        def __enter__(self) -> "FakeCursor":
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+        def execute(self, sql_text: str, _parameters: Any = None) -> None:
+            executed.append(sql_text)
+            if self._connection is opened[0]:
+                raise RuntimeError("Invalid SessionHandle: 5f0c9e2a")
+
+        def fetchall(self) -> list[tuple[int, ...]]:
+            return [(1,)]
+
+    class FakeConnection:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def cursor(self) -> FakeCursor:
+            return FakeCursor(self)
+
+        def close(self) -> None:
+            self.closed = True
+
+    def fake_connect(**_kwargs: Any) -> FakeConnection:
+        connection = FakeConnection()
+        opened.append(connection)
+        return connection
+
+    monkeypatch.setattr("gsf.connectors.databricks.sql.connect", fake_connect)
+    db = DatabricksDatabase(_connection_string())
+
+    with db.reuse_connection():
+        frame = db.execute("SELECT 1")
+        assert frame.to_dict("records") == [{"n": 1}]
+        assert len(opened) == 2, "the dead session should have been reopened"
+        assert opened[0].closed, "the dead session should be closed"
+        # Later statements in the batch have to reach the replacement.
+        assert db.execute("SELECT 2").to_dict("records") == [{"n": 1}]
+        assert len(opened) == 2, "one reopen, not one per statement"
+
+    assert executed == ["SELECT 1", "SELECT 1", "SELECT 2"]
+    assert opened[1].closed, "the block must close the replacement it now holds"
+
+
+def test_a_rejected_statement_is_not_retried_on_the_shared_session(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A SQL error is the warehouse answering, so reopening would change nothing."""
+    executed: list[str] = []
+
+    class FakeCursor:
+        description = None
+
+        def __enter__(self) -> "FakeCursor":
+            return self
+
+        def __exit__(self, *_exc: Any) -> None:
+            return None
+
+        def execute(self, sql_text: str, _parameters: Any = None) -> None:
+            executed.append(sql_text)
+            raise RuntimeError("TABLE_OR_VIEW_NOT_FOUND: nope")
+
+    class FakeConnection:
+        def cursor(self) -> FakeCursor:
+            return FakeCursor()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "gsf.connectors.databricks.sql.connect",
+        lambda **_kwargs: FakeConnection(),
+    )
+    db = DatabricksDatabase(_connection_string())
+
+    with db.reuse_connection():
+        with pytest.raises(RuntimeError, match="TABLE_OR_VIEW_NOT_FOUND"):
+            db.execute("SELECT * FROM nope")
+
+    assert len(executed) == 1, "a SQL error must surface, not trigger a reconnect"
+
+
 def test_reuse_connection_nests_without_reopening(monkeypatch: MonkeyPatch) -> None:
     opened = []
 
@@ -672,3 +865,16 @@ def test_a_statement_timeout_still_gets_its_own_session(
     # One for the shared connection, one dedicated to the capped statement.
     assert len(kwargs_seen) == 2
     assert kwargs_seen[1]["session_configuration"] == {"statement_timeout": 30}
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Unity Catalog is three-level and ``database_name`` is the catalog here,
+    # so the two-level base default would drop it.
+    database = DatabricksDatabase(_connection_string())
+    assert database.qualify("analytics", "events") == "`main`.`analytics`.`events`"
+
+
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `main`.`e` would be read as schema.table, not catalog.table.
+    with pytest.raises(ValueError, match="requires a schema"):
+        DatabricksDatabase(_connection_string()).qualify(None, "e")

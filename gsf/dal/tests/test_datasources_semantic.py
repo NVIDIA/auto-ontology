@@ -142,7 +142,7 @@ def world():
     store().query_write(
         s.catalog_database.delete().where(s.catalog_database.c.name == w.prefix)
     )
-    for table in (s.term, s.column_attribute, s.sql_attribute):
+    for table in (s.term, s.column_attribute, s.sql_attribute, s.tag):
         store().query_write(table.delete().where(table.c.name.like(f"{w.prefix}%")))
 
 
@@ -242,6 +242,16 @@ def test_tables_for_schema_ignores_database_name(world) -> None:
     assert d.fetch_tables_for_schema(
         world.schema, database_name="not-this-database"
     ) == d.fetch_tables_for_schema(world.schema)
+
+
+def test_tables_for_schema_carries_each_tables_tags(world) -> None:
+    """Where a table's chips come from, there being no table detail read."""
+    tag = _add(s.tag, name=f"{world.prefix}-pii")
+    _link(s.tag_target, tag_id=tag, table_id=world.tables["orders"])
+
+    rows = _by_name(d.fetch_tables_for_schema(world.schema))
+    assert [t["name"] for t in rows["orders"]["tags"]] == [f"{world.prefix}-pii"]
+    assert rows["customers"]["tags"] == []
 
 
 # --------------------------------------------------------------------------
@@ -363,6 +373,19 @@ def test_columns_for_table_parses_sample_values(world) -> None:
         for c in d.fetch_columns_for_table(world.tables["orders"])["columns"]
     }
     assert columns["total"]["sample_values"] == ["1", "2"]
+
+
+def test_columns_for_table_carries_each_columns_tags(world) -> None:
+    """Read for the whole page at once, so an untagged column is an empty list."""
+    tag = _add(s.tag, name=f"{world.prefix}-pii")
+    _link(s.tag_target, tag_id=tag, column_id=world.columns["orders.total"])
+
+    columns = {
+        c["column_name"]: c
+        for c in d.fetch_columns_for_table(world.tables["orders"])["columns"]
+    }
+    assert [t["name"] for t in columns["total"]["tags"]] == [f"{world.prefix}-pii"]
+    assert columns["order_id"]["tags"] == []
 
 
 # --------------------------------------------------------------------------

@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlparse
 import pandas as pd
 import pytest
 
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.connection_string_factory import build_connection_string
 from gsf.connectors.kyuubi import KyuubiDatabase, _parse_connection_string
 from gsf.connectors.registry import CONNECTOR_REGISTRY
@@ -268,6 +269,20 @@ def test_undescribable_table_is_dropped_from_tables_too() -> None:
     assert "system" not in set(tables["table_schema"])
 
 
+def test_describing_nothing_at_all_raises_instead_of_emptying_the_catalog() -> None:
+    """Dropping one unreadable table is a skip; dropping every one is a failure.
+
+    A dead session or a revoked catalog grant fails every DESCRIBE alike. Silently
+    dropping the lot yields an empty catalog that is indistinguishable from a
+    database with nothing in it.
+    """
+    db = _database()
+    _stub_with_failing_describe(db, {"events", "table_creation_locks"})
+
+    with pytest.raises(IncompleteCatalogExtractionError, match="could not describe"):
+        db.get_tables()
+
+
 def test_every_reported_schema_has_columns() -> None:
     """The invariant nemo's schemas_parser relies on, stated directly."""
     db = _database()
@@ -400,6 +415,39 @@ def test_execute_reopens_after_a_broken_pipe() -> None:
     assert opened == [1], "the dead session should be dropped before retrying"
 
 
+def test_execute_reopens_after_an_invalid_session_handle() -> None:
+    """A retired engine usually leaves the socket up and the handle unknown.
+
+    Kyuubi answers the next statement normally, reporting ``Invalid
+    SessionHandle`` for a session it no longer has. That is an ordinary driver
+    error on a healthy connection, so recognising it by exception type is not
+    enough. Nothing else clears the cached connection, so missing this case
+    strands the connector on a dead handle for every later query.
+    """
+    db = _database()
+    calls: list[str] = []
+    opened: list[int] = []
+
+    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+        calls.append(sql)
+        if len(calls) == 1:
+            raise RuntimeError(
+                "TExecuteStatementResp(status=TStatus(statusCode=3, "
+                "errorMessage='Invalid SessionHandle: "
+                "1f9c2c1e-0000-4c1e-9f00-2b0d5a7c9e11'))"
+            )
+        return pd.DataFrame({"ok": [1]})
+
+    db._execute_once = fake_execute_once  # type: ignore[method-assign]
+    db._reset_connection = lambda: opened.append(1)  # type: ignore[method-assign]
+
+    frame = db.execute("SELECT 1")
+
+    assert frame.to_dict("records") == [{"ok": 1}]
+    assert len(calls) == 2, "the statement should be retried once"
+    assert opened == [1], "the stale session should be dropped before retrying"
+
+
 def test_execute_does_not_retry_a_rejected_statement() -> None:
     """A SQL error is the server answering, not the transport failing."""
     db = _database()
@@ -415,6 +463,24 @@ def test_execute_does_not_retry_a_rejected_statement() -> None:
         db.execute("SELECT * FROM nope")
 
     assert len(calls) == 1, "a SQL error must surface, not trigger a reconnect"
+
+
+def test_execute_surfaces_a_session_error_that_survives_the_retry() -> None:
+    """If reopening does not help, the error is reported rather than looped on."""
+    db = _database()
+    calls: list[str] = []
+
+    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+        calls.append(sql)
+        raise RuntimeError("Invalid SessionHandle: deadbeef")
+
+    db._execute_once = fake_execute_once  # type: ignore[method-assign]
+    db._reset_connection = lambda: None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="Invalid SessionHandle"):
+        db.execute("SELECT 1")
+
+    assert len(calls) == 2, "exactly one retry, then give up"
 
 
 # ----------------------------------------------------------------------
@@ -461,3 +527,28 @@ def test_invalid_uploaded_keystore_is_rejected_clearly() -> None:
 
     with pytest.raises(ValueError, match="not valid base64"):
         _write_temp_jks("not!base64!")
+
+
+# ----------------------------------------------------------------------
+# Qualification
+# ----------------------------------------------------------------------
+
+
+def test_qualify_prepends_the_bound_catalog() -> None:
+    # Spark resolves a bare schema.table against spark_catalog, not the Iceberg
+    # catalog this connection binds, so dropping the catalog made every
+    # profiling probe fail with TABLE_OR_VIEW_NOT_FOUND.
+    assert _database().qualify("raw", "events") == "`nvdp`.`raw`.`events`"
+
+
+def test_qualify_rejects_a_missing_schema() -> None:
+    # `nvdp`.`events` would not mean "catalog nvdp": Spark reads a two-part
+    # name as schema.table, so the catalog would land in the schema position.
+    with pytest.raises(ValueError, match="requires a schema"):
+        _database().qualify(None, "events")
+
+
+def test_qualify_quotes_names_with_spaces() -> None:
+    assert _database().qualify("my schema", "my table") == (
+        "`nvdp`.`my schema`.`my table`"
+    )

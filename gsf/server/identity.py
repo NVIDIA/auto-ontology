@@ -2,7 +2,13 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read identities forwarded by the trusted private Next.js gateway."""
+"""Read identities forwarded by the trusted private Next.js gateway.
+
+Lives at the top of ``gsf.server`` rather than under ``chat``, where it started:
+the header is a property of the gateway every router sits behind, and chat was
+only the first feature to need a caller's name. Tags read it too, to record who
+created and last renamed one.
+"""
 
 from __future__ import annotations
 

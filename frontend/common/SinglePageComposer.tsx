@@ -12,6 +12,8 @@ import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
 import {
 	isComposerSection,
 	type ComposerSection,
+	type ComposerEntityTagsSection,
+	type ComposerTagChip,
 	type ComposerZonesSection,
 	type ComposerCertification,
 } from '@/types/composer-section';
@@ -31,6 +33,7 @@ import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import { TextVariant } from '@/enums/text';
@@ -135,6 +138,8 @@ function composerSectionHeading(section: ComposerSection): string {
 			return `${section.title} (${section.zones.length})`;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return `${section.title} (${section.terms.length})`;
+		case ComposerSectionKind.ENTITY_TAGS:
+			return `${section.title} (${section.tags.length})`;
 		default:
 			return section.title;
 	}
@@ -370,6 +375,112 @@ const ReadOnlyTagList = ({
 	);
 };
 
+const byName = (a: ComposerTagChip, b: ComposerTagChip) =>
+	a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id.localeCompare(b.id);
+
+/**
+ * The tags an object carries, while editing them.
+ *
+ * A pending edit like every other: adding and removing chips move a local list
+ * and record the object's whole intended set of tag ids, which the Save button
+ * flushes with the rest. That is what makes Cancel undo them — nothing has been
+ * written yet — and it is why this card is mounted only in edit mode, so
+ * leaving edit mode discards the list with the component.
+ *
+ * Sorted by name, which is the order the server returns them in, so the chips
+ * do not rearrange themselves the moment a save is read back.
+ */
+const EditableEntityTagsCard = ({
+	section,
+	onChange,
+}: {
+	section: ComposerEntityTagsSection;
+	onChange: (sectionId: string, value: string[]) => void;
+}) => {
+	const [tags, setTags] = useState<ComposerTagChip[]>(() => [...section.tags].sort(byName));
+
+	const apply = (next: ComposerTagChip[]) => {
+		setTags(next);
+		onChange(
+			section.id,
+			next.map((tag) => tag.id),
+		);
+	};
+
+	const assigned = new Set(tags.map((tag) => tag.id));
+	const unassigned = section.options.filter((tag) => !assigned.has(tag.id));
+
+	return (
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 shadow-sm ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+			<div className="flex items-center justify-between gap-3">
+				<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					{section.title} ({tags.length})
+				</h2>
+				<PopoverMenu
+					items={unassigned.map((tag) => ({
+						label: tag.name,
+						onClick: () => apply([...tags, tag].sort(byName)),
+					}))}
+					header={
+						unassigned.length === 0 ? (
+							<p className="px-3 py-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+								{section.options.length === 0
+									? 'No tags exist yet'
+									: 'Every tag is already applied'}
+							</p>
+						) : undefined
+					}
+					trigger={({ toggle }) => (
+						<Button
+							theme={ButtonTheme.Soft}
+							size={Size.SMALL}
+							type="button"
+							onClick={toggle}
+							iconPosition="left"
+						>
+							<Icon name={IconName.Plus} className="h-3.5 w-3.5" />
+							Add tag
+						</Button>
+					)}
+				/>
+			</div>
+			{tags.length === 0 ? (
+				<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+			) : (
+				<ul className="mt-3 flex flex-wrap gap-2">
+					{tags.map((tag) => (
+						<li key={tag.id}>
+							<Label
+								label={tag.name}
+								onRemove={() => apply(tags.filter((t) => t.id !== tag.id))}
+							/>
+						</li>
+					))}
+				</ul>
+			)}
+		</div>
+	);
+};
+
+const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) => (
+	<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
+		<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+			{section.title} ({section.tags.length})
+		</h2>
+		{section.tags.length === 0 ? (
+			<p className="mt-3 text-sm italic text-zinc-500 dark:text-zinc-400">—</p>
+		) : (
+			<ul className="mt-3 flex flex-wrap gap-2">
+				{section.tags.map((tag) => (
+					<li key={tag.id}>
+						<Label label={tag.name} />
+					</li>
+				))}
+			</ul>
+		)}
+	</div>
+);
+
 const ZonesSection = ({ section }: { section: ComposerZonesSection }) => {
 	const displayedZones = section.zones;
 
@@ -584,6 +695,8 @@ function renderComposerSection(
 			);
 		case ComposerSectionKind.ZONES_CHIPS:
 			return <ZonesSection section={section} />;
+		case ComposerSectionKind.ENTITY_TAGS:
+			return <EntityTagsSection section={section} />;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
@@ -729,6 +842,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 		const pdfPageName = header.header.pdfProps?.pageName;
 		const handleIsPDF = header.header.pdfProps?.handleIsPDF;
 
+		// Autofocus goes to a text field, so only the two kinds that have one are
+		// candidates for it.
 		const firstEditableId =
 			sections.find(
 				(s): s is ComposerSection =>
@@ -737,7 +852,16 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 						s.type === ComposerSectionKind.TAG_LIST) &&
 					s.editable === true,
 			)?.id ?? null;
-		const hasEditableSections = firstEditableId !== null;
+		// Whether the toolbar offers Edit at all, which a tags section earns too
+		// even though there is nothing in it to focus.
+		const hasEditableSections =
+			firstEditableId !== null ||
+			sections.some(
+				(s) =>
+					isComposerSection(s) &&
+					s.type === ComposerSectionKind.ENTITY_TAGS &&
+					s.editable === true,
+			);
 		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
 		const [saveError, setSaveError] = useState<string | null>(null);
@@ -1064,6 +1188,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										isEditingActive &&
 										section.type === ComposerSectionKind.TAG_LIST &&
 										section.editable === true;
+									const isEditableEntityTags =
+										isEditingActive &&
+										section.type === ComposerSectionKind.ENTITY_TAGS &&
+										section.editable === true;
 									return (
 										<div key={section.id}>
 											{isEditableTextCard ? (
@@ -1106,6 +1234,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 														!shouldAutofocusTitle &&
 														section.id === firstEditableId
 													}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
+												/>
+											) : isEditableEntityTags ? (
+												<EditableEntityTagsCard
+													section={section}
 													onChange={(id, val) => {
 														pendingEditsRef.current[id] = val;
 													}}

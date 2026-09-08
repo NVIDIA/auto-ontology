@@ -40,7 +40,6 @@ from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationA
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
-from gsf.retrieval.text_to_sql.agents.sql_from_tables import SQLFromTablesAgent
 from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
 from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
@@ -65,19 +64,21 @@ NODE_START_EVENT = "step_start"
 # branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
 # stop the ``sql`` event firing there.
 INTENT_VALIDATION_SKIPPED_AFTER = 5
+# Stop after seven reconstruction calls.
+MAX_RECONSTRUCTION_ATTEMPTS = 7
 
 
 def route_sql_validation(state: AgentState) -> str:
     """
     Route based on SQL validation result.
 
-    Handles SQL validation attempts and fallback logic:
-    - "skip_intent_validation" if SQL is valid but reconstruction_count exceeds
+    Handles SQL validation attempts and retry logic:
+    - "skip_intent_validation" if SQL is valid but the reconstruction count exceeds
       INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
     - "valid_sql" if SQL is valid (routes to intent validation)
     - "invalid_sql" if invalid (with retry logic)
-    - "fallback" after 4 attempts (try constructing from tables)
-    - "unconstructable" after 8 attempts (give up)
+    - "unconstructable" after 7 reconstructions, or when a node already gave up
+      (e.g. an unreachable database, which no rewrite can fix)
 
     Args:
         state: Current agent state
@@ -85,38 +86,32 @@ def route_sql_validation(state: AgentState) -> str:
     Returns:
         Routing decision based on validation result and attempt count
     """
-    if state["decision"] == "invalid_sql":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Construct sql attempt: {attempts}")
-        state["path_state"]["sql_attempts"] = attempts + 1
-        if attempts == 4:
-            logger.info(
-                "Can not construct sql from snippets, try from relevant tables. Fallback."
-            )
-            return "fallback"  # try constructing from tables, not only snippets
-        elif attempts < 8:
-            return "invalid_sql"
-        elif attempts == 8:
-            logger.error("SQL construction failed after 8 attempts")
-            return "unconstructable"
+    if state["decision"] == "unconstructable":
+        # Passed through rather than folded into the else branch below, which
+        # assumes anything that is not "invalid_sql" is usable SQL and would
+        # send an already-abandoned run on to intent validation.
+        return "unconstructable"
 
-    else:
-        # SQL is valid - check if we should skip intent validation.
-        # Use "failed_attempts" as the attempt count, not "sql_attempts" —
-        # every reconstruct_sql call appends to failed_attempts regardless of
-        # which check routed it there (intent validation, empty-like result,
-        # value repair, ...), so it's the only universal, reliable counter.
-        path_state = state["path_state"]
-        reconstruction_count = max(
-            len(path_state.get("failed_attempts") or []),
-            path_state.get("reconstruction_count", 0) or 0,
-        )
-        if reconstruction_count > INTENT_VALIDATION_SKIPPED_AFTER:
-            logger.info(
-                f"Skipping intent validation after {reconstruction_count} reconstructions"
+    path_state = state["path_state"]
+    failed_attempt_count = len(path_state.get("failed_attempts") or [])
+
+    if state["decision"] == "invalid_sql":
+        logger.info("SQL reconstruction attempts completed: %s", failed_attempt_count)
+        if failed_attempt_count >= MAX_RECONSTRUCTION_ATTEMPTS:
+            logger.error(
+                "SQL construction failed after %s reconstructions",
+                failed_attempt_count,
             )
-            return "skip_intent_validation"
-        return "valid_sql"
+            return "unconstructable"
+        return "invalid_sql"
+
+    # SQL is valid - check if we should skip intent validation
+    if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
+        logger.info(
+            f"Skipping intent validation after {failed_attempt_count} reconstructions"
+        )
+        return "skip_intent_validation"
+    return "valid_sql"
 
 
 def route_intent_validation(state: AgentState) -> str:
@@ -136,8 +131,8 @@ def route_intent_validation(state: AgentState) -> str:
     decision = state.get("decision", "")
 
     if decision == "intent_invalid":
-        attempts = state["path_state"].get("sql_attempts", 0)
-        logger.info(f"Intent validation failed at attempt: {attempts}")
+        attempts = len(state["path_state"].get("failed_attempts") or [])
+        logger.info("Intent validation failed after %s reconstructions", attempts)
         # Route back to reconstruction to fix intent issues
         return "invalid_sql"
     else:
@@ -149,16 +144,11 @@ def _make_soft_check_router(check_name: str):
     """Build a router for a post-construction "soft" check (jsonb/join/value
     prechecks, empty-LIKE check, value-repair check).
 
-    These send SQL back to ``reconstruct_sql`` on failure but — unlike
-    ``validate_sql_query``/``execute_sql_query``, which enforce sql_attempts-based
-    fallback/unconstructable caps via :func:`route_sql_validation` — they carry no
-    attempt counter of their own. A persistently failing check could loop with
-    ``reconstruct_sql`` indefinitely, bounded only by the global recursion_limit,
-    which aborts the whole run (including any already-executed SQL) instead of
-    degrading gracefully. This reuses the same ``reconstruction_count`` safety net
-    as the "skip_intent_validation" branch of :func:`route_sql_validation`: once
-    too many reconstructions have already happened, stop blocking on this check
-    and let the SQL through as-is.
+    These send SQL back to ``reconstruct_sql`` on failure but do not route
+    through :func:`route_sql_validation`, which enforces the hard reconstruction
+    cap. A persistently failing check could otherwise loop until the graph's
+    global recursion limit aborts the run. Once enough failed attempts have
+    accumulated, stop blocking on this check and let the SQL through as-is.
 
     Args:
         check_name: Node name, used only for the log message when the cap fires.
@@ -171,10 +161,10 @@ def _make_soft_check_router(check_name: str):
         decision = state.get("decision", "") or ""
         if decision != "invalid_sql":
             return "valid_sql"
-        reconstruction_count = len(state["path_state"].get("failed_attempts") or [])
-        if reconstruction_count > INTENT_VALIDATION_SKIPPED_AFTER:
+        failed_attempt_count = len(state["path_state"].get("failed_attempts") or [])
+        if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
             logger.info(
-                f"Skipping {check_name} after {reconstruction_count} reconstructions"
+                f"Skipping {check_name} after {failed_attempt_count} reconstructions"
             )
             return "valid_sql"
         return "invalid_sql"
@@ -318,7 +308,6 @@ def create_graph():
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
-    sql_from_tables_agent = SQLFromTablesAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
@@ -370,9 +359,6 @@ def create_graph():
         if combined_precheck_enabled
         else None
     )
-    construct_sql_not_from_snippets_node = _make_node(
-        "construct_sql_not_from_snippets", agent_wrapper(sql_from_tables_agent)
-    )
     construct_sql_from_candidates_node = _make_node(
         "construct_sql_from_candidates",
         agent_wrapper(sql_from_candidates_agent),
@@ -423,9 +409,6 @@ def create_graph():
     graph.add_node("check_value_repair", value_repair_node)
     if combined_precheck_node is not None:
         graph.add_node("precheck_combined", combined_precheck_node)
-    graph.add_node(
-        "construct_sql_not_from_snippets", construct_sql_not_from_snippets_node
-    )
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
@@ -515,7 +498,6 @@ def create_graph():
             "valid_sql": "validate_intent",  # Validate intent after syntax validation succeeds
             "skip_intent_validation": pre_execute_target,  # Skip intent validation after 5+ reconstructions
             "invalid_sql": "reconstruct_sql",
-            "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
         },
     )
@@ -547,7 +529,6 @@ def create_graph():
         {
             "valid_sql": "check_empty_like_result",
             "invalid_sql": "reconstruct_sql",
-            "fallback": "construct_sql_not_from_snippets",
             "unconstructable": "unconstructable_sql_response",
             "skip_intent_validation": "check_empty_like_result",
         },
@@ -572,14 +553,6 @@ def create_graph():
         },
     )
 
-    graph.add_conditional_edges(
-        "construct_sql_not_from_snippets",
-        route_decision,
-        {
-            "validate_sql_query": "validate_sql_query",
-            "unconstructable": "unconstructable_sql_response",
-        },
-    )
     graph.add_edge("reconstruct_sql", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)

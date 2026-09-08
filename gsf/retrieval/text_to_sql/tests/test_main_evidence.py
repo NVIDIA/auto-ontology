@@ -65,5 +65,6 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
     )
 
     assert state["evidence"] == "active refers to accounts.status_code"
-    assert state["initial_question"] == "How many active accounts?"
+    assert state["initial_question"] == "How many accounts?"
+    assert state["path_state"]["processing_question"] == "How many active accounts?"
     assert state["messages"][1].content == "How many active accounts?"

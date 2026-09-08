@@ -39,6 +39,7 @@ from sqlalchemy import values as sa_values
 from gsf.dal import schema as s
 from gsf.dal.session import store, write_transaction
 from gsf.dal.sql_fragments import column_description_expr, table_description_expr
+from gsf.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from gsf.utils.sample_values import (
@@ -810,7 +811,14 @@ def fetch_tables_for_schema(
     if scoped is not None:
         statement = statement.where(s.catalog_table.c.id.in_(list(scoped["table_ids"])))
 
-    return [dict(r) for r in store().query_read(statement)]
+    rows = [dict(r) for r in store().query_read(statement)]
+    # Read here rather than on a table detail read, because there is none: the
+    # catalog tree builds a table's page out of the schema's list, so this is
+    # where a table's chips have to arrive from.
+    tags = fetch_tags_map(TARGET_TABLE, [row["id"] for row in rows])
+    for row in rows:
+        row["tags"] = tags.get(row["id"], [])
+    return rows
 
 
 def fetch_all_tables_without_term(
@@ -900,13 +908,20 @@ def fetch_columns_for_table(
     if limit is not None:
         page = page.limit(limit)
 
+    columns = [dict(r) for r in store().query_read(page)]
+    tags = fetch_tags_map(TARGET_COLUMN, [column["id"] for column in columns])
+
     table = dict(header[0])
     table["columns"] = [
         # Rendered, not just decoded: `ColumnSummary.sample_values` is a string
         # list, so the stored types are display text by the time a client sees
         # them.
-        {**dict(r), "sample_values": stringify_sample_values(r["sample_values"])}
-        for r in store().query_read(page)
+        {
+            **column,
+            "sample_values": stringify_sample_values(column["sample_values"]),
+            "tags": tags.get(column["id"], []),
+        }
+        for column in columns
     ]
     return table
 

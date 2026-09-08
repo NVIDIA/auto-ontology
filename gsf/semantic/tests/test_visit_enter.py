@@ -15,28 +15,26 @@ import pytest
 from gsf.semantic.visit_enter import (
     _json_ready_sample,
     _keep_persisted_sample,
-    _quoted_identifier,
     _sample_key,
     calculate_columns_profiling,
     process_table,
 )
+from gsf.utils.sql_identifiers import qualified_name
 
 
-@pytest.mark.parametrize(
-    ("dialect", "expected"),
-    [
-        ("sqlite", '"Sales Orders"'),
-        ("postgres", '"Sales Orders"'),
-        ("mysql", "`Sales Orders`"),
-        ("spark", "`Sales Orders`"),
-        (None, '"Sales Orders"'),
-        ("not-a-dialect", '"Sales Orders"'),
-    ],
-)
-def test_quoted_identifier_per_dialect(dialect: str | None, expected: str) -> None:
-    # Backticks on MySQL/Spark, double quotes elsewhere; an unknown dialect
-    # still quotes, since a bare identifier is what loses the table.
-    assert _quoted_identifier("Sales Orders", dialect) == expected
+def _mock_connector(dialect: str = "postgres") -> MagicMock:
+    """A mock connector that qualifies names the way a real one would.
+
+    ``calculate_columns_profiling`` delegates qualification to the connector,
+    so a bare MagicMock would interpolate a repr into the SQL and every
+    assertion on the generated statement would pass vacuously.
+    """
+    connector = MagicMock()
+    connector.dialect = dialect
+    connector.qualify.side_effect = lambda schema, table: qualified_name(
+        schema, table, dialect=dialect
+    )
+    return connector
 
 
 @pytest.mark.parametrize(
@@ -94,8 +92,7 @@ def test_calculate_columns_profiling_quotes_name_with_space(
     # Unquoted "main.Sales Orders" parses as table main.Sales, so the probe
     # raised "no such table" and every column of the table was dropped.
     df = pd.DataFrame({"OrderDate": ["5/31/18", "6/1/18", "12/4/18"]})
-    connector = MagicMock()
-    connector.dialect = "sqlite"
+    connector = _mock_connector("sqlite")
     connector.execute.return_value = df
 
     table = {"id": "t1", "name": "Sales Orders", "schema_name": "main"}
@@ -106,6 +103,34 @@ def test_calculate_columns_profiling_quotes_name_with_space(
     sql = connector.execute.call_args_list[0][0][0]
     assert '"main"."Sales Orders"' in sql
     assert result["OrderDate"]["format"] == "M/D/YY"
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_profiling_probe_uses_the_connectors_qualification(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    # Three-level engines (Kyuubi/Trino/Databricks) prepend their bound catalog.
+    # Building schema.table here instead sent the probe to the default catalog,
+    # where the tables do not exist -- 197/197 tables failed, silently.
+    connector = MagicMock()
+    connector.dialect = "spark"
+    connector.qualify.side_effect = lambda schema, table: qualified_name(
+        "nvapp", schema, table, dialect="spark"
+    )
+    connector.execute.return_value = pd.DataFrame({"id": [1, 2, 3]})
+
+    table = {"id": "t1", "name": "tbl_Click", "schema_name": "nvapp_client"}
+    columns = [{"name": "id", "data_type": "BIGINT"}]
+
+    calculate_columns_profiling(table, columns, connector)
+
+    connector.qualify.assert_called_once_with("nvapp_client", "tbl_Click")
+    sql = connector.execute.call_args_list[0][0][0]
+    assert "`nvapp`.`nvapp_client`.`tbl_Click`" in sql
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -125,7 +150,7 @@ def test_calculate_columns_profiling_unhashable_values(
             "meta": [{"k": 1}, {"k": 2}],
         }
     )
-    connector = MagicMock()
+    connector = _mock_connector()
     connector.execute.return_value = df
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
@@ -181,8 +206,7 @@ def test_calculate_columns_profiling(
         col = match.group(1)
         return pd.DataFrame({col: df[col].dropna().unique().tolist()})
 
-    connector = MagicMock()
-    connector.dialect = "postgres"
+    connector = _mock_connector()
     connector.execute.side_effect = _fake_execute
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
@@ -254,8 +278,7 @@ def test_calculate_columns_profiling_preserves_scalar_types(
             "label": ["a" * 40, "b", "a" * 40, "c"],
         }
     )
-    connector = MagicMock()
-    connector.dialect = "postgres"
+    connector = _mock_connector()
     # Only `label` is text with fewer than 5 distinct values, so it is the one
     # column that triggers a DISTINCT probe; return empty to keep the top-N set.
     connector.execute.side_effect = [df, pd.DataFrame({"label": []})]
@@ -386,7 +409,7 @@ def test_calculate_columns_profiling_distinct_only_when_under_top_n(
     )
     status_distinct_df = pd.DataFrame({"status": ["open", "closed", "banned"]})
 
-    connector = MagicMock()
+    connector = _mock_connector()
     connector.execute.side_effect = [sample_df, status_distinct_df]
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
@@ -452,6 +475,121 @@ def test_process_table_writes_term_and_attributes(
 
     mock_merge_term.assert_called_once_with("Order", "Order entity", "t1", synonyms=[])
     mock_merge_col_attr.assert_called_once()
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_distinct_probe_is_gated_but_the_row_sample_is_not(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """The setting governs the DISTINCT probes only.
+
+    ``SELECT * ... LIMIT`` is bounded and always runs. The DISTINCT probe is
+    the unbounded one -- a full-column scan per column where DISTINCT + LIMIT
+    does not early-stop -- so it is the one worth turning off.
+    """
+    # `status` is non-unique text with fewer than _PROFILING_TOP_N distinct
+    # sampled values, which is exactly the shape that triggers a DISTINCT probe.
+    df = pd.DataFrame({"status": ["open", "open", "closed"]})
+    columns = [{"name": "status", "data_type": "text"}]
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+
+    off = _mock_connector()
+    off.execute.return_value = df
+    calculate_columns_profiling(table, columns, off, probe_distinct_values=False)
+    off_sql = [c[0][0] for c in off.execute.call_args_list]
+
+    on = _mock_connector()
+    on.execute.side_effect = [df, pd.DataFrame({"status": ["banned"]})]
+    calculate_columns_profiling(table, columns, on, probe_distinct_values=True)
+    on_sql = [c[0][0] for c in on.execute.call_args_list]
+
+    # Both sample the rows; only the enabled one issues the DISTINCT probe.
+    assert sum("SELECT * FROM" in s for s in off_sql) == 1
+    assert sum("SELECT * FROM" in s for s in on_sql) == 1
+    assert not any("SELECT DISTINCT" in s for s in off_sql)
+    assert sum("SELECT DISTINCT" in s for s in on_sql) == 1
+
+
+@patch("gsf.semantic.visit_enter.get_connectors")
+@patch("gsf.semantic.visit_enter.merge_column_attribute")
+@patch("gsf.semantic.visit_enter.merge_term")
+@patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("gsf.semantic.visit_enter.extract_term")
+def test_row_sample_runs_even_with_the_setting_off(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_merge_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_get_connectors: MagicMock,
+) -> None:
+    """``SELECT * ... LIMIT 1000`` is unconditional, end to end.
+
+    Asserted against the real connector-resolution path (``get_connectors``)
+    rather than a patched ``_resolve_connector``, and by recording every SQL
+    string the connector is asked to run.
+    """
+    from gsf.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+
+    executed: list[str] = []
+    spy = MagicMock()
+    spy.database_name = "db"
+    spy.dialect = "spark"
+    spy.qualify.side_effect = lambda s, t: f"`nvapp`.`{s}`.`{t}`"
+
+    def _record(sql: str, *args: object, **kwargs: object) -> pd.DataFrame:
+        executed.append(sql)
+        return pd.DataFrame({"amount": [1, 2, 3]})
+
+    spy.execute.side_effect = _record
+    mock_get_connectors.return_value = [spy]
+
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+
+    process_table(
+        table,
+        ctx,
+        domain_summary=None,
+        database_name="db",
+        probe_distinct_values=False,
+    )
+
+    assert executed == ["SELECT * FROM `nvapp`.`public`.`orders` LIMIT 1000"]
+
+
+@patch("gsf.semantic.visit_enter.calculate_columns_profiling")
+@patch("gsf.semantic.visit_enter._resolve_connector")
+@patch("gsf.semantic.visit_enter.merge_column_attribute")
+@patch("gsf.semantic.visit_enter.merge_term")
+@patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("gsf.semantic.visit_enter.extract_term")
+def test_process_table_profiles_by_default(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_merge_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_resolve: MagicMock,
+    mock_profiling: MagicMock,
+) -> None:
+    from gsf.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+    mock_profiling.return_value = {}
+
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+
+    process_table(table, ctx, domain_summary=None, database_name="db")
+
+    mock_profiling.assert_called_once()
 
 
 @patch("gsf.semantic.visit_enter.merge_column_attribute")

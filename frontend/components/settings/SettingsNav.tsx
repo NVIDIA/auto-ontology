@@ -13,6 +13,7 @@ type NavItem = { label: string; href: string };
 
 const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/connections' };
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
+const TAGS_NAV_ITEM: NavItem = { label: 'Tags', href: '/settings/tags' };
 const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
 	label: 'Semantic Input',
 	href: '/settings/semantic-input',
@@ -65,6 +66,7 @@ export const SettingsNav = () => {
 	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
 	items.push(
 		ZONES_NAV_ITEM,
+		TAGS_NAV_ITEM,
 		SEMANTIC_INPUT_NAV_ITEM,
 		USERS_NAV_ITEM,
 		SSO_NAV_ITEM,

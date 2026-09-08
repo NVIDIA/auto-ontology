@@ -13,8 +13,6 @@ from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
 
-from sqlglot import exp
-
 from gsf.connectors import get_connectors
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
@@ -30,6 +28,7 @@ from gsf.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
+from gsf.utils.sql_identifiers import quoted_identifier
 
 if TYPE_CHECKING:
     from gsf.connectors.base import SQLDatabase
@@ -171,24 +170,6 @@ def _date_shapes_seen(values: list[str]) -> list[str]:
     return shapes
 
 
-def _quoted_identifier(name: str, dialect: str | None) -> str:
-    """Quote a schema, table or column name for *dialect*.
-
-    Names carrying a space or a reserved word have to be quoted or the probe
-    below silently loses the table: ``SELECT * FROM main.Sales Orders`` parses
-    as table ``main.Sales``, raises "no such table", and the caller drops every
-    column of that table from profiling. The quote character is dialect-specific
-    (backticks on MySQL and Spark, double quotes elsewhere), so the naive
-    hard-coded ``"`` would trade a SQLite bug for a MySQL one.
-    """
-    try:
-        return exp.to_identifier(name, quoted=True).sql(dialect=dialect or None)
-    except Exception:
-        # Unknown dialect: fall back to the SQL-standard quote rather than
-        # emitting a bare identifier, since bare is what breaks on spaces.
-        return '"' + name.replace('"', '""') + '"'
-
-
 def _json_ready_sample(value: Any) -> Any:
     """Convert a live warehouse value to a JSON-serializable Python native.
 
@@ -269,7 +250,7 @@ def _distinct_values_if_low_cardinality(
     most-common-values behaviour. The ``LIMIT`` keeps the probe cheap even on
     huge, high-cardinality columns (the scan stops after cap + 1 distinct rows).
     """
-    quoted = _quoted_identifier(col_name, getattr(connector, "dialect", None))
+    quoted = quoted_identifier(col_name, getattr(connector, "dialect", None))
     try:
         df = connector.execute(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
@@ -289,6 +270,8 @@ def calculate_columns_profiling(
     table: dict[str, Any],
     columns: list[dict[str, Any]],
     connector: "SQLDatabase",
+    *,
+    probe_distinct_values: bool = True,
 ) -> dict[str, dict[str, Any]]:
     """Profile a table's columns from a live sample of up to 1000 rows.
 
@@ -297,6 +280,13 @@ def calculate_columns_profiling(
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
+
+    ``probe_distinct_values`` gates only that second step. The bounded
+    ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
+    unbounded one (a full-column scan per column on warehouses where
+    ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
+    "Distinct Value Scanning" setting turns off. With it off, a column keeps
+    the top-N values from the row sample rather than gaining nothing.
 
     Sample values keep the type the warehouse returned (see
     ``_json_ready_sample``): a numeric column profiles as ``[10, 20, 30]``,
@@ -326,13 +316,10 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
-    dialect = getattr(connector, "dialect", None)
-    quoted_table = _quoted_identifier(table_name, dialect)
-    qualified = (
-        f"{_quoted_identifier(schema_name, dialect)}.{quoted_table}"
-        if schema_name
-        else quoted_table
-    )
+    # Qualification is the connector's rule, not ours: engines with a
+    # catalog.schema.table namespace prepend their bound catalog here, and a
+    # two-level name would resolve against the wrong catalog.
+    qualified = connector.qualify(schema_name, table_name)
 
     try:
         df = connector.execute(
@@ -395,7 +382,8 @@ def calculate_columns_profiling(
         # per column on warehouses where DISTINCT + LIMIT does not early-stop.
         col_values = top5
         if (
-            not is_unique
+            probe_distinct_values
+            and not is_unique
             and len(top5) < _PROFILING_TOP_N
             and _is_text_sample_type(declared_type)
         ):
@@ -630,15 +618,23 @@ def process_table(
     domain_summary: DomainSummary | None,
     embedder: SemanticEmbedder | None = None,
     database_name: str | None = None,
+    probe_distinct_values: bool = True,
 ) -> ProcessTableResult:
-    """Build taxonomy nodes for one table: Term and ColumnAttributes."""
+    """Build taxonomy nodes for one table: Term and ColumnAttributes.
+
+    ``probe_distinct_values`` mirrors the "Distinct Value Scanning" setting,
+    read once per run by the caller. It gates only the per-column ``SELECT
+    DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
+    a direct caller keeps the historical behaviour.
+    """
     table_id = table["id"]
     table_name = table["name"]
 
-    # Columns profiling — requires a live connector; skipped when unavailable.
-    # Persists sample_values, is_unique, and format onto Column nodes, and maps
-    # each column to {"sample_values": [...], "is_unique": bool, "format": str
-    # | None} for FK detection below.
+    # Columns profiling — requires a live connector; skipped only when one is
+    # unavailable. The bounded SELECT * ... LIMIT sample runs unconditionally;
+    # the setting gates the unbounded DISTINCT probes inside. It persists
+    # sample_values, is_unique, and format onto Column nodes, and maps those
+    # values for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None:
@@ -646,7 +642,10 @@ def process_table(
         try:
             with _step(table_name, f"Sampling column values ({column_count} columns)"):
                 columns_profiling_samples = calculate_columns_profiling(
-                    table, ctx.get("columns", []), connector
+                    table,
+                    ctx.get("columns", []),
+                    connector,
+                    probe_distinct_values=probe_distinct_values,
                 )
         except Exception:
             logger.warning(

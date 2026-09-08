@@ -40,6 +40,7 @@ from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
     get_question_for_processing,
+    get_standalone_question,
 )
 
 
@@ -181,31 +182,32 @@ class IntentValidationAgent(BaseAgent):
 
         # Get user's question
         original_question = get_original_question(state)
+        processing_question = get_standalone_question(state)
         sanitized_question = get_question_for_processing(state)
 
         # Prefer the enriched snippets (name/description/sql) from preparation.
         # Fall back to the VDB custom_analyses list when enrichment is absent.
         # Most ingested databases have no CustomAnalysis nodes, so this is
-        # normally a no-op (ca_section == "") — kept for parity with any
+        # normally a no-op — kept for parity with any
         # ingest that does define them.
-        ca_str_list = path_state.get("custom_analyses_str") or []
-        if ca_str_list:
-            ca_section = (
+        custom_analyses_str_list = path_state.get("custom_analyses_str") or []
+        if custom_analyses_str_list:
+            custom_analyses = (
                 "DOMAIN-SPECIFIC CUSTOM ANALYSES (use their SQL patterns as guidance):\n"
-                + "\n".join(f"- {entry}" for entry in ca_str_list)
+                + "\n".join(f"- {entry}" for entry in custom_analyses_str_list)
                 + "\n\n"
             )
         else:
-            ca_section = format_custom_analyses_section(
+            custom_analyses = format_custom_analyses_section(
                 path_state.get("custom_analyses") or []
             )
 
-        join_paths_section = ""
+        join_paths = ""
         if not _JOINS_VALIDATED_ELSEWHERE:
             primary_attribute = path_state.get("primary_attribute") or {}
             attribute_join_paths = path_state.get("attribute_join_paths") or []
             if primary_attribute and attribute_join_paths:
-                join_paths_section = (
+                join_paths = (
                     "AUTHORITATIVE JOIN PATHS (keep joins that follow these verified paths):\n"
                     + format_semantic_context(
                         primary_attribute,
@@ -217,11 +219,11 @@ class IntentValidationAgent(BaseAgent):
 
         validation_prompt = create_intent_validation_prompt(
             original_question,
+            processing_question,
             sanitized_question,
-            "",
             sql_code,
-            custom_analyses=ca_section,
-            join_paths=join_paths_section,
+            custom_analyses=custom_analyses,
+            join_paths=join_paths,
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
         )
 

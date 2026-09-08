@@ -57,7 +57,10 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
+from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.base import SQLDatabase
+
+from gsf.connectors.db_errors import is_session_lost
 
 if TYPE_CHECKING:
     from pyhive.hive import Connection
@@ -505,6 +508,28 @@ class KyuubiDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._catalog
 
+    def qualify(self, schema: Optional[str], table: str) -> str:
+        """Prepend the bound catalog: Spark names are ``catalog.schema.table``.
+
+        The base two-level default would resolve against ``spark_catalog``, not
+        the Iceberg catalog this connection binds, so every probe would raise
+        TABLE_OR_VIEW_NOT_FOUND. Matches how :meth:`get_tables` and the
+        ``DESCRIBE TABLE`` pass already qualify.
+
+        Raises:
+            ValueError: *schema* is missing. Spark reads a two-part name as
+                ``schema.table``, so emitting ``catalog.table`` would put the
+                catalog in the schema position and quietly resolve to
+                something else -- every table here lives in a schema, so an
+                absent one is a bug worth surfacing.
+        """
+        if not schema:
+            raise ValueError(
+                f"Kyuubi requires a schema to qualify {table!r} "
+                f"in catalog {self._catalog!r}"
+            )
+        return _qualified(self._catalog, schema, table)
+
     # ------------------------------------------------------------------
     # Execution
     # ------------------------------------------------------------------
@@ -525,19 +550,33 @@ class KyuubiDatabase(SQLDatabase):
             return pd.DataFrame(cursor.fetchall(), columns=columns)
 
     def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        """Run *sql*, reopening the session once if the socket has gone away.
+        """Run *sql*, reopening the session once if it has gone away.
 
         The retry lives here rather than around ``cursor()`` because
         ``hive.Connection.cursor()`` only constructs a local object -- it never
         touches the socket, so a session the server has already discarded looks
-        healthy until a statement is sent and the write fails with
-        ``BrokenPipeError``. Kyuubi retires an idle Spark engine after a few
-        hours, so any connector cached longer than that hits this on its next
-        query.
+        healthy until a statement is sent. Kyuubi retires an idle Spark engine
+        after a few hours, so any connector cached longer than that hits this on
+        its next query.
 
-        Only transport failures are retried; a rejected statement is a real SQL
-        error and is raised unchanged. The failed statement never reached the
-        server, so re-running it cannot double-apply anything.
+        A retired session surfaces in one of two shapes, and both have to be
+        handled:
+
+        * the socket is gone, and the write fails with ``BrokenPipeError`` or a
+          ``TTransportException``; or
+        * the Kyuubi server is still up and answers normally, reporting
+          ``Invalid SessionHandle`` for the handle it no longer knows. That
+          arrives as an ordinary driver error on a perfectly healthy
+          connection, so it is recognised by message rather than by type.
+
+        Missing the second shape is not a degraded retry but a permanent
+        failure: nothing else clears ``self._connection``, so a connector cached
+        in a long-lived worker would keep replaying the dead handle for every
+        subsequent query until the process restarted.
+
+        A statement the server actually rejected is a real SQL error and is
+        raised unchanged. Retrying is safe because the failed statement never
+        reached an engine, so re-running it cannot double-apply anything.
         """
         with self._lock:
             try:
@@ -547,8 +586,16 @@ class KyuubiDatabase(SQLDatabase):
                     "Kyuubi session lost (%s); reopening and retrying once",
                     type(exc).__name__,
                 )
-                self._reset_connection()
-                return self._execute_once(sql, parameters)
+            except Exception as exc:
+                if not is_session_lost(exc, sql):
+                    raise
+                logger.info(
+                    "Kyuubi rejected the session handle (%s); "
+                    "reopening and retrying once",
+                    type(exc).__name__,
+                )
+            self._reset_connection()
+            return self._execute_once(sql, parameters)
 
     # ------------------------------------------------------------------
     # Schema introspection
@@ -608,6 +655,16 @@ class KyuubiDatabase(SQLDatabase):
         down with it. ``nvdp.system.table_creation_locks`` does exactly that:
         it is listed by ``SHOW TABLES`` but ``DESCRIBE`` returns Nessie 403.
 
+        This is the same contract
+        :func:`gsf.catalog.extract._validate_relation_column_coverage` enforces
+        for every connector: never report a relation you have no columns for.
+        Dropping is right for *one* unreadable table, but it cannot be right for
+        all of them -- a dead session or a revoked catalog grant fails every
+        ``DESCRIBE`` alike, and silently dropping the lot yields an empty catalog
+        that looks exactly like a database with nothing in it. So if tables were
+        listed and not one could be described, that is raised rather than
+        dropped.
+
         Results are cached for the connector's lifetime: introspection is a read
         of slow-moving metadata, and each DESCRIBE is a separate Spark round
         trip.
@@ -653,6 +710,13 @@ class KyuubiDatabase(SQLDatabase):
                         )
                 views_by_schema[schema] = kept_views
 
+            if skipped and not table_rows:
+                raise IncompleteCatalogExtractionError(
+                    f"Kyuubi listed {len(skipped)} relation(s) and could not describe "
+                    f"any of them: {', '.join(skipped[:10])}"
+                    f"{'' if len(skipped) <= 10 else f' (+{len(skipped) - 10} more)'}. "
+                    "Refusing to ingest an empty catalog."
+                )
             if skipped:
                 logger.warning(
                     "Skipped %d Kyuubi table(s) whose columns could not be read: %s",
