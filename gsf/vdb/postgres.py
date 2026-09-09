@@ -103,12 +103,30 @@ def _instrument_engine(engine: PGEngine) -> None:
         if sync_engine is None:
             return
 
+        # The connection, cursor, bind parameters and execution context are
+        # typed ``Any``: they are DBAPI and SQLAlchemy internals whose concrete
+        # types vary by dialect, and the timestamp below is stashed on the
+        # context as a private attribute, which a precise type would reject.
         @event.listens_for(sync_engine, "before_cursor_execute")
-        def _before(conn, cursor, statement, parameters, context, executemany):
+        def _before(
+            conn: Any,
+            cursor: Any,
+            statement: str,
+            parameters: Any,
+            context: Any,
+            executemany: bool,
+        ) -> None:
             context._gsf_started = time.perf_counter()
 
         @event.listens_for(sync_engine, "after_cursor_execute")
-        def _after(conn, cursor, statement, parameters, context, executemany):
+        def _after(
+            conn: Any,
+            cursor: Any,
+            statement: str,
+            parameters: Any,
+            context: Any,
+            executemany: bool,
+        ) -> None:
             started = getattr(context, "_gsf_started", None)
             if started is None:
                 return
@@ -133,7 +151,8 @@ def _pool_status(engine: PGEngine) -> str:
         target = getattr(engine, "_pool", None) or getattr(engine, "_engine", None)
         sync_engine = getattr(target, "sync_engine", None) or target
         return sync_engine.pool.status()
-    except Exception:  # pragma: no cover
+    except Exception:  # pragma: no cover - status is diagnostic, never load-bearing
+        logger.debug("Could not read VDB pool status", exc_info=True)
         return "?"
 
 
