@@ -71,24 +71,6 @@ def _to_async_url(url: str) -> str:
     return url
 
 
-# Server-side time for vector queries, accumulated across all threads. A
-# retrieval call blocks on `_run_as_sync`, which hands the coroutine to a
-# background event loop, so the SQL runs on a different thread than the caller
-# and cannot be attributed per-call by a thread-local. Aggregating instead
-# answers the question that matters: of the wall time a retrieval spends, how
-# much is the database working versus the caller waiting for a connection or a
-# turn on the loop.
-_QUERY_SECONDS = 0.0
-_QUERY_COUNT = 0
-_QUERY_LOCK = threading.Lock()
-
-
-def vector_query_stats() -> tuple[float, int]:
-    """Total server-side seconds and query count since process start."""
-    with _QUERY_LOCK:
-        return _QUERY_SECONDS, _QUERY_COUNT
-
-
 def _instrument_engine(engine: PGEngine) -> None:
     """Time every SQL statement this engine executes.
 
@@ -131,11 +113,9 @@ def _instrument_engine(engine: PGEngine) -> None:
             if started is None:
                 return
             elapsed = time.perf_counter() - started
-            global _QUERY_SECONDS, _QUERY_COUNT
-            with _QUERY_LOCK:
-                _QUERY_SECONDS += elapsed
-                _QUERY_COUNT += 1
-            # Per-statement duration is the only figure that is attributable.
+            # Logged, not accumulated. A running total would need a lock on
+            # every statement, and the total is not the useful number anyway:
+            # per-statement duration is the only figure that is attributable.
             # A caller cannot subtract "SQL time during my window" from its own
             # wall time: the statements run on a shared event-loop thread, so
             # that window also contains every concurrent caller's queries and
