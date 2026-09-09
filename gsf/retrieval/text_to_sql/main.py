@@ -197,6 +197,22 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
     return (getattr(generated, "sql_code", "") or "").strip()
 
 
+def _merge_node_output(final_state: dict, node_output: dict | None) -> None:
+    """Fold one graph node's output into the accumulated state, in place.
+
+    ``path_state`` is merged key-by-key (nodes only ever return the subset
+    they touched); every other top-level key is overwritten outright.
+    """
+    if not node_output:
+        return
+    if "path_state" in node_output:
+        final_state.setdefault("path_state", {})
+        final_state["path_state"].update(node_output["path_state"])
+    for key, value in node_output.items():
+        if key != "path_state":
+            final_state[key] = value
+
+
 def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
     """Concatenate the run's per-node thought entries into one summary string.
 
@@ -312,14 +328,7 @@ def stream_agent_response(
                     streamed_sql = node_sql
                     yield {"type": "sql", "node": node_name, "sql": node_sql}
 
-                if node_output:
-                    if "path_state" in node_output:
-                        if "path_state" not in final_state:
-                            final_state["path_state"] = {}
-                        final_state["path_state"].update(node_output["path_state"])
-                    for key, value in node_output.items():
-                        if key != "path_state":
-                            final_state[key] = value
+                _merge_node_output(final_state, node_output)
 
         answer = _extract_answer(final_state)
         thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
@@ -363,15 +372,8 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
 
     try:
         for step in app.stream(state, config={"recursion_limit": 45}):
-            for node_name, node_output in step.items():
-                if node_output:
-                    if "path_state" in node_output:
-                        if "path_state" not in final_state:
-                            final_state["path_state"] = {}
-                        final_state["path_state"].update(node_output["path_state"])
-                    for key, value in node_output.items():
-                        if key != "path_state":
-                            final_state[key] = value
+            for node_output in step.values():
+                _merge_node_output(final_state, node_output)
     except Exception as exc:
         logger.exception("Error during agent stream in get_agent_response_with_state")
         # The stream may have already produced a valid, executed SQL query
@@ -401,35 +403,6 @@ def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
         result = {"response": str(answer)}
     result["path_state"] = merged_path_state
     return result
-
-
-def run_until_node(payload: TextToSQLPayload, stop_after: str) -> dict:
-    """Run the graph and return the accumulated state once ``stop_after`` produces output.
-
-    Streams the compiled graph exactly like :func:`stream_agent_response` — building
-    the state with :func:`_build_state` and merging each node's ``path_state`` — but
-    stops as soon as the ``stop_after`` node has run, before the next node executes.
-    This lets callers reuse the front of the pipeline (e.g. up to ``prepare_candidates``,
-    to read ``relevant_tables``/``attribute_join_paths``) without paying for the rest of
-    the flow. The returned dict is the full ``AgentState`` (top-level keys such as
-    ``llm``/``connectors``/``semantic_retriever`` plus the merged ``path_state``).
-    """
-    state = _build_state(payload)
-    final_state = dict(state)
-
-    for step in app.stream(state, config={"recursion_limit": 45}):
-        for node_name, node_output in step.items():
-            if node_output:
-                if "path_state" in node_output:
-                    final_state.setdefault("path_state", {})
-                    final_state["path_state"].update(node_output["path_state"])
-                for key, value in node_output.items():
-                    if key != "path_state":
-                        final_state[key] = value
-            if node_name == stop_after:
-                return final_state
-
-    return final_state
 
 
 __all__ = [
