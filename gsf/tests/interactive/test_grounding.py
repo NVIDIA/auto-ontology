@@ -104,8 +104,17 @@ def test_run_sql_generation_sets_custom_prompts():
         "- PPR: Panel Performance Ratio = MeasuredPower / RatedPower * 100%"
     )
 
-    with patch(
-        "gsf.retrieval.interactive.coordinator._get_fast_llm", return_value=mock_llm
+    with (
+        patch(
+            "gsf.retrieval.interactive.coordinator._get_fast_llm",
+            return_value=mock_llm,
+        ),
+        # generate_evidence() calls safe_invoke_text_nr(), a live LLM call —
+        # stub it so this test stays hermetic instead of hitting the network.
+        patch(
+            "gsf.retrieval.interactive.coordinator.generate_evidence",
+            return_value="",
+        ),
     ):
         sys.modules["gsf.retrieval.text_to_sql.main"] = _make_fake_t2s_main(
             fake_get_agent_response
