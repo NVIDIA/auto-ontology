@@ -144,6 +144,24 @@ def _transport_errors() -> tuple[type[BaseException], ...]:
     )
 
 
+def _status_detail(status: Any) -> str:
+    """Everything the server said about a failed statement, in one line.
+
+    The synchronous path used to surface the driver's whole ``TStatus``. Polling
+    reports a terminal state instead, so the detail has to be assembled here or
+    it is lost — and it is load-bearing: ``is_session_lost`` and the text-to-SQL
+    repair loop both classify by message text, and a bare state name matches
+    nothing. The statement itself is deliberately left out: callers match
+    markers against this text, and an echoed table name could match one.
+    """
+    parts = [
+        getattr(status, "errorMessage", None),
+        getattr(status, "sqlState", None),
+        *(getattr(status, "infoMessages", None) or []),
+    ]
+    return " | ".join(str(p) for p in parts if p) or "no error detail reported"
+
+
 def _quoted_identifier(name: str) -> str:
     """Return a Spark SQL backtick-quoted identifier."""
     return "`" + name.replace("`", "``") + "`"
@@ -579,12 +597,20 @@ class KyuubiDatabase(SQLDatabase):
         a cheap round trip and reports the operation state, so ``PENDING`` and
         ``RUNNING`` show up in the log as they happen.
 
+        A ``timeout_s`` of None still gets a ceiling. Polling is what removed
+        the old implicit one: a blocking ``ExecuteStatement`` was bounded by the
+        socket read timeout, but every poll is a fast round trip that answers
+        promptly, so an engine parked in PENDING would otherwise spin here
+        forever — and it would do it holding the session lock, wedging every
+        other caller with it.
+
         Raises:
-            KyuubiQueryTimeout: *timeout_s* elapsed; the statement is cancelled.
+            KyuubiQueryTimeout: the cap elapsed; the statement is cancelled.
             RuntimeError: the server ended the statement in a failed state.
         """
         from TCLIService.ttypes import TOperationState
 
+        ceiling = _SOCKET_TIMEOUT_SECONDS if timeout_s is None else timeout_s
         pending = {
             TOperationState.INITIALIZED_STATE,
             TOperationState.PENDING_STATE,
@@ -617,16 +643,15 @@ class KyuubiDatabase(SQLDatabase):
             if state not in pending:
                 raise RuntimeError(
                     f"Kyuubi statement ended in {names.get(state, state)}: "
-                    f"{getattr(status, 'errorMessage', None) or label}"
+                    f"{_status_detail(status)}"
                 )
-            if timeout_s is not None and elapsed >= timeout_s:
+            if elapsed >= ceiling:
                 self._cancel(cursor)
                 raise KyuubiQueryTimeout(
-                    f"Kyuubi statement exceeded {timeout_s}s in state "
+                    f"Kyuubi statement exceeded {ceiling}s in state "
                     f"{names.get(state, state)} and was cancelled: {label}"
                 )
-            if timeout_s is not None:
-                interval = min(interval, max(timeout_s - elapsed, 0.0))
+            interval = min(interval, max(ceiling - elapsed, 0.0))
             time.sleep(interval)
             interval = min(
                 max(interval, _POLL_INTERVAL_START_SECONDS) * 2,

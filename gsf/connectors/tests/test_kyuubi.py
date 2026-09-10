@@ -668,3 +668,83 @@ def test_a_pending_statement_reports_its_state_while_it_waits(
         db.execute(SQL)
 
     assert any("PENDING_STATE after" in m for m in caplog.messages)
+
+
+def test_an_uncapped_statement_still_has_a_ceiling(monkeypatch) -> None:
+    """Polling removed the implicit bound the blocking socket read gave us.
+
+    Without a default ceiling an engine parked in PENDING spins here forever,
+    holding the session lock and wedging every other caller with it.
+    """
+    monkeypatch.setattr("gsf.connectors.kyuubi._SOCKET_TIMEOUT_SECONDS", 1)
+    db = _database()
+    cursor = _stub_cursor(db, [TOperationState.PENDING_STATE])
+
+    with pytest.raises(KyuubiQueryTimeout, match="exceeded 1s"):
+        db.execute(SQL)
+
+    assert cursor.cancelled
+
+
+def test_a_failed_statement_reports_what_the_server_said() -> None:
+    """is_session_lost and the repair loop classify by message text.
+
+    A bare state name matches nothing, so a session lost mid-statement would be
+    raised instead of retried.
+    """
+    db = _database()
+
+    class _Failed(_FakeCursor):
+        def poll(self):
+            return SimpleNamespace(
+                operationState=TOperationState.ERROR_STATE,
+                errorMessage="Invalid SessionHandle: deadbeef",
+                sqlState="08S01",
+                infoMessages=["org.apache.kyuubi.KyuubiSQLException"],
+            )
+
+    cursor = _Failed([TOperationState.ERROR_STATE])
+
+    @contextmanager
+    def fake_cursor():
+        yield cursor
+
+    db._cursor = fake_cursor  # type: ignore[method-assign]
+    db._reset_connection = lambda: None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError) as excinfo:
+        db.execute(SQL)
+
+    message = str(excinfo.value)
+    assert "Invalid SessionHandle" in message
+    assert "08S01" in message
+    assert "KyuubiSQLException" in message
+    # The statement is left out on purpose: callers match markers against this
+    # text, and an echoed identifier could match one.
+    assert "elk_log" not in message and "SELECT" not in message
+
+
+def test_a_failure_with_no_detail_says_so() -> None:
+    """Falling back to the SQL would put an identifier where markers are matched."""
+    db = _database()
+
+    class _Bare(_FakeCursor):
+        def poll(self):
+            return SimpleNamespace(
+                operationState=TOperationState.CANCELED_STATE,
+                errorMessage=None,
+                sqlState=None,
+                infoMessages=None,
+            )
+
+    cursor = _Bare([TOperationState.CANCELED_STATE])
+
+    @contextmanager
+    def fake_cursor():
+        yield cursor
+
+    db._cursor = fake_cursor  # type: ignore[method-assign]
+    db._reset_connection = lambda: None  # type: ignore[method-assign]
+
+    with pytest.raises(RuntimeError, match="no error detail reported"):
+        db.execute(SQL)

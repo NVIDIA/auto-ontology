@@ -32,7 +32,7 @@ def compile_semantic_layer(
     """
     # A warehouse that was unreachable during an earlier run in this worker
     # must not stay un-sampled for this one.
-    reset_sampling_breaker()
+    reset_sampling_breaker(database_name)
     summary = domain_summary or load_domain_summary(database_name)
     tables = fetch_all_tables_without_term(database_name)
     # Read once per run, not once per table: the flag lives in Postgres and

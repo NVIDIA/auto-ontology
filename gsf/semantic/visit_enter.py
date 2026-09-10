@@ -155,16 +155,17 @@ class _SamplingCircuitBreaker:
         with self._lock:
             self._failures.pop(self._key(connector), None)
 
-    def record_failure(self, connector: "SQLDatabase", error: BaseException) -> None:
+    def record_failure(self, connector: "SQLDatabase", error: BaseException) -> bool:
+        """Count *error* against the warehouse. Returns whether it counted."""
         if not isinstance(error, TimeoutError) and not is_infrastructure_error(error):
-            return
+            return False
         key = self._key(connector)
         with self._lock:
             self._failures[key] += 1
             if self._failures[key] < _MAX_CONSECUTIVE_SAMPLE_FAILURES:
-                return
+                return True
             if key in self._tripped:
-                return
+                return True
             self._tripped.add(key)
         logger.warning(
             "Value sampling disabled for %s — %d consecutive sample queries "
@@ -173,24 +174,28 @@ class _SamplingCircuitBreaker:
             key,
             _MAX_CONSECUTIVE_SAMPLE_FAILURES,
         )
+        return True
 
-    def reset(self) -> None:
+    def reset(self, database_name: str) -> None:
         with self._lock:
-            self._failures.clear()
-            self._tripped.clear()
+            self._failures.pop(database_name, None)
+            self._tripped.discard(database_name)
 
 
 _sampling_breaker = _SamplingCircuitBreaker()
 
 
-def reset_sampling_breaker() -> None:
-    """Re-enable sampling at the start of a compilation run.
+def reset_sampling_breaker(database_name: str) -> None:
+    """Re-enable sampling for *database_name* at the start of a run.
 
-    The breaker is process-wide, so without this a warehouse that was down
-    during one run would stay un-sampled for every later run in the same
-    worker.
+    The breaker is process-wide and long-lived, so without this a warehouse
+    that was down during one run would stay un-sampled for every later run in
+    the same worker. Scoped to one database on purpose: compilation runs for
+    different datasources are not mutually exclusive, and clearing the whole
+    breaker would hand a run already in flight back the warehouse it had just
+    proven dead.
     """
-    _sampling_breaker.reset()
+    _sampling_breaker.reset(database_name)
 
 
 def _is_excluded_sample_type(data_type: str | None) -> bool:
@@ -296,7 +301,19 @@ def _distinct_values_if_low_cardinality(
             f"SELECT DISTINCT {quoted} FROM {qualified} "
             f"WHERE {quoted} IS NOT NULL LIMIT {cap + 1}",
         )
-    except Exception:
+    except Exception as exc:
+        # Falling back to the row sample's top-N is a fine outcome, but a probe
+        # that times out is not free: it is a full column scan per text column,
+        # and staying silent lets a degrading warehouse burn the cap on every
+        # one of them while the cheap row sample keeps resetting the streak.
+        if _sampling_breaker.record_failure(connector, exc):
+            logger.warning(
+                "Distinct-value probe on %s.%s failed (%s) — using the row "
+                "sample's most-common values instead",
+                qualified,
+                col_name,
+                type(exc).__name__,
+            )
         return None
     if df is None or df.empty:
         return None

@@ -13,6 +13,7 @@ import pytest
 
 from gsf.semantic.visit_enter import (
     _MAX_CONSECUTIVE_SAMPLE_FAILURES,
+    _distinct_values_if_low_cardinality,
     _PROFILING_QUERY_TIMEOUT_SECONDS,
     _json_ready_sample,
     _keep_persisted_sample,
@@ -631,9 +632,9 @@ COLUMNS = [{"name": "id", "data_type": "bigint"}]
 
 @pytest.fixture(autouse=True)
 def _reset_breaker():
-    reset_sampling_breaker()
+    reset_sampling_breaker(_CappedConnector.database_name)
     yield
-    reset_sampling_breaker()
+    reset_sampling_breaker(_CappedConnector.database_name)
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")
@@ -697,3 +698,35 @@ def test_one_success_clears_the_failure_streak(*_mocks) -> None:
     # Both connectors share a key (the database name), so the success in the
     # middle is what keeps the breaker closed here.
     assert not _sampling_breaker.is_open(failing)
+
+
+def test_resetting_one_database_leaves_another_run_alone() -> None:
+    """Compilations for two datasources overlap; one must not re-arm the other."""
+    dead = _CappedConnector(TimeoutError("cancelled"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        calculate_columns_profiling(TABLE, COLUMNS, dead)
+    assert _sampling_breaker.is_open(dead)
+
+    reset_sampling_breaker("some_other_database")
+
+    assert _sampling_breaker.is_open(dead), (
+        "a run starting elsewhere must not hand this run back a dead warehouse"
+    )
+
+
+def test_distinct_probe_timeouts_count_toward_the_breaker() -> None:
+    """The probe is a full column scan; silent timeouts burn the cap per column."""
+    connector = _CappedConnector()
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        assert (
+            _distinct_values_if_low_cardinality(
+                _CappedConnector(TimeoutError("cancelled")),
+                "`raw`.`elk_log`",
+                "status",
+                25,
+            )
+            is None
+        )
+
+    assert _sampling_breaker.is_open(connector)
