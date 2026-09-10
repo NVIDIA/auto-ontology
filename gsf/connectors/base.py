@@ -57,6 +57,16 @@ class SQLDatabase(ABC):
         Used by the text-to-SQL agent to emit dialect-appropriate SQL.
     """
 
+    #: Whether :meth:`execute` takes a ``timeout_s`` cap that is free to apply.
+    #: Callers running a query that should be cheap — profiling samples — pass
+    #: a cap when this is set, so an engine that has stopped answering costs
+    #: seconds instead of the driver's own timeout (900s on Kyuubi).
+    #:
+    #: Having a ``timeout_s`` parameter is not enough to set this. Databricks
+    #: has one, but honouring it there means opening a fresh session per
+    #: statement, which during ingestion costs far more than the cap saves.
+    supports_statement_timeout: bool = False
+
     @abstractmethod
     def __init__(self, connection_string: str) -> None: ...
 

@@ -12,11 +12,15 @@ import pandas as pd
 import pytest
 
 from gsf.semantic.visit_enter import (
+    _MAX_CONSECUTIVE_SAMPLE_FAILURES,
+    _PROFILING_QUERY_TIMEOUT_SECONDS,
     _json_ready_sample,
     _keep_persisted_sample,
     _sample_key,
+    _sampling_breaker,
     calculate_columns_profiling,
     process_table,
+    reset_sampling_breaker,
 )
 from gsf.utils.sql_identifiers import qualified_name
 
@@ -593,3 +597,103 @@ def test_process_table_multiple_terms(
 
     assert mock_merge_term.call_count == 2
     assert mock_merge_col_attr.call_count == 2
+
+
+# ----------------------------------------------------------------------
+# Sample query cap and circuit breaker
+# ----------------------------------------------------------------------
+
+
+class _CappedConnector:
+    """A connector whose execute() accepts a timeout, like Kyuubi's."""
+
+    dialect = "spark"
+    database_name = "nvdp"
+    supports_statement_timeout = True
+
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.calls: list[tuple[str, int | None]] = []
+
+    def qualify(self, schema: str, table: str) -> str:
+        return f"`{schema}`.`{table}`"
+
+    def execute(self, sql: str, parameters=None, *, timeout_s: int | None = None):
+        self.calls.append((sql, timeout_s))
+        if self.error is not None:
+            raise self.error
+        return pd.DataFrame({"id": [1, 2]})
+
+
+TABLE = {"id": "t1", "name": "elk_log", "schema_name": "raw"}
+COLUMNS = [{"name": "id", "data_type": "bigint"}]
+
+
+@pytest.fixture(autouse=True)
+def _reset_breaker():
+    reset_sampling_breaker()
+    yield
+    reset_sampling_breaker()
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_sample_query_is_capped_where_the_connector_supports_it(*_mocks) -> None:
+    """A bounded sample is seconds on a healthy engine; 900s means it is not."""
+    connector = _CappedConnector()
+
+    calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert connector.calls[0][1] == _PROFILING_QUERY_TIMEOUT_SECONDS
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_a_connector_without_a_cap_is_called_unchanged(*_mocks) -> None:
+    """Passing timeout_s to a connector that has no such parameter would fail."""
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"id": [1, 2]})
+
+    calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert connector.execute.call_args_list[0].kwargs == {}
+
+
+def test_repeated_sample_timeouts_disable_sampling_for_the_run() -> None:
+    """86 tables x a 120s timeout is three hours that produce nothing."""
+    connector = _CappedConnector(TimeoutError("cancelled after 120s"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        assert calculate_columns_profiling(TABLE, COLUMNS, connector) == {}
+
+    assert _sampling_breaker.is_open(connector)
+
+
+def test_a_sql_error_on_one_table_does_not_disable_sampling() -> None:
+    """A table the engine refuses says nothing about the other 85."""
+    connector = _CappedConnector(ValueError("Table or view not found: nope"))
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES + 2):
+        calculate_columns_profiling(TABLE, COLUMNS, connector)
+
+    assert not _sampling_breaker.is_open(connector)
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_one_success_clears_the_failure_streak(*_mocks) -> None:
+    """Only *consecutive* failures mean the warehouse itself is gone."""
+    failing = _CappedConnector(TimeoutError("cancelled"))
+    healthy = _CappedConnector()
+
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+    calculate_columns_profiling(TABLE, COLUMNS, healthy)
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+    calculate_columns_profiling(TABLE, COLUMNS, failing)
+
+    # Both connectors share a key (the database name), so the success in the
+    # middle is what keeps the breaker closed here.
+    assert not _sampling_breaker.is_open(failing)

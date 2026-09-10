@@ -80,6 +80,26 @@ _TOKEN_REQUEST_TIMEOUT_SECONDS = 30
 # while the engine is still starting.
 _SOCKET_TIMEOUT_SECONDS = 900
 
+# Polling cadence for an async statement: short at first so a fast query is not
+# held up, backed off so a long scan does not spin on the socket.
+_POLL_INTERVAL_START_SECONDS = 0.2
+_POLL_INTERVAL_MAX_SECONDS = 5.0
+# A statement quicker than this logs only its summary line; past it, every
+# operation-state change is reported as it happens.
+_SLOW_QUERY_SECONDS = 5.0
+# How often a statement that is still pending repeats its state.
+_PROGRESS_LOG_INTERVAL_SECONDS = 60.0
+
+
+class KyuubiQueryTimeout(TimeoutError):
+    """A statement outlived the caller's ``timeout_s`` and was cancelled.
+
+    Deliberately not a transport error: the socket is fine and the server is
+    answering, so reopening the session and retrying would only burn the same
+    time again. Callers that set a timeout want a fast, honest failure.
+    """
+
+
 # ``DESCRIBE TABLE`` appends sections (``# Partition Information``, ``# Detailed
 # Table Information``) after the column list, separated by a blank or ``#`` row.
 # Only the leading block describes columns.
@@ -271,6 +291,10 @@ class KyuubiDatabase(SQLDatabase):
         Optional ingestion allowlist. Empty or ``None`` means every schema in the
         catalog.
     """
+
+    # The cap is enforced by polling the statement already in flight, so it
+    # costs nothing to ask for one -- no extra session, no extra round trip.
+    supports_statement_timeout = True
 
     def __init__(
         self,
@@ -534,23 +558,149 @@ class KyuubiDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _cancel(cursor: Any) -> None:
+        """Ask the server to stop a statement we have given up on."""
+        try:
+            cursor.cancel()
+        except Exception:
+            logger.debug("Failed to cancel Kyuubi statement", exc_info=True)
+
+    def _await_completion(
+        self, cursor: Any, label: str, started: float, timeout_s: int | None
+    ) -> None:
+        """Poll an async statement until it leaves the pending states.
+
+        Statements run with ``async_=True`` so the client is never parked in
+        one blocking Thrift call. A synchronous ``ExecuteStatement`` holds the
+        socket open for the whole query, which makes the 900s socket timeout
+        the only backstop and leaves no way to tell a statement queued for a
+        Spark engine from one that is scanning: both are silence. Polling costs
+        a cheap round trip and reports the operation state, so ``PENDING`` and
+        ``RUNNING`` show up in the log as they happen.
+
+        Raises:
+            KyuubiQueryTimeout: *timeout_s* elapsed; the statement is cancelled.
+            RuntimeError: the server ended the statement in a failed state.
+        """
+        from TCLIService.ttypes import TOperationState
+
+        pending = {
+            TOperationState.INITIALIZED_STATE,
+            TOperationState.PENDING_STATE,
+            TOperationState.RUNNING_STATE,
+        }
+        names = TOperationState._VALUES_TO_NAMES
+        interval = _POLL_INTERVAL_START_SECONDS
+        last_state: int | None = None
+        last_logged = 0.0
+        while True:
+            status = cursor.poll()
+            state = status.operationState
+            elapsed = time.perf_counter() - started
+            # A fast statement says everything it needs to in its summary line;
+            # only a slow one is worth narrating while it is still going.
+            if elapsed >= _SLOW_QUERY_SECONDS and (
+                state != last_state
+                or elapsed - last_logged >= _PROGRESS_LOG_INTERVAL_SECONDS
+            ):
+                logger.info(
+                    "kyuubi: %s after %.1fs — %s",
+                    names.get(state, state),
+                    elapsed,
+                    label,
+                )
+                last_logged = elapsed
+            last_state = state
+            if state == TOperationState.FINISHED_STATE:
+                return
+            if state not in pending:
+                raise RuntimeError(
+                    f"Kyuubi statement ended in {names.get(state, state)}: "
+                    f"{getattr(status, 'errorMessage', None) or label}"
+                )
+            if timeout_s is not None and elapsed >= timeout_s:
+                self._cancel(cursor)
+                raise KyuubiQueryTimeout(
+                    f"Kyuubi statement exceeded {timeout_s}s in state "
+                    f"{names.get(state, state)} and was cancelled: {label}"
+                )
+            if timeout_s is not None:
+                interval = min(interval, max(timeout_s - elapsed, 0.0))
+            time.sleep(interval)
+            interval = min(
+                max(interval, _POLL_INTERVAL_START_SECONDS) * 2,
+                _POLL_INTERVAL_MAX_SECONDS,
+            )
+
     def _execute_once(
-        self, sql: str, parameters: Optional[list] = None
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        wait_seconds: float = 0.0,
+        timeout_s: int | None = None,
     ) -> pd.DataFrame:
+        # A statement is silent until it returns, and a cold Spark engine or a
+        # wide scan can hold the socket for the full 900s timeout -- which in
+        # the logs is indistinguishable from a hang. Timing each phase turns
+        # "ingestion is stuck" into "it is 900s into SELECT * FROM raw.elk_log".
+        # ``wait`` is time spent queued behind another statement: the session is
+        # serialised behind a lock, so one slow query stalls every caller behind
+        # it, and that queueing is otherwise invisible.
+        label = " ".join(sql.split())[:110]
+        started = time.perf_counter()
         with self._cursor() as cursor:
+            connected = time.perf_counter()
             if parameters:
-                cursor.execute(sql, parameters)
+                cursor.execute(sql, parameters, async_=True)
             else:
-                cursor.execute(sql)
+                cursor.execute(sql, async_=True)
+            self._await_completion(cursor, label, connected, timeout_s)
+            executed = time.perf_counter()
             if cursor.description is None:
+                logger.info(
+                    "kyuubi: %.2fs (wait %.2fs, connect %.2fs, execute %.2fs) "
+                    "— no rows — %s",
+                    wait_seconds + executed - started,
+                    wait_seconds,
+                    connected - started,
+                    executed - connected,
+                    label,
+                )
                 return pd.DataFrame()
             # pyhive reports names as ``table.column``; keep only the column so
             # result keys match what the caller's SQL asked for.
             columns = [str(desc[0]).split(".")[-1] for desc in cursor.description]
-            return pd.DataFrame(cursor.fetchall(), columns=columns)
+            rows = cursor.fetchall()
+            logger.info(
+                "kyuubi: %.2fs (wait %.2fs, connect %.2fs, execute %.2fs, "
+                "fetch %.2fs) — %d row(s) — %s",
+                wait_seconds + time.perf_counter() - started,
+                wait_seconds,
+                connected - started,
+                executed - connected,
+                time.perf_counter() - executed,
+                len(rows),
+                label,
+            )
+            return pd.DataFrame(rows, columns=columns)
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: int | None = None,
+    ) -> pd.DataFrame:
         """Run *sql*, reopening the session once if it has gone away.
+
+        *timeout_s* caps how long the statement may stay pending before it is
+        cancelled and :class:`KyuubiQueryTimeout` is raised. It is off by
+        default: a metadata scan over a large catalog legitimately takes
+        minutes. Callers whose query should be cheap — profiling samples, say —
+        pass a cap so a warehouse that is not answering costs seconds rather
+        than the full socket timeout. A timeout is never retried.
 
         The retry lives here rather than around ``cursor()`` because
         ``hive.Connection.cursor()`` only constructs a local object -- it never
@@ -578,24 +728,46 @@ class KyuubiDatabase(SQLDatabase):
         raised unchanged. Retrying is safe because the failed statement never
         reached an engine, so re-running it cannot double-apply anything.
         """
+        queued = time.perf_counter()
         with self._lock:
+            wait_seconds = time.perf_counter() - queued
+            # A failed statement is the one whose duration matters most -- a
+            # read timeout costs the full socket timeout before it raises -- so
+            # every exit path reports how long it burned.
+            started = time.perf_counter()
             try:
-                return self._execute_once(sql, parameters)
+                return self._execute_once(
+                    sql, parameters, wait_seconds=wait_seconds, timeout_s=timeout_s
+                )
+            except KyuubiQueryTimeout:
+                # The caller asked for a bound and got it. Reopening the
+                # session would not make the engine any faster.
+                raise
             except _transport_errors() as exc:
                 logger.info(
-                    "Kyuubi session lost (%s); reopening and retrying once",
+                    "Kyuubi session lost after %.2fs (%s); reopening and retrying once",
+                    time.perf_counter() - started,
                     type(exc).__name__,
                 )
             except Exception as exc:
                 if not is_session_lost(exc, sql):
+                    logger.info(
+                        "kyuubi: failed after %.2fs (%s) — %s",
+                        time.perf_counter() - started,
+                        type(exc).__name__,
+                        " ".join(sql.split())[:110],
+                    )
                     raise
                 logger.info(
-                    "Kyuubi rejected the session handle (%s); "
+                    "Kyuubi rejected the session handle after %.2fs (%s); "
                     "reopening and retrying once",
+                    time.perf_counter() - started,
                     type(exc).__name__,
                 )
             self._reset_connection()
-            return self._execute_once(sql, parameters)
+            return self._execute_once(
+                sql, parameters, wait_seconds=wait_seconds, timeout_s=timeout_s
+            )
 
     # ------------------------------------------------------------------
     # Schema introspection

@@ -4,14 +4,22 @@
 
 import base64
 import json
+import logging
+from contextlib import contextmanager
+from types import SimpleNamespace
 from urllib.parse import parse_qs, urlparse
 
 import pandas as pd
 import pytest
+from TCLIService.ttypes import TOperationState
 
 from gsf.catalog.extract import IncompleteCatalogExtractionError
 from gsf.connectors.connection_string_factory import build_connection_string
-from gsf.connectors.kyuubi import KyuubiDatabase, _parse_connection_string
+from gsf.connectors.kyuubi import (
+    KyuubiDatabase,
+    KyuubiQueryTimeout,
+    _parse_connection_string,
+)
 from gsf.connectors.registry import CONNECTOR_REGISTRY
 
 HOST = "hive.pdx-aws.data.nvidia.com"
@@ -396,7 +404,7 @@ def test_execute_reopens_after_a_broken_pipe() -> None:
     calls: list[str] = []
     opened: list[int] = []
 
-    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+    def fake_execute_once(sql: str, parameters=None, **_kwargs) -> pd.DataFrame:
         calls.append(sql)
         if len(calls) == 1:
             raise BrokenPipeError(32, "Broken pipe")
@@ -428,7 +436,7 @@ def test_execute_reopens_after_an_invalid_session_handle() -> None:
     calls: list[str] = []
     opened: list[int] = []
 
-    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+    def fake_execute_once(sql: str, parameters=None, **_kwargs) -> pd.DataFrame:
         calls.append(sql)
         if len(calls) == 1:
             raise RuntimeError(
@@ -453,7 +461,7 @@ def test_execute_does_not_retry_a_rejected_statement() -> None:
     db = _database()
     calls: list[str] = []
 
-    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+    def fake_execute_once(sql: str, parameters=None, **_kwargs) -> pd.DataFrame:
         calls.append(sql)
         raise ValueError("Table or view not found: nope")
 
@@ -470,7 +478,7 @@ def test_execute_surfaces_a_session_error_that_survives_the_retry() -> None:
     db = _database()
     calls: list[str] = []
 
-    def fake_execute_once(sql: str, parameters=None) -> pd.DataFrame:
+    def fake_execute_once(sql: str, parameters=None, **_kwargs) -> pd.DataFrame:
         calls.append(sql)
         raise RuntimeError("Invalid SessionHandle: deadbeef")
 
@@ -552,3 +560,111 @@ def test_qualify_quotes_names_with_spaces() -> None:
     assert _database().qualify("my schema", "my table") == (
         "`nvdp`.`my schema`.`my table`"
     )
+
+
+SQL = "SELECT *\n  FROM `nvdp`.`raw`.`events` LIMIT 1000"
+
+
+class _FakeCursor:
+    """A pyhive-shaped cursor whose operation state the test drives.
+
+    ``states`` is consumed one entry per ``poll()``; the last one repeats, so a
+    single RUNNING entry stands in for a statement that never finishes.
+    """
+
+    description = [("events.id", "bigint")]
+
+    def __init__(self, states: list[int]) -> None:
+        self._states = states
+        self.executed_async: bool | None = None
+        self.cancelled = False
+        self.polls = 0
+
+    def execute(self, sql: str, parameters=None, async_: bool = False) -> None:
+        self.executed_async = async_
+
+    def poll(self):
+        state = self._states[min(self.polls, len(self._states) - 1)]
+        self.polls += 1
+        return SimpleNamespace(operationState=state, errorMessage="boom")
+
+    def cancel(self) -> None:
+        self.cancelled = True
+
+    def fetchall(self) -> list[tuple[int]]:
+        return [(1,), (2,)]
+
+
+def _stub_cursor(db: KyuubiDatabase, states: list[int]) -> _FakeCursor:
+    cursor = _FakeCursor(states)
+
+    @contextmanager
+    def fake_cursor():
+        yield cursor
+
+    db._cursor = fake_cursor  # type: ignore[method-assign]
+    return cursor
+
+
+def test_execute_logs_the_query_and_its_phase_timings(caplog) -> None:
+    """A statement is silent until it returns, so time it like Databricks does.
+
+    Without this a 900s read timeout and a healthy query look identical in the
+    logs, and the queueing behind the session lock is invisible.
+    """
+    db = _database()
+    cursor = _stub_cursor(db, [TOperationState.FINISHED_STATE])
+
+    with caplog.at_level(logging.INFO, logger="gsf.connectors.kyuubi"):
+        frame = db.execute(SQL)
+
+    assert list(frame.columns) == ["id"]
+    assert cursor.executed_async is True, "a blocking call cannot report its state"
+    message = next(m for m in caplog.messages if m.startswith("kyuubi: "))
+    assert "2 row(s)" in message
+    for phase in ("wait ", "connect ", "execute ", "fetch "):
+        assert phase in message
+    assert "SELECT * FROM `nvdp`.`raw`.`events` LIMIT 1000" in message
+
+
+def test_execute_cancels_a_statement_that_outlives_its_timeout() -> None:
+    """A capped query fails fast instead of riding the 900s socket timeout.
+
+    The engine never gets past RUNNING here, which is what a Spark job that
+    cannot get executors looks like from the client.
+    """
+    db = _database()
+    cursor = _stub_cursor(db, [TOperationState.RUNNING_STATE])
+    reopened: list[int] = []
+    db._reset_connection = lambda: reopened.append(1)  # type: ignore[method-assign]
+
+    with pytest.raises(KyuubiQueryTimeout, match="exceeded 1s"):
+        db.execute(SQL, timeout_s=1)
+
+    assert cursor.cancelled, "the server should be told to stop the statement"
+    assert not reopened, "a timeout is not a lost session — retrying just re-waits"
+
+
+def test_execute_reports_a_statement_the_engine_failed() -> None:
+    """poll() reports ERROR_STATE without raising; fetching would mask it."""
+    db = _database()
+    _stub_cursor(db, [TOperationState.ERROR_STATE])
+
+    with pytest.raises(RuntimeError, match="ERROR_STATE: boom"):
+        db.execute(SQL)
+
+
+def test_a_pending_statement_reports_its_state_while_it_waits(
+    caplog, monkeypatch
+) -> None:
+    """PENDING vs RUNNING is the difference between queued and scanning."""
+    # The state line is only worth logging once a statement is slow, so pretend
+    # this one already is.
+    monkeypatch.setattr("gsf.connectors.kyuubi._SLOW_QUERY_SECONDS", 0.0)
+    db = _database()
+    _stub_cursor(db, [TOperationState.PENDING_STATE, TOperationState.FINISHED_STATE])
+
+    with caplog.at_level(logging.INFO, logger="gsf.connectors.kyuubi"):
+        db.execute(SQL)
+
+    assert any("PENDING_STATE after" in m for m in caplog.messages)

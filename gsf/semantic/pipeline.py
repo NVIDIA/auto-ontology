@@ -10,7 +10,7 @@ from gsf.infra.feature_flags import is_distinct_value_probing_enabled
 from gsf.semantic.domain import DomainSummary, load_domain_summary
 from gsf.semantic.embed import SemanticEmbedder
 from gsf.semantic.models import ProcessTableResult
-from gsf.semantic.visit_enter import process_table
+from gsf.semantic.visit_enter import process_table, reset_sampling_breaker
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +30,9 @@ def compile_semantic_layer(
     writes, VDB embedding) is serialized via ``_term_commit_lock`` in
     ``visit_enter`` to prevent duplicate Terms.
     """
+    # A warehouse that was unreachable during an earlier run in this worker
+    # must not stay un-sampled for this one.
+    reset_sampling_breaker()
     summary = domain_summary or load_domain_summary(database_name)
     tables = fetch_all_tables_without_term(database_name)
     # Read once per run, not once per table: the flag lives in Postgres and
