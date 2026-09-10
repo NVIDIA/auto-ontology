@@ -14,7 +14,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
+import time
 from typing import Any, Iterable, Optional
 
 import psycopg
@@ -67,6 +69,71 @@ def _to_async_url(url: str) -> str:
     if url.startswith("postgres://"):
         return url.replace("postgres://", "postgresql+asyncpg://", 1)
     return url
+
+
+def _instrument_engine(engine: PGEngine) -> None:
+    """Time every SQL statement this engine executes.
+
+    Attached to ``sync_engine`` because that is where SQLAlchemy emits events
+    even for an async engine.
+    """
+    try:
+        from sqlalchemy import event
+
+        target = getattr(engine, "_pool", None) or getattr(engine, "_engine", None)
+        sync_engine = getattr(target, "sync_engine", None) or target
+        if sync_engine is None:
+            return
+
+        # The connection, cursor, bind parameters and execution context are
+        # typed ``Any``: they are DBAPI and SQLAlchemy internals whose concrete
+        # types vary by dialect, and the timestamp below is stashed on the
+        # context as a private attribute, which a precise type would reject.
+        @event.listens_for(sync_engine, "before_cursor_execute")
+        def _before(
+            conn: Any,
+            cursor: Any,
+            statement: str,
+            parameters: Any,
+            context: Any,
+            executemany: bool,
+        ) -> None:
+            context._gsf_started = time.perf_counter()
+
+        @event.listens_for(sync_engine, "after_cursor_execute")
+        def _after(
+            conn: Any,
+            cursor: Any,
+            statement: str,
+            parameters: Any,
+            context: Any,
+            executemany: bool,
+        ) -> None:
+            started = getattr(context, "_gsf_started", None)
+            if started is None:
+                return
+            elapsed = time.perf_counter() - started
+            # Logged, not accumulated. A running total would need a lock on
+            # every statement, and the total is not the useful number anyway:
+            # per-statement duration is the only figure that is attributable.
+            # A caller cannot subtract "SQL time during my window" from its own
+            # wall time: the statements run on a shared event-loop thread, so
+            # that window also contains every concurrent caller's queries and
+            # over-counts by roughly the concurrency level.
+            logger.debug("vdb.sql %.4fs", elapsed)
+    except Exception:  # pragma: no cover - instrumentation must never break I/O
+        logger.debug("Could not instrument VDB engine timing", exc_info=True)
+
+
+def _pool_status(engine: PGEngine) -> str:
+    """One-line pool occupancy, or '?' when it cannot be read."""
+    try:
+        target = getattr(engine, "_pool", None) or getattr(engine, "_engine", None)
+        sync_engine = getattr(target, "sync_engine", None) or target
+        return sync_engine.pool.status()
+    except Exception:  # pragma: no cover - status is diagnostic, never load-bearing
+        logger.debug("Could not read VDB pool status", exc_info=True)
+        return "?"
 
 
 class PostgresVDB(VDB):
@@ -128,9 +195,25 @@ class PostgresVDB(VDB):
 
     def _get_engine(self) -> PGEngine:
         if self._engine is None:
+            # from_connection_string forwards **kwargs to create_async_engine.
+            # Passing none leaves SQLAlchemy's default pool_size=5, the ceiling
+            # every concurrent retrieval shares: at 12 concurrent questions a
+            # small share of retrievals found it full. Raising it did not move
+            # wall clock -- the queries were not what those callers were waiting
+            # on -- so the default is set to clear the ceiling, not for headroom
+            # nothing used.
+            #
+            # Budget connections before raising these. GSF opens two of these
+            # stores (data and semantic), each able to reach
+            # pool_size + max_overflow, and the catalog pool in gsf.dal.session
+            # is separate and not covered by GSF_PG_POOL_SIZE.
             self._engine = PGEngine.from_connection_string(
-                _to_async_url(self.connection_string)
+                _to_async_url(self.connection_string),
+                pool_size=int(os.environ.get("GSF_VDB_POOL_SIZE", "10")),
+                max_overflow=int(os.environ.get("GSF_VDB_MAX_OVERFLOW", "10")),
+                pool_pre_ping=True,
             )
+            _instrument_engine(self._engine)
         return self._engine
 
     def _table_exists(self) -> bool:
@@ -446,6 +529,13 @@ class PostgresVDB(VDB):
         if store is None:
             return [[] for _ in queries]
 
+        # Wall time for this call. Server-side time is deliberately not
+        # summarised here: a global SQL accumulator sampled around this window
+        # also captures every concurrent caller's statements, so any per-call
+        # figure derived that way over-reports by roughly the concurrency
+        # level. The attributable number is the per-statement `vdb.sql` line.
+        _started = time.perf_counter()
+
         results: list[list[dict]] = []
         for query in queries:
             try:
@@ -467,6 +557,13 @@ class PostgresVDB(VDB):
             except Exception as e:
                 logger.error(f"Error in retrieval: {e}")
                 return [[] for _ in queries]
+
+        logger.debug(
+            "vdb.retrieval total=%.3fs queries=%d pool=%s",
+            time.perf_counter() - _started,
+            len(queries),
+            _pool_status(self._get_engine()),
+        )
         return results
 
     def run(self, records: list) -> int:
