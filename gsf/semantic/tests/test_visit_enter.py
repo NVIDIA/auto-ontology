@@ -730,3 +730,57 @@ def test_distinct_probe_timeouts_count_toward_the_breaker() -> None:
         )
 
     assert _sampling_breaker.is_open(connector)
+
+
+@patch("gsf.semantic.visit_enter.calculate_columns_profiling")
+@patch("gsf.semantic.visit_enter._resolve_connector")
+@patch("gsf.semantic.visit_enter.merge_column_attribute")
+@patch("gsf.semantic.visit_enter.merge_term")
+@patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")
+@patch("gsf.semantic.visit_enter.extract_term")
+def test_a_tripped_breaker_stops_process_table_sampling(
+    mock_term: MagicMock,
+    mock_fk_suggest: MagicMock,
+    mock_merge_term: MagicMock,
+    mock_merge_col_attr: MagicMock,
+    mock_resolve: MagicMock,
+    mock_profiling: MagicMock,
+) -> None:
+    """Tripping the breaker is only worth anything if it saves the 120s."""
+    from gsf.semantic.models import PotentialFkResult, TableTermsResult
+
+    mock_fk_suggest.return_value = PotentialFkResult()
+    mock_term.return_value = TableTermsResult(terms=[])
+    connector = _CappedConnector(TimeoutError("cancelled"))
+    mock_resolve.return_value = connector
+
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        _sampling_breaker.record_failure(connector, TimeoutError("cancelled"))
+    assert _sampling_breaker.is_open(connector)
+
+    table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
+    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+    process_table(table, ctx, domain_summary=None, database_name="nvdp")
+
+    mock_profiling.assert_not_called()
+
+
+def test_the_breaker_key_matches_however_the_database_is_spelled() -> None:
+    """_resolve_connector matches case-insensitively, so the key must too.
+
+    A connector loaded from CONNECTION_STRINGS can spell its database
+    differently from the catalog name the run compiles under; a key that
+    disagreed with the reset would leave sampling off for every later run.
+    """
+
+    class _Shouty(_CappedConnector):
+        database_name = "NVDP"
+
+    dead = _Shouty(TimeoutError("cancelled"))
+    for _ in range(_MAX_CONSECUTIVE_SAMPLE_FAILURES):
+        _sampling_breaker.record_failure(dead, TimeoutError("cancelled"))
+    assert _sampling_breaker.is_open(dead)
+
+    reset_sampling_breaker("nvdp")
+
+    assert not _sampling_breaker.is_open(dead)

@@ -145,7 +145,12 @@ class _SamplingCircuitBreaker:
 
     @staticmethod
     def _key(connector: "SQLDatabase") -> str:
-        return str(getattr(connector, "database_name", None) or id(connector))
+        # Casefolded to match _resolve_connector: a connector loaded from
+        # CONNECTION_STRINGS can spell its database differently from the
+        # catalog name a run is compiled under, and a key that disagrees with
+        # the reset would leave the breaker open for every later run.
+        name = getattr(connector, "database_name", None)
+        return str(name).casefold() if name else str(id(connector))
 
     def is_open(self, connector: "SQLDatabase") -> bool:
         with self._lock:
@@ -177,9 +182,10 @@ class _SamplingCircuitBreaker:
         return True
 
     def reset(self, database_name: str) -> None:
+        key = database_name.casefold()
         with self._lock:
-            self._failures.pop(database_name, None)
-            self._tripped.discard(database_name)
+            self._failures.pop(key, None)
+            self._tripped.discard(key)
 
 
 _sampling_breaker = _SamplingCircuitBreaker()
