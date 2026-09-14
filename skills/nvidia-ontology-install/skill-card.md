@@ -57,7 +57,7 @@ Other properties: `.nvidia-ontology-install.log` is gitignored; do not commit it
 
 ## Evaluation Agents Used
 
-OpenCode with `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment.
+SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
 
 ## Evaluation Tasks
 
