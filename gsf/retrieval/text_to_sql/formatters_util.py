@@ -20,18 +20,47 @@ def _format_sample_values(raw: Any) -> str:
     return ", ".join(values)
 
 
-def qualify_table(database_name: str, schema_name: str, table_name: str) -> str:
+# Dialects whose connection does *not* bind the catalog, so a name has to carry
+# it explicitly. These are exactly the connectors that override
+# ``SQLDatabase.qualify`` to prepend it (``gsf.connectors.kyuubi``,
+# ``gsf.connectors.trino``); everywhere else the session is already scoped to
+# the database and a two-part name resolves.
+_CATALOG_QUALIFIED_DIALECTS = frozenset({"spark", "trino"})
+
+
+def qualify_table(
+    database_name: str,
+    schema_name: str,
+    table_name: str,
+    dialect: str | None = None,
+) -> str:
     """Build the qualified identifier the model is expected to copy verbatim.
 
     Two-level dialects (MySQL/MariaDB) have no schema namespace: the catalog
     reports ``TABLE_SCHEMA`` as the database itself, so naively joining all
-    three parts yields ``db.db.table``, which is a syntax error. Collapsing the
-    duplicate is also correct for three-level dialects, where a database and
-    schema may legitimately share a name — the connection is already scoped to
-    the database, so ``schema.table`` still resolves.
+    three parts yields ``db.db.table``, which is a syntax error. The duplicate
+    is collapsed for those, and for engines whose connection binds the database
+    so that ``schema.table`` still resolves.
+
+    It must *not* be collapsed on a dialect in
+    :data:`_CATALOG_QUALIFIED_DIALECTS`. There the catalog and the schema are
+    separate namespaces that may legitimately share a name — a Kyuubi catalog
+    ``lakehouse`` holding a schema ``lakehouse`` — and the session is left on
+    the engine's own default catalog (``spark_catalog``), not the bound one.
+    So collapsing emits ``lakehouse.events``, which Spark reads as schema
+    ``lakehouse`` under ``spark_catalog`` and rejects with
+    TABLE_OR_VIEW_NOT_FOUND. Scoping the session instead is not an option:
+    Spark rejects ``USE CATALOG``, and ``SET CATALOG`` leaves
+    ``current_schema()`` empty so the two-part name still does not resolve.
     """
     parts = [database_name, schema_name, table_name]
-    if database_name and schema_name and database_name.lower() == schema_name.lower():
+    collapsible = (dialect or "").lower() not in _CATALOG_QUALIFIED_DIALECTS
+    if (
+        collapsible
+        and database_name
+        and schema_name
+        and database_name.lower() == schema_name.lower()
+    ):
         parts = [schema_name, table_name]
     return ".".join(part for part in parts if part)
 
@@ -109,8 +138,15 @@ def format_semantic_context(
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
+    dialect: str | None = None,
 ) -> str:
-    """Format tables and their columns as schema context for a prompt."""
+    """Format tables and their columns as schema context for a prompt.
+
+    *dialect* only decides how each table name is qualified; see
+    :func:`qualify_table`. Omitting it keeps the two-part form, which is wrong
+    for a catalog-qualified engine, so callers that have a connector should
+    pass its dialect.
+    """
     if not tables:
         return "No tables available"
 
@@ -124,7 +160,7 @@ def format_tables_for_prompt(
         database_name = table.get("database_name", "")
         schema_name = table.get("schema_name", "")
 
-        full_name = qualify_table(database_name, schema_name, table_name)
+        full_name = qualify_table(database_name, schema_name, table_name, dialect)
 
         table_parts.append(f"TABLE: {full_name}")
         if table_label and table_label != table_name:

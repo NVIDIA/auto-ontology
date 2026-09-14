@@ -35,6 +35,7 @@ from gsf.retrieval.data_access.relevant_tables import (
 )
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
@@ -560,11 +561,26 @@ class SQLReconstructionAgent(BaseAgent):
         path_state["failed_attempts"] = failed_attempts
 
         # --- Step 3: Build reconstruction prompt ---
+        # Resolved after table discovery above, so a newly merged table is
+        # covered too. Without the dialect the table list would drop the
+        # catalog on a catalog-qualified engine, and since the model copies
+        # these names verbatim every retry would reproduce the unresolvable
+        # name it is being asked to fix.
+        connector = resolve_connector_from_tables(
+            relevant_tables, state.get("connectors") or []
+        )
+        dialect = getattr(connector, "dialect", None)
+
         tables_section = ""
         if relevant_tables:
+            formatted_tables = format_tables_for_prompt(
+                relevant_tables,
+                target_db=path_state.get("target_db"),
+                dialect=dialect,
+            )
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"
-                f"{format_tables_for_prompt(relevant_tables, target_db=path_state.get('target_db'))}\n\n"
+                f"{formatted_tables}\n\n"
             )
 
         history_section = ""

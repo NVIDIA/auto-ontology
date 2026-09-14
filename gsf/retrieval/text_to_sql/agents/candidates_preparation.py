@@ -78,6 +78,10 @@ def _qualified_name(t: dict) -> str:
     Includes database_name (not just schema.name) so two same-named tables
     in different databases (e.g. two "public.orders") don't collide during
     dedup and silently merge into one.
+
+    Deliberately dialect-blind, unlike the prompt formatters: these names are
+    identity keys that get matched back against what the relevance filter
+    returns, never interpolated into SQL, so only self-consistency matters.
     """
     return qualify_table(
         t.get("database_name", ""),

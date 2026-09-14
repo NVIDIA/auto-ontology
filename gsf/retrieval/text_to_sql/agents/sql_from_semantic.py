@@ -236,7 +236,9 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Build the available-tables schema section.
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
-                + format_tables_for_prompt(relevant_tables, target_db=target_db)
+                + format_tables_for_prompt(
+                    relevant_tables, target_db=target_db, dialect=dialect
+                )
                 if relevant_tables
                 else "No tables available."
             )

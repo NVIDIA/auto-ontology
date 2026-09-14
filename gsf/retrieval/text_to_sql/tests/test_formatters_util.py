@@ -17,6 +17,38 @@ def test_collapse_ignores_identifier_case() -> None:
     assert qualify_table("analytics", "ANALYTICS", "orders") == "ANALYTICS.orders"
 
 
+def test_keeps_catalog_when_schema_shares_its_name_on_spark() -> None:
+    """A Kyuubi catalog and schema may share a name and stay distinct.
+
+    Collapsing yields ``lakehouse.events``, which Spark resolves as a schema
+    under ``spark_catalog`` and rejects with TABLE_OR_VIEW_NOT_FOUND.
+    """
+    assert (
+        qualify_table("lakehouse", "lakehouse", "events", "spark")
+        == "lakehouse.lakehouse.events"
+    )
+
+
+def test_keeps_catalog_when_schema_shares_its_name_on_trino() -> None:
+    assert qualify_table("hive", "hive", "orders", "trino") == "hive.hive.orders"
+
+
+def test_catalog_qualified_dialect_check_ignores_case() -> None:
+    assert (
+        qualify_table("lakehouse", "lakehouse", "orders", "SPARK")
+        == "lakehouse.lakehouse.orders"
+    )
+
+
+def test_collapses_for_a_dialect_that_binds_its_database() -> None:
+    """Databricks and friends scope the session, so two parts still resolve."""
+    assert qualify_table("dw", "dw", "orders", "databricks") == "dw.orders"
+
+
+def test_distinct_schema_is_unaffected_by_dialect() -> None:
+    assert qualify_table("mydb", "public", "orders", "spark") == "mydb.public.orders"
+
+
 def test_keeps_three_parts_for_distinct_schema() -> None:
     assert qualify_table("mydb", "public", "orders") == "mydb.public.orders"
 
@@ -40,6 +72,22 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     )
     assert "TABLE: dw.SIS_DEPARTMENT" in rendered
     assert "dw.dw." not in rendered
+
+
+def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
+    """The model copies these names verbatim, so the catalog has to survive."""
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "events",
+                "database_name": "lakehouse",
+                "schema_name": "lakehouse",
+                "columns": [{"name": "cluster_id", "data_type": "string"}],
+            }
+        ],
+        dialect="spark",
+    )
+    assert "TABLE: lakehouse.lakehouse.events" in rendered
 
 
 def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:

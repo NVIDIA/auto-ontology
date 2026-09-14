@@ -135,7 +135,9 @@ class SQLFromTablesAgent(BaseAgent):
             observation_block=observation_block,
             queries=[],
             tables=format_tables_for_prompt(
-                relevant_tables, target_db=path_state.get("target_db")
+                relevant_tables,
+                target_db=path_state.get("target_db"),
+                dialect=dialect,
             ),
             join_paths="",
             qa_from_conversations=similar_questions,
