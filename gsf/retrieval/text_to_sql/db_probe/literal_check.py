@@ -44,6 +44,10 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 
 logger = logging.getLogger(__name__)
 
+# The connector's ``dialect`` is handed to sqlglot verbatim throughout this
+# package. See the note in ``agents/sql_parse_validation.py`` for why a
+# translation map must not come back.
+
 
 def _first_value(row: dict) -> Any:
     """Return the first value of a single-row result dict."""
@@ -57,26 +61,6 @@ def _first_value(row: dict) -> Any:
 # absent and do not repair.
 _CLOSE_MATCH_CUTOFF = 0.6
 
-# A miss here makes sqlglot fall back to its default dialect, which quotes
-# identifiers with ``"`` — a string literal to Spark, not an identifier. Keep in
-# step with the map of the same name in ``agents/sql_parse_validation.py``.
-_SQLGLOT_DIALECTS = {
-    "postgresql": "postgres",
-    "postgres": "postgres",
-    "sqlite": "sqlite",
-    "duckdb": "duckdb",
-    "snowflake": "snowflake",
-    "mysql": "mysql",
-    "bigquery": "bigquery",
-    "spark": "spark",
-    "databricks": "databricks",
-    "trino": "trino",
-}
-
-
-def _sqlglot_dialect(dialect: Optional[str]) -> Optional[str]:
-    return _SQLGLOT_DIALECTS.get((dialect or "").lower())
-
 
 def _text_cast(column_sql: str, dialect: Optional[str]) -> str:
     """*column_sql* wrapped in an explicit text cast, when the dialect needs one.
@@ -89,7 +73,7 @@ def _text_cast(column_sql: str, dialect: Optional[str]) -> str:
     known to be a safe no-op (Postgres casts a plain ``text`` column to
     itself) *and* known to fix a real, observed failure.
     """
-    if _sqlglot_dialect(dialect) == "postgres":
+    if dialect == "postgres":
         return f"{column_sql}::text"
     return column_sql
 
@@ -285,7 +269,7 @@ def _fetch_range(
     dialect this executor supports (unlike ``PERCENTILE_CONT``, which SQLite
     and MySQL don't have).
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     col_ref = exp.column(col.this).sql(dialect=d)
     table_ref = table_node.sql(dialect=d)
     sql = (
@@ -327,7 +311,7 @@ def find_numeric_scale_mismatches(
     this is a heuristic rather than a certainty.
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("numeric_scale_check: could not parse SQL (%s)", exc)
         return []
@@ -523,7 +507,7 @@ def find_integer_division_mismatches(
     Each entry: ``{"kind": "integer_division", "numerator", "denominator"}``
     — the two operands' own SQL text, for the reconstruction message.
     """
-    if _sqlglot_dialect(dialect) != "postgres":
+    if dialect != "postgres":
         return []
     known_types = known_types or {}
     try:
@@ -571,7 +555,7 @@ def try_self_apply_integer_division_fixes(
     """
     fixable = [m for m in mismatches if m.get("kind") == "integer_division"]
     other = [m for m in mismatches if m.get("kind") != "integer_division"]
-    if not fixable or _sqlglot_dialect(dialect) != "postgres":
+    if not fixable or dialect != "postgres":
         return sql, mismatches
 
     try:

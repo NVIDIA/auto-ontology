@@ -64,7 +64,6 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     _as_column,
     _candidate_tables,
-    _sqlglot_dialect,
     _table_nodes,
 )
 
@@ -181,7 +180,7 @@ def _value_overlap(
     dialect this pipeline targets, so this can't regress a case that works
     today — it only fixes the mixed-case ones that silently didn't.
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     a_ref = exp.column(col_a, quoted=True).sql(dialect=d)
     b_ref = exp.column(col_b, quoted=True).sql(dialect=d)
     a_table_ref = exp.table_(table_a, quoted=True).sql(dialect=d)
@@ -230,7 +229,7 @@ def find_join_path_mismatches(
     what was actually checked.
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("join_path_check: could not parse SQL (%s)", exc)
         return []
@@ -522,7 +521,7 @@ def try_self_apply_wrong_column_fixes(
         return sql, mismatches
 
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("join_path_check self-apply: could not parse SQL (%s)", exc)
         return sql, mismatches
@@ -569,7 +568,7 @@ def try_self_apply_wrong_column_fixes(
     if not applied:
         return sql, mismatches
 
-    new_sql = tree.sql(dialect=_sqlglot_dialect(dialect))
+    new_sql = tree.sql(dialect=dialect or None)
     remaining = [m for m in mismatches if id(m) not in applied]
     return new_sql, remaining
 
@@ -695,7 +694,7 @@ def try_self_apply_missing_bridge_fixes(
         return sql, mismatches
 
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("join_path_check self-apply(bridge): could not parse SQL (%s)", exc)
         return sql, mismatches
@@ -708,7 +707,7 @@ def try_self_apply_missing_bridge_fixes(
 
     existing_names = {t.name.lower() for t in all_nodes if t.name}
     existing_aliases = set(by_key.keys())
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
 
     applied: set[int] = set()
     for join in tree.find_all(exp.Join):
@@ -1016,7 +1015,7 @@ def _count_case_dirty_rejects(
     equality — i.e. the two sides agree in substance and differ only in
     casing/whitespace. ``None`` on probe failure.
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     a_ref = exp.table_(table_a).sql(dialect=d)
     b_ref = exp.table_(table_b).sql(dialect=d)
 
@@ -1080,7 +1079,7 @@ def find_case_dirty_join_mismatches(
     "rejected_rows", "verdict": "case_dirty_join"}``.
     """
     try:
-        tree = sqlglot.parse_one(sql, read=_sqlglot_dialect(dialect))
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception as exc:  # noqa: BLE001 — never break the pipeline on a parse error
         logger.info("case_dirty_join_check: could not parse SQL (%s)", exc)
         return []

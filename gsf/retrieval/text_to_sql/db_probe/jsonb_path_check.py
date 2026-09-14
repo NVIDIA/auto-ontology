@@ -40,7 +40,6 @@ from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     _as_column,
     _candidate_tables,
     _first_value,
-    _sqlglot_dialect,
     _table_nodes,
 )
 
@@ -102,7 +101,7 @@ def _fetch_jsonb_keys(
     never a JSON object, or the probe fails — i.e. "not resolvable here", not
     "the key is missing". Mirrors ``literal_check._fetch_distinct``.
     """
-    d = _sqlglot_dialect(dialect)
+    d = dialect or None
     col_ref = exp.column(col.this).sql(dialect=d)
     table_ref = table_node.sql(dialect=d)
     target = f"{col_ref}->'{container}'" if container else col_ref
@@ -145,7 +144,7 @@ def find_jsonb_path_mismatches(
     probe budget exhausted, etc.) — never treated as "everything is fine"
     beyond that.
     """
-    if _sqlglot_dialect(dialect) != "postgres":
+    if dialect != "postgres":
         return []
 
     try:

@@ -40,25 +40,13 @@ from gsf.retrieval.data_access.graph_schemas import (
 
 logger = logging.getLogger(__name__)
 
-# sqlglot dialect names differ slightly from our connector dialect strings.
-# Maps a connector's ``dialect`` to the sqlglot dialect used to read *and*
-# re-render SQL. A miss here is not a harmless fallback: sqlglot then renders in
-# its default dialect, which quotes identifiers with ``"``. Spark reads a
-# double-quoted token as a string literal, so a rewritten ``ci."kubeType"``
-# fails to parse outright rather than degrading gracefully.
-_SQLGLOT_DIALECTS = {
-    "sqlite": "sqlite",
-    "postgres": "postgres",
-    "postgresql": "postgres",
-    "snowflake": "snowflake",
-    "duckdb": "duckdb",
-    "mysql": "mysql",
-    "heavydb": "postgres",
-    "spark": "spark",
-    "databricks": "databricks",
-    "trino": "trino",
-}
-
+# A connector's ``dialect`` goes straight to sqlglot here. Do not reintroduce a
+# name map: ``connectors/tests/test_registry_dialects.py`` already guarantees
+# every connector reports a name sqlglot knows, so a map can only ever be an
+# identity — one that silently yields ``None`` for anything it has not been
+# taught, which makes sqlglot re-render in its default dialect and quote
+# identifiers with ``"``. Spark reads that as a string literal, so the SQL stops
+# parsing. Qualification and dialect are the connector's to decide.
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -199,9 +187,8 @@ def quote_known_mixed_case_identifiers(
     if not mixed_case_tables and not mixed_case_columns:
         return sql
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        tree = sqlglot.parse_one(sql, read=read)
+        tree = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         return sql
     if tree is None:
@@ -228,7 +215,7 @@ def quote_known_mixed_case_identifiers(
 
     if not changed:
         return sql
-    return tree.sql(dialect=read)
+    return tree.sql(dialect=dialect or None)
 
 
 def detect_vacuous_group_by(
@@ -288,9 +275,8 @@ def detect_vacuous_group_by(
     if not any(kw in sql_lower for kw in _CLUE_WORDS):
         return ""
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         return ""
     if parsed is None:
@@ -563,9 +549,8 @@ def detect_missing_aggregation(
     if "group by" not in sql_lower:
         return ""
 
-    read = _SQLGLOT_DIALECTS.get((dialect or "").strip().lower())
     try:
-        parsed = sqlglot.parse_one(sql, read=read)
+        parsed = sqlglot.parse_one(sql, read=dialect or None)
     except Exception:
         return ""
     if parsed is None:
