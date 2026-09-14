@@ -167,6 +167,13 @@ def format_tables_for_prompt(
     :func:`qualify_table`. Omitting it keeps the two-part form, which is wrong
     for a catalog-qualified engine, so callers that have a connector should
     pass its dialect.
+
+    *target_db* stands in for a table that carries no ``database_name`` of its
+    own, which legacy catalog metadata does not (see
+    ``connector_routing.resolve_connector_from_tables``). Without it such a
+    table renders unqualified here while :func:`format_semantic_context` names
+    the same table with its catalog — and on a catalog-qualified engine the
+    short one does not resolve.
     """
     if not tables:
         return "No tables available"
@@ -178,7 +185,7 @@ def format_tables_for_prompt(
         table_name = table.get("name", "UNKNOWN")
         table_label = table.get("label", "")
         table_description = table.get("description", "")
-        database_name = table.get("database_name", "")
+        database_name = table.get("database_name") or target_db or ""
         schema_name = table.get("schema_name", "")
 
         full_name = qualify_table(database_name, schema_name, table_name, dialect)

@@ -252,3 +252,52 @@ def test_semantic_context_matches_table_section_spelling() -> None:
 
     assert "TABLE: lakehouse.lakehouse.clusters" in tables_section
     assert "Table: lakehouse.lakehouse.clusters" in hint
+
+
+def test_prompt_falls_back_to_target_db_when_table_has_no_database() -> None:
+    """Legacy catalog rows carry no database_name; target_db supplies it.
+
+    Without the fallback the table renders as ``lakehouse.events`` on Spark —
+    a schema under spark_catalog, which does not resolve.
+    """
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "events",
+                "schema_name": "lakehouse",
+                "columns": [{"name": "cluster_id", "data_type": "string"}],
+            }
+        ],
+        target_db="lakehouse",
+        dialect="spark",
+    )
+
+    assert "TABLE: lakehouse.lakehouse.events" in rendered
+
+
+def test_table_own_database_wins_over_target_db() -> None:
+    rendered = format_tables_for_prompt(
+        [{"name": "events", "database_name": "other", "schema_name": "lakehouse"}],
+        target_db="lakehouse",
+        dialect="spark",
+    )
+
+    assert "TABLE: other.lakehouse.events" in rendered
+
+
+def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
+    """The cross-section invariant has to hold without database_name too."""
+    tables_section = format_tables_for_prompt(
+        [{"name": "clusters", "schema_name": "lakehouse"}],
+        target_db="lakehouse",
+        dialect="spark",
+    )
+    hint = format_semantic_context(
+        {"schema_name": "lakehouse", "table_name": "clusters", "col_name": "id"},
+        [],
+        target_db="lakehouse",
+        dialect="spark",
+    )
+
+    assert "TABLE: lakehouse.lakehouse.clusters" in tables_section
+    assert "Table: lakehouse.lakehouse.clusters" in hint
