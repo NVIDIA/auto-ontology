@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from gsf.retrieval.text_to_sql.formatters_util import (
+    format_semantic_context,
     format_tables_for_prompt,
     qualify_table,
 )
@@ -150,3 +151,104 @@ def test_prompt_renders_date_format_when_present() -> None:
         ]
     )
     assert "format: YYMMDD" in rendered
+
+
+def test_semantic_context_keeps_catalog_on_spark() -> None:
+    """The anchor, the attribute lines and the join hops all carry the catalog.
+
+    The prompt calls these paths authoritative and tells the model to copy the
+    join conditions, so any name here can end up in SQL.
+    """
+    primary_attribute = {
+        "database_name": "lakehouse",
+        "schema_name": "lakehouse",
+        "table_name": "clusters",
+        "col_name": "cluster_id",
+        "attr_name": "ClusterId",
+    }
+    join_paths = [
+        {
+            "attr_name": "EventName",
+            "col_name": "name",
+            "database_name": "lakehouse",
+            "schema_name": "lakehouse",
+            "table_name": "events",
+            "path": [
+                {
+                    "source_database": "lakehouse",
+                    "source_schema": "lakehouse",
+                    "source_table": "clusters",
+                    "source_column": "cluster_id",
+                    "target_database": "lakehouse",
+                    "target_schema": "lakehouse",
+                    "target_table": "events",
+                    "target_column": "cluster_id",
+                }
+            ],
+        }
+    ]
+
+    rendered = format_semantic_context(
+        primary_attribute, join_paths, target_db="lakehouse", dialect="spark"
+    )
+
+    assert "Table: lakehouse.lakehouse.clusters" in rendered
+    assert "lakehouse.lakehouse.events.name" in rendered
+    assert (
+        "lakehouse.lakehouse.clusters.cluster_id"
+        " = lakehouse.lakehouse.events.cluster_id" in rendered
+    )
+
+
+def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
+    """find_table_bridge omits the per-hop database, so target_db stands in."""
+    rendered = format_semantic_context(
+        {"schema_name": "lakehouse", "table_name": "clusters", "col_name": "id"},
+        [
+            {
+                "attr_name": "A",
+                "col_name": "id",
+                "schema_name": "lakehouse",
+                "table_name": "events",
+                "path": [
+                    {
+                        "source_schema": "lakehouse",
+                        "source_table": "clusters",
+                        "source_column": "id",
+                        "target_schema": "lakehouse",
+                        "target_table": "events",
+                        "target_column": "id",
+                    }
+                ],
+            }
+        ],
+        target_db="lakehouse",
+        dialect="spark",
+    )
+
+    assert "lakehouse.lakehouse.clusters.id = lakehouse.lakehouse.events.id" in rendered
+
+
+def test_semantic_context_matches_table_section_spelling() -> None:
+    """The hint and the schema context must name the same table identically."""
+    table = {
+        "name": "clusters",
+        "database_name": "lakehouse",
+        "schema_name": "lakehouse",
+        "columns": [{"name": "cluster_id", "data_type": "string"}],
+    }
+    tables_section = format_tables_for_prompt([table], dialect="spark")
+    hint = format_semantic_context(
+        {
+            "database_name": "lakehouse",
+            "schema_name": "lakehouse",
+            "table_name": "clusters",
+            "col_name": "cluster_id",
+            "attr_name": "ClusterId",
+        },
+        [],
+        dialect="spark",
+    )
+
+    assert "TABLE: lakehouse.lakehouse.clusters" in tables_section
+    assert "Table: lakehouse.lakehouse.clusters" in hint

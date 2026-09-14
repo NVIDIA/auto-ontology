@@ -65,12 +65,23 @@ def qualify_table(
     return ".".join(part for part in parts if part)
 
 
-def _hop_column(hop: dict, side: str, target_db: str | None = None) -> str:
-    """Format a join-path endpoint as ``schema.table.column``."""
+def _hop_column(
+    hop: dict,
+    side: str,
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Format a join-path endpoint, qualified as :func:`qualify_table` would.
+
+    The hop's own database wins over *target_db*, so a path that crosses
+    databases names each side correctly; only the bridge-table builder in
+    ``gsf.dal.attributes`` omits it, and there *target_db* is the fallback.
+    """
+    database = hop.get(f"{side}_database") or target_db or ""
     schema = hop.get(f"{side}_schema", "")
     table = hop.get(f"{side}_table", "")
     column = hop.get(f"{side}_column", "")
-    prefix = f"{schema}.{table}" if schema else table
+    prefix = qualify_table(database, schema, table, dialect)
     return f"{prefix}.{column}"
 
 
@@ -78,13 +89,22 @@ def format_semantic_context(
     primary_attribute: dict,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
+    dialect: str | None = None,
 ) -> str:
-    """Format the semantic anchor and authoritative join paths for a prompt."""
+    """Format the semantic anchor and authoritative join paths for a prompt.
+
+    Names are qualified exactly as :func:`format_tables_for_prompt` does. The
+    prompt calls these paths authoritative and tells the model to copy the join
+    conditions, so a name spelled differently here than in the schema context
+    is one the model may copy into SQL — on a catalog-qualified engine, dropping
+    the catalog makes it unresolvable.
+    """
     anchor_schema = primary_attribute.get("schema_name", "")
     anchor_table = primary_attribute.get("table_name", "")
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
-    anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    anchor_database = primary_attribute.get("database_name") or target_db or ""
+    anchor_full = qualify_table(anchor_database, anchor_schema, anchor_table, dialect)
     # Only present on attrs (re-)ingested since this field was added — older
     # rows just omit the tag.
     anchor_datatype = primary_attribute.get("datatype") or ""
@@ -115,7 +135,8 @@ def format_semantic_context(
             # carry only "path" — no named attribute they resolve to. Render
             # a generic label instead of a blank "  : ." header line.
             if attr_name or col_name or table:
-                full_table = f"{schema}.{table}" if schema else table
+                database = entry.get("database_name") or target_db or ""
+                full_table = qualify_table(database, schema, table, dialect)
                 lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
             else:
                 lines.append("  (structural bridge — connects tables kept above)")
@@ -123,13 +144,13 @@ def format_semantic_context(
             if path:
                 lines.append("    Join path:")
                 if len(path) == 1:
-                    left = _hop_column(path[0], "source", target_db)
-                    right = _hop_column(path[0], "target", target_db)
+                    left = _hop_column(path[0], "source", target_db, dialect)
+                    right = _hop_column(path[0], "target", target_db, dialect)
                     lines.append(f"      {left} = {right}")
                 else:
                     for cur, nxt in zip(path, path[1:]):
-                        left = _hop_column(cur, "target", target_db)
-                        right = _hop_column(nxt, "source", target_db)
+                        left = _hop_column(cur, "target", target_db, dialect)
+                        right = _hop_column(nxt, "source", target_db, dialect)
                         lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)

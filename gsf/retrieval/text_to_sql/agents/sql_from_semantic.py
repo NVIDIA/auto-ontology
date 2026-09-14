@@ -229,6 +229,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                         primary_attribute,
                         attribute_join_paths,
                         target_db=target_db,
+                        dialect=dialect,
                     )
                     + "\n\n"
                 )

@@ -30,6 +30,7 @@ from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.formatters_util import format_semantic_context
+from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
@@ -214,6 +215,17 @@ class IntentValidationAgent(BaseAgent):
                         primary_attribute,
                         attribute_join_paths,
                         target_db=path_state.get("target_db"),
+                        # Must match how the generator spelled these names, or
+                        # the validator judges the SQL against a different
+                        # spelling of the same table.
+                        dialect=getattr(
+                            resolve_connector_from_tables(
+                                path_state.get("relevant_tables"),
+                                state.get("connectors") or [],
+                            ),
+                            "dialect",
+                            None,
+                        ),
                     )
                     + "\n\n"
                 )
