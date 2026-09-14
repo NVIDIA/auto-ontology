@@ -2849,6 +2849,7 @@
       "description_certified": false,
       "id": "<table:pagila.public.film>",
       "imported_id": null,
+      "is_junction_table": false,
       "label": "Table",
       "name": "film",
       "pk": [
@@ -2864,6 +2865,7 @@
       "description_certified": false,
       "id": "<table:pagila.public.film>",
       "imported_id": null,
+      "is_junction_table": false,
       "label": "Table",
       "name": "film",
       "pk": [
