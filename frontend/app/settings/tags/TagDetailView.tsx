@@ -5,22 +5,25 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { tagsApi } from '@/api/tags';
 import { Breadcrumbs } from '@/common/Breadcrumbs';
 import { formatDate } from '@/common/date';
 import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
+import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
+import { AUTO_GENERATED_LABEL } from '@/constants/tags';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
+import { useInfiniteList } from '@/hooks/useInfiniteList';
 import type { TableColumn } from '@/types/table';
-import type { TagDetail, TagItem } from '@/types/tags';
+import type { Tag, TagItem } from '@/types/tags';
 
 import { tagItemPath } from './tag-item-path';
-import { TAGS_PATH } from './tags-path';
+import { TAGS_PANEL_PADDING, TAGS_PATH } from './tags-path';
 
 const TYPE_LABELS: Record<TagItemType, string> = {
 	[TagItemType.Term]: 'Term',
@@ -30,14 +33,62 @@ const TYPE_LABELS: Record<TagItemType, string> = {
 	[TagItemType.SqlAttribute]: 'SQL Attribute',
 };
 
-// A column attribute shares the Term icon because it is a property of one, and
-// the Type column beside it is what names the two apart.
+// The same icon each kind is drawn with in global search — see
+// `SEARCH_TYPE_ICON` — since these rows lead to the same objects, and a kind
+// that changed its mark between the two screens would read as another kind.
 const TYPE_ICONS: Record<TagItemType, IconName> = {
 	[TagItemType.Term]: IconName.Terms,
 	[TagItemType.Table]: IconName.Table,
 	[TagItemType.Column]: IconName.Column,
-	[TagItemType.ColumnAttribute]: IconName.Terms,
+	[TagItemType.ColumnAttribute]: IconName.Key,
 	[TagItemType.SqlAttribute]: IconName.CodeBracket,
+};
+
+/**
+ * Who or what applied the label: the rule that matched, the person who
+ * clicked, or the deployment itself.
+ *
+ * The `rule` first, under the same lightning mark the Rules page draws a rule
+ * with — a rule labels objects nobody visited, so "which rule" is the answer
+ * to why this row is here at all. Then the account, with the initial the rest
+ * of the app draws a person as.
+ *
+ * Everything else is "Auto Generated", deliberately one answer rather than
+ * two. No rule and no account means an attach that carried no identity, or a
+ * row written before these columns existed, or an id whose account has since
+ * been deleted — these are not foreign keys, so a label outlives its user.
+ * A reader can act on "a person or a rule did this"; they can do nothing with
+ * the difference between an id that resolves to nobody and no id at all, so
+ * this column does not spend a word on it — nor does any other column in the
+ * app that names a person.
+ */
+const TaggedByCell = ({ item }: { item: TagItem }) => {
+	if (item.rule != null) {
+		return (
+			<span className="flex min-w-0 items-center gap-1.5" title={item.rule.name}>
+				<Icon name={IconName.Lightning} className="h-3.5 w-3.5 shrink-0 text-[#76b900]" />
+				<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">
+					{item.rule.name}
+				</span>
+			</span>
+		);
+	}
+
+	const name = item.tagged_by_user?.name || item.tagged_by_user?.email || '';
+	const known = name !== '';
+	const label = known ? name : AUTO_GENERATED_LABEL;
+
+	return (
+		<span className="flex min-w-0 items-center gap-2" title={label}>
+			<span
+				aria-hidden="true"
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400'}`}
+			>
+				{label.charAt(0).toUpperCase()}
+			</span>
+			<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">{label}</span>
+		</span>
+	);
 };
 
 const COLUMNS: TableColumn<TagItem>[] = [
@@ -76,6 +127,13 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		cell: (item) => item.path ?? '—',
 	},
 	{
+		key: 'tagged_by',
+		header: 'Tagged By',
+		width: 'w-48',
+		nowrap: true,
+		cell: (item) => <TaggedByCell item={item} />,
+	},
+	{
 		key: 'tagged',
 		header: 'Tagged',
 		width: 'w-32',
@@ -97,11 +155,19 @@ type TagDetailViewProps = {
  * deployment, not where you edit it. Which is also why every row opens that
  * page: it is where the labelling can actually be changed. A tag nothing
  * carries gets the empty state below rather than a blank table.
+ *
+ * Two reads rather than one, and the second is paged: a tag applied by a rule
+ * lands on everything a search matched, and goes on landing on whatever matches
+ * later, so what a tag labels is a list without a known ceiling. The rows are
+ * read a page at a time as the reader scrolls, while the tag itself — the name
+ * this page is titled with — is one small read that does not wait for them.
  */
 export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 	const router = useRouter();
-	const [tag, setTag] = useState<TagDetail | null>(null);
-	const [loading, setLoading] = useState(true);
+	// No loading flag beside these: the two reads render independently, and a
+	// tag that has not arrived is `tag == null`, which is what the title
+	// skeletons on. One flag covering both would tie the table to the title.
+	const [tag, setTag] = useState<Tag | null>(null);
 	const [error, setError] = useState<string | null>(null);
 
 	useEffect(() => {
@@ -115,12 +181,38 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 				setError(null);
 				setTag(response.data ?? null);
 			}
-			setLoading(false);
 		});
 		return () => {
 			cancelled = true;
 		};
 	}, [tagId]);
+
+	const fetchItemsPage = useCallback(
+		async (skip: number, limit: number) => {
+			const response = await tagsApi.getTargets(tagId, { skip, limit });
+			if (response.error) {
+				return { error: response.message ?? 'Failed to load tagged items.' };
+			}
+			return { items: response.data ?? [], total: response.total ?? 0 };
+		},
+		[tagId],
+	);
+
+	const {
+		items,
+		total,
+		isLoading: itemsLoading,
+		isLoadingMore,
+		error: itemsError,
+		hasMore,
+		loadMore,
+	} = useInfiniteList(fetchItemsPage, {
+		// An object can only carry a tag once, so a row cannot legitimately
+		// repeat — but a label applied while the reader is scrolling shifts every
+		// later row into the next window, which is exactly when a page re-sends
+		// one it already sent.
+		itemKey: (item) => `${item.type}:${item.id}`,
+	});
 
 	// A row-wide handler rather than a link in the Name cell, because the whole
 	// row is what a reader aims at here — and `Table` gives Enter and Space the
@@ -136,7 +228,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 	// last crumb is plain text, so a lone "Tags" crumb is not a way back.
 	if (error != null) {
 		return (
-			<div className="w-full space-y-5">
+			<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
 				<Breadcrumbs items={[{ label: 'Tags' }]} />
 				<EmptyState
 					icon={IconName.Tag}
@@ -148,58 +240,83 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 		);
 	}
 
-	const items = tag?.items ?? [];
-
 	return (
-		<div className="w-full space-y-5">
-			{/* The tag's own crumb is added only once its name is known: the id in
-			    the URL is not a label, and an empty crumb after the separator
-			    reads as a tag whose name is blank. */}
-			<Breadcrumbs
-				items={
-					tag == null
-						? [{ label: 'Tags' }]
-						: [{ label: 'Tags', href: TAGS_PATH }, { label: tag.name }]
-				}
-			/>
+		<InfiniteScroll
+			className={`flex-1 ${TAGS_PANEL_PADDING}`}
+			onLoadMore={loadMore}
+			isLoading={isLoadingMore}
+			hasMore={hasMore}
+			// Only a failed *first* page is rendered below — a failed later page
+			// keeps the rows already loaded and gets its own retry control.
+			error={items.length > 0 ? itemsError : null}
+		>
+			<div className="w-full space-y-5">
+				{/* The tag's own crumb is added only once its name is known: the id in
+				    the URL is not a label, and an empty crumb after the separator
+				    reads as a tag whose name is blank. */}
+				<Breadcrumbs
+					items={
+						tag == null
+							? [{ label: 'Tags' }]
+							: [{ label: 'Tags', href: TAGS_PATH }, { label: tag.name }]
+					}
+				/>
 
-			<div className="flex items-center gap-2">
-				<Icon name={IconName.Tag} className="h-5 w-5 shrink-0 text-[#76b900]" />
-				{tag == null ? (
-					<SkeletonBlock className="h-5 w-48" />
-				) : (
-					<>
-						<h1 className="min-w-0 truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">
-							{tag.name}
-						</h1>
-						<span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
-							Created {formatDate(tag.created)}
-						</span>
-					</>
-				)}
-			</div>
-
-			{loading ? (
-				<div role="status" aria-label="Loading tagged items">
-					<SkeletonTable columns={4} rows={4} />
+				<div className="flex items-center gap-2">
+					<Icon name={IconName.Tag} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					{tag == null ? (
+						<SkeletonBlock className="h-5 w-48" />
+					) : (
+						<>
+							<h1 className="min-w-0 truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">
+								{tag.name}
+							</h1>
+							{/* How many objects carry the tag, which a scrolled list
+							    cannot say by its length: what is on screen is as far
+							    as the reader has got, not how far there is to go.
+							    Withheld until a page has landed, since a list that
+							    failed to load has no count rather than a count of
+							    none. */}
+							<span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+								{itemsLoading || itemsError != null ? null : `${total} tagged · `}
+								Created {formatDate(tag.created)}
+							</span>
+						</>
+					)}
 				</div>
-			) : items.length > 0 ? (
-				<Table
-					columns={COLUMNS}
-					rows={items}
-					rowKey={(item) => `${item.type}:${item.id}`}
-					onRowClick={handleRowClick}
-					containerClassName="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
-				/>
-			) : (
-				<EmptyState
-					variant={EmptyStateVariant.Inline}
-					icon={IconName.Tag}
-					title="Nothing is tagged with this tag"
-					description="Terms, tables, columns, column attributes and SQL attributes carrying this tag will be listed here."
-					className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
-				/>
-			)}
-		</div>
+
+				{!itemsLoading && itemsError != null && items.length === 0 ? (
+					<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+						{itemsError}
+					</div>
+				) : null}
+
+				{itemsLoading ? (
+					<div role="status" aria-label="Loading tagged items">
+						<SkeletonTable columns={5} rows={4} />
+					</div>
+				) : null}
+
+				{items.length > 0 ? (
+					<Table
+						columns={COLUMNS}
+						rows={items}
+						rowKey={(item) => `${item.type}:${item.id}`}
+						onRowClick={handleRowClick}
+						containerClassName="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+					/>
+				) : null}
+
+				{!itemsLoading && itemsError == null && items.length === 0 ? (
+					<EmptyState
+						variant={EmptyStateVariant.Inline}
+						icon={IconName.Tag}
+						title="Nothing is tagged with this tag"
+						description="Terms, tables, columns, column attributes and SQL attributes carrying this tag will be listed here."
+						className="rounded-lg border border-dashed border-zinc-300/90 bg-white/70 dark:border-zinc-600 dark:bg-zinc-900/30"
+					/>
+				) : null}
+			</div>
+		</InfiniteScroll>
 	);
 };

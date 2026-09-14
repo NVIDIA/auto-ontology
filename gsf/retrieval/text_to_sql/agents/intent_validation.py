@@ -23,17 +23,17 @@ Design Decisions:
 """
 
 import logging
+import os
 from typing import Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from gsf.utils.llm_invoke import invoke_with_structured_output
+from gsf.retrieval.text_to_sql.formatters_util import format_semantic_context
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
-from gsf.retrieval.text_to_sql.formatters_util import (
-    format_semantic_context,
-)
 from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
+    INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
     create_intent_validation_prompt,
     format_custom_analyses_section,
 )
@@ -52,6 +52,20 @@ logger = logging.getLogger(__name__)
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
 # right step event and ``NODE_LABELS`` entry.
 _GRAPH_NODE_NAME = "validate_intent"
+
+# Defaults to DB_PROBE_JOIN_PATH_CHECK's value (not a hardcoded "false") so the
+# two move together automatically: when that deterministic graph/live-probe
+# check is on, join legality is already covered, so this LLM check can afford
+# the more permissive "flag only if self-evidently broken, or you can name a
+# better-fitting relationship" wording and skip AUTHORITATIVE JOIN PATHS; when
+# it's off, this falls back to judging legality itself (mirrors main). Explicit
+# INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE still overrides either way.
+# NOT RECOMMENDED: DB_PROBE_JOIN_PATH_CHECK=false with this forced true —
+# nothing would then check join legality at all.
+_JOINS_VALIDATED_ELSEWHERE = os.environ.get(
+    "INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE",
+    os.environ.get("DB_PROBE_JOIN_PATH_CHECK", "false"),
+).strip().lower() in ("1", "true", "yes")
 
 
 class IntentValidationModel(BaseModel):
@@ -79,6 +93,14 @@ class IntentValidationModel(BaseModel):
             "do NOT add explanatory text like 'no aggregation issues'."
         ),
     )
+
+    @field_validator("join_issues", "aggregation_issues", mode="before")
+    @classmethod
+    def _empty_string_means_no_issues(cls, v: Any) -> Any:
+        """The model sometimes reports "no issues" as "" instead of [] — treat it as empty."""
+        if v == "":
+            return []
+        return v
 
 
 class IntentValidationAgent(BaseAgent):
@@ -166,6 +188,9 @@ class IntentValidationAgent(BaseAgent):
 
         # Prefer the enriched snippets (name/description/sql) from preparation.
         # Fall back to the VDB custom_analyses list when enrichment is absent.
+        # Most ingested databases have no CustomAnalysis nodes, so this is
+        # normally a no-op — kept for parity with any
+        # ingest that does define them.
         custom_analyses_str_list = path_state.get("custom_analyses_str") or []
         if custom_analyses_str_list:
             custom_analyses = (
@@ -179,30 +204,37 @@ class IntentValidationAgent(BaseAgent):
             )
 
         join_paths = ""
-        primary_attribute = path_state.get("primary_attribute") or {}
-        attribute_join_paths = path_state.get("attribute_join_paths") or []
-        if primary_attribute and attribute_join_paths:
-            join_paths = (
-                "AUTHORITATIVE JOIN PATHS (keep joins that follow these verified paths):\n"
-                + format_semantic_context(
-                    primary_attribute,
-                    attribute_join_paths,
-                    target_db=path_state.get("target_db"),
+        if not _JOINS_VALIDATED_ELSEWHERE:
+            primary_attribute = path_state.get("primary_attribute") or {}
+            attribute_join_paths = path_state.get("attribute_join_paths") or []
+            if primary_attribute and attribute_join_paths:
+                join_paths = (
+                    "AUTHORITATIVE JOIN PATHS (keep joins that follow these verified paths):\n"
+                    + format_semantic_context(
+                        primary_attribute,
+                        attribute_join_paths,
+                        target_db=path_state.get("target_db"),
+                    )
+                    + "\n\n"
                 )
-                + "\n\n"
-            )
 
         validation_prompt = create_intent_validation_prompt(
             original_question,
             processing_question,
             sanitized_question,
             sql_code,
-            custom_analyses,
-            join_paths,
+            custom_analyses=custom_analyses,
+            join_paths=join_paths,
+            joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
         )
 
+        system_prompt = (
+            INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE
+            if _JOINS_VALIDATED_ELSEWHERE
+            else INTENT_VALIDATION_SYSTEM_PROMPT
+        )
         messages = [
-            SystemMessage(content=INTENT_VALIDATION_SYSTEM_PROMPT),
+            SystemMessage(content=system_prompt),
             HumanMessage(content=validation_prompt),
         ]
 
@@ -219,12 +251,15 @@ class IntentValidationAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        if (validation_result.reasoning or "").strip():
+        if (
+            validation_result is not None
+            and (validation_result.reasoning or "").strip()
+        ):
             record_thought(
                 path_state, _GRAPH_NODE_NAME, validation_result.reasoning.strip()
             )
 
-        if validation_result.is_valid:
+        if validation_result is None or validation_result.is_valid:
             self.logger.info("SQL validation passed (no critical issues)")
             return {
                 "decision": "intent_valid",

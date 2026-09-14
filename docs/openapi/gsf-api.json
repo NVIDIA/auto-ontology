@@ -4464,6 +4464,293 @@
         "x-gsf-proxied": true
       }
     },
+    "/api/rules": {
+      "get": {
+        "description": "rulesApi.getAll — list rules.\n\n`manage` rather than the `read` that guards the tag *list*: a rule names the\nsearch it replays, so the list of them describes the catalog the way a tag's\nown page does. The only screen that asks for it is Settings → Rules, and that\nwhole section is admin-only already.\n\n`withTagAuthors` despite the name: it resolves `created_by` / `modified_by` in\na `{ data }` envelope, and a rule stores those two columns for the same reason\na tag does — the accounts live in the `frontend` schema, which the backend has\nno model for. Unconditionally, without the `?authors=` the tag list gates it\nbehind: that param exists because the tag picker reads the vocabulary on every\nnavigation and throws the names away, and nothing reads rules but the one page\nthat shows an owner on every card.",
+        "operationId": "get_api_rules",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "rulesApi.getAll — list rules.",
+        "tags": ["rules"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/rules/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      },
+      "post": {
+        "description": "rulesApi.create — save a rule (admin only).\n\nGuarded like creating a tag rather than like applying one: a rule labels\neverything its search matches, and goes on labelling whatever matches later,\nso it curates the vocabulary's reach rather than putting one existing tag on\none object.\n\nThe identity goes with it because the backend attributes the rule to whoever\nsaved it — `created_by` — and `proxyToBackend` forwards nothing from the\nincoming request. `ctx.user` is the resolved caller, so the id the backend\ntrusts is the one this route authenticated.",
+        "operationId": "post_api_rules",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "rulesApi.create — save a rule (admin only).",
+        "tags": ["rules"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/rules/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
+    "/api/rules/{rule_id}": {
+      "delete": {
+        "description": "rulesApi.delete — remove a rule, and with it the tags it applied unless\n`?keep_tags=true` says to leave them (admin only). `tag: ['manage']` rather\nthan the `catalog: ['edit']` that guards applying a single tag: this un-tags\nevery object the rule matched in one request, and can remove a tag from the\nvocabulary outright when the rule was the whole of what used it — a change to\nthe vocabulary rather than an edit of any one object.\n\nNo identity forwarded: nothing survives the delete to record an actor on.",
+        "operationId": "delete_api_rules_rule_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Leave the tags the rule applied on their objects, attributed to whoever wrote the rule, instead of removing them with the rule.",
+            "in": "query",
+            "name": "keep_tags",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Leave the tags the rule applied on their objects, attributed to whoever wrote the rule, instead of removing them with the rule.",
+              "title": "Keep Tags",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Rule",
+        "tags": ["rules"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/rules/[rule_id]/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      },
+      "patch": {
+        "description": "rulesApi.update — rename a rule (admin only).\n\nThe identity goes with it, as it does with the create, but for the other\ncolumn: `created_by` is left alone so the rule stays attributed to whoever\nsaved it, and `modified_by` records who renamed it — which is what the\ninformation card reads to say who last edited the rule.",
+        "operationId": "patch_api_rules_rule_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Rule_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "rulesApi.update — rename a rule (admin only).",
+        "tags": ["rules"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/rules/[rule_id]/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      }
+    },
     "/api/schemas/{db_id}": {
       "get": {
         "description": "datasources.getSchemasForDatabase — list schemas for one database.",
@@ -4531,7 +4818,7 @@
     },
     "/api/search/global-search": {
       "post": {
-        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first.",
+        "description": "Fulltext global search across catalog and semantic nodes.\n\nRequires at least two characters after trimming. ``contains`` is the only\nmatch option. Results are capped at 200 and ranked so names that contain\nevery token sort first, then Terms an alias matched.\n\n``filters.synonyms`` turns that alias matching off, which drops the Terms\nreached only by one and empties the ``synonyms`` reported on every hit --\nwith it off, no alias caused a hit, so there is none to name.",
         "operationId": "post_api_search_global_search",
         "requestBody": {
           "content": {
@@ -5392,27 +5679,58 @@
       "get": {
         "description": "tagsApi.getAll — list tags. Viewers too, unlike the rest of this file: the\ntag picker on every detail page offers the whole vocabulary, and a tag's name\nand id say nothing about the catalog.\n\nAuthor names are added only when asked for — see `authorsRequested`. This is\nthe hottest tag route there is, read on every navigation the picker survives,\nand the settings page is the only caller with anything to show them in.",
         "operationId": "get_api_tags",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Tag_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "description": "No authenticated caller could be resolved"
-          },
-          "403": {
-            "description": "The caller lacks the required permission"
-          }
-        },
-        "summary": "tagsApi.getAll — list tags.",
-        "tags": ["tags"],
         "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the tag name.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the tag name.",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          },
           {
             "name": "authors",
             "in": "query",
@@ -5424,6 +5742,36 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_Tag_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.getAll — list tags.",
+        "tags": ["tags"],
         "security": [
           {
             "ApiToken": []
@@ -5547,7 +5895,7 @@
         "x-gsf-proxied": true
       },
       "get": {
-        "description": "tagsApi.getById — one tag with the objects it labels.\n\n`manage` rather than the `read` that guards the tag *list*: this answer names\ncatalog objects and spells out where they sit, and it is not scoped to the\ncaller's zones the way the catalog reads are. Only the settings page asks for\nit, and that whole section is admin-only already.\nAuthors on request, by the same rule as the list: the detail view renders a\ntag's name and the objects carrying it, so nothing here reads them today, and\na route that resolved them anyway would be work with no reader.",
+        "description": "tagsApi.getById — one tag. What it labels is `targets/route.ts` beside this.\n\n`manage` rather than the `read` that guards the tag *list*: only the settings\npage asks for a single tag, and that whole section is admin-only already.\n\nAuthors on request, by the same rule as the list: this is where the detail\nview reads who curated the tag, and only the gateway can put names to those\nids.",
         "operationId": "get_api_tags_tag_id_",
         "parameters": [
           {
@@ -5563,7 +5911,7 @@
             "name": "authors",
             "in": "query",
             "required": false,
-            "description": "Resolve `created_by` / `modified_by` to the accounts they name, adding `created_by_user` and `modified_by_user` beside them. Off by default: this view renders a tag's name and the objects carrying it, and reads no author.",
+            "description": "Resolve the account ids this answer carries to the accounts they name: `created_by` and `modified_by`, added beside them as `*_user`. Off by default, and the detail view asks for it — it shows who curated the tag.",
             "schema": {
               "type": "string",
               "const": "1"
@@ -5575,7 +5923,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/DataResponse_TagDetail_"
+                  "$ref": "#/components/schemas/DataResponse_Tag_"
                 }
               }
             },
@@ -5598,7 +5946,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "tagsApi.getById — one tag with the objects it labels.",
+        "summary": "tagsApi.getById — one tag.",
         "tags": ["tags"],
         "security": [
           {
@@ -5678,8 +6026,96 @@
       }
     },
     "/api/tags/{tag_id}/targets": {
+      "get": {
+        "description": "tagsApi.getTargets — one page of the objects a tag labels.\n\n`tag: ['manage']`, not the `catalog: ['edit']` below: this answer names\ncatalog objects and spells out where they sit, and it is not scoped to the\ncaller's zones the way the catalog reads are. Only the tag's settings page\nasks for it, and that section is admin-only already.\n\nAuthors unconditionally, without the `?authors=` the tag list gates them\nbehind: the \"Tagged By\" column is a column of this table rather than an extra\na caller may not render, so a page of rows with unresolved ids would be a\npage with a blank column.",
+        "operationId": "get_api_tags_tag_id_targets",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "tag_id",
+            "required": true,
+            "schema": {
+              "title": "Tag Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_TagItem_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "tagsApi.getTargets — one page of the objects a tag labels.",
+        "tags": ["tags"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-gsf-source": "frontend/app/api/tags/[tag_id]/targets/route.ts",
+        "x-gsf-permissions": {
+          "tag": ["manage"]
+        },
+        "x-gsf-proxied": true
+      },
       "post": {
-        "description": "tagsApi.attach — label an object with an existing tag.\n\n`catalog: ['edit']` rather than `tag: ['manage']`, which is what guards the\ntag list itself: curating the vocabulary is an admin's job, but applying a\ntag that already exists is an edit of the object, no different from editing\nits description. Viewers hold that permission and edit terms with it.",
+        "description": "tagsApi.attach — label an object with an existing tag.\n\n`catalog: ['edit']` rather than `tag: ['manage']`, which is what guards the\ntag list itself: curating the vocabulary is an admin's job, but applying a\ntag that already exists is an edit of the object, no different from editing\nits description. Viewers hold that permission and edit terms with it.\n\nThe identity goes down for the backend's `tagged_by`, which the tag's page\nshows in its \"Tagged By\" column — the one thing distinguishing a label a\nperson applied from one a rule matched.",
         "operationId": "post_api_tags_tag_id_targets",
         "parameters": [
           {
@@ -7918,6 +8354,17 @@
         "title": "DataResponse[PublicConnection]",
         "type": "object"
       },
+      "DataResponse_Rule_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Rule"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[Rule]",
+        "type": "object"
+      },
       "DataResponse_SemanticExplorationGraph_": {
         "additionalProperties": true,
         "properties": {
@@ -8015,17 +8462,6 @@
         },
         "required": ["data"],
         "title": "DataResponse[Tag]",
-        "type": "object"
-      },
-      "DataResponse_TagDetail_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/TagDetail"
-          }
-        },
-        "required": ["data"],
-        "title": "DataResponse[TagDetail]",
         "type": "object"
       },
       "DataResponse_Term_": {
@@ -8568,6 +9004,7 @@
         "type": "object"
       },
       "GlobalSearchFilters": {
+        "description": "What a query is matched against, and which kinds of object it may hit.\n\nThe two text flags widen the match beyond an object's name: ``description``\nadds its description, ``synonyms`` adds a Term's aliases.\n\nTheir defaults differ, which is deliberate rather than an oversight.\n``description`` is off because matching prose is the narrower, more\nsurprising behaviour to opt into. ``synonyms`` is on because alias matching\nis what this endpoint did for its whole life before the flag existed, and\ndefaulting it off would quietly take Terms away from every caller that does\nnot send the flag.",
         "properties": {
           "description": {
             "default": false,
@@ -8587,6 +9024,11 @@
               }
             ],
             "title": "Objects"
+          },
+          "synonyms": {
+            "default": true,
+            "title": "Synonyms",
+            "type": "boolean"
           }
         },
         "title": "GlobalSearchFilters",
@@ -8884,25 +9326,6 @@
         "title": "ListResponse[TableSummary]",
         "type": "object"
       },
-      "ListResponse_Tag_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/Tag"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": ["data", "count"],
-        "title": "ListResponse[Tag]",
-        "type": "object"
-      },
       "ListResponse_TagChip_": {
         "additionalProperties": true,
         "properties": {
@@ -9097,6 +9520,29 @@
         "title": "PagedListResponse[ColumnAttribute]",
         "type": "object"
       },
+      "PagedListResponse_Rule_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Rule"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[Rule]",
+        "type": "object"
+      },
       "PagedListResponse_SqlAttribute_": {
         "additionalProperties": true,
         "properties": {
@@ -9118,6 +9564,52 @@
         },
         "required": ["data", "count", "total"],
         "title": "PagedListResponse[SqlAttribute]",
+        "type": "object"
+      },
+      "PagedListResponse_Tag_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Tag"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[Tag]",
+        "type": "object"
+      },
+      "PagedListResponse_TagItem_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TagItem"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[TagItem]",
         "type": "object"
       },
       "PqlAnalysis": {
@@ -9210,6 +9702,162 @@
         },
         "required": ["database_name"],
         "title": "PublicConnection",
+        "type": "object"
+      },
+      "Rule": {
+        "additionalProperties": true,
+        "description": "A saved search, and the tags to apply to everything it matches.\n\n``search_term``, ``text_match_option`` and ``filters`` are the global-search\nrequest the rule replays; together they are what the rule *is*, which is why\nthey are required rather than optional like most of this module — a rule\nmissing any of the three matches nothing.\n\n``tags`` carry the name to show and the id to act by, both read from the tag\ntable on every read rather than from what the write that saved them sent —\nso a renamed tag reads back renamed here, and a caller posting whole tag\nobjects is answered with the tags as they are rather than as it sent them.\nSee ``RuleTagRef`` in ``gsf/server/rules/router.py``. The ids are checked\nagainst that table, so a rule cannot apply a tag that does not exist.\n\n``created_by`` is the id of the user who saved it, read from the trusted\ngateway header rather than from the request body — see\n``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever\nlast renamed it, and null until somebody has — which is the same fact as\n``modified`` still equalling ``created``, and null again for a rename whose\nrequest carried no identity to record.\n\n``created`` and ``modified`` follow the convention :class:`Tag` sets: a\ntimezone-aware ``datetime`` serialised as ISO 8601, from one clock.",
+        "properties": {
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "filters": {
+            "$ref": "#/components/schemas/RuleFilters"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "modified": {
+            "format": "date-time",
+            "title": "Modified",
+            "type": "string"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "search_term": {
+            "title": "Search Term",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text_match_option": {
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "search_term",
+          "text_match_option",
+          "filters",
+          "created_by",
+          "created",
+          "modified"
+        ],
+        "title": "Rule",
+        "type": "object"
+      },
+      "RuleCreate": {
+        "description": "A rule as the create dialog sends it.\n\n``search_term``, ``text_match_option`` and ``filters`` are the\n``/search/global-search`` request being saved, spelled the way that route\ntakes it.\n\n``filters.objects`` is the search's tab rather than a switch anybody set:\nthe dialog opens over a result list, and saving from *Tables* means the rule\nlabels tables. Omitted for the *All* tab, and stored omitted -- see\n:func:`create_rule` -- because \"no kind was picked\" and \"the kinds picked\nwere none\" are not the same rule.",
+        "properties": {
+          "filters": {
+            "$ref": "#/components/schemas/GlobalSearchFilters"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "search_term": {
+            "title": "Search Term",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/RuleTagRef"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "text_match_option": {
+            "default": "contains",
+            "title": "Text Match Option",
+            "type": "string"
+          }
+        },
+        "required": ["name", "search_term", "tags"],
+        "title": "RuleCreate",
+        "type": "object"
+      },
+      "RuleFilters": {
+        "additionalProperties": true,
+        "description": "The global-search filters a rule replays.\n\nThe same fields ``GlobalSearchFilters`` in ``gsf/server/search/router.py``\naccepts, and deliberately no others: a rule *is* a saved search, so a\nfilter stored here that the search cannot honour would be a rule that never\nreproduces the results it was created from.\n\n``synonyms`` defaults on for the reason it does there — it is what the\nsearch did before the flag existed — and ``objects`` records which tab the\nrule was saved from, since that is what the count it promises to tag was\nscoped to.",
+        "properties": {
+          "description": {
+            "default": false,
+            "title": "Description",
+            "type": "boolean"
+          },
+          "objects": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Objects"
+          },
+          "synonyms": {
+            "default": true,
+            "title": "Synonyms",
+            "type": "boolean"
+          }
+        },
+        "title": "RuleFilters",
+        "type": "object"
+      },
+      "RuleTagRef": {
+        "description": "One tag a rule applies, as a caller names it.\n\nAn object rather than a bare id, so a client can post the tags it is\nalready holding without reducing them first, and anything else it carries\n-- a name, a timestamp, whatever its own tag model holds -- is ignored\nrather than turning a perfectly good tag into a 422.\n\nIgnored rather than stored, because the tag table already says all of it,\nand better: a read joins to it, so a rule answers with each tag as it is\nnow rather than as it looked when the rule was saved. What is checked is\nthe id, in :func:`_resolved_tags` -- a rule applying a tag that does not\nexist would label nothing while claiming otherwise.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          }
+        },
+        "required": ["id"],
+        "title": "RuleTagRef",
+        "type": "object"
+      },
+      "RuleUpdate": {
+        "description": "The part of a rule an edit may change: its name.\n\nNot the search, and not the tags either. Both of those are what a rule *is*\n-- change one and the rule labels a different set of objects, while the\nlabels it already wrote stay where they are, explaining nothing and\nre-applied by nobody. That is a new rule and a deleted one, which is two\noperations this API already has.\n\nA name, by contrast, is only how the settings list refers to the rule: the\nlabels it wrote name it by id, so renaming reaches all of them without a\nsingle ``tag_target`` row being written.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["name"],
+        "title": "RuleUpdate",
         "type": "object"
       },
       "SchemasPayload": {
@@ -10555,65 +11203,9 @@
         "title": "TagCreate",
         "type": "object"
       },
-      "TagDetail": {
-        "additionalProperties": true,
-        "description": "A tag together with everything it labels.\n\n``items`` is empty for a tag nothing carries — a freshly created tag, or one\nwhose last object was untagged — which the page renders as its empty state\nrather than as a failed read.",
-        "properties": {
-          "created": {
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "created_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Created By"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/TagItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "modified": {
-            "format": "date-time",
-            "title": "Modified",
-            "type": "string"
-          },
-          "modified_by": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Modified By"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": ["id", "name", "created", "modified"],
-        "title": "TagDetail",
-        "type": "object"
-      },
       "TagItem": {
         "additionalProperties": true,
-        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits — ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
+        "description": "One object carrying a tag, whichever of the five kinds it is.\n\n``type`` is what tells them apart, as :class:`TagTargetType` spells the five.\n\n``path`` says where the object sits — ``database.schema`` for a Table,\n``database.schema.table`` for a Column, and the owning Term for either kind\nof attribute, which are properties of one in the same sense and so are\ndescribed the same way. Null only for a Term, which is a glossary entry\nrather than a catalog object and sits under nothing.\n\n``tagged_by`` and ``rule`` are where the label came from, for the page's\n\"Tagged By\" column: the account that applied it by hand, or the rule that\nmatched. At most one is set — a label has one source — and both null is an\nanswer rather than a gap: it is what an attach carrying no identity records,\nso the page reads it as \"Auto Generated\", the deployment having labelled\nthis itself. A row written before either column existed reads the same way,\nsince a label nobody claimed is a label nobody claimed.\n\n``tagged_by`` is an opaque Better Auth user id, resolved to a name by the\ngateway for the reason :class:`Tag`'s authors are: the accounts live in a\nschema this service does not own. An id that resolves to nothing reads as\n\"Auto Generated\" as well — these are not foreign keys, so an account can be\ndeleted and leave the label behind, and the column names a person or a rule\nor neither rather than spelling out which kind of nobody this is.\n\nThe four id fields are the same relationships as ids, which is what a link\nto the object's own page is built from: a Table and a Column are addressed\nby their whole catalog chain, an attribute by the Term whose page lists it,\nand a Term by its own id alone. Each kind fills only the ones it has.",
         "properties": {
           "database_id": {
             "anyOf": [
@@ -10645,6 +11237,16 @@
             ],
             "title": "Path"
           },
+          "rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TagItemRule"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "schema_id": {
             "anyOf": [
               {
@@ -10672,6 +11274,17 @@
             "title": "Tagged",
             "type": "string"
           },
+          "tagged_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tagged By"
+          },
           "term_id": {
             "anyOf": [
               {
@@ -10689,6 +11302,23 @@
         },
         "required": ["id", "name", "type", "tagged"],
         "title": "TagItem",
+        "type": "object"
+      },
+      "TagItemRule": {
+        "additionalProperties": true,
+        "description": "The rule that applied a label, named so a reader can recognise it.\n\nThe id as well as the name because a rule can be renamed: the name is what\nto print, and the id is what still refers to the same rule afterwards.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"],
+        "title": "TagItemRule",
         "type": "object"
       },
       "TagTarget": {

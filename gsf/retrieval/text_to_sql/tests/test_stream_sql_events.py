@@ -34,16 +34,16 @@ def main_fixture(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     collection on any machine without credentials. Nothing here calls the
     client — the graph itself is replaced per test.
 
-    ``_PROACTIVE_VALUE_CHECK_IN_GRAPH`` is pinned off for the same reason it
+    ``_COMBINED_PRECHECK_IN_GRAPH`` is pinned off for the same reason it
     is pinned on in the tests that want it: it is derived from the graph
     ``main`` built at import, so ``DB_PROBE_PROACTIVE`` in the ambient
     environment would otherwise decide which node these tests expect the
-    query to be cleared by. Tests covering the proactive branch override it.
+    query to be cleared by. Tests covering the precheck branch override it.
     """
 
     monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: None)
     module = importlib.import_module("gsf.retrieval.text_to_sql.main")
-    monkeypatch.setattr(module, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", False)
+    monkeypatch.setattr(module, "_COMBINED_PRECHECK_IN_GRAPH", False)
     return module
 
 
@@ -210,7 +210,7 @@ def test_rejected_draft_never_reaches_the_client(
 
 def _precheck_step(sql: str, decision: str) -> dict[str, Any]:
     return {
-        "precheck_value_repair": {
+        "precheck_combined": {
             "path_state": {"sql_code": sql},
             "decision": decision,
         }
@@ -224,7 +224,7 @@ def test_proactive_value_check_is_the_only_gate_when_enabled(
     """With the proactive check in the graph it, not intent validation, is the
     last hop, so ``intent_valid`` alone must not emit."""
 
-    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+    monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
     events = _run(
         main,
@@ -232,7 +232,7 @@ def test_proactive_value_check_is_the_only_gate_when_enabled(
         [_intent_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
     )
 
-    assert _sql_events(events) == [("precheck_value_repair", "SELECT 1")]
+    assert _sql_events(events) == [("precheck_combined", "SELECT 1")]
 
 
 def test_proactive_rejection_never_shows_the_query(
@@ -246,7 +246,7 @@ def test_proactive_rejection_never_shows_the_query(
     ever runs.
     """
 
-    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+    monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
     events = _run(
         main,
@@ -269,7 +269,7 @@ def test_proactive_rejection_never_shows_the_query(
         ],
     )
 
-    assert _sql_events(events) == [("precheck_value_repair", "SELECT good")]
+    assert _sql_events(events) == [("precheck_combined", "SELECT good")]
 
 
 def test_skip_intent_branch_waits_for_the_proactive_check(
@@ -280,7 +280,7 @@ def test_skip_intent_branch_waits_for_the_proactive_check(
     validation, but with the proactive check enabled it still routes through
     that node rather than straight to execution."""
 
-    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+    monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
     events = _run(
         main, monkeypatch, [_syntax_ok_step("SELECT 1", _PAST_SKIP_THRESHOLD)]
@@ -295,11 +295,11 @@ def test_proactive_check_emits_without_a_preceding_intent_pass(
 ) -> None:
     """It is the only gate on the skip-intent branch, so it has to emit."""
 
-    monkeypatch.setattr(main, "_PROACTIVE_VALUE_CHECK_IN_GRAPH", True)
+    monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
     events = _run(main, monkeypatch, [_precheck_step("SELECT 1", "valid_sql")])
 
-    assert _sql_events(events) == [("precheck_value_repair", "SELECT 1")]
+    assert _sql_events(events) == [("precheck_combined", "SELECT 1")]
 
 
 def test_proactive_node_is_ignored_when_not_in_the_graph(

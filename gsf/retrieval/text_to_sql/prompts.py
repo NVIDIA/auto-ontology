@@ -2,6 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+import os
+
+# Controls how many entity noun phrases are extracted for SQL generation.
+SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -137,6 +142,17 @@ _SNOWFLAKE_DIALECT_RULES = (
 # under a schema that MUST be kept in the identifier (``schema.table``).
 _SCHEMALESS_DIALECTS = {"sqlite", "duckdb"}
 
+_POSTGRES_DIALECT_RULES = (
+    "**PostgreSQL-specific (STRICT — these will error at execution)**\n"
+    "- WHERE and HAVING cannot reference SELECT aliases. Repeat the full expression or wrap in a subquery/CTE.\n"
+    "- GROUP BY cannot reference SELECT aliases. Repeat the full expression "
+    "(including CASE WHEN blocks) in GROUP BY, or wrap the query in a subquery/CTE.\n"
+    "- Postgres folds unquoted identifiers to lowercase. If a table or column name shown in "
+    "AVAILABLE TABLES / KNOWN COLUMN MAPPINGS contains any uppercase letter, wrap it in double "
+    "quotes using the EXACT case shown — leaving it unquoted silently resolves to the wrong "
+    "(lowercase) relation and errors as 'does not exist'. All-lowercase names need no quoting.\n\n"
+)
+
 
 # Shared output-field spec for SQL-generation prompts (candidates-based and
 # table-based) — kept as a single source so the two call sites can't drift.
@@ -170,6 +186,8 @@ def format_dialect_rules(dialect: str | None) -> str:
         return _SQLITE_DIALECT_RULES
     if normalized == "snowflake":
         return _SNOWFLAKE_DIALECT_RULES
+    if normalized in ("postgres", "postgresql"):
+        return _POSTGRES_DIALECT_RULES
     return ""
 
 
@@ -347,6 +365,56 @@ Only fail validation for serious, critical errors that
 would make the query unusable."""
 
 
+# INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE variant of the system prompt —
+# used only when a separate deterministic check (e.g. db_probe.join_path_check)
+# already validates join legality, so this LLM check can assume every join is
+# real and focus on whether it reaches the right entity. See intent_validation.py.
+INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE = """You are a SQL
+validation expert. Your job is to check if a generated
+SQL query has any CRITICAL issues that would prevent it
+from answering the user's question.
+
+Be LENIENT - only mark as invalid if there are serious
+problems. Minor issues or alternative approaches are
+acceptable.
+
+Check for CRITICAL issues only:
+1. **Semantically Wrong Joins**: Assume every join in the
+query is real — do not question whether the relation exists.
+Flag a join if either (a) it is self-evidently broken
+regardless of any alternative — e.g. a tautological
+condition (`a.x = a.x`), a table joined to itself, or
+columns of clearly unrelated meaning being equated — or
+(b) it reaches a different, wrong entity for the question
+when you can name a specific, better-fitting real
+relationship instead (e.g. a related-but-different table, or
+the wrong field/role for the same concept). Do not flag a
+join just because it looks unfamiliar — alternate but
+plausible join paths (a different entity for a filter
+dimension, a shorter/longer path, another valid FK chain)
+are acceptable.
+2. **Clearly Wrong Aggregations**: Are aggregations
+completely incorrect? (e.g., COUNT when user explicitly
+asks for SUM) (Minor variations are acceptable)
+
+When DOMAIN-SPECIFIC CUSTOM ANALYSES are provided, treat
+their SQL patterns as intentional user-defined domain
+definitions. Fragments that look unusual, incomplete, or
+nonstandard in isolation are still valid if they follow
+those custom analyses — do NOT mark them as critical issues
+solely for that reason.
+
+When AUTHORITATIVE JOIN PATHS are provided, they come from
+the verified semantic model. If the generated SQL uses a
+join condition from those paths, keep it and do NOT flag
+that join as invalid.
+
+IMPORTANT: Be generous in your validation. If the SQL
+could reasonably answer the question, mark it as valid.
+Only fail validation for serious, critical errors that
+would make the query unusable."""
+
+
 def format_dual_question_block(
     original_question: str,
     sanitized_question: str,
@@ -443,7 +511,6 @@ Rules:
 - Preserve every factual constraint: numbers, product names, brands, categories, and qualifiers
   such as "similar", "natural ingredients", or "expensive is okay".
 - Do NOT invent constraints that are not in the original text.
-- If the input is already a direct question, return it unchanged.
 - Output one concise question or search intent, not a paragraph.
 
 Examples:
@@ -535,12 +602,41 @@ def create_intent_validation_prompt(
     sql_code: str,
     custom_analyses: str = "",
     join_paths: str = "",
+    joins_validated_elsewhere: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
         original_question, sanitized_question, processing_question
     )
     custom_analyses_block = f"\n{custom_analyses}" if custom_analyses.strip() else ""
-    join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
+    # joins_validated_elsewhere (INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE,
+    # off by default) opts into this branch's own, more permissive join
+    # criterion instead of main's current one, and never shows AUTHORITATIVE
+    # JOIN PATHS — appropriate only when a separate deterministic check (e.g.
+    # db_probe.join_path_check) already covers join legality, so this LLM
+    # check doesn't have to. See the flag's docstring in intent_validation.py.
+    if joins_validated_elsewhere:
+        join_paths_block = ""
+        join_criterion = (
+            "1. Every join in this query is already known to be real — do not question whether it exists. "
+            "Flag it only if either (a) it is self-evidently broken regardless of any alternative (a "
+            "tautological condition, a table joined to itself, columns of clearly unrelated meaning being "
+            "equated), or (b) it clearly reaches the wrong entity for the question and you can name a "
+            "specific, better-fitting real relationship instead. Do not flag a join just because it merely "
+            "looks unfamiliar (different fields/roles for the same concept, e.g. customer vs supplier "
+            "delivery city for a region filter, are OK)."
+        )
+        authoritative_note = ""
+    else:
+        join_paths_block = f"\n{join_paths}" if join_paths.strip() else ""
+        join_criterion = (
+            "1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible "
+            "join paths that could still answer it are OK — including different fields/roles for the same "
+            "concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those."
+        )
+        authoritative_note = (
+            "\nIf AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows "
+            "one of those verified paths."
+        )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
@@ -551,22 +647,20 @@ Generated SQL Query:
 ```
 
 Check for CRITICAL issues ONLY (be lenient):
-1. Are any joins nonsensical or clearly broken for the question? Alternate but plausible \
-join paths that could still answer it are OK — including different fields/roles for the same \
-concept (e.g. customer vs supplier delivery city for a region filter). Do NOT fail for those.
+{join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
-definitions — do not flag the generated query as invalid merely for following those patterns.
-If AUTHORITATIVE JOIN PATHS are listed above, do not flag a generated join that follows one of those verified paths.
+definitions — do not flag the generated query as invalid merely for following those \
+patterns.{authoritative_note}
 
 Provide your analysis."""
 
 
 def create_entity_extraction_prompt(question: str) -> str:
     return f"""You are a database schema analyst. Given a question, populate the field \
-"required_entity_name" with 1–5 noun phrases that correspond to database tables, \
+"required_entity_name" with 1–{SQL_GEN_MAX_ENTITIES} noun phrases that correspond to database tables, \
 columns, or relationships.
 
 Preserve the exact casing of terms as they appear in the question. Do not lowercase,
@@ -652,14 +746,16 @@ are actually needed to answer the question.
 
 Rules:
 - Only remove tables you are confident are NOT needed in the SQL query.
-- If table A must be joined through table B to reach table C, do NOT
-  remove any table in the join chain (A, B, or C).
+- If table A must be joined through tables B and C to reach table D, do NOT
+  remove any table in the join chain (A, B, C, or D). The join paths below
+  show real table connections. Keep the full bridges between tables that
+  you deem relevant.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
 - When in doubt, do NOT remove — it is safer to include an extra table
   than to remove a necessary one.
 
-{domain_rules}{custom_analyses}User's question:
+{domain_rules}{custom_analyses}{join_paths}{enriched_question}User's question:
 {question}
 
 Candidate tables:

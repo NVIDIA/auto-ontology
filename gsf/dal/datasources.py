@@ -42,7 +42,11 @@ from gsf.dal.sql_fragments import column_description_expr, table_description_exp
 from gsf.dal.tags import TARGET_COLUMN, TARGET_TABLE, fetch_tags_map
 from gsf.dal.users import resolve_accessible_catalog_ids
 from gsf.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
-from gsf.utils.sample_values import dump_sample_values, stringify_sample_values
+from gsf.utils.sample_values import (
+    dump_sample_values,
+    parse_sample_values,
+    stringify_sample_values,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -923,7 +927,7 @@ def fetch_columns_for_table(
 
 
 def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
-    """Tables with a name/type/description summary of each column.
+    """Tables with a name/type/description/sample_values summary of each column.
 
     Returns ``[]`` rather than raising if the query fails: this decorates
     retrieval results, and losing the decoration beats losing the results.
@@ -931,6 +935,15 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     A table with no columns does not appear at all — the column join is inner.
     Left that way deliberately: a column-less table in the catalog is a symptom
     worth seeing where it originates, not something to paper over here.
+
+    ``sample_values`` is what lets a SQL-generating model write a correct
+    ``->``/``->>`` path into a JSONB column instead of guessing a plausible
+    sibling key — this is the only per-column field ``candidates_preparation``'s
+    "back-fill" step (§4a: any table whose columns arrived without
+    sample_values from the vector-index hit) exists to supply. It was
+    selected here from Aug 2026 until the Neo4j-to-Postgres port silently
+    dropped it from this query's rewrite (the Neo4j Cypher version had it);
+    restored so the back-fill isn't a no-op again.
     """
     if not table_ids:
         return []
@@ -947,6 +960,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.data_type,
                 column_description_expr().label("column_description"),
                 s.catalog_column.c.format,
+                s.catalog_column.c.sample_values,
             )
             .select_from(
                 _table_join().join(
@@ -989,6 +1003,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "data_type": row["data_type"],
                     "description": row["column_description"],
                     "format": row["format"],
+                    "sample_values": parse_sample_values(row["sample_values"]),
                 }
             )
     return list(tables.values())
@@ -1297,3 +1312,142 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         )
 
     return [{**dict(c), "fk_pairs": pairs.get(c["table_id"], [])} for c in candidates]
+
+
+def find_column_id_by_table_and_name(
+    table_name: str,
+    column_name: str,
+    database_name: str | None = None,
+) -> str | None:
+    """Resolve a ``table.column`` reference from generated SQL to its Column id.
+
+    Case-insensitive on both table and column name, since the SQL came from an
+    LLM and may not match the catalog's stored casing exactly. When
+    *database_name* is given, scopes the match to that database only — the
+    same table/column name can exist in multiple co-resident databases
+    (see :func:`gsf.dal.attributes.find_unlinked_fk_columns`), and an unscoped
+    match could silently resolve to the wrong database's column. Returns
+    ``None`` (not an exception) on no match or an ambiguous multi-database
+    match without *database_name*, so callers can treat "can't verify" the
+    same as "no known edge" rather than crash.
+    """
+    if not table_name or not column_name:
+        return None
+    join = s.catalog_column.join(
+        s.catalog_table, s.catalog_table.c.id == s.catalog_column.c.table_id
+    )
+    where = [
+        func.lower(s.catalog_table.c.name) == table_name.lower(),
+        func.lower(s.catalog_column.c.name) == column_name.lower(),
+    ]
+    if database_name:
+        join = join.join(
+            s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+        ).join(
+            s.catalog_database,
+            s.catalog_database.c.id == s.catalog_schema.c.database_id,
+        )
+        where.append(s.catalog_database.c.name == database_name)
+        limit = 1
+    else:
+        limit = 2
+    rows = store().query_read(
+        select(s.catalog_column.c.id).select_from(join).where(*where).limit(limit)
+    )
+    if not database_name and len(rows) > 1:
+        logger.info(
+            "find_column_id_by_table_and_name: ambiguous match for %s.%s "
+            "with no database_name given — treating as unresolved",
+            table_name,
+            column_name,
+        )
+        return None
+    return rows[0]["id"] if rows else None
+
+
+def find_table_id_by_name(
+    table_name: str, database_name: str | None = None
+) -> str | None:
+    """Resolve a bare table name (from a join-path hop) to its Table id.
+
+    Same database-scoping rationale as :func:`find_column_id_by_table_and_name`
+    — an unscoped lookup (e.g. :func:`fetch_table_by_name`) risks matching a
+    same-named table in a different co-resident database.
+    """
+    if not table_name:
+        return None
+    join = s.catalog_table
+    where = [func.lower(s.catalog_table.c.name) == table_name.lower()]
+    if database_name:
+        join = s.catalog_table.join(
+            s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+        ).join(
+            s.catalog_database,
+            s.catalog_database.c.id == s.catalog_schema.c.database_id,
+        )
+        where.append(s.catalog_database.c.name == database_name)
+        limit = 1
+    else:
+        limit = 2
+    rows = store().query_read(
+        select(s.catalog_table.c.id).select_from(join).where(*where).limit(limit)
+    )
+    if not database_name and len(rows) > 1:
+        logger.info(
+            "find_table_id_by_name: ambiguous match for %s with no "
+            "database_name given — treating as unresolved",
+            table_name,
+        )
+        return None
+    return rows[0]["id"] if rows else None
+
+
+def find_table_key_columns(
+    table_name: str, database_name: str | None = None
+) -> dict[str, list[str]]:
+    """Return ``{"pk": [...], "unique": [...]}`` column names (lowercased) for
+    a bare table name, used to detect a vacuous ``GROUP BY``/``PARTITION BY``
+    (grouping by a column already unique per row makes the aggregate a no-op).
+
+    Same database-scoping rationale as :func:`find_table_id_by_name` — scope
+    to *database_name* when given, since an unscoped lookup risks matching a
+    same-named table in a different co-resident database. ``pk`` comes
+    from ``catalog_table.pk`` (set at ingestion from the DDL); ``unique`` comes
+    from ``catalog_column.is_unique`` (set from observed-data profiling — see
+    :func:`store_column_uniqueness`), so it also catches a unique-in-practice
+    column with no declared constraint. Returns ``{"pk": [], "unique": []}``
+    (not ``None``) when no match is found.
+    """
+    empty: dict[str, list[str]] = {"pk": [], "unique": []}
+    if not table_name:
+        return empty
+    join = s.catalog_table
+    where = [func.lower(s.catalog_table.c.name) == table_name.lower()]
+    if database_name:
+        join = s.catalog_table.join(
+            s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+        ).join(
+            s.catalog_database,
+            s.catalog_database.c.id == s.catalog_schema.c.database_id,
+        )
+        where.append(s.catalog_database.c.name == database_name)
+    rows = store().query_read(
+        select(s.catalog_table.c.id, s.catalog_table.c.pk)
+        .select_from(join)
+        .where(*where)
+        .limit(1)
+    )
+    if not rows:
+        return empty
+    table_id, pk = rows[0]["id"], rows[0]["pk"]
+    pk_cols = [str(c).lower() for c in (pk or [])]
+    unique_rows = store().query_read(
+        select(s.catalog_column.c.name).where(
+            s.catalog_column.c.table_id == table_id,
+            s.catalog_column.c.is_unique.is_(True),
+        )
+    )
+    unique_cols = list(
+        dict.fromkeys(r["name"].lower() for r in unique_rows if r["name"])
+    )
+    return {"pk": pk_cols, "unique": unique_cols}

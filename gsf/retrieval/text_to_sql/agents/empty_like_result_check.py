@@ -3,11 +3,17 @@
 # SPDX-License-Identifier: Apache-2.0
 
 """
-Empty-result LIKE check after SQL execution.
+Post-execution result integrity checks.
 
-When execution succeeds but returns an empty result set and the SQL contains
-LIKE/ILIKE predicates, use an LLM to identify non-essential filters and route
-once to reconstruction with explicit removal guidance.
+Two checks run after successful SQL execution:
+
+1. All-NULL JSONB columns: if a JSONB-accessed computed column returns NULL for
+   every row, the path is likely wrong (wrong nesting level or wrong key name).
+   Routes once to reconstruction with a targeted error — no LLM call needed.
+
+2. Empty-result LIKE check: if execution returns zero rows and the SQL contains
+   LIKE/ILIKE predicates, uses an LLM to identify non-essential filters and
+   routes once to reconstruction with explicit removal guidance.
 """
 
 from __future__ import annotations
@@ -35,6 +41,11 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 logger = logging.getLogger(__name__)
 
 _LIKE_PATTERN = re.compile(r"\bI?LIKE\b", re.IGNORECASE)
+
+# Matches a JSONB leaf access (->>) followed (within the same column expression) by AS alias.
+# Covers: (col->>'key')::type AS alias  and  col->'a'->>'b' AS alias
+# Note: no \b after closing quote — "'" is non-word so \b never fires there.
+_JSONB_ALIAS_RE = re.compile(r"->>'[^']+'\s*[^,\n]*?\bAS\s+(\w+)", re.IGNORECASE)
 
 _EMPTY_LIKE_SYSTEM_PROMPT = """You classify LIKE/ILIKE predicates in SQL queries.
 Be conservative: only mark a predicate non-essential when it clearly filters on
@@ -92,12 +103,99 @@ def _sql_has_like(sql: str) -> bool:
     return bool(_LIKE_PATTERN.search(sql or ""))
 
 
+def _parse_db_rows(db_result: Any) -> list[dict]:
+    """Best-effort parse of db_result into a list of row dicts."""
+    if db_result is None:
+        return []
+    if isinstance(db_result, list):
+        if db_result and isinstance(db_result[0], dict):
+            return db_result
+        if len(db_result) == 1 and isinstance(db_result[0], str):
+            try:
+                parsed = json.loads(db_result[0])
+                if isinstance(parsed, list):
+                    return [r for r in parsed if isinstance(r, dict)]
+            except (json.JSONDecodeError, TypeError):
+                pass
+    if isinstance(db_result, str):
+        try:
+            parsed = json.loads(db_result)
+            if isinstance(parsed, list):
+                return [r for r in parsed if isinstance(r, dict)]
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return []
+
+
+def _null_jsonb_aliases(sql: str, db_result: Any) -> list[str]:
+    """Return aliases of JSONB-accessed SELECT columns where every row value is NULL.
+
+    Only fires when the SQL contains JSONB access operators, the result is
+    non-empty, and at least one aliased JSONB column is all-NULL — a strong
+    signal that the path is navigating to the wrong nesting level.
+    """
+    if not sql or "->>" not in sql:
+        return []
+    aliases = list(
+        dict.fromkeys(
+            m.group(1).lower() for m in _JSONB_ALIAS_RE.finditer(sql) if m.group(1)
+        )
+    )
+    if not aliases:
+        return []
+    rows = _parse_db_rows(db_result)
+    if not rows:
+        return []
+    return [
+        alias
+        for alias in aliases
+        if (vals := [row.get(alias) for row in rows if alias in row])
+        and all(v is None for v in vals)
+    ]
+
+
+def _build_null_jsonb_error(null_aliases: list[str]) -> str:
+    cols = ", ".join(f"`{a}`" for a in null_aliases)
+    return (
+        f"SQL executed but column(s) {cols} returned NULL for every row. "
+        "This means the JSONB path is wrong. Two possible causes: "
+        "(1) wrong nesting level — the key exists but is inside an intermediate object, "
+        "so flat access (->>'key') should be (->'container'->>'key'); "
+        "(2) wrong key name — the key is abbreviated or named differently in the schema "
+        "than expected. Check the column schema and correct whichever applies."
+    )
+
+
 def _get_sql_code(path_state: dict) -> str:
     sql_code = path_state.get("sql_code")
     if sql_code and str(sql_code).strip():
         return str(sql_code)
     llm_result = path_state.get("sql_generation_result")
     return getattr(llm_result, "sql_code", "") or ""
+
+
+def _set_sql_code(path_state: dict, sql_code: str) -> None:
+    """Store a self-applied *sql_code* onto every field a downstream
+    consumer might read it from.
+
+    ``path_state["sql_code"]`` and ``path_state["sql_generation_result"].sql_code``
+    are two separate copies read with different precedence by different
+    consumers (``_get_sql_code`` above — used by ``sql_execution`` and the
+    other combined_precheck sub-checks — prefers ``sql_code``; ``response.py``'s
+    ``calculation_response``, which builds what actually gets submitted,
+    reads only ``sql_generation_result.sql_code``). Writing just one of them
+    left the two out of sync: a self-applied precheck fix (e.g. a
+    missing-bridge join rewrite) could land in ``sql_generation_result`` only,
+    so ``sql_execution`` validated the pre-fix SQL while submission sent the
+    post-fix one — never executed or validated at all. Always write both so
+    they can't diverge, regardless of which one a given reader prefers.
+    """
+    path_state["sql_code"] = sql_code
+    response = path_state.get("sql_generation_result")
+    if response is not None:
+        path_state["sql_generation_result"] = response.model_copy(
+            update={"sql_code": sql_code}
+        )
 
 
 def build_empty_like_reconstruction_error(
@@ -138,7 +236,18 @@ class EmptyLikeResultCheckAgent(BaseAgent):
         db_result = path_state.get("sql_response_from_db")
 
         if not _is_empty_db_result(db_result):
-            self.logger.info("SQL result is non-empty — skipping empty LIKE check")
+            # Non-empty result: check for JSONB columns that are all-NULL,
+            # which indicates a wrong nesting path rather than an empty table.
+            if not path_state.get("null_jsonb_retry_attempted"):
+                null_aliases = _null_jsonb_aliases(sql_code, db_result)
+                if null_aliases:
+                    path_state["null_jsonb_retry_attempted"] = True
+                    path_state["error"] = _build_null_jsonb_error(null_aliases)
+                    self.logger.info(
+                        "All-NULL JSONB column(s) %s — routing to reconstruction",
+                        null_aliases,
+                    )
+                    return {"decision": "invalid_sql", "path_state": path_state}
             return {"decision": "valid_sql", "path_state": path_state}
 
         if not _sql_has_like(sql_code):

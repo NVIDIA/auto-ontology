@@ -20,6 +20,7 @@ prompt so the LLM does not repeat the same broken SQL.
 from __future__ import annotations
 
 import logging
+import re
 from enum import Enum
 from typing import Any, Dict
 
@@ -33,8 +34,8 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from gsf.utils.llm_invoke import invoke_with_structured_output
-from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
@@ -53,8 +54,161 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "reconstruct_sql"
 
 # ------------------------------------------------------------------
-# Error classification models
+# Known-column grounding (from the semantic resolution done up front)
 # ------------------------------------------------------------------
+
+
+def _collect_known_columns(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> tuple[list[str], list[str]]:
+    """Shared line-collection for known columns/join keys, used by both the
+    repair prompt and the (more hedged) classification prompt renderers
+    below. See ``_format_known_columns`` for the column/hop line format.
+    """
+    entries = list(attribute_join_paths or [])
+    if primary_attribute:
+        entries = [primary_attribute] + entries
+
+    column_lines = []
+    seen_columns = set()
+    hop_lines = []
+    seen_hops = set()
+    for entry in entries:
+        col_name = entry.get("col_name")
+        table_name = entry.get("table_name")
+        if col_name and table_name:
+            key = (table_name, col_name)
+            if key not in seen_columns:
+                seen_columns.add(key)
+                label = entry.get("attr_name") or col_name
+                # datatype is only populated for attrs (re-)ingested since
+                # this field was added — older rows just omit the tag.
+                datatype = entry.get("datatype")
+                tag = f" ({datatype})" if datatype else ""
+                column_lines.append(f"  {label}: {table_name}.{col_name}{tag}")
+
+        # Multi-hop entries also carry the exact join key on each side of
+        # every hop (e.g. treatmentbasics.encref = encounters.enckey) — this
+        # is what actually fixes wrong-FK-column guesses like "enc_ref" vs
+        # "encref", which the flat column mapping above can't cover since
+        # the FK column isn't itself a resolved business attribute.
+        for hop in entry.get("path") or []:
+            src_table = hop.get("source_table")
+            src_col = hop.get("source_column")
+            tgt_table = hop.get("target_table")
+            tgt_col = hop.get("target_column")
+            if not (src_table and src_col and tgt_table and tgt_col):
+                continue
+            hop_key = (src_table, src_col, tgt_table, tgt_col)
+            if hop_key in seen_hops:
+                continue
+            seen_hops.add(hop_key)
+            hop_lines.append(f"  {src_table}.{src_col} = {tgt_table}.{tgt_col}")
+
+    return column_lines, hop_lines
+
+
+def _format_known_columns(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> str:
+    """Render a short, repair-focused reminder of already-resolved column
+    names, so reconstruction doesn't have to re-guess casing/existence from
+    the error message alone (e.g. "exch_spot" vs "EXCH_SPOT" when the real
+    column is "quote_depth_snapshot"). Terse by design — this is a repair
+    prompt, not the first-pass generation prompt.
+    """
+    column_lines, hop_lines = _collect_known_columns(
+        primary_attribute, attribute_join_paths
+    )
+    if not column_lines and not hop_lines:
+        return ""
+
+    sections = []
+    if column_lines:
+        sections.append(
+            "\nKNOWN COLUMN MAPPINGS (already resolved — use these exact "
+            "names/casing, do not guess):\n" + "\n".join(column_lines)
+        )
+    if hop_lines:
+        sections.append(
+            "\nKNOWN JOIN KEYS (already resolved — use these exact join "
+            "conditions, do not guess FK column names):\n" + "\n".join(hop_lines)
+        )
+
+    return "\n".join(sections) + "\n\n"
+
+
+def _format_known_columns_for_classification(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict] | None,
+) -> str:
+    """Render the same known-columns data for the error CLASSIFIER prompt,
+    with deliberately hedged framing.
+
+    Unlike the repair prompt's "already resolved, use these exact names"
+    (appropriate there — it's just telling the LLM what names to write), this
+    context feeds a root-cause judgment call: is the data missing, or is the
+    SQL just wrong? The anchor/join-path resolution that produces this data
+    is itself a best-effort LLM+graph process that has been wrong before
+    (see candidates_preparation.py's anchor-selection fallback path and its
+    "relevance filter has repeatedly proven unreliable" note) — so this must
+    NOT be framed as ground truth, or the classifier could be biased toward
+    "fixable" even when the resolution itself picked the wrong table/column
+    and a real missing_data rediscovery is needed.
+    """
+    column_lines, hop_lines = _collect_known_columns(
+        primary_attribute, attribute_join_paths
+    )
+    if not column_lines and not hop_lines:
+        return ""
+
+    sections = []
+    if column_lines:
+        sections.append(
+            "\nColumns resolved by an earlier step (may be "
+            "incomplete). The datatype is in parentheses "
+            "where known):\n" + "\n".join(column_lines)
+        )
+    if hop_lines:
+        sections.append(
+            "\nJoin keys tentatively resolved by an earlier step (same "
+            "caveat):\n" + "\n".join(hop_lines)
+        )
+    sections.append(
+        "\nIf the error concerns one of the above, prefer 'fixable' unless "
+        "you have a specific reason to believe this resolution itself is "
+        "wrong (e.g. it points at a table/column that doesn't plausibly "
+        "answer the question), in which case 'missing_data' is still "
+        "correct."
+    )
+
+    return "\n".join(sections) + "\n\n"
+
+
+# ------------------------------------------------------------------
+# Deterministic fast-path classification
+# ------------------------------------------------------------------
+
+# Postgres raises this when a CAST/::numeric hits a formatted string value
+# (e.g. "45.2%" or "USD 81,931.00") instead of a bare number — always fixable
+# with the same tables by stripping non-numeric characters before casting,
+# never a missing_data situation. Matching here skips the LLM classification
+# call, same as the existing db_probe pre-classification checks below.
+# Postgres-specific error text; other dialects just won't match (fails safe),
+# could be generalized with per-dialect patterns later.
+_NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
+    r"invalid input syntax for type (?:numeric|double precision|integer|bigint):"
+    r'\s*"[^"]*(?:%|\$|USD|EUR|GBP)[^"]*"',
+    re.IGNORECASE,
+)
+
+
+def _is_numeric_format_cast_error(error: str) -> bool:
+    """Whether ``error`` is a Postgres cast failure on a %/currency-formatted
+    string value (see ``_NUMERIC_FORMAT_CAST_ERROR_RE``)."""
+    return bool(_NUMERIC_FORMAT_CAST_ERROR_RE.search(error or ""))
 
 
 class ErrorType(str, Enum):
@@ -108,7 +262,7 @@ Question the user asked:
 
 Tables available:
 {table_summary}
-
+{known_columns_section}
 Error / previous attempt:
 {error_context}
 
@@ -145,6 +299,24 @@ class SQLReconstructionAgent(BaseAgent):
             return False
         return True
 
+    def _format_attempt_history(self, attempts: list[dict], *, label: str) -> list[str]:
+        """Render past ``{"sql", "error"}`` attempts as numbered prompt lines."""
+        lines: list[str] = []
+        for i, attempt in enumerate(attempts, 1):
+            if len(attempt["sql"]) > 600 or len(attempt["error"]) > 600:
+                self.logger.info(
+                    "History %s %d truncated for prompt (sql=%d chars, error=%d chars)",
+                    label,
+                    i,
+                    len(attempt["sql"]),
+                    len(attempt["error"]),
+                )
+            lines.append(
+                f"  {label} {i}: {attempt['sql'][:600]}\n"
+                f"  Error: {attempt['error'][:600]}"
+            )
+        return lines
+
     # ------------------------------------------------------------------
     # Error analysis
     # ------------------------------------------------------------------
@@ -158,14 +330,29 @@ class SQLReconstructionAgent(BaseAgent):
     ) -> ErrorAnalysis:
         """Ask the LLM to classify the error and suggest search queries."""
         llm = state["llm"]
+        path_state = state["path_state"]
+
+        if ext_err := path_state.get("error"):
+            error_context = f"External feedback: {ext_err}\n\n{error_context}"
 
         table_summary = (
             ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
         )
 
+        # Cheap, no extra LLM/DB call — same data _format_known_columns() uses
+        # for the repair prompt, just rendered with hedged framing here since
+        # this feeds a root-cause judgment call rather than a "what to write"
+        # instruction. See _format_known_columns_for_classification's
+        # docstring for why the framing differs.
+        known_columns_section = _format_known_columns_for_classification(
+            path_state.get("primary_attribute"),
+            path_state.get("attribute_join_paths"),
+        )
+
         prompt = _ANALYSIS_PROMPT_TEMPLATE.format(
             question=question,
             table_summary=table_summary,
+            known_columns_section=known_columns_section,
             error_context=error_context,
         )
 
@@ -200,8 +387,8 @@ class SQLReconstructionAgent(BaseAgent):
 
         existing_ids = {str(t.get("id", "")) for t in existing_tables if t.get("id")}
 
-        path_state = state.get("path_state") or {}
-        database_name = path_state.get("target_db") or path_state.get(
+        path_state_for_db = state.get("path_state") or {}
+        database_name = path_state_for_db.get("target_db") or path_state_for_db.get(
             "retrieval_database"
         )
         combined: list[dict] = []
@@ -277,9 +464,21 @@ class SQLReconstructionAgent(BaseAgent):
         incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
+        # Debug-turn detector: coordinator.py::_apply_debug_seed sets this to
+        # "reconstruct_sql" to jump the graph straight to this node with a
+        # seeded error, and only pops it after the whole graph run finishes —
+        # so it stays true for every reconstruct_sql call within that same
+        # debug turn (including 2nd/3rd retries), not just the first one.
+        # Scopes the evidence re-surfacing below to debug turns only, so
+        # ordinary in-turn self-repair (pre-first-submission) is unaffected.
+        is_debug_turn = path_state.get("_resume_from") == "reconstruct_sql"
+        # Evidence now arrives as its own state field rather than embedded in
+        # the question text, so question_block never contains it and needs
+        # no stripping.
         evidence = state["evidence"]
         question_block = format_dual_question_block(
-            original_question, sanitized_question
+            original_question,
+            sanitized_question,
         )
 
         messages = state["messages"]
@@ -287,6 +486,10 @@ class SQLReconstructionAgent(BaseAgent):
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
         previous_thought = (getattr(incorrect_response, "thought", "") or "").strip()
+
+        # Accumulate every prior `thought` (not just the last one) so an
+        # assumption made two retries ago that the latest thought doesn't
+        # repeat isn't silently lost from the repair prompt.
         interpretation_history = list(path_state.get("interpretation_history") or [])
         if previous_thought and previous_thought not in interpretation_history:
             interpretation_history.append(previous_thought)
@@ -295,27 +498,49 @@ class SQLReconstructionAgent(BaseAgent):
         # --- Step 1: Classify the error (once per reconstruction chain) ---
         if not path_state.get("error_analysis_done"):
             path_state["error_analysis_done"] = True
-            response_text = getattr(incorrect_response, "response", "") or ""
-            error_context = (
-                f"SQL: {sql_code}\n"
-                f"Response: {response_text}\n"
-                f"Actual validation/execution error: {error}"
-            )
 
-            analysis = self._analyze_error(
-                state, question_block, error_context, relevant_tables
-            )
-            path_state["error_type"] = analysis.error_type.value
-            self.logger.info(
-                "Error analysis: %s — %s",
-                analysis.error_type.value,
-                analysis.explanation[:150],
-            )
-            if analysis.explanation:
-                record_thought(path_state, _GRAPH_NODE_NAME, analysis.explanation)
+            # A db_probe check (literal_check / jsonb_path_check) already
+            # confirmed the correct value/key live in a table the query is
+            # already joining — that can never be a missing_data situation,
+            # so skip the LLM classification (and the table-discovery
+            # detour it could trigger) and go straight to fixable.
+            if path_state.pop("error_known_fixable", False):
+                self.logger.info(
+                    "Error pre-classified fixable (db_probe check) — skipping "
+                    "LLM error analysis and table discovery"
+                )
+                path_state["error_type"] = ErrorType.FIXABLE.value
+                analysis = None
+            elif _is_numeric_format_cast_error(error):
+                self.logger.info(
+                    "Error pre-classified fixable (numeric/currency-format cast) "
+                    "— skipping LLM error analysis and table discovery"
+                )
+                path_state["error_type"] = ErrorType.FIXABLE.value
+                analysis = None
+            else:
+                response_text = getattr(incorrect_response, "response", "") or ""
+                error_context = (
+                    f"SQL: {sql_code}\n"
+                    f"Response: {response_text}\n"
+                    f"Actual validation/execution error: {error}"
+                )
+
+                analysis = self._analyze_error(
+                    state, question_block, error_context, relevant_tables
+                )
+                path_state["error_type"] = analysis.error_type.value
+                self.logger.info(
+                    "Error analysis: %s — %s",
+                    analysis.error_type.value,
+                    analysis.explanation[:150],
+                )
+                if analysis.explanation:
+                    record_thought(path_state, _GRAPH_NODE_NAME, analysis.explanation)
 
             if (
-                analysis.error_type == ErrorType.MISSING_DATA
+                analysis is not None
+                and analysis.error_type == ErrorType.MISSING_DATA
                 and analysis.search_queries
             ):
                 new_tables = self._discover_tables(
@@ -343,18 +568,32 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         history_section = ""
-        if len(failed_attempts) > 1:
-            history_lines = []
-            for i, attempt in enumerate(failed_attempts[:-1], 1):
-                history_lines.append(
-                    f"  Attempt {i}: {attempt['sql'][:200]}\n"
-                    f"  Error: {attempt['error'][:200]}"
-                )
+        # Round 1's own reconstruction lineage, carried forward read-only by
+        # a debug turn's seed (see coordinator.py::_apply_debug_seed) — kept
+        # under a separate key so it never touches len(failed_attempts),
+        # which the graph's routers use as the reconstruction-budget cap.
+        # Every entry here is already a *past* attempt (none is "the one
+        # currently being reconstructed"), unlike failed_attempts below.
+        prior_round_failed_attempts: list[dict] = list(
+            path_state.get("prior_round_failed_attempts") or []
+        )
+        history_lines = [
+            *self._format_attempt_history(
+                prior_round_failed_attempts, label="Round 1 attempt"
+            ),
+            *self._format_attempt_history(failed_attempts[:-1], label="Attempt"),
+        ]
+        if history_lines:
             history_section = (
                 "\nPREVIOUS FAILED ATTEMPTS (do NOT repeat any of these):\n"
                 + "\n".join(history_lines)
                 + "\n\n"
             )
+
+        known_columns_section = _format_known_columns(
+            path_state.get("primary_attribute"),
+            path_state.get("attribute_join_paths"),
+        )
 
         evidence_section = ""
         if evidence:
@@ -362,10 +601,33 @@ class SQLReconstructionAgent(BaseAgent):
             if evidence_hints:
                 evidence_section = f"{evidence_hints}\n\n"
 
+        # Re-surface the Evidence body (already resolved during clarification)
+        # in its own labeled section instead of leaving it buried, unmarked,
+        # at the tail of question_block — several observed debug-turn
+        # reconstruction failures used a plausible-but-wrong formula, column,
+        # or threshold even though the correct one was sitting in this exact
+        # text. Debug-turn only (see is_debug_turn above); outside a debug
+        # turn this section stays empty (evidence is still injected as its
+        # own SystemMessage below, just without this extra emphasis).
+        raw_evidence_reminder_section = ""
+        raw_evidence = evidence if is_debug_turn else None
+        if raw_evidence:
+            raw_evidence_reminder_section = (
+                "\nEVIDENCE (already resolved during clarification — re-check "
+                f"before rewriting):\n{raw_evidence}\n\n"
+                "Verify your corrected SQL's columns, formula, and thresholds "
+                "satisfy this evidence exactly. Do not substitute a different "
+                "formula, column, or value than what's stated here unless it "
+                "directly conflicts with the validation error above.\n\n"
+            )
+
         # Anchor ambiguous-term interpretation across repair attempts: without
         # this, each reconstruction call independently re-derives things like
-        # "recently" from scratch and silently drifts (e.g. 5 months -> 4
+        # "recently" from scratch and silently drifts (e.g. 5 months → 4
         # months) even when the time window was never the flagged problem.
+        # Accumulate the FULL history (not just the last thought) so an
+        # assumption made two retries ago isn't lost just because the latest
+        # thought didn't happen to repeat it.
         prior_interpretation_section = ""
         if interpretation_history:
             interpretation_text = "\n".join(
@@ -376,15 +638,19 @@ class SQLReconstructionAgent(BaseAgent):
                 "\nINTERPRETATION HISTORY:\n"
                 f"{interpretation_text}\n\n"
                 "Keep every valid assumption above. Change one only when required "
-                "by the question, schema, or error, and state the change explicitly. "
-                "Omission does not remove an assumption. Restate all active "
-                "assumptions in `thought`; SQL implementation details may change.\n\n"
+                "by the question, schema, or error, and state the change "
+                "explicitly. Omission does not remove an assumption. Do not treat "
+                "SQL implementation choices—such as joins, columns, aliases, or "
+                "query structure—as fixed. Restate all active assumptions in "
+                "`thought`; revise only parts contradicted by the question, "
+                "available schema, or validation error.\n\n"
             )
 
         error_prompt = (
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
+            f"{raw_evidence_reminder_section}"
             f"{history_section}"
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
@@ -398,6 +664,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
+            f"{known_columns_section}"
             f"{evidence_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
@@ -423,8 +690,8 @@ class SQLReconstructionAgent(BaseAgent):
                 "path_state": path_state,
             }
 
-        sql_preview = (getattr(response, "sql_code", "") or "")[:100]
-        self.logger.info("SQL reconstructed: %s...", sql_preview)
+        sql_preview = (getattr(response, "sql_code", "") or "")[:300]
+        self.logger.info("SQL reconstructed: %s", sql_preview)
 
         thought = getattr(response, "thought", "No explanation")
         response_explanation = getattr(response, "response", "") or thought
@@ -434,9 +701,6 @@ class SQLReconstructionAgent(BaseAgent):
         )
         if thought and thought != "No explanation":
             record_thought(path_state, _GRAPH_NODE_NAME, thought)
-            if thought not in interpretation_history:
-                interpretation_history.append(thought)
-                path_state["interpretation_history"] = interpretation_history
 
         custom_analyses_used: list = []
         if hasattr(response, "custom_analyses_used"):

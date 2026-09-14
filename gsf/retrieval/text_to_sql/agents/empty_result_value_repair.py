@@ -25,6 +25,7 @@ from gsf.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     build_value_repair_error,
     find_literal_mismatches,
+    find_numeric_scale_mismatches,
 )
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -64,6 +65,7 @@ class EmptyResultValueRepairAgent(BaseAgent):
 
         with ProbeExecutor(connector) as executor:
             mismatches = find_literal_mismatches(executor, dialect, sql_code)
+            mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
 
         if not mismatches:
             self.logger.info("Empty result but no literal mismatches — passing through")
@@ -71,8 +73,15 @@ class EmptyResultValueRepairAgent(BaseAgent):
 
         path_state["value_repair_attempted"] = True
         path_state["error"] = build_value_repair_error(mismatches)
+        # This error was derived from a live probe against the query's own
+        # already-joined tables — the fix is always "use the real value we
+        # just found there," never "go search for a new table." Skip
+        # reconstruction's LLM error-classification for it (see
+        # sql_reconstruction.py) so it can't be misread as missing_data.
+        path_state["error_known_fixable"] = True
         self.logger.info(
-            "Empty result — routing to reconstruction to fix %d literal(s): %s",
+            "[%s] Empty result — routing to reconstruction to fix %d literal(s): %s",
+            path_state.get("task_id", "?"),
             len(mismatches),
             [f"{m['table']}.{m['column']}='{m['used']}'" for m in mismatches],
         )

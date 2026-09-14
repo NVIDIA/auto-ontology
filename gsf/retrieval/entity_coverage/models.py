@@ -10,11 +10,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from gsf.utils.llm_invoke import StrictLLMOutputModel
 
-class QuestionExtractionLiteModel(BaseModel):
+
+class QuestionExtractionLiteModel(StrictLLMOutputModel):
     """Sanitize + entity extraction only (no subject / used_glossary_names)."""
-
-    model_config = ConfigDict(extra="forbid")
 
     sanitized_question: str = Field(
         ...,

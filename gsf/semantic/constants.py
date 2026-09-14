@@ -30,3 +30,8 @@ REL_IS_A = "IS_A"
 REL_ROLE = "ROLE"
 REL_REPRESENTS = "REPRESENTS"
 REL_SEMANTIC_FK = "SEMANTIC_FK"
+
+# Additional source value for SqlAttribute nodes generated from pure-FK
+# bridge (junction) tables. Sits alongside SQL_ATTR_SOURCE_MANUAL /
+# SQL_ATTR_SOURCE_SQL, which remain defined in gsf.dal.sql_attributes.
+SQL_ATTR_SOURCE_BRIDGE = "bridgeTable"

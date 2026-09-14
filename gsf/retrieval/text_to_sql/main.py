@@ -51,12 +51,12 @@ except ValueError as e:
 graph = create_graph()
 app = graph.compile()
 
-# Whether the proactive value check sits between validation and execution.
+# Whether the combined precheck sits between validation and execution.
 # Read off the graph that was actually built rather than re-reading
-# ``DB_PROBE_PROACTIVE``: ``create_graph`` evaluates that env var once at
-# import, so a later change to it would leave the two disagreeing about which
-# node is the last gate before execution. See ``_sql_about_to_run``.
-_PROACTIVE_VALUE_CHECK_IN_GRAPH = "precheck_value_repair" in graph.nodes
+# the probe flags: ``create_graph`` evaluates them once at import, so a later
+# change would leave the two disagreeing about which node is the last gate
+# before execution. See ``_sql_about_to_run``.
+_COMBINED_PRECHECK_IN_GRAPH = "precheck_combined" in graph.nodes
 
 
 def _build_state(payload: TextToSQLPayload) -> AgentState:
@@ -130,6 +130,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "llm": llm_client,
         "initial_question": submitted_question,
         "evidence": payload.get("evidence") or "",
+        "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
         "messages": messages,
         "path_state": initial_path_state,
@@ -175,8 +176,8 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
     """
     decision = (node_output or {}).get("decision") or ""
 
-    if _PROACTIVE_VALUE_CHECK_IN_GRAPH:
-        cleared = node_name == "precheck_value_repair" and decision == "valid_sql"
+    if _COMBINED_PRECHECK_IN_GRAPH:
+        cleared = node_name == "precheck_combined" and decision == "valid_sql"
     else:
         cleared = decision == "intent_valid" or (
             node_name == "validate_sql_query"
@@ -194,6 +195,22 @@ def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) 
         return sql
     generated = node_path_state.get("sql_generation_result")
     return (getattr(generated, "sql_code", "") or "").strip()
+
+
+def _merge_node_output(final_state: dict, node_output: dict | None) -> None:
+    """Fold one graph node's output into the accumulated state, in place.
+
+    ``path_state`` is merged key-by-key (nodes only ever return the subset
+    they touched); every other top-level key is overwritten outright.
+    """
+    if not node_output:
+        return
+    if "path_state" in node_output:
+        final_state.setdefault("path_state", {})
+        final_state["path_state"].update(node_output["path_state"])
+    for key, value in node_output.items():
+        if key != "path_state":
+            final_state[key] = value
 
 
 def _build_thoughts_summary(thoughts_log: list[dict]) -> str:
@@ -311,14 +328,7 @@ def stream_agent_response(
                     streamed_sql = node_sql
                     yield {"type": "sql", "node": node_name, "sql": node_sql}
 
-                if node_output:
-                    if "path_state" in node_output:
-                        if "path_state" not in final_state:
-                            final_state["path_state"] = {}
-                        final_state["path_state"].update(node_output["path_state"])
-                    for key, value in node_output.items():
-                        if key != "path_state":
-                            final_state[key] = value
+                _merge_node_output(final_state, node_output)
 
         answer = _extract_answer(final_state)
         thoughts_log = final_state.get("path_state", {}).get("thoughts_log") or []
@@ -326,7 +336,7 @@ def stream_agent_response(
         if isinstance(answer, dict) and thoughts_summary:
             answer["thoughts"] = thoughts_summary
         elapsed = time.perf_counter() - t0
-        logger.info("Final answer (%.2fs):\n%s", elapsed, answer)
+        logger.debug("Final answer (%.2fs):\n%s", elapsed, answer)
         yield {"type": "result", "answer": answer}
 
     except Exception as exc:
@@ -354,8 +364,50 @@ def get_agent_response(payload: TextToSQLPayload) -> dict:
     return {"response": "SQL can't be constructed.", "sql_code": "", "result": None}
 
 
+def get_agent_response_with_state(payload: TextToSQLPayload) -> dict:
+    """Like get_agent_response but also returns path_state in the result under key 'path_state'."""
+    # Required by gsf/retrieval/interactive/coordinator.py to persist path_state across turns/phases.
+    state = _build_state(payload)
+    final_state = dict(state)
+
+    try:
+        for step in app.stream(state, config={"recursion_limit": 45}):
+            for node_output in step.values():
+                _merge_node_output(final_state, node_output)
+    except Exception as exc:
+        logger.exception("Error during agent stream in get_agent_response_with_state")
+        # The stream may have already produced a valid, executed SQL query
+        # (e.g. several reconstruction rounds succeeded) before a later node
+        # raised — most commonly GraphRecursionError from an intent-validation
+        # <-> reconstruction oscillation. Fall back to whatever SQL is already
+        # sitting in path_state instead of discarding it and submitting blank
+        # SQL, which is a guaranteed Phase 1 failure even when the last known
+        # SQL was correct.
+        interrupted_path_state = final_state.get("path_state") or {}
+        fallback_sql = interrupted_path_state.get("sql_code", "") or ""
+        return {
+            "response": f"Agent failed: {exc}",
+            "sql_code": fallback_sql,
+            "path_state": interrupted_path_state,
+        }
+
+    # merge path_state: start with initial, overlay final accumulated
+    merged_path_state = dict(state.get("path_state") or {})
+    if "path_state" in final_state:
+        merged_path_state.update(final_state["path_state"])
+
+    answer = _extract_answer(final_state)
+    if isinstance(answer, dict):
+        result = dict(answer)
+    else:
+        result = {"response": str(answer)}
+    result["path_state"] = merged_path_state
+    return result
+
+
 __all__ = [
     "get_agent_response",
+    "get_agent_response_with_state",
     "stream_agent_response",
     "app",
     "graph",

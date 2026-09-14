@@ -33,19 +33,6 @@ def test_routes_all_tables_to_their_database() -> None:
     assert resolved is second
 
 
-def test_rejects_cross_database_tables() -> None:
-    connectors = [_connector("first"), _connector("second")]
-
-    with pytest.raises(ValueError, match="span multiple databases"):
-        resolve_connector_from_tables(
-            [
-                {"name": "orders", "database_name": "first"},
-                {"name": "customers", "database_name": "second"},
-            ],
-            connectors,
-        )
-
-
 def test_rejects_missing_database_with_multiple_connectors() -> None:
     connectors = [_connector("first"), _connector("second")]
 

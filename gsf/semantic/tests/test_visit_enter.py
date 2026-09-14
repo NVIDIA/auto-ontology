@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from unittest.mock import MagicMock, patch
@@ -196,14 +197,22 @@ def test_calculate_columns_profiling(
             "token": ["a" * 40, "b" * 40, "a" * 40, "c" * 40],
         }
     )
-    # status and token each have <5 distinct sample values, so each gets a
-    # DISTINCT probe. Return empty so the sample top-N values are kept as-is.
+
+    def _fake_execute(sql: str) -> pd.DataFrame:
+        # The main profiling query (SELECT *) gets the full table. A
+        # per-column DISTINCT probe (see _distinct_values_if_low_cardinality)
+        # fires for non-unique text columns ("status", "token" here) — a
+        # real connector would return only that column, so the mock must
+        # too, or df.iloc[:, 0] silently reads whichever column comes first
+        # instead of the one actually queried.
+        match = re.search(r'SELECT DISTINCT "([^"]+)"', sql)
+        if not match:
+            return df
+        col = match.group(1)
+        return pd.DataFrame({col: df[col].dropna().unique().tolist()})
+
     connector = _mock_connector()
-    connector.execute.side_effect = [
-        df,
-        pd.DataFrame({"status": []}),
-        pd.DataFrame({"token": []}),
-    ]
+    connector.execute.side_effect = _fake_execute
 
     table = {"id": "t1", "name": "orders", "schema_name": "public"}
     columns = [
@@ -215,6 +224,9 @@ def test_calculate_columns_profiling(
 
     result = calculate_columns_profiling(table, columns, connector)
 
+    # The main profiling query is the first connector.execute call — later
+    # calls (e.g. a per-column DISTINCT check for long-string columns like
+    # "token") would otherwise shadow it if we looked at call_args (last call).
     sql = connector.execute.call_args_list[0][0][0]
     assert '"public"."orders"' in sql
     assert "LIMIT 1000" in sql
@@ -302,6 +314,85 @@ def test_calculate_columns_profiling_preserves_scalar_types(
     # 40-char string does not.
     assert stored["big"] == [10**40, 10**41, 10**42]
     assert stored["label"] == ["b", "c"]
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_infers_date_format(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    # Every column here is unique, so no DISTINCT-cardinality probe fires —
+    # kept simple/isolated from test_calculate_columns_profiling, which
+    # exercises that probe (via non-unique "status"/"token" columns) instead.
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "created_at": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "orders", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "created_at", "data_type": "timestamp"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["created_at"]["format"] == "YYYY-MM-DD"
+    mock_store_dates.assert_called_once()
+    assert mock_store_dates.call_args[0][1] == {"created_at": "YYYY-MM-DD"}
+    # Declared date/timestamp type: sample_values stay excluded regardless of
+    # the format inference (pre-existing _is_excluded_sample_type behavior).
+    stored = mock_store_samples.call_args[0][1]
+    assert "created_at" not in stored
+
+
+@patch("gsf.semantic.visit_enter.store_column_date_formats")
+@patch("gsf.semantic.visit_enter.store_column_uniqueness")
+@patch("gsf.semantic.visit_enter.store_column_sample_values")
+def test_text_column_with_date_format_keeps_sample_values(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """A TEXT-typed date column, unlike a declared date/timestamp type, keeps
+    its persisted sample_values alongside the inferred format — samples stay
+    available to semantic_fk.py's SQL-probe fallback (which reads persisted
+    Column.sample_values, not this call's in-memory profiling dict), and date
+    values are short enough that keeping them costs little.
+    """
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "signup_date": ["2020-01-01", "2020-01-02", "2020-01-03", "2020-01-04"],
+        }
+    )
+    connector = MagicMock()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "users", "schema_name": "public"}
+    columns = [
+        {"name": "id", "data_type": "integer"},
+        {"name": "signup_date", "data_type": "text"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert result["signup_date"]["format"] == "YYYY-MM-DD"
+    stored = mock_store_samples.call_args[0][1]
+    assert "signup_date" in stored
+    assert set(stored["signup_date"]) == {
+        "2020-01-01",
+        "2020-01-02",
+        "2020-01-03",
+        "2020-01-04",
+    }
 
 
 @patch("gsf.semantic.visit_enter.store_column_date_formats")

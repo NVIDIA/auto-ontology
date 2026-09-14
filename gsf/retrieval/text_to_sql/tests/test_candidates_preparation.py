@@ -9,6 +9,7 @@ from gsf.retrieval.text_to_sql.agents import candidates_preparation
 from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
+from gsf.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from gsf.retrieval.text_to_sql.state import AgentState
 
 
@@ -35,7 +36,8 @@ def test_retrieve_additional_tables_searches_question_and_entities(
     )
 
     assert [q for q, _, _ in seen] == ["q", "e1", "e2"]
-    assert all(k == 1 for _, k, _ in seen)
+    expected_k = max(1, SQL_GEN_MAX_ENTITIES // len(seen))
+    assert all(k == expected_k for _, k, _ in seen)
     assert all(db == "db" for _, _, db in seen)
     assert len(out) == 3
 
@@ -62,7 +64,10 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     monkeypatch.setattr(
         CandidatePreparationAgent,
         "_filter_tables_by_relevance",
-        lambda self, state, question, tables, custom_analyses=None: (tables, ""),
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            tables,
+            "",
+        ),
     )
     monkeypatch.setattr(
         candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []

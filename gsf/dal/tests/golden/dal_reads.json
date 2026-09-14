@@ -8,6 +8,7 @@
         "col_id": "<col:pagila.public.film.film_id>",
         "col_name": "film_id",
         "database_name": "pagila",
+        "datatype": "integer",
         "schema_name": "public",
         "table_id": "<table:pagila.public.film>",
         "table_name": "film",
@@ -3590,43 +3591,50 @@
             "data_type": "integer",
             "description": "Primary key of customer.",
             "format": null,
-            "name": "customer_id"
+            "name": "customer_id",
+            "sample_values": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
-            "name": "inventory_id"
+            "name": "inventory_id",
+            "sample_values": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
-            "name": "rental_id"
+            "name": "rental_id",
+            "sample_values": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
-            "name": "staff_id"
+            "name": "staff_id",
+            "sample_values": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": "When the rental started.",
             "format": null,
-            "name": "rental_date"
+            "name": "rental_date",
+            "sample_values": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
-            "name": "last_update"
+            "name": "last_update",
+            "sample_values": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
-            "name": "return_date"
+            "name": "return_date",
+            "sample_values": null
           }
         ],
         "database_name": "pagila",
@@ -3645,85 +3653,99 @@
             "data_type": "integer",
             "description": "Primary key of film.",
             "format": null,
-            "name": "film_id"
+            "name": "film_id",
+            "sample_values": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
-            "name": "language_id"
+            "name": "language_id",
+            "sample_values": null
           },
           {
             "data_type": "integer",
             "description": null,
             "format": null,
-            "name": "original_language_id"
+            "name": "original_language_id",
+            "sample_values": null
           },
           {
             "data_type": "mpaa_rating",
             "description": "MPAA rating; an enum.",
             "format": null,
-            "name": "rating"
+            "name": "rating",
+            "sample_values": null
           },
           {
             "data_type": "numeric",
             "description": null,
             "format": null,
-            "name": "rental_rate"
+            "name": "rental_rate",
+            "sample_values": null
           },
           {
             "data_type": "numeric",
             "description": null,
             "format": null,
-            "name": "replacement_cost"
+            "name": "replacement_cost",
+            "sample_values": null
           },
           {
             "data_type": "smallint",
             "description": null,
             "format": null,
-            "name": "length"
+            "name": "length",
+            "sample_values": null
           },
           {
             "data_type": "smallint",
             "description": null,
             "format": null,
-            "name": "rental_duration"
+            "name": "rental_duration",
+            "sample_values": null
           },
           {
             "data_type": "text",
             "description": "The film's title.",
             "format": null,
-            "name": "title"
+            "name": "title",
+            "sample_values": null
           },
           {
             "data_type": "text",
             "description": null,
             "format": null,
-            "name": "description"
+            "name": "description",
+            "sample_values": null
           },
           {
             "data_type": "text[]",
             "description": null,
             "format": null,
-            "name": "special_features"
+            "name": "special_features",
+            "sample_values": null
           },
           {
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
-            "name": "last_update"
+            "name": "last_update",
+            "sample_values": null
           },
           {
             "data_type": "tsvector",
             "description": null,
             "format": null,
-            "name": "fulltext"
+            "name": "fulltext",
+            "sample_values": null
           },
           {
             "data_type": "year",
             "description": null,
             "format": null,
-            "name": "release_year"
+            "name": "release_year",
+            "sample_values": null
           }
         ],
         "database_name": "pagila",
@@ -6477,6 +6499,7 @@
       [
         {
           "column_name": "Name",
+          "datatype": "NVARCHAR(200)",
           "description": "The track's title.",
           "id": "<attr:Track/track name/Name>",
           "is_unique": null,
@@ -6490,6 +6513,7 @@
         },
         {
           "column_name": "amount",
+          "datatype": "numeric",
           "description": "Amount paid.",
           "id": "<attr:Payment/payment amount/amount>",
           "is_unique": null,
@@ -6503,6 +6527,7 @@
         },
         {
           "column_name": "customer_id",
+          "datatype": "integer",
           "description": "Primary key of customer.",
           "id": "<attr:Customer/customer id/customer_id>",
           "is_unique": null,
@@ -6516,6 +6541,7 @@
         },
         {
           "column_name": "email",
+          "datatype": "character varying",
           "description": "Contact address.",
           "id": "<attr:Customer/customer email/email>",
           "is_unique": null,
@@ -6529,6 +6555,7 @@
         },
         {
           "column_name": "film_id",
+          "datatype": "integer",
           "description": "Primary key of film.",
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
@@ -6542,6 +6569,7 @@
         },
         {
           "column_name": "rating",
+          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
@@ -6555,6 +6583,7 @@
         },
         {
           "column_name": "rental_date",
+          "datatype": "timestamp with time zone",
           "description": "When the rental started.",
           "id": "<attr:Rental/rental date/rental_date>",
           "is_unique": null,
@@ -6568,6 +6597,7 @@
         },
         {
           "column_name": "title",
+          "datatype": "text",
           "description": "The film's title.",
           "id": "<attr:Film/film title/title>",
           "is_unique": null,
@@ -6615,6 +6645,7 @@
       [
         {
           "column_name": "film_id",
+          "datatype": "integer",
           "description": "Primary key of film.",
           "id": "<attr:Film/film id/film_id>",
           "is_unique": null,
@@ -6628,6 +6659,7 @@
         },
         {
           "column_name": "rating",
+          "datatype": "mpaa_rating",
           "description": "MPAA rating; an enum.",
           "id": "<attr:Film/film rating/rating>",
           "is_unique": null,
@@ -6641,6 +6673,7 @@
         },
         {
           "column_name": "title",
+          "datatype": "text",
           "description": "The film's title.",
           "id": "<attr:Film/film title/title>",
           "is_unique": null,

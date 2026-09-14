@@ -112,6 +112,43 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
     return entry
 
 
+def _merge_column_lists(ca: list, cb: list) -> list:
+    """Merge two column-dict lists by ``name``, filling missing fields on each column
+    from whichever side has them (e.g. ``sample_values`` present only in the DB row).
+
+    A plain "pick the longer/richer list" swap is not enough here: the sparse and rich
+    rows for the same table normally have the *same* columns, just with different fields
+    populated, so neither list is unambiguously "better" as a whole — the fields have to
+    be reconciled column-by-column instead.
+    """
+    if not ca:
+        return cb
+    if not cb:
+        return ca
+    cb_by_name = {c.get("name"): c for c in cb if isinstance(c, dict) and c.get("name")}
+    merged: list = []
+    seen_names: set = set()
+    for col in ca:
+        name = col.get("name") if isinstance(col, dict) else None
+        other = cb_by_name.get(name) if name else None
+        if name:
+            seen_names.add(name)
+        if not other:
+            merged.append(col)
+            continue
+        merged_col = dict(col)
+        for ck, cv in other.items():
+            cur = merged_col.get(ck)
+            if cv not in (None, "", []) and cur in (None, "", []):
+                merged_col[ck] = cv
+        merged.append(merged_col)
+    # Any columns present only on the b-side (e.g. a table that grew columns).
+    for name, col in cb_by_name.items():
+        if name not in seen_names:
+            merged.append(col)
+    return merged
+
+
 def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
     """Merge two table dicts with the same ``id`` (e.g. catalog vs vector); prefer non-empty / richer fields."""
     out = dict(a)
@@ -121,10 +158,7 @@ def _merge_two_relevant_table_dicts(a: dict, b: dict) -> dict:
         if k == "columns":
             ca = out.get("columns") if isinstance(out.get("columns"), list) else []
             cb = v if isinstance(v, list) else []
-            if len(cb) > len(ca):
-                out["columns"] = cb
-            elif not ca and cb:
-                out["columns"] = cb
+            out["columns"] = _merge_column_lists(ca, cb)
             continue
         if k in ("table_info", "text"):
             sa = str(out.get(k) or "").strip()

@@ -34,6 +34,7 @@ from gsf.server.datasources.router import router as datasources_router  # noqa: 
 from gsf.server.exploration.router import router as exploration_router  # noqa: E402
 from gsf.server.health.router import router as health_router  # noqa: E402
 from gsf.server.metadata.router import router as metadata_router  # noqa: E402
+from gsf.server.rules.router import router as rules_router  # noqa: E402
 from gsf.server.semantic_compilation.router import (  # noqa: E402
     router as semantic_compilation_router,
 )
@@ -103,6 +104,7 @@ def create_app() -> FastAPI:
     )
     app.include_router(zones_router, prefix="/api", tags=["zones"])
     app.include_router(tags_router, prefix="/api", tags=["tags"])
+    app.include_router(rules_router, prefix="/api", tags=["rules"])
     app.include_router(terms_router, prefix="/api", tags=["terms"])
     app.include_router(
         model_interchange_router, prefix="/api", tags=["model-interchange"]

@@ -57,6 +57,10 @@ dev_tools/evaluation/
 # with secrets); local scratch state, never commit.
 openmetadata-eval/
 
+# Claude Code's local agent-memory/session state — machine-specific, never commit.
+.claude/projects/
+dev_tools/pgadmin/
+
 # Generated SQLite fixture DBs — built from the vendored .sql by
 # dev_tools.fixtures.build_sqlite_fixtures; text is the source of truth, not the blob.
 dev_tools/fixtures/sql/*.sqlite

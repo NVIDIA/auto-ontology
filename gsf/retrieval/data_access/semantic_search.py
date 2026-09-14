@@ -27,6 +27,8 @@ from __future__ import annotations
 import ast
 import json
 import logging
+import random
+import time
 from typing import TYPE_CHECKING, Literal
 
 from gsf.catalog.constants import Labels
@@ -52,6 +54,57 @@ PER_LABEL_LIMITS: dict[str, int] = {
     Labels.CUSTOM_ANALYSIS: 3,
     LABEL_SQL_ATTRIBUTE: 3,
 }
+
+# ``retriever.query`` embeds the entity text via the remote NIM embeddings
+# endpoint before it can run the vector search — a transient 5xx there
+# (observed as e.g. "502 Bad Gateway") currently has no retry anywhere in the
+# stack and silently degrades that query to zero candidates. These are
+# infrastructure blips, not a signal about the query itself, so retry with
+# backoff instead of failing straight through.
+_EMBED_QUERY_RETRY_MAX_ATTEMPTS = 3
+_EMBED_QUERY_RETRYABLE_TOKENS = (
+    "502",
+    "Bad Gateway",
+    "503",
+    "Service Unavailable",
+    "504",
+    "Gateway Timeout",
+    "Timeout",
+    "Connection",
+)
+
+
+def _query_with_retry(
+    retriever: "Retriever", entity: str, top_k: int, vdb_kwargs: dict | None
+) -> list[dict]:
+    """``retriever.query`` with retry-with-backoff on transient embedding-
+    endpoint errors. Waits between attempts (exponential backoff + jitter,
+    same shape as ``gsf/utils/llm_invoke.py``'s LLM retry) rather than
+    retrying immediately, since a 502/503 needs the endpoint a moment to
+    recover. Non-retryable errors (e.g. a bad query shape) still raise
+    immediately on the first attempt.
+    """
+    last_exc: Exception | None = None
+    for attempt in range(_EMBED_QUERY_RETRY_MAX_ATTEMPTS):
+        try:
+            return retriever.query(entity, top_k=top_k, vdb_kwargs=vdb_kwargs)
+        except Exception as e:
+            last_exc = e
+            is_retryable = any(tok in str(e) for tok in _EMBED_QUERY_RETRYABLE_TOKENS)
+            if is_retryable and attempt < _EMBED_QUERY_RETRY_MAX_ATTEMPTS - 1:
+                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                logger.warning(
+                    "Retryable embedding error on attempt %d/%d — retrying in "
+                    "%.1fs: %s",
+                    attempt + 1,
+                    _EMBED_QUERY_RETRY_MAX_ATTEMPTS,
+                    wait,
+                    str(e)[:200],
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise last_exc  # pragma: no cover — loop always returns or raises above
 
 
 def clean_results(raw_candidates: list[dict]) -> list[dict]:
@@ -229,7 +282,7 @@ def _hits_to_semantic_rows(
             "label": lab,
             "score": score,
         }
-        for _field in ("name", "schema_name", "database_name", "source"):
+        for _field in ("name", "schema_name", "database_name", "data_type", "source"):
             val = meta.get(_field)
             if val is not None:
                 row[_field] = val
@@ -277,7 +330,7 @@ def search_semantic_index(
             else DEFAULT_FETCH_LIMIT
         )
 
-        hits = retriever.query(entity, top_k=top_k, vdb_kwargs=vdb_kwargs)
+        hits = _query_with_retry(retriever, entity, top_k, vdb_kwargs)
         all_hits.extend(hits)
 
     return _hits_to_semantic_rows(

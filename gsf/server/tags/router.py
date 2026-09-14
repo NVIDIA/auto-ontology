@@ -6,17 +6,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from gsf.dal import tags as dal
 from gsf.server.identity import resolve_internal_user
 from gsf.server.models import TagTargetType
+from gsf.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from gsf.server.responses import (
     IdResponse,
     TagChipListResponse,
-    TagDetailResponse,
-    TagListResponse,
+    TagItemPageResponse,
+    TagPageResponse,
     TagResponse,
 )
 
@@ -45,28 +46,84 @@ class TagTarget(BaseModel):
     id: str
 
 
-@router.get("/tags", response_model=TagListResponse)
-def list_tags() -> dict:
-    """Return every tag."""
-    rows = dal.list_tags()
-    return {"data": rows, "count": len(rows)}
+@router.get("/tags", response_model=TagPageResponse)
+def list_tags(
+    q: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the tag name.",
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Return tags, ordered by name.
+
+    *q*, when given, keeps the tags whose name contains it -- a name is the
+    whole of what the settings list shows, so there is nothing else to search
+    by.
+
+    *skip*/*limit* select one page of that order, and ``total`` counts every
+    match so a caller knows when to stop asking. Omitting *limit* returns every
+    matching tag, which is what the tag picker asks for: it offers the whole
+    vocabulary on every detail page and narrows it in the browser.
+    """
+    rows = dal.list_tags(search=q, skip=skip, limit=limit)
+    # The count is a second read, so it is worth skipping for the request that
+    # asked for everything: a whole unpaged list already is its own total. Same
+    # bargain the rule list and the targets list below make.
+    total = dal.count_tags(search=q) if skip or limit is not None else len(rows)
+    return {"data": rows, "count": len(rows), "total": total}
 
 
-@router.get("/tags/{tag_id}", response_model=TagDetailResponse)
+@router.get("/tags/{tag_id}", response_model=TagResponse)
 def get_tag(tag_id: str) -> dict:
-    """Return one tag with every object it labels.
+    """Return one tag.
+
+    The tag alone: what it labels is a list of its own, read a page at a time
+    from :func:`list_tag_targets` below. A tag can label the whole catalog --
+    that is what a rule does to one -- so a detail that carried every object
+    would grow without bound while the page it feeds shows a screenful.
 
     404 for an unknown id, rather than an empty tag: the page opens this from a
     row it has already read, so a missing tag means the row is stale, and a
     blank page titled with nothing would look like a tag with no items.
-
-    An *existing* tag with nothing tagged is the opposite case and answers 200
-    with ``items: []``, which the page renders as its empty state.
     """
     tag = dal.get_tag(tag_id)
     if tag is None:
         raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
-    return {"data": {**tag, "items": dal.list_tag_targets(tag_id)}}
+    return {"data": tag}
+
+
+@router.get("/tags/{tag_id}/targets", response_model=TagItemPageResponse)
+def list_tag_targets(
+    tag_id: str,
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """Return the objects this tag labels, as one page across the five kinds.
+
+    Ordered by name, case-insensitively, with *skip*/*limit* selecting one
+    window of that order; ``total`` counts everything the tag labels, so a
+    caller knows when to stop asking. Omitting *limit* returns every object,
+    which is what a caller wanting the whole list in one answer asks for.
+
+    Each row says where its label came from -- the account that applied it or
+    the rule that matched -- which is the "Tagged By" column on the tag's page.
+
+    404 for an unknown tag rather than an empty page: the page reads this beside
+    :func:`get_tag`, and a tag that is gone should say so once rather than draw
+    as a tag with nothing tagged. An *existing* tag with nothing tagged is the
+    opposite case and answers 200 with an empty ``data``, which the page renders
+    as its empty state.
+    """
+    if dal.get_tag(tag_id) is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
+
+    rows = dal.list_tag_targets(tag_id, skip=skip, limit=limit)
+    # The count is a second read over the same union, so it is worth skipping
+    # for the request that asked for everything: an unpaged list is its own
+    # total. Same bargain the rule list makes.
+    total = dal.count_tag_targets(tag_id) if skip or limit is not None else len(rows)
+    return {"data": rows, "count": len(rows), "total": total}
 
 
 def _validated_name(raw: str) -> str:
@@ -181,7 +238,7 @@ def _target_or_tag_missing(
 @router.post(
     "/tags/{tag_id}/targets", status_code=201, response_model=TagChipListResponse
 )
-def attach_tag(tag_id: str, body: TagTarget) -> dict:
+def attach_tag(request: Request, tag_id: str, body: TagTarget) -> dict:
     """Label one object with this tag.
 
     Both write routes live here rather than on ``/terms/{id}/tags`` and its two
@@ -194,13 +251,29 @@ def attach_tag(tag_id: str, body: TagTarget) -> dict:
     edit. Labelling something that already carries the tag is a 201 with the
     same body: two clicks on one tag are one intention.
 
+    Who applied the label is read from the gateway's identity header, for the
+    reason ``create_tag`` reads an author from it, and shows in the "Tagged By"
+    column on the tag's page. ``required=False`` for the same reason too: it is
+    audit rather than authorization, so a direct call on the private network
+    still labels the object -- recorded as the deployment's own doing, which
+    that column names "Auto Generated". See ``attach_tag`` in the DAL.
+
+    Re-labelling something keeps the source it already had, so this does not
+    take a label away from the rule that applied it -- see ``attach_tag`` in the
+    DAL.
+
     409 for a column or SQL attribute that is not a property of any term: it
     exists, so a 404 would be a lie, but it is unreachable — every list of
     attributes goes through the term that owns them — and a tag on it could
     never be seen or taken off again.
     """
     try:
-        tags = dal.attach_tag(tag_id=tag_id, kind=body.type, item_id=body.id)
+        tags = dal.attach_tag(
+            tag_id=tag_id,
+            kind=body.type,
+            item_id=body.id,
+            tagged_by=resolve_internal_user(request, required=False),
+        )
     except ValueError as exc:
         # Only the DAL's eligibility rule reaches here. Its other ``ValueError``
         # is for an unknown target kind, which ``TagTargetType`` has already

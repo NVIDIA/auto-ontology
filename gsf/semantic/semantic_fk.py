@@ -7,13 +7,16 @@ Algorithm
 2. For each such column:
    a. **Declared FK fast path** — if a FOREIGN_KEY edge already exists in the
       graph, look up the ColumnAttribute attached to the target Column and
-      create SEMANTIC_FK directly.
+      create SEMANTIC_FK directly. A declared FK that targets a column on the
+      *same* table is rejected — that's a self-reference, never the entity
+      the FK points to.
    b. **LLM / VDB fallback** — if there is no declared FK, embed the column
       context, search the *semantic* VDB for the top-5 most similar
-        ColumnAttribute records, and ask the LLM to pick the best match. If the
-        LLM abstains, probe the candidate columns for the FK's sample values.
-        The hit's ``metadata["id"]`` is the ColumnAttribute id directly — no
-        additional lookup needed.
+      ColumnAttribute records (excluding candidates on the FK's own table),
+      ask the LLM to pick the best match, and fall back to probing the live
+      database for a candidate whose sample values match when the LLM
+      abstains. The hit's ``metadata["id"]`` is the ColumnAttribute id
+      directly — no additional lookup needed.
 """
 
 from __future__ import annotations
@@ -96,19 +99,31 @@ def resolve_semantic_fks(database_name: str) -> int:
         if fk_target_col_id:
             if col.get("fk_target_table_id") == col.get("table_id"):
                 _log_start(index, col)
-                # resolve_semantic_fks [declared]: rejected same-table target
+                logger.debug(
+                    "resolve_semantic_fks [declared]: %s.%s declared FK targets its "
+                    "own table — rejecting self-reference",
+                    col.get("table_name"),
+                    col.get("name"),
+                )
                 continue
             attr_id = find_column_attribute_by_column_id(fk_target_col_id)
             if attr_id:
                 _log_start(index, col)
-                merge_semantic_fk(col["id"], attr_id)
-                declared_written += 1
-                logger.debug(
-                    "resolve_semantic_fks [declared]: %s.%s → attr %s",
-                    col.get("table_name"),
-                    col.get("name"),
-                    attr_id,
-                )
+                # merge_semantic_fk refuses (and logs) a cross-database edge on
+                # its own -- should be structurally impossible for a declared
+                # FK, whose target is always a column in the same connected
+                # database, but treat "not written" the same as "no attribute
+                # found" rather than assume.
+                if merge_semantic_fk(col["id"], attr_id):
+                    declared_written += 1
+                    logger.debug(
+                        "resolve_semantic_fks [declared]: %s.%s → attr %s",
+                        col.get("table_name"),
+                        col.get("name"),
+                        attr_id,
+                    )
+                else:
+                    llm_queue.append((index, col))
             else:
                 logger.debug(
                     "resolve_semantic_fks [declared]: target column %s has no ColumnAttribute — queuing for LLM",
@@ -143,8 +158,13 @@ def resolve_semantic_fks(database_name: str) -> int:
         _log_start(index, col)
         try:
             attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
-            if attr_id:
-                merge_semantic_fk(col["id"], attr_id)
+            # The VDB where-filter already scopes hits to database_name, but
+            # it's a query-time filter over a collection shared by every
+            # ingested database, not physical isolation -- the same shape of
+            # mechanism that let Term nodes leak across databases elsewhere.
+            # merge_semantic_fk verifies against the catalog before writing
+            # rather than trust the filter alone, and logs its own rejection.
+            if attr_id and merge_semantic_fk(col["id"], attr_id):
                 logger.debug(
                     "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
@@ -241,10 +261,19 @@ def _resolve_via_vdb(
     - name + description query (top 3): captures semantic context
     - name-only query (top 3): catches cases where description is noisy or absent
 
+    Candidates on the FK column's own table are excluded — a FK never
+    references a column on the table it lives on. Candidates whose owning
+    column is known (profiled) to be non-unique are excluded at the VDB
+    query level — a non-unique column can't validly serve as the referenced
+    key.
+
     The hit's ``metadata["id"]`` is the ColumnAttribute id directly —
     no additional graph lookup is required.
 
-    Returns the ColumnAttribute id if a confident LLM match is found, else None.
+    Returns the ColumnAttribute id from a confident LLM match, or — when the
+    LLM abstains — from probing the live database for a candidate whose
+    physical column actually contains the FK's sample values. None if
+    neither step finds a match.
     """
     vdb_kwargs = {
         "where": {
@@ -290,7 +319,12 @@ def _match_hit_by_sample_values(
     hits: list[dict[str, Any]],
     connector: SQLDatabase | None,
 ) -> str | None:
-    """Choose the best VDB hit whose physical column contains every FK sample."""
+    """Choose the best VDB hit whose physical column contains every FK sample.
+
+    Runs only when the LLM abstains — probes each same-named candidate's live
+    column via a bounded, read-only ``ProbeExecutor`` query and keeps hits
+    where every one of the FK's distinct sample values actually appears.
+    """
     samples = _distinct_samples(col.get("sample_values"))
     if connector is None or not samples:
         return None

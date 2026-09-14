@@ -6,6 +6,18 @@
 
 from __future__ import annotations
 
+import os
+
+# Maximum number of entity noun phrases to extract per question during clarification.
+# Raise via CLARIFICATION_MAX_ENTITIES env var for complex multi-metric queries.
+# Falls back to SQL_GEN_MAX_ENTITIES (then 5) when unset.
+_MAX_ENTITIES: int = int(
+    os.environ.get(
+        "CLARIFICATION_MAX_ENTITIES",
+        os.environ.get("SQL_GEN_MAX_ENTITIES", "5"),
+    )
+)
+
 
 def format_glossary_section(glossary: list[dict[str, str]] | None) -> str:
     """Render the user-curated Glossary, or "" when there is nothing to inject.
@@ -55,7 +67,7 @@ Rules:
 """
 
 
-_SANITIZE_AND_ENTITIES = """## Part 1 — sanitized_question
+_SANITIZE_AND_ENTITIES = f"""## Part 1 — sanitized_question
 
 Rules:
 - Remove personal background, narrative fluff, filler, politeness, and generic request
@@ -77,7 +89,7 @@ sanitized_question: How many shipments were delivered last month?
 
 ## Part 2 — required_entity_name
 
-Populate "required_entity_name" with 1–5 noun phrases that correspond to database \
+Populate "required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database \
 tables, columns, or relationships. Extract only from the completed sanitized intent. \
 Do not extract entities directly from Glossary or Evidence sections.
 

@@ -1,13 +1,18 @@
 {
   "attributes": {
+    "column_participates_in_semantic_fk": "(col_id: 'str') -> 'bool'",
     "fetch_attr_column_contexts": "(attr_ids: 'list[str]', *, database_name: 'str | None') -> 'dict[str, dict]'",
     "fetch_column_attribute_column": "(attr_id: 'str') -> 'dict[str, Any] | None'",
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
+    "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
+    "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
+    "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
+    "find_table_bridge": "(table_a_id: 'str', table_b_id: 'str', allowed_table_ids: 'set[str] | None' = None) -> 'tuple[list[dict], list[dict]]'",
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
-    "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'None'",
+    "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None) -> 'dict[str, Any] | None'"
   },
   "candidates": {
@@ -59,6 +64,9 @@
     "fetch_tables_and_columns_by_node_ids": "(node_ids: 'list[str]') -> 'tuple[pd.DataFrame, pd.DataFrame, str]'",
     "fetch_tables_by_ids": "(table_ids: 'list[str]') -> 'list[dict[str, Any]]'",
     "fetch_tables_for_schema": "(schema_id: 'str', *, database_name: 'str | None' = None, zone_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
+    "find_column_id_by_table_and_name": "(table_name: 'str', column_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
+    "find_table_id_by_name": "(table_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
+    "find_table_key_columns": "(table_name: 'str', database_name: 'str | None' = None) -> 'dict[str, list[str]]'",
     "patch_catalog_node": "(node_id: 'str', properties: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
@@ -106,6 +114,13 @@
     "delete_all_data": "(database_name: 'str | None' = None) -> 'ResetResult'",
     "delete_data_layer": "(database_name: 'str | None' = None) -> 'int'",
     "delete_semantic_layer": "(database_name: 'str | None' = None) -> 'int'"
+  },
+  "rules": {
+    "count_rules": "(*, search: 'str | None' = None) -> 'int'",
+    "create_rule": "(*, name: 'str', search_term: 'str', text_match_option: 'str', filters: 'dict[str, Any]', tags: 'list[str]', created_by: 'str') -> 'str'",
+    "delete_rule": "(rule_id: 'str', *, keep_tags: 'bool' = False) -> 'bool'",
+    "list_rules": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "update_rule": "(*, rule_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "schema": {},
   "schema_version": {
@@ -162,14 +177,18 @@
     "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
-    "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
+    "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str', tagged_by: 'str | None' = None) -> 'list[dict[str, Any]] | None'",
+    "attach_tags_by_rule": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'list[tuple[str, str]]') -> 'int'",
+    "count_tag_targets": "(tag_id: 'str') -> 'int'",
+    "count_tags": "(*, search: 'str | None' = None) -> 'int'",
     "create_tag": "(*, name: 'str', created_by: 'str | None' = None) -> 'dict[str, Any]'",
     "delete_tag": "(tag_id: 'str') -> 'bool'",
     "detach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str') -> 'list[dict[str, Any]] | None'",
+    "existing_tag_ids": "(tag_ids: 'list[str]') -> 'set[str]'",
     "fetch_tags_map": "(kind: 'str', item_ids: 'list[str]') -> 'dict[str, list[dict[str, Any]]]'",
     "get_tag": "(tag_id: 'str') -> 'dict[str, Any] | None'",
-    "list_tag_targets": "(tag_id: 'str') -> 'list[dict[str, Any]]'",
-    "list_tags": "() -> 'list[dict[str, Any]]'",
+    "list_tag_targets": "(tag_id: 'str', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
+    "list_tags": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "update_tag": "(*, tag_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
   "terms": {
@@ -187,11 +206,11 @@
     "fetch_table_schema_map": "(database_name: 'str') -> 'dict[str, str]'",
     "fetch_term_and_column_attributes_for_embedding": "(term_id: 'str') -> 'tuple[dict[str, Any] | None, list[dict[str, Any]]]'",
     "fetch_term_synonyms": "(attr_ids: 'list[str]') -> 'dict[str, list[str]]'",
-    "fetch_term_table_pairs": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, *, term_ids: 'list[str] | None' = None, table_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
+    "fetch_term_table_pairs": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, database_name: 'str | None' = None, *, term_ids: 'list[str] | None' = None, table_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'",
     "fetch_term_zones_map": "(zone_ids: 'list[str] | None' = None, term_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
     "fetch_terms_and_attributes_for_table": "(table_id: 'str') -> 'tuple[list[dict[str, Any]], list[dict[str, Any]]]'",
     "fetch_terms_by_ids": "(term_ids: 'list[str]', *, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
-    "fetch_terms_with_sqls": "() -> 'list[dict[str, Any]]'",
+    "fetch_terms_with_sqls": "(source: 'str' = 'semantic', database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
     "find_term_link_path": "(term_a_id: 'str', term_b_id: 'str') -> 'list[dict[str, Any]]'",
     "get_full_term_by_id": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'dict[str, Any] | None'",

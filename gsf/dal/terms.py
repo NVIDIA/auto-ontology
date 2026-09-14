@@ -293,7 +293,13 @@ def semantic_layer_calculated() -> bool:
 
 
 def get_term_record_for_table(table_id: str) -> dict[str, str] | None:
-    """``{id, name, description}`` for the Term a table represents."""
+    """``{id, name, description}`` for the Term a table represents.
+
+    Returns ``None`` when the table has no representing Term. Unlike
+    ``get_term_for_table``, which returns only the name, this also carries
+    ``id``/``description`` — needed to rerank candidate owner Terms (e.g.
+    for bridge-table SqlAttribute synthesis).
+    """
     rows = store().query_read(
         select(
             s.term.c.id,
@@ -588,6 +594,7 @@ def fetch_all_terms_and_attributes(
             s.catalog_table.c.name.label("table_name"),
             s.column_attribute.c.id,
             s.catalog_schema.c.name.label("schema_name"),
+            s.column_attribute.c.datatype,
         )
         .select_from(
             s.column_attribute.join(
@@ -811,14 +818,25 @@ def fetch_table_schema_map(database_name: str) -> dict[str, str]:
     }
 
 
-def fetch_terms_with_sqls() -> list[dict[str, Any]]:
-    """Every semantic Term with the **ingestion** SQL of its tables.
+def fetch_terms_with_sqls(
+    source: str = SEMANTIC_SOURCE,
+    database_name: str | None = None,
+) -> list[dict[str, Any]]:
+    """Every Term with the **ingestion** SQL of its connected tables.
 
     Statements owned by a SqlAttribute or CustomAnalysis are excluded, so
     generated semantic SQL cannot feed the next round of suggestions — a
     feedback loop where the suggester learns from itself.
 
-    Terms with no ingestion query are omitted.
+    *source* defaults to ``SEMANTIC_SOURCE`` — matching main's version, which
+    hardcoded it — so callers that never cared about non-semantic terms (the
+    zero-arg call sites/tests) keep working unchanged; it's only a parameter
+    at all because ``sql_attribute_suggester.py`` passes it explicitly.
+
+    Terms with no ingestion query are omitted. When *database_name* is given,
+    only terms whose tables belong to that database are returned — required
+    when compiling one DB at a time so SqlAttribute validation uses a
+    matching catalog.
 
     ``props`` is the statement row itself. There are no per-month counters —
     they were measured as unread by anything, and the schema does not carry
@@ -836,7 +854,7 @@ def fetch_terms_with_sqls() -> list[dict[str, Any]]:
         .exists()
     )
 
-    rows = store().query_read(
+    statement = (
         select(
             s.term.c.id.label("term_id"),
             s.term.c.name.label("term_name"),
@@ -851,10 +869,23 @@ def fetch_terms_with_sqls() -> list[dict[str, Any]]:
             )
             .join(s.sql_query, s.sql_query.c.id == s.sql_query__table.c.sql_query_id)
         )
-        .where(s.term.c.source == SEMANTIC_SOURCE, ~owned)
+        .where(s.term.c.source == source, ~owned)
         .distinct()
         .order_by(s.term.c.id, s.sql_query.c.id)
     )
+    if database_name is not None:
+        statement = statement.select_from(
+            s.catalog_schema.join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        ).where(
+            s.table__term.c.table_id == s.catalog_table.c.id,
+            s.catalog_table.c.schema_id == s.catalog_schema.c.id,
+            s.catalog_database.c.name == database_name,
+        )
+
+    rows = store().query_read(statement)
 
     grouped: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -1262,6 +1293,7 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
 def fetch_term_table_pairs(
     zone_ids: list[str] | None = None,
     data_ids_by_zone: dict[str, set[str]] | None = None,
+    database_name: str | None = None,
     *,
     term_ids: list[str] | None = None,
     table_ids: list[str] | None = None,
@@ -1289,10 +1321,35 @@ def fetch_term_table_pairs(
     :func:`gsf.dal.exploration.fetch_semantic_exploration_graph` uses it to
     label term↔term edges with the real relationship type(s) behind them.
 
+    *database_name*, when given, additionally restricts results to tables in
+    that database only — same idiom as ``fetch_terms_with_sqls``'s scoping.
+    This matters because Term nodes are global (no ``database_name`` of their
+    own, and not scoped by *zone_ids* either, since a zone can span multiple
+    databases): the same Term can legitimately be REPRESENTS-linked to tables
+    in two unrelated databases that happen to model a similar concept under
+    the same term name (e.g. "Case" in both a reverse-logistics and a
+    labor-certification schema). Without this filter, a caller resolving
+    "which tables does this term touch" for one specific live database can
+    silently get tables back from a *different* database too.
+
     *term_ids* and *table_ids* narrow the scan; neither widens access, both
     being intersected with what *zone_ids* already allows.
     """
     scope_ids = _scope_table_ids(zone_ids, data_ids_by_zone)
+    database_table_ids = (
+        select(s.catalog_table.c.id)
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema, s.catalog_schema.c.id == s.catalog_table.c.schema_id
+            ).join(
+                s.catalog_database,
+                s.catalog_database.c.id == s.catalog_schema.c.database_id,
+            )
+        )
+        .where(s.catalog_database.c.name == database_name)
+        if database_name is not None
+        else None
+    )
 
     def restrict(statement, table_column):
         conditions: list[Any] = [s.term.c.source == SEMANTIC_SOURCE]
@@ -1303,6 +1360,8 @@ def fetch_term_table_pairs(
             conditions.append(s.term.c.id.in_(list(term_ids)))
         if table_ids is not None:
             conditions.append(table_column.in_(list(table_ids)))
+        if database_table_ids is not None:
+            conditions.append(table_column.in_(database_table_ids))
         return statement.where(*conditions)
 
     represents = restrict(
@@ -1602,11 +1661,10 @@ def _term_link_edges():
 def _link_path_bfs(anchor_id: str, dest_id: str) -> list[dict[str, Any]] | None:
     """Shortest term-to-term path as a node list, or ``None`` when there is none.
 
-    Level-at-a-time BFS with the visited set held in Python, for the same reason
-    :func:`gsf.dal.attributes._bfs_path` does it that way: a recursive CTE tracks
-    visited nodes per *path*, so a hub attribute shared by hundreds of columns
-    fans out exponentially. A shared visited set bounds the work by the size of
-    the reachable component instead.
+    Level-at-a-time BFS with the visited set held in Python rather than as a
+    recursive CTE: a CTE tracks visited nodes per *path*, so a hub attribute
+    shared by hundreds of columns fans out exponentially. A shared visited set
+    bounds the work by the size of the reachable component instead.
 
     Each entry of the returned list is ``{id, kind, relationship}``, where
     ``relationship`` is the edge type walked to *reach* that node -- ``None`` on

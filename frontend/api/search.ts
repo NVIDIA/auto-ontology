@@ -29,7 +29,10 @@ export const globalSearchCountsFromResponse = (
 const withDefaults = (payload: GlobalSearchRequest): GlobalSearchRequest => ({
 	text_match_option: TextMatchOption.Contains,
 	...payload,
-	filters: { description: true, ...payload.filters },
+	// Both text flags spelled out rather than left to the backend, whose own
+	// defaults differ from each other — so what a caller omitting `filters` gets
+	// is readable here instead of only in the Python request model.
+	filters: { description: true, synonyms: true, ...payload.filters },
 });
 
 export const searchApi = {

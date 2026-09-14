@@ -317,7 +317,7 @@ export const TermsView = () => {
 		async (skip: number, limit: number) => {
 			const query = debouncedSearchQuery;
 			const res = await termsApi.list({
-				...(query ? { q: query } : {}),
+				...(query ? { query } : {}),
 				skip,
 				limit,
 			});

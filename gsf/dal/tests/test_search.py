@@ -385,6 +385,23 @@ def test_a_synonym_only_term_is_returned(world: World) -> None:
     assert f"{world.prefix}_Revenue" in _names(hits)
 
 
+def test_no_synonym_tokens_drops_the_synonym_only_term(world: World) -> None:
+    """The twin of the test above, and what the ``synonyms`` filter rests on.
+
+    ``include_synonyms=False`` in the service is not a flag this module knows
+    about — it arrives as no synonym tokens at all. So the filter is only real
+    if an empty list actually withholds the alias branch, which is what this
+    asks: same query as above, same alias in the database, no tokens, no hit.
+    """
+    hits = search.fetch_global_search(
+        search.search_tokens("zzzznomatch"),
+        {LABEL_TERM},
+        include_description=False,
+        synonym_tokens=[],
+    )
+    assert f"{world.prefix}_Revenue" not in _names(hits)
+
+
 def test_a_term_matching_name_and_synonym_is_one_hit(world: World) -> None:
     hits = search.fetch_global_search(
         search.search_tokens(world.prefix),

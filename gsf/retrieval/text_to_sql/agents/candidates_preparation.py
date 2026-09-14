@@ -24,12 +24,18 @@ Design Decisions:
 """
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from gsf.dal.attributes import fetch_attr_column_contexts, find_join_path
+from gsf.dal.attributes import (
+    fetch_attr_column_contexts,
+    find_anchor_hub_siblings,
+    find_join_path,
+    find_kept_table_bridges,
+)
 from gsf.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
@@ -45,6 +51,7 @@ from gsf.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
     get_relevant_tables_from_candidates,
 )
+from gsf.retrieval.data_access.semantic_search import search_semantic_index
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.formatters_util import qualify_table
 from gsf.retrieval.text_to_sql.models import (
@@ -54,6 +61,7 @@ from gsf.retrieval.text_to_sql.models import (
 )
 from gsf.retrieval.text_to_sql.prompts import (
     CUSTOM_ANALYSIS_RELEVANCE_FILTER_PROMPT,
+    SQL_GEN_MAX_ENTITIES,
     TABLE_RELEVANCE_FILTER_PROMPT,
 )
 from gsf.retrieval.text_to_sql.state import (
@@ -65,7 +73,12 @@ from gsf.utils.llm_invoke import invoke_with_structured_output
 
 
 def _qualified_name(t: dict) -> str:
-    """Build a database/schema-qualified table name for deduplication."""
+    """Build a database/schema-qualified table name for deduplication.
+
+    Includes database_name (not just schema.name) so two same-named tables
+    in different databases (e.g. two "public.orders") don't collide during
+    dedup and silently merge into one.
+    """
     return qualify_table(
         t.get("database_name", ""),
         t.get("schema_name", ""),
@@ -73,11 +86,125 @@ def _qualified_name(t: dict) -> str:
     )
 
 
-logger = logging.getLogger(__name__)
+# Off by default: an A/B test (real LLM calls, real schema/GT data) showed
+# showing the relevance filter each table's columns — with sample values for
+# JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
+# can decoy-match unrelated tables — fixes real wrong table drops (including
+# ones production's downstream force-include reconciliation had to paper
+# over), at the cost of a real ~2s/call latency increase. Gate behind an env
+# flag rather than shipping unconditionally so that cost is opt-in; a future
+# version may make this conditional on whether the candidate tables actually
+# contain JSONB columns instead of a global on/off switch.
+_RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
+    "RELEVANCE_FILTER_INCLUDE_COLUMNS", ""
+).strip().lower() in ("1", "true", "yes")
+
+# Only added for JSONB-typed columns (see _RELEVANCE_FILTER_INCLUDE_COLUMNS
+# docstring above) — flat columns have self-explanatory names in this schema
+# and get their description (when present) instead; JSONB sample values are
+# already stored on the Column row (profiling at ingestion) and reach here
+# for free via fetch_tables_by_ids's nested `columns`, so this adds no extra
+# DB round trip, only extra prompt tokens.
+_RELEVANCE_FILTER_MAX_COLS = 25
+
+# Off by default. find_anchor_hub_siblings() pulls in tables that share a
+# hub with the anchor's own table via FK — see its docstring for why. Opt-in
+# via env flag (this deployment's .env sets it to true) so new/other
+# deployments aren't defaulted into the extra store + embedding-search cost
+# without an explicit choice.
+_HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
+    "HUB_SIBLING_EXPANSION_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+
+# Off by default. find_kept_table_bridges() force-restores tables the
+# relevance filter dropped when they join two tables the filter kept — see
+# §5b below and find_kept_table_bridges' docstring. Opt-in via env flag
+# (this deployment's .env sets it to true) so new/other deployments aren't
+# defaulted into the extra round trip without an explicit choice.
+_TABLE_BRIDGE_RECONCILIATION_ENABLED = os.environ.get(
+    "TABLE_BRIDGE_RECONCILIATION_ENABLED", "false"
+).strip().lower() in ("1", "true", "yes")
+
+# How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
+# Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
+# an audit of 28.8's run: capped-out siblings matched a GT-required table in
+# ~30% of truncation events, and re-ranking by embedding score (rather than
+# raising the cap alone) recovered most of those within the *same* cap size —
+# see _rank_and_cap_hub_siblings' docstring.
+_HUB_SIBLING_CAP = int(os.environ.get("HUB_SIBLING_CAP", "6"))
+
+# How many ColumnAttribute hits to pull per entity when scoring hub siblings
+# for the rank — generous relative to per-hub sibling counts (median 2, rare
+# mega-hubs up to ~20) so a sibling several entities down the ranking still
+# has a chance to be seen, without unbounded index-scan cost.
+_HUB_SIBLING_RANK_K = 30
 
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
 #: wide candidate set cannot starve the rest of the request.
 _JOIN_PATH_WORKERS = 4
+
+
+def _format_relevance_filter_column(c: dict) -> str:
+    name = c.get("name", "")
+    ctype = c.get("data_type") or "unknown"
+    desc = c.get("description")
+    sv = c.get("sample_values")
+    extra = ""
+    # sample_values is already normalized to list[str] | None by
+    # fetch_tables_by_ids (via parse_sample_values) — no JSON decoding here.
+    if sv and "json" in str(ctype).lower():
+        extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
+    if desc:
+        extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    return f"    - {name} ({ctype}){extra}"
+
+
+def _build_relevance_tables_summary(tables: list[dict]) -> str:
+    if not _RELEVANCE_FILTER_INCLUDE_COLUMNS:
+        return "\n".join(
+            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+            for t in tables
+        )
+    lines = []
+    for t in tables:
+        lines.append(
+            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
+        )
+        cols = t.get("columns") or []
+        if cols:
+            lines.append("  Columns:")
+            lines.extend(
+                _format_relevance_filter_column(c)
+                for c in cols[:_RELEVANCE_FILTER_MAX_COLS]
+            )
+    return "\n".join(lines)
+
+
+def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
+    """Merge *additions* into *base*, enriching existing entries.
+
+    Tables already present in *base* (matched by ``id``) are merged via
+    :func:`dedupe_merge_relevant_tables` so per-column fields such as
+    ``sample_values`` survive even when the candidate row arrived without
+    them.  New tables are appended after the original base order.
+    """
+    if not additions:
+        return list(base)
+    base_by_id = {str(t.get("id") or ""): i for i, t in enumerate(base)}
+    result = list(base)
+    for tbl in additions:
+        tid = str(tbl.get("id") or "")
+        if tid and tid in base_by_id:
+            merged = dedupe_merge_relevant_tables([result[base_by_id[tid]], tbl])
+            result[base_by_id[tid]] = merged[0]
+        else:
+            if tid:
+                base_by_id[tid] = len(result)
+            result.append(tbl)
+    return result
+
+
+logger = logging.getLogger(__name__)
 
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
 # (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
@@ -166,24 +293,29 @@ class CandidatePreparationAgent(BaseAgent):
 
         custom_analyses_str = self._build_custom_analyses_str(relevant_queries)
 
-        # Extra table retrieve only needs the question + entities. Kick it
-        # off before the anchor LLM so the two ~3s steps overlap.
-        extra_entities = path_state.get("entities") or []
-        with ThreadPoolExecutor(max_workers=1) as extra_pool:
-            extra_future = extra_pool.submit(
-                self._retrieve_additional_tables,
-                state.get("data_retriever"),
-                question,
-                extra_entities,
-                target_db,
-            )
+        # Extra-table retrieval only needs the question + entities — independent
+        # of the anchor-column LLM/join-path work below. Kick it off in the
+        # background so the two multi-second steps overlap instead of stacking.
+        extra_pool = ThreadPoolExecutor(max_workers=1)
+        extra_future = extra_pool.submit(
+            self._retrieve_additional_tables,
+            state.get("data_retriever"),
+            question,
+            path_state.get("entities") or [],
+            target_db,
+        )
 
-            # --- 2. Enrich ColumnAttributes with the store context and build join paths ---
-            primary_attribute: dict | None = None
-            attribute_join_paths: list[dict] = []
-            attr_contexts: dict[str, dict] = {}
-            term_synonyms: dict[str, list[str]] = {}
+        # --- 2. Enrich ColumnAttributes with store context and build join paths ---
+        primary_attribute: dict | None = None
+        attribute_join_paths: list[dict] = []
+        attr_contexts: dict[str, dict] = {}
+        term_synonyms: dict[str, list[str]] = {}
+        # Table ids to force back into relevant_tables after the relevance
+        # filter runs (§5b), regardless of what it decides — see rationale
+        # at the hub-sibling and pairwise-bridge computations below.
+        forced_table_ids: set[str] = set()
 
+        try:
             if column_attributes:
                 attr_ids = [
                     str(hit.get("id") or "")
@@ -197,7 +329,7 @@ class CandidatePreparationAgent(BaseAgent):
                     database_name=target_db,
                 )
                 self.logger.info(
-                    "Fetched the store context for %d/%d column attributes",
+                    "Fetched store context for %d/%d column attributes",
                     len(attr_contexts),
                     len(attr_ids),
                 )
@@ -220,6 +352,7 @@ class CandidatePreparationAgent(BaseAgent):
                         "table_name": anchor_ctx["table_name"],
                         "schema_name": anchor_ctx["schema_name"],
                         "database_name": anchor_ctx["database_name"],
+                        "datatype": anchor_ctx.get("datatype") or "",
                     }
 
                     dest_items = [
@@ -252,6 +385,7 @@ class CandidatePreparationAgent(BaseAgent):
                                     "table_name": dest_ctx["table_name"],
                                     "schema_name": dest_ctx["schema_name"],
                                     "database_name": dest_ctx["database_name"],
+                                    "datatype": dest_ctx.get("datatype") or "",
                                     "path": join_path,
                                 }
                             )
@@ -260,6 +394,48 @@ class CandidatePreparationAgent(BaseAgent):
                                 dest_ctx["attr_name"],
                                 dest_id,
                                 len(join_path),
+                            )
+
+                    # Looser, discovery-only signal: find_join_path above cannot
+                    # reach a sibling table that shares a hub with the anchor
+                    # (forward-only, by design — see its docstring). Surface
+                    # those siblings (and the hub itself) separately so the
+                    # relevance filter doesn't drop a structurally-connected
+                    # table it has no other way to recognize. Scoped to the
+                    # anchor's own outgoing FKs only. These are also force-kept
+                    # in relevant_tables below (§5b) rather than merely shown to
+                    # the relevance filter, since it's unreliable at preserving
+                    # structurally-connected tables even when given this info.
+                    anchor_table_id = anchor_ctx.get("table_id")
+                    if anchor_table_id and _HUB_SIBLING_EXPANSION_ENABLED:
+                        # Uncapped here (max_siblings=None) — capping now happens
+                        # after ranking, in _rank_and_cap_hub_siblings, instead of
+                        # on the DAL's arbitrary return order.
+                        hub_sibling_hops, _ = find_anchor_hub_siblings(
+                            anchor_table_id, max_siblings=None
+                        )
+                        hub_sibling_hops, hub_sibling_truncated = (
+                            self._rank_and_cap_hub_siblings(
+                                state,
+                                path_state.get("entities") or [],
+                                target_db,
+                                hub_sibling_hops,
+                                cap=_HUB_SIBLING_CAP,
+                            )
+                        )
+                        if hub_sibling_hops:
+                            attribute_join_paths.append({"path": hub_sibling_hops})
+                            forced_table_ids.update(
+                                h["id"] for h in hub_sibling_hops if h.get("id")
+                            )
+                            self.logger.info(
+                                "Found %d hub-sibling table(s) via anchor's own FK "
+                                "(hub included): %s%s",
+                                len(hub_sibling_hops),
+                                [h["target_table"] for h in hub_sibling_hops],
+                                f" ({hub_sibling_truncated} sibling(s) truncated by cap)"
+                                if hub_sibling_truncated
+                                else "",
                             )
                 else:
                     self.logger.warning(
@@ -292,10 +468,9 @@ class CandidatePreparationAgent(BaseAgent):
             try:
                 additional_tables = extra_future.result()
             except Exception:
-                self.logger.warning(
-                    "Additional table retrieval failed",
-                    exc_info=True,
-                )
+                self.logger.warning("Additional table retrieval failed", exc_info=True)
+        finally:
+            extra_pool.shutdown()
 
         seen_qnames: set[str] = set()
         deduped_tables: list[dict] = []
@@ -307,26 +482,45 @@ class CandidatePreparationAgent(BaseAgent):
             deduped_tables.append(t)
         relevant_tables = deduped_tables
 
-        self.logger.info(
-            "Found %d relevant tables (after dedupe, capped at 20): %s",
+        self.logger.debug(
+            "Found %d relevant tables (after dedupe): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
+
+        # --- 4a. Back-fill sample_values for any table that arrived without them ---
+        # Tables retrieved from the vector index carry only name/data_type/description;
+        # richer per-column detail (e.g. sample_values) lives in the store's row for
+        # that table. Fetch the rich rows for every table that has an id but whose
+        # columns are all missing sample_values, then merge per-column so nothing
+        # already present is overwritten.
+        sample_less_ids = [
+            str(t["id"])
+            for t in relevant_tables
+            if t.get("id")
+            and not any(
+                isinstance(c, dict) and c.get("sample_values")
+                for c in (t.get("columns") or [])
+            )
+        ]
+        if sample_less_ids:
+            enriched = fetch_tables_by_ids(sample_less_ids)
+            relevant_tables = _merge_tables(relevant_tables, enriched)
+            self.logger.info(
+                "Back-filled sample_values for %d/%d table(s)",
+                len(enriched),
+                len(sample_less_ids),
+            )
 
         # --- 4b. Add tables referenced by custom analyses via the store ---
         if custom_analyses:
             ca_ids = [str(ca["id"]) for ca in custom_analyses if ca.get("id")]
             ca_linked_tables = fetch_tables_from_custom_analyses(ca_ids)
-            existing_ids = {t.get("id") for t in relevant_tables}
-            added = 0
-            for tbl in ca_linked_tables:
-                if tbl.get("id") not in existing_ids:
-                    relevant_tables.append(tbl)
-                    existing_ids.add(tbl.get("id"))
-                    added += 1
+            prev_len = len(relevant_tables)
+            relevant_tables = _merge_tables(relevant_tables, ca_linked_tables)
             self.logger.info(
                 "Added %d table(s) from custom analyses SQL references: %s",
-                added,
+                len(relevant_tables) - prev_len,
                 [t["name"] for t in ca_linked_tables],
             )
 
@@ -345,16 +539,11 @@ class CandidatePreparationAgent(BaseAgent):
             )
 
             sa_linked_tables = fetch_tables_from_sql_attributes(sa_ids)
-            existing_ids = {t.get("id") for t in relevant_tables}
-            added = 0
-            for tbl in sa_linked_tables:
-                if tbl.get("id") not in existing_ids:
-                    relevant_tables.append(tbl)
-                    existing_ids.add(tbl.get("id"))
-                    added += 1
+            prev_len = len(relevant_tables)
+            relevant_tables = _merge_tables(relevant_tables, sa_linked_tables)
             self.logger.info(
                 "Added %d table(s) from SqlAttribute SQL references: %s",
-                added,
+                len(relevant_tables) - prev_len,
                 [t["name"] for t in sa_linked_tables],
             )
 
@@ -385,6 +574,12 @@ class CandidatePreparationAgent(BaseAgent):
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
+        # Term rows are global (no database_name), so a Term shared across two
+        # databases (e.g. the same domain ingested as both a full DB and a
+        # "_template" variant) can pull wrong-DB tables into relevant_tables via
+        # the subject-Term/candidate expansion above. Drop them before the
+        # relevance filter and bridge reconciliation ever see them, rather than
+        # relying on those steps to notice a table that doesn't belong.
         if target_db:
             relevant_tables = [
                 table
@@ -392,20 +587,87 @@ class CandidatePreparationAgent(BaseAgent):
                 if table.get("database_name") == target_db
             ]
 
+        # Snapshot the candidate pool BEFORE the relevance filter runs. §5b's
+        # bridge reconciliation must only ever restore a table that was
+        # already a candidate here (and that the filter had a chance to see)
+        # — never surface a table the filter was never shown, which would be
+        # discovering new information rather than enforcing the filter's own
+        # "don't remove a needed bridge" rule.
+        pre_filter_candidate_ids = {t["id"] for t in relevant_tables if t.get("id")}
+
         # --- 5. Filter tables by relevance ---
         relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
             state,
             question,
             relevant_tables,
             custom_analyses,
+            attribute_join_paths,
         )
-        self.logger.info(
+        self.logger.debug(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
         if table_relevance_reasoning:
             record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
+
+        # --- 5b. Deterministic bridge-table reconciliation ---
+        # The relevance filter is unreliable at preserving join-chain bridge
+        # tables even when its prompt shows it the exact connection, so force
+        # these back in by code instead of relying on it. Two sources:
+        #   (a) the anchor's hub + capped siblings, already computed above
+        #       and collected into forced_table_ids;
+        #   (b) any bridge table needed to connect pairs of tables the
+        #       filter itself decided to KEEP — this only ever restores
+        #       connectivity between tables the filter already judged
+        #       relevant, it never second-guesses which tables matter, and
+        #       (via pre_filter_candidate_ids) never introduces a table the
+        #       filter was never shown in the first place.
+        if _TABLE_BRIDGE_RECONCILIATION_ENABLED:
+            kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
+            bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
+                kept_ids, pre_filter_candidate_ids
+            )
+            if bridge_tables:
+                forced_table_ids.update(t["id"] for t in bridge_tables)
+                self.logger.info(
+                    "Pairwise bridge reconciliation added %d table(s) between "
+                    "kept tables: %s%s",
+                    len(bridge_tables),
+                    [t["name"] for t in bridge_tables],
+                    f" ({skipped_pairs} pair(s) skipped after cap)"
+                    if skipped_pairs
+                    else "",
+                )
+            # A bridge table with no join hops reaching SQL-gen is a table the
+            # model can see but not connect — without the real FK chain, it has
+            # to guess the join condition and can fabricate one between unrelated
+            # columns. Surface the real FK chain the same way attribute_join_paths
+            # already does for verified semantic joins.
+            if bridge_paths:
+                attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
+                self.logger.info(
+                    "Pairwise bridge reconciliation added %d join path(s) for "
+                    "bridge table(s)",
+                    len(bridge_paths),
+                )
+
+        forced_table_ids -= {t.get("id") for t in relevant_tables}
+        if forced_table_ids:
+            forced_tables = fetch_tables_by_ids(list(forced_table_ids))
+            relevant_tables = _merge_tables(relevant_tables, forced_tables)
+            self.logger.info(
+                "Force-included %d table(s) after relevance filter (deterministic "
+                "reconciliation, not the LLM's choice): %s",
+                len(forced_tables),
+                [t["name"] for t in forced_tables],
+            )
+
+        self.logger.info(
+            "Final %d table(s) reaching SQL generation: %s",
+            len(relevant_tables),
+            [_qualified_name(t) for t in relevant_tables],
+        )
 
         return {
             "path_state": {
@@ -425,22 +687,123 @@ class CandidatePreparationAgent(BaseAgent):
             }
         }
 
+    def _rank_and_cap_hub_siblings(
+        self,
+        state: AgentState,
+        entities: list[str],
+        target_db: str | None,
+        hub_sibling_hops: list[dict],
+        cap: int,
+    ) -> tuple[list[dict], int]:
+        """Rank a hub's sibling tables by embedding similarity to the
+        question's extracted entities, then cap — replacing
+        ``find_anchor_hub_siblings``'s old behavior of capping in whatever
+        arbitrary order the DAL query happened to return.
+
+        That arbitrary order was a real bug, not just a theoretical one: an
+        audit of a full eval run found that when a hub had more than the cap
+        (siblings dropped), the dropped sibling was the one GT actually
+        needed in ~30% of those events — e.g. a "risk_and_moderation" table
+        losing out to "monitoring" purely because of the DAL's return order,
+        despite both being plausible siblings of the same "accounts" hub.
+        Re-ranking by embedding score (rather than just raising the cap)
+        recovered most of those within the *same* cap size, since the
+        dropped table was usually still a strong match once actually
+        compared against the question — it just never got the chance.
+
+        Scoring reuses the exact same vector index and per-entity search
+        ``candidate_retrieval`` already runs every turn (``ColumnAttribute``
+        label, same retriever) — no LLM call, and no new embedding calls
+        beyond what this turn already pays for elsewhere; only the
+        request/response size for these specific lookups is new. For each
+        sibling table, its score is the *best* (lowest-distance) hit across
+        all entities among that table's own ColumnAttributes — i.e. "does
+        any extracted entity match any column on this table well" — not a
+        weighted blend across entities, to keep this cheap and legible.
+        The hub itself is never scored or dropped (see
+        ``find_anchor_hub_siblings``'s docstring for why it's always kept).
+
+        Falls back to the prior (unranked, arbitrary-order) cap on any
+        failure — retriever missing, search error, etc. — so this can only
+        ever do as well as or better than the old behavior, never worse.
+
+        Returns ``(kept_hops, truncated_count)`` in the same shape
+        ``find_anchor_hub_siblings`` returns.
+        """
+        hub_entries = [h for h in hub_sibling_hops if h.get("is_hub")]
+        sibling_entries = [h for h in hub_sibling_hops if not h.get("is_hub")]
+
+        def _unranked_fallback() -> tuple[list[dict], int]:
+            kept = sibling_entries[:cap]
+            return hub_entries + kept, len(sibling_entries) - len(kept)
+
+        if len(sibling_entries) <= cap or not entities:
+            return _unranked_fallback()
+
+        retriever = state.get("data_retriever")
+        if retriever is None:
+            return _unranked_fallback()
+
+        sibling_table_ids = {h["id"] for h in sibling_entries if h.get("id")}
+        best_score: dict[str, float] = {}
+        try:
+            for entity in entities:
+                rows = search_semantic_index(
+                    retriever,
+                    entity,
+                    label_filter=["ColumnAttribute"],
+                    per_label_k=_HUB_SIBLING_RANK_K,
+                    database_name=target_db,
+                )
+                attr_ids = [r["id"] for r in rows if r.get("id")]
+                if not attr_ids:
+                    continue
+                ctx = fetch_attr_column_contexts(
+                    attr_ids,
+                    database_name=target_db,
+                )
+                for r in rows:
+                    c = ctx.get(r.get("id"))
+                    tid = c.get("table_id") if c else None
+                    if tid not in sibling_table_ids:
+                        continue
+                    score = r.get("score")
+                    if score is None:
+                        continue
+                    if tid not in best_score or score < best_score[tid]:
+                        best_score[tid] = score
+        except Exception:
+            self.logger.warning(
+                "Hub-sibling relevance ranking failed — falling back to unranked cap",
+                exc_info=True,
+            )
+            return _unranked_fallback()
+
+        # Siblings with no scored hit at all (never matched any entity)
+        # sort last rather than being dropped outright — they still get a
+        # chance to fill remaining cap slots after scored ones.
+        ranked = sorted(
+            sibling_entries,
+            key=lambda h: best_score.get(h.get("id"), float("inf")),
+        )
+        kept = ranked[:cap]
+        truncated = len(sibling_entries) - len(kept)
+        return hub_entries + kept, truncated
+
     def _retrieve_additional_tables(
         self,
         retriever: Any,
         question: str,
-        entities: Any,
+        entities: list[str],
         target_db: str | None,
     ) -> list[dict]:
         """Embed the question and entities and search for extra Table hits.
 
-        Independent of the anchor LLM — intended to run in parallel with it.
+        Independent of the anchor-column LLM/join-path work in ``execute`` —
+        intended to run in a background thread in parallel with it.
         """
-        search_queries = [question]
-        if isinstance(entities, list):
-            search_queries.extend(entities)
-        k_per_query = max(1, 5 // len(search_queries))
-        additional_tables: list[dict] = []
+        search_queries = [question] + list(entities)
+        k_per_query = max(1, SQL_GEN_MAX_ENTITIES // len(search_queries))
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
             return get_relevant_tables(
@@ -450,6 +813,7 @@ class CandidatePreparationAgent(BaseAgent):
                 database_name=target_db,
             )
 
+        additional_tables: list[dict] = []
         with ThreadPoolExecutor(max_workers=len(search_queries) or 1) as pool:
             futures = {
                 pool.submit(_fetch_tables_for_query, q): q for q in search_queries
@@ -462,7 +826,7 @@ class CandidatePreparationAgent(BaseAgent):
                     self.logger.warning(
                         "Table retrieval failed for query: %s", query, exc_info=True
                     )
-        return dedupe_merge_relevant_tables(additional_tables)[:10]
+        return dedupe_merge_relevant_tables(additional_tables)[:20]
 
     def _filter_custom_analyses_by_relevance(
         self,
@@ -554,6 +918,7 @@ class CandidatePreparationAgent(BaseAgent):
         question: str,
         tables: list[dict],
         custom_analyses: list[dict] | None = None,
+        attribute_join_paths: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
         if len(tables) <= 2:
@@ -565,10 +930,7 @@ class CandidatePreparationAgent(BaseAgent):
             self.logger.warning("No LLM in state — skipping relevance filter")
             return tables, ""
 
-        tables_summary = "\n".join(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
-            for t in tables
-        )
+        tables_summary = _build_relevance_tables_summary(tables)
 
         domain_rules_text = rules_to_text(state.get("domain_rules", []))
         domain_rules_section = ""
@@ -596,11 +958,52 @@ class CandidatePreparationAgent(BaseAgent):
                 + "\n\n"
             )
 
+        join_paths_section = ""
+        chains: set[str] = set()
+        if attribute_join_paths:
+            for entry in attribute_join_paths:
+                for hop in entry.get("path") or []:
+                    src = hop.get("source_table")
+                    tgt = hop.get("target_table")
+                    if src and tgt and src != tgt:
+                        chains.add(f"{src} <-> {tgt}")
+            if chains:
+                join_paths_section = (
+                    "Known join paths between candidate tables:\n"
+                    + "\n".join(sorted(chains))
+                    + "\n\n"
+                )
+            self.logger.debug(
+                "Relevance filter join_paths_section: %s",
+                sorted(chains) if chains else "(no cross-table chains found)",
+            )
+
+        # Optional and not specific to any one caller — only present when an
+        # upstream flow (e.g. interactive clarification) populated
+        # state["enriched_question"]. Deliberately NOT the full
+        # state["evidence"] blob: that also carries sort/scalar/output-shape
+        # hints and a raw Phase 1 SQL reference, which are noise for a
+        # table-relevance decision. Guard sentence lives inside this block
+        # (not a standalone Rules bullet) so the prompt is byte-identical to
+        # before when no enriched question is present.
+        enriched_question_text = (state.get("enriched_question") or "").strip()
+        enriched_question_section = ""
+        if enriched_question_text:
+            enriched_question_section = (
+                "The expanded question below is the same question with all formulas, "
+                "thresholds, and terms resolved. Use it for context when deciding "
+                "which tables are relevant.\n"
+                "Expanded question:\n"
+                f"{enriched_question_text}\n\n"
+            )
+
         prompt_text = TABLE_RELEVANCE_FILTER_PROMPT.format(
             question=question,
             tables_summary=tables_summary,
             domain_rules=domain_rules_section,
             custom_analyses=ca_section,
+            join_paths=join_paths_section,
+            enriched_question=enriched_question_section,
         )
 
         messages = [
@@ -650,6 +1053,26 @@ class CandidatePreparationAgent(BaseAgent):
         )
         if removed:
             self.logger.info("Relevance filter removed tables: %s", removed)
+
+        # Cross-reference the join-chain facts we showed the LLM (computed in
+        # full before the call, above) against what it actually kept — lets
+        # us measure whether the prompt wording is doing anything, rather
+        # than assume it from a handful of manually-inspected runs.
+        if chains:
+            kept_names = {(t.get("name") or "").lower() for t in filtered}
+            preserved, broken = [], []
+            for chain in sorted(chains):
+                a, b = (part.strip().lower() for part in chain.split("<->"))
+                (preserved if a in kept_names and b in kept_names else broken).append(
+                    chain
+                )
+            self.logger.debug(
+                "Relevance filter join-chain outcome — preserved: %s | broken "
+                "(a table on this chain was removed, before §5b reconciliation "
+                "restores it): %s",
+                preserved if preserved else "(none)",
+                broken if broken else "(none)",
+            )
 
         if not filtered:
             self.logger.warning("Relevance filter removed ALL tables — keeping all")

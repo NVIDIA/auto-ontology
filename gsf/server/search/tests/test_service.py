@@ -89,6 +89,7 @@ def test_short_query_skips_the_database_and_returns_empty() -> None:
             text_match_option="contains",
             objects=None,
             include_description=True,
+            include_synonyms=True,
         )
     assert result == {"data": [], "count": 0}
     fetch.assert_not_called()
@@ -102,6 +103,7 @@ def test_min_length_query_reaches_the_database() -> None:
             text_match_option="contains",
             objects=None,
             include_description=True,
+            include_synonyms=True,
         )
     fetch.assert_called_once()
 
@@ -113,6 +115,7 @@ def test_specials_only_query_is_treated_as_empty() -> None:
             text_match_option="contains",
             objects=None,
             include_description=False,
+            include_synonyms=True,
         )
     assert result == {"data": {}}
     fetch.assert_not_called()
@@ -125,6 +128,7 @@ def test_unsupported_match_option_raises() -> None:
             text_match_option="starts_with",
             objects=None,
             include_description=False,
+            include_synonyms=True,
         )
 
 
@@ -161,6 +165,7 @@ def test_global_search_normalizes_and_ranks(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=["Term", "Table"],
         include_description=True,
+        include_synonyms=True,
     )
 
     assert [item["id"] for item in result["data"]] == ["2", "1"]
@@ -200,6 +205,7 @@ def test_global_search_keeps_breadcrumb_ids(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=["Column"],
         include_description=True,
+        include_synonyms=True,
     )
     assert result["data"][0]["breadcrumbs"] == [
         {"id": "db-1", "name": "sales", "type": "Database"},
@@ -217,6 +223,7 @@ def test_global_search_count_passes_object_filter(count: MagicMock) -> None:
         text_match_option="contains",
         objects=["Column"],
         include_description=False,
+        include_synonyms=True,
     )
     assert result == {"data": {"Term": 2, "Column": 4}}
     assert count.call_args.args[1] == {"Column"}
@@ -243,9 +250,74 @@ def test_global_search_keeps_matching_synonyms_only(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=["Term"],
         include_description=False,
+        include_synonyms=True,
     )
     assert result["data"][0]["synonyms"] == ["BU"]
     assert fetch.call_args.kwargs["synonym_tokens"] == ["bu"]
+
+
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_synonyms_off_asks_the_database_for_no_alias_match(fetch: MagicMock) -> None:
+    """The filter is one value: no synonym tokens, hence no alias matching.
+
+    Everything downstream reads that emptiness rather than a flag of its own —
+    the DAL drops its alias-only branch and leaves ``synonym_hit`` NULL — so
+    asserting the tokens is asserting the whole switch.
+    """
+    fetch.return_value = []
+    global_search(
+        search_term="BU",
+        text_match_option="contains",
+        objects=["Term"],
+        include_description=False,
+        include_synonyms=False,
+    )
+    assert fetch.call_args.kwargs["synonym_tokens"] == []
+
+
+@patch("gsf.server.search.service.search_dal.count_global_search")
+def test_synonyms_off_counts_without_aliases(count: MagicMock) -> None:
+    """The count path takes the filter too, or the tabs and the list disagree."""
+    count.return_value = {}
+    global_search_count(
+        search_term="BU",
+        text_match_option="contains",
+        objects=["Term"],
+        include_description=False,
+        include_synonyms=False,
+    )
+    assert count.call_args.kwargs["synonym_tokens"] == []
+
+
+@patch("gsf.server.search.service.search_dal.fetch_global_search")
+def test_synonyms_off_reports_no_aliases_on_a_hit(fetch: MagicMock) -> None:
+    """A Term still found by its name keeps the hit and loses the alias chips.
+
+    With aliases out of the match, none of them caused this row to come back,
+    so naming one would credit the hit to something that was never consulted.
+    """
+    fetch.return_value = [
+        {
+            "id": "term-1",
+            "name": "Business Unit",
+            "label": "Term",
+            "table_type": None,
+            "description": None,
+            "certified": "pending",
+            "parent_id": None,
+            "breadcrumbs": [],
+            "synonyms": ["BU", "Org"],
+        },
+    ]
+    result = global_search(
+        search_term="Business",
+        text_match_option="contains",
+        objects=["Term"],
+        include_description=False,
+        include_synonyms=False,
+    )
+    assert [item["id"] for item in result["data"]] == ["term-1"]
+    assert result["data"][0]["synonyms"] == []
 
 
 @patch("gsf.server.search.service.search_dal.fetch_global_search")
@@ -268,6 +340,7 @@ def test_global_search_keeps_table_label_for_views(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=["View"],
         include_description=False,
+        include_synonyms=True,
     )
     assert result["data"][0]["type"] == "Table"
     assert result["data"][0]["table_type"] == "view"
@@ -328,6 +401,7 @@ def test_synonym_only_term_survives_list_cap(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=None,
         include_description=True,
+        include_synonyms=True,
     )
     ids = [item["id"] for item in result["data"]]
     assert "term-syn" in ids
@@ -392,6 +466,7 @@ def test_synonym_rescue_cannot_evict_the_whole_page(fetch: MagicMock) -> None:
         text_match_option="contains",
         objects=None,
         include_description=True,
+        include_synonyms=True,
     )
     ids = [item["id"] for item in result["data"]]
     assert len(ids) == 4
@@ -417,6 +492,7 @@ def test_synonym_rescue_claims_only_its_share_of_the_page(fetch: MagicMock) -> N
         text_match_option="contains",
         objects=None,
         include_description=True,
+        include_synonyms=True,
     )
     assert len(result["data"]) == 20
     assert result["data"][0]["id"] == "col-0"
@@ -464,6 +540,7 @@ def test_an_unmatched_alias_does_not_claim_the_middle_rank(fetch: MagicMock) -> 
         text_match_option="contains",
         objects=None,
         include_description=True,
+        include_synonyms=True,
     )
     assert [item["id"] for item in result["data"]] == ["col-short", "term-aliased"]
     assert result["data"][1]["synonyms"] == []

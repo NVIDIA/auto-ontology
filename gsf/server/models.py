@@ -53,6 +53,8 @@ __all__ = [
     "NodeUpdateResult",
     "PqlAnalysis",
     "PublicConnection",
+    "Rule",
+    "RuleFilters",
     "SchemaSummary",
     "SemanticExplorationGraph",
     "SemanticGraphNode",
@@ -67,7 +69,6 @@ __all__ = [
     "TableSummary",
     "Tag",
     "TagChip",
-    "TagDetail",
     "TagItem",
     "TagTargetType",
     "Term",
@@ -339,6 +340,17 @@ class TagTargetType(StrEnum):
     SQL_ATTRIBUTE = "sql_attribute"
 
 
+class TagItemRule(ApiModel):
+    """The rule that applied a label, named so a reader can recognise it.
+
+    The id as well as the name because a rule can be renamed: the name is what
+    to print, and the id is what still refers to the same rule afterwards.
+    """
+
+    id: str
+    name: str
+
+
 class TagItem(ApiModel):
     """One object carrying a tag, whichever of the five kinds it is.
 
@@ -349,6 +361,21 @@ class TagItem(ApiModel):
     of attribute, which are properties of one in the same sense and so are
     described the same way. Null only for a Term, which is a glossary entry
     rather than a catalog object and sits under nothing.
+
+    ``tagged_by`` and ``rule`` are where the label came from, for the page's
+    "Tagged By" column: the account that applied it by hand, or the rule that
+    matched. At most one is set — a label has one source — and both null is an
+    answer rather than a gap: it is what an attach carrying no identity records,
+    so the page reads it as "Auto Generated", the deployment having labelled
+    this itself. A row written before either column existed reads the same way,
+    since a label nobody claimed is a label nobody claimed.
+
+    ``tagged_by`` is an opaque Better Auth user id, resolved to a name by the
+    gateway for the reason :class:`Tag`'s authors are: the accounts live in a
+    schema this service does not own. An id that resolves to nothing reads as
+    "Auto Generated" as well — these are not foreign keys, so an account can be
+    deleted and leave the label behind, and the column names a person or a rule
+    or neither rather than spelling out which kind of nobody this is.
 
     The four id fields are the same relationships as ids, which is what a link
     to the object's own page is built from: a Table and a Column are addressed
@@ -361,21 +388,74 @@ class TagItem(ApiModel):
     type: TagTargetType
     path: str | None = None
     tagged: datetime
+    tagged_by: str | None = None
+    rule: TagItemRule | None = None
     database_id: str | None = None
     schema_id: str | None = None
     table_id: str | None = None
     term_id: str | None = None
 
 
-class TagDetail(Tag):
-    """A tag together with everything it labels.
+# ---------------------------------------------------------------------------
+# Rules
+# ---------------------------------------------------------------------------
 
-    ``items`` is empty for a tag nothing carries — a freshly created tag, or one
-    whose last object was untagged — which the page renders as its empty state
-    rather than as a failed read.
+
+class RuleFilters(ApiModel):
+    """The global-search filters a rule replays.
+
+    The same fields ``GlobalSearchFilters`` in ``gsf/server/search/router.py``
+    accepts, and deliberately no others: a rule *is* a saved search, so a
+    filter stored here that the search cannot honour would be a rule that never
+    reproduces the results it was created from.
+
+    ``synonyms`` defaults on for the reason it does there — it is what the
+    search did before the flag existed — and ``objects`` records which tab the
+    rule was saved from, since that is what the count it promises to tag was
+    scoped to.
     """
 
-    items: list[TagItem] = Field(default_factory=list)
+    description: bool = False
+    synonyms: bool = True
+    objects: list[str] | None = None
+
+
+class Rule(ApiModel):
+    """A saved search, and the tags to apply to everything it matches.
+
+    ``search_term``, ``text_match_option`` and ``filters`` are the global-search
+    request the rule replays; together they are what the rule *is*, which is why
+    they are required rather than optional like most of this module — a rule
+    missing any of the three matches nothing.
+
+    ``tags`` carry the name to show and the id to act by, both read from the tag
+    table on every read rather than from what the write that saved them sent —
+    so a renamed tag reads back renamed here, and a caller posting whole tag
+    objects is answered with the tags as they are rather than as it sent them.
+    See ``RuleTagRef`` in ``gsf/server/rules/router.py``. The ids are checked
+    against that table, so a rule cannot apply a tag that does not exist.
+
+    ``created_by`` is the id of the user who saved it, read from the trusted
+    gateway header rather than from the request body — see
+    ``gsf/server/chat/identity.py``. ``modified_by`` is the same for whoever
+    last renamed it, and null until somebody has — which is the same fact as
+    ``modified`` still equalling ``created``, and null again for a rename whose
+    request carried no identity to record.
+
+    ``created`` and ``modified`` follow the convention :class:`Tag` sets: a
+    timezone-aware ``datetime`` serialised as ISO 8601, from one clock.
+    """
+
+    id: str
+    name: str
+    search_term: str
+    text_match_option: str
+    filters: RuleFilters
+    tags: list[TagChip] = Field(default_factory=list)
+    created_by: str
+    modified_by: str | None = None
+    created: datetime
+    modified: datetime
 
 
 # ---------------------------------------------------------------------------

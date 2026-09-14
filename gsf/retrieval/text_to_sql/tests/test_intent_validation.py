@@ -12,6 +12,10 @@ from gsf.retrieval.text_to_sql.agents.intent_validation import (
 
 
 @patch(
+    "gsf.retrieval.text_to_sql.agents.intent_validation._JOINS_VALIDATED_ELSEWHERE",
+    False,
+)
+@patch(
     "gsf.retrieval.text_to_sql.agents.intent_validation.invoke_with_structured_output",
     return_value=IntentValidationModel(is_valid=True),
 )

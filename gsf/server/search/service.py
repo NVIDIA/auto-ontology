@@ -186,8 +186,23 @@ def _prepare_search(
     search_term: str,
     text_match_option: str,
     objects: list[str] | None,
+    include_synonyms: bool,
 ) -> tuple[list[str], set[str], str, list[str]] | None:
-    """Validate and expand a query. ``None`` means nothing searchable."""
+    """Validate and expand a query. ``None`` means nothing searchable.
+
+    *include_synonyms* is honoured by returning no synonym tokens rather than
+    by a flag the rest of the module has to remember. That is the whole switch,
+    and it works because every place aliases are consulted already treats an
+    empty token list as "no alias can match": the DAL leaves ``synonym_hit``
+    NULL and drops its alias-only branch (see ``_term_select`` and
+    ``_synonym_term_select`` in ``gsf/dal/search.py``), and here
+    :func:`_matching_synonyms` reduces every hit's aliases to none -- which in
+    turn puts :func:`rank_key`'s middle bucket and :func:`_fit_list_limit`'s
+    rescue out of reach.
+
+    So there is exactly one thing to get right, and no second definition of
+    "synonyms are off" to fall out of step with the first.
+    """
     if text_match_option != TEXT_MATCH_CONTAINS:
         raise SearchValidationError(
             f"Unsupported text_match_option {text_match_option!r}; "
@@ -198,7 +213,10 @@ def _prepare_search(
         return None
     types = resolve_object_types(objects)
     stripped = search_term.strip()
-    return tokens, types, stripped, search_dal.synonym_word_tokens(stripped)
+    synonym_tokens = (
+        search_dal.synonym_word_tokens(stripped) if include_synonyms else []
+    )
+    return tokens, types, stripped, synonym_tokens
 
 
 def global_search(
@@ -207,12 +225,14 @@ def global_search(
     text_match_option: str,
     objects: list[str] | None,
     include_description: bool,
+    include_synonyms: bool,
 ) -> dict[str, Any]:
     """Run the list path: fulltext + enrichment, capped and ranked."""
     prepared = _prepare_search(
         search_term=search_term,
         text_match_option=text_match_option,
         objects=objects,
+        include_synonyms=include_synonyms,
     )
     if prepared is None:
         return {"data": [], "count": 0}
@@ -237,12 +257,14 @@ def global_search_count(
     text_match_option: str,
     objects: list[str] | None,
     include_description: bool,
+    include_synonyms: bool,
 ) -> dict[str, Any]:
     """Run the count path: same match as list, grouped by type, no cap."""
     prepared = _prepare_search(
         search_term=search_term,
         text_match_option=text_match_option,
         objects=objects,
+        include_synonyms=include_synonyms,
     )
     if prepared is None:
         return {"data": {}}

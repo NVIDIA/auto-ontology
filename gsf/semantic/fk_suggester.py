@@ -118,10 +118,7 @@ def suggest_potential_foreign_keys(
     pk_block = ", ".join(sorted(pk_names)) if pk_names else "(none)"
     profiling = columns_profiling_samples or {}
     candidate_lines = "\n".join(
-        _format_column_line(
-            col,
-            (profiling.get(col["name"]) or {}).get("is_unique"),
-        )
+        _format_column_line(col, (profiling.get(col["name"]) or {}).get("is_unique"))
         for col in candidates
     )
 

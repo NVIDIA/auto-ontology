@@ -24,7 +24,7 @@ NODE_LABELS: dict[str, str] = {
     "kumo_predict": "Preparing prediction",
     "retrieve_candidates": "Retrieving candidates",
     "prepare_candidates": "Preparing candidates",
-    "precheck_value_repair": "Checking filter values",
+    "precheck_combined": "Checking joins and filter values",
     "construct_sql_from_candidates": "Constructing SQL",
     "reconstruct_sql": "Reconstructing SQL",
     "validate_sql_query": "Validating SQL",

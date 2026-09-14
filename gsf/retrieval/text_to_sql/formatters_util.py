@@ -56,11 +56,15 @@ def format_semantic_context(
     anchor_col = primary_attribute.get("col_name", "")
     anchor_name = primary_attribute.get("attr_name", "")
     anchor_full = f"{anchor_schema}.{anchor_table}" if anchor_schema else anchor_table
+    # Only present on attrs (re-)ingested since this field was added — older
+    # rows just omit the tag.
+    anchor_datatype = primary_attribute.get("datatype") or ""
+    anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
 
     lines: list[str] = [
         "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
         f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name})",
+        f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
     ]
 
     if attribute_join_paths:
@@ -76,8 +80,16 @@ def format_semantic_context(
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
             table = entry.get("table_name", "")
-            full_table = f"{schema}.{table}" if schema else table
-            lines.append(f"  {attr_name}: {full_table}.{col_name}")
+            datatype = entry.get("datatype") or ""
+            datatype_tag = f" [{datatype}]" if datatype else ""
+            # Structural entries (hub-sibling / bridge-table reconciliation)
+            # carry only "path" — no named attribute they resolve to. Render
+            # a generic label instead of a blank "  : ." header line.
+            if attr_name or col_name or table:
+                full_table = f"{schema}.{table}" if schema else table
+                lines.append(f"  {attr_name}: {full_table}.{col_name}{datatype_tag}")
+            else:
+                lines.append("  (structural bridge — connects tables kept above)")
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
@@ -140,7 +152,14 @@ def format_tables_for_prompt(
                     if col_desc:
                         col_line += f" - {col_desc}"
                     if sample_values:
-                        col_line += f" | sample values: {sample_values}"
+                        if "json" in (col_type or "").lower():
+                            col_line += (
+                                f" | available JSONB keys"
+                                f" (dot = nesting level, use as"
+                                f" ->>'key' or ->'container'->>'leaf'): {sample_values}"
+                            )
+                        else:
+                            col_line += f" | sample values: {sample_values}"
                     notation = col.get("format")
                     if notation and "format:" not in (col_desc or "").lower():
                         col_line += f" | format: {notation}"

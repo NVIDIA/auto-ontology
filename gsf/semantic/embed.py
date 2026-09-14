@@ -17,6 +17,20 @@ from gsf.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 
+# Max length of one already-formatted sample_values list entry kept in a
+# non-JSON ColumnAttribute's embedding text. Historically the only cutoff
+# here — kept as-is for every ordinary column so this change stays scoped to
+# JSONB, not a blanket loosening.
+_MAX_EMBEDDED_SAMPLE_LEN = 30
+
+# Same idea, but for JSONB columns specifically: their sample_values entries
+# are visit_enter.py's formatted `key [e.g. 'value']` strings (brackets and
+# quotes included), which need more headroom than a bare value does — using
+# the plain 30-char cutoff on those would routinely drop the entry whole,
+# including the key name itself. Scoped to JSON-typed columns only (via the
+# ``data_type`` param below) so ordinary columns are unaffected.
+_MAX_EMBEDDED_JSON_SAMPLE_LEN = 60
+
 
 @dataclass
 class SemanticEmbedder:
@@ -213,9 +227,21 @@ def embed_all_semantic_nodes(
     return len(with_embeddings)
 
 
-def _format_sample_values(raw: Any) -> str:
-    """Return a ' Sample values: ...' suffix string, or empty string if unavailable."""
-    values = stringify_sample_values(raw, max_len=30)
+def _format_sample_values(raw: Any, data_type: str | None = None) -> str:
+    """Return a ' Sample values: ...' suffix string, or empty string if unavailable.
+
+    *data_type* is the owning column's declared type. JSON-typed columns get a
+    higher per-entry length cutoff (see ``_MAX_EMBEDDED_JSON_SAMPLE_LEN``)
+    since their sample_values entries are visit_enter.py's formatted
+    ``key [e.g. 'value']`` strings, not bare values — every other column keeps
+    the original cutoff unchanged.
+    """
+    max_len = (
+        _MAX_EMBEDDED_JSON_SAMPLE_LEN
+        if "json" in (data_type or "").lower()
+        else _MAX_EMBEDDED_SAMPLE_LEN
+    )
+    values = stringify_sample_values(raw, max_len=max_len)
     if not values:
         return ""
     return " Sample values: " + ", ".join(values) + "."
@@ -261,7 +287,7 @@ def _build_rows(
         if not attr_name:
             continue
         owner = a.get("term_name") or term_name or ""
-        sample_block = _format_sample_values(a.get("sample_values"))
+        sample_block = _format_sample_values(a.get("sample_values"), a.get("datatype"))
         text = (
             f"ColumnAttribute: {attr_name} of Term {owner}{synonym_suffix}. "
             f"{a.get('description') or ''}"
@@ -279,12 +305,22 @@ def _build_rows(
             "source_column": a.get("source_column"),
             "table_id": a.get("table_id"),
             "table_name": a.get("table_name"),
+            # Lets semantic FK resolution filter VDB candidates down to
+            # columns that can validly serve as a referenced key — see
+            # semantic_fk._resolve_via_vdb.
             "is_unique": a.get("is_unique"),
             "database_name": database_name,
             "source_path": path,
         }
         if a.get("schema_name"):
             fields["schema_name"] = a["schema_name"]
+        if a.get("datatype"):
+            # Threaded through so downstream consumers (e.g. entity_resolution's
+            # composite-column check) can read the real column type instead of
+            # guessing from description text. Only present on rows embedded after
+            # this field was added — existing embedded rows keep the text-based
+            # fallback until they're re-embedded.
+            fields["data_type"] = a["datatype"]
         if a.get("id"):
             fields["id"] = a["id"]
         rows.append(

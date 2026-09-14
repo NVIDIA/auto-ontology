@@ -16,10 +16,14 @@ This package:
 - :func:`find_literal_mismatches` (:mod:`literal_check`) — compare filter
   literals in generated SQL against real distinct DB values so wrong
   case/spelling can be repaired.
+- :func:`find_jsonb_path_mismatches` (:mod:`jsonb_path_check`) — compare
+  ``->``/``->>`` JSONB key paths in generated SQL against the real keys
+  present in the database so a hallucinated key/container can be repaired.
 """
 
 from gsf.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
+    is_db_probe_jsonb_path_check,
     DB_PROBE_MAX_CALLS,
     DB_PROBE_MAX_ROWS,
     DB_PROBE_TIMEOUT_S,
@@ -32,9 +36,14 @@ from gsf.retrieval.text_to_sql.db_probe.literal_check import (
     build_value_repair_error,
     find_literal_mismatches,
 )
+from gsf.retrieval.text_to_sql.db_probe.jsonb_path_check import (
+    build_jsonb_path_repair_error,
+    find_jsonb_path_mismatches,
+)
 
 __all__ = [
     "is_db_probe_proactive",
+    "is_db_probe_jsonb_path_check",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",
     "DB_PROBE_TIMEOUT_S",
@@ -42,4 +51,6 @@ __all__ = [
     "is_read_only_select",
     "build_value_repair_error",
     "find_literal_mismatches",
+    "build_jsonb_path_repair_error",
+    "find_jsonb_path_mismatches",
 ]

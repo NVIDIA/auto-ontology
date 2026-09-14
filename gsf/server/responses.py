@@ -38,6 +38,7 @@ from gsf.server.models import (
     IdRef,
     PqlAnalysis,
     PublicConnection,
+    Rule,
     SchemaSummary,
     SemanticExplorationGraph,
     SqlAttribute,
@@ -51,7 +52,7 @@ from gsf.server.models import (
     TableSummary,
     Tag,
     TagChip,
-    TagDetail,
+    TagItem,
     Term,
     TermCountEntry,
     TermDetail,
@@ -95,6 +96,8 @@ __all__ = [
     "PagedListResponse",
     "PqlAnalysisListResponse",
     "PqlAnalysisResponse",
+    "RulePageResponse",
+    "RuleResponse",
     "SchemasPayload",
     "SemanticExplorationGraphResponse",
     "SemanticRunningResponse",
@@ -114,8 +117,8 @@ __all__ = [
     "TableListResponse",
     "TableZonesResponse",
     "TagChipListResponse",
-    "TagDetailResponse",
-    "TagListResponse",
+    "TagItemPageResponse",
+    "TagPageResponse",
     "TagResponse",
     "TermDetailResponse",
     "TermExplorationDetailsResponse",
@@ -288,11 +291,20 @@ ZoneListResponse = ListResponse[Zone]
 
 # Tags
 TagResponse = DataResponse[Tag]
-TagListResponse = ListResponse[Tag]
-TagDetailResponse = DataResponse[TagDetail]
+# Paged, but optionally: the settings list reads a window of the vocabulary and
+# the tag picker reads all of it, so `total` is what tells the first when to stop
+# asking and equals `count` for the second.
+TagPageResponse = PagedListResponse[Tag]
+# What a tag labels, paged: a tag applied by a rule can carry the whole catalog,
+# so the objects are their own list rather than a field on the tag.
+TagItemPageResponse = PagedListResponse[TagItem]
 # The attach and detach routes answer with the *object's* tags after the change,
 # which is what the page redraws from — not with the tag that was moved.
 TagChipListResponse = ListResponse[TagChip]
+
+# Rules
+RuleResponse = DataResponse[Rule]
+RulePageResponse = PagedListResponse[Rule]
 
 # Catalog
 DatabaseListResponse = ListResponse[DatabaseSummary]

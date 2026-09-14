@@ -15,6 +15,10 @@ migration silently drops. A rename asks one thing more of the rule than a
 create does: a tag has to be allowed to keep its own name, and to change only
 its case, neither of which is a collision with anybody.
 
+``list_tag_targets`` is paged, and the page and ``count_tag_targets`` are read
+from one union so they cannot disagree: a total the page can never reach would
+have a scrolling caller asking for a next page forever.
+
 The second is ``list_tag_targets``, which unions five kinds of tagged object
 into one list. Five branches is five chances to join through the wrong column
 and still return something plausible, so the fixture tags one of each kind at
@@ -27,6 +31,16 @@ The write path is covered for what a bare INSERT would not give: that labelling
 something twice is not an error, that a missing tag or object is reported rather
 than raised, and that both paths answer with the object's tags afterwards, which
 is what a page redraws from.
+
+The third is where a label *came from*, since a tag's page now names it. Two
+sources write the same row — a person through ``attach_tag`` and a rule through
+``attach_tags_by_rule`` — and the tests pin the rule that settles them: the
+first source keeps the label, in both orders, because the second insert is
+absorbed rather than applied. Deleting a rule gets its own set: it takes back
+what it labelled, leaves alone what a person did, and — asked to keep the
+labels — hands them to whoever wrote the rule instead, read from the rule rather
+than from whoever is deleting it. They are that person's own labels from then
+on, which is why the next identical rule does not adopt them either.
 
 Needs a migrated database and skips without one.
 """
@@ -43,6 +57,7 @@ pytest.importorskip("sqlalchemy")
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from gsf.dal import schema as s  # noqa: E402
+from gsf.dal.rules import delete_rule, update_rule  # noqa: E402
 from gsf.dal.session import store  # noqa: E402
 from gsf.dal.tags import (  # noqa: E402
     TARGET_COLUMN,
@@ -51,9 +66,13 @@ from gsf.dal.tags import (  # noqa: E402
     TARGET_TABLE,
     TARGET_TERM,
     attach_tag,
+    attach_tags_by_rule,
+    count_tag_targets,
+    count_tags,
     create_tag,
     delete_tag,
     detach_tag,
+    existing_tag_ids,
     fetch_tags_map,
     get_tag,
     list_tag_targets,
@@ -137,6 +156,51 @@ def test_the_listing_is_ordered_case_insensitively(prefix) -> None:
 
     names = [row["name"] for row in list_tags() if prefix in row["name"]]
     assert names == [f"{prefix}-Alpha", f"{prefix}-beta", f"{prefix}-gamma"]
+
+
+def test_a_page_of_tags_is_a_window_on_one_order(prefix) -> None:
+    """Two pages of one list: neither repeats a tag nor skips one."""
+    for name in (f"{prefix}-c", f"{prefix}-a", f"{prefix}-b"):
+        create_tag(name=name)
+
+    first = list_tags(search=prefix, skip=0, limit=2)
+    second = list_tags(search=prefix, skip=2, limit=2)
+
+    assert [row["name"] for row in first] == [f"{prefix}-a", f"{prefix}-b"]
+    assert [row["name"] for row in second] == [f"{prefix}-c"]
+
+
+def test_an_unpaged_read_returns_every_match(prefix) -> None:
+    """What the tag picker asks for: the whole vocabulary, to filter locally."""
+    for name in (f"{prefix}-a", f"{prefix}-b", f"{prefix}-c"):
+        create_tag(name=name)
+
+    assert len(list_tags(search=prefix)) == 3
+
+
+def test_the_tag_total_counts_the_whole_match_not_the_page(prefix) -> None:
+    for name in (f"{prefix}-a", f"{prefix}-b", f"{prefix}-c"):
+        create_tag(name=name)
+
+    assert len(list_tags(search=prefix, limit=2)) == 2
+    assert count_tags(search=prefix) == 3
+
+
+def test_a_search_matches_the_name_ignoring_case(prefix) -> None:
+    create_tag(name=f"{prefix}-customers")
+    create_tag(name=f"{prefix}-orders")
+
+    found = list_tags(search=f"{prefix}-CUSTOM")
+
+    assert [row["name"] for row in found] == [f"{prefix}-customers"]
+    assert count_tags(search=f"{prefix}-CUSTOM") == 1
+
+
+def test_a_blank_search_filters_nothing(prefix) -> None:
+    """A cleared search box sends an empty string, not a missing parameter."""
+    create_tag(name=f"{prefix}-pii")
+
+    assert count_tags(search="   ") == count_tags()
 
 
 def test_create_stamps_both_timestamps(prefix) -> None:
@@ -343,6 +407,22 @@ def test_get_tag_for_an_unknown_id_reports_it(prefix) -> None:
     assert get_tag(f"{prefix}-no-such-id") is None
 
 
+def test_existing_ids_keeps_the_ones_that_are_tags_and_drops_the_rest(prefix) -> None:
+    """What a rule's tags are checked against before it is saved."""
+    tag = create_tag(name=f"{prefix}-pii")
+
+    assert existing_tag_ids([tag["id"], f"{prefix}-no-such-id"]) == {tag["id"]}
+
+
+def test_existing_ids_of_nothing_asks_the_database_nothing() -> None:
+    """``IN ()`` is not a query, and the empty answer needs no read.
+
+    No ``prefix``: this one writes nothing, so it needs neither a name to write
+    under nor the cleanup that fixture exists for.
+    """
+    assert existing_tag_ids([]) == set()
+
+
 # --------------------------------------------------------------------------
 # list_tag_targets
 # --------------------------------------------------------------------------
@@ -398,6 +478,24 @@ class Tagged:
     def link(table, **values) -> None:
         store().query_write(table.insert().values(**values))
 
+    def rule(self, name: str, *, created_by: str = "user-1") -> str:
+        """A stored rule, for the labels a rule applies to carry an id.
+
+        Inserted rather than created through ``gsf.dal.rules``: what a rule
+        *searches* does not matter here — the search is replayed a layer up, in
+        ``gsf.server.rules.service`` — and only its id reaches this table.
+
+        *created_by* is worth naming for the delete that keeps the labels: it
+        hands them to the rule's author, so a test needs to be able to make one
+        somebody in particular wrote.
+        """
+        return _add(
+            s.rule,
+            name=f"{self.prefix}-{name}",
+            search_term=self.prefix,
+            created_by=created_by,
+        )
+
     def label(self, tag_id: str | None = None, **target) -> None:
         store().query_write(
             s.tag_target.insert().values(tag_id=tag_id or self.tag, **target)
@@ -423,7 +521,7 @@ def tagged(prefix):
     store().query_write(
         s.catalog_database.delete().where(s.catalog_database.c.id == world.database)
     )
-    for table in (s.column_attribute, s.sql_attribute, s.term):
+    for table in (s.column_attribute, s.sql_attribute, s.term, s.rule):
         store().query_write(table.delete().where(table.c.name.like(f"{prefix}%")))
 
 
@@ -435,6 +533,42 @@ def test_a_tag_labelling_nothing_has_no_items(tagged) -> None:
 def test_an_unknown_tag_has_no_items(prefix) -> None:
     """Only ``get_tag`` distinguishes this from a tag labelling nothing."""
     assert list_tag_targets(f"{prefix}-no-such-id") == []
+
+
+def test_a_page_is_a_window_on_one_order(tagged) -> None:
+    """Two windows of one order: no object repeated between them, none missed."""
+    tagged.label_one_of_each()
+
+    whole = [row["id"] for row in list_tag_targets(tagged.tag)]
+    first = [row["id"] for row in list_tag_targets(tagged.tag, limit=2)]
+    rest = [row["id"] for row in list_tag_targets(tagged.tag, skip=2, limit=2)]
+
+    assert len(whole) == 5
+    assert first == whole[:2]
+    assert rest == whole[2:4]
+
+
+def test_a_page_past_the_end_is_empty_rather_than_an_error(tagged) -> None:
+    tagged.label_one_of_each()
+
+    assert list_tag_targets(tagged.tag, skip=500, limit=10) == []
+
+
+def test_the_total_counts_everything_the_tag_labels_not_the_page(tagged) -> None:
+    """What tells a scrolling caller when to stop asking."""
+    tagged.label_one_of_each()
+
+    assert len(list_tag_targets(tagged.tag, limit=2)) == 2
+    assert count_tag_targets(tagged.tag) == 5
+
+
+def test_a_tag_labelling_nothing_counts_zero(tagged) -> None:
+    assert count_tag_targets(tagged.tag) == 0
+
+
+def test_an_unknown_tag_counts_zero(prefix) -> None:
+    """As the list does: only ``get_tag`` tells this from a tag with no items."""
+    assert count_tag_targets(f"{prefix}-no-such-id") == 0
 
 
 def test_each_kind_of_object_appears_exactly_once(tagged) -> None:
@@ -909,3 +1043,214 @@ def test_detaching_leaves_the_object_alone(tagged) -> None:
     detach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term)
 
     assert store().query_read(s.term.select().where(s.term.c.id == tagged.term))
+
+
+# --------------------------------------------------------------------------
+# Where a label came from
+# --------------------------------------------------------------------------
+
+
+def test_a_hand_applied_label_records_the_account(tagged) -> None:
+    attach_tag(
+        tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term, tagged_by="user-1"
+    )
+
+    item = tagged.items()[TARGET_TERM]
+    assert item["tagged_by"] == "user-1"
+    assert item["rule"] is None
+
+
+def test_a_label_with_no_identity_names_nobody(tagged) -> None:
+    """Neither column set, which the page reads as "Auto Generated"."""
+    attach_tag(tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term)
+
+    item = tagged.items()[TARGET_TERM]
+    assert item["tagged_by"] is None
+    assert item["rule"] is None
+
+
+def test_a_rule_applied_label_names_the_rule(tagged) -> None:
+    rule_id = tagged.rule("pii-everywhere")
+    applied = attach_tags_by_rule(
+        rule_id=rule_id,
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term), (TARGET_TABLE, tagged.table)],
+    )
+
+    assert applied == 2
+    items = tagged.items()
+    assert items[TARGET_TERM]["rule"] == {
+        "id": rule_id,
+        "name": f"{tagged.prefix}-pii-everywhere",
+    }
+    assert items[TARGET_TERM]["tagged_by"] is None
+    assert items[TARGET_TABLE]["rule"]["id"] == rule_id
+
+
+def test_renaming_a_rule_renames_it_on_everything_it_labelled(tagged) -> None:
+    """The point of naming the rule by id rather than copying its name here."""
+    rule_id = tagged.rule("pii")
+    attach_tags_by_rule(
+        rule_id=rule_id,
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term), (TARGET_TABLE, tagged.table)],
+    )
+
+    update_rule(rule_id=rule_id, name=f"{tagged.prefix}-sensitive")
+
+    items = tagged.items()
+    assert items[TARGET_TERM]["rule"]["name"] == f"{tagged.prefix}-sensitive"
+    assert items[TARGET_TABLE]["rule"]["name"] == f"{tagged.prefix}-sensitive"
+
+
+def test_a_rule_labels_every_object_with_every_tag_it_applies(tagged) -> None:
+    """The pairs are the cross product, which is what "applies these" means."""
+    second = create_tag(name=f"{tagged.prefix}-confidential")["id"]
+
+    applied = attach_tags_by_rule(
+        rule_id=tagged.rule("two-tags"),
+        tag_ids=[tagged.tag, second],
+        targets=[(TARGET_TERM, tagged.term), (TARGET_TABLE, tagged.table)],
+    )
+
+    assert applied == 4
+
+
+def test_a_rule_re_applying_itself_costs_nothing(tagged) -> None:
+    """The hook that re-runs a rule as the catalog grows can be a plain call."""
+    rule_id = tagged.rule("again")
+    targets = [(TARGET_TERM, tagged.term)]
+
+    assert (
+        attach_tags_by_rule(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets) == 1
+    )
+    assert (
+        attach_tags_by_rule(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets) == 0
+    )
+    assert len(list_tag_targets(tagged.tag)) == 1
+
+
+def test_a_rule_does_not_take_over_a_label_a_person_applied(tagged) -> None:
+    """First source keeps the label, which is what the absorbed insert means."""
+    attach_tag(
+        tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term, tagged_by="user-1"
+    )
+
+    applied = attach_tags_by_rule(
+        rule_id=tagged.rule("late"),
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term)],
+    )
+
+    item = tagged.items()[TARGET_TERM]
+    assert applied == 0
+    assert item["tagged_by"] == "user-1"
+    assert item["rule"] is None
+
+
+def test_a_rule_applied_label_names_no_account(tagged) -> None:
+    """A rule is not an account, and ``rule_id`` is what says a rule did it."""
+    attach_tags_by_rule(
+        rule_id=tagged.rule("named"),
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term)],
+    )
+
+    assert tagged.items()[TARGET_TERM]["tagged_by"] is None
+
+
+def test_a_person_does_not_take_over_a_label_a_rule_applied(tagged) -> None:
+    rule_id = tagged.rule("first")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    attach_tag(
+        tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term, tagged_by="user-1"
+    )
+
+    item = tagged.items()[TARGET_TERM]
+    assert item["rule"]["id"] == rule_id
+    assert item["tagged_by"] is None
+
+
+def test_nothing_to_do_is_not_a_query(tagged) -> None:
+    """A rule matching nothing is a standing instruction, not a failure."""
+    assert attach_tags_by_rule(rule_id=tagged.rule("x"), tag_ids=[], targets=[]) == 0
+    assert (
+        attach_tags_by_rule(rule_id=tagged.rule("y"), tag_ids=[tagged.tag], targets=[])
+        == 0
+    )
+
+
+def test_deleting_a_rule_takes_back_what_it_labelled(tagged) -> None:
+    """``ON DELETE CASCADE``: the label was the rule holding, not a fact."""
+    rule_id = tagged.rule("temporary")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    store().query_write(s.rule.delete().where(s.rule.c.id == rule_id))
+
+    assert list_tag_targets(tagged.tag) == []
+
+
+def test_deleting_a_rule_leaves_a_hand_applied_label(tagged) -> None:
+    """The cascade follows ``rule_id``, and a hand-applied row does not have one."""
+    attach_tag(
+        tag_id=tagged.tag, kind=TARGET_TERM, item_id=tagged.term, tagged_by="user-1"
+    )
+    rule_id = tagged.rule("elsewhere")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TABLE, tagged.table)]
+    )
+
+    store().query_write(s.rule.delete().where(s.rule.c.id == rule_id))
+
+    assert [row["id"] for row in list_tag_targets(tagged.tag)] == [tagged.term]
+
+
+def test_a_rule_can_be_deleted_and_leave_its_labels_behind(tagged) -> None:
+    """``keep_tags``: handed to the rule's author, so the cascade finds none."""
+    rule_id = tagged.rule("suggestion")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    assert delete_rule(rule_id, keep_tags=True) is True
+
+    item = tagged.items()[TARGET_TERM]
+    assert item["id"] == tagged.term
+    # The rule is gone and the person who wrote it is named instead -- these
+    # are that person's labels now, not nobody's.
+    assert item["rule"] is None
+    assert item["tagged_by"] == "user-1"
+
+
+def test_the_labels_kept_go_to_the_author_of_that_rule(tagged) -> None:
+    """Read from the rule, so a delete by an admin is not a claim of authorship."""
+    rule_id = tagged.rule("somebody-elses", created_by="user-2")
+    attach_tags_by_rule(
+        rule_id=rule_id, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+
+    delete_rule(rule_id, keep_tags=True)
+
+    assert tagged.items()[TARGET_TERM]["tagged_by"] == "user-2"
+
+
+def test_a_label_left_behind_is_not_adopted_by_the_next_rule(tagged) -> None:
+    """It is a person's label now, and a rule claims no existing row."""
+    first = tagged.rule("first")
+    attach_tags_by_rule(
+        rule_id=first, tag_ids=[tagged.tag], targets=[(TARGET_TERM, tagged.term)]
+    )
+    delete_rule(first, keep_tags=True)
+
+    attach_tags_by_rule(
+        rule_id=tagged.rule("second"),
+        tag_ids=[tagged.tag],
+        targets=[(TARGET_TERM, tagged.term)],
+    )
+
+    assert tagged.items()[TARGET_TERM]["rule"] is None

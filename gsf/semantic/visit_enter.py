@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import threading
 import time
 from collections import Counter, defaultdict
@@ -26,7 +27,7 @@ from gsf.semantic.date_format import infer_date_format, is_date_type
 from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
-from gsf.semantic.embed import SemanticEmbedder
+from gsf.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
 from gsf.semantic.fk_suggester import suggest_potential_foreign_keys
 from gsf.semantic.models import ColumnAttributeSpec, ProcessTableResult
 from gsf.semantic.term_extractor import apply_display_names_to_specs, extract_term
@@ -60,6 +61,34 @@ _EXCLUDED_SAMPLE_TYPES = ("date", "time", "timestamp", "datetime", "uuid")
 _LOW_CARDINALITY_MAX = 25
 # Declared data-type substrings treated as free/categorical text.
 _TEXT_SAMPLE_TYPES = ("char", "text", "string", "clob", "enum")
+# JSONB nested-key names that mark a sibling value as unit-qualified (e.g.
+# {"value": 45000, "unit": "annual"}). When a container has one of these,
+# every other key in that container is annotated with the unit key's path so
+# the SQL generator sees, right next to the value, that it must not compare
+# two such values without checking the unit matches.
+_UNIT_MARKER_KEYS = ("unit", "units", "uom", "currency", "measure")
+# JSONB nested-key name substrings that plausibly hold a date/timestamp
+# string. Gates which nested keys are worth pulling example values for below
+# — cheap and imprecise by design (a name-based heuristic, not a value-based
+# one), since the alternative (capturing examples for every nested key) would
+# bloat every JSONB column's description with mostly-irrelevant values.
+_DATE_KEY_HINTS = ("date", "_dt", "day", "time", "moment", "schedule", "_on", "_at")
+
+# Shape patterns for free-text values that hold a date/timestamp as a string
+# (a JSONB nested leaf, or a "text"-typed column that was never cast to a
+# real date type — both are common in these benchmark schemas). Matched
+# against the *shape* only (digit widths / separators), never asserting a
+# day/month reading for ambiguous slash-separated forms — that can't be
+# recovered from the shape alone and a wrong guess would be worse than no
+# guess. Order doesn't matter: a value is tested against every pattern and
+# can only ever match one (they're mutually exclusive shapes).
+_DATE_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("YYYY-MM-DD", re.compile(r"^\d{4}-\d{2}-\d{2}")),
+    ("YYYY/MM/DD", re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")),
+    ("DD/MM/YYYY or MM/DD/YYYY (ambiguous)", re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")),
+    ("DD/MM/YY or MM/DD/YY (ambiguous)", re.compile(r"^\d{2}/\d{2}/\d{2}$")),
+    ("Mon DD, YYYY", re.compile(r"^[A-Za-z]{3,9} \d{1,2},? \d{4}$")),
+)
 
 # Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
 # the commit phase must be serial: VDB search → judge → store merge → VDB embed.
@@ -220,6 +249,29 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
+def _date_shapes_seen(values: list[str]) -> list[str]:
+    """Distinct recognized date/timestamp shapes among *values*, in first-seen order.
+
+    A value that matches none of :data:`_DATE_SHAPE_PATTERNS` is silently
+    ignored rather than counted as "no date shape" for the whole column —
+    this only exists to catch a column mixing more than one *recognized*
+    shape (e.g. some rows ``YYYY-MM-DD``, others ``YYYY/MM/DD``), which is a
+    real, observed bug: a fixed-format parser silently mis-parses whichever
+    shape it wasn't written for. It intentionally does not try to classify
+    every possible date-like string — an odd one-off format (e.g. a literal
+    "12th Jun." style column) is left to speak for itself via the raw sample
+    values already shown, rather than force a wrong or overly-broad match.
+    """
+    shapes: list[str] = []
+    for value in values:
+        for label, pattern in _DATE_SHAPE_PATTERNS:
+            if pattern.match(value):
+                if label not in shapes:
+                    shapes.append(label)
+                break
+    return shapes
+
+
 def _json_ready_sample(value: Any) -> Any:
     """Convert a live warehouse value to a JSON-serializable Python native.
 
@@ -355,18 +407,26 @@ def calculate_columns_profiling(
     ``_json_ready_sample``): a numeric column profiles as ``[10, 20, 30]``,
     not ``["10", "20", "30"]``. The types survive storage, since a column's
     ``sample_values`` is persisted as JSON; only readers that need display
-    text coerce, through ``stringify_sample_values``.
+    text coerce through ``stringify_sample_values``.
 
-    Persists to catalog columns: ``is_unique`` for every column, ``format``
-    for columns whose sampled values share one notation — whether declared as
-    a date/time type or as text, since loosely-typed sources such as SQLite
-    store dates as TEXT — and ``sample_values`` for every column except those
-    with a date format or a declared date/time/uuid type (values longer than
-    30 chars are dropped, which by ``_keep_persisted_sample`` applies to text
-    rather than to numbers).
+    Persists to catalog columns: ``is_unique`` for every column,
+    ``format`` for date/time-typed or text columns whose sampled values share
+    one storage notation — resolved by validating every value against
+    strptime candidates (see ``gsf.semantic.date_format``), so it can settle
+    genuinely ambiguous-looking shapes (``13/07/2011`` can only be day-first)
+    rather than merely flag them — and ``sample_values`` for every column
+    except those whose declared type is a date/time/uuid (individual string
+    values longer than 30 chars are dropped). A text column whose real values
+    mix more than one recognized date/timestamp shape (e.g. some rows
+    ``YYYY-MM-DD``, others ``YYYY/MM/DD``) gets an explicit mixed-format
+    warning appended, checked against the full sample rather than only the
+    stored top-5 so a rare minority shape isn't missed. JSONB nested keys
+    whose name hints at a date (see ``_DATE_KEY_HINTS``) get the same
+    treatment plus a raw example value when no recognized shape matches at
+    all.
 
-    Returns ``{column_name: {"sample_values": [...], "is_unique": bool,
-    "format": str | None}}`` for *all* columns (values unfiltered —
+    Returns ``{column_name: {"sample_values": [top-5 values], "is_unique":
+    bool, "format": str | None}}`` for *all* columns (values unfiltered —
     includes dates, uuids and long strings).
     """
     schema_name = table.get("schema_name")
@@ -460,6 +520,10 @@ def calculate_columns_profiling(
         # SQLite (and other loosely-typed sources) declare dates as TEXT, so the
         # declared type alone misses them: infer from the values as well, which
         # only yields a format when every sampled value shares one notation.
+        # Unlike main's port, this does NOT suppress sample_values below just
+        # because a format was found — samples stay available to FK inference
+        # (semantic_fk.py's SQL-probe fallback reads persisted sample_values),
+        # and date values are short enough that keeping them costs little.
         date_format = (
             infer_date_format(series)
             if is_date_type(declared_type) or _is_text_sample_type(declared_type)
@@ -475,9 +539,184 @@ def calculate_columns_profiling(
             "format": date_format,
         }
 
-        if _is_excluded_sample_type(declared_type) or date_format:
+        if _is_excluded_sample_type(declared_type):
             continue
+
+        # JSONB columns: the raw value is a Python dict and its string
+        # representation always exceeds _MAX_SAMPLE_VALUE_LEN, so the normal
+        # filter would silently discard everything.  Instead, extract the
+        # unique key names from the sampled rows — flat keys at the top level
+        # and one level of nesting — so the SQL generator sees the actual
+        # field paths it needs to write correct ->/->> expressions.
+        if "json" in (declared_type or "").lower():
+            top_level_keys: list[str] = []
+            containers: dict[str, list[str]] = {}
+            # Example raw values per (container, nested_key) — only collected
+            # for keys whose name hints at a date/timestamp (see
+            # _DATE_KEY_HINTS); every other nested key stays name-only, same
+            # as before. These are never a Column's real "sample_values" (the
+            # column itself is JSONB, not text) — they exist solely to let a
+            # date-shape check run on a nested leaf the way it already can on
+            # a plain text column.
+            nested_date_examples: dict[tuple[str, str], list[str]] = {}
+            # Example raw values per top-level flat key (e.g. 'Tx_Adh' ->
+            # ['High', 'Medium', 'Compliant']). Unlike nested_date_examples
+            # above, this is collected for every flat key, not just
+            # date-hinted ones — a bare key name like 'Tx_Adh' gives the SQL
+            # generator no way to tell it apart from a same-purpose flat
+            # column (e.g. 'med_adh') that already shows its real sample
+            # values; showing the actual values here closes that gap.
+            top_level_examples: dict[str, list[str]] = {}
+            for raw_val in df[column].dropna():
+                if not isinstance(raw_val, dict):
+                    continue
+                for k, v in raw_val.items():
+                    if isinstance(v, dict):
+                        nested = containers.setdefault(k, [])
+                        for nested_k, nested_v in v.items():
+                            if nested_k not in nested:
+                                nested.append(nested_k)
+                            is_date_hint = any(
+                                hint in nested_k.lower() for hint in _DATE_KEY_HINTS
+                            )
+                            if nested_v is None or not is_date_hint:
+                                continue
+                            examples = nested_date_examples.setdefault(
+                                (k, nested_k), []
+                            )
+                            str_v = str(nested_v)
+                            if (
+                                len(examples) < 3
+                                and str_v not in examples
+                                and (len(str_v) <= _MAX_SAMPLE_VALUE_LEN)
+                            ):
+                                examples.append(str_v)
+                    else:
+                        if k not in top_level_keys:
+                            top_level_keys.append(k)
+                        if v is None:
+                            continue
+                        examples = top_level_examples.setdefault(k, [])
+                        str_v = str(v)
+                        if (
+                            len(examples) < _PROFILING_TOP_N
+                            and str_v not in examples
+                            and (len(str_v) <= _MAX_SAMPLE_VALUE_LEN)
+                        ):
+                            examples.append(str_v)
+
+            # embed.py's ColumnAttribute embedding text (_format_sample_values)
+            # drops any individual sample_values entry over
+            # _MAX_EMBEDDED_JSON_SAMPLE_LEN chars WHOLE, not truncated — so an
+            # over-length annotation risks losing the entry, including the
+            # bare key name, from retrieval entirely (this was already true
+            # pre-existing for the WARNING/date-format annotations below,
+            # which had no fallback at all). ``_safe_annotate`` keeps
+            # appending as much annotation as fits, falling back a step at a
+            # time rather than an all-or-nothing choice, so a key's own name
+            # is never lost just because a longer example/format string
+            # didn't fit next to it. The SQL-gen prompt (sql_from_semantic.py)
+            # applies no such filter — it always sees the full, un-capped
+            # entry — so this only trims what retrieval-time embedding sees.
+            # Note this budgets the *formatted* entry (brackets/quotes
+            # included) against _MAX_EMBEDDED_JSON_SAMPLE_LEN (the JSON-only,
+            # 60-char budget), not the raw-value cutoff (_MAX_SAMPLE_VALUE_LEN,
+            # 30 chars) used above when deciding whether a value was worth
+            # collecting as an example candidate at all — those are two
+            # different questions with two different budgets.
+            def _safe_annotate(base: str, *annotations: str) -> str:
+                entry = base
+                for ann in annotations:
+                    candidate = f"{entry} {ann}"
+                    if len(candidate) <= _MAX_EMBEDDED_JSON_SAMPLE_LEN:
+                        entry = candidate
+                    else:
+                        break
+                return entry
+
+            json_keys: list[str] = []
+            for k, nested_keys in containers.items():
+                unit_key = next(
+                    (nk for nk in nested_keys if nk.lower() in _UNIT_MARKER_KEYS),
+                    None,
+                )
+                for nested_k in nested_keys:
+                    base = f"{k}.{nested_k}"
+                    unit_ann = (
+                        f"[unit: {k}.{unit_key}]"
+                        if unit_key and nested_k != unit_key
+                        else None
+                    )
+                    examples = nested_date_examples.get((k, nested_k))
+                    date_ann = None
+                    if examples:
+                        shapes = _date_shapes_seen(examples)
+                        if len(shapes) > 1:
+                            # Try every observed shape first (this is the one
+                            # place fewer items changes the *meaning*, not
+                            # just the detail level — dropping a shape here
+                            # could hide a real mixed-format bug), then fall
+                            # back to just flagging that shapes are mixed
+                            # without enumerating them, before giving up the
+                            # annotation entirely.
+                            full = (
+                                "[WARNING mixed date formats observed: "
+                                f"{', '.join(shapes)}]"
+                            )
+                            short = "[WARNING mixed date formats observed]"
+                            date_ann = (
+                                full
+                                if len(f"{base} {full}")
+                                <= _MAX_EMBEDDED_JSON_SAMPLE_LEN
+                                else short
+                            )
+                        elif shapes:
+                            date_ann = f"[date format: {shapes[0]}]"
+                        else:
+                            date_ann = f"[e.g. {examples[0]!r}]"
+                    anns = [a for a in (unit_ann, date_ann) if a]
+                    json_keys.append(_safe_annotate(base, *anns))
+            for k in top_level_keys:
+                examples = top_level_examples.get(k)
+                if not examples:
+                    json_keys.append(k)
+                    continue
+                # Greedily fit as many distinct example values as the length
+                # budget allows (1 up to len(examples), all collected up to
+                # _PROFILING_TOP_N) instead of a fixed count — a short key
+                # with short values (e.g. 'Tx_Adh': 'High'/'Low'/'Compliant')
+                # gets more signal than a fixed cap of 1 would give it, while
+                # a long key/value pair still degrades gracefully to fewer
+                # examples, then to the bare key, rather than being dropped.
+                best = k
+                for n in range(1, len(examples) + 1):
+                    candidate = f"{k} [e.g. {', '.join(repr(e) for e in examples[:n])}]"
+                    if len(candidate) <= _MAX_EMBEDDED_JSON_SAMPLE_LEN:
+                        best = candidate
+                    else:
+                        break
+                json_keys.append(best)
+
+            if json_keys:
+                # Capped well above the typical real key count (see
+                # mental_health.treatmentoutcomes.txprogmet, which has 11) so
+                # a wide-but-not-huge JSONB column doesn't lose keys to a
+                # cap tuned for a narrower column shape seen elsewhere.
+                sample_values[col_name] = json_keys[:20]
+            continue
+
         filtered = [v for v in col_values if _keep_persisted_sample(v)]
+        if _is_text_sample_type(declared_type):
+            # Checked against the full up-to-1000-row sample, not just the
+            # top-5/distinct values kept for display — a minority format can
+            # be entirely absent from the top-5 while still breaking a
+            # fixed-format parser on real rows (observed: a column mostly
+            # 'YYYY-MM-DD' with a rare 'YYYY/MM/DD' minority).
+            shapes = _date_shapes_seen(list(series))
+            if len(shapes) > 1:
+                filtered.append(
+                    f"[WARNING mixed date formats observed: {', '.join(shapes)}]"
+                )
         if filtered:
             sample_values[col_name] = filtered
 
@@ -510,8 +749,9 @@ def process_table(
 
     # Columns profiling — requires a live connector; skipped only when one is
     # unavailable. The bounded SELECT * ... LIMIT sample runs unconditionally;
-    # the setting gates the unbounded DISTINCT probes inside. Persists
-    # sample_values, is_unique, and format onto Column nodes.
+    # the setting gates the unbounded DISTINCT probes inside. It persists
+    # sample_values, is_unique, and format onto Column nodes, and maps those
+    # values for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None and _sampling_breaker.is_open(connector):

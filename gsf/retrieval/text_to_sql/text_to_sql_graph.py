@@ -25,8 +25,8 @@ from gsf.retrieval.entity_coverage.agents.question_extraction import (
 from gsf.retrieval.text_to_sql.agents.empty_result_value_repair import (
     EmptyResultValueRepairAgent,
 )
-from gsf.retrieval.text_to_sql.agents.proactive_value_check import (
-    ProactiveValueCheckAgent,
+from gsf.retrieval.text_to_sql.agents.combined_precheck import (
+    CombinedPrecheckAgent,
 )
 from gsf.retrieval.text_to_sql.agents.prediction_classification import (
     PredictionClassificationAgent,
@@ -46,6 +46,8 @@ from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationA
 from gsf.retrieval.text_to_sql.base import agent_wrapper
 from gsf.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
+    is_db_probe_jsonb_path_check,
+    is_db_probe_join_path_check,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,6 +138,38 @@ def route_intent_validation(state: AgentState) -> str:
     else:
         # Intent is valid, proceed to formatting
         return "valid_sql"
+
+
+def _make_soft_check_router(check_name: str):
+    """Build a router for a post-construction "soft" check (jsonb/join/value
+    prechecks, empty-LIKE check, value-repair check).
+
+    These send SQL back to ``reconstruct_sql`` on failure but do not route
+    through :func:`route_sql_validation`, which enforces the hard reconstruction
+    cap. A persistently failing check could otherwise loop until the graph's
+    global recursion limit aborts the run. Once enough failed attempts have
+    accumulated, stop blocking on this check and let the SQL through as-is.
+
+    Args:
+        check_name: Node name, used only for the log message when the cap fires.
+
+    Returns:
+        A router function usable in ``add_conditional_edges``.
+    """
+
+    def _route(state: AgentState) -> str:
+        decision = state.get("decision", "") or ""
+        if decision != "invalid_sql":
+            return "valid_sql"
+        failed_attempt_count = len(state["path_state"].get("failed_attempts") or [])
+        if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
+            logger.info(
+                f"Skipping {check_name} after {failed_attempt_count} reconstructions"
+            )
+            return "valid_sql"
+        return "invalid_sql"
+
+    return _route
 
 
 def route_translation(state: AgentState) -> str:
@@ -257,6 +291,10 @@ def wrap_node_with_logging(
     return wrapped
 
 
+def _entry_router_fn(state):
+    return state["path_state"].get("_resume_from", "question_extraction")
+
+
 def create_graph():
 
     # KumoRFM prediction is wired in only when configured — decided once here at
@@ -297,12 +335,28 @@ def create_graph():
     value_repair_node = _make_node(
         "check_value_repair", agent_wrapper(EmptyResultValueRepairAgent())
     )
-    # Optional proactive (pre-execution) literal check — opt-in via DB_PROBE_PROACTIVE.
+    # Optional proactive (pre-execution) checks — literal/value, join-path, and
+    # JSONB key-path — merged into one node (CombinedPrecheckAgent) so a query
+    # failing more than one of them costs a single reconstruction round-trip
+    # instead of one per check. The node is only added if at least one of the
+    # three flags is on; internally, each sub-check still only runs if its own
+    # flag is enabled. Opt-in via DB_PROBE_PROACTIVE, DB_PROBE_JOIN_PATH_CHECK,
+    # DB_PROBE_JSONB_PATH_CHECK.
     proactive_enabled = is_db_probe_proactive()
-    logger.info("Text-to-SQL graph: db-probe proactive %s", proactive_enabled)
-    proactive_value_node = (
-        _make_node("precheck_value_repair", agent_wrapper(ProactiveValueCheckAgent()))
-        if proactive_enabled
+    join_path_enabled = is_db_probe_join_path_check()
+    jsonb_path_enabled = is_db_probe_jsonb_path_check()
+    logger.info(
+        "Text-to-SQL graph: db-probe proactive=%s join_path=%s jsonb_path=%s",
+        proactive_enabled,
+        join_path_enabled,
+        jsonb_path_enabled,
+    )
+    combined_precheck_enabled = (
+        proactive_enabled or join_path_enabled or jsonb_path_enabled
+    )
+    combined_precheck_node = (
+        _make_node("precheck_combined", agent_wrapper(CombinedPrecheckAgent()))
+        if combined_precheck_enabled
         else None
     )
     construct_sql_from_candidates_node = _make_node(
@@ -337,15 +391,24 @@ def create_graph():
     graph = StateGraph(AgentState)
 
     # -----------------    ENTRY POINT   ------------------
-    graph.set_entry_point("question_extraction")
+    graph.add_node("_entry_router", lambda state: state)
+    graph.set_entry_point("_entry_router")
+    graph.add_conditional_edges(
+        "_entry_router",
+        _entry_router_fn,
+        {
+            "question_extraction": "question_extraction",
+            "reconstruct_sql": "reconstruct_sql",
+        },
+    )
 
     # Add only nodes instantiated above.
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("check_value_repair", value_repair_node)
-    if proactive_value_node is not None:
-        graph.add_node("precheck_value_repair", proactive_value_node)
+    if combined_precheck_node is not None:
+        graph.add_node("precheck_combined", combined_precheck_node)
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
@@ -416,11 +479,14 @@ def create_graph():
         },
     )
 
-    # When the proactive check is enabled, every route that would otherwise go
-    # straight to execution is funnelled through it first.
+    # When any pre-execution probe check is enabled, every route that would
+    # otherwise go straight to execution is funnelled through the merged
+    # precheck node first (literal/value, join-path, and JSONB-path checks —
+    # see combined_precheck.py for why they're combined and how their
+    # internal ordering/gating works).
     pre_execute_target = (
-        "precheck_value_repair"
-        if proactive_value_node is not None
+        "precheck_combined"
+        if combined_precheck_node is not None
         else "execute_sql_query"
     )
 
@@ -446,10 +512,10 @@ def create_graph():
         },
     )
 
-    if proactive_value_node is not None:
+    if combined_precheck_node is not None:
         graph.add_conditional_edges(
-            "precheck_value_repair",
-            route_decision,
+            "precheck_combined",
+            _make_soft_check_router("precheck_combined"),
             {
                 "valid_sql": "execute_sql_query",
                 "invalid_sql": "reconstruct_sql",
@@ -472,7 +538,7 @@ def create_graph():
     # empty result at run time).
     graph.add_conditional_edges(
         "check_empty_like_result",
-        route_decision,
+        _make_soft_check_router("check_empty_like_result"),
         {
             "valid_sql": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
@@ -480,7 +546,7 @@ def create_graph():
     )
     graph.add_conditional_edges(
         "check_value_repair",
-        route_decision,
+        _make_soft_check_router("check_value_repair"),
         {
             "valid_sql": "format_and_respond",
             "invalid_sql": "reconstruct_sql",
