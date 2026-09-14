@@ -3,9 +3,10 @@
   "evals": [
     {
       "id": "inst-eval-001-underspecified",
-      "prompt": "Install GSF for me.",
+      "prompt": "Use the nvidia-ontology-install skill to handle this request safely: Install GSF for me.",
       "expected_output": "The request is underspecified, so the agent asks the required questions before running a command: target (full Compose, --dev, --ds, Helm, or MCP-only against an existing instance), whether DEFAULT_MODELS_API_KEY is set, source database / CONNECTION_STRINGS vs UI connections, and whether host port 5432 is free. It does not guess Compose and run it silently.",
       "assertions": [
+        "Loads nvidia-ontology-install before choosing an installation path",
         "Asks which target is wanted \u2014 Compose, --dev, --ds, Helm, or MCP-only",
         "Asks about DEFAULT_MODELS_API_KEY / NIM credentials",
         "Does not silently assume defaults and emit a single install command"

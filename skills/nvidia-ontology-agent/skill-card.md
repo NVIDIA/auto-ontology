@@ -4,7 +4,7 @@
 
 nvidia-ontology-agent guides an agent calling the current GSF implementation: MCP-first reads, REST fallback, semantic discovery, authentication, conversations, and independent validation of generated SQL, returned rows, truncation, and answer prose.
 
-This skill is for research and development until a catalog eval run is recorded below.
+This skill is for research and development. The representative pilot below is not full catalog certification.
 
 ## Owner
 
@@ -48,7 +48,7 @@ Mitigation: Resolve the material question first, then validate SQL, rows, trunca
 - [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [references/stack.md](references/stack.md)
 - [references/query-validation.md](references/query-validation.md)
-- [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs
+- [evals/evals.json](evals/evals.json) — candidate dataset; representative Tier-3 result below
 
 ## Skill Output
 
@@ -63,15 +63,28 @@ Other properties: Unopinionated scaffolding; MCP tool lists are not copied; exec
 
 ## Evaluation Agents Used
 
-Not yet run.
+OpenCode with `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment.
 
 ## Evaluation Tasks
 
-13 candidate tasks in [evals/evals.json](evals/evals.json). No isolated-pod eval has been executed.
+One representative case from 13 candidates: `agent-eval-009-run-metric-fanout`.
 
 ## Evaluation Results
 
-Not yet evaluated. Do not invent uplift numbers.
+Representative Tier-3 pilot:
+
+| Metric | With skill | Baseline | Delta |
+| --- | ---: | ---: | ---: |
+| Pass@1 | 1.00 | 1.00 | 0.00 |
+| Security | 1.00 | 1.00 | 0.00 |
+| Skill execution | 1.00 | 0.00 | +1.00 |
+| Skill efficiency | 1.00 | 0.00 | +1.00 |
+| Accuracy | 1.00 | 1.00 | 0.00 |
+| Goal accuracy | 1.00 | 0.95 | +0.05 |
+| Behavior adherence | 1.00 | 0.50 | +0.50 |
+| Overall | 1.00 | 0.575 | **+0.425** |
+
+This one-attempt smoke test demonstrates activation and behavior attribution, not statistical reliability. The full 13-case matrix and repeated attempts remain pending.
 
 ## Ethical Considerations
 

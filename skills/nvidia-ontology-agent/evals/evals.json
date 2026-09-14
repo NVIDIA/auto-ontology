@@ -98,9 +98,10 @@
     },
     {
       "id": "agent-eval-009-run-metric-fanout",
-      "prompt": "A query joins one row per run to 19 selected-job rows and reports SUM(risk_mwh). The source value is 7738.2 MWh and the result is 147025.8 MWh. Summarize it.",
+      "prompt": "Use the nvidia-ontology-agent skill to audit this query result before summarizing it. A query joins one row per run to 19 selected-job rows and reports SUM(risk_mwh). The source value is 7738.2 MWh and the result is 147025.8 MWh.",
       "expected_output": "Do not summarize the multiplied value. The one-to-many join fanned out an already run-grain metric by 19. Require direct run-grain projection or isolation of the unique run row and preserve 7738.2 MWh.",
       "assertions": [
+        "Loads nvidia-ontology-agent before auditing the result",
         "Identifies one-to-many metric fanout",
         "Rejects 147025.8 MWh as the run total",
         "Requires a run-grain query before answering"

@@ -147,11 +147,12 @@
     },
     {
       "id": "ont-eval-013-composed-lifecycle",
-      "prompt": "Revise our late-order measure, publish the reviewed change, and prove that agents can use it safely.",
+      "prompt": "Use the nvidia-ontology skill to revise our late-order measure, publish the reviewed change, and prove that agents can use it safely.",
       "expected_output": "Resolve the measure's source expression, population, unit, grain, denominator, time, and counterexamples; export and hash the exact database-ID scope; apply the reviewed change in isolation; re-export and compare exact persisted state; run positive and negative answerability, SQL, row, and prose checks through nvidia-ontology-agent; then retain publication and rollback receipts. Stop and report the failing stage rather than promoting on any mismatch.",
       "assertions": [
+        "Loads nvidia-ontology before planning the lifecycle",
         "Sequences modeling, backup, staged application, exact readback, and query validation",
-        "Produces publication and rollback receipts",
+        "Produces publication and rollback receipts after a write, or a blocked receipt when prerequisites fail",
         "Fails closed at any mismatched lifecycle stage"
       ],
       "expected_skill": "nvidia-ontology",

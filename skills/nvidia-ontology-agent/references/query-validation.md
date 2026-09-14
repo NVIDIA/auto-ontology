@@ -42,6 +42,10 @@ particular:
 
 If a material constraint is missing or substituted, do not present the result
 as an answer. Preserve the SQL and report the mismatch or request clarification.
+When a one-to-many fanout is detected, obtain and execute a corrected run-grain
+query before presenting a validated result. A supplied run-level value may be
+identified as source evidence while diagnosing the multiplication, but it must
+not be relabeled as a validated query result.
 
 ## Check rows independently
 

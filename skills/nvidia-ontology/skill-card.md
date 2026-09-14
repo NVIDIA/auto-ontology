@@ -4,7 +4,7 @@
 
 nvidia-ontology inspects, models, manages, and safely publishes through the current GSF semantic layer, including source-grounded concepts, relationships, measures, model import/export, governed result definitions, exact readback, and rollback boundaries.
 
-This skill is for research and development until a catalog eval run is recorded below.
+This skill is for research and development. The representative pilot below is not full catalog certification.
 
 ## Owner
 
@@ -48,7 +48,7 @@ Mitigation: Require a scoped backup, isolated application, exact re-export compa
 - [references/write-api.md](references/write-api.md)
 - [references/modeling.md](references/modeling.md)
 - [references/publication.md](references/publication.md)
-- [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs
+- [evals/evals.json](evals/evals.json) — candidate dataset; representative Tier-3 result below
 
 ## Skill Output
 
@@ -63,15 +63,28 @@ Other properties: Does not modify MCP; unsupported writes stop at an explicit re
 
 ## Evaluation Agents Used
 
-Not yet run.
+OpenCode with `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment.
 
 ## Evaluation Tasks
 
-13 candidate tasks in [evals/evals.json](evals/evals.json). No isolated-pod eval has been executed.
+One representative case from 13 candidates: `ont-eval-013-composed-lifecycle`.
 
 ## Evaluation Results
 
-Not yet evaluated. Do not invent uplift numbers.
+Representative Tier-3 pilot:
+
+| Metric | With skill | Baseline | Delta |
+| --- | ---: | ---: | ---: |
+| Pass@1 | 1.00 | 0.00 | +1.00 |
+| Security | 0.50 | 0.00 | +0.50 |
+| Skill execution | 1.00 | 0.50 | +0.50 |
+| Skill efficiency | 0.75 | 0.268 | +0.482 |
+| Accuracy | 0.80 | 0.40 | +0.40 |
+| Goal accuracy | 0.20 | 0.05 | +0.15 |
+| Behavior adherence | 0.75 | 0.25 | +0.50 |
+| Overall | 0.667 | 0.245 | **+0.422** |
+
+This one-attempt smoke test demonstrates positive lift, not statistical reliability. The fixture intentionally had no reviewed artifact, credentials, or live GSF deployment, so fail-closed behavior prevented lifecycle completion. The security grader also counted two localhost read-only probes as network-exfiltration warnings. A fixture-backed lifecycle run and the full 13-case matrix remain pending.
 
 ## Ethical Considerations
 
