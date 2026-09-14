@@ -530,6 +530,18 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
 # ---------------------------------------------------------------------------
 
 
+def mark_table_as_junction(table_id: str) -> None:
+    """Promote a catalog table to a junction table without ever clearing it."""
+    store().query_write(
+        update(s.catalog_table)
+        .where(
+            s.catalog_table.c.id == table_id,
+            ~s.catalog_table.c.is_junction_table,
+        )
+        .values(is_junction_table=True)
+    )
+
+
 def apply_metadata_batch(
     database_name: str,
     table_rows: list[dict],

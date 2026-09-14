@@ -192,6 +192,10 @@ catalog_table = Table(
     # pk column", and a join table would make every read a second query.
     Column("pk", ARRAY(Text), nullable=True),
     Column("table_type", Text, nullable=True),
+    # Promoted by semantic compilation when a table's row grain is an
+    # association between entity roles. Compilation deliberately never clears
+    # the flag: a later uncertain LLM response must not erase prior evidence.
+    Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )

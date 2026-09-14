@@ -151,7 +151,7 @@ class PotentialFkSuggestion(BaseModel):
 
 
 class PotentialFkResult(BaseModel):
-    """LLM output: columns that may be FKs but lack graph FOREIGN_KEY edges."""
+    """Sanitized FK suggestions and table-grain classification."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -159,10 +159,18 @@ class PotentialFkResult(BaseModel):
         default_factory=list,
         description="Suspected FK columns; empty when none apply.",
     )
+    is_junction_table: bool = Field(
+        default=False,
+        description="Whether each row represents an association between entity roles.",
+    )
+    junction_table_rationale: str = Field(
+        default="",
+        description="Brief reason for the junction-table decision.",
+    )
 
 
 class FkAndPkResult(BaseModel):
-    """LLM output: FK suggestions plus columns that look like the table's own PK."""
+    """LLM output: FK/PK suggestions plus table-grain classification."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -176,6 +184,17 @@ class FkAndPkResult(BaseModel):
             "Column names that appear to be the table's own primary key "
             "even if not declared as such. Usually empty or one entry."
         ),
+    )
+    is_junction_table: bool = Field(
+        default=False,
+        description=(
+            "True only when each row represents an association between at least "
+            "two entity roles."
+        ),
+    )
+    junction_table_rationale: str = Field(
+        default="",
+        description="Brief reason for the junction-table decision.",
     )
 
 

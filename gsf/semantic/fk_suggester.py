@@ -18,7 +18,7 @@ from gsf.semantic.models import FkAndPkResult, PotentialFkResult, PotentialFkSug
 logger = logging.getLogger(__name__)
 
 _SYSTEM = """\
-You review relational table metadata and produce two outputs:
+You review relational table metadata and produce three outputs:
 
 1. fk_suggestions — columns that are likely foreign keys but are not already declared as
    FOREIGN_KEY or primary-key columns.
@@ -42,6 +42,22 @@ You review relational table metadata and produce two outputs:
    explicitly declared as such. These are typically a bare "id", "uuid", or "<table_name>_id"
    column of integer or UUID type whose description or name conveys it identifies the table's
    own records. Usually empty or one entry. Only list columns from the candidate list.
+
+3. is_junction_table and junction_table_rationale — classify the table's row grain.
+   Set is_junction_table true ONLY when each row represents an association between at least
+   two entity roles. At least two columns must be foreign-key roles; two distinct roles may
+   point to the same entity. Extra columns may be a surrogate key or relationship properties
+   such as role, quantity, ordering, status, or effective dates, but they must describe the
+   association rather than establish an independent entity grain.
+
+   Set it false for:
+   - an entity table that merely contains ordinary foreign keys
+   - a satellite, extension, or detail table with one parent FK plus descriptive attributes
+   - lookup/reference tables
+   - self-hierarchies with only one relationship role (for example id + parent_id)
+   - event or transaction tables whose rows have their own business identity or lifecycle
+
+   Be conservative. Multiple foreign keys alone do not make a table a junction table.
 
 The is_unique marker comes from sampled column profiling. A column marked is_unique: false
 contains repeated values, so it cannot be the table's own primary key. Never include it in
@@ -109,7 +125,10 @@ def suggest_potential_foreign_keys(
     excluded = pk_names | known_fk_names
     candidates = _candidate_columns(columns, excluded=excluded)
 
-    if not candidates:
+    # A payload-bearing junction can have no FK-suggestion candidates because
+    # all of its key columns are already declared. Tables wider than two
+    # columns still need the table-grain decision from this same LLM call.
+    if not candidates and len(columns) <= 2:
         return PotentialFkResult()
 
     schema_name = table.get("schema_name") or ""
@@ -117,9 +136,30 @@ def suggest_potential_foreign_keys(
     known_fk_block = ", ".join(sorted(known_fk_names)) if known_fk_names else "(none)"
     pk_block = ", ".join(sorted(pk_names)) if pk_names else "(none)"
     profiling = columns_profiling_samples or {}
-    candidate_lines = "\n".join(
+    all_column_lines = "\n".join(
         _format_column_line(col, (profiling.get(col["name"]) or {}).get("is_unique"))
-        for col in candidates
+        for col in columns
+        if col.get("name")
+    )
+    candidate_lines = (
+        "\n".join(
+            _format_column_line(
+                col, (profiling.get(col["name"]) or {}).get("is_unique")
+            )
+            for col in candidates
+        )
+        or "  (none)"
+    )
+    known_fk_lines = (
+        "\n".join(
+            (
+                f"  - {fk.get('source_column')} -> "
+                f"{fk.get('target_table') or fk.get('target_table_id') or '(unknown target)'}"
+            )
+            for fk in fks
+            if fk.get("source_column")
+        )
+        or "  (none)"
     )
 
     prompt = (
@@ -127,6 +167,8 @@ def suggest_potential_foreign_keys(
         f"Description: {table.get('description') or ''}\n"
         f"Primary key columns (exclude from suggestions): {pk_block}\n"
         f"Known foreign key columns (exclude from suggestions): {known_fk_block}\n"
+        f"Known foreign key roles:\n{known_fk_lines}\n"
+        f"All table columns:\n{all_column_lines}\n"
         f"Candidate columns:\n{candidate_lines}\n"
     )
 
@@ -176,4 +218,8 @@ def suggest_potential_foreign_keys(
                 )
             )
 
-    return PotentialFkResult(suggestions=filtered)
+    return PotentialFkResult(
+        suggestions=filtered,
+        is_junction_table=result.is_junction_table,
+        junction_table_rationale=result.junction_table_rationale.strip(),
+    )

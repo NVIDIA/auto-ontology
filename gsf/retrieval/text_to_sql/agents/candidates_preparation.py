@@ -33,6 +33,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from gsf.dal.attributes import (
     fetch_attr_column_contexts,
     find_anchor_hub_siblings,
+    find_connected_junction_tables,
     find_join_path,
     find_kept_table_bridges,
 )
@@ -122,7 +123,7 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
 
 # Off by default. find_kept_table_bridges() force-restores tables the
 # relevance filter dropped when they join two tables the filter kept — see
-# §5b below and find_kept_table_bridges' docstring. Opt-in via env flag
+# §5c below and find_kept_table_bridges' docstring. Opt-in via env flag
 # (this deployment's .env sets it to true) so new/other deployments aren't
 # defaulted into the extra round trip without an explicit choice.
 _TABLE_BRIDGE_RECONCILIATION_ENABLED = os.environ.get(
@@ -315,8 +316,8 @@ class CandidatePreparationAgent(BaseAgent):
         attr_contexts: dict[str, dict] = {}
         term_synonyms: dict[str, list[str]] = {}
         # Table ids to force back into relevant_tables after the relevance
-        # filter runs (§5b), regardless of what it decides — see rationale
-        # at the hub-sibling and pairwise-bridge computations below.
+        # filter runs (§5b-§5c), regardless of what it decides — see rationale
+        # at the junction, hub-sibling, and pairwise-bridge computations below.
         forced_table_ids: set[str] = set()
 
         try:
@@ -407,7 +408,7 @@ class CandidatePreparationAgent(BaseAgent):
                     # relevance filter doesn't drop a structurally-connected
                     # table it has no other way to recognize. Scoped to the
                     # anchor's own outgoing FKs only. These are also force-kept
-                    # in relevant_tables below (§5b) rather than merely shown to
+                    # in relevant_tables below (§5b-§5c) rather than merely shown to
                     # the relevance filter, since it's unreliable at preserving
                     # structurally-connected tables even when given this info.
                     anchor_table_id = anchor_ctx.get("table_id")
@@ -591,7 +592,7 @@ class CandidatePreparationAgent(BaseAgent):
                 if table.get("database_name") == target_db
             ]
 
-        # Snapshot the candidate pool BEFORE the relevance filter runs. §5b's
+        # Snapshot the candidate pool BEFORE the relevance filter runs. §5c's
         # bridge reconciliation must only ever restore a table that was
         # already a candidate here (and that the filter had a chance to see)
         # — never surface a table the filter was never shown, which would be
@@ -615,7 +616,32 @@ class CandidatePreparationAgent(BaseAgent):
         if table_relevance_reasoning:
             record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
-        # --- 5b. Deterministic bridge-table reconciliation ---
+        # --- 5b. One-hop junction-table expansion ---
+        # Junction tables are join structure, not relevance candidates: once
+        # the filter has chosen a table, include every catalog-classified
+        # junction whose FK columns point into it. This intentionally discovers
+        # tables that were not in the pre-filter candidate pool.
+        kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
+        connected_junctions, connected_junction_paths = find_connected_junction_tables(
+            kept_ids
+        )
+        if connected_junctions:
+            forced_table_ids.update(t["id"] for t in connected_junctions)
+            self.logger.info(
+                "Connected-junction expansion added %d table(s): %s",
+                len(connected_junctions),
+                [t["name"] for t in connected_junctions],
+            )
+        if connected_junction_paths:
+            attribute_join_paths.extend(
+                {"path": hops} for hops in connected_junction_paths
+            )
+            self.logger.info(
+                "Connected-junction expansion added %d one-hop join path(s)",
+                len(connected_junction_paths),
+            )
+
+        # --- 5c. Deterministic bridge-table reconciliation ---
         # The relevance filter is unreliable at preserving join-chain bridge
         # tables even when its prompt shows it the exact connection, so force
         # these back in by code instead of relying on it. Two sources:
@@ -1072,7 +1098,7 @@ class CandidatePreparationAgent(BaseAgent):
                 )
             self.logger.debug(
                 "Relevance filter join-chain outcome — preserved: %s | broken "
-                "(a table on this chain was removed, before §5b reconciliation "
+                "(a table on this chain was removed, before §5c reconciliation "
                 "restores it): %s",
                 preserved if preserved else "(none)",
                 broken if broken else "(none)",

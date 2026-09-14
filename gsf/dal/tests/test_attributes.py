@@ -143,6 +143,58 @@ def world():
 # --------------------------------------------------------------------------
 
 
+def test_finds_one_hop_junctions_over_declared_and_semantic_fks(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("tags", pk=["id"])
+    world.column("tags", "id")
+
+    world.table("customer_tag")
+    world.column("customer_tag", "customer_id", 1)
+    world.column("customer_tag", "tag_id", 2)
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["customer_tag"])
+        .values(is_junction_table=True)
+    )
+    world.references("customer_tag.customer_id", "customer-id")
+    _link(
+        s.column__foreign_key,
+        source_column_id=world.columns["customer_tag.tag_id"],
+        target_column_id=world.columns["tags.id"],
+    )
+
+    # Connected through the same semantic FK shape, but not classified as a
+    # junction, so it must not be expanded.
+    world.table("customer_profile")
+    world.column("customer_profile", "customer_id")
+    world.references("customer_profile.customer_id", "customer-id")
+
+    junctions, paths = a.find_connected_junction_tables(
+        [world.tables["customers"], world.tables["tags"]]
+    )
+
+    assert junctions == [{"id": world.tables["customer_tag"], "name": "customer_tag"}]
+    joins = {
+        (
+            path[0]["source_table"],
+            path[0]["source_column"],
+            path[0]["target_table"],
+            path[0]["target_column"],
+        )
+        for path in paths
+    }
+    assert joins == {
+        ("customer_tag", "customer_id", "customers", "id"),
+        ("customer_tag", "tag_id", "tags", "id"),
+    }
+
+
+def test_connected_junctions_require_at_least_one_table() -> None:
+    assert a.find_connected_junction_tables([]) == ([], [])
+
+
 @pytest.fixture
 def joined(world):
     """`orders.customer_id` references the attribute `customers.id` owns."""

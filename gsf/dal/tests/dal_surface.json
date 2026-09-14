@@ -6,6 +6,7 @@
     "fetch_column_attribute_columns_map": "(attr_ids: 'list[str]') -> 'dict[str, dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
+    "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
     "find_shared_hub_bridge": "(col_a_id: 'str', col_b_id: 'str') -> 'dict'",
@@ -67,6 +68,7 @@
     "find_column_id_by_table_and_name": "(table_name: 'str', column_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
     "find_table_id_by_name": "(table_name: 'str', database_name: 'str | None' = None) -> 'str | None'",
     "find_table_key_columns": "(table_name: 'str', database_name: 'str | None' = None) -> 'dict[str, list[str]]'",
+    "mark_table_as_junction": "(table_id: 'str') -> 'None'",
     "patch_catalog_node": "(node_id: 'str', properties: 'dict[str, Any]') -> 'dict[str, Any] | None'",
     "store_column_date_formats": "(table_id: 'str', date_formats: 'dict[str, str]') -> 'None'",
     "store_column_sample_values": "(table_id: 'str', samples: 'dict[str, list]') -> 'None'",
@@ -174,7 +176,7 @@
   },
   "sql_fragments": {
     "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
-    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
+    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
     "attach_tag": "(*, tag_id: 'str', kind: 'str', item_id: 'str', tagged_by: 'str | None' = None) -> 'list[dict[str, Any]] | None'",

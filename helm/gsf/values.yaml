@@ -127,7 +127,7 @@ backend:
   # wait-for-catalog-schema init container blocks until public.alembic_version
   # matches it, so new Pods never serve against a schema the migration Job has
   # not finished applying. Bump this with the migration, in the same commit.
-  alembicRevision: e37f4a1f2f5d
+  alembicRevision: 2c24b6498f41
   image:
     repository: nvcr.io/nvstaging/gsf/gsf
     tag: 0.0.1

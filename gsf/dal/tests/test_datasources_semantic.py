@@ -523,6 +523,26 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
 # --------------------------------------------------------------------------
 
 
+def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
+    table_id = world.tables["order_tag"]
+    before = store().query_read(
+        select(s.catalog_table.c.is_junction_table).where(
+            s.catalog_table.c.id == table_id
+        )
+    )
+    assert before[0]["is_junction_table"] is False
+
+    d.mark_table_as_junction(table_id)
+    d.mark_table_as_junction(table_id)
+
+    after = store().query_read(
+        select(s.catalog_table.c.is_junction_table).where(
+            s.catalog_table.c.id == table_id
+        )
+    )
+    assert after[0]["is_junction_table"] is True
+
+
 def test_a_pure_junction_table_is_a_candidate(world) -> None:
     rows = d.fetch_bridge_table_candidates(world.prefix)
     assert [r["table_name"] for r in rows] == ["order_tag"]

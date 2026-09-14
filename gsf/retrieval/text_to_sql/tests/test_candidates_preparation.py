@@ -95,6 +95,11 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     )
     monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
     monkeypatch.setattr(candidates_preparation, "find_join_path", lambda *a, **k: [])
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda ids: ([], []),
+    )
 
     state = cast(
         AgentState,
@@ -115,3 +120,83 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     assert retrieve_was_running == [True]
     names = [t.get("name") for t in result["path_state"]["relevant_tables"]]
     assert "extra" in names
+
+
+def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> None:
+    base = {
+        "id": "base",
+        "name": "orders",
+        "schema_name": "public",
+        "database_name": "db",
+        "columns": [{"name": "id", "sample_values": [1]}],
+    }
+    junction = {
+        "id": "junction",
+        "name": "order_tag",
+        "schema_name": "public",
+        "database_name": "db",
+        "columns": [],
+    }
+    hop = {
+        "source_schema": "public",
+        "source_table": "order_tag",
+        "source_column": "order_id",
+        "target_schema": "public",
+        "target_table": "orders",
+        "target_column": "id",
+    }
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_filter_tables_by_relevance",
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            tables,
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_tables_from_custom_analyses", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [base],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda ids: [junction] if ids == ["junction"] else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda ids: ([{"id": "junction", "name": "order_tag"}], [[hop]]),
+    )
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "orders and their tags",
+            "data_retriever": object(),
+            "path_state": {
+                "target_db": "db",
+                "retrieved_custom_analyses": [{"id": "analysis"}],
+            },
+        },
+    )
+
+    result = CandidatePreparationAgent().execute(state)["path_state"]
+
+    assert [table["id"] for table in result["relevant_tables"]] == [
+        "base",
+        "junction",
+    ]
+    assert {"path": [hop]} in result["attribute_join_paths"]

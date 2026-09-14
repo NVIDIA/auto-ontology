@@ -19,6 +19,7 @@ from gsf.connectors import get_connectors
 from gsf.connectors.db_errors import is_infrastructure_error
 from gsf.dal.attributes import merge_column_attribute
 from gsf.dal.datasources import (
+    mark_table_as_junction,
     store_column_date_formats,
     store_column_sample_values,
     store_column_uniqueness,
@@ -795,6 +796,21 @@ def process_table(
         fk["source_column"] for fk in declared_fks if fk.get("source_column")
     }
     all_fk_names = declared_fk_names | suggested_fk_names
+
+    # Payload-bearing junctions are wider than the pure two-key shape handled
+    # by the later bridge pass. Require both the conservative LLM decision and
+    # structural evidence for at least two FK roles before persisting it.
+    if (
+        len(ctx.get("columns", [])) > 2
+        and fk_suggestions.is_junction_table
+        and len(all_fk_names) >= 2
+    ):
+        mark_table_as_junction(table_id)
+        logger.info(
+            "[%s] marked as a junction table: %s",
+            table_name,
+            fk_suggestions.junction_table_rationale or "LLM table-grain decision",
+        )
 
     # --- Build attribute specs for non-FK columns ---
     specs = column_attribute_specs(

@@ -635,6 +635,88 @@ def test_process_table_skips_fk_columns(
     mock_merge_term.assert_not_called()
 
 
+def test_process_table_marks_a_wide_llm_junction() -> None:
+    from gsf.semantic.models import PotentialFkResult
+
+    table = {"id": "line", "name": "order_product", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "order_id", "data_type": "integer"},
+            {"name": "product_id", "data_type": "integer"},
+            {"name": "quantity", "data_type": "integer"},
+        ],
+        "fks": [
+            {"source_column": "order_id", "target_table": "orders"},
+            {"source_column": "product_id", "target_table": "products"},
+        ],
+    }
+    decision = PotentialFkResult(
+        is_junction_table=True,
+        junction_table_rationale="Relationship payload between orders and products.",
+    )
+
+    with (
+        patch(
+            "gsf.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=decision,
+        ),
+        patch("gsf.semantic.visit_enter.column_attribute_specs", return_value=[]),
+        patch("gsf.semantic.visit_enter.mark_table_as_junction") as mock_mark,
+    ):
+        process_table(table, ctx, domain_summary=None)
+
+    mock_mark.assert_called_once_with("line")
+
+
+@pytest.mark.parametrize(
+    ("columns", "declared_fks"),
+    [
+        (
+            [
+                {"name": "left_id", "data_type": "integer"},
+                {"name": "right_id", "data_type": "integer"},
+            ],
+            [
+                {"source_column": "left_id", "target_table": "entities"},
+                {"source_column": "right_id", "target_table": "entities"},
+            ],
+        ),
+        (
+            [
+                {"name": "customer_id", "data_type": "integer"},
+                {"name": "preference", "data_type": "text"},
+                {"name": "updated_at", "data_type": "timestamp"},
+            ],
+            [{"source_column": "customer_id", "target_table": "customers"}],
+        ),
+    ],
+)
+def test_process_table_rejects_insufficient_structural_junction_evidence(
+    columns: list[dict[str, str]],
+    declared_fks: list[dict[str, str]],
+) -> None:
+    from gsf.semantic.models import PotentialFkResult
+
+    decision = PotentialFkResult(
+        is_junction_table=True,
+        junction_table_rationale="Intentionally over-positive LLM fixture.",
+    )
+    table = {"id": "candidate", "name": "candidate", "schema_name": "public"}
+    ctx = {"columns": columns, "fks": declared_fks}
+
+    with (
+        patch(
+            "gsf.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=decision,
+        ),
+        patch("gsf.semantic.visit_enter.column_attribute_specs", return_value=[]),
+        patch("gsf.semantic.visit_enter.mark_table_as_junction") as mock_mark,
+    ):
+        process_table(table, ctx, domain_summary=None)
+
+    mock_mark.assert_not_called()
+
+
 @patch("gsf.semantic.visit_enter.merge_column_attribute")
 @patch("gsf.semantic.visit_enter.merge_term")
 @patch("gsf.semantic.visit_enter.suggest_potential_foreign_keys")

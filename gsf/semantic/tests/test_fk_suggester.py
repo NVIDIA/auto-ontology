@@ -16,6 +16,84 @@ from gsf.semantic.models import FkAndPkResult
 )
 @patch(
     "gsf.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(
+        fk_suggestions=[],
+        pk_column_names=[],
+        is_junction_table=True,
+        junction_table_rationale="One row associates an order and a product.",
+    ),
+)
+def test_wide_declared_fk_table_is_classified_without_suggestion_candidates(
+    mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    table = {
+        "id": "line",
+        "name": "order_product",
+        "schema_name": "public",
+        "pk": ["id"],
+    }
+    ctx = {
+        "columns": [
+            {"name": "id", "data_type": "integer"},
+            {"name": "order_id", "data_type": "integer"},
+            {"name": "product_id", "data_type": "integer"},
+        ],
+        "fks": [
+            {"source_column": "order_id", "target_table": "orders"},
+            {"source_column": "product_id", "target_table": "products"},
+        ],
+    }
+
+    result = suggest_potential_foreign_keys(table, ctx)
+
+    assert result.is_junction_table is True
+    assert result.junction_table_rationale.startswith("One row associates")
+    prompt = mock_invoke.call_args.args[1][1].content
+    assert "order_id -> orders" in prompt
+    assert "product_id -> products" in prompt
+    assert "Candidate columns:\n  (none)" in prompt
+
+
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
+@patch(
+    "gsf.semantic.fk_suggester.invoke_with_structured_output",
+    return_value=FkAndPkResult(
+        fk_suggestions=[],
+        pk_column_names=[],
+        is_junction_table=False,
+        junction_table_rationale="A one-parent descriptive extension.",
+    ),
+)
+def test_satellite_classification_stays_false_and_prompt_is_conservative(
+    mock_invoke: MagicMock,
+    _mock_client: MagicMock,
+) -> None:
+    table = {"id": "profile", "name": "customer_profile", "schema_name": "public"}
+    ctx = {
+        "columns": [
+            {"name": "customer_id", "data_type": "integer"},
+            {"name": "preference", "data_type": "text"},
+            {"name": "updated_at", "data_type": "timestamp"},
+        ],
+        "fks": [{"source_column": "customer_id", "target_table": "customers"}],
+    }
+
+    result = suggest_potential_foreign_keys(table, ctx)
+
+    assert result.is_junction_table is False
+    system_prompt = mock_invoke.call_args.args[1][0].content
+    assert "satellite, extension, or detail table with one parent FK" in system_prompt
+    assert "Multiple foreign keys alone do not make a table a junction" in system_prompt
+
+
+@patch(
+    "gsf.semantic.fk_suggester.get_non_reasoning_llm_client", return_value=MagicMock()
+)
+@patch(
+    "gsf.semantic.fk_suggester.invoke_with_structured_output",
     return_value=FkAndPkResult(fk_suggestions=[], pk_column_names=[]),
 )
 def test_non_unique_uuid_columns_suggested(
@@ -182,5 +260,7 @@ def test_declared_fk_target_is_not_suggested(
 
     assert result.suggestions == []
     prompt = mock_invoke.call_args.args[1][1].content
-    assert "playerID" not in prompt
-    assert "team_id" in prompt
+    all_columns, candidates = prompt.split("Candidate columns:\n", 1)
+    assert "playerID" in all_columns
+    assert "playerID" not in candidates
+    assert "team_id" in candidates
