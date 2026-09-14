@@ -45,7 +45,7 @@ Mitigation: Resolve the material question first, then validate SQL, rows, trunca
 - `mcp/README.md`, `docs/mcp.md`, `mcp/gsf_mcp/tools.py`
 - `docs/openapi/gsf-api.json`
 - `frontend/auth/resolve-user.ts`, `frontend/auth/bearer.ts`
-- [runtime-contract.yaml](runtime-contract.yaml)
+- [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [references/stack.md](references/stack.md)
 - [references/query-validation.md](references/query-validation.md)
 - [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs

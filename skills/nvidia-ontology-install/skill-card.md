@@ -41,18 +41,19 @@ Mitigation: This skill contains no staging hostnames, cluster names, or Vault pa
 
 - Repository-root `README.md`, `.env.example`, `dev_tools/setup_env.sh`, `DEPLOYMENT.md`
 - `docs/mcp.md` troubleshooting
+- [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs
 
 ## Skill Output
 
-Output type(s): Shell commands, configuration instructions, install log lines
+Output type(s): Deployment plans, shell commands, configuration instructions, install log lines, connection and readiness receipts
 Output format: Markdown with inline bash code blocks; append-only `.nvidia-ontology-install.log`
 Output parameters: Commands run from the GSF repository root unless noted
 Other properties: `.nvidia-ontology-install.log` is gitignored; do not commit it
 
 ## Skill Version
 
-0.1.0 (source: frontmatter)
+0.2.0 (source: frontmatter)
 
 ## Evaluation Agents Used
 

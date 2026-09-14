@@ -2,15 +2,11 @@
 name: nvidia-ontology
 version: "0.2.0"
 description: >-
-  Inspect, model, manage, and safely publish through the GSF semantic layer:
-  glossary terms, SQL attributes, column attributes, semantic relationships,
-  model YAML import/export, governed result definitions, and compilation. Use
-  when navigating or changing dataset meaning, defining source-grounded
-  measures and relationships, or verifying durable publication. MCP is
-  read-only; writes go through approved REST or source interfaces.
+  Model and publish NVIDIA Ontology through GSF. Use for terms, relationships,
+  measures, imports, and governed results—not deployment or querying.
 license: Apache-2.0
 metadata:
-  author: NVIDIA Ontology Team
+  author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
     - gsf
@@ -22,10 +18,12 @@ metadata:
 
 # NVIDIA Ontology management and modeling
 
-Workflow for inspecting and changing GSF's semantic layer without confusing a
-successful API call with correct business meaning or durable publication. The
-machine-readable inputs, outputs, statuses, gates, and handoffs are in
-[runtime-contract.yaml](runtime-contract.yaml).
+## Purpose
+
+Inspect and change GSF's semantic layer without confusing a successful API call
+with correct business meaning or durable publication. The machine-readable
+inputs, outputs, statuses, gates, and handoffs are in
+[runtime-contract.yaml](assets/runtime-contract.yaml).
 
 Choose the focused workflow before acting:
 
@@ -42,6 +40,17 @@ writer; GSF has no generic result-row writeback endpoint. Request bodies and
 field types live in `docs/openapi/gsf-api.json`; this skill names operations and
 permissions only.
 
+## Prerequisites
+
+Use a running, authenticated GSF deployment. Use `nvidia-ontology-install` when
+the deployment or semantic layer is not ready.
+
+## Limitations
+
+MCP is read-only, GSF has no generic result-row writeback endpoint, and current
+model import and certification APIs do not prove atomic promotion. Follow the
+publication gates below and fail closed when exact readback is unavailable.
+
 ## Auth
 
 Scripts use an API token (`x-api-key` or `Authorization: Bearer`). Mint it in
@@ -52,7 +61,7 @@ session; a token cannot mint another token.
 Writes below need `catalog:edit` unless noted. `403` means the owner's role
 lacks that permission, not that the path is wrong.
 
-## Workflow
+## Instructions
 
 1. **Discover current meaning** via MCP (`search_terms`, `get_term`,
    `get_term_columns`, `get_term_sql_attributes`, `describe_table`) or REST
@@ -108,6 +117,19 @@ revision, certification history, or version lineage.
   `modelInterchange:import`. Can replace existing data — confirm with the
   user before `replace=true`, apply first in isolation, and use the exact
   readback workflow in [publication.md](references/publication.md).
+
+## Examples
+
+- To define a run-grain measure, follow the evidence and counterexample workflow
+  in [modeling.md](references/modeling.md).
+- To revise and promote a model, back up the exact scope and follow the staged
+  readback workflow in [publication.md](references/publication.md).
+
+## Troubleshooting
+
+For write failures, verify the authenticated owner's permission, distinguish
+HTTP 422 parse failures from validation results, and inspect compilation status
+before changing the model or resetting compilation.
 
 ## See also
 

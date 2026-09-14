@@ -1,15 +1,12 @@
 ---
 name: nvidia-ontology-install
-version: "0.1.0"
+version: "0.2.0"
 description: >-
-  Install and troubleshoot a GSF (Generative Semantic Fabric) deployment via
-  Docker Compose, local --dev, Helm, or MCP against an existing instance. Use
-  when setting up GSF, .env or NIM keys fail, the UI looks broken after restart,
-  Postgres ports collide, or MCP cannot sign in. For contributing to GSF
-  internals see CLAUDE.md, not this skill.
+  Install or troubleshoot NVIDIA Ontology's GSF runtime. Use for Docker Compose,
+  local or Helm setup, and MCP connection to an existing deployment.
 license: Apache-2.0
 metadata:
-  author: NVIDIA Ontology Team
+  author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
     - gsf
@@ -22,15 +19,21 @@ metadata:
 
 # NVIDIA Ontology installation
 
-Bring up the current GSF implementation, or connect an agent to an instance
-that is already running.
-Do not invent a second installer: invoke the commands in the repository-root
-`README.md` and `dev_tools/setup_env.sh`.
+## Purpose
+
+Bring up the current GSF implementation, troubleshoot it, or connect an agent
+to an instance that is already running. Do not invent a second installer:
+invoke the commands in the repository-root `README.md` and
+`dev_tools/setup_env.sh`. Typed setup, connection, ingestion, compilation, and
+readiness artifacts are in
+[runtime-contract.yaml](assets/runtime-contract.yaml).
 
 On failure, read [troubleshooting.md](references/troubleshooting.md) instead of
 searching the web.
 
-## Required questions
+## Instructions
+
+### Required questions
 
 Ask these if not already clear. Do not guess a default and emit a command.
 
@@ -44,9 +47,16 @@ Ask these if not already clear. Do not guess a default and emit a command.
 4. **Port conflicts** — is host `5432` free? `POSTGRES_PORT` only remaps the
    host side; containers still use 5432 internally.
 
+## Available scripts
+
+| Script | Purpose | Arguments |
+| --- | --- | --- |
+| `scripts/log_install.sh` | Run and redact-log installation or troubleshooting commands | Optional `--model ID`, then `-- COMMAND [ARGS...]` |
+
 ## Install logging (mandatory)
 
-Wrap **every** install, compose, helm, and troubleshooting command with
+Invoke the script through the shell available to the agent. Wrap **every**
+install, compose, helm, and troubleshooting command with
 [`scripts/log_install.sh`](scripts/log_install.sh) so the session is
 debuggable. Pass the model id when the harness knows it:
 
@@ -60,7 +70,7 @@ The script appends timestamp, model, cwd, the command (with secret flags
 redacted) and redacted env, and exit code to `.nvidia-ontology-install.log` (gitignored). Do not
 restate flags in this skill; log what actually ran.
 
-## One-time prep (local)
+## Prerequisites for local installation
 
 From the repository root:
 
@@ -132,6 +142,12 @@ uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.
 The frontend image bakes `PYTHON_API_URL=http://host.docker.internal:3001`.
 On native Linux Docker you may need `--add-host=host.docker.internal:host-gateway`.
 
+## Limitations
+
+This skill uses the repository's existing installers and does not cover Astra
+GitOps, change semantic definitions, or treat partial Vault configuration as
+secret storage. Ask before destructive volume deletion.
+
 ## Kubernetes
 
 Do not paste Helm credentials into the conversation. Point at repository-root
@@ -161,6 +177,12 @@ curl -s -o /dev/null -w '%{http_code}\n' "$GSF_API_URL/.well-known/oauth-authori
 `200` is required. Anything else: run the frontend from the checkout
 (`pnpm dev`) and point `GSF_API_URL` at that port.
 
+## Examples
+
+- Full local stack: use `./dev_tools/setup_env.sh` through the logging wrapper.
+- Existing deployment: do not reinstall; configure `GSF_API_URL` and verify
+  OAuth discovery before connecting the MCP client.
+
 ## Verify
 
 1. UI loads at http://localhost:3000 (or the deployed `APP_URL`) and shows
@@ -179,9 +201,16 @@ docker compose down          # keep volumes
 docker compose down -v       # wipe Postgres / pgAdmin data
 ```
 
+## Troubleshooting
+
+Use [troubleshooting.md](references/troubleshooting.md) for stale sessions,
+model-key failures, embedding mismatches, port conflicts, and partial Vault
+configuration. Log the command and redact secrets before sharing evidence.
+
 ## See also
 
 - [troubleshooting.md](references/troubleshooting.md)
+- [runtime-contract.yaml](assets/runtime-contract.yaml)
 - `nvidia-ontology-agent` — call GSF once it is running
 - `nvidia-ontology` — edit the semantic layer
 - `CLAUDE.md` — maintain GSF itself

@@ -44,7 +44,7 @@ Mitigation: Require a scoped backup, isolated application, exact re-export compa
 
 - `docs/openapi/gsf-api.json` (operation ids and `x-gsf-permissions`)
 - `mcp/gsf_mcp/tools.py` (read-only MCP allow-list)
-- [runtime-contract.yaml](runtime-contract.yaml)
+- [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [references/write-api.md](references/write-api.md)
 - [references/modeling.md](references/modeling.md)
 - [references/publication.md](references/publication.md)

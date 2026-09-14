@@ -2,15 +2,12 @@
 name: nvidia-ontology-agent
 version: "0.2.0"
 description: >-
-  Call NVIDIA Ontology through the current GSF implementation: prefer MCP for
-  reads, use REST when MCP is unavailable, discover meaning through the semantic
-  layer, and validate generated SQL, rows, and answers before making claims.
-  Covers MCP login, API tokens, SSO bearer auth, conversations, readiness,
-  grounded questions, and failure behavior without prescribing an agent
-  framework.
+  Query NVIDIA Ontology through GSF and validate generated SQL, rows, and
+  answers. Use for MCP or REST access, readiness, authentication, conversations,
+  and grounded questions.
 license: Apache-2.0
 metadata:
-  author: NVIDIA Ontology Team
+  author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
     - gsf
@@ -22,14 +19,30 @@ metadata:
 
 # NVIDIA Ontology agent usage
 
-Lightweight workflow for calling the current GSF implementation from an agent.
-This is not a prescribed harness, SDK, or LangGraph template. Typed workflow
-artifacts, statuses, gates, and handoffs are in
-[runtime-contract.yaml](runtime-contract.yaml).
+## Purpose
 
-If GSF is not running, use `nvidia-ontology-install` first. If you need to
-**change** semantic definitions or publish governed results, use
-`nvidia-ontology`.
+Call the current GSF implementation from an agent without prescribing a harness,
+SDK, or LangGraph template. Typed workflow artifacts, statuses, gates, and
+handoffs are in [runtime-contract.yaml](assets/runtime-contract.yaml).
+
+## Prerequisites
+
+Use a running GSF deployment and an authenticated MCP or REST client. If GSF is
+not running, use `nvidia-ontology-install` first.
+
+## Limitations
+
+This skill reads and validates answers. It does not expose FastAPI directly,
+write semantic definitions, publish governed results, or provide a raw-schema
+browser. Hand mutations and publication to `nvidia-ontology`.
+
+## Instructions
+
+1. Call readiness before asking a question.
+2. Discover terms and confirm answerability through the semantic layer.
+3. Ask through MCP, or use the authenticated Next.js REST gateway as fallback.
+4. Validate material intent, SQL, rows, truncation, and prose before presenting
+   a claim-bearing answer.
 
 ## Prefer MCP for reads
 
@@ -136,6 +149,19 @@ than a stronger claim.
 `GET /api/semantic-compilation/status`) before rewriting the question. A
 named database is not proof SQL can execute. See `nvidia-ontology-install`
 troubleshooting.
+
+## Examples
+
+- For a grounded count, run `check_readiness`, `search_terms`,
+  `check_answerable`, and then `ask_question`.
+- If a response is truncated or violates measure grain, refuse the complete
+  claim and follow [query-validation.md](references/query-validation.md).
+
+## Troubleshooting
+
+For empty or failed answers, check readiness and compilation status before
+rephrasing. For REST errors, verify the public web origin, authentication, and
+conversation ownership before retrying.
 
 ## See also
 
