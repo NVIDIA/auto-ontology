@@ -57,6 +57,9 @@ def _first_value(row: dict) -> Any:
 # absent and do not repair.
 _CLOSE_MATCH_CUTOFF = 0.6
 
+# A miss here makes sqlglot fall back to its default dialect, which quotes
+# identifiers with ``"`` — a string literal to Spark, not an identifier. Keep in
+# step with the map of the same name in ``agents/sql_parse_validation.py``.
 _SQLGLOT_DIALECTS = {
     "postgresql": "postgres",
     "postgres": "postgres",
@@ -65,6 +68,9 @@ _SQLGLOT_DIALECTS = {
     "snowflake": "snowflake",
     "mysql": "mysql",
     "bigquery": "bigquery",
+    "spark": "spark",
+    "databricks": "databricks",
+    "trino": "trino",
 }
 
 

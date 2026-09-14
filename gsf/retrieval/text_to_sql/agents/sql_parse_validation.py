@@ -41,6 +41,11 @@ from gsf.retrieval.data_access.graph_schemas import (
 logger = logging.getLogger(__name__)
 
 # sqlglot dialect names differ slightly from our connector dialect strings.
+# Maps a connector's ``dialect`` to the sqlglot dialect used to read *and*
+# re-render SQL. A miss here is not a harmless fallback: sqlglot then renders in
+# its default dialect, which quotes identifiers with ``"``. Spark reads a
+# double-quoted token as a string literal, so a rewritten ``ci."kubeType"``
+# fails to parse outright rather than degrading gracefully.
 _SQLGLOT_DIALECTS = {
     "sqlite": "sqlite",
     "postgres": "postgres",
@@ -49,6 +54,9 @@ _SQLGLOT_DIALECTS = {
     "duckdb": "duckdb",
     "mysql": "mysql",
     "heavydb": "postgres",
+    "spark": "spark",
+    "databricks": "databricks",
+    "trino": "trino",
 }
 
 _TRUTHY = {"1", "true", "yes", "on"}
