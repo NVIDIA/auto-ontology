@@ -1,16 +1,18 @@
 ---
-name: gsf-agent
-version: "0.1.0"
+name: nvidia-ontology-agent
+version: "0.2.0"
 description: >-
-  Scaffold how an agent calls GSF: prefer MCP for reads, REST for writes and
-  when MCP is unavailable; discover datasets through the semantic layer; auth
-  via MCP login, API token, or SSO bearer (AI-Q). Use when embedding GSF in an
-  agent harness, AI-Q, NemoClaw, or another app, or when asking how to list
-  terms, ask questions, or authenticate. Does not prescribe an agent framework.
+  Call NVIDIA Ontology through the current GSF implementation: prefer MCP for
+  reads, use REST when MCP is unavailable, discover meaning through the semantic
+  layer, and validate generated SQL, rows, and answers before making claims.
+  Covers MCP login, API tokens, SSO bearer auth, conversations, readiness,
+  grounded questions, and failure behavior without prescribing an agent
+  framework.
 license: Apache-2.0
 metadata:
-  author: NVIDIA GSF Team
+  author: NVIDIA Ontology Team
   tags:
+    - nvidia-ontology
     - gsf
     - mcp
     - api
@@ -18,13 +20,16 @@ metadata:
     - aiq
 ---
 
-# GSF Agent usage
+# NVIDIA Ontology agent usage
 
-Lightweight scaffolding for calling GSF from an agent. This is not a
-prescribed harness, SDK, or LangGraph template.
+Lightweight workflow for calling the current GSF implementation from an agent.
+This is not a prescribed harness, SDK, or LangGraph template. Typed workflow
+artifacts, statuses, gates, and handoffs are in
+[runtime-contract.yaml](runtime-contract.yaml).
 
-If GSF is not running, use `gsf-install` first. If you need to **change**
-terms or SQL attributes, use `gsf-ontology`.
+If GSF is not running, use `nvidia-ontology-install` first. If you need to
+**change** semantic definitions or publish governed results, use
+`nvidia-ontology`.
 
 ## Prefer MCP for reads
 
@@ -40,6 +45,9 @@ Sequence (the server also advertises this so models do not jump straight to
 3. `check_answerable` — cheap coverage check.
 4. `ask_question` — full text-to-SQL; tens of seconds; answer + SQL + rows
    (capped at 100 rows, with `row_count` / `truncated`).
+5. For a claim-bearing answer, validate material intent, generated SQL, returned
+   rows, truncation, and prose using
+   [query-validation.md](references/query-validation.md).
 
 Everything on MCP **reads**. There is no MCP tool for raw databases, schemas,
 or columns on purpose. `describe_table` is the legitimate table view: terms
@@ -49,9 +57,10 @@ Connect: `GSF_API_URL` is the **web app**. Run `gsf-mcp`, point the client at
 `…/mcp`, user signs in. No token on the MCP server. Details:
 repository `mcp/README.md` and `docs/mcp.md`.
 
-## REST when MCP is unavailable, and for writes
+## REST fallback and write handoff
 
-Public clients call the authenticated **Next.js gateway**, not FastAPI
+When MCP is unavailable, public clients call the authenticated **Next.js
+gateway**, not FastAPI
 `:3001`. FastAPI trusts `x-gsf-user-id` and must not be exposed. A direct
 FastAPI request without `conversation_id` is stateless; with
 `conversation_id` it requires that internal header.
@@ -65,7 +74,9 @@ Auth (any of these; resolved in one place):
 - SSO id token (`Authorization: Bearer <jwt>`), e.g. AI-Q — see
   [stack.md](references/stack.md)
 
-Shapes: `docs/openapi/gsf-api.json`. Do not scrape all ~87 operations.
+Shapes: `docs/openapi/gsf-api.json`. Do not scrape all ~87 operations. A write
+request hands off to `nvidia-ontology`; this skill does not turn a read-only
+question into a mutation.
 
 ### Chat
 
@@ -108,18 +119,29 @@ MCP first. REST fallback:
 - `GET /api/exploration/tables/{table_id}/details`
 - `GET /api/exploration/graph`
 
-Writes and compile reset: `gsf-ontology`.
+Writes and compile reset: `nvidia-ontology`.
+
+## Validate claim-bearing answers
+
+Do not treat successful execution as sufficient evidence. Before presenting a
+decision-facing result, apply
+[query-validation.md](references/query-validation.md) to check population,
+measure, unit, grain, joins, lineage, status, validity, rows, truncation, and
+answer prose. If a material constraint cannot be verified, return the gap rather
+than a stronger claim.
 
 ## Empty or failed answers
 
 `ask_question` / chat returned nothing useful → `check_readiness` (or
 `GET /api/semantic-compilation/status`) before rewriting the question. A
-named database is not proof SQL can execute. See `gsf-install`
+named database is not proof SQL can execute. See `nvidia-ontology-install`
 troubleshooting.
 
 ## See also
 
 - [stack.md](references/stack.md) — AI-Q, Nemotron, cuOpt (what exists vs
   what partners wire)
-- `gsf-ontology` — modify the layer
-- `gsf-install` — bring-up and MCP OAuth discovery
+- [query-validation.md](references/query-validation.md) — material intent, SQL,
+  rows, and answer checks
+- `nvidia-ontology` — model, modify, and publish through the layer
+- `nvidia-ontology-install` — bring-up and MCP OAuth discovery

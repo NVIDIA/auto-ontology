@@ -1,5 +1,5 @@
 ---
-name: gsf-install
+name: nvidia-ontology-install
 version: "0.1.0"
 description: >-
   Install and troubleshoot a GSF (Generative Semantic Fabric) deployment via
@@ -9,8 +9,9 @@ description: >-
   internals see CLAUDE.md, not this skill.
 license: Apache-2.0
 metadata:
-  author: NVIDIA GSF Team
+  author: NVIDIA Ontology Team
   tags:
+    - nvidia-ontology
     - gsf
     - install
     - docker
@@ -19,9 +20,10 @@ metadata:
     - troubleshooting
 ---
 
-# GSF Install
+# NVIDIA Ontology installation
 
-Bring GSF up, or connect an agent to an instance that is already running.
+Bring up the current GSF implementation, or connect an agent to an instance
+that is already running.
 Do not invent a second installer: invoke the commands in the repository-root
 `README.md` and `dev_tools/setup_env.sh`.
 
@@ -50,12 +52,12 @@ debuggable. Pass the model id when the harness knows it:
 
 ```bash
 # from the GSF repository root
-./skills/gsf-install/scripts/log_install.sh --model "$GSF_INSTALL_MODEL" -- \
+./skills/nvidia-ontology-install/scripts/log_install.sh --model "$NVIDIA_ONTOLOGY_INSTALL_MODEL" -- \
   ./dev_tools/setup_env.sh
 ```
 
 The script appends timestamp, model, cwd, the command (with secret flags
-redacted) and redacted env, and exit code to `.gsf-install.log` (gitignored). Do not
+redacted) and redacted env, and exit code to `.nvidia-ontology-install.log` (gitignored). Do not
 restate flags in this skill; log what actually ran.
 
 ## One-time prep (local)
@@ -85,7 +87,7 @@ uv sync
 Preferred when the user wants a running GSF without iterating on the code.
 
 ```bash
-./skills/gsf-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh
+./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh
 # equivalent: docker compose up -d --build
 ```
 
@@ -105,7 +107,7 @@ service, runs the one-shot migrate job, and starts the app.
 Infra only (Postgres, pgAdmin, ingestion). You run Next.js and FastAPI:
 
 ```bash
-./skills/gsf-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --dev
+./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --dev
 ```
 
 Then two terminals:
@@ -123,7 +125,7 @@ reload (what the container runs).
 ## Local: `--ds` (frontend in Docker, API on the host)
 
 ```bash
-./skills/gsf-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --ds
+./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --ds
 uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
@@ -180,6 +182,6 @@ docker compose down -v       # wipe Postgres / pgAdmin data
 ## See also
 
 - [troubleshooting.md](references/troubleshooting.md)
-- `gsf-agent` — call GSF once it is running
-- `gsf-ontology` — edit the semantic layer
+- `nvidia-ontology-agent` — call GSF once it is running
+- `nvidia-ontology` — edit the semantic layer
 - `CLAUDE.md` — maintain GSF itself

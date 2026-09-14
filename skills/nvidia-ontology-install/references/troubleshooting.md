@@ -35,7 +35,7 @@ field falls back to `DEFAULT_MODELS_*`.
 A mismatch puts stored vectors and query vectors in different spaces; answers
 look like "nothing found."
 
-Confirm the logged (redacted) triplets in `.gsf-install.log` match what you
+Confirm the logged (redacted) triplets in `.nvidia-ontology-install.log` match what you
 intended.
 
 ## Connections: UI vs `CONNECTION_STRINGS` vs Vault

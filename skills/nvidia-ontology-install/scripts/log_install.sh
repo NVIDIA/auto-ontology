@@ -6,7 +6,7 @@
 # Append-only install log. Wrap the real command; do not invent flags here.
 #
 #   log_install.sh [--model NAME] -- command [args...]
-#   GSF_INSTALL_MODEL=... GSF_INSTALL_LOG=/tmp/gsf.log log_install.sh -- uv sync
+#   NVIDIA_ONTOLOGY_INSTALL_MODEL=... NVIDIA_ONTOLOGY_INSTALL_LOG=/tmp/gsf.log log_install.sh -- uv sync
 
 set -euo pipefail
 
@@ -16,11 +16,11 @@ Usage:
   log_install.sh [--model NAME] -- command [args...]
 
 Appends timestamp, optional model, cwd, the redacted command, redacted env,
-and exit code to .gsf-install.log at the git repo root (or $GSF_INSTALL_LOG).
+and exit code to .nvidia-ontology-install.log at the git repo root (or $NVIDIA_ONTOLOGY_INSTALL_LOG).
 EOF
 }
 
-MODEL="${GSF_INSTALL_MODEL:-}"
+MODEL="${NVIDIA_ONTOLOGY_INSTALL_MODEL:-}"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--model)
@@ -46,12 +46,12 @@ if [[ $# -eq 0 ]]; then
 	exit 2
 fi
 
-if [[ -n "${GSF_INSTALL_LOG:-}" ]]; then
-	LOG_FILE="$GSF_INSTALL_LOG"
+if [[ -n "${NVIDIA_ONTOLOGY_INSTALL_LOG:-}" ]]; then
+	LOG_FILE="$NVIDIA_ONTOLOGY_INSTALL_LOG"
 elif ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-	LOG_FILE="$ROOT/.gsf-install.log"
+	LOG_FILE="$ROOT/.nvidia-ontology-install.log"
 else
-	LOG_FILE="$PWD/.gsf-install.log"
+	LOG_FILE="$PWD/.nvidia-ontology-install.log"
 fi
 
 # Match env names and Helm camelCase (defaultModelsApiKey, connectionStrings).

@@ -1,0 +1,119 @@
+---
+name: nvidia-ontology
+version: "0.2.0"
+description: >-
+  Inspect, model, manage, and safely publish through the GSF semantic layer:
+  glossary terms, SQL attributes, column attributes, semantic relationships,
+  model YAML import/export, governed result definitions, and compilation. Use
+  when navigating or changing dataset meaning, defining source-grounded
+  measures and relationships, or verifying durable publication. MCP is
+  read-only; writes go through approved REST or source interfaces.
+license: Apache-2.0
+metadata:
+  author: NVIDIA Ontology Team
+  tags:
+    - nvidia-ontology
+    - gsf
+    - ontology
+    - glossary
+    - sql-attributes
+    - catalog
+---
+
+# NVIDIA Ontology management and modeling
+
+Workflow for inspecting and changing GSF's semantic layer without confusing a
+successful API call with correct business meaning or durable publication. The
+machine-readable inputs, outputs, statuses, gates, and handoffs are in
+[runtime-contract.yaml](runtime-contract.yaml).
+
+Choose the focused workflow before acting:
+
+- routine inspection or metadata edits: continue below and use
+  [write-api.md](references/write-api.md);
+- concepts, relationships, measures, units, grain, or policies: use
+  [modeling.md](references/modeling.md);
+- model promotion or reusable analytical results: use
+  [publication.md](references/publication.md).
+
+MCP tools only **read**. Create, patch, import, and compile-reset go through
+the Next.js `/api/...` gateway. Governed result rows require an approved source
+writer; GSF has no generic result-row writeback endpoint. Request bodies and
+field types live in `docs/openapi/gsf-api.json`; this skill names operations and
+permissions only.
+
+## Auth
+
+Scripts use an API token (`x-api-key` or `Authorization: Bearer`). Mint it in
+the UI (user menu → API Tokens). A token **acts as its owner** — a viewer's
+token cannot do admin things. Creating and revoking tokens requires a signed-in
+session; a token cannot mint another token.
+
+Writes below need `catalog:edit` unless noted. `403` means the owner's role
+lacks that permission, not that the path is wrong.
+
+## Workflow
+
+1. **Discover current meaning** via MCP (`search_terms`, `get_term`,
+   `get_term_columns`, `get_term_sql_attributes`, `describe_table`) or REST
+   if MCP is absent (`GET /api/terms`, `GET /api/terms/{term_id}`,
+   `GET /api/exploration/tables/{table_id}/details`).
+2. **Resolve the semantic contract** when meaning changes. Record source
+   binding, identity, population, relationship cardinality, measure expression,
+   unit, grain, denominator, time, validity, and counterexamples; see
+   [modeling.md](references/modeling.md).
+3. **State the proposed change** to the user (term rename, new SQL attribute,
+   import, and so on). Do not silently rewrite the glossary.
+4. **Validate SQL** before create/update: `POST /api/sql-attributes/validate`.
+   A parse failure is **HTTP 422**, not `valid: false`.
+5. **Apply** the smallest write that matches the request (see
+   [write-api.md](references/write-api.md)).
+6. **Compilation is not a hidden side effect.** Check
+   `GET /api/semantic-compilation/status`. Do **not** call
+   `POST /api/semantic-compilation/reset` as cleanup — it is an asynchronous,
+   destructive rebuild of every database's compiled layer, returns 202, and
+   requires `semanticCompilation:manage`.
+7. **Verify the persisted change**, not merely request success. Model imports
+   require a scoped backup and exact re-export comparison; see
+   [publication.md](references/publication.md). Then use MCP
+   `check_answerable` / `ask_question` (or REST
+   `POST /api/question-entity-coverage` and `POST /api/chat/completions`) for
+   positive and negative behavior checks.
+
+## Semantic relationships and "what does this dataset mean"
+
+Stay on the semantic layer. Do not browse raw schemas to answer meaning.
+
+- Term → columns: MCP `get_term_columns` or
+  `GET /api/terms/{term_id}/column-attributes`
+- Term → derived SQL: MCP `get_term_sql_attributes`
+- Table → terms and SQL attributes: MCP `describe_table` or
+  `GET /api/exploration/tables/{table_id}/details`
+- Semantic hop chain between two terms:
+  `GET /api/exploration/terms/{term_id}/path/{other_term_id}`
+- Semantic graphs: `GET /api/exploration/graph`,
+  `GET /api/exploration/semantic-graph`
+
+These are semantic relationship paths, not generation provenance, source
+revision, certification history, or version lineage.
+
+## Bulk import / export
+
+- `POST /api/model/export` — YAML of catalog + semantic layer.
+  Permission `modelInterchange:export`. Body may set catalog database **IDs**
+  in `databases` (empty = all) and `format` (`gsf` or `ossie`).
+- `POST /api/model/import` — multipart YAML; native GSF
+  (`data_layer` / `semantic_layer`) or Apache Ossie (`semantic_model`).
+  Query `replace` (default true) and `embed` (default true). Permission
+  `modelInterchange:import`. Can replace existing data — confirm with the
+  user before `replace=true`, apply first in isolation, and use the exact
+  readback workflow in [publication.md](references/publication.md).
+
+## See also
+
+- [write-api.md](references/write-api.md)
+- [modeling.md](references/modeling.md)
+- [publication.md](references/publication.md)
+- `nvidia-ontology-agent` — how to call GSF and validate query results
+- `nvidia-ontology-install` — deployment not ready
+- `mcp/gsf_mcp/tools.py` — live read-tool allow-list

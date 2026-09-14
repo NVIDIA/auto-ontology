@@ -2,7 +2,7 @@
   {
     "id": "inst-eval-001-underspecified",
     "question": "Install GSF for me.",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "The request is underspecified, so the agent asks the required questions before running a command: target (full Compose, --dev, --ds, Helm, or MCP-only against an existing instance), whether DEFAULT_MODELS_API_KEY is set, source database / CONNECTION_STRINGS vs UI connections, and whether host port 5432 is free. It does not guess Compose and run it silently.",
     "expected_behavior": [
@@ -14,19 +14,19 @@
   {
     "id": "inst-eval-002-use-existing-scripts",
     "question": "I cloned NVIDIA/GSF and filled in .env. How do I start the full local stack?",
-    "expected_skill": "gsf-install",
-    "expected_script": "skills/gsf-install/scripts/log_install.sh",
+    "expected_skill": "nvidia-ontology-install",
+    "expected_script": "skills/nvidia-ontology-install/scripts/log_install.sh",
     "ground_truth": "The agent invokes the existing setup path from the repository root — ./dev_tools/setup_env.sh or docker compose up -d --build — wrapped with log_install.sh. It does not write a new docker-compose file or a custom install script.",
     "expected_behavior": [
       "Uses dev_tools/setup_env.sh or docker compose up -d --build from the repo root",
-      "Wraps the command with skills/gsf-install/scripts/log_install.sh",
+      "Wraps the command with skills/nvidia-ontology-install/scripts/log_install.sh",
       "Does not invent a second installer"
     ]
   },
   {
     "id": "inst-eval-003-auth-secret-cookies",
     "question": "After I restarted docker compose the GSF UI at localhost:3000 loads but the left navigation is missing.",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "Stale Better Auth session cookie, typically after AUTH_SECRET changed or the database was reset. Clear site data for localhost:3000 or delete better-auth.session_token and sign in again. This is not a compose or frontend-build failure.",
     "expected_behavior": [
@@ -38,7 +38,7 @@
   {
     "id": "inst-eval-004-postgres-port-host-only",
     "question": "5432 is taken on my laptop so I set POSTGRES_PORT=15432 in .env. The GSF container still talks to Postgres on 5432. Is that a bug?",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "Not a bug. POSTGRES_PORT only changes the host-side port mapping. Containers always reach Postgres on 5432 on the compose network. Host access becomes localhost:15432.",
     "expected_behavior": [
@@ -50,7 +50,7 @@
   {
     "id": "inst-eval-005-mcp-already-up",
     "question": "GSF is already running at https://gsf.example.com. I only need my coding agent to query it.",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "Do not reinstall. Point GSF_API_URL at the web app and run gsf-mcp (uvx from the mcp subdirectory). Confirm GET $GSF_API_URL/.well-known/oauth-authorization-server returns 200. Client config uses the /mcp suffix; the user signs in; no token on the MCP server.",
     "expected_behavior": [
@@ -63,7 +63,7 @@
   {
     "id": "inst-eval-006-vault-partial",
     "question": "I set VAULT_ADDR and VAULT_NAMESPACE but left ROLE_ID empty. Are my UI-added connection passwords in Vault?",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "No. Vault is enabled only when VAULT_ADDR, VAULT_NAMESPACE, VAULT_ROLE_ID, and VAULT_SECRET_ID are all set. Partial configuration is ignored with a warning and credentials stay plaintext on the catalog row.",
     "expected_behavior": [
@@ -75,7 +75,7 @@
   {
     "id": "inst-eval-007-embed-triplet-mismatch",
     "question": "Ingest succeeded but every question comes back as if there were no matching data. EMBED_MODEL at query time is not the one I used at ingest.",
-    "expected_skill": "gsf-install",
+    "expected_skill": "nvidia-ontology-install",
     "expected_script": null,
     "ground_truth": "EMBED_ENDPOINT and EMBED_MODEL must be identical for ingest and query. A mismatch puts stored vectors and query vectors in different spaces. Align the embed triplet and re-ingest; this is not a chat-prompt problem.",
     "expected_behavior": [

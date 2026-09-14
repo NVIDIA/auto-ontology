@@ -2,13 +2,13 @@
 
 ## Description
 
-gsf-ontology inspects and modifies the GSF semantic layer (glossary terms, SQL attributes, lineage, model import/export, compilation) for developers and partners who need to change ontology meaning.
+nvidia-ontology inspects, models, manages, and safely publishes through the current GSF semantic layer, including source-grounded concepts, relationships, measures, model import/export, governed result definitions, exact readback, and rollback boundaries.
 
 This skill is for research and development until a catalog eval run is recorded below.
 
 ## Owner
 
-NVIDIA GSF Team
+NVIDIA Ontology Team
 
 ## License/Terms of Use
 
@@ -16,7 +16,7 @@ Apache 2.0
 
 ## Use Case
 
-Agents that must edit GSF terms or SQL attributes, import/export model YAML, or explain dataset meaning via the semantic layer — not via raw database schemas.
+Agents that must understand or change ontology meaning, define reusable measures and relationships, import/export a model safely, or publish a supported governed definition or result handoff without confusing request success with certification.
 
 ## Deployment Geography for Use
 
@@ -37,23 +37,29 @@ Mitigation: MCP is read-only; confirm writes with the user; never treat `POST /a
 Risk: An API token acts as its owner; a leaked admin token can edit the catalog.
 Mitigation: State that tokens inherit the owner's role; prefer least-privilege owners; revocation is immediate in the UI.
 
+Risk: A successful import or non-empty query may conceal stale properties, retained relationships, wrong grain, or an unsupported publication claim.
+Mitigation: Require a scoped backup, isolated application, exact re-export comparison, positive and negative query probes, and receipt-only behavior when no approved writer exists.
+
 ## References
 
 - `docs/openapi/gsf-api.json` (operation ids and `x-gsf-permissions`)
 - `mcp/gsf_mcp/tools.py` (read-only MCP allow-list)
+- [runtime-contract.yaml](runtime-contract.yaml)
 - [references/write-api.md](references/write-api.md)
+- [references/modeling.md](references/modeling.md)
+- [references/publication.md](references/publication.md)
 - [evals/evals.json](evals/evals.json) — candidate dataset; no `BENCHMARK.md` until a Tier-3 eval runs
 
 ## Skill Output
 
-Output type(s): API calls, proposed catalog edits, verification questions
-Output format: HTTP against the Next.js `/api` gateway; Markdown explanations
-Output parameters: Permission tags as in OpenAPI; no schema dumps
-Other properties: Does not modify MCP; does not browse raw schemas for meaning
+Output type(s): Semantic specifications, API calls, proposed catalog edits, publication and rollback receipts, verification questions
+Output format: HTTP against the Next.js `/api` gateway; approved source-writer handoffs; Markdown explanations
+Output parameters: Permission tags as in OpenAPI; source and semantic IDs; no credential or raw-data dumps
+Other properties: Does not modify MCP; unsupported writes stop at an explicit receipt
 
 ## Skill Version
 
-0.1.0 (source: frontmatter)
+0.2.0 (source: frontmatter)
 
 ## Evaluation Agents Used
 
@@ -61,7 +67,7 @@ Not yet run.
 
 ## Evaluation Tasks
 
-7 candidate tasks in [evals/evals.json](evals/evals.json). No isolated-pod eval has been executed.
+13 candidate tasks in [evals/evals.json](evals/evals.json). No isolated-pod eval has been executed.
 
 ## Evaluation Results
 

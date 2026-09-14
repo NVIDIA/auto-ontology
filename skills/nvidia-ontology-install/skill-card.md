@@ -2,13 +2,13 @@
 
 ## Description
 
-gsf-install installs and troubleshoots a GSF (Generative Semantic Fabric) deployment for developers bringing the stack up, or connecting MCP to an instance that is already running.
+nvidia-ontology-install installs and troubleshoots a GSF (Generative Semantic Fabric) deployment for developers bringing the stack up, or connecting MCP to an instance that is already running.
 
 This skill is for research and development until a catalog eval run is recorded below.
 
 ## Owner
 
-NVIDIA GSF Team
+NVIDIA Ontology Team
 
 ## License/Terms of Use
 
@@ -46,9 +46,9 @@ Mitigation: This skill contains no staging hostnames, cluster names, or Vault pa
 ## Skill Output
 
 Output type(s): Shell commands, configuration instructions, install log lines
-Output format: Markdown with inline bash code blocks; append-only `.gsf-install.log`
+Output format: Markdown with inline bash code blocks; append-only `.nvidia-ontology-install.log`
 Output parameters: Commands run from the GSF repository root unless noted
-Other properties: `.gsf-install.log` is gitignored; do not commit it
+Other properties: `.nvidia-ontology-install.log` is gitignored; do not commit it
 
 ## Skill Version
 

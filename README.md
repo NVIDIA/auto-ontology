@@ -245,7 +245,7 @@ signed-in user.
 ## Agent skills
 
 Coding agents: start at [`AGENTS.md`](./AGENTS.md). Skills live in
-[`skills/`](./skills/) (`gsf-install`, `gsf-ontology`, `gsf-agent`).
+[`skills/`](./skills/) (`nvidia-ontology-install`, `nvidia-ontology`, `nvidia-ontology-agent`).
 Maintainers keep using [`CLAUDE.md`](./CLAUDE.md).
 
 ## MCP server

@@ -66,5 +66,5 @@ dev_tools/fixtures/sql/*.sqlite
 # the repo rather than shipping one developer's setup to everyone.
 helm.sh
 
-# Append-only GSF install log written by skills/gsf-install/scripts/log_install.sh
-.gsf-install.log
+# Append-only GSF install log written by skills/nvidia-ontology-install/scripts/log_install.sh
+.nvidia-ontology-install.log

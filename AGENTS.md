@@ -4,11 +4,11 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# AGENTS.md — GSF AI agent entry point
+# AGENTS.md — NVIDIA Ontology agent entry point
 
-Skills that teach an agent how to **set up** GSF and **use** its ontology
-layer. They live in **`skills/`** (repo root), one directory per skill, named
-`gsf-*`.
+Skills that teach an agent how to **set up** the current GSF implementation and
+**use** its ontology layer. They live in **`skills/`** (repo root), one directory
+per skill, under the durable `nvidia-ontology*` namespace.
 
 This file is for developers bringing GSF up and partners embedding it in an
 agent harness. GSF **maintainers** (build, test, schema, frontend conventions)
@@ -17,17 +17,34 @@ skills.
 
 ## Which skill to read
 
-- [`skills/gsf-install/`](./skills/gsf-install/) — local Compose, `--dev`,
+- [`skills/nvidia-ontology-install/`](./skills/nvidia-ontology-install/) — local Compose, `--dev`,
   Helm pointer, MCP against an already-running instance, install logging,
   troubleshooting. Start here when GSF is not up yet or something failed
   during bring-up.
-- [`skills/gsf-ontology/`](./skills/gsf-ontology/) — inspect and **modify**
-  glossary terms, SQL attributes, lineage, model YAML import/export,
-  compilation. MCP cannot write; this skill covers the write path.
-- [`skills/gsf-agent/`](./skills/gsf-agent/) — how an agent calls GSF
-  (MCP first, REST fallback), discovery through the semantic layer, auth
-  contracts for AI-Q / SSO / API tokens. Start here when GSF is already
-  deployed.
+- [`skills/nvidia-ontology/`](./skills/nvidia-ontology/) — inspect, model,
+  **modify**, and safely publish through glossary terms, SQL attributes,
+  semantic relationships, model YAML import/export, and governed result
+  definitions. MCP cannot write; this skill covers the approved write paths.
+- [`skills/nvidia-ontology-agent/`](./skills/nvidia-ontology-agent/) — how an
+  agent calls GSF (MCP first, REST fallback), discovers meaning through the
+  semantic layer, and validates SQL, rows, and answers. Start here when GSF is
+  already deployed.
+
+## Workflow ownership and handoffs
+
+| User action | Owning skill |
+| --- | --- |
+| Install, configure, connect, ingest, compile, prove readiness | `nvidia-ontology-install` |
+| Inspect meaning and semantic relationships | `nvidia-ontology` |
+| Design concepts, mappings, relationships, measures, units, grain, and policies | `nvidia-ontology` → `references/modeling.md` |
+| Apply, verify, certify honestly, publish, and roll back | `nvidia-ontology` → `references/publication.md` |
+| Ask descriptive or diagnostic questions and validate SQL, rows, and prose | `nvidia-ontology-agent` → `references/query-validation.md` |
+
+The composed lifecycle is install/connect/readiness → inspect/model → staged
+apply/readback → query validation → governed publication → fresh query readback.
+A step that lacks product support must return an explicit gap or receipt rather
+than inventing an operation. Authentication, permissions, provenance, and error
+handling remain shared concerns rather than separate overlapping skills.
 
 ## Sources of truth (do not duplicate)
 
@@ -53,18 +70,18 @@ and build.nvidia.com/skills. That pipeline requires, per skill:
 - `SKILL.md`, `skill-card.md`, `evals/evals.json` (present here)
 - `skill.oms.sig` — NVIDIA OMS signature (not generated here; do not fabricate)
 - a Tier-3 eval run that fills the skill-card tables (not run here)
-- a `components.d/gsf.yml` entry in **nvidia/skills** registering:
+- a `components.d/nvidia-ontology.yml` entry in **nvidia/skills** registering:
 
 ```yaml
-name: GSF
+name: NVIDIA Ontology
 repo: NVIDIA/GSF
 skills:
-  - path: skills/gsf-install/
-    catalog_dir: gsf-install
-  - path: skills/gsf-ontology/
-    catalog_dir: gsf-ontology
-  - path: skills/gsf-agent/
-    catalog_dir: gsf-agent
+  - path: skills/nvidia-ontology-install/
+    catalog_dir: nvidia-ontology-install
+  - path: skills/nvidia-ontology/
+    catalog_dir: nvidia-ontology
+  - path: skills/nvidia-ontology-agent/
+    catalog_dir: nvidia-ontology-agent
 ```
 
 Until that lands, agents use the copies in this checkout. Skills must stay
