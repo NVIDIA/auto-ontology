@@ -8,7 +8,7 @@ import re
 import threading
 import time
 from collections import Counter, defaultdict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime, time as dt_time
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Iterator
@@ -736,6 +736,7 @@ def process_table(
     embedder: SemanticEmbedder | None = None,
     database_name: str | None = None,
     probe_distinct_values: bool = True,
+    commit_slot: AbstractContextManager[None] | None = None,
 ) -> ProcessTableResult:
     """Build taxonomy nodes for one table: Term and ColumnAttributes.
 
@@ -743,6 +744,9 @@ def process_table(
     read once per run by the caller. It gates only the per-column ``SELECT
     DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
     a direct caller keeps the historical behaviour.
+
+    ``commit_slot`` lets the parallel pipeline impose canonical table ordering
+    only on persistence. Direct callers fall back to the process-local lock.
     """
     table_id = table["id"]
     table_name = table["name"]
@@ -843,7 +847,8 @@ def process_table(
     terms: list = []
     attrs_by_term: dict[str, list[dict]] = defaultdict(list)
 
-    with _term_commit_lock:
+    commit_context = commit_slot if commit_slot is not None else _term_commit_lock
+    with commit_context:
         with _step(table_name, f"Writing {len(persisted_terms)} term(s) to the graph"):
             _commit_terms(
                 persisted_terms,
