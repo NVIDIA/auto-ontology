@@ -38,9 +38,16 @@ Rules:
 
 def to_term_name(table_name: str) -> str:
     """Return a human-readable fallback Term name from a physical table name."""
-    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", table_name.strip())
+    separated = re.sub(
+        r"(?<=[A-Z])(?=[A-Z][a-z])",
+        " ",
+        table_name.strip(),
+    )
+    separated = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", separated)
     parts = re.split(r"[^A-Za-z0-9]+", separated)
-    return " ".join(part.capitalize() for part in parts if part)
+    return " ".join(
+        part if part.isupper() else part.capitalize() for part in parts if part
+    )
 
 
 _FORMAT_MARKER = "format:"

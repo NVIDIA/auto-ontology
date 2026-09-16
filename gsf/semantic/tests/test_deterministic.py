@@ -87,6 +87,7 @@ def test_to_term_name() -> None:
     assert to_term_name("gtl_imaging_event") == "Gtl Imaging Event"
     assert to_term_name("gtl_ui_event") == "Gtl Ui Event"
     assert to_term_name("GtlImagingEvent") == "Gtl Imaging Event"
+    assert to_term_name("XMLHttpRequest") == "XML Http Request"
 
 
 def test_fk_targets_deduped() -> None:
