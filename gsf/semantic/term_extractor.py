@@ -78,7 +78,7 @@ def _normalize_label(name: str, *, fallback: str) -> str:
     cleaned = name.strip()
     if cleaned.lower() in _INVALID or not _LABEL_RE.match(cleaned):
         return fallback
-    return cleaned
+    return to_term_name(cleaned)
 
 
 def _format_spec_line(spec: ColumnAttributeSpec) -> str:
