@@ -1,0 +1,7 @@
+# Code owners are automatically requested for review on every pull request.
+# Combined with the branch ruleset's "require code owner review" and
+# 2-approval settings, this enforces the +2 code review requirement with
+# Security PIC sign-off for the GSF release process.
+
+# Default owner for the entire repository: Security PIC
+* @yuvalshkolar
