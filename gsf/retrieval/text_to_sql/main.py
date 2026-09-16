@@ -57,6 +57,7 @@ app = graph.compile()
 # change would leave the two disagreeing about which node is the last gate
 # before execution. See ``_sql_about_to_run``.
 _COMBINED_PRECHECK_IN_GRAPH = "precheck_combined" in graph.nodes
+_TRANSPARENT_NODES = frozenset({"_entry_router"})
 
 
 def _build_state(payload: TextToSQLPayload) -> AgentState:
@@ -281,7 +282,7 @@ def stream_agent_response(
             if mode == "custom":
                 if (chunk or {}).get("type") == NODE_START_EVENT:
                     started = chunk.get("node")
-                    if started:
+                    if started and started not in _TRANSPARENT_NODES:
                         # A node that raises produces no update, so tracking
                         # completions alone would blame the node before it.
                         last_node = started
@@ -295,6 +296,10 @@ def stream_agent_response(
 
             logger.info("--- AGENT STEP ---")
             for node_name, node_output in chunk.items():
+                if node_name in _TRANSPARENT_NODES:
+                    _merge_node_output(final_state, node_output)
+                    continue
+
                 last_node = node_name
                 logger.info("Node: %s", node_name)
 

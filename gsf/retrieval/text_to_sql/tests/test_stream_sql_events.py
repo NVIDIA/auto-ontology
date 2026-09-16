@@ -514,6 +514,21 @@ def test_each_node_reports_start_then_end(
     ]
 
 
+def test_entry_router_is_not_streamed(
+    main: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The entry router only selects a graph path and is invisible to clients."""
+
+    events = _run(
+        main,
+        monkeypatch,
+        [{"_entry_router": {"path_state": {"final_response": {"response": "routed"}}}}],
+    )
+
+    assert [event["type"] for event in events] == ["result"]
+    assert events[0]["answer"] == {"response": "routed"}
+
+
 def test_start_precedes_the_nodes_own_update(
     main: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
