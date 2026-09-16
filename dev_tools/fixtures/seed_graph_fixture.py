@@ -299,18 +299,19 @@ PQL_ANALYSES: tuple[tuple[str, str, str, str], ...] = (
 
 
 def seed_terms() -> dict[str, str]:
-    from gsf.dal.terms import merge_term, update_term
+    from gsf.dal.terms import update_term, upsert_table_term
 
     term_ids: dict[str, str] = {}
     for name, description, (db, schema, table), synonyms in TERMS:
-        term_id = merge_term(
+        persisted = upsert_table_term(
             name=name,
             description=description,
             table_id=_table_id(db, schema, table),
             synonyms=synonyms,
         )
-        if term_id is None:
-            raise RuntimeError(f"merge_term returned None for {name!r}")
+        if persisted is None:
+            raise RuntimeError(f"upsert_table_term returned None for {name!r}")
+        term_id, _ = persisted
         term_ids[name] = term_id
 
     # Certification flags must not be uniform, or a golden cannot tell a

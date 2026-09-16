@@ -25,7 +25,7 @@ from gsf.dal.datasources import (
     store_column_uniqueness,
 )
 from gsf.semantic.date_format import infer_date_format, is_date_type
-from gsf.dal.terms import fetch_terms_and_attributes_for_table, merge_term
+from gsf.dal.terms import fetch_terms_and_attributes_for_table, upsert_table_term
 from gsf.semantic.deterministic import column_attribute_specs
 from gsf.semantic.domain import DomainSummary
 from gsf.semantic.embed import _MAX_EMBEDDED_JSON_SAMPLE_LEN, SemanticEmbedder
@@ -91,10 +91,9 @@ _DATE_SHAPE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("Mon DD, YYYY", re.compile(r"^[A-Za-z]{3,9} \d{1,2},? \d{4}$")),
 )
 
-# Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but
-# the commit phase must be serial: VDB search → judge → store merge → VDB embed.
-# Without the lock, two threads could simultaneously propose the same Term,
-# both find zero VDB hits (the first hasn't embedded yet), and create duplicates.
+# Tables are processed in parallel (ThreadPoolExecutor in pipeline.py), but the
+# commit phase is serialized so collision-qualified Term names are allocated in
+# a stable order and each table's store writes and embedding stay together.
 _term_commit_lock = threading.Lock()
 
 
@@ -838,21 +837,13 @@ def process_table(
         )
         return ProcessTableResult()
 
-    # Serialize: dedup check + the store writes + VDB embed must be atomic
-    # so the next thread's VDB search sees this thread's newly embedded terms.
+    # Serialize collision-safe name allocation, store writes, and VDB embedding.
     result_term_names: list[str] = []
     result_attr_names: list[str] = []
     terms: list = []
     attrs_by_term: dict[str, list[dict]] = defaultdict(list)
 
     with _term_commit_lock:
-        if embedder is not None:
-            with _step(
-                table_name,
-                f"Checking {len(persisted_terms)} proposed term(s) for duplicates",
-            ):
-                _dedupe_terms(table_name, persisted_terms, embedder)
-
         with _step(table_name, f"Writing {len(persisted_terms)} term(s) to the graph"):
             _commit_terms(
                 persisted_terms,
@@ -893,38 +884,6 @@ def process_table(
     )
 
 
-def _dedupe_terms(
-    table_name: str,
-    persisted_terms: list,
-    embedder: SemanticEmbedder,
-) -> None:
-    """Rewrite proposed Term names onto existing ones the judge deems equivalent."""
-    for term, _ in persisted_terms:
-        try:
-            candidates = embedder.search_similar_terms(term.name, term.description)
-            if not candidates:
-                continue
-
-            from gsf.semantic.term_judge import judge_term_overlap
-
-            merge_into = judge_term_overlap(term.name, term.description, candidates)
-            if merge_into:
-                logger.info(
-                    "[%s] Merging proposed Term %r into existing %r",
-                    table_name,
-                    term.name,
-                    merge_into,
-                )
-                term.name = merge_into
-        except Exception:
-            logger.warning(
-                "[%s] Term dedup check failed for %r — proceeding as-is",
-                table_name,
-                term.name,
-                exc_info=True,
-            )
-
-
 def _commit_terms(
     persisted_terms: list,
     spec_by_column: dict[str, ColumnAttributeSpec],
@@ -932,9 +891,25 @@ def _commit_terms(
     result_term_names: list[str],
     result_attr_names: list[str],
 ) -> None:
-    """Merge Terms and their ColumnAttributes into the store."""
+    """Write table-private Terms and their ColumnAttributes to the store."""
     for term, assignments in persisted_terms:
-        merge_term(term.name, term.description, table_id, synonyms=term.synonyms)
+        proposed_name = term.name
+        persisted = upsert_table_term(
+            proposed_name,
+            term.description,
+            table_id,
+            synonyms=term.synonyms,
+        )
+        if persisted is None:
+            continue
+        _, term.name = persisted
+        if term.name != proposed_name:
+            logger.info(
+                "Qualified colliding Term name %r as %r for table %s",
+                proposed_name,
+                term.name,
+                table_id,
+            )
         result_term_names.append(term.name)
         for assignment in assignments:
             spec = spec_by_column[assignment.source_column]

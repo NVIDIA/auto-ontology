@@ -52,7 +52,11 @@ def _stubbed(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         visit_enter, "_terms_with_assignments", lambda *_a: [(term, [assignment])]
     )
-    monkeypatch.setattr(visit_enter, "merge_term", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        visit_enter,
+        "upsert_table_term",
+        lambda *_a, **_k: ("term1", "Order"),
+    )
     monkeypatch.setattr(visit_enter, "merge_column_attribute", lambda **_k: None)
     monkeypatch.setattr(
         visit_enter,
@@ -68,9 +72,7 @@ def _run(embedder: Any = None) -> None:
 
 
 def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
-    embedder = SimpleNamespace(
-        search_similar_terms=lambda *_a: [], embed_term=lambda *_a: None
-    )
+    embedder = SimpleNamespace(embed_term=lambda *_a: None)
 
     with caplog.at_level(logging.INFO, logger="gsf.semantic.visit_enter"):
         _run(embedder)
@@ -81,7 +83,6 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
         "[orders] Sampling column values (2 columns)…",
         "[orders] Detecting foreign keys…",
         "[orders] Generating terms and descriptions (1 columns)…",
-        "[orders] Checking 1 proposed term(s) for duplicates…",
         "[orders] Writing 1 term(s) to the graph…",
         "[orders] Embedding 1 term(s)…",
     ):
@@ -96,9 +97,7 @@ def test_each_step_is_logged(_stubbed: None, caplog: LogCaptureFixture) -> None:
 def test_steps_are_logged_in_pipeline_order(
     _stubbed: None, caplog: LogCaptureFixture
 ) -> None:
-    embedder = SimpleNamespace(
-        search_similar_terms=lambda *_a: [], embed_term=lambda *_a: None
-    )
+    embedder = SimpleNamespace(embed_term=lambda *_a: None)
 
     with caplog.at_level(logging.INFO, logger="gsf.semantic.visit_enter"):
         _run(embedder)
@@ -108,7 +107,6 @@ def test_steps_are_logged_in_pipeline_order(
         "Sampling column values (2 columns)",
         "Detecting foreign keys",
         "Generating terms and descriptions (1 columns)",
-        "Checking 1 proposed term(s) for duplicates",
         "Writing 1 term(s) to the graph",
         "Embedding 1 term(s)",
     ]

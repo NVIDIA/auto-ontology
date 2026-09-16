@@ -219,10 +219,10 @@
     "get_slim_term_by_id": "(term_id: 'str') -> 'dict[str, str] | None'",
     "get_term_certification": "(term_id: 'str', zone_ids: 'list[str] | None' = None) -> 'str | None'",
     "get_term_record_for_table": "(table_id: 'str') -> 'dict[str, str] | None'",
-    "merge_term": "(name: 'str', description: 'str', table_id: 'str', synonyms: 'list[str] | None' = None) -> 'str | None'",
     "semantic_layer_calculated": "() -> 'bool'",
     "term_is_in_scope": "(term_id: 'str', zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'bool'",
-    "update_term": "(term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, name_certified: 'bool | None' = None, description_certified: 'bool | None' = None) -> 'dict[str, Any] | None'"
+    "update_term": "(term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, name_certified: 'bool | None' = None, description_certified: 'bool | None' = None) -> 'dict[str, Any] | None'",
+    "upsert_table_term": "(name: 'str', description: 'str', table_id: 'str', synonyms: 'list[str] | None' = None) -> 'tuple[str, str] | None'"
   },
   "users": {
     "get_accessible_catalog_ids_for_zones": "(zone_ids: 'list[str]') -> 'dict[str, set[str]]'",

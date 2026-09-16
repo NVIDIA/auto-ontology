@@ -26,9 +26,9 @@ def compile_semantic_layer(
     """Run full taxonomy compilation over every table in the store.
 
     Tables are processed in parallel (LLM calls for FK detection and term
-    extraction run concurrently). The commit phase (VDB dedup check, the store
-    writes, VDB embedding) is serialized via ``_term_commit_lock`` in
-    ``visit_enter`` to prevent duplicate Terms.
+    extraction run concurrently). The commit phase (collision-safe name
+    allocation, store writes, VDB embedding) is serialized via
+    ``_term_commit_lock`` in ``visit_enter``.
     """
     # A warehouse that was unreachable during an earlier run in this worker
     # must not stay un-sampled for this one.
