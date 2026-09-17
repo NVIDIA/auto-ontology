@@ -29,9 +29,10 @@ See the `Makefile` (`make help`) for build and migration targets, and
 1. Fork the repository and create your branch from `main`.
 2. Add tests for new functionality and make sure the full test suite passes.
 3. Keep pull requests focused — one logical change per PR.
-4. Pull requests targeting `main` require **an approving review** before
-   they can be merged. Code owners (see `.github/CODEOWNERS`) are
-   automatically requested for review.
+4. Pull requests targeting `main` require **an approving review from a code
+   owner** before they can be merged. Code owners (see `.github/CODEOWNERS`)
+   are automatically requested for review. Because a code owner cannot
+   approve their own pull request, one of the other owners must review it.
 
 ## Developer Certificate of Origin (DCO)
 
