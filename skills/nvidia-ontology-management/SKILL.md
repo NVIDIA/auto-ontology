@@ -1,26 +1,25 @@
 ---
-name: nvidia-ontology
+name: nvidia-ontology-management
 version: "0.2.0"
 description: >-
-  Model and publish NVIDIA Ontology through GSF. Use for terms, relationships,
+  Model and publish semantic definitions in Auto Ontology. Use for terms, relationships,
   measures, imports, and governed results—not deployment or querying.
 license: Apache-2.0
 metadata:
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
-    - gsf
     - ontology
     - glossary
     - sql-attributes
     - catalog
 ---
 
-# NVIDIA Ontology management and modeling
+# Auto Ontology management and modeling
 
 ## Purpose
 
-Inspect and change GSF's semantic layer without confusing a successful API call
+Inspect and change Auto Ontology's semantic layer without confusing a successful API call
 with correct business meaning or durable publication. The machine-readable
 inputs, outputs, statuses, gates, and handoffs are in
 [runtime-contract.yaml](assets/runtime-contract.yaml).
@@ -36,18 +35,18 @@ Choose the focused workflow before acting:
 
 MCP tools only **read**. Create, patch, import, and compile-reset go through
 the Next.js `/api/...` gateway. Governed result rows require an approved source
-writer; GSF has no generic result-row writeback endpoint. Request bodies and
+writer; Auto Ontology has no generic result-row writeback endpoint. Request bodies and
 field types live in `docs/openapi/gsf-api.json`; this skill names operations and
 permissions only.
 
 ## Prerequisites
 
-Use a running, authenticated GSF deployment. Use `nvidia-ontology-install` when
+Use a running, authenticated Auto Ontology deployment. Use `nvidia-ontology-setup` when
 the deployment or semantic layer is not ready.
 
 ## Limitations
 
-MCP is read-only, GSF has no generic result-row writeback endpoint, and current
+MCP is read-only, Auto Ontology has no generic result-row writeback endpoint, and current
 model import and certification APIs do not prove atomic promotion. Follow the
 publication gates below and fail closed when exact readback is unavailable.
 
@@ -111,7 +110,7 @@ revision, certification history, or version lineage.
 - `POST /api/model/export` — YAML of catalog + semantic layer.
   Permission `modelInterchange:export`. Body may set catalog database **IDs**
   in `databases` (empty = all) and `format` (`gsf` or `ossie`).
-- `POST /api/model/import` — multipart YAML; native GSF
+- `POST /api/model/import` — multipart YAML; native Auto Ontology
   (`data_layer` / `semantic_layer`) or Apache Ossie (`semantic_model`).
   Query `replace` (default true) and `embed` (default true). Permission
   `modelInterchange:import`. Can replace existing data — confirm with the
@@ -136,6 +135,6 @@ before changing the model or resetting compilation.
 - [write-api.md](references/write-api.md)
 - [modeling.md](references/modeling.md)
 - [publication.md](references/publication.md)
-- `nvidia-ontology-agent` — how to call GSF and validate query results
-- `nvidia-ontology-install` — deployment not ready
+- `nvidia-ontology-query` — how to call Auto Ontology and validate query results
+- `nvidia-ontology-setup` — deployment not ready
 - `mcp/gsf_mcp/tools.py` — live read-tool allow-list

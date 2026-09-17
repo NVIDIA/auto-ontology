@@ -1,5 +1,5 @@
 schema_version: 1
-skill: nvidia-ontology-install
+skill: nvidia-ontology-setup
 role: specialist
 workflows:
   plan_setup:
@@ -66,5 +66,5 @@ fail_closed_when:
   - partial Vault configuration is being treated as protected storage
   - connection ingestion or compilation evidence is missing
 handoffs:
-  - nvidia-ontology for inspection modeling mutation or publication
-  - nvidia-ontology-agent after deployment source and compilation readiness pass
+  - nvidia-ontology-management for inspection modeling mutation or publication
+  - nvidia-ontology-query after deployment source and compilation readiness pass

@@ -2,13 +2,13 @@
 
 ## Description
 
-nvidia-ontology inspects, models, manages, and safely publishes through the current GSF semantic layer, including source-grounded concepts, relationships, measures, model import/export, governed result definitions, exact readback, and rollback boundaries.
+nvidia-ontology-management inspects, models, manages, and safely publishes through the current Auto Ontology semantic layer, including source-grounded concepts, relationships, measures, model import/export, governed result definitions, exact readback, and rollback boundaries.
 
 This skill is for research and development. The representative pilot below is not full catalog certification.
 
 ## Owner
 
-NVIDIA Ontology Team
+Auto Ontology Team
 
 ## License/Terms of Use
 
@@ -25,7 +25,7 @@ Global
 ### Requirements / Dependencies
 
 Requires API Key or External Credential: Yes
-Credential Type(s): GSF API token (`x-api-key`) or signed-in session / SSO bearer with `catalog:edit` (and `modelInterchange:*` / `semanticCompilation:manage` for those operations)
+Credential Type(s): Auto Ontology API token (`x-api-key`) or signed-in session / SSO bearer with `catalog:edit` (and `modelInterchange:*` / `semanticCompilation:manage` for those operations)
 
 Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate.
 
@@ -67,7 +67,7 @@ SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker
 
 ## Evaluation Tasks
 
-One representative case from 13 candidates: `ont-eval-013-composed-lifecycle`.
+One representative case from 13 candidates: `management-eval-013-composed-lifecycle`.
 
 ## Evaluation Results
 
@@ -84,7 +84,7 @@ Representative Tier-3 pilot:
 | Behavior adherence | 0.75 | 0.25 | +0.50 |
 | Overall | 0.667 | 0.245 | **+0.422** |
 
-This one-attempt smoke test demonstrates positive lift, not statistical reliability. The fixture intentionally had no reviewed artifact, credentials, or live GSF deployment, so fail-closed behavior prevented lifecycle completion. The security grader also counted two localhost read-only probes as network-exfiltration warnings. A fixture-backed lifecycle run and the full 13-case matrix remain pending.
+This one-attempt smoke test demonstrates positive lift, not statistical reliability. The fixture intentionally had no reviewed artifact, credentials, or live Auto Ontology deployment, so fail-closed behavior prevented lifecycle completion. The security grader also counted two localhost read-only probes as network-exfiltration warnings. A fixture-backed lifecycle run and the full 13-case matrix remain pending.
 
 ## Ethical Considerations
 

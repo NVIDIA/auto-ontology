@@ -61,7 +61,7 @@ Policies need authority, applicability, constrained fields, permitted changes,
 and required identities. Descriptive text is not executable procedure or
 permission to act.
 
-## Map the design to supported GSF operations
+## Map the design to supported Auto Ontology operations
 
 Use the smallest supported change:
 
@@ -70,7 +70,7 @@ Use the smallest supported change:
 - use scoped native model export/import for concept population or relationship
   changes.
 
-GSF has no direct public create-empty-Term endpoint and no complete direct
+Auto Ontology has no direct public create-empty-Term endpoint and no complete direct
 structural relationship mutation workflow. Do not invent one. If the requested
 design cannot be expressed through the installed revision's public API, return
 a model gap instead of weakening the design.

@@ -1,5 +1,5 @@
 schema_version: 1
-skill: nvidia-ontology-agent
+skill: nvidia-ontology-query
 role: specialist
 workflows:
   inspect_readiness:
@@ -65,5 +65,5 @@ fail_closed_when:
   - empty or null output is being treated as zero without definition
   - a result is incomplete or invalid but the requested claim requires completeness
 handoffs:
-  - nvidia-ontology for missing definitions model corrections or publication
-  - nvidia-ontology-install for deployment connection or compilation gaps
+  - nvidia-ontology-management for missing definitions model corrections or publication
+  - nvidia-ontology-setup for deployment connection or compilation gaps

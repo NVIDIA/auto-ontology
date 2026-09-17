@@ -1,15 +1,14 @@
 ---
-name: nvidia-ontology-install
+name: nvidia-ontology-setup
 version: "0.2.0"
 description: >-
-  Install or troubleshoot NVIDIA Ontology's GSF runtime. Use for Docker Compose,
+  Set up or troubleshoot the Auto Ontology runtime. Use for Docker Compose,
   local or Helm setup, and MCP connection to an existing deployment.
 license: Apache-2.0
 metadata:
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
-    - gsf
     - install
     - docker
     - helm
@@ -17,11 +16,11 @@ metadata:
     - troubleshooting
 ---
 
-# NVIDIA Ontology installation
+# Auto Ontology setup
 
 ## Purpose
 
-Bring up the current GSF implementation, troubleshoot it, or connect an agent
+Bring up the current Auto Ontology implementation, troubleshoot it, or connect an agent
 to an instance that is already running. Do not invent a second installer:
 invoke the commands in the repository-root `README.md` and
 `dev_tools/setup_env.sh`. Typed setup, connection, ingestion, compilation, and
@@ -39,7 +38,7 @@ Ask these if not already clear. Do not guess a default and emit a command.
 
 1. **Target** — full Docker Compose stack, local `--dev` (infra in Docker, apps
    on the host), `--ds` (frontend in Docker, FastAPI on the host), Helm /
-   Kubernetes, or “GSF is already up, I only need MCP”?
+   Kubernetes, or “Auto Ontology is already up, I only need MCP”?
 2. **NVIDIA NIM key** — is `DEFAULT_MODELS_API_KEY` (or `NVIDIA_API_KEY`) set?
    Chat and ingest need it.
 3. **Source database** — Postgres, Snowflake, Databricks, or DuckDB connection
@@ -51,23 +50,23 @@ Ask these if not already clear. Do not guess a default and emit a command.
 
 | Script | Purpose | Arguments |
 | --- | --- | --- |
-| `scripts/log_install.sh` | Run and redact-log installation or troubleshooting commands | Optional `--model ID`, then `-- COMMAND [ARGS...]` |
+| `scripts/log_setup.sh` | Run and redact-log installation or troubleshooting commands | Optional `--model ID`, then `-- COMMAND [ARGS...]` |
 
-## Install logging (mandatory)
+## Setup logging (mandatory)
 
 Invoke the script through the shell available to the agent. Wrap **every**
 install, compose, helm, and troubleshooting command with
-[`scripts/log_install.sh`](scripts/log_install.sh) so the session is
+[`scripts/log_setup.sh`](scripts/log_setup.sh) so the session is
 debuggable. Pass the model id when the harness knows it:
 
 ```bash
-# from the GSF repository root
-./skills/nvidia-ontology-install/scripts/log_install.sh --model "$NVIDIA_ONTOLOGY_INSTALL_MODEL" -- \
+# from the Auto Ontology repository root
+./skills/nvidia-ontology-setup/scripts/log_setup.sh --model "$NVIDIA_ONTOLOGY_SETUP_MODEL" -- \
   ./dev_tools/setup_env.sh
 ```
 
 The script appends timestamp, model, cwd, the command (with secret flags
-redacted) and redacted env, and exit code to `.nvidia-ontology-install.log` (gitignored). Do not
+redacted) and redacted env, and exit code to `.nvidia-ontology-setup.log` (gitignored). Do not
 restate flags in this skill; log what actually ran.
 
 ## Prerequisites for local installation
@@ -94,10 +93,10 @@ uv sync
 
 ## Local: full Compose stack
 
-Preferred when the user wants a running GSF without iterating on the code.
+Preferred when the user wants a running Auto Ontology without iterating on the code.
 
 ```bash
-./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh
+./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh
 # equivalent: docker compose up -d --build
 ```
 
@@ -117,7 +116,7 @@ service, runs the one-shot migrate job, and starts the app.
 Infra only (Postgres, pgAdmin, ingestion). You run Next.js and FastAPI:
 
 ```bash
-./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --dev
+./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --dev
 ```
 
 Then two terminals:
@@ -135,7 +134,7 @@ reload (what the container runs).
 ## Local: `--ds` (frontend in Docker, API on the host)
 
 ```bash
-./skills/nvidia-ontology-install/scripts/log_install.sh -- ./dev_tools/setup_env.sh --ds
+./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --ds
 uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
@@ -155,7 +154,7 @@ Do not paste Helm credentials into the conversation. Point at repository-root
 `postgresPassword`, and `connectionStrings`. This skill does not cover Astra
 GitOps.
 
-## GSF is already up — MCP only
+## Auto Ontology is already up — MCP only
 
 Do not reinstall. Point `GSF_API_URL` at the **web app** (Compose UI is
 `:3000`, not FastAPI `:3001`):
@@ -166,7 +165,7 @@ GSF_API_URL=http://localhost:3000 uvx --from "git+https://github.com/NVIDIA/GSF.
 
 Until the package is on PyPI this needs GitHub credentials that can read
 `NVIDIA/GSF`. Client config uses the MCP server URL with a `/mcp` suffix.
-People sign in through GSF; do not put a token on the MCP server.
+People sign in through Auto Ontology; do not put a token on the MCP server.
 
 Confirm the deployment is new enough to be an authorization server:
 
@@ -211,6 +210,6 @@ configuration. Log the command and redact secrets before sharing evidence.
 
 - [troubleshooting.md](references/troubleshooting.md)
 - [runtime-contract.yaml](assets/runtime-contract.yaml)
-- `nvidia-ontology-agent` — call GSF once it is running
-- `nvidia-ontology` — edit the semantic layer
-- `CLAUDE.md` — maintain GSF itself
+- `nvidia-ontology-query` — call Auto Ontology once it is running
+- `nvidia-ontology-management` — edit the semantic layer
+- `CLAUDE.md` — maintain Auto Ontology itself

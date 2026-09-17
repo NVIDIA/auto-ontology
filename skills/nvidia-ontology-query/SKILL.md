@@ -1,8 +1,8 @@
 ---
-name: nvidia-ontology-agent
+name: nvidia-ontology-query
 version: "0.2.0"
 description: >-
-  Query NVIDIA Ontology through GSF and validate generated SQL, rows, and
+  Query Auto Ontology and validate generated SQL, rows, and
   answers. Use for MCP or REST access, readiness, authentication, conversations,
   and grounded questions.
 license: Apache-2.0
@@ -10,31 +10,30 @@ metadata:
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
-    - gsf
     - mcp
     - api
     - agents
     - aiq
 ---
 
-# NVIDIA Ontology agent usage
+# Auto Ontology grounded queries
 
 ## Purpose
 
-Call the current GSF implementation from an agent without prescribing a harness,
-SDK, or LangGraph template. Typed workflow artifacts, statuses, gates, and
-handoffs are in [runtime-contract.yaml](assets/runtime-contract.yaml).
+Query the current Auto Ontology implementation from an agent without prescribing a
+harness, SDK, or LangGraph template. Typed workflow artifacts, statuses, gates,
+and handoffs are in [runtime-contract.yaml](assets/runtime-contract.yaml).
 
 ## Prerequisites
 
-Use a running GSF deployment and an authenticated MCP or REST client. If GSF is
-not running, use `nvidia-ontology-install` first.
+Use a running Auto Ontology deployment and an authenticated MCP or REST client. If Auto Ontology is
+not running, use `nvidia-ontology-setup` first.
 
 ## Limitations
 
 This skill reads and validates answers. It does not expose FastAPI directly,
 write semantic definitions, publish governed results, or provide a raw-schema
-browser. Hand mutations and publication to `nvidia-ontology`.
+browser. Hand mutations and publication to `nvidia-ontology-management`.
 
 ## Instructions
 
@@ -83,12 +82,12 @@ Auth (any of these; resolved in one place):
 - Browser session cookie
 - API token: `x-api-key: $GSF_API_TOKEN` (`Authorization: Bearer` works for
   `gsf_…` tokens too). Token acts as its owner.
-- GSF-issued OAuth access token (MCP sign-in)
+- Auto Ontology-issued OAuth access token (MCP sign-in)
 - SSO id token (`Authorization: Bearer <jwt>`), e.g. AI-Q — see
   [stack.md](references/stack.md)
 
 Shapes: `docs/openapi/gsf-api.json`. Do not scrape all ~87 operations. A write
-request hands off to `nvidia-ontology`; this skill does not turn a read-only
+request hands off to `nvidia-ontology-management`; this skill does not turn a read-only
 question into a mutation.
 
 ### Chat
@@ -102,7 +101,7 @@ then `[DONE]`. Permission `chat:use`.
   **`409 Conversation in progress`**.
 - A 404 on a conversation id means it belongs to another user.
 
-Python (from the GSF README; no extra SDK):
+Python (from the Auto Ontology README; no extra SDK):
 
 ```python
 import os
@@ -111,10 +110,10 @@ import requests
 session = requests.Session()
 session.headers["x-api-key"] = os.environ["GSF_API_TOKEN"]
 
-terms = session.get("https://gsf.example.com/api/terms").json()
+terms = session.get("https://ontology.example.com/api/terms").json()
 
 answer = session.post(
-    "https://gsf.example.com/api/chat/completions",
+    "https://ontology.example.com/api/chat/completions",
     json={"question": "How many orders shipped last week?"},
 )
 # response is SSE, not a single JSON object
@@ -132,7 +131,7 @@ MCP first. REST fallback:
 - `GET /api/exploration/tables/{table_id}/details`
 - `GET /api/exploration/graph`
 
-Writes and compile reset: `nvidia-ontology`.
+Writes and compile reset: `nvidia-ontology-management`.
 
 ## Validate claim-bearing answers
 
@@ -147,7 +146,7 @@ than a stronger claim.
 
 `ask_question` / chat returned nothing useful → `check_readiness` (or
 `GET /api/semantic-compilation/status`) before rewriting the question. A
-named database is not proof SQL can execute. See `nvidia-ontology-install`
+named database is not proof SQL can execute. See `nvidia-ontology-setup`
 troubleshooting.
 
 ## Examples
@@ -169,5 +168,5 @@ conversation ownership before retrying.
   what partners wire)
 - [query-validation.md](references/query-validation.md) — material intent, SQL,
   rows, and answer checks
-- `nvidia-ontology` — model, modify, and publish through the layer
-- `nvidia-ontology-install` — bring-up and MCP OAuth discovery
+- `nvidia-ontology-management` — model, modify, and publish through the layer
+- `nvidia-ontology-setup` — bring-up and MCP OAuth discovery

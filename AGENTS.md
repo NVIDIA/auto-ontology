@@ -4,41 +4,41 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# AGENTS.md — NVIDIA Ontology agent entry point
+# AGENTS.md — Auto Ontology agent entry point
 
-Skills that teach an agent how to **set up** the current GSF implementation and
+Skills that teach an agent how to **set up** the current Auto Ontology implementation and
 **use** its ontology layer. They live in **`skills/`** (repo root), one directory
 per skill, under the durable `nvidia-ontology*` namespace.
 
-This file is for developers bringing GSF up and partners embedding it in an
-agent harness. GSF **maintainers** (build, test, schema, frontend conventions)
+This file is for developers bringing Auto Ontology up and partners embedding it in an
+agent harness. Auto Ontology **maintainers** (build, test, schema, frontend conventions)
 stay on [`CLAUDE.md`](./CLAUDE.md). Do not fold those conventions into these
 skills.
 
 ## Which skill to read
 
-- [`skills/nvidia-ontology-install/`](./skills/nvidia-ontology-install/) — local Compose, `--dev`,
-  Helm pointer, MCP against an already-running instance, install logging,
-  troubleshooting. Start here when GSF is not up yet or something failed
+- [`skills/nvidia-ontology-setup/`](./skills/nvidia-ontology-setup/) — local Compose, `--dev`,
+  Helm pointer, MCP against an already-running instance, setup logging, and
+  troubleshooting. Start here when Auto Ontology is not up yet or something failed
   during bring-up.
-- [`skills/nvidia-ontology/`](./skills/nvidia-ontology/) — inspect, model,
+- [`skills/nvidia-ontology-management/`](./skills/nvidia-ontology-management/) — inspect, model,
   **modify**, and safely publish through glossary terms, SQL attributes,
   semantic relationships, model YAML import/export, and governed result
   definitions. MCP cannot write; this skill covers the approved write paths.
-- [`skills/nvidia-ontology-agent/`](./skills/nvidia-ontology-agent/) — how an
-  agent calls GSF (MCP first, REST fallback), discovers meaning through the
-  semantic layer, and validates SQL, rows, and answers. Start here when GSF is
+- [`skills/nvidia-ontology-query/`](./skills/nvidia-ontology-query/) — how an
+  agent calls Auto Ontology (MCP first, REST fallback), discovers meaning through the
+  semantic layer, and validates SQL, rows, and answers. Start here when Auto Ontology is
   already deployed.
 
 ## Workflow ownership and handoffs
 
 | User action | Owning skill |
 | --- | --- |
-| Install, configure, connect, ingest, compile, prove readiness | `nvidia-ontology-install` |
-| Inspect meaning and semantic relationships | `nvidia-ontology` |
-| Design concepts, mappings, relationships, measures, units, grain, and policies | `nvidia-ontology` → `references/modeling.md` |
-| Apply, verify, certify honestly, publish, and roll back | `nvidia-ontology` → `references/publication.md` |
-| Ask descriptive or diagnostic questions and validate SQL, rows, and prose | `nvidia-ontology-agent` → `references/query-validation.md` |
+| Install, configure, connect, ingest, compile, prove readiness | `nvidia-ontology-setup` |
+| Inspect meaning and semantic relationships | `nvidia-ontology-management` |
+| Design concepts, mappings, relationships, measures, units, grain, and policies | `nvidia-ontology-management` → `references/modeling.md` |
+| Apply, verify, certify honestly, publish, and roll back | `nvidia-ontology-management` → `references/publication.md` |
+| Ask descriptive or diagnostic questions and validate SQL, rows, and prose | `nvidia-ontology-query` → `references/query-validation.md` |
 
 The composed lifecycle is install/connect/readiness → inspect/model → staged
 apply/readback → query validation → governed publication → fresh query readback.
@@ -69,21 +69,21 @@ and build.nvidia.com/skills. That pipeline requires, per skill:
 
 - `SKILL.md`, `skill-card.md`, `evals/evals.json` (present here)
 - `skill.oms.sig` — NVIDIA OMS signature (not generated here; do not fabricate)
-- a Tier-3 eval run that fills the skill-card tables (not run here)
+- a Tier-3 eval run that fills the skill-card tables (representative pilots are recorded; repeated full-matrix runs remain pending)
 - a `components.d/nvidia-ontology.yml` entry in **nvidia/skills** registering:
 
 ```yaml
-name: NVIDIA Ontology
+name: Auto Ontology
 repo: NVIDIA/GSF
 skills:
-  - path: skills/nvidia-ontology-install/
-    catalog_dir: nvidia-ontology-install
-  - path: skills/nvidia-ontology/
-    catalog_dir: nvidia-ontology
-  - path: skills/nvidia-ontology-agent/
-    catalog_dir: nvidia-ontology-agent
+  - path: skills/nvidia-ontology-setup/
+    catalog_dir: nvidia-ontology-setup
+  - path: skills/nvidia-ontology-management/
+    catalog_dir: nvidia-ontology-management
+  - path: skills/nvidia-ontology-query/
+    catalog_dir: nvidia-ontology-query
 ```
 
 Until that lands, agents use the copies in this checkout. Skills must stay
 free of staging hostnames, cluster names, Vault paths, and credentials —
-the catalog is public even when GSF itself is access-restricted.
+the catalog is public even when Auto Ontology itself is access-restricted.

@@ -20,14 +20,14 @@ event.
 
 - **Receipt only:** retain validated artifacts locally when no approved writer
   exists. Report explicitly that nothing was published.
-- **Native semantic model:** use scoped GSF model export/import for Terms,
+- **Native semantic model:** use scoped Auto Ontology model export/import for Terms,
   attributes, represented tables, and semantic relationships.
 - **Reusable definition:** use a validated CustomAnalysis for supported SQL or a
   PqlAnalysis for supported PQL. These store definitions, not arbitrary result
   rows.
 - **Governed result table:** write immutable, keyed result partitions to an
-  approved source table outside GSF, then ingest and model that table for reuse.
-  GSF does not provide a generic MCP or REST endpoint for arbitrary result-row
+  approved source table outside Auto Ontology, then ingest and model that table for reuse.
+  Auto Ontology does not provide a generic MCP or REST endpoint for arbitrary result-row
   writeback.
 
 Do not use conversation persistence as a result store. If none of the modes can
@@ -95,6 +95,6 @@ result, destination or definition ID, payload/artifact hash, exact before/after
 diff, row/key/hash verification, compilation identity, post-write SQL and rows,
 and rollback target. Never retain tokens, passwords, or connection strings.
 
-Current GSF certification fields are not an atomic review/promotion system.
+Current Auto Ontology certification fields are not an atomic review/promotion system.
 Until that product lifecycle exists, describe the reviewed state accurately and
 do not claim atomic certification, promotion, supersession, or rollback.

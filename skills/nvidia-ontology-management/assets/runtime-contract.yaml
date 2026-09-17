@@ -1,5 +1,5 @@
 schema_version: 1
-skill: nvidia-ontology
+skill: nvidia-ontology-management
 role: specialist
 workflows:
   inspect:
@@ -76,5 +76,5 @@ fail_closed_when:
   - exact readback differs from the reviewed change
   - no approved writer exists for durable result rows
 handoffs:
-  - nvidia-ontology-install for deployment connection ingestion or readiness gaps
-  - nvidia-ontology-agent for positive and negative query readback
+  - nvidia-ontology-setup for deployment connection ingestion or readiness gaps
+  - nvidia-ontology-query for positive and negative query readback

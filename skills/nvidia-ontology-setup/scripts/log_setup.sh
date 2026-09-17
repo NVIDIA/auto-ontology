@@ -3,24 +3,24 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Append-only install log. Wrap the real command; do not invent flags here.
+# Append-only setup log. Wrap the real command; do not invent flags here.
 #
-#   log_install.sh [--model NAME] -- command [args...]
-#   NVIDIA_ONTOLOGY_INSTALL_MODEL=... NVIDIA_ONTOLOGY_INSTALL_LOG=/tmp/gsf.log log_install.sh -- uv sync
+#   log_setup.sh [--model NAME] -- command [args...]
+#   NVIDIA_ONTOLOGY_SETUP_MODEL=... NVIDIA_ONTOLOGY_SETUP_LOG=/tmp/ontology-setup.log log_setup.sh -- uv sync
 
 set -euo pipefail
 
 usage() {
 	cat <<'EOF'
 Usage:
-  log_install.sh [--model NAME] -- command [args...]
+  log_setup.sh [--model NAME] -- command [args...]
 
 Appends timestamp, optional model, cwd, the redacted command, redacted env,
-and exit code to .nvidia-ontology-install.log at the git repo root (or $NVIDIA_ONTOLOGY_INSTALL_LOG).
+and exit code to .nvidia-ontology-setup.log at the git repo root (or $NVIDIA_ONTOLOGY_SETUP_LOG).
 EOF
 }
 
-MODEL="${NVIDIA_ONTOLOGY_INSTALL_MODEL:-}"
+MODEL="${NVIDIA_ONTOLOGY_SETUP_MODEL:-}"
 while [[ $# -gt 0 ]]; do
 	case "$1" in
 	--model)
@@ -46,12 +46,12 @@ if [[ $# -eq 0 ]]; then
 	exit 2
 fi
 
-if [[ -n "${NVIDIA_ONTOLOGY_INSTALL_LOG:-}" ]]; then
-	LOG_FILE="$NVIDIA_ONTOLOGY_INSTALL_LOG"
+if [[ -n "${NVIDIA_ONTOLOGY_SETUP_LOG:-}" ]]; then
+	LOG_FILE="$NVIDIA_ONTOLOGY_SETUP_LOG"
 elif ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
-	LOG_FILE="$ROOT/.nvidia-ontology-install.log"
+	LOG_FILE="$ROOT/.nvidia-ontology-setup.log"
 else
-	LOG_FILE="$PWD/.nvidia-ontology-install.log"
+	LOG_FILE="$PWD/.nvidia-ontology-setup.log"
 fi
 
 # Match env names and Helm camelCase (defaultModelsApiKey, connectionStrings).
