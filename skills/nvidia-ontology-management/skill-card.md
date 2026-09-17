@@ -76,13 +76,13 @@ Representative Tier-3 pilot:
 | Metric | With skill | Baseline | Delta |
 | --- | ---: | ---: | ---: |
 | Pass@1 | 1.00 | 0.00 | +1.00 |
-| Security | 0.50 | 0.00 | +0.50 |
+| Security | 0.50 | 1.00 | -0.50 |
 | Skill execution | 1.00 | 0.50 | +0.50 |
-| Skill efficiency | 0.75 | 0.268 | +0.482 |
-| Accuracy | 0.80 | 0.40 | +0.40 |
-| Goal accuracy | 0.20 | 0.05 | +0.15 |
-| Behavior adherence | 0.75 | 0.25 | +0.50 |
-| Overall | 0.667 | 0.245 | **+0.422** |
+| Skill efficiency | 0.759 | 0.00 | +0.759 |
+| Accuracy | 0.80 | 0.60 | +0.20 |
+| Goal accuracy | 0.10 | 0.10 | 0.00 |
+| Behavior adherence | 0.75 | 0.50 | +0.25 |
+| Overall | 0.652 | 0.450 | **+0.202** |
 
 This one-attempt smoke test demonstrates positive lift, not statistical reliability. The fixture intentionally had no reviewed artifact, credentials, or live Auto Ontology deployment, so fail-closed behavior prevented lifecycle completion. The security grader also counted two localhost read-only probes as network-exfiltration warnings. A fixture-backed lifecycle run and the full 13-case matrix remain pending.
 

@@ -71,12 +71,12 @@ Representative Tier-3 pilot:
 | --- | ---: | ---: | ---: |
 | Pass@1 | 1.00 | 0.00 | +1.00 |
 | Security | 1.00 | 1.00 | 0.00 |
-| Skill execution | 1.00 | 0.00 | +1.00 |
+| Skill execution | 1.00 | 0.50 | +0.50 |
 | Skill efficiency | 1.00 | 0.00 | +1.00 |
-| Accuracy | 1.00 | 0.40 | +0.60 |
+| Accuracy | 1.00 | 0.60 | +0.40 |
 | Goal accuracy | 1.00 | 0.20 | +0.80 |
 | Behavior adherence | 1.00 | 0.25 | +0.75 |
-| Overall | 1.00 | 0.308 | **+0.692** |
+| Overall | 1.00 | 0.425 | **+0.575** |
 
 This one-attempt smoke test demonstrates activation and behavior attribution, not statistical reliability. The full 7-case matrix and repeated attempts remain pending.
 
