@@ -2,6 +2,11 @@
 
 Generative Semantic Fabric adds the structured-data ontology layer to any partner or NVidia agent harness  interface, like NVIDIA AI-Q Claws, etc
 
+## Benchmarks
+
+To run a text-to-SQL benchmark such as BIRD, refer to the
+[ontology SQL evaluation repository](https://github.com/NVIDIA/ontology-sql-eval/).
+
 > **Licensing & contributions.** GSF is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
 > bundled, linked, or otherwise used by this project are listed in
