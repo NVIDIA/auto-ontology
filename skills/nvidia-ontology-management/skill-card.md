@@ -63,28 +63,28 @@ Other properties: Does not modify MCP; unsupported writes stop at an explicit re
 
 ## Evaluation Agents Used
 
-SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
+SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One attempt per case and condition used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
 
 ## Evaluation Tasks
 
-One representative case from 13 candidates: `management-eval-013-composed-lifecycle`.
+All 13 cases in `evals/evals.json`.
 
 ## Evaluation Results
 
-Representative Tier-3 pilot:
+Full one-attempt Tier-3 matrix:
 
 | Metric | With skill | Baseline | Delta |
 | --- | ---: | ---: | ---: |
-| Pass@1 | 1.00 | 0.00 | +1.00 |
-| Security | 0.50 | 1.00 | -0.50 |
-| Skill execution | 1.00 | 0.50 | +0.50 |
-| Skill efficiency | 0.759 | 0.00 | +0.759 |
-| Accuracy | 0.80 | 0.60 | +0.20 |
-| Goal accuracy | 0.10 | 0.10 | 0.00 |
-| Behavior adherence | 0.75 | 0.50 | +0.25 |
-| Overall | 0.652 | 0.450 | **+0.202** |
+| Pass@1 | 1.000 | 0.462 | +0.538 |
+| Security | 0.923 | 1.000 | -0.077 |
+| Skill execution | 0.962 | 0.481 | +0.481 |
+| Skill efficiency | 0.817 | 0.117 | +0.700 |
+| Accuracy | 0.831 | 0.508 | +0.323 |
+| Goal accuracy | 0.656 | 0.389 | +0.268 |
+| Behavior adherence | 0.750 | 0.397 | +0.353 |
+| Overall | 0.823 | 0.482 | **+0.341** |
 
-This one-attempt smoke test demonstrates positive lift, not statistical reliability. The fixture intentionally had no reviewed artifact, credentials, or live Auto Ontology deployment, so fail-closed behavior prevented lifecycle completion. The security grader also counted two localhost read-only probes as network-exfiltration warnings. A fixture-backed lifecycle run and the full 13-case matrix remain pending.
+Provider and container failures initially left trials unscored. Those case-condition pairs were rerun with the same configuration at lower concurrency and combined with the successful attempts. Localhost read-only probes account for the small security delta. The matrix demonstrates broad positive lift, but repeated attempts and a fixture-backed live lifecycle remain pending.
 
 ## Ethical Considerations
 

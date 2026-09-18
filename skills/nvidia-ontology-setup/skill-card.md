@@ -57,28 +57,28 @@ Other properties: `.nvidia-ontology-setup.log` is gitignored; do not commit it
 
 ## Evaluation Agents Used
 
-SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One with-skill and one baseline attempt used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
+SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One attempt per case and condition used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
 
 ## Evaluation Tasks
 
-One representative case from 7 candidates: `setup-eval-001-underspecified`.
+All 7 cases in `evals/evals.json`.
 
 ## Evaluation Results
 
-Representative Tier-3 pilot:
+Full one-attempt Tier-3 matrix:
 
 | Metric | With skill | Baseline | Delta |
 | --- | ---: | ---: | ---: |
-| Pass@1 | 1.00 | 0.00 | +1.00 |
-| Security | 1.00 | 1.00 | 0.00 |
-| Skill execution | 1.00 | 0.50 | +0.50 |
-| Skill efficiency | 1.00 | 0.00 | +1.00 |
-| Accuracy | 1.00 | 0.60 | +0.40 |
-| Goal accuracy | 1.00 | 0.20 | +0.80 |
-| Behavior adherence | 1.00 | 0.25 | +0.75 |
-| Overall | 1.00 | 0.425 | **+0.575** |
+| Pass@1 | 1.000 | 0.286 | +0.714 |
+| Security | 1.000 | 1.000 | 0.000 |
+| Skill execution | 0.991 | 0.536 | +0.455 |
+| Skill efficiency | 0.805 | 0.106 | +0.699 |
+| Accuracy | 0.857 | 0.543 | +0.314 |
+| Goal accuracy | 0.747 | 0.336 | +0.411 |
+| Behavior adherence | 0.869 | 0.393 | +0.476 |
+| Overall | 0.878 | 0.486 | **+0.393** |
 
-This one-attempt smoke test demonstrates activation and behavior attribution, not statistical reliability. The full 7-case matrix and repeated attempts remain pending.
+Provider and container failures initially left trials unscored. Those case-condition pairs were rerun with the same configuration at lower concurrency and combined with the successful attempts. The matrix demonstrates broad positive lift, but repeated attempts remain pending.
 
 ## Ethical Considerations
 
