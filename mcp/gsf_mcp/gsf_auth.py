@@ -40,10 +40,12 @@ from gsf_mcp.config import Settings
 
 logger = get_logger(__name__)
 
-# Better Auth's `mcp` plugin exposes this; it looks a grant up by its access
-# token and refuses an expired one. The `userinfo_endpoint` its own discovery
-# document advertises is not implemented, so this is the only way to ask.
-SESSION_PATH = "/api/auth/mcp/get-session"
+# Better Auth 1.7's OAuth Provider validates a bearer at UserInfo without
+# requiring this resource server to hold client credentials. GSF adds the
+# issuing client and granted scope as private claims for FastMCP's AccessToken.
+USERINFO_PATH = "/api/auth/oauth2/userinfo"
+CLIENT_ID_CLAIM = "urn:gsf:oauth:client_id"
+SCOPE_CLAIM = "urn:gsf:oauth:scope"
 
 
 class GsfTokenVerifier(TokenVerifier):
@@ -77,35 +79,34 @@ class GsfTokenVerifier(TokenVerifier):
             transport=self._transport,
         ) as client:
             response = await client.get(
-                SESSION_PATH, headers={"Authorization": f"Bearer {token}"}
+                USERINFO_PATH, headers={"Authorization": f"Bearer {token}"}
             )
 
         if response.status_code >= 500:
             response.raise_for_status()
 
-        # An unknown or expired token is answered with a literal `null` body and
-        # a 200, not an error status. Anything unparseable is treated the same
-        # way: a body we cannot read is not a grant, and raising here would turn
-        # a refusal into a server error.
+        # Unknown, expired, or revoked tokens receive a 4xx response. Anything
+        # unparseable is treated the same way: a body we cannot read is not an
+        # identity, and raising here would turn a refusal into a server error.
         try:
-            grant = response.json() if response.status_code == 200 else None
+            user_info = response.json() if response.status_code == 200 else None
         except ValueError:
-            grant = None
+            user_info = None
 
-        if not isinstance(grant, dict) or not grant.get("userId"):
+        if not isinstance(user_info, dict) or not user_info.get("sub"):
             logger.debug("GSF rejected an access token")
             return None
 
         # Space-separated per RFC 6749, and absent when the grant carries none.
-        scopes = str(grant.get("scopes") or "").split()
+        scopes = str(user_info.get(SCOPE_CLAIM) or "").split()
 
         return AccessToken(
             token=token,
             # The client that was granted the token, which FastMCP uses to
             # attribute the session. Registration guarantees it.
-            client_id=str(grant.get("clientId") or "unknown"),
+            client_id=str(user_info.get(CLIENT_ID_CLAIM) or "unknown"),
             scopes=scopes,
-            subject=str(grant["userId"]),
+            subject=str(user_info["sub"]),
         )
 
 
@@ -147,8 +148,10 @@ def gsf_access_token() -> str | None:
 
 
 __all__ = [
+    "CLIENT_ID_CLAIM",
     "GsfTokenVerifier",
-    "SESSION_PATH",
+    "SCOPE_CLAIM",
+    "USERINFO_PATH",
     "build_gsf_auth",
     "gsf_access_token",
 ]

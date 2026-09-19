@@ -29,7 +29,6 @@ from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.utils.llm_invoke import invoke_with_structured_output
 from gsf.retrieval.text_to_sql.base import BaseAgent
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -39,6 +38,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_general_prompt,
     create_sql_user_prompt,
+    format_authoritative_evidence,
     format_dialect_rules,
     format_dual_question_block,
 )
@@ -116,16 +116,11 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
-                has_evidence=True,
             )
         else:
             system_prompt = create_sql_general_prompt
 
         observation_block = ""
-        if evidence:
-            evidence_hints = build_evidence_hints_block(original_question, evidence)
-            if evidence_hints:
-                observation_block = f"\n{evidence_hints}\n"
 
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
@@ -147,7 +142,7 @@ class SQLFromTablesAgent(BaseAgent):
         messages = state["messages"] + [SystemMessage(content=system_prompt)]
         if evidence:
             messages.append(
-                SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+                SystemMessage(content=format_authoritative_evidence(evidence))
             )
         messages.append(HumanMessage(content=user_prompt))
 

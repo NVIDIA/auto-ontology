@@ -46,13 +46,13 @@ from gsf.retrieval.text_to_sql.state import (
 from gsf.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_authoritative_evidence,
     format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
     format_sql_examples_section,
     format_value_anchors_section,
 )
-from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
 
 logger = logging.getLogger(__name__)
@@ -201,11 +201,6 @@ class SQLFromCandidatesAgent(BaseAgent):
             glossary_section = format_glossary_section(state.get("glossary") or [])
             if glossary_section:
                 observation_block += f"\n{glossary_section}"
-            if evidence:
-                evidence_hints = build_evidence_hints_block(original_question, evidence)
-                if evidence_hints:
-                    observation_block += f"\n{evidence_hints}\n"
-
             # Build custom analyses section for user prompt
             ca_section = format_custom_analyses_section(custom_analyses)
 
@@ -275,14 +270,13 @@ class SQLFromCandidatesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
-                has_evidence=bool(evidence),
                 has_sql_examples=bool(sql_examples_section),
             )
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
             if evidence:
                 messages.append(
-                    SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+                    SystemMessage(content=format_authoritative_evidence(evidence))
                 )
             # Before the query patterns: anchors state what this database
             # contains, which constrains the SQL more tightly than precedent

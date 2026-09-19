@@ -27,12 +27,12 @@ def test_sanitize_uses_llm_display_names() -> None:
     raw = RawTableTermsResult(
         terms=[
             RawTermProposal(
-                name="Purchase Order",
+                name="PurchaseOrder",
                 description="A purchase order",
                 attributes=[
                     TermColumnRef(
                         source_column="amount",
-                        display_name="Total Amount",
+                        display_name="TotalAmount",
                     )
                 ],
             )

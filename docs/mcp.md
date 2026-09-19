@@ -89,9 +89,14 @@ restart signs nobody out. Permissions come from the account on every call rather
 than from the token, so changing a role, banning a user, or deleting a grant
 takes effect immediately.
 
-The tokens are opaque, so the server asks GSF to check each one. If GSF cannot be
-reached the call fails as an error rather than as "sign in again", so an outage
-does not send everyone into a login that cannot succeed either.
+The tokens are opaque, so the server asks GSF's OAuth UserInfo endpoint to check
+each one. That bearer-authenticated endpoint needs no client secret and checks
+expiry, revocation, client, and browser-session state on every call. The grant
+must include the `openid` scope (Better Auth's UserInfo requirement); GSF
+advertises it on the authorization server so clients that copy
+`scopes_supported` include it. If GSF cannot be reached the call fails as an
+error rather than as "sign in again", so an outage does not send everyone into a
+login that cannot succeed either.
 
 There is no way to configure a token for the server itself. One would make every
 caller act as its owner — their permissions, their conversation history — and
@@ -174,10 +179,10 @@ under `unverified` and the verdict stands on what could be checked.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `GSF_API_URL` | `http://localhost:3000` | Base URL of the GSF web app. |
+| `GSF_MCP_PUBLIC_URL` | `http://localhost:3003` | Public MCP origin, without `/mcp`. The frontend must receive the same value so issued tokens have the resource URL clients use. |
 
 Rarely needed: `GSF_MCP_HOST` and `GSF_MCP_PORT` (bind address and port, default
-`0.0.0.0:3003`), `GSF_MCP_PUBLIC_URL` (where callers reach this server, derived
-from those two), `GSF_MCP_TIMEOUT_S` and `GSF_MCP_CHAT_TIMEOUT_S` (request
+`0.0.0.0:3003`), `GSF_MCP_TIMEOUT_S` and `GSF_MCP_CHAT_TIMEOUT_S` (request
 timeouts, `30` and `900`), and `GSF_OPENAPI_SPEC` (override the spec tools are
 generated from).
 

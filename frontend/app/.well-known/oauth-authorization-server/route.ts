@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { oAuthDiscoveryMetadata } from 'better-auth/plugins';
+import { oauthProviderAuthServerMetadata } from '@better-auth/oauth-provider';
 import { auth } from '@/auth/auth';
 
 // Publishes GSF's OAuth authorization-server metadata (RFC 8414) so an MCP
@@ -14,4 +14,4 @@ import { auth } from '@/auth/auth';
 // redirected to /login, so discovery fails before it starts. `/.well-known` is
 // exempted from that gate in proxy.ts; the document is public by design and
 // contains no secrets.
-export const GET = oAuthDiscoveryMetadata(auth);
+export const GET = oauthProviderAuthServerMetadata(auth);

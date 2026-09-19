@@ -13,7 +13,12 @@ import httpx
 import pytest
 from mcp.server.auth.provider import AccessToken
 
-from gsf_mcp.gsf_auth import SESSION_PATH, GsfTokenVerifier
+from gsf_mcp.gsf_auth import (
+    CLIENT_ID_CLAIM,
+    SCOPE_CLAIM,
+    USERINFO_PATH,
+    GsfTokenVerifier,
+)
 
 API_URL = "https://gsf.example"
 TOKEN = "opaque-token"
@@ -30,14 +35,14 @@ def _verify(handler: Handler, token: str = TOKEN) -> AccessToken | None:
 
 def test_a_live_grant_identifies_its_owner() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == SESSION_PATH
+        assert request.url.path == USERINFO_PATH
         assert request.headers["Authorization"] == f"Bearer {TOKEN}"
         return httpx.Response(
             200,
             json={
-                "userId": "user-1",
-                "clientId": "client-9",
-                "scopes": "openid profile email",
+                "sub": "user-1",
+                CLIENT_ID_CLAIM: "client-9",
+                SCOPE_CLAIM: "openid profile email",
             },
         )
 
@@ -52,12 +57,9 @@ def test_a_live_grant_identifies_its_owner() -> None:
 
 
 def test_an_unknown_token_is_refused_not_an_error() -> None:
-    # Better Auth answers an expired or unknown token with a literal null body
-    # and a 200, so the status alone does not settle it.
+    # UserInfo rejects an expired or unknown bearer as invalid_token.
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200, content=b"null", headers={"content-type": "application/json"}
-        )
+        return httpx.Response(401, json={"error": "invalid_token"})
 
     assert _verify(handler) is None
 
@@ -71,14 +73,14 @@ def test_a_body_that_is_not_json_is_refused_not_a_crash() -> None:
 
 def test_a_grant_without_an_owner_is_refused() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"clientId": "client-9"})
+        return httpx.Response(200, json={CLIENT_ID_CLAIM: "client-9"})
 
     assert _verify(handler) is None
 
 
 def test_a_grant_carrying_no_scopes_still_verifies() -> None:
     def handler(_request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"userId": "user-1", "clientId": "c"})
+        return httpx.Response(200, json={"sub": "user-1", CLIENT_ID_CLAIM: "c"})
 
     access = _verify(handler)
 

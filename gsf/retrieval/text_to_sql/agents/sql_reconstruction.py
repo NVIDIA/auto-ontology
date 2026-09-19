@@ -38,8 +38,10 @@ from gsf.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
 from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.models import SQLGenerationModel
-from gsf.retrieval.text_to_sql.evidence_hints import build_evidence_hints_block
-from gsf.retrieval.text_to_sql.prompts import format_dual_question_block
+from gsf.retrieval.text_to_sql.prompts import (
+    format_authoritative_evidence,
+    format_dual_question_block,
+)
 from gsf.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -465,14 +467,6 @@ class SQLReconstructionAgent(BaseAgent):
         incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
-        # Debug-turn detector: coordinator.py::_apply_debug_seed sets this to
-        # "reconstruct_sql" to jump the graph straight to this node with a
-        # seeded error, and only pops it after the whole graph run finishes —
-        # so it stays true for every reconstruct_sql call within that same
-        # debug turn (including 2nd/3rd retries), not just the first one.
-        # Scopes the evidence re-surfacing below to debug turns only, so
-        # ordinary in-turn self-repair (pre-first-submission) is unaffected.
-        is_debug_turn = path_state.get("_resume_from") == "reconstruct_sql"
         # Evidence now arrives as its own state field rather than embedded in
         # the question text, so question_block never contains it and needs
         # no stripping.
@@ -611,32 +605,6 @@ class SQLReconstructionAgent(BaseAgent):
             path_state.get("attribute_join_paths"),
         )
 
-        evidence_section = ""
-        if evidence:
-            evidence_hints = build_evidence_hints_block(original_question, evidence)
-            if evidence_hints:
-                evidence_section = f"{evidence_hints}\n\n"
-
-        # Re-surface the Evidence body (already resolved during clarification)
-        # in its own labeled section instead of leaving it buried, unmarked,
-        # at the tail of question_block — several observed debug-turn
-        # reconstruction failures used a plausible-but-wrong formula, column,
-        # or threshold even though the correct one was sitting in this exact
-        # text. Debug-turn only (see is_debug_turn above); outside a debug
-        # turn this section stays empty (evidence is still injected as its
-        # own SystemMessage below, just without this extra emphasis).
-        raw_evidence_reminder_section = ""
-        raw_evidence = evidence if is_debug_turn else None
-        if raw_evidence:
-            raw_evidence_reminder_section = (
-                "\nEVIDENCE (already resolved during clarification — re-check "
-                f"before rewriting):\n{raw_evidence}\n\n"
-                "Verify your corrected SQL's columns, formula, and thresholds "
-                "satisfy this evidence exactly. Do not substitute a different "
-                "formula, column, or value than what's stated here unless it "
-                "directly conflicts with the validation error above.\n\n"
-            )
-
         # Anchor ambiguous-term interpretation across repair attempts: without
         # this, each reconstruction call independently re-derives things like
         # "recently" from scratch and silently drifts (e.g. 5 months → 4
@@ -666,7 +634,6 @@ class SQLReconstructionAgent(BaseAgent):
             "The following SQL contains an ERROR:\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
-            f"{raw_evidence_reminder_section}"
             f"{history_section}"
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "
@@ -681,7 +648,6 @@ class SQLReconstructionAgent(BaseAgent):
             "never wrong.\n"
             f"{tables_section}"
             f"{known_columns_section}"
-            f"{evidence_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "
@@ -691,7 +657,7 @@ class SQLReconstructionAgent(BaseAgent):
         messages = list(messages)
         if evidence:
             messages.append(
-                SystemMessage(content=f"## Authoritative Evidence\n{evidence}")
+                SystemMessage(content=format_authoritative_evidence(evidence))
             )
         messages.append(HumanMessage(content=error_prompt))
 

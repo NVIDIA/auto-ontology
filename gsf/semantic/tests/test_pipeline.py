@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import threading
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+from gsf.semantic.models import ProcessTableResult
 from gsf.semantic.pipeline import compile_semantic_layer
 
 
@@ -31,6 +34,40 @@ def test_compile_processes_all_tables(
 
     assert count == 2
     assert mock_process.call_count == 2
+
+
+@patch("gsf.semantic.pipeline.fetch_table_context")
+@patch("gsf.semantic.pipeline.load_domain_summary", return_value=None)
+@patch("gsf.semantic.pipeline.fetch_all_tables_without_term")
+def test_term_commits_follow_canonical_order_when_llm_completion_is_reversed(
+    mock_fetch_tables: MagicMock,
+    _mock_summary: MagicMock,
+    mock_fetch_ctx: MagicMock,
+) -> None:
+    mock_fetch_tables.return_value = [
+        {"id": "z-id", "name": "zeta", "schema_name": "sales"},
+        {"id": "a-id", "name": "alpha", "schema_name": "sales"},
+    ]
+    mock_fetch_ctx.return_value = {"columns": [{"name": "id"}], "fks": []}
+    zeta_ready = threading.Event()
+    commits: list[str] = []
+
+    def fake_process(
+        table: dict[str, Any], _ctx: dict[str, Any], **kwargs: Any
+    ) -> ProcessTableResult:
+        if table["name"] == "alpha":
+            assert zeta_ready.wait(timeout=2)
+        else:
+            zeta_ready.set()
+        with kwargs["commit_slot"]:
+            commits.append(table["name"])
+        return ProcessTableResult()
+
+    with patch("gsf.semantic.pipeline.process_table", side_effect=fake_process):
+        count = compile_semantic_layer("dbx")
+
+    assert count == 2
+    assert commits == ["alpha", "zeta"]
 
 
 @patch("gsf.semantic.pipeline.process_table")

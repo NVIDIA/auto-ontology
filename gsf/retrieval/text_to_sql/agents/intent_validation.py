@@ -36,6 +36,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
     create_intent_validation_prompt,
+    format_authoritative_evidence,
     format_custom_analyses_section,
 )
 from gsf.retrieval.text_to_sql.state import (
@@ -94,8 +95,18 @@ class IntentValidationModel(BaseModel):
             "do NOT add explanatory text like 'no aggregation issues'."
         ),
     )
+    evidence_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List every way the SQL violates Authoritative Evidence, including a "
+            "missing or substituted value, column/table mapping, filter, operator, "
+            "or formula. Leave EMPTY [] when all evidence instructions are followed."
+        ),
+    )
 
-    @field_validator("join_issues", "aggregation_issues", mode="before")
+    @field_validator(
+        "join_issues", "aggregation_issues", "evidence_issues", mode="before"
+    )
     @classmethod
     def _empty_string_means_no_issues(cls, v: Any) -> Any:
         """The model sometimes reports "no issues" as "" instead of [] — treat it as empty."""
@@ -186,6 +197,7 @@ class IntentValidationAgent(BaseAgent):
         original_question = get_original_question(state)
         processing_question = get_standalone_question(state)
         sanitized_question = get_question_for_processing(state)
+        evidence = state.get("evidence") or ""
 
         # Prefer the enriched snippets (name/description/sql) from preparation.
         # Fall back to the VDB custom_analyses list when enrichment is absent.
@@ -238,6 +250,7 @@ class IntentValidationAgent(BaseAgent):
             custom_analyses=custom_analyses,
             join_paths=join_paths,
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
+            has_evidence=bool(evidence),
         )
 
         system_prompt = (
@@ -245,10 +258,12 @@ class IntentValidationAgent(BaseAgent):
             if _JOINS_VALIDATED_ELSEWHERE
             else INTENT_VALIDATION_SYSTEM_PROMPT
         )
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=validation_prompt),
-        ]
+        messages = [SystemMessage(content=system_prompt)]
+        if evidence:
+            messages.append(
+                SystemMessage(content=format_authoritative_evidence(evidence))
+            )
+        messages.append(HumanMessage(content=validation_prompt))
 
         # Call LLM for validation
         try:
@@ -271,7 +286,9 @@ class IntentValidationAgent(BaseAgent):
                 path_state, _GRAPH_NODE_NAME, validation_result.reasoning.strip()
             )
 
-        if validation_result is None or validation_result.is_valid:
+        if validation_result is None or (
+            validation_result.is_valid and not validation_result.evidence_issues
+        ):
             self.logger.info("SQL validation passed (no critical issues)")
             return {
                 "decision": "intent_valid",
@@ -279,7 +296,9 @@ class IntentValidationAgent(BaseAgent):
             }
 
         has_real_issues = (
-            validation_result.join_issues or validation_result.aggregation_issues
+            validation_result.join_issues
+            or validation_result.aggregation_issues
+            or validation_result.evidence_issues
         )
         if not has_real_issues:
             self.logger.info(
@@ -304,6 +323,14 @@ class IntentValidationAgent(BaseAgent):
                 "\n\nCritical aggregation issues:\n"
                 + "\n".join(
                     f"  - {issue}" for issue in validation_result.aggregation_issues
+                )
+            )
+
+        if validation_result.evidence_issues:
+            error_parts.append(
+                "\n\nCritical evidence issues:\n"
+                + "\n".join(
+                    f"  - {issue}" for issue in validation_result.evidence_issues
                 )
             )
 

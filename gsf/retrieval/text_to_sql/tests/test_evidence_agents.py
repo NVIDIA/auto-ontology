@@ -53,9 +53,12 @@ def test_tables_agent_uses_state_evidence_as_authoritative_context(
         evidence="The time refers to events.duration LIKE 'M:SS%'.",
     )
 
-    assert "## Evidence Priority" in messages[0].content
     assert "## Authoritative Evidence" in messages[1].content
-    assert "events.duration LIKE '1:54%'" in messages[2].content
+    assert "MUST follow every instruction" in messages[1].content
+    assert messages[1].content.endswith(
+        "The time refers to events.duration LIKE 'M:SS%'."
+    )
+    assert "events.duration LIKE '1:54%'" not in messages[2].content
     assert "The time refers to" not in messages[2].content
 
 
@@ -71,6 +74,5 @@ def test_tables_agent_does_not_scan_question_for_evidence(
         evidence="",
     )
 
-    assert "## Evidence Priority" not in messages[0].content
     assert "## Authoritative Evidence" not in messages[1].content
-    assert "## Evidence-derived rules" not in messages[1].content
+    assert "MUST follow every instruction" not in messages[1].content

@@ -104,6 +104,9 @@ def test_reconstruction_uses_evidence_from_state(
     SQLReconstructionAgent().execute(state)
 
     prompt = captured_messages[-1].content
-    assert "## Authoritative Evidence" in captured_messages[-2].content
+    evidence_message = captured_messages[-2].content
+    assert "## Authoritative Evidence" in evidence_message
+    assert "MUST follow every instruction" in evidence_message
+    assert evidence_message.endswith("The time refers to events.duration LIKE 'M:SS%'.")
     assert "The time refers to" not in prompt
-    assert "events.duration LIKE '1:54%'" in prompt
+    assert "events.duration LIKE '1:54%'" not in prompt

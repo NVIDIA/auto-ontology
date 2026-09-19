@@ -65,6 +65,11 @@ spec:
             - name: APP_URL
               value: {{ .Values.appUrl | quote }}
             {{- end }}
+            {{- if .Values.mcpPublicUrl }}
+            # Public MCP origin. Better Auth binds tokens to its /mcp endpoint.
+            - name: GSF_MCP_PUBLIC_URL
+              value: {{ .Values.mcpPublicUrl | quote }}
+            {{- end }}
           readinessProbe:
             httpGet:
               path: /api/health

@@ -406,42 +406,51 @@ def test_update_of_a_missing_term_is_none(world) -> None:
     assert t.update_term("no-such-term", name="x") is None
 
 
-def test_merge_term_is_idempotent_and_links_the_table(world) -> None:
+def test_upsert_table_term_is_idempotent_for_one_table(world) -> None:
     world.table("orders")
-    first = t.merge_term(f"{world.prefix}-Order", "a purchase", world.tables["orders"])
-    second = t.merge_term(f"{world.prefix}-Order", "a purchase", world.tables["orders"])
-    assert first == second
 
-    links = store().query_read(
-        select(s.table__term.c.table_id).where(s.table__term.c.term_id == first)
+    first = t.upsert_table_term(
+        f"{world.prefix}-Order", "original", world.tables["orders"]
     )
-    assert len(links) == 1
-    store().query_write(s.term.delete().where(s.term.c.id == first))
+    second = t.upsert_table_term(
+        f"{world.prefix}-Order", "rebuilt", world.tables["orders"]
+    )
 
-
-def test_merge_term_overwrites_the_description(world) -> None:
-    """Unlike merge_column_attribute, which coalesces. Preserved, not fixed.
-
-    It means a semantic rebuild overwrites a hand-edited description — which is
-    deliberate: a rebuild is meant to be authoritative.
-    """
-    world.table("orders")
-    term = t.merge_term(f"{world.prefix}-Order", "original", world.tables["orders"])
-    t.merge_term(f"{world.prefix}-Order", "rebuilt", world.tables["orders"])
-
-    row = store().query_read(select(s.term.c.description).where(s.term.c.id == term))[0]
+    assert first is not None
+    assert first[1] == f"{world.prefix}-Order"
+    assert second == first
+    row = store().query_read(
+        select(s.term.c.description).where(s.term.c.id == first[0])
+    )[0]
     assert row["description"] == "rebuilt"
-    store().query_write(s.term.delete().where(s.term.c.id == term))
 
 
-def test_merge_term_writes_nothing_when_the_table_is_missing(world) -> None:
-    assert t.merge_term(f"{world.prefix}-Ghost", "x", "no-such-table") is None
-    assert (
-        store().query_read(
-            select(s.term.c.id).where(s.term.c.name == f"{world.prefix}-Ghost")
+def test_upsert_table_term_qualifies_only_a_cross_table_name_collision(world) -> None:
+    world.table("orders")
+    world.table("invoices")
+    proposed = f"{world.prefix}-Record"
+
+    first = t.upsert_table_term(proposed, "orders", world.tables["orders"])
+    second = t.upsert_table_term(proposed, "invoices", world.tables["invoices"])
+
+    assert first is not None
+    assert second is not None
+    assert first[1] == proposed
+    assert second[0] != first[0]
+    assert second[1] == f"{proposed} ({world.prefix}.public.invoices)"
+    links = store().query_read(
+        select(s.table__term.c.table_id, s.table__term.c.term_id).where(
+            s.table__term.c.term_id.in_([first[0], second[0]])
         )
-        == []
     )
+    assert {(row["table_id"], row["term_id"]) for row in links} == {
+        (world.tables["orders"], first[0]),
+        (world.tables["invoices"], second[0]),
+    }
+
+
+def test_upsert_table_term_writes_nothing_when_the_table_is_missing() -> None:
+    assert t.upsert_table_term("Ghost", "x", "no-such-table") is None
 
 
 # --------------------------------------------------------------------------

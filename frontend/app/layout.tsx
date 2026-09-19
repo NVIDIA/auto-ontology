@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
 import { Geist, Geist_Mono } from 'next/font/google';
 import { TooltipProvider } from '@nvidia/foundations-react-core';
 import { NavRail } from '@/common/NavRail';
@@ -11,6 +12,12 @@ import { BreadcrumbProvider } from '@/contexts/BreadcrumbContext';
 import { getCurrentSession } from '@/auth/auth-guards';
 import { Role } from '@/enums/auth';
 import './globals.css';
+
+const isLoginOrOauthPath = (pathname: string): boolean =>
+	pathname === '/login' ||
+	pathname.startsWith('/login/') ||
+	pathname === '/oauth' ||
+	pathname.startsWith('/oauth/');
 
 const geistSans = Geist({
 	variable: '--font-geist-sans',
@@ -42,6 +49,8 @@ export default async function RootLayout({
 	const isAdmin = session?.user.role === Role.Admin;
 	// Injected at runtime by the Helm chart from the chart version (.Chart.Version).
 	const appVersion = process.env.APP_VERSION;
+	const pathname = (await headers()).get('x-gsf-pathname') ?? '';
+	const showAppChrome = Boolean(session) && !isLoginOrOauthPath(pathname);
 
 	return (
 		<html
@@ -50,7 +59,7 @@ export default async function RootLayout({
 		>
 			<body className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
 				<TooltipProvider openDelayDuration={400} skipDelayDuration={0}>
-					{session ? (
+					{showAppChrome ? (
 						<BreadcrumbProvider>
 							<AppTopBar version={appVersion} />
 							<div className="flex min-h-0 flex-1">

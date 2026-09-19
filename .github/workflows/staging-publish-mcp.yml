@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Builds the GSF MCP server image and pushes it to nvcr.io. The Astra deploy
+# repo consumes it by digest. Requires repo secret:
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
+
+name: 'Staging: Publish MCP image to nvcr.io'
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Override image tag (default: stg.<timestamp>)'
+        required: false
+  push:
+    branches: [main, feat/astra-nightly-deploy]
+    paths:
+      - 'mcp/**'
+      - '.github/workflows/staging-publish-mcp.yml'
+
+env:
+  IMAGE: nvcr.io/nvstaging/gsf/gsf-mcp
+
+jobs:
+  publish-mcp:
+    name: Build & push amd64 MCP image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Compute image tag
+        id: meta
+        run: |
+          set -euo pipefail
+          t='${{ github.event.inputs.tag }}'
+          if [ -z "$t" ]; then
+            t="stg.$(date -u +%Y%m%d%H%M%S)"
+          fi
+          echo "tag=$t" >>"$GITHUB_OUTPUT"
+          echo "Image tag: $t"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to nvcr.io
+        uses: docker/login-action@v3
+        with:
+          registry: nvcr.io
+          username: '$oauthtoken'
+          password: ${{ secrets.NGC_API_KEY }}
+
+      - name: Build & push (linux/amd64)
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./mcp
+          file: mcp/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE }}:${{ steps.meta.outputs.tag }}
+          provenance: false
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published MCP image"
+            echo ""
+            echo "- Image: \`${IMAGE}:${{ steps.meta.outputs.tag }}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "Pin in the umbrella as:"
+            echo '```yaml'
+            echo "mcp:"
+            echo "  image:"
+            echo "    repository: ${IMAGE}"
+            echo "    tag: ${{ steps.meta.outputs.tag }}"
+            echo "    digest: ${{ steps.build.outputs.digest }}"
+            echo '```'
+          } >>"$GITHUB_STEP_SUMMARY"

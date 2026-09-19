@@ -36,6 +36,6 @@
       "envFile": "${workspaceFolder}/.env",
       "console": "integratedTerminal",
       "justMyCode": false
-    },
+    }
   ]
 }

@@ -51,10 +51,23 @@ export function extractOAuthToken(headers: Headers): string | null {
 export async function verifyOAuthToken(
 	headers: Headers,
 ): Promise<{ id: string; role: string | null } | null> {
-	// The plugin looks the token up and rejects it if expired; a valid one comes
-	// back as the stored grant, whose `userId` is who signed in.
-	const grant = await auth.api.getMcpSession({ headers, asResponse: false });
-	const userId = grant?.userId;
+	// UserInfo accepts the bearer directly and validates opaque tokens against
+	// the stored grant, including expiry, revocation, client, and session state.
+	const response = await auth.api.oauth2UserInfo({ headers, asResponse: true });
+	if (!response.ok) {
+		if (response.status >= 500) {
+			throw new Error(`OAuth token validation failed with HTTP ${response.status}`);
+		}
+		return null;
+	}
+	const userInfo: unknown = await response.json();
+	const userId =
+		typeof userInfo === 'object' &&
+		userInfo !== null &&
+		'sub' in userInfo &&
+		typeof userInfo.sub === 'string'
+			? userInfo.sub
+			: null;
 	if (!userId) return null;
 
 	// Re-read the role rather than trusting the grant, so a role change or a ban

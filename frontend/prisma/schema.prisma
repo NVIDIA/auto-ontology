@@ -96,26 +96,27 @@ model ConversationAnalytics {
 
 // Auto generated from https://better-auth.com/docs/concepts/database#generating-schema
 model User {
-  id            String                  @id
-  name          String
-  email         String
-  emailVerified Boolean                 @default(false)
-  image         String?
-  createdAt     DateTime                @default(now())
-  updatedAt     DateTime                @updatedAt
-  role          String?
-  banned        Boolean?                @default(false)
-  banReason     String?
-  banExpires    DateTime?
-  sessions      Session[]
-  accounts      Account[]
-  ssoproviders  SsoProvider[]
-  conversations Conversation[]
-  analytics     ConversationAnalytics[]
-  apiKeys       Apikey[]
-  oauthApps     OauthApplication[]
-  oauthTokens   OauthAccessToken[]
-  oauthConsents OauthConsent[]
+  id                 String                  @id
+  name               String
+  email              String
+  emailVerified      Boolean                 @default(false)
+  image              String?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  role               String?
+  banned             Boolean?                @default(false)
+  banReason          String?
+  banExpires         DateTime?
+  sessions           Session[]
+  accounts           Account[]
+  ssoproviders       SsoProvider[]
+  conversations      Conversation[]
+  analytics          ConversationAnalytics[]
+  apiKeys            Apikey[]
+  oauthClients       OauthClient[]
+  oauthTokens        OauthAccessToken[]
+  oauthRefreshTokens OauthRefreshToken[]
+  oauthConsents      OauthConsent[]
 
   @@unique([email])
   @@map("user")
@@ -123,16 +124,18 @@ model User {
 }
 
 model Session {
-  id             String   @id
-  expiresAt      DateTime
-  token          String
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
-  ipAddress      String?
-  userAgent      String?
-  userId         String
-  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  impersonatedBy String?
+  id                 String              @id
+  expiresAt          DateTime
+  token              String
+  createdAt          DateTime            @default(now())
+  updatedAt          DateTime            @updatedAt
+  ipAddress          String?
+  userAgent          String?
+  userId             String
+  user               User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  impersonatedBy     String?
+  oauthAccessTokens  OauthAccessToken[]
+  oauthRefreshTokens OauthRefreshToken[]
 
   @@unique([token])
   @@index([userId])
@@ -237,84 +240,199 @@ model Apikey {
   @@schema("frontend")
 }
 
-// OAuth tables owned by the Better Auth `mcp` plugin, which makes GSF the
-// authorization server MCP clients log in against. Field names and types must
-// match the plugin's schema exactly, like the other Better Auth tables above.
+// OAuth tables owned by Better Auth 1.7's `mcp` plugin (via
+// `@better-auth/oauth-provider`). Field names and types must match the plugin
+// schema exactly, like the other Better Auth tables above.
 //
 // The models are `Oauth*`, not `OAuth*`, for the same reason `Apikey` is not
 // `ApiKey`: the adapter looks a model up as `prisma[<plugin's model name>]`, and
-// the plugin names these `oauthApplication`, `oauthAccessToken`, and
-// `oauthConsent`. Prisma derives the delegate from the model name, so
-// `OAuthApplication` would generate `prisma.oAuthApplication` and every call
-// would fail at runtime.
+// the plugin names these `oauthClient`, `oauthAccessToken`, `oauthConsent`,
+// etc. Prisma derives the delegate from the model name, so `OAuthClient` would
+// generate `prisma.oAuthClient` and every call would fail at runtime.
 //
-// A client that registers itself has no owning user, so `userId` is optional
-// here even though the plugin declares it required — a dynamically registered
-// MCP client belongs to no one until someone consents to it.
+// A client that registers itself has no owning user, so `userId` is optional —
+// a dynamically registered MCP client belongs to no one until someone consents.
 //
 // These sit in `frontend` with the rest of Better Auth. `public` is Alembic's
 // (see `gsf/dal/schema.py`); listing it on the datasource would let Prisma
 // propose dropping GSF tables.
-model OauthApplication {
-  id           String   @id
-  name         String
-  icon         String?
-  metadata     String?
-  clientId     String   @unique
-  clientSecret String?
-  redirectUrls String
-  type         String
-  disabled     Boolean? @default(false)
-  userId       String?
-  user         User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+model OauthClient {
+  id                               String    @id
+  clientId                         String    @unique
+  clientSecret                     String?
+  clientDiscoveryId                String?
+  disabled                         Boolean?  @default(false)
+  skipConsent                      Boolean?
+  enableEndSession                 Boolean?
+  subjectType                      String?
+  scopes                           String[]  @default([])
+  clientCredentialsScopes          String[]  @default([])
+  userId                           String?
+  user                             User?     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt                        DateTime? @default(now())
+  updatedAt                        DateTime? @updatedAt
+  name                             String?
+  uri                              String?
+  icon                             String?
+  contacts                         String[]  @default([])
+  tos                              String?
+  policy                           String?
+  softwareId                       String?
+  softwareVersion                  String?
+  softwareStatement                String?
+  redirectUris                     String[]  @default([])
+  postLogoutRedirectUris           String[]  @default([])
+  backchannelLogoutUri             String?
+  backchannelLogoutSessionRequired Boolean?
+  tokenEndpointAuthMethod          String?
+  applicationType                  String?
+  jwks                             String?
+  jwksUri                          String?
+  grantTypes                       String[]  @default([])
+  responseTypes                    String[]  @default([])
+  requirePKCE                      Boolean?
+  dpopBoundAccessTokens            Boolean?  @default(false)
+  referenceId                      String?
+  metadata                         Json?
 
-  accessTokens OauthAccessToken[]
-  consents     OauthConsent[]
+  accessTokens  OauthAccessToken[]
+  refreshTokens OauthRefreshToken[]
+  consents      OauthConsent[]
+  resources     OauthClientResource[]
 
   @@index([userId])
-  @@map("oauthApplication")
+  @@map("oauthClient")
   @@schema("frontend")
 }
 
-// `refreshToken` is nullable although the plugin declares it required: not every
-// grant issues one, and a NOT NULL column would turn that into a failed insert.
-// Postgres permits many nulls under a unique index, so uniqueness still holds
-// for the tokens that do exist.
-model OauthAccessToken {
-  id                    String            @id
-  accessToken           String            @unique
-  refreshToken          String?           @unique
-  accessTokenExpiresAt  DateTime?
-  refreshTokenExpiresAt DateTime?
-  clientId              String
-  application           OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
-  userId                String?
-  user                  User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes                String
-  createdAt             DateTime          @default(now())
-  updatedAt             DateTime          @updatedAt
+model OauthResource {
+  id                            String    @id
+  identifier                    String    @unique
+  name                          String
+  accessTokenTtl                Int?
+  refreshTokenTtl               Int?
+  signingAlgorithm              String?
+  signingKeyId                  String?
+  // Nullable JSON array, not `String[]`. Prisma cannot model optional lists,
+  // and Better Auth seeds this as SQL NULL ("inherit plugin scopes"). An empty
+  // array would intersect to no scopes and block every grant.
+  allowedScopes                 Json?
+  customClaims                  Json?
+  dpopBoundAccessTokensRequired Boolean?  @default(false)
+  disabled                      Boolean?  @default(false)
+  createdAt                     DateTime? @default(now())
+  updatedAt                     DateTime? @updatedAt
+  policyVersion                 Int?      @default(1)
+  metadata                      Json?
+
+  clients OauthClientResource[]
+
+  @@map("oauthResource")
+  @@schema("frontend")
+}
+
+model OauthClientResource {
+  id         String        @id
+  clientId   String
+  client     OauthClient   @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  resourceId String
+  resource   OauthResource @relation(fields: [resourceId], references: [identifier], onDelete: Cascade)
+  metadata   Json?
+  createdAt  DateTime?     @default(now())
+
+  @@unique([clientId, resourceId])
+  @@index([clientId])
+  @@index([resourceId])
+  @@map("oauthClientResource")
+  @@schema("frontend")
+}
+
+model OauthRefreshToken {
+  id                      String      @id
+  token                   String      @unique
+  clientId                String
+  client                  OauthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId               String?
+  session                 Session?    @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId                  String
+  user                    User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String[]    @default([])
+  requestedUserInfoClaims String[]    @default([])
+  expiresAt               DateTime
+  createdAt               DateTime    @default(now())
+  revoked                 DateTime?
+  rotatedAt               DateTime?
+  rotationReplayResponse  String?
+  rotationReplayExpiresAt DateTime?
+  authTime                DateTime?
+  confirmation            Json?
+  scopes                  String[]    @default([])
+
+  accessTokens OauthAccessToken[]
 
   @@index([clientId])
+  @@index([sessionId])
   @@index([userId])
+  @@index([authorizationCodeId])
+  @@map("oauthRefreshToken")
+  @@schema("frontend")
+}
+
+model OauthAccessToken {
+  id                      String             @id
+  token                   String             @unique
+  clientId                String
+  client                  OauthClient        @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  sessionId               String?
+  session                 Session?           @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  userId                  String?
+  user                    User?              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  authorizationCodeId     String?
+  resources               String[]           @default([])
+  requestedUserInfoClaims String[]           @default([])
+  refreshId               String?
+  refreshToken            OauthRefreshToken? @relation(fields: [refreshId], references: [id], onDelete: SetNull)
+  expiresAt               DateTime
+  createdAt               DateTime           @default(now())
+  revoked                 DateTime?
+  confirmation            Json?
+  scopes                  String[]           @default([])
+
+  @@index([clientId])
+  @@index([sessionId])
+  @@index([userId])
+  @@index([authorizationCodeId])
+  @@index([refreshId])
   @@map("oauthAccessToken")
   @@schema("frontend")
 }
 
 model OauthConsent {
-  id           String            @id
-  clientId     String
-  application  OauthApplication? @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
-  userId       String
-  user         User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  scopes       String
-  consentGiven Boolean           @default(false)
-  createdAt    DateTime          @default(now())
-  updatedAt    DateTime          @updatedAt
+  id                      String      @id
+  clientId                String
+  client                  OauthClient @relation(fields: [clientId], references: [clientId], onDelete: Cascade)
+  userId                  String?
+  user                    User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceId             String?
+  resources               String[]    @default([])
+  requestedUserInfoClaims String[]    @default([])
+  scopes                  String[]    @default([])
+  createdAt               DateTime    @default(now())
+  updatedAt               DateTime    @updatedAt
 
   @@index([clientId])
   @@index([userId])
   @@map("oauthConsent")
+  @@schema("frontend")
+}
+
+model OauthClientAssertion {
+  id        String   @id
+  expiresAt DateTime
+
+  @@map("oauthClientAssertion")
   @@schema("frontend")
 }

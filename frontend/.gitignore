@@ -39,6 +39,9 @@ yarn-error.log*
 # prisma
 /generated/
 
+# pnpm dlx / corepack scratch
+.cache/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

@@ -402,50 +402,106 @@ def update_term(
     return result
 
 
-def merge_term(
+def upsert_table_term(
     name: str,
     description: str,
     table_id: str,
     synonyms: list[str] | None = None,
-) -> str | None:
-    """Upsert a Term and link the table to it. ``None`` if the table is missing.
+) -> tuple[str, str] | None:
+    """Upsert a compilation Term owned by one table.
 
-    Unlike ``merge_column_attribute``, ``description`` is **assigned** rather
-    than coalesced, so a re-run of the semantic build overwrites a hand-edited
-    description. Deliberate, and worth knowing before changing it: a rebuild is
-    meant to be authoritative.
+    The proposed name is kept unless another table already owns it. Collisions
+    are qualified with the table's full catalog identity, keeping the global
+    ``(name, source)`` constraint and name-based attribute lookups unambiguous.
+    Returns ``(term_id, persisted_name)``, or ``None`` for a missing table.
     """
-    if not store().query_read(
-        select(s.catalog_table.c.id).where(s.catalog_table.c.id == table_id)
-    ):
-        return None
-
-    statement = insert(s.term).values(
-        name=name,
-        source=SEMANTIC_SOURCE,
-        description=description,
-        synonyms=synonyms or [],
-    )
-    # One transaction, as `update_term` above. A term with no `table__term` link
-    # is excluded by `_represented()`, so it is invisible to every read while
-    # still occupying `uq_term_name_source` -- it blocks its own name forever.
     with write_transaction():
-        rows = store().query_write(
-            statement.on_conflict_do_update(
-                constraint="uq_term_name_source",
-                set_={
-                    "description": statement.excluded.description,
-                    "synonyms": statement.excluded.synonyms,
-                },
-            ).returning(s.term.c.id)
+        tables = store().query_read(
+            select(
+                s.catalog_database.c.name.label("database_name"),
+                s.catalog_schema.c.name.label("schema_name"),
+                s.catalog_table.c.name.label("table_name"),
+            )
+            .select_from(
+                s.catalog_table.join(
+                    s.catalog_schema,
+                    s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+                ).join(
+                    s.catalog_database,
+                    s.catalog_database.c.id == s.catalog_schema.c.database_id,
+                )
+            )
+            .where(s.catalog_table.c.id == table_id)
         )
-        term_id = rows[0]["id"]
-        store().query_write(
-            insert(s.table__term)
-            .values(table_id=table_id, term_id=term_id)
-            .on_conflict_do_nothing()
+        if not tables:
+            return None
+
+        table = tables[0]
+        qualified_table = ".".join(
+            part
+            for part in (
+                table["database_name"],
+                table["schema_name"],
+                table["table_name"],
+            )
+            if part
         )
-    return term_id
+        candidate_names = (
+            name,
+            f"{name} ({qualified_table})",
+            f"{name} ({table_id})",
+        )
+
+        for candidate_name in candidate_names:
+            existing = store().query_read(
+                select(s.term.c.id, s.table__term.c.table_id)
+                .select_from(
+                    s.term.outerjoin(
+                        s.table__term, s.table__term.c.term_id == s.term.c.id
+                    )
+                )
+                .where(
+                    s.term.c.name == candidate_name,
+                    s.term.c.source == SEMANTIC_SOURCE,
+                )
+            )
+            represented_tables = {
+                row["table_id"] for row in existing if row.get("table_id")
+            }
+            if existing and represented_tables == {table_id}:
+                term_id = existing[0]["id"]
+                store().query_write(
+                    update(s.term)
+                    .where(s.term.c.id == term_id)
+                    .values(description=description, synonyms=synonyms or [])
+                )
+                return term_id, candidate_name
+            if existing:
+                continue
+
+            statement = (
+                insert(s.term)
+                .values(
+                    name=candidate_name,
+                    source=SEMANTIC_SOURCE,
+                    description=description,
+                    synonyms=synonyms or [],
+                )
+                .on_conflict_do_nothing(constraint="uq_term_name_source")
+                .returning(s.term.c.id)
+            )
+            inserted = store().query_write(statement)
+            if not inserted:
+                # Another compiler won this name after the read. Try the next,
+                # more specific candidate instead of sharing its Term.
+                continue
+            term_id = inserted[0]["id"]
+            store().query_write(
+                insert(s.table__term).values(table_id=table_id, term_id=term_id)
+            )
+            return term_id, candidate_name
+
+    raise RuntimeError(f"Could not allocate a private Term name for table {table_id}")
 
 
 def fetch_term_synonyms(attr_ids: list[str]) -> dict[str, list[str]]:

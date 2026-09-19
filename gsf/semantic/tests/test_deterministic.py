@@ -82,7 +82,12 @@ def test_llm_date_description_also_gets_the_notation(_mock_desc) -> None:
 
 
 def test_to_term_name() -> None:
-    assert to_term_name("purchase_orders") == "PurchaseOrders"
+    assert to_term_name("purchase_orders") == "Purchase Orders"
+    assert to_term_name("delta_lite_event") == "Delta Lite Event"
+    assert to_term_name("gtl_imaging_event") == "Gtl Imaging Event"
+    assert to_term_name("gtl_ui_event") == "Gtl Ui Event"
+    assert to_term_name("GtlImagingEvent") == "Gtl Imaging Event"
+    assert to_term_name("XMLHttpRequest") == "XML Http Request"
 
 
 def test_fk_targets_deduped() -> None:

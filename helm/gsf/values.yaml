@@ -73,6 +73,9 @@ authSecret: ""
 # `kubectl port-forward svc/frontend 3000:3000`. For NodePort/ingress/https,
 # set this to that exact origin (e.g. https://gsf.example.com).
 appUrl: "http://localhost:3000"
+# Public origin of the separately deployed MCP server, without its `/mcp`
+# endpoint suffix. OAuth access tokens are audience-bound to this URL.
+mcpPublicUrl: "http://localhost:3003"
 # Bootstrap admin account. REQUIRED — self-service sign-up is disabled, so this
 # is the only way the initial admin is provisioned. The frontend creates this
 # admin on first start (email-verified), or resets its password to this value

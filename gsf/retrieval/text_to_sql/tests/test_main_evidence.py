@@ -25,10 +25,8 @@ def main_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 @pytest.mark.parametrize("payload_evidence", [None, ""])
 def test_build_state_treats_absent_or_empty_evidence_as_none(
     main_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
     payload_evidence: str | None,
 ) -> None:
-    monkeypatch.setattr(main_module, "fetch_custom_analyses", lambda: [])
     payload = {
         "question": "How many accounts?",
         "data_retriever": object(),
@@ -46,9 +44,7 @@ def test_build_state_treats_absent_or_empty_evidence_as_none(
 
 def test_build_state_keeps_evidence_separate_from_every_question_value(
     main_module: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(main_module, "fetch_custom_analyses", lambda: [])
     state = main_module._build_state(
         cast(
             TextToSQLPayload,
