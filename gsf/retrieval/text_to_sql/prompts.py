@@ -459,7 +459,8 @@ would make the query unusable."""
 # INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE variant of the system prompt —
 # used only when a separate deterministic check (e.g. db_probe.join_path_check)
 # already validates join legality, so this LLM check can assume every join is
-# real and focus on whether it reaches the right entity. See intent_validation.py.
+# real and focus on whether it reaches the right entity. See the intent phase in
+# sql_parse_validation.py.
 INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE = """You are a SQL
 validation expert. Your job is to check if a generated
 SQL query has any CRITICAL issues that would prevent it
@@ -862,6 +863,7 @@ def create_intent_validation_prompt(
     join_paths: str = "",
     joins_validated_elsewhere: bool = False,
     has_evidence: bool = False,
+    used_schema_context: str = "",
 ) -> str:
     question_block = format_dual_question_block(
         original_question, sanitized_question, processing_question
@@ -872,7 +874,7 @@ def create_intent_validation_prompt(
     # criterion instead of main's current one, and never shows AUTHORITATIVE
     # JOIN PATHS — appropriate only when a separate deterministic check (e.g.
     # db_probe.join_path_check) already covers join legality, so this LLM
-    # check doesn't have to. See the flag's docstring in intent_validation.py.
+    # check doesn't have to. See the flag in sql_parse_validation.py.
     if joins_validated_elsewhere:
         join_paths_block = ""
         join_criterion = (
@@ -904,10 +906,16 @@ def create_intent_validation_prompt(
         if has_evidence
         else ""
     )
+    parsed_usage_block = (
+        "\nUSED SQL OBJECTS "
+        "(catalog metadata only for tables and columns referenced by the query):\n"
+        f"{used_schema_context}\n"
+    )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
 {join_paths_block}
+{parsed_usage_block}
 Generated SQL Query:
 ```sql
 {sql_code}

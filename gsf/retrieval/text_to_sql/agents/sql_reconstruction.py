@@ -219,7 +219,7 @@ class ErrorType(str, Enum):
 
     The only decision that matters is: do we need more tables or can we
     fix the SQL with what we already have?  The error may have been
-    raised by sql_parse_validation, sql_execution, or intent_validation
+    raised by unified SQL validation or SQL execution
     -- but the *symptom* (syntax / runtime / wrong intent) doesn't
     always match the *root cause*.  So we let the LLM decide.
     """

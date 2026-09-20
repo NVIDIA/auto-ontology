@@ -37,11 +37,11 @@ class _FailAfterGenerationApp:
         stream_mode: list[str] | None = None,
         config: dict[str, Any] | None = None,
     ) -> Iterator[tuple[str, Any]]:
-        yield ("custom", {"type": "step_start", "node": "validate_intent"})
+        yield ("custom", {"type": "step_start", "node": "validate_sql_query"})
         yield (
             "updates",
             {
-                "validate_intent": {
+                "validate_sql_query": {
                     "path_state": {
                         "sql_generation_result": SimpleNamespace(
                             sql_code="SELECT 1",
@@ -52,7 +52,7 @@ class _FailAfterGenerationApp:
                 }
             },
         )
-        raise KeyError("intent_valid")
+        raise KeyError("valid_sql")
 
 
 def test_stream_error_preserves_partial_generated_sql(
@@ -65,8 +65,8 @@ def test_stream_error_preserves_partial_generated_sql(
 
     assert events[-1] == {
         "type": "error",
-        "message": "Agent failed after validate_intent: 'intent_valid'",
-        "node": "validate_intent",
+        "message": "Agent failed after validate_sql_query: 'valid_sql'",
+        "node": "validate_sql_query",
         "error_type": "KeyError",
         "partial_answer": {
             "sql_code": "SELECT 1",
@@ -85,7 +85,7 @@ def test_nonstreaming_error_exposes_partial_answer(
     with pytest.raises(main.AgentRunError) as caught:
         main.get_agent_response({"question": "q"})
 
-    assert caught.value.node == "validate_intent"
+    assert caught.value.node == "validate_sql_query"
     assert caught.value.partial_answer["sql_code"] == "SELECT 1"
 
 

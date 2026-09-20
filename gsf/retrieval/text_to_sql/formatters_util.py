@@ -321,3 +321,96 @@ def format_tables_for_prompt(
         formatted_tables.append("\n".join(table_parts))
 
     return "\n\n".join(formatted_tables)
+
+
+def format_used_schema_for_prompt(
+    tables: list[dict],
+    used_tables: list[str],
+    used_columns: list[str],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Enrich only the parsed table and column references used by the SQL."""
+
+    def tail(value: str, size: int) -> tuple[str, ...]:
+        return tuple(part.casefold() for part in value.split(".")[-size:])
+
+    def matching_table(used_name: str) -> dict | None:
+        used_schema, used_table = tail(used_name, 2)
+        return next(
+            (
+                table
+                for table in tables
+                if str(table.get("name") or "").casefold() == used_table
+                and (
+                    not table.get("schema_name")
+                    or str(table.get("schema_name") or "").casefold() == used_schema
+                )
+            ),
+            None,
+        )
+
+    table_lines: list[str] = []
+    for used_name in used_tables:
+        table = matching_table(used_name)
+        if table is None:
+            table_lines.append(f"- {used_name}")
+            continue
+        full_name = qualify_table(
+            table.get("database_name") or target_db or "",
+            table.get("schema_name") or "",
+            table.get("name") or "",
+            dialect,
+        )
+        line = f"- {full_name}"
+        label = table.get("label")
+        if label and label != table.get("name"):
+            line += f" | label: {label}"
+        if table.get("description"):
+            line += f" | description: {table['description']}"
+        if table.get("pk"):
+            line += f" | primary key: {table['pk']}"
+        table_lines.append(line)
+
+    column_lines: list[str] = []
+    for used_name in used_columns:
+        used_schema, used_table, used_column = tail(used_name, 3)
+        table = matching_table(f"{used_schema}.{used_table}")
+        if table is None:
+            column_lines.append(f"- {used_name}")
+            continue
+        columns = table.get("columns")
+        if not isinstance(columns, list):
+            columns = []
+        column = next(
+            (
+                candidate
+                for candidate in columns
+                if isinstance(candidate, dict)
+                and str(candidate.get("name") or "").casefold() == used_column
+            ),
+            None,
+        )
+        if column is None:
+            column_lines.append(f"- {used_name}")
+            continue
+        full_table = qualify_table(
+            table.get("database_name") or target_db or "",
+            table.get("schema_name") or "",
+            table.get("name") or "",
+            dialect,
+        )
+        rendered = _format_column_for_prompt(column)
+        rendered = rendered.replace(
+            f"- {column.get('name', 'UNKNOWN')}",
+            f"- {full_table}.{column.get('name', 'UNKNOWN')}",
+            1,
+        )
+        column_lines.append(rendered)
+
+    return (
+        "TABLES USED IN SQL:\n"
+        + ("\n".join(table_lines) or "- None resolved")
+        + "\n\nCOLUMNS USED IN SQL:\n"
+        + ("\n".join(column_lines) or "- None resolved")
+    )

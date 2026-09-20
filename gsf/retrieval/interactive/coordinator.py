@@ -101,11 +101,11 @@ def _apply_debug_seed(
     session.path_state["sql_attempts"] = 0
     session.path_state["reconstruction_count"] = 0
     session.path_state["error_analysis_done"] = False
-    # "failed_attempts" backs route_sql_validation's skip_intent_validation
-    # check (len(failed_attempts) > 5) — it must reset here too, or a debug
-    # turn inherits the attempt count from the PRIOR turn and can skip
-    # intent validation almost immediately, cutting off the fresh repair
-    # budget this turn is supposed to get.
+    # "failed_attempts" controls reconstruction and the unified validator's
+    # intent-LLM retry safeguard (len(failed_attempts) > 5). It must reset here
+    # too, or a debug turn inherits the attempt count from the PRIOR turn and
+    # can skip the intent phase almost immediately, cutting off the fresh
+    # repair budget this turn is supposed to get.
     #
     # "jsonb_path_repair_attempts" is JsonbPathCheckAgent's bounded counter
     # (see jsonb_path_check.py, capped at _MAX_REPAIR_ATTEMPTS) — it stays at

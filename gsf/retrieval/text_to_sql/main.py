@@ -10,7 +10,6 @@ from typing import Generator
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from gsf.retrieval.text_to_sql.text_to_sql_graph import (
-    INTENT_VALIDATION_SKIPPED_AFTER,
     NODE_START_EVENT,
     _prediction_enabled,
     create_graph,
@@ -165,33 +164,26 @@ def _extract_answer(final_state: dict) -> dict:
 def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
     """The SQL this node just cleared for execution, or ``""``.
 
-    Deliberately not emitted at generation time: both validations routinely
-    send a query back for reconstruction, so a draft is frequently not what
+    Deliberately not emitted at generation time: unified validation routinely
+    sends a query back for reconstruction, so a draft is frequently not what
     runs. The consequence is that a run which never clears its final gate
     (``unconstructable`` after 8 attempts) shows no SQL at all.
 
     Which node *is* the final gate is decided by ``create_graph`` and is not
     visible here: the proactive value check, when built in, sits after intent
-    validation and can still bounce a query to reconstruction, and past
-    ``INTENT_VALIDATION_SKIPPED_AFTER`` reconstructions intent validation is
-    skipped entirely.
+    validation and can still bounce a query to reconstruction.
     """
     decision = (node_output or {}).get("decision") or ""
 
     if _COMBINED_PRECHECK_IN_GRAPH:
         cleared = node_name == "precheck_combined" and decision == "valid_sql"
     else:
-        cleared = decision == "intent_valid" or (
-            node_name == "validate_sql_query"
-            and decision == "valid_sql"
-            and len(node_path_state.get("failed_attempts") or [])
-            > INTENT_VALIDATION_SKIPPED_AFTER
-        )
+        cleared = node_name == "validate_sql_query" and decision == "valid_sql"
     if not cleared:
         return ""
 
-    # ``sql_code`` is what ``SQLExecutionAgent`` runs; the generation result
-    # only covers intent validation's early return when there is no SQL.
+    # ``sql_code`` is what ``SQLExecutionAgent`` runs; keep the generation
+    # result as a defensive fallback for partial/mocked node updates.
     sql = (node_path_state.get("sql_code") or "").strip()
     if sql:
         return sql

@@ -31,7 +31,7 @@ class _MalformedAgent(BaseAgent):
         return None  # type: ignore[return-value]
 
 
-def _state(decision: str = "intent_valid") -> dict:
+def _state(decision: str = "valid_sql") -> dict:
     return {
         "decision": decision,
         "path_state": {},
@@ -50,7 +50,7 @@ def test_validation_failure_never_returns_an_empty_state_update() -> None:
         raise AssertionError("missing failure decision must fail explicitly")
 
 
-def test_execution_validation_failure_replaces_stale_intent_decision() -> None:
+def test_execution_validation_failure_replaces_stale_valid_decision() -> None:
     state = _state()
     update = agent_wrapper(SQLExecutionAgent())(state)
     merged = {**state, **update}
@@ -60,7 +60,7 @@ def test_execution_validation_failure_replaces_stale_intent_decision() -> None:
     assert update["path_state"]["error"]["agent"] == "sql_execution"
 
 
-def test_execution_exception_replaces_stale_intent_decision(
+def test_execution_exception_replaces_stale_valid_decision(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     agent = SQLExecutionAgent()

@@ -5,7 +5,7 @@
 """``sql`` events: the query the agent is about to run, streamed pre-execution.
 
 The event fires only once a node has cleared the query for execution, never at
-generation time — a draft that intent validation is about to reject must not
+generation time — a draft that unified validation is about to reject must not
 reach the client, since it is not what runs.
 """
 
@@ -16,13 +16,7 @@ from typing import Any, Iterator, cast
 import pytest
 
 from gsf.retrieval.text_to_sql.state import TextToSQLPayload
-from gsf.retrieval.text_to_sql.text_to_sql_graph import INTENT_VALIDATION_SKIPPED_AFTER
 from gsf.utils import llm_invoke
-
-# One past the threshold is where ``route_sql_validation`` starts skipping
-# intent validation. Derived from the graph's own constant so retuning the
-# retry budget moves these tests with it instead of silently invalidating them.
-_PAST_SKIP_THRESHOLD = INTENT_VALIDATION_SKIPPED_AFTER + 1
 
 
 @pytest.fixture(name="main")
@@ -61,28 +55,15 @@ def _generation_step(sql: str) -> dict[str, Any]:
     }
 
 
-def _syntax_ok_step(sql: str, failed_attempt_count: int = 0) -> dict[str, Any]:
+def _validation_ok_step(sql: str, failed_attempt_count: int = 0) -> dict[str, Any]:
     return {
         "validate_sql_query": {
             "path_state": {
                 "sql_generation_result": _generated(sql),
                 "sql_code": sql,
-                # Only the number of completed attempts controls this branch.
                 "failed_attempts": [{} for _ in range(failed_attempt_count)],
             },
             "decision": "valid_sql",
-        }
-    }
-
-
-def _intent_ok_step(sql: str) -> dict[str, Any]:
-    return {
-        "validate_intent": {
-            "path_state": {
-                "sql_generation_result": _generated(sql),
-                "sql_code": sql,
-            },
-            "decision": "intent_valid",
         }
     }
 
@@ -128,7 +109,7 @@ def _sql_events(events: list[dict]) -> list[tuple[str, str]]:
     return [(e["node"], e["sql"]) for e in events if e["type"] == "sql"]
 
 
-def test_sql_is_emitted_once_intent_validation_clears_it(
+def test_sql_is_emitted_once_unified_validation_clears_it(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -139,17 +120,16 @@ def test_sql_is_emitted_once_intent_validation_clears_it(
         monkeypatch,
         [
             _generation_step("SELECT 1"),
-            _syntax_ok_step("SELECT 1"),
-            _intent_ok_step("SELECT 1"),
+            _validation_ok_step("SELECT 1"),
             {"execute_sql_query": {"path_state": {"sql_code": "SELECT 1"}}},
         ],
     )
 
-    assert _sql_events(events) == [("validate_intent", "SELECT 1")]
+    assert _sql_events(events) == [("validate_sql_query", "SELECT 1")]
 
     # It has to land before the node that runs it, or it isn't "live".
     kinds = [(e["type"], e.get("node")) for e in events]
-    assert kinds.index(("sql", "validate_intent")) < kinds.index(
+    assert kinds.index(("sql", "validate_sql_query")) < kinds.index(
         ("step", "execute_sql_query")
     )
 
@@ -169,10 +149,10 @@ def test_rejected_draft_never_reaches_the_client(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Only the query that survives intent validation is shown.
+    """Only the query that survives unified validation is shown.
 
-    The first attempt is syntactically fine but semantically wrong, so intent
-    validation routes it to reconstruction. Showing it would put a query on
+    The first attempt is semantically wrong, so validation routes it to
+    reconstruction. Showing it would put a query on
     screen that never runs.
     """
 
@@ -181,14 +161,13 @@ def test_rejected_draft_never_reaches_the_client(
         monkeypatch,
         [
             _generation_step("SELECT bad"),
-            _syntax_ok_step("SELECT bad"),
             {
-                "validate_intent": {
+                "validate_sql_query": {
                     "path_state": {
                         "sql_generation_result": _generated("SELECT bad"),
                         "sql_code": "SELECT bad",
                     },
-                    "decision": "intent_invalid",
+                    "decision": "invalid_sql",
                 }
             },
             {
@@ -200,12 +179,11 @@ def test_rejected_draft_never_reaches_the_client(
                     "decision": "validate_sql_query",
                 }
             },
-            _syntax_ok_step("SELECT good"),
-            _intent_ok_step("SELECT good"),
+            _validation_ok_step("SELECT good"),
         ],
     )
 
-    assert _sql_events(events) == [("validate_intent", "SELECT good")]
+    assert _sql_events(events) == [("validate_sql_query", "SELECT good")]
 
 
 def _precheck_step(sql: str, decision: str) -> dict[str, Any]:
@@ -221,15 +199,14 @@ def test_proactive_value_check_is_the_only_gate_when_enabled(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """With the proactive check in the graph it, not intent validation, is the
-    last hop, so ``intent_valid`` alone must not emit."""
+    """With the proactive check in the graph it, not validation, is the last hop."""
 
     monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
     events = _run(
         main,
         monkeypatch,
-        [_intent_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
+        [_validation_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
     )
 
     assert _sql_events(events) == [("precheck_combined", "SELECT 1")]
@@ -239,9 +216,9 @@ def test_proactive_rejection_never_shows_the_query(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A literal mismatch sends an intent-valid query to reconstruction.
+    """A literal mismatch sends a validated query to reconstruction.
 
-    Emitting at ``intent_valid`` would put a query on screen that the
+    Emitting at validation would put a query on screen that the
     proactive check is about to reject — only the rewrite that survives it
     ever runs.
     """
@@ -252,7 +229,7 @@ def test_proactive_rejection_never_shows_the_query(
         main,
         monkeypatch,
         [
-            _intent_ok_step("SELECT bad_literal"),
+            _validation_ok_step("SELECT bad_literal"),
             _precheck_step("SELECT bad_literal", "invalid_sql"),
             {
                 "reconstruct_sql": {
@@ -263,8 +240,7 @@ def test_proactive_rejection_never_shows_the_query(
                     "decision": "validate_sql_query",
                 }
             },
-            _syntax_ok_step("SELECT good"),
-            _intent_ok_step("SELECT good"),
+            _validation_ok_step("SELECT good"),
             _precheck_step("SELECT good", "valid_sql"),
         ],
     )
@@ -272,28 +248,24 @@ def test_proactive_rejection_never_shows_the_query(
     assert _sql_events(events) == [("precheck_combined", "SELECT good")]
 
 
-def test_skip_intent_branch_waits_for_the_proactive_check(
+def test_validation_waits_for_the_proactive_check(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Past the reconstruction threshold ``route_sql_validation`` skips intent
-    validation, but with the proactive check enabled it still routes through
-    that node rather than straight to execution."""
+    """The unified validation pass is not the final gate when prechecks exist."""
 
     monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
-    events = _run(
-        main, monkeypatch, [_syntax_ok_step("SELECT 1", _PAST_SKIP_THRESHOLD)]
-    )
+    events = _run(main, monkeypatch, [_validation_ok_step("SELECT 1")])
 
     assert _sql_events(events) == []
 
 
-def test_proactive_check_emits_without_a_preceding_intent_pass(
+def test_proactive_check_emits_without_a_preceding_validation_update(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """It is the only gate on the skip-intent branch, so it has to emit."""
+    """As the configured final gate, the precheck emits the SQL it clears."""
 
     monkeypatch.setattr(main, "_COMBINED_PRECHECK_IN_GRAPH", True)
 
@@ -306,47 +278,45 @@ def test_proactive_node_is_ignored_when_not_in_the_graph(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Default build: intent validation is the last gate and emits there."""
+    """Default build: unified validation is the last gate and emits there."""
 
     events = _run(
         main,
         monkeypatch,
-        [_intent_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
-    )
-
-    assert _sql_events(events) == [("validate_intent", "SELECT 1")]
-
-
-def test_skipped_intent_validation_still_emits(
-    main: ModuleType,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Past the threshold ``route_sql_validation`` goes straight from syntax
-    validation to execution, so that node becomes the last gate."""
-
-    events = _run(
-        main, monkeypatch, [_syntax_ok_step("SELECT 1", _PAST_SKIP_THRESHOLD)]
+        [_validation_ok_step("SELECT 1"), _precheck_step("SELECT 1", "valid_sql")],
     )
 
     assert _sql_events(events) == [("validate_sql_query", "SELECT 1")]
 
 
-def test_syntax_validation_alone_does_not_emit(
+def test_unified_validation_emits_after_many_reconstructions(
     main: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """At the threshold intent validation still runs next and may reject the
-    query, so this node is not yet the last gate.
+    """The unified node remains the final gate when its LLM phase is skipped."""
 
-    Pinned to the boundary rather than an arbitrary low count: the routing is
-    ``> INTENT_VALIDATION_SKIPPED_AFTER``, so the constant itself is the
-    largest count that must *not* emit here.
-    """
+    events = _run(main, monkeypatch, [_validation_ok_step("SELECT 1", 6)])
+
+    assert _sql_events(events) == [("validate_sql_query", "SELECT 1")]
+
+
+def test_invalid_unified_validation_does_not_emit(
+    main: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed unified validation result is never shown as executable SQL."""
 
     events = _run(
         main,
         monkeypatch,
-        [_syntax_ok_step("SELECT 1", INTENT_VALIDATION_SKIPPED_AFTER)],
+        [
+            {
+                "validate_sql_query": {
+                    "path_state": {"sql_code": "SELECT 1"},
+                    "decision": "invalid_sql",
+                }
+            }
+        ],
     )
 
     assert _sql_events(events) == []
@@ -361,13 +331,13 @@ def test_unchanged_sql_is_not_re_emitted(
         main,
         monkeypatch,
         [
-            _intent_ok_step("SELECT 1"),
+            _validation_ok_step("SELECT 1"),
             {"execute_sql_query": {"path_state": {"sql_code": "SELECT 1"}}},
-            _intent_ok_step("SELECT 1"),
+            _validation_ok_step("SELECT 1"),
         ],
     )
 
-    assert _sql_events(events) == [("validate_intent", "SELECT 1")]
+    assert _sql_events(events) == [("validate_sql_query", "SELECT 1")]
 
 
 def test_a_rebuilt_query_replaces_the_previous_one(
@@ -380,20 +350,20 @@ def test_a_rebuilt_query_replaces_the_previous_one(
         main,
         monkeypatch,
         [
-            _intent_ok_step("SELECT a"),
+            _validation_ok_step("SELECT a"),
             {
                 "execute_sql_query": {
                     "path_state": {"sql_code": "SELECT a", "error": "boom"},
                     "decision": "invalid_sql",
                 }
             },
-            _intent_ok_step("SELECT b"),
+            _validation_ok_step("SELECT b"),
         ],
     )
 
     assert _sql_events(events) == [
-        ("validate_intent", "SELECT a"),
-        ("validate_intent", "SELECT b"),
+        ("validate_sql_query", "SELECT a"),
+        ("validate_sql_query", "SELECT b"),
     ]
 
 
@@ -412,16 +382,15 @@ def test_nodes_without_sql_emit_nothing(
     assert _sql_events(events) == []
 
 
-def test_intent_valid_without_sql_emits_nothing(
+def test_validation_without_sql_emits_nothing(
     main: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``IntentValidationAgent`` returns ``intent_valid`` early when there is
-    no SQL to check — that must not produce an empty event."""
+    """A validation update without SQL must not produce an empty event."""
 
     events = _run(
         main,
         monkeypatch,
-        [{"validate_intent": {"path_state": {}, "decision": "intent_valid"}}],
+        [{"validate_sql_query": {"path_state": {}, "decision": "valid_sql"}}],
     )
 
     assert _sql_events(events) == []
@@ -462,7 +431,7 @@ def test_generator_iterates_lazily(
 
     def items() -> Iterator[tuple[str, Any]]:
         consumed.append("first")
-        yield from _stream_items([_intent_ok_step("SELECT 1")])
+        yield from _stream_items([_validation_ok_step("SELECT 1")])
         consumed.append("second")
         yield from _stream_items(
             [{"execute_sql_query": {"path_state": {"sql_code": "SELECT 1"}}}]
@@ -565,7 +534,7 @@ def test_unknown_custom_payloads_are_ignored(
     def items() -> Iterator[tuple[str, Any]]:
         yield ("custom", {"type": "something_else", "node": "reconstruct_sql"})
         yield ("custom", {"type": "step_start"})  # no node name
-        yield from _stream_items([_intent_ok_step("SELECT 1")])
+        yield from _stream_items([_validation_ok_step("SELECT 1")])
 
     monkeypatch.setattr(main, "_build_state", lambda payload: {"path_state": {}})
     monkeypatch.setattr(
@@ -577,4 +546,7 @@ def test_unknown_custom_payloads_are_ignored(
     events = list(main.stream_agent_response(cast(TextToSQLPayload, {"question": "q"})))
     steps = [e for e in events if e["type"] == "step"]
 
-    assert [s["node"] for s in steps] == ["validate_intent", "validate_intent"]
+    assert [s["node"] for s in steps] == [
+        "validate_sql_query",
+        "validate_sql_query",
+    ]

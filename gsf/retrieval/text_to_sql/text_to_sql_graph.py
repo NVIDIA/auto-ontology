@@ -39,13 +39,15 @@ from gsf.retrieval.text_to_sql.agents.kumo_prediction import KumoPredictionAgent
 from gsf.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
-from gsf.retrieval.text_to_sql.agents.intent_validation import IntentValidationAgent
 from gsf.retrieval.text_to_sql.agents.response import ResponseAgent
 from gsf.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from gsf.retrieval.text_to_sql.agents.sql_from_semantic import SQLFromCandidatesAgent
 from gsf.retrieval.text_to_sql.agents.sql_reconstruction import SQLReconstructionAgent
 from gsf.retrieval.text_to_sql.agents.sql_unconstructable import SQLUnconstructableAgent
-from gsf.retrieval.text_to_sql.agents.sql_parse_validation import SQLValidationAgent
+from gsf.retrieval.text_to_sql.agents.sql_parse_validation import (
+    INTENT_VALIDATION_SKIPPED_AFTER,
+    SQLValidationAgent,
+)
 from gsf.retrieval.text_to_sql.base import agent_wrapper
 from gsf.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
@@ -60,13 +62,6 @@ logger = logging.getLogger(__name__)
 # now" event; keep the two in step.
 NODE_START_EVENT = "step_start"
 
-# Reconstructions after which ``route_sql_validation`` stops re-validating
-# intent and routes straight from syntax validation to execution. Exported
-# rather than inlined because ``stream_agent_response`` has to know the same
-# threshold to tell which node is the last gate before execution on that
-# branch (see ``_sql_about_to_run``); tuning it here would otherwise silently
-# stop the ``sql`` event firing there.
-INTENT_VALIDATION_SKIPPED_AFTER = 5
 # Stop after seven reconstruction calls.
 MAX_RECONSTRUCTION_ATTEMPTS = 7
 
@@ -75,10 +70,8 @@ def route_sql_validation(state: AgentState) -> str:
     """
     Route based on SQL validation result.
 
-    Handles SQL validation attempts and retry logic:
-    - "skip_intent_validation" if SQL is valid but the reconstruction count exceeds
-      INTENT_VALIDATION_SKIPPED_AFTER (skip intent validation)
-    - "valid_sql" if SQL is valid (routes to intent validation)
+    Handles unified SQL validation attempts and retry logic:
+    - "valid_sql" if parse/static/intent validation succeeds
     - "invalid_sql" if invalid (with retry logic)
     - "unconstructable" after 7 reconstructions, or when a node already gave up
       (e.g. an unreachable database, which no rewrite can fix)
@@ -92,7 +85,7 @@ def route_sql_validation(state: AgentState) -> str:
     if state["decision"] == "unconstructable":
         # Passed through rather than folded into the else branch below, which
         # assumes anything that is not "invalid_sql" is usable SQL and would
-        # send an already-abandoned run on to intent validation.
+        # send an already-abandoned run on toward execution.
         return "unconstructable"
 
     path_state = state["path_state"]
@@ -108,39 +101,7 @@ def route_sql_validation(state: AgentState) -> str:
             return "unconstructable"
         return "invalid_sql"
 
-    # SQL is valid - check if we should skip intent validation
-    if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
-        logger.info(
-            f"Skipping intent validation after {failed_attempt_count} reconstructions"
-        )
-        return "skip_intent_validation"
     return "valid_sql"
-
-
-def route_intent_validation(state: AgentState) -> str:
-    """
-    Route based on intent validation result.
-
-    Handles intent validation:
-    - "intent_valid" if SQL addresses user's intent (proceed to formatting)
-    - "intent_invalid" if SQL doesn't address intent (retry with reconstruction)
-
-    Args:
-        state: Current agent state
-
-    Returns:
-        Routing decision based on intent validation result
-    """
-    decision = state.get("decision", "")
-
-    if decision == "intent_invalid":
-        attempts = len(state["path_state"].get("failed_attempts") or [])
-        logger.info("Intent validation failed after %s reconstructions", attempts)
-        # Route back to reconstruction to fix intent issues
-        return "invalid_sql"
-    else:
-        # Intent is valid, proceed to formatting
-        return "valid_sql"
 
 
 def _make_soft_check_router(check_name: str):
@@ -329,7 +290,6 @@ def create_graph():
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_validation_agent = SQLValidationAgent()
-    intent_validation_agent = IntentValidationAgent()
     sql_execution_agent = SQLExecutionAgent()
     empty_like_result_check_agent = EmptyLikeResultCheckAgent()
     response_agent = ResponseAgent()
@@ -391,9 +351,6 @@ def create_graph():
     validate_sql_query_node = _make_node(
         "validate_sql_query", agent_wrapper(sql_validation_agent)
     )
-    validate_intent_node = _make_node(
-        "validate_intent", agent_wrapper(intent_validation_agent)
-    )
     execute_sql_query_node = _make_node(
         "execute_sql_query", agent_wrapper(sql_execution_agent)
     )
@@ -434,7 +391,6 @@ def create_graph():
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
-    graph.add_node("validate_intent", validate_intent_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
     graph.add_node("check_empty_like_result", check_empty_like_result_node)
     graph.add_node("format_and_respond", format_and_respond_node)
@@ -524,20 +480,9 @@ def create_graph():
         "validate_sql_query",
         route_sql_validation,
         {
-            "valid_sql": "validate_intent",  # Validate intent after syntax validation succeeds
-            "skip_intent_validation": pre_execute_target,  # Skip intent validation after 5+ reconstructions
+            "valid_sql": pre_execute_target,
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
-        },
-    )
-
-    # Intent validation → route
-    graph.add_conditional_edges(
-        "validate_intent",
-        route_intent_validation,
-        {
-            "valid_sql": pre_execute_target,  # Format after both validations succeed
-            "invalid_sql": "reconstruct_sql",  # Reconstruct if intent is invalid
         },
     )
 
@@ -559,7 +504,6 @@ def create_graph():
             "valid_sql": "check_empty_like_result",
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
-            "skip_intent_validation": "check_empty_like_result",
         },
     )
 

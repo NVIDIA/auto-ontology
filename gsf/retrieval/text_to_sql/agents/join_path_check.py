@@ -8,9 +8,9 @@ Sibling of ``jsonb_path_check.py``, checking ``JOIN ... ON`` predicates
 against the same ``SEMANTIC_FK`` graph that seeds ``attribute_join_paths``,
 instead of checking JSONB key paths. A hallucinated join between two
 plausible-looking identifier columns is syntactically and semantically valid SQL — it executes
-and returns rows — so nothing else in the pipeline catches it: syntax
-validation only checks the SQL parses, and ``validate_intent`` reasons over
-the same join-path data the generator had, so it shares the same blind spot
+and returns rows — so nothing else in the pipeline catches it: static
+validation only checks deterministic properties, and the unified validator's
+intent phase reasons over the same join-path data the generator had, so it shares the same blind spot
 when that data is what led the model astray in the first place.
 
 Also runs ``find_case_dirty_join_mismatches``: same graph, opposite failure

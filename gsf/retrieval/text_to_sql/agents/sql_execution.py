@@ -114,7 +114,7 @@ class SQLExecutionAgent(BaseAgent):
     def __init__(self):
         # Any execution exception or missing SQL must route to reconstruction.
         # Without an explicit failure decision, the generic wrapper can preserve
-        # the preceding intent_valid value, which is invalid for this node's edge map.
+        # the preceding valid_sql value when execution itself fails.
         super().__init__("sql_execution", failure_decision="invalid_sql")
 
     def validate_input(self, state: AgentState) -> bool:

@@ -69,8 +69,8 @@ def test_every_wrapped_node_announces_itself() -> None:
     per-agent."""
 
     app = _compile(
-        "validate_intent",
-        lambda _state: {"path_state": {}, "decision": "intent_valid"},
+        "validate_sql_query",
+        lambda _state: {"path_state": {}, "decision": "valid_sql"},
     )
 
     custom = [
@@ -81,14 +81,14 @@ def test_every_wrapped_node_announces_itself() -> None:
         if mode == "custom"
     ]
 
-    assert custom == [{"type": NODE_START_EVENT, "node": "validate_intent"}]
+    assert custom == [{"type": NODE_START_EVENT, "node": "validate_sql_query"}]
 
 
 def test_announcing_outside_a_stream_is_not_fatal() -> None:
     """``get_agent_response`` and the tests call the graph without a stream
     writer; a missing progress event must not take the run down."""
 
-    announce_node_start("validate_intent")
+    announce_node_start("validate_sql_query")
 
 
 def test_node_still_runs_when_announcing_fails(monkeypatch: Any) -> None:
@@ -108,7 +108,7 @@ def test_node_still_runs_when_announcing_fails(monkeypatch: Any) -> None:
         calls.append("ran")
         return {"path_state": {}, "decision": "done"}
 
-    wrapped = wrap_node_with_logging("validate_intent", node)
+    wrapped = wrap_node_with_logging("validate_sql_query", node)
     result = wrapped({"path_state": {}, "decision": ""})
 
     assert calls == ["ran"]

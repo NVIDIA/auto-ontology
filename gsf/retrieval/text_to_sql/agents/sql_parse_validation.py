@@ -24,21 +24,52 @@ import logging
 import os
 from typing import Any, Dict
 
+from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import BaseModel, Field, field_validator
 import sqlglot
 from sqlglot import expressions as exp
 
 from gsf.catalog.sql_parse import parse_query_single
 from gsf.dal.datasources import find_table_key_columns
-from gsf.retrieval.text_to_sql.base import BaseAgent
+from gsf.retrieval.text_to_sql.base import BaseAgent, record_thought
 from gsf.retrieval.text_to_sql.connector_routing import resolve_connector_from_tables
-from gsf.retrieval.text_to_sql.state import AgentState
 from gsf.retrieval.data_access.custom_analyses import get_custom_analyses_ids
 from gsf.retrieval.data_access.graph_schemas import (
     fetch_all_schema_ids,
     get_schemas_by_ids,
 )
+from gsf.retrieval.text_to_sql.formatters_util import (
+    format_semantic_context,
+    format_used_schema_for_prompt,
+)
+from gsf.retrieval.text_to_sql.prompts import (
+    INTENT_VALIDATION_SYSTEM_PROMPT,
+    INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
+    create_intent_validation_prompt,
+    format_authoritative_evidence,
+    format_custom_analyses_section,
+)
+from gsf.retrieval.text_to_sql.state import (
+    AgentState,
+    get_original_question,
+    get_question_for_processing,
+    get_standalone_question,
+)
+from gsf.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
+
+# The unified validation node always performs deterministic parsing/static
+# checks. Only its LLM intent phase is skipped after this many reconstructions.
+INTENT_VALIDATION_SKIPPED_AFTER = 5
+
+# See the former intent_validation.py for the rationale. When a deterministic
+# live join-path check is enabled, intent validation does not need to re-judge
+# whether every relationship exists.
+_JOINS_VALIDATED_ELSEWHERE = os.environ.get(
+    "INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE",
+    os.environ.get("DB_PROBE_JOIN_PATH_CHECK", "false"),
+).strip().lower() in ("1", "true", "yes")
 
 # A connector's ``dialect`` goes straight to sqlglot here. Do not reintroduce a
 # name map: ``connectors/tests/test_registry_dialects.py`` already guarantees
@@ -48,6 +79,74 @@ logger = logging.getLogger(__name__)
 # identifiers with ``"``. Spark reads that as a string literal, so the SQL stops
 # parsing. Qualification and dialect are the connector's to decide.
 _TRUTHY = {"1", "true", "yes", "on"}
+
+
+class IntentValidationModel(BaseModel):
+    """Structured response for the LLM phase of unified SQL validation."""
+
+    reasoning: str = Field(
+        default="",
+        description=(
+            "Brief reasoning (1-2 sentences max) on whether the SQL addresses "
+            "the question's intent."
+        ),
+    )
+    is_valid: bool = Field(
+        description=(
+            "Whether the SQL query has any CRITICAL issues. Should be True "
+            "unless there are serious problems."
+        )
+    )
+    join_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of CRITICAL join issues that would produce completely wrong "
+            "results. Leave EMPTY [] if there are no join issues — do NOT add "
+            "explanatory text like 'no join issues'."
+        ),
+    )
+    aggregation_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List of CRITICAL aggregation issues that are clearly wrong (not "
+            "minor variations). Leave EMPTY [] if there are no aggregation "
+            "issues — do NOT add explanatory text like 'no aggregation issues'."
+        ),
+    )
+    evidence_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List every way the SQL violates Authoritative Evidence, including a "
+            "missing or substituted value, column/table mapping, filter, operator, "
+            "or formula. Leave EMPTY [] when all evidence instructions are followed."
+        ),
+    )
+
+    @field_validator(
+        "join_issues", "aggregation_issues", "evidence_issues", mode="before"
+    )
+    @classmethod
+    def _empty_string_means_no_issues(cls, value: Any) -> Any:
+        """Treat the model's occasional empty-string issue list as empty."""
+        if value == "":
+            return []
+        return value
+
+
+def _qualified_catalog_names(schemas: dict, node_ids: list[str]) -> list[str]:
+    """Resolve catalog node IDs to stable ``schema.table[.column]`` names."""
+    unresolved = {str(node_id) for node_id in node_ids if node_id}
+    names: set[str] = set()
+    for schema in schemas.values():
+        id_to_node = getattr(schema, "id_to_node", {}) or {}
+        for node_id in unresolved:
+            name = id_to_node.get(node_id)
+            if name:
+                names.add(str(name))
+        unresolved -= set(id_to_node)
+        if not unresolved:
+            break
+    return sorted(names)
 
 
 def _vacuous_group_by_check_enabled() -> bool:
@@ -650,53 +749,27 @@ def _check_select_block_missing_agg(
 
 
 class SQLValidationAgent(BaseAgent):
-    """
-    Agent that validates SQL queries before execution.
-
-    This agent performs logical validation of SQL queries, checking for
-    common mistakes like self-comparisons, incorrect filters, etc.
-
-    Input Requirements:
-    - path_state["sql_generation_result"]: SQL response to validate
-    - path_state["relevant_tables"]: Relevant tables used
-
-    Output:
-    - path_state["sql_response_from_db"]: None (will be set after execution)
-    - path_state["sql_columns"]: Column IDs from SQL
-    - path_state["custom_analyses_used"]: Semantic entity IDs used
-    - decision: "valid_sql" or "invalid_sql"
-    """
+    """Run catalog/static validation, then LLM intent validation."""
 
     def __init__(self):
         super().__init__("sql_validation")
 
     def validate_input(self, state: AgentState) -> bool:
         """Validate that SQL response is available."""
-        path_state = state.get("path_state", {})
         if state.get("decision") == "unconstructable":
-            # Skip validation if SQL couldn't be constructed
-            return False
+            return True
+        path_state = state.get("path_state", {})
         if not path_state.get("sql_generation_result"):
             self.logger.warning("No SQL response found for validation")
             return False
         return True
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
-        """
-        Validate SQL query.
-
-        Performs logical validation using LLM and query_validation function.
-        Sets connection data and extracts columns from SQL.
-
-        Args:
-            state: Current agent state
-
-        Returns:
-            Dictionary with:
-            - path_state: Contains validation result and extracted data
-            - decision: "valid_sql" or "invalid_sql"
-        """
+        """Validate SQL deterministically before checking its intent with the LLM."""
         path_state = state.get("path_state", {})
+        if state.get("decision") == "unconstructable":
+            return {"decision": "unconstructable", "path_state": path_state}
+
         response = path_state.get("sql_generation_result")
         connectors = state.get("connectors") or []
         dialects = [c.dialect for c in connectors if getattr(c, "dialect", None)]
@@ -797,6 +870,7 @@ class SQLValidationAgent(BaseAgent):
         )
 
         sql_columns = validation_result.get("sql_columns") or []
+        sql_tables = validation_result.get("sql_tables") or []
         custom_analyses_used = []
         if hasattr(response, "custom_analyses_used"):
             custom_analyses_used = get_custom_analyses_ids(
@@ -809,27 +883,181 @@ class SQLValidationAgent(BaseAgent):
             **path_state,
             "sql_response_from_db": None,  # Will be set after execution
             "sql_columns": sql_columns,
+            "sql_tables": sql_tables,
             "custom_analyses_used": custom_analyses_used,
             "sql_code": response.sql_code,  # Store SQL code for execution
         }
 
-        self.logger.info(f"SQL validation passed, columns: {len(sql_columns)}")
+        failed_attempt_count = len(updated_path_state.get("failed_attempts") or [])
+        if failed_attempt_count > INTENT_VALIDATION_SKIPPED_AFTER:
+            self.logger.info(
+                "Skipping LLM intent validation after %s reconstructions",
+                failed_attempt_count,
+            )
+            return {
+                "decision": "valid_sql",
+                "path_state": updated_path_state,
+            }
 
-        return {
-            "decision": "valid_sql",
-            "path_state": updated_path_state,
-        }
+        return self._validate_intent(
+            state,
+            updated_path_state,
+            validation_result.get("used_tables") or [],
+            validation_result.get("used_columns") or [],
+        )
 
     @staticmethod
     def _sql_parse_validation(schemas, sql: str, dialects: list[str]) -> dict:
         result: dict = {}
         try:
-            parse_query_single(
+            query_obj = parse_query_single(
                 sql=sql,
                 schemas=schemas,
                 dialects=dialects,
             )
+            if query_obj is None:
+                raise ValueError(
+                    "SQL doesn't reference any table known to the catalog; "
+                    "check the query and available schema"
+                )
+            table_ids = [str(node_id) for node_id in query_obj.get_tables_ids()]
+            column_ids = [str(node_id) for node_id in query_obj.get_column_ids()]
             result["success"] = True
+            result["sql_tables"] = table_ids
+            result["sql_columns"] = column_ids
+            result["used_tables"] = _qualified_catalog_names(schemas, table_ids)
+            result["used_columns"] = _qualified_catalog_names(schemas, column_ids)
         except Exception as error:
             result.update({"error": str(error), "another_try": 1})
         return result
+
+    def _validate_intent(
+        self,
+        state: AgentState,
+        path_state: dict,
+        used_tables: list[str],
+        used_columns: list[str],
+    ) -> Dict[str, Any]:
+        """Run the semantic phase after deterministic validation has succeeded."""
+        sql_code = path_state["sql_code"]
+        evidence = state.get("evidence") or ""
+
+        custom_analyses_str_list = path_state.get("custom_analyses_str") or []
+        if custom_analyses_str_list:
+            custom_analyses = (
+                "DOMAIN-SPECIFIC CUSTOM ANALYSES "
+                "(use their SQL patterns as guidance):\n"
+                + "\n".join(f"- {entry}" for entry in custom_analyses_str_list)
+                + "\n\n"
+            )
+        else:
+            custom_analyses = format_custom_analyses_section(
+                path_state.get("custom_analyses") or []
+            )
+
+        relevant_tables = path_state.get("relevant_tables") or []
+        connector = resolve_connector_from_tables(
+            relevant_tables,
+            state.get("connectors") or [],
+        )
+        dialect = getattr(connector, "dialect", None)
+        used_schema_context = format_used_schema_for_prompt(
+            relevant_tables,
+            used_tables,
+            used_columns,
+            target_db=path_state.get("target_db"),
+            dialect=dialect,
+        )
+
+        join_paths = ""
+        if not _JOINS_VALIDATED_ELSEWHERE:
+            primary_attribute = path_state.get("primary_attribute") or {}
+            attribute_join_paths = path_state.get("attribute_join_paths") or []
+            if primary_attribute and attribute_join_paths:
+                join_paths = (
+                    "AUTHORITATIVE JOIN PATHS "
+                    "(keep joins that follow these verified paths):\n"
+                    + format_semantic_context(
+                        primary_attribute,
+                        attribute_join_paths,
+                        target_db=path_state.get("target_db"),
+                        dialect=dialect,
+                    )
+                    + "\n\n"
+                )
+
+        validation_prompt = create_intent_validation_prompt(
+            get_original_question(state),
+            get_standalone_question(state),
+            get_question_for_processing(state),
+            sql_code,
+            custom_analyses=custom_analyses,
+            join_paths=join_paths,
+            joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
+            has_evidence=bool(evidence),
+            used_schema_context=used_schema_context,
+        )
+        system_prompt = (
+            INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE
+            if _JOINS_VALIDATED_ELSEWHERE
+            else INTENT_VALIDATION_SYSTEM_PROMPT
+        )
+        messages = [SystemMessage(content=system_prompt)]
+        if evidence:
+            messages.append(
+                SystemMessage(content=format_authoritative_evidence(evidence))
+            )
+        messages.append(HumanMessage(content=validation_prompt))
+
+        try:
+            validation_result = invoke_with_structured_output(
+                state["llm"], messages, IntentValidationModel
+            )
+        except Exception as error:
+            self.logger.error("Intent validation LLM call failed: %s", error)
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        if (
+            validation_result is not None
+            and (validation_result.reasoning or "").strip()
+        ):
+            record_thought(
+                path_state,
+                "validate_sql_query",
+                validation_result.reasoning.strip(),
+            )
+
+        if validation_result is None or (
+            validation_result.is_valid and not validation_result.evidence_issues
+        ):
+            self.logger.info(
+                "SQL passed static and intent validation, columns: %s",
+                len(path_state.get("sql_columns") or []),
+            )
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        has_real_issues = (
+            validation_result.join_issues
+            or validation_result.aggregation_issues
+            or validation_result.evidence_issues
+        )
+        if not has_real_issues:
+            self.logger.info(
+                "SQL intent validation passed (is_valid=False without issues)"
+            )
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        error_parts = ["Critical SQL issues found:"]
+        issue_sections = (
+            ("Critical join issues", validation_result.join_issues),
+            ("Critical aggregation issues", validation_result.aggregation_issues),
+            ("Critical evidence issues", validation_result.evidence_issues),
+        )
+        for title, issues in issue_sections:
+            if issues:
+                error_parts.append(
+                    f"\n\n{title}:\n" + "\n".join(f"  - {issue}" for issue in issues)
+                )
+
+        path_state["error"] = "".join(error_parts)
+        return {"decision": "invalid_sql", "path_state": path_state}
