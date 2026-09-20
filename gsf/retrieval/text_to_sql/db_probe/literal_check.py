@@ -18,6 +18,16 @@ runtime from (1) the generated SQL itself and (2) live read-only probes:
   case / spelling / spacing). A literal with no close real counterpart is left
   alone, because an empty result can be the correct answer.
 
+A column whose value set is too large to judge wholesale is not skipped
+outright: the literal is still point-probed there (exact match, then
+case/whitespace variants of it). Refusing the whole column also refused plain
+case mismatches on identifier-like columns — a badge, a set, a person name —
+which are high-cardinality without being free text, and which questions name
+explicitly far more often than they name a category. Only the fuzzy spelling
+near-miss stays limited to small value sets, since it needs them in full.
+That point probe is reserved for a query that already returned nothing (see
+``result_was_empty``), which is the evidence that the literal is the problem.
+
 A second, independent check targets numeric comparison predicates (``>``,
 ``>=``, ``<``, ``<=``): a literal that falls far outside the column's real
 ``MIN``/``MAX`` range, but whose value ``/100`` (or ``*100``) *does* fall
@@ -225,23 +235,50 @@ def _candidate_tables(
     return all_nodes
 
 
+def _probe_refs(
+    table_node: exp.Table, col: exp.Column, dialect: Optional[str]
+) -> tuple[str, str]:
+    """``(table_ref, column_ref)`` SQL for a probe against ``col`` in *table_node*.
+
+    The column is qualified with the table's own name, and the table is
+    rendered without its query alias so that qualification resolves. Both
+    matter on SQLite, which reinterprets an unresolvable double-quoted
+    identifier as a string literal rather than failing: ``SELECT DISTINCT
+    "language" FROM "sets"`` returns one row containing the text ``language``,
+    which reads back as a perfectly good single-valued low-cardinality column.
+    A candidate table that doesn't own the column would then be accepted, and
+    the literal judged against that one bogus value — while the table that
+    really owns the column never gets probed at all. Qualified, the same probe
+    raises ``no such column`` and the candidate is correctly skipped.
+
+    Quoting still comes from the identifiers the model itself used, so this
+    reads no catalog metadata.
+    """
+    d = dialect or None
+    bare = table_node.copy()
+    bare.set("alias", None)  # an alias in FROM would shadow the table name
+    return bare.sql(dialect=d), exp.column(col.this, table=bare.this).sql(dialect=d)
+
+
 def _fetch_distinct(
     executor: ProbeExecutor,
     table_node: exp.Table,
     col: exp.Column,
     dialect: Optional[str],
-) -> Optional[list[str]]:
-    """Distinct values for ``col`` in ``table_node`` via a live probe.
+) -> tuple[Optional[list[str]], bool]:
+    """``(distinct_values, high_cardinality)`` for ``col`` in ``table_node``.
 
     Reproduces the exact identifiers/quoting the model used (both already
-    executed against the real DB), so no schema knowledge is needed. Returns
-    ``None`` when the column isn't in this table, the probe fails, or the column
-    is high-cardinality (so we never judge a free-text/name column).
+    executed against the real DB), so no schema knowledge is needed.
+
+    ``values`` is ``None`` when the column isn't in this table, the probe
+    fails, or the column is high-cardinality (so we never judge a free-text
+    column by its whole value set). Only the last of those sets the
+    ``high_cardinality`` flag, which tells the caller the column *is* here and
+    can still be point-probed for one specific literal — see
+    ``_fetch_case_variants``.
     """
-    d = dialect or None
-    # Bare column (drop table qualifier) so it works regardless of alias scoping.
-    col_ref = exp.column(col.this).sql(dialect=d)
-    table_ref = table_node.sql(dialect=d)
+    table_ref, col_ref = _probe_refs(table_node, col, dialect)
     threshold = DB_PROBE_LOW_CARD_THRESHOLD
     sql = (
         f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
@@ -249,11 +286,67 @@ def _fetch_distinct(
     )
     res = executor.run(sql, purpose="value_check_distinct")
     if not res["ok"] or not res["rows"]:
-        return None
+        return None, False
     values = [_first_value(r) for r in res["rows"]]
-    if len(values) > threshold:  # high-cardinality — can't judge a literal here
+    if len(values) > threshold:  # too many to judge wholesale — point-probe instead
+        return None, True
+    return [str(v) for v in values if v is not None], False
+
+
+def _literal_exists(
+    executor: ProbeExecutor,
+    table_node: exp.Table,
+    col: exp.Column,
+    dialect: Optional[str],
+    literal: str,
+) -> Optional[bool]:
+    """Whether *literal* matches ``col`` exactly, or ``None`` if the probe failed.
+
+    A bare equality lookup, so an index on the column can serve it — unlike the
+    case-folded variant search, which always scans. Running this first keeps the
+    scan off the common path where the literal is simply correct.
+    """
+    table_ref, col_ref = _probe_refs(table_node, col, dialect)
+    lit = exp.Literal.string(literal).sql(dialect=dialect or None)
+    sql = f"SELECT 1 AS hit FROM {table_ref} WHERE {col_ref} = {lit} LIMIT 1"
+    res = executor.run(sql, purpose="value_check_exact")
+    if not res["ok"]:
         return None
-    return [str(v) for v in values if v is not None]
+    return bool(res["rows"])
+
+
+def _fetch_case_variants(
+    executor: ProbeExecutor,
+    table_node: exp.Table,
+    col: exp.Column,
+    dialect: Optional[str],
+    literal: str,
+) -> list[str]:
+    """Real values in ``col`` equal to *literal* ignoring case and outer whitespace.
+
+    The wholesale ``DISTINCT`` probe refuses high-cardinality columns so it never
+    judges free text by its whole value set. That also hid plain case mismatches
+    on the identifier-like columns questions name most often (a badge, a set, a
+    person), which are high-cardinality but not free text. Asking about a single
+    literal is independent of the column's cardinality, so the check still
+    applies there.
+
+    Only case/whitespace variants are findable this way — a fuzzy spelling
+    near-miss needs the full value set, so it stays limited to low-cardinality
+    columns.
+    """
+    table_ref, col_ref = _probe_refs(table_node, col, dialect)
+    cast_ref = _text_cast(col_ref, dialect)
+    lit = exp.Literal.string(literal).sql(dialect=dialect or None)
+    sql = (
+        f"SELECT DISTINCT {col_ref} AS value FROM {table_ref} "
+        f"WHERE LOWER(TRIM({cast_ref})) = LOWER(TRIM({lit})) "
+        f"LIMIT {DB_PROBE_LOW_CARD_THRESHOLD}"
+    )
+    res = executor.run(sql, purpose="value_check_variants")
+    if not res["ok"] or not res["rows"]:
+        return []
+    return [str(v) for v in (_first_value(r) for r in res["rows"]) if v is not None]
 
 
 def _fetch_range(
@@ -269,9 +362,7 @@ def _fetch_range(
     dialect this executor supports (unlike ``PERCENTILE_CONT``, which SQLite
     and MySQL don't have).
     """
-    d = dialect or None
-    col_ref = exp.column(col.this).sql(dialect=d)
-    table_ref = table_node.sql(dialect=d)
+    table_ref, col_ref = _probe_refs(table_node, col, dialect)
     sql = (
         f"SELECT MIN({col_ref}) AS lo, MAX({col_ref}) AS hi FROM {table_ref} "
         f"WHERE {col_ref} IS NOT NULL"
@@ -586,12 +677,14 @@ def _resolve_distinct(
     col: exp.Column,
     all_nodes: list[exp.Table],
     by_key: dict[str, exp.Table],
-    distinct_cache: dict[tuple[str, str], Optional[list[str]]],
-) -> tuple[Optional[list[str]], Optional[str]]:
-    """``(actual_values, owning_table)`` for *col*, via the shared distinct cache.
+    distinct_cache: dict[tuple[str, str], tuple[Optional[list[str]], bool]],
+) -> tuple[Optional[list[str]], Optional[exp.Table], bool]:
+    """``(actual_values, owning_table_node, high_cardinality)`` for *col*.
 
-    ``(None, None)`` when the column isn't resolvable, is high-cardinality, or
-    the probe failed — callers treat that as "nothing to check here."
+    ``values`` is ``None`` when the column isn't resolvable, is
+    high-cardinality, or the probe failed. The table node is still returned in
+    the high-cardinality case so the caller can point-probe a single literal
+    there; it is ``None`` only when no candidate table owns the column at all.
     """
     for node in _candidate_tables(col, all_nodes, by_key):
         if not executor.budget_left:
@@ -599,15 +692,61 @@ def _resolve_distinct(
         key = (node.name.lower(), col.name.lower())
         if key not in distinct_cache:
             distinct_cache[key] = _fetch_distinct(executor, node, col, dialect)
-        if distinct_cache[key] is not None:
-            return distinct_cache[key], node.name
-    return None, None
+        values, high_card = distinct_cache[key]
+        if values is not None:
+            return values, node, False
+        if high_card:
+            return None, node, True
+    return None, None, False
+
+
+def _check_high_card_literals(
+    executor: ProbeExecutor,
+    dialect: Optional[str],
+    col: exp.Column,
+    table_node: exp.Table,
+    values: list[str],
+) -> list[dict[str, Any]]:
+    """String mismatches for a column too large to judge by its whole value set.
+
+    Per literal: confirm it exists exactly (cheap), and only when it doesn't,
+    look for case/whitespace variants that do. A literal that already exists is
+    left alone — finding its case-variant siblings would need the full-column
+    read this path exists to avoid, and an exact hit is the common case.
+
+    Callers must gate this on the query having actually returned nothing (see
+    ``find_literal_mismatches``): a missing literal is only evidence of a bug
+    when it left the result empty.
+    """
+    out: list[dict[str, Any]] = []
+    for used in values:
+        if executor.budget_left < 2:  # both probes, or neither
+            break
+        if _literal_exists(executor, table_node, col, dialect, used) is not False:
+            continue  # present, or probe failed — either way nothing to claim
+        variants = _fetch_case_variants(executor, table_node, col, dialect, used)
+        if not variants:
+            continue  # no case variant either — absence may be the right answer
+        out.append(
+            {
+                "kind": "string",
+                "table": table_node.name,
+                "column": col.name,
+                "used": used,
+                "suggested": variants,
+                # Deliberately empty: the column has too many distinct values to
+                # quote back, and the variants above are the whole point anyway.
+                "actual": [],
+            }
+        )
+    return out
 
 
 def find_literal_mismatches(
     executor: ProbeExecutor,
     dialect: Optional[str],
     sql: str,
+    result_was_empty: bool = False,
 ) -> list[dict[str, Any]]:
     """Return fixable literal mismatches against real database values.
 
@@ -616,7 +755,9 @@ def find_literal_mismatches(
 
     - ``kind: "string"`` — the literal has no exact match in the database, but
       a near-miss (case/whitespace/spelling) does. Each entry:
-      ``{"table", "column", "used", "suggested", "actual"}``.
+      ``{"table", "column", "used", "suggested", "actual"}``, where ``actual``
+      is empty for a high-cardinality column (found by point lookup instead,
+      so there is no value set to quote back).
     - ``kind: "case_duplicate"`` — the literal *does* exactly match a real
       value, but that same real-world value also appears in the column under
       other casing/whitespace (e.g. a status column storing ``'Certified'``,
@@ -634,6 +775,13 @@ def find_literal_mismatches(
     Empty list means nothing to repair: every literal/pattern is valid with no
     case-variant siblings, or a missing value has no close real counterpart
     and the empty result is legitimate.
+
+    ``result_was_empty`` says the query has already run and returned no rows.
+    Only then is a high-cardinality column point-probed (see
+    ``_check_high_card_literals``), because that check's whole premise is "the
+    literal is missing, and that is why nothing came back". Gating on it also
+    keeps the extra lookups off the queries that returned an answer, which is
+    nearly all of them.
     """
     try:
         tree = sqlglot.parse_one(sql, read=dialect or None)
@@ -648,14 +796,20 @@ def find_literal_mismatches(
         return []
 
     mismatches: list[dict[str, Any]] = []
-    distinct_cache: dict[tuple[str, str], Optional[list[str]]] = {}
+    distinct_cache: dict[tuple[str, str], tuple[Optional[list[str]], bool]] = {}
 
     for col, values in _string_predicates(tree):
-        actual, owning_table = _resolve_distinct(
+        actual, table_node, high_card = _resolve_distinct(
             executor, dialect, col, all_nodes, by_key, distinct_cache
         )
-        if not actual:  # column not resolvable, high-cardinality, or probe failed
-            continue
+        owning_table = table_node.name if table_node is not None else None
+
+        if actual is None:
+            if result_was_empty and high_card and table_node is not None:
+                mismatches += _check_high_card_literals(
+                    executor, dialect, col, table_node, values
+                )
+            continue  # not resolvable or probe failed — nothing to check here
 
         # Group the already-fetched distinct values by their normalized form
         # so a used literal can be checked against *all* siblings that share
@@ -707,11 +861,12 @@ def find_literal_mismatches(
             )
 
     for col, pattern in _like_predicates(tree):
-        actual, owning_table = _resolve_distinct(
+        actual, table_node, _ = _resolve_distinct(
             executor, dialect, col, all_nodes, by_key, distinct_cache
         )
         if not actual:
             continue
+        owning_table = table_node.name if table_node is not None else None
 
         case_sensitive_re = re.compile(_sql_like_pattern_to_regex(pattern))
         case_insensitive_re = re.compile(
@@ -738,12 +893,18 @@ def find_literal_mismatches(
 
 
 def _render_string_mismatch(m: dict[str, Any]) -> str:
-    actual_preview = ", ".join(str(v) for v in m["actual"][:20])
+    # No actual-value list for a high-cardinality column — too many to quote.
+    actual = m.get("actual") or []
+    actual_clause = (
+        f"Actual values are [{', '.join(str(v) for v in actual[:20])}]. "
+        if actual
+        else ""
+    )
     suggested = ", ".join(str(v) for v in m["suggested"])
     return (
         f"- Column {m['table']}.{m['column']}: your filter used '{m['used']}', "
         f"which does not exist in the database and returns no rows. "
-        f"Actual values are [{actual_preview}]. Closest real value(s): {suggested}."
+        f"{actual_clause}Closest real value(s): {suggested}."
     )
 
 
