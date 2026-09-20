@@ -222,6 +222,7 @@ def create_sql_from_candidates_prompt(
     *,
     dialect: str | None = None,
     target_db: str | None = None,
+    has_sql_examples: bool = False,
 ) -> str:
     """System prompt for SQL generation from semantic retrieval candidates.
 
@@ -263,9 +264,69 @@ WHERE s.order_date BETWEEN
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
 
+    # Solved question/SQL pairs retrieved by question wording from a labelled
+    # corpus of other databases. Two failure modes need heading off: borrowing
+    # identifiers or literals instead of structure, and treating the first
+    # listed pair as the best fit (they are ordered by wording similarity, which
+    # is only weakly related to whether their structure transfers).
+
+    # The exemplar's own evidence shows how a stated formula
+    # was turned into SQL (casting, operand order, whether
+    # *100 was applied), which is the transferable part.
+    sql_examples_block = (
+        "## How To Use Reference Query Patterns\n"
+        "The request includes solved question/SQL pairs from OTHER databases, "
+        "retrieved because their wording resembles this request. They are "
+        "precedent for how a request of this kind becomes SQL — nothing else.\n"
+        "Work through them like this:\n"
+        "1. Read each pair's question, and its evidence when present, and judge "
+        "which pairs ask for the same KIND of thing as this request: a count, a "
+        "ratio, a share, a superlative, a per-group breakdown, one entity or a "
+        "list. Ignore the subject matter; two questions about different domains "
+        "can still be the same kind of request.\n"
+        "2. From the pairs that match in kind, transfer the construction: which "
+        "aggregate answers it, whether the answer needs a join to reach a name "
+        "or label, whether a ratio is cast to REAL before dividing, whether a "
+        "conditional share puts the filter in a CASE inside the aggregate "
+        "rather than in WHERE, and whether DISTINCT is needed.\n"
+        "3. When a pair's evidence states a formula, study how that formula was "
+        "turned into SQL — operand order, the cast, whether the result was scaled "
+        "by 100, whether anything was rounded — and give THIS request's evidence "
+        "the same treatment.\n"
+        "4. Then rebuild the query for this database from scratch: every table, "
+        "column and alias must come from AVAILABLE TABLES, and every filter value "
+        "from this question or its evidence. Names, aliases and literals in the "
+        "pairs do NOT exist here.\n"
+        "5. The pairs are ordered by question similarity, not by how well they "
+        "fit. The first is not automatically the best; prefer whichever pair "
+        "matches this request's kind most closely, and when pairs disagree with "
+        "each other, follow that one rather than the earliest.\n"
+        "6. If no pair matches the kind of request being made, ignore them all "
+        "and build from the question and schema: project exactly what is asked "
+        "and nothing beside it, and bound the result only where the question "
+        "implies a bound. Forcing an ill-fitting pattern is worse than using "
+        "none.\n"
+        "The Rules section still governs throughout: a pair shows how a request "
+        "of this kind is usually built, but where a pair and a rule disagree, "
+        "the rule wins. The question, its evidence, and the schema outrank both.\n"
+        "What they tell you nothing about, no matter what they do:\n"
+        "- Which columns to SELECT, or how many. The pair answered a different "
+        "question; what to return follows from THIS question and the Rules "
+        "section, even when the pair returns more or fewer columns.\n"
+        "- Whether to add LIMIT, and with what number. That follows from this "
+        "question's own wording under the Rules section.\n"
+        "- How many tables YOUR query needs. A single-table pair is no reason to "
+        "drop a join this question requires, and a multi-join pair is no reason "
+        "to add one; their schema is not yours.\n"
+        "- Which columns exist, or what a column is called here.\n"
+        "- Which values to filter on.\n\n"
+        if has_sql_examples
+        else ""
+    )
+
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
-Key rules:
+{sql_examples_block} Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
   Define your own aliases in FROM/JOIN and use only those.
@@ -498,6 +559,173 @@ def format_custom_analyses_section(custom_analyses: list[dict] | None) -> str:
         + "\n".join(ca_lines)
         + "\n\n"
     )
+
+
+def format_sql_examples_section(sql_examples: list[dict] | None) -> str:
+    """Render retrieved question/SQL/evidence precedent for prompt injection.
+
+    Each example is rendered whole — its question, its own evidence, its source
+    database and its SQL — because the transferable lesson is the mapping from
+    request to query, not the query alone. The evidence line in particular
+    shows how a stated formula became SQL (casting, operand order, whether the
+    result was scaled), which is exactly what the model has to reproduce for
+    the request at hand.
+
+    Deliberately separate from the ``## Example SQL Queries`` slot, which holds
+    custom-analysis SQL written against the *target* database and which the
+    prompt rules invite the model to lift filter values from. These examples
+    are structural precedent from other databases, so the section is labelled
+    and framed so the two cannot be confused.
+
+    Returns "" when there is nothing to inject.
+    """
+    if not sql_examples:
+        return ""
+    blocks: list[str] = []
+    for example in sql_examples:
+        sql = " ".join((example.get("sql") or "").split())
+        if not sql:
+            continue
+        source = (example.get("db") or "").strip()
+        header = f"{len(blocks) + 1}."
+        if source:
+            header += f" [source database: {source}]"
+        lines = [header]
+        question = (example.get("question") or "").strip()
+        if question:
+            lines.append(f"   Question: {question}")
+        evidence = " ".join((example.get("evidence") or "").split())
+        if evidence:
+            lines.append(f"   Evidence: {evidence}")
+        lines.append(f"   SQL: {sql}")
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return "## Reference Query Patterns\n" + "\n\n".join(blocks)
+
+
+def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
+    """Render looked-up question phrases and the columns that store them.
+
+    Each anchor is an observation about the live database, not a suggestion:
+    this phrase from the question is stored in this column, with this exact
+    spelling, in this many rows. It exists because the schema alone does not
+    say which of several plausible columns holds a value: the same label often
+    sits in a code column and a display column, or in an entity's own attribute
+    and a denormalised copy on a related table. Picking the wrong one still
+    returns rows, so nothing downstream notices.
+
+    Anchors marked absent are the other half and carry as much weight: a label
+    the question states that the database does not store anywhere means the
+    filter has to be built some other way, rather than from the question's own
+    wording.
+
+    The usage guidance travels inside the section so that attaching it needs no
+    second change to the surrounding prompts.
+
+    Returns "" when nothing was looked up.
+    """
+    if not value_anchors:
+        return ""
+    # Between columns of one table a row count decides nothing while reading as
+    # though it did: schools.MailCity holds 'San Joaquin' in more rows than
+    # schools.City, and City is what the question means. Across tables the
+    # count does discriminate, since volume tracks where a value belongs, so it
+    # is dropped only where columns of the same table compete.
+    rivals: dict[tuple[str, str], set[str]] = {}
+    for anchor in value_anchors:
+        key = (
+            (anchor.get("phrase") or "").strip().lower(),
+            (anchor.get("tbl") or "").strip().lower(),
+        )
+        rivals.setdefault(key, set()).add((anchor.get("col") or "").strip().lower())
+
+    found, absent = [], []
+    for anchor in value_anchors:
+        phrase = (anchor.get("phrase") or "").strip()
+        if not phrase:
+            continue
+        kind = (anchor.get("kind") or "value").strip()
+        if kind == "absent":
+            absent.append(f'"{phrase}"')
+            continue
+        table = (anchor.get("tbl") or "").strip()
+        column = (anchor.get("col") or "").strip()
+        value = (anchor.get("stored_value") or "").strip()
+        if not (table and column and value):
+            continue
+        rows = anchor.get("n_rows") or ""
+        contested = len(rivals.get((phrase.lower(), table.lower()), ())) > 1
+        count = (
+            f" — {int(rows):,} row{'' if int(rows) == 1 else 's'}"
+            if str(rows).isdigit() and not contested
+            else ""
+        )
+        # Two different facts, and conflating them invites an equality filter
+        # on a value that only contains the phrase.
+        claim = (
+            f"= '{value}'{count}"
+            if kind != "contains"
+            else f"contains it inside values such as '{value}' (no value equals the phrase)"
+        )
+        # Supplied only where the phrase matched several columns of one table.
+        # There the row counts say nothing about which column the question
+        # means, and the documented name often says it outright: 'MailCity' is
+        # "mailing city", so a question that does not say mailing means City.
+        gloss = (anchor.get("description") or "").strip()
+        named = f" ({gloss})" if gloss else ""
+        found.append(f'- "{phrase}": {table}."{column}"{named} {claim}')
+    if not found and not absent:
+        return ""
+
+    lines = ["## Verified Database Values"]
+    lines.append(
+        "Phrases from the question, looked up in this database. Every line "
+        "below is a fact about what the data contains."
+    )
+    if found:
+        lines.append("")
+        lines.extend(found)
+    if absent:
+        lines.append("")
+        lines.append(
+            "Stated in the question but stored NOWHERE in this database: "
+            + ", ".join(sorted(set(absent)))
+            + "."
+        )
+    lines.append("")
+    # The absent clause is only included when there is an absent line, so the
+    # section never instructs against something it did not list.
+    never_invent = (
+        " Never filter on a phrase listed as stored nowhere; find what the "
+        "database does store for that idea, or express the condition another way."
+        if absent
+        else ""
+    )
+    lines.append(
+        "Use these when choosing a filter: take the column and the exact "
+        "stored spelling from here instead of inferring either from the "
+        "question's wording or a column's name. A line reading = '...' supports "
+        "an equality filter on that spelling; a line saying the column merely "
+        "contains the phrase does not — match such a column with LIKE, or not "
+        "at all if the question means an exact category. A phrase listed under several "
+        "columns is genuinely ambiguous — decide which column the question is "
+        "asking about from its wording and the column's role in the schema, "
+        "not from the order listed. Where such a column is "
+        "followed by a documented name in parentheses, that name is how the "
+        "question would have to refer to it: a qualifier in the name must also "
+        "be present in the question to pick that column, and an unqualified "
+        "mention means the plain column. A row count, where one is given, says "
+        "only how many rows hold that value: where one phrase sits in several "
+        "tables, the larger count tends to mark the table the value principally "
+        "belongs to. A small count is not itself a reason to distrust a match — "
+        "a value held by a single row is often the very entity the question names."
+        + never_invent
+        + " Evidence "
+        "still outranks these lines, and a phrase absent from this list is not "
+        "thereby absent from the database — only the listed phrases were looked up."
+    )
+    return "\n".join(lines)
 
 
 def create_empty_like_check_prompt(
@@ -786,6 +1014,13 @@ are actually needed to answer the question.
 
 Rules:
 - Only remove tables you are confident are NOT needed in the SQL query.
+- A table can be required even when none of its columns appear in the answer:
+  joining it may restrict WHICH rows qualify (only schools that appear in
+  frpm; only patients who have an examination record). "No column of mine is
+  returned" is NOT a reason to remove a table.
+- Before removing a table, confirm BOTH: (a) it supplies no column the answer
+  needs, AND (b) removing it cannot change the set of rows that qualify.
+  Report both per table — a table stays unless both hold.
 - If table A must be joined through tables B and C to reach table D, do NOT
   remove any table in the join chain (A, B, C, or D). The join paths below
   show real table connections. Keep the full bridges between tables that
@@ -801,7 +1036,10 @@ Rules:
 Candidate tables:
 {tables_summary}
 
-Provide brief reasoning (1-2 sentences) then return the names of tables that can be safely REMOVED.
+Provide brief reasoning (1-2 sentences), then for each table you want REMOVED
+give its name together with both removal checks: whether it supplies no column
+the answer needs, and whether removing it cannot change which rows qualify.
+State in its justification how you verified the row-scoping check.
 Only remove a table if you are confident it is not needed. When in doubt, do NOT remove."""
 
 

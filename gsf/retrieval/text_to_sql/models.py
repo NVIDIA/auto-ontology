@@ -53,6 +53,49 @@ NonEmptyItemScoreList = Annotated[
 ]
 
 
+class TableRemovalModel(BaseModel):
+    """One table the relevance filter proposes to remove, with its checks.
+
+    A table earns removal only by failing *both* tests, so both are answered
+    per table rather than summarised once for the batch. An audit of 47
+    harmful drops found 33 of them (70%) were tables the gold query used only
+    to restrict rows, never to supply a projected column: asked for a single
+    free-form justification the model reliably reasons about column
+    provenance alone and stops there, which is exactly the blind spot.
+    ``candidates_preparation`` enforces the two flags rather than trusting
+    the prose, so a removal the model cannot justify is not applied.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    table: str = Field(..., description="Name of the table to remove.")
+    supplies_no_needed_column: bool = Field(
+        ...,
+        description=(
+            "True only if this table supplies no column the answer needs — "
+            "neither in the output, nor in a filter, nor in a grouping or sort."
+        ),
+    )
+    cannot_change_qualifying_rows: bool = Field(
+        ...,
+        description=(
+            "True only if removing this table cannot change WHICH rows qualify. "
+            "Joining a table also restricts the result to rows that have a "
+            "match in it, so this is False whenever the question limits results "
+            "to rows having a related record there (only schools that appear in "
+            "frpm; only patients who have an examination record) — even though "
+            "none of that table's columns are returned."
+        ),
+    )
+    justification: str = Field(
+        ...,
+        description=(
+            "One sentence stating how you verified the two flags above, "
+            "naming the row-scoping check explicitly."
+        ),
+    )
+
+
 class TableRelevanceModel(BaseModel):
     """LLM output for table relevance filtering."""
 
@@ -62,10 +105,10 @@ class TableRelevanceModel(BaseModel):
         ...,
         description="Brief reasoning (1-2 sentences max) on which tables are relevant.",
     )
-    tables_to_remove: list[str] = Field(
+    tables_to_remove: list[TableRemovalModel] = Field(
         default_factory=list,
         description=(
-            "Names of tables that can be safely removed. "
+            "Tables that can be safely removed, each with its removal checks. "
             "Leave EMPTY [] if unsure or none should be removed."
         ),
     )

@@ -9,6 +9,10 @@ from gsf.retrieval.text_to_sql.agents import candidates_preparation
 from gsf.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
+from gsf.retrieval.text_to_sql.models import (
+    TableRelevanceModel,
+    TableRemovalModel,
+)
 from gsf.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from gsf.retrieval.text_to_sql.state import AgentState
 
@@ -200,3 +204,95 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
         "junction",
     ]
     assert {"path": [hop]} in result["attribute_join_paths"]
+
+
+# --------------------------------------------------------------------------
+# Relevance filter: a removal is applied only when both checks hold
+# --------------------------------------------------------------------------
+
+
+def _table(name: str) -> dict:
+    return {
+        "id": name,
+        "name": name,
+        "schema_name": "main",
+        "database_name": "db",
+        "description": f"the {name} table",
+    }
+
+
+def _removal(
+    table: str,
+    *,
+    no_column: bool = True,
+    cannot_change_rows: bool = True,
+) -> TableRemovalModel:
+    return TableRemovalModel(
+        table=table,
+        supplies_no_needed_column=no_column,
+        cannot_change_qualifying_rows=cannot_change_rows,
+        justification="checked both",
+    )
+
+
+def _stub_filter_llm(monkeypatch, result: TableRelevanceModel) -> None:
+    monkeypatch.setattr(
+        candidates_preparation,
+        "invoke_with_structured_output",
+        lambda llm, messages, model: result,
+    )
+
+
+def _run_filter(tables: list[dict]) -> list[dict]:
+    kept, _ = CandidatePreparationAgent()._filter_tables_by_relevance(
+        cast(AgentState, {"llm": object(), "domain_rules": []}), "q", tables
+    )
+    return kept
+
+
+def test_removal_is_applied_when_both_checks_hold(monkeypatch) -> None:
+    _stub_filter_llm(
+        monkeypatch,
+        TableRelevanceModel(
+            reasoning="drop b", tables_to_remove=[_removal("db.main.b")]
+        ),
+    )
+
+    kept = _run_filter([_table(n) for n in ("a", "b", "c")])
+
+    assert [t["name"] for t in kept] == ["a", "c"]
+
+
+def test_removal_is_declined_when_the_table_may_restrict_rows(monkeypatch) -> None:
+    """The 70% case: no column of it is projected, but it scopes the row set."""
+    _stub_filter_llm(
+        monkeypatch,
+        TableRelevanceModel(
+            reasoning="frpm supplies no output column",
+            tables_to_remove=[
+                _removal("db.main.frpm", no_column=True, cannot_change_rows=False)
+            ],
+        ),
+    )
+
+    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
+
+    assert "frpm" in [t["name"] for t in kept]
+
+
+def test_removal_is_declined_when_the_table_supplies_a_needed_column(
+    monkeypatch,
+) -> None:
+    _stub_filter_llm(
+        monkeypatch,
+        TableRelevanceModel(
+            reasoning="only used for scoping",
+            tables_to_remove=[
+                _removal("db.main.frpm", no_column=False, cannot_change_rows=True)
+            ],
+        ),
+    )
+
+    kept = _run_filter([_table(n) for n in ("schools", "frpm", "satscores")])
+
+    assert "frpm" in [t["name"] for t in kept]

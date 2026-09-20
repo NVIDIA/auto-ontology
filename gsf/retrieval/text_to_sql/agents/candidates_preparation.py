@@ -1067,7 +1067,38 @@ class CandidatePreparationAgent(BaseAgent):
             return top_n, ""
 
         reasoning = (result.reasoning or "").strip()
-        names_to_remove = {name.lower() for name in result.tables_to_remove}
+
+        # A removal needs both checks to hold, and the model answers them per
+        # table (see TableRemovalModel). Enforcing them here rather than
+        # trusting the prose is the point of asking: the failure mode being
+        # targeted is a model that is confident, not uncertain, so it will
+        # state a clean column-provenance case for a table the query needs to
+        # restrict rows. Declining such a removal costs one extra table in the
+        # prompt; honouring it costs the answer.
+        names_to_remove: set[str] = set()
+        unjustified: list[str] = []
+        for removal in result.tables_to_remove:
+            name = (removal.table or "").strip()
+            if not name:
+                continue
+            if removal.supplies_no_needed_column and (
+                removal.cannot_change_qualifying_rows
+            ):
+                names_to_remove.add(name.lower())
+            else:
+                unjustified.append(
+                    f"{name} (no_needed_column="
+                    f"{removal.supplies_no_needed_column}, "
+                    f"cannot_change_rows={removal.cannot_change_qualifying_rows}: "
+                    f"{(removal.justification or '').strip()})"
+                )
+        if unjustified:
+            self.logger.info(
+                "Relevance filter proposed %d removal(s) it could not justify on "
+                "both checks — keeping them: %s",
+                len(unjustified),
+                unjustified,
+            )
 
         filtered = [
             t for t in tables if _qualified_name(t).lower() not in names_to_remove
