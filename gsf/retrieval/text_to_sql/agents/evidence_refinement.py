@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import re
 from typing import Any, Dict, Literal
 
@@ -20,11 +21,6 @@ from gsf.utils.sample_values import stringify_sample_values
 
 _GRAPH_NODE_NAME = "refine_evidence"
 _COMPARISON_OPERATORS = frozenset({"=", "!=", "<>", ">", ">=", "<", "<="})
-_QUOTED_LITERAL_RE = re.compile(r"""^(?:'[^'\n]*'|"[^"\n]*")$""")
-_SCALAR_LITERAL_RE = re.compile(
-    r"""^(?:'[^'\n]*'|"[^"\n]*"|-?\d+(?:\.\d+)?|true|false|null)$""",
-    re.IGNORECASE,
-)
 _FORMULA_OPERATOR_RE = re.compile(r"[*+/]")
 _OPERATOR_CUES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -50,7 +46,13 @@ _SYSTEM_PROMPT = """\
 You refine evidence before SQL generation by correcting only mistakes that are
 certain from the user's question or the supplied column sample values.
 
-Return exact, minimal substring replacements on individual evidence lines.
+Return complete corrected lines, not substring patches. For every repair:
+- copy original_line exactly from the numbered evidence, without its ``N| `` prefix;
+- return corrected_line as the complete fixed version of that same line;
+- preserve every other word, formula, mapping, and instruction byte-for-byte;
+- set corrected_value to the exact final scalar value or comparison operator used
+  in corrected_line (quotes around a string are optional in corrected_value).
+
 Allowed repairs:
 1. string_representation: fix a string value or its casing only when one sample
    value for the named table and column proves the exact stored representation;
@@ -66,13 +68,22 @@ remove evidence. If a repair is uncertain, return no patch for it. An empty repa
 list is the correct answer whenever the evidence may already be valid."""
 
 
-class EvidenceRepairPatch(StrictLLMOutputModel):
-    """One minimal replacement within a single evidence line."""
+class EvidenceLineRepair(StrictLLMOutputModel):
+    """One complete corrected evidence line."""
 
     line_number: int = Field(ge=1, description="One-based evidence line number.")
-    old_text: str = Field(description="Exact literal or operator to replace.")
-    new_text: str = Field(description="Exact replacement literal or operator.")
+    original_line: str = Field(
+        description="The complete original evidence line, copied exactly."
+    )
+    corrected_line: str = Field(
+        description="The complete corrected line with no unrelated rewrites."
+    )
     kind: Literal["string_representation", "constant_value", "predicate_operator"]
+    corrected_value: str = Field(
+        description=(
+            "Exact final scalar value or comparison operator used in corrected_line."
+        )
+    )
     table_name: str = Field(
         default="",
         description="Table containing the value; required for sample-backed repairs.",
@@ -88,7 +99,7 @@ class EvidenceRefinementResult(StrictLLMOutputModel):
     """Structured evidence refinement response."""
 
     reasoning: str = Field(default="")
-    repairs: list[EvidenceRepairPatch] = Field(default_factory=list)
+    repairs: list[EvidenceLineRepair] = Field(default_factory=list)
 
 
 def _unquote_literal(value: str) -> str:
@@ -149,77 +160,103 @@ def _column_samples(
 
 
 def _sample_supports(
-    patch: EvidenceRepairPatch,
+    repair: EvidenceLineRepair,
     tables: list[dict[str, Any]],
 ) -> bool:
-    if not patch.table_name or not patch.column_name:
+    if not repair.table_name or not repair.column_name:
         return False
-    samples = _column_samples(tables, patch.table_name, patch.column_name)
+    samples = _column_samples(tables, repair.table_name, repair.column_name)
     if not samples:
         return False
-    return _unquote_literal(patch.new_text) in samples
+    return _unquote_literal(repair.corrected_value) in samples
 
 
-def _valid_patch(
-    patch: EvidenceRepairPatch,
+def _corrected_line_contains_value(repair: EvidenceLineRepair) -> bool:
+    value = _unquote_literal(repair.corrected_value)
+    return bool(value) and value in repair.corrected_line
+
+
+def _is_local_line_correction(repair: EvidenceLineRepair) -> bool:
+    """Reject broad prose rewrites while allowing one compact value correction."""
+    changed = [
+        opcode
+        for opcode in SequenceMatcher(
+            None, repair.original_line, repair.corrected_line, autojunk=False
+        ).get_opcodes()
+        if opcode[0] != "equal"
+    ]
+    if not changed or len(changed) > 3:
+        return False
+    changed_chars = sum(
+        (old_end - old_start) + (new_end - new_start)
+        for _, old_start, old_end, new_start, new_end in changed
+    )
+    value_length = len(_unquote_literal(repair.corrected_value))
+    return changed_chars <= max(32, value_length * 3 + 8)
+
+
+def _valid_repair(
+    repair: EvidenceLineRepair,
     line: str,
     question: str,
     tables: list[dict[str, Any]],
 ) -> bool:
     if (
-        not patch.old_text
-        or not patch.new_text
-        or patch.old_text == patch.new_text
-        or "\n" in patch.old_text
-        or "\n" in patch.new_text
-        or line.count(patch.old_text) != 1
+        repair.original_line != line
+        or repair.corrected_line == line
+        or "\n" in repair.original_line
+        or "\n" in repair.corrected_line
+        or not repair.corrected_value.strip()
         or _FORMULA_OPERATOR_RE.search(line)
+        or not _is_local_line_correction(repair)
     ):
         return False
 
-    if patch.kind == "predicate_operator":
+    if repair.kind == "predicate_operator":
         return (
-            patch.old_text.strip() in _COMPARISON_OPERATORS
-            and patch.new_text.strip() in _COMPARISON_OPERATORS
-            and patch.new_text.strip() == _unambiguous_question_operator(question)
+            repair.corrected_value.strip() in _COMPARISON_OPERATORS
+            and repair.corrected_value.strip()
+            == _unambiguous_question_operator(question)
+            and repair.corrected_value.strip() in repair.corrected_line
         )
 
-    if not _SCALAR_LITERAL_RE.fullmatch(patch.old_text.strip()):
+    if not _corrected_line_contains_value(repair):
         return False
-    if not _SCALAR_LITERAL_RE.fullmatch(patch.new_text.strip()):
-        return False
-
-    if patch.kind == "string_representation":
-        return bool(
-            _QUOTED_LITERAL_RE.fullmatch(patch.old_text.strip())
-            and _QUOTED_LITERAL_RE.fullmatch(patch.new_text.strip())
-            and _sample_supports(patch, tables)
-        )
-
-    return _question_contains_literal(question, patch.new_text) or _sample_supports(
-        patch, tables
-    )
+    if repair.kind == "string_representation":
+        return _sample_supports(repair, tables)
+    return _question_contains_literal(
+        question, repair.corrected_value
+    ) or _sample_supports(repair, tables)
 
 
 def apply_evidence_repairs(
     evidence: str,
-    repairs: list[EvidenceRepairPatch],
+    repairs: list[EvidenceLineRepair],
     question: str,
     tables: list[dict[str, Any]],
 ) -> tuple[str, list[dict[str, str | int]]]:
-    """Atomically apply validated patches, preserving all other evidence."""
+    """Atomically apply validated full-line repairs.
+
+    The LLM supplies complete corrected lines, while this function owns assembly
+    of the final evidence so every unmentioned line remains byte-for-byte intact.
+    """
     lines = evidence.splitlines(keepends=True)
     accepted: list[dict[str, str | int]] = []
+    seen_line_numbers: set[int] = set()
 
-    for patch in repairs:
-        index = patch.line_number - 1
-        if index < 0 or index >= len(lines) or evidence.count(patch.old_text) != 1:
+    for repair in repairs:
+        index = repair.line_number - 1
+        if index < 0 or index >= len(lines) or repair.line_number in seen_line_numbers:
             return evidence, []
-        line = lines[index]
-        if not _valid_patch(patch, line, question, tables):
+        seen_line_numbers.add(repair.line_number)
+
+        original_with_ending = lines[index]
+        line_ending = original_with_ending[len(original_with_ending.rstrip("\r\n")) :]
+        original_line = original_with_ending.removesuffix(line_ending)
+        if not _valid_repair(repair, original_line, question, tables):
             return evidence, []
-        lines[index] = line.replace(patch.old_text, patch.new_text, 1)
-        accepted.append(patch.model_dump())
+        lines[index] = repair.corrected_line + line_ending
+        accepted.append(repair.model_dump())
 
     return "".join(lines), accepted
 
@@ -282,6 +319,6 @@ class EvidenceRefinementAgent(BaseAgent):
 __all__ = [
     "EvidenceRefinementAgent",
     "EvidenceRefinementResult",
-    "EvidenceRepairPatch",
+    "EvidenceLineRepair",
     "apply_evidence_repairs",
 ]

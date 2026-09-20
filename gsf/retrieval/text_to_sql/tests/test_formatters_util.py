@@ -156,8 +156,8 @@ def test_prompt_renders_date_format_when_present() -> None:
 def test_semantic_context_keeps_catalog_on_spark() -> None:
     """The anchor, the attribute lines and the join hops all carry the catalog.
 
-    The prompt calls these paths authoritative and tells the model to copy the
-    join conditions, so any name here can end up in SQL.
+    The prompt tells the model to copy a selected path's verified join conditions,
+    so any name here can end up in SQL.
     """
     primary_attribute = {
         "database_name": "lakehouse",
@@ -198,6 +198,8 @@ def test_semantic_context_keeps_catalog_on_spark() -> None:
         "lakehouse.lakehouse.clusters.cluster_id"
         " = lakehouse.lakehouse.events.cluster_id" in rendered
     )
+    assert "they are not a plan" in rendered
+    assert "Never add a path merely because it is listed" in rendered
 
 
 def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:

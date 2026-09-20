@@ -35,6 +35,7 @@ from gsf.retrieval.data_access.custom_analyses import (
 )
 from gsf.retrieval.entity_coverage.prompts import format_glossary_section
 from gsf.retrieval.text_to_sql.formatters_util import (
+    format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -121,7 +122,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
-        evidence = state["evidence"]
+        evidence = state.get("evidence", "")
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -238,6 +239,13 @@ class SQLFromCandidatesAgent(BaseAgent):
                 if relevant_tables
                 else "No tables available."
             )
+            important_columns = format_important_columns_for_prompt(
+                primary_attribute,
+                attribute_join_paths,
+                relevant_tables,
+                target_db=target_db,
+                dialect=dialect,
+            )
 
             # Build user prompt
             user_prompt = create_sql_user_prompt.format(
@@ -248,6 +256,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                important_columns=important_columns,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,
             )

@@ -134,6 +134,7 @@ class SQLFromTablesAgent(BaseAgent):
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
             ),
+            important_columns="No semantically matched columns.",
             join_paths="",
             qa_from_conversations=similar_questions,
             custom_analyses="",

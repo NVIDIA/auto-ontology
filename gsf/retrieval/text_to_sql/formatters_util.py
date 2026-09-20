@@ -20,6 +20,31 @@ def _format_sample_values(raw: Any) -> str:
     return ", ".join(values)
 
 
+def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> str:
+    """Render one catalog column consistently wherever schema context appears."""
+    name = column.get("name", "UNKNOWN")
+    data_type = column.get("data_type", "UNKNOWN")
+    description = column.get("description", "")
+    sample_values = _format_sample_values(column.get("sample_values"))
+
+    line = f"{indent}- {name} ({data_type})"
+    if description:
+        line += f" - {description}"
+    if sample_values:
+        if "json" in (data_type or "").lower():
+            line += (
+                " | available JSONB keys"
+                " (dot = nesting level, use as"
+                f" ->>'key' or ->'container'->>'leaf'): {sample_values}"
+            )
+        else:
+            line += f" | sample values: {sample_values}"
+    notation = column.get("format")
+    if notation and "format:" not in (description or "").lower():
+        line += f" | format: {notation}"
+    return line
+
+
 # Dialects whose connection does *not* bind the catalog, so a name has to carry
 # it explicitly. These are exactly the connectors that override
 # ``SQLDatabase.qualify`` to prepend it (``gsf.connectors.kyuubi``,
@@ -91,13 +116,13 @@ def format_semantic_context(
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
-    """Format the semantic anchor and authoritative join paths for a prompt.
+    """Format the semantic anchor and verified optional join paths for a prompt.
 
     Names are qualified exactly as :func:`format_tables_for_prompt` does. The
-    prompt calls these paths authoritative and tells the model to copy the join
-    conditions, so a name spelled differently here than in the schema context
-    is one the model may copy into SQL — on a catalog-qualified engine, dropping
-    the catalog makes it unresolvable.
+    prompt tells the model to copy a selected path's verified join conditions,
+    so a name spelled differently here than in the schema context is one the
+    model may copy into SQL — on a catalog-qualified engine, dropping the catalog
+    makes it unresolvable.
     """
     anchor_schema = primary_attribute.get("schema_name", "")
     anchor_table = primary_attribute.get("table_name", "")
@@ -119,10 +144,12 @@ def format_semantic_context(
     if attribute_join_paths:
         lines.append("")
         lines.append(
-            "JOIN PATHS (AUTHORITATIVE — derived from the verified semantic model). "
-            "This is our most reliable knowledge of how these tables join: use these "
-            "exact join conditions almost always, and only deviate if they clearly "
-            "cannot answer the question. Use only the hops you need:"
+            "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
+            "These paths show how available tables can join; they are not a plan "
+            "and most may be irrelevant to this question. Select only paths needed "
+            "to reach tables that contribute to the answer. Never add a path merely "
+            "because it is listed. When a path is needed, use its exact join "
+            "conditions and only the required hops:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
@@ -154,6 +181,84 @@ def format_semantic_context(
                         lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
+
+
+def format_important_columns_for_prompt(
+    primary_attribute: dict | None,
+    attribute_join_paths: list[dict],
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render columns selected by semantic retrieval with full catalog details.
+
+    ``primary_attribute`` and named entries in ``attribute_join_paths`` identify
+    columns whose ColumnAttributes matched extracted question entities. Their
+    owning tables also appear in the ordinary schema section; this deliberately
+    repeats the matched columns so the SQL model can distinguish them from the
+    rest of a potentially wide table.
+    """
+    entries = [
+        entry
+        for entry in [primary_attribute, *attribute_join_paths]
+        if entry
+        and entry.get("table_name")
+        and entry.get("col_name")
+        and entry.get("attr_name")
+    ]
+    if not entries:
+        return "No semantically matched columns."
+
+    lines: list[str] = []
+    for entry in entries:
+        database = entry.get("database_name") or target_db or ""
+        schema = entry.get("schema_name") or ""
+        table_name = entry.get("table_name") or ""
+        column_name = entry.get("col_name") or ""
+
+        matching_table = next(
+            (
+                table
+                for table in tables
+                if str(table.get("name") or "").casefold() == table_name.casefold()
+                and (
+                    not schema
+                    or str(table.get("schema_name") or "").casefold()
+                    == schema.casefold()
+                )
+                and (
+                    not database
+                    or not table.get("database_name")
+                    or str(table.get("database_name") or "").casefold()
+                    == database.casefold()
+                )
+            ),
+            None,
+        )
+        # The relevance filter may have removed an attribute's table after join
+        # paths were built. Do not reintroduce a column from a table absent from
+        # AVAILABLE TABLES, where the model is explicitly forbidden to use it.
+        if matching_table is None:
+            continue
+        catalog_column = next(
+            (
+                column
+                for column in (matching_table or {}).get("columns", [])
+                if isinstance(column, dict)
+                and str(column.get("name") or "").casefold() == column_name.casefold()
+            ),
+            None,
+        )
+        column = catalog_column or {
+            "name": column_name,
+            "data_type": entry.get("datatype") or "UNKNOWN",
+        }
+        full_table = qualify_table(database, schema, table_name, dialect)
+        lines.append(f"Semantic match: {entry['attr_name']}")
+        lines.append(f"  Table: {full_table}")
+        lines.append(_format_column_for_prompt(column, indent="  "))
+
+    return "\n".join(lines) or "No semantically matched columns."
 
 
 def format_tables_for_prompt(
@@ -207,27 +312,7 @@ def format_tables_for_prompt(
             )
             for col in columns:
                 if isinstance(col, dict):
-                    col_name = col.get("name", "UNKNOWN")
-                    col_type = col.get("data_type", "UNKNOWN")
-                    col_desc = col.get("description", "")
-                    sample_values = _format_sample_values(col.get("sample_values"))
-
-                    col_line = f"    - {col_name} ({col_type})"
-                    if col_desc:
-                        col_line += f" - {col_desc}"
-                    if sample_values:
-                        if "json" in (col_type or "").lower():
-                            col_line += (
-                                f" | available JSONB keys"
-                                f" (dot = nesting level, use as"
-                                f" ->>'key' or ->'container'->>'leaf'): {sample_values}"
-                            )
-                        else:
-                            col_line += f" | sample values: {sample_values}"
-                    notation = col.get("format")
-                    if notation and "format:" not in (col_desc or "").lower():
-                        col_line += f" | format: {notation}"
-                    table_parts.append(col_line)
+                    table_parts.append(_format_column_for_prompt(col, indent="    "))
                 elif isinstance(col, str):
                     table_parts.append(f"    - {col}")
                 else:
