@@ -209,6 +209,18 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
     return result
 
 
+def _needs_column_metadata_backfill(table: dict) -> bool:
+    """Whether a relevant table lacks samples or nullability metadata."""
+    columns = table.get("columns") or []
+    has_samples = any(
+        isinstance(column, dict) and column.get("sample_values") for column in columns
+    )
+    has_complete_nullability = bool(columns) and all(
+        isinstance(column, dict) and "is_nullable" in column for column in columns
+    )
+    return not has_samples or not has_complete_nullability
+
+
 logger = logging.getLogger(__name__)
 
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
@@ -493,28 +505,23 @@ class CandidatePreparationAgent(BaseAgent):
             [_qualified_name(t) for t in relevant_tables],
         )
 
-        # --- 4a. Back-fill sample_values for any table that arrived without them ---
+        # --- 4a. Back-fill rich per-column metadata when it is incomplete ---
         # Tables retrieved from the vector index carry only name/data_type/description;
-        # richer per-column detail (e.g. sample_values) lives in the store's row for
-        # that table. Fetch the rich rows for every table that has an id but whose
-        # columns are all missing sample_values, then merge per-column so nothing
-        # already present is overwritten.
-        sample_less_ids = [
+        # sample_values and is_nullable live in the store's row for that table.
+        # Fetch rich rows whenever either signal is missing, then merge per-column
+        # so nothing already present is overwritten.
+        metadata_incomplete_ids = [
             str(t["id"])
             for t in relevant_tables
-            if t.get("id")
-            and not any(
-                isinstance(c, dict) and c.get("sample_values")
-                for c in (t.get("columns") or [])
-            )
+            if t.get("id") and _needs_column_metadata_backfill(t)
         ]
-        if sample_less_ids:
-            enriched = fetch_tables_by_ids(sample_less_ids)
+        if metadata_incomplete_ids:
+            enriched = fetch_tables_by_ids(metadata_incomplete_ids)
             relevant_tables = _merge_tables(relevant_tables, enriched)
             self.logger.info(
-                "Back-filled sample_values for %d/%d table(s)",
+                "Back-filled column metadata for %d/%d table(s)",
                 len(enriched),
-                len(sample_less_ids),
+                len(metadata_incomplete_ids),
             )
 
         # --- 4b. Add tables referenced by custom analyses via the store ---

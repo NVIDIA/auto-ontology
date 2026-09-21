@@ -394,6 +394,16 @@ def test_columns_for_table_carries_each_columns_tags(world) -> None:
 
 
 def test_tables_by_ids_nests_column_summaries(world) -> None:
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.order_id"])
+        .values(is_nullable=False)
+    )
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == world.columns["orders.customer_id"])
+        .values(is_nullable=True)
+    )
     rows = {
         r["name"]: r
         for r in d.fetch_tables_by_ids(
@@ -407,6 +417,10 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
         "customer_id",
         "total",
     ]
+    columns = {column["name"]: column for column in rows["orders"]["columns"]}
+    assert columns["order_id"]["is_nullable"] is False
+    assert columns["customer_id"]["is_nullable"] is True
+    assert columns["total"]["is_nullable"] is None
 
 
 def test_tables_by_ids_is_empty_for_an_empty_list() -> None:

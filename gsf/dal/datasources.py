@@ -955,7 +955,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     sample_values from the vector-index hit) exists to supply. It was
     selected here from Aug 2026 until the Neo4j-to-Postgres port silently
     dropped it from this query's rewrite (the Neo4j Cypher version had it);
-    restored so the back-fill isn't a no-op again.
+    restored so the back-fill isn't a no-op again. ``is_nullable`` is included
+    alongside it so projection rules can tell when a requested item may be
+    missing; ``None`` means the connector could not determine it.
     """
     if not table_ids:
         return []
@@ -973,6 +975,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 column_description_expr().label("column_description"),
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
+                s.catalog_column.c.is_nullable,
             )
             .select_from(
                 _table_join().join(
@@ -1016,6 +1019,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "description": row["column_description"],
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
+                    "is_nullable": row["is_nullable"],
                 }
             )
     return list(tables.values())

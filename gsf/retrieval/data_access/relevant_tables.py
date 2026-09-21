@@ -98,8 +98,12 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["database_name"] = str(database_name).strip()
     if table.get("schema_name") and not entry.get("schema_name"):
         entry["schema_name"] = table["schema_name"]
-    if table.get("columns") and not entry.get("columns"):
-        entry["columns"] = table["columns"]
+    direct_columns = table.get("columns")
+    if isinstance(direct_columns, list):
+        parsed_columns = (
+            entry.get("columns") if isinstance(entry.get("columns"), list) else []
+        )
+        entry["columns"] = _merge_column_lists(parsed_columns, direct_columns)
     # Keep the catalog's own spelling (``pk``) rather than renaming it: this
     # function is applied twice on the candidate path (once in
     # ``_get_candidates_information``, again in

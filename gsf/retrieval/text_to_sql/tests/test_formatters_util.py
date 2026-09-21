@@ -165,6 +165,25 @@ def test_prompt_omits_sample_values_when_absent() -> None:
     assert "sample values" not in rendered
 
 
+def test_prompt_renders_column_nullability_states() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "items",
+                "columns": [
+                    {"name": "id", "data_type": "int", "is_nullable": False},
+                    {"name": "category", "data_type": "text", "is_nullable": True},
+                    {"name": "legacy_value", "data_type": "text", "is_nullable": None},
+                ],
+            }
+        ]
+    )
+
+    assert "id (int) | is_nullable: false" in rendered
+    assert "category (text) | is_nullable: true" in rendered
+    assert "legacy_value (text) | is_nullable: unknown" in rendered
+
+
 def test_prompt_renders_date_format_when_present() -> None:
     rendered = format_tables_for_prompt(
         [

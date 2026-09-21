@@ -17,6 +17,41 @@ from gsf.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from gsf.retrieval.text_to_sql.state import AgentState
 
 
+def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
+    assert candidates_preparation._needs_column_metadata_backfill(
+        {
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": ["open"],
+                }
+            ]
+        }
+    )
+    assert candidates_preparation._needs_column_metadata_backfill(
+        {
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": [],
+                    "is_nullable": True,
+                }
+            ]
+        }
+    )
+    assert not candidates_preparation._needs_column_metadata_backfill(
+        {
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": ["open"],
+                    "is_nullable": None,
+                }
+            ]
+        }
+    )
+
+
 def test_retrieve_additional_tables_searches_question_and_entities(
     monkeypatch,
 ) -> None:

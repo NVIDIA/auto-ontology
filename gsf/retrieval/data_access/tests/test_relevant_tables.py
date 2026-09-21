@@ -109,3 +109,31 @@ def test_dedupe_merge_keeps_the_key_of_an_already_normalized_table() -> None:
     merged = relevant_tables.dedupe_merge_relevant_tables([normalized, normalized])
 
     assert merged[0]["pk"] == ["StoreID"]
+
+
+def test_normalize_merges_rich_nullability_into_parsed_columns() -> None:
+    table = {
+        "id": "table-1",
+        "name": "orders",
+        "label": Labels.TABLE,
+        "text": "table_name: orders, columns: {name: status, data_type: text}",
+        "columns": [
+            {
+                "name": "status",
+                "data_type": "text",
+                "sample_values": ["open"],
+                "is_nullable": True,
+            }
+        ],
+    }
+
+    normalized = relevant_tables._normalize_table_to_relevant_shape(table)
+
+    assert normalized["columns"] == [
+        {
+            "name": "status",
+            "data_type": "text",
+            "sample_values": ["open"],
+            "is_nullable": True,
+        }
+    ]

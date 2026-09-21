@@ -42,6 +42,13 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
     notation = column.get("format")
     if notation and "format:" not in (description or "").lower():
         line += f" | format: {notation}"
+    nullability = column.get("is_nullable")
+    if nullability is True:
+        line += " | is_nullable: true"
+    elif nullability is False:
+        line += " | is_nullable: false"
+    else:
+        line += " | is_nullable: unknown"
     return line
 
 
