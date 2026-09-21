@@ -16,6 +16,7 @@ def _run_sql_from_tables(
     *,
     question: str,
     evidence: str,
+    sql_examples: list[dict] | None = None,
 ) -> list:
     captured: list = []
     monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
@@ -38,6 +39,7 @@ def _run_sql_from_tables(
             "messages": [],
             "connectors": [object()],
             "data_retriever": object(),
+            "sql_examples": sql_examples or [],
             "path_state": {"relevant_tables": [{}]},
         }
     )
@@ -76,3 +78,16 @@ def test_tables_agent_does_not_scan_question_for_evidence(
 
     assert "## Authoritative Evidence" not in messages[1].content
     assert "MUST follow every instruction" not in messages[1].content
+
+
+def test_tables_agent_enables_reference_query_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="How many customers placed orders?",
+        evidence="Count distinct customers.",
+        sql_examples=[{"question": "How many users purchased?", "sql": "SELECT 1"}],
+    )
+
+    assert "## How To Use Reference Query Patterns" in messages[0].content

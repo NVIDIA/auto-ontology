@@ -3593,6 +3593,7 @@
             "data_type": "integer",
             "description": "Primary key of customer.",
             "format": null,
+            "is_nullable": false,
             "name": "customer_id",
             "sample_values": null
           },
@@ -3600,6 +3601,7 @@
             "data_type": "integer",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "inventory_id",
             "sample_values": null
           },
@@ -3607,6 +3609,7 @@
             "data_type": "integer",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "rental_id",
             "sample_values": null
           },
@@ -3614,6 +3617,7 @@
             "data_type": "integer",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "staff_id",
             "sample_values": null
           },
@@ -3621,6 +3625,7 @@
             "data_type": "timestamp with time zone",
             "description": "When the rental started.",
             "format": null,
+            "is_nullable": false,
             "name": "rental_date",
             "sample_values": null
           },
@@ -3628,6 +3633,7 @@
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "last_update",
             "sample_values": null
           },
@@ -3635,6 +3641,7 @@
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
+            "is_nullable": true,
             "name": "return_date",
             "sample_values": null
           }
@@ -3655,6 +3662,7 @@
             "data_type": "integer",
             "description": "Primary key of film.",
             "format": null,
+            "is_nullable": false,
             "name": "film_id",
             "sample_values": null
           },
@@ -3662,6 +3670,7 @@
             "data_type": "integer",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "language_id",
             "sample_values": null
           },
@@ -3669,6 +3678,7 @@
             "data_type": "integer",
             "description": null,
             "format": null,
+            "is_nullable": true,
             "name": "original_language_id",
             "sample_values": null
           },
@@ -3676,6 +3686,7 @@
             "data_type": "mpaa_rating",
             "description": "MPAA rating; an enum.",
             "format": null,
+            "is_nullable": true,
             "name": "rating",
             "sample_values": null
           },
@@ -3683,6 +3694,7 @@
             "data_type": "numeric",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "rental_rate",
             "sample_values": null
           },
@@ -3690,6 +3702,7 @@
             "data_type": "numeric",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "replacement_cost",
             "sample_values": null
           },
@@ -3697,20 +3710,23 @@
             "data_type": "smallint",
             "description": null,
             "format": null,
-            "name": "length",
+            "is_nullable": false,
+            "name": "rental_duration",
             "sample_values": null
           },
           {
             "data_type": "smallint",
             "description": null,
             "format": null,
-            "name": "rental_duration",
+            "is_nullable": true,
+            "name": "length",
             "sample_values": null
           },
           {
             "data_type": "text",
             "description": "The film's title.",
             "format": null,
+            "is_nullable": false,
             "name": "title",
             "sample_values": null
           },
@@ -3718,6 +3734,7 @@
             "data_type": "text",
             "description": null,
             "format": null,
+            "is_nullable": true,
             "name": "description",
             "sample_values": null
           },
@@ -3725,6 +3742,7 @@
             "data_type": "text[]",
             "description": null,
             "format": null,
+            "is_nullable": true,
             "name": "special_features",
             "sample_values": null
           },
@@ -3732,6 +3750,7 @@
             "data_type": "timestamp with time zone",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "last_update",
             "sample_values": null
           },
@@ -3739,6 +3758,7 @@
             "data_type": "tsvector",
             "description": null,
             "format": null,
+            "is_nullable": false,
             "name": "fulltext",
             "sample_values": null
           },
@@ -3746,6 +3766,7 @@
             "data_type": "year",
             "description": null,
             "format": null,
+            "is_nullable": true,
             "name": "release_year",
             "sample_values": null
           }

@@ -117,6 +117,7 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
+                has_sql_examples=bool(state.get("sql_examples")),
             )
         else:
             system_prompt = create_sql_general_prompt
