@@ -376,7 +376,9 @@ def test_probe_qualifies_column_and_drops_table_alias():
     executor = ProbeExecutor(connector=connector)
 
     find_literal_mismatches(
-        executor, "sqlite", "SELECT * FROM set_translations AS st WHERE st.language = 'Korean'"
+        executor,
+        "sqlite",
+        "SELECT * FROM set_translations AS st WHERE st.language = 'Korean'",
     )
 
     probe = executor.log[0]["sql"]

@@ -70,9 +70,7 @@ def test_retry_still_runs_after_a_spent_literal_repair():
     in the run. That says nothing about this empty result, so the undiagnosed
     retry is still owed.
     """
-    out = EmptyResultValueRepairAgent().execute(
-        _state([], value_repair_attempted=True)
-    )
+    out = EmptyResultValueRepairAgent().execute(_state([], value_repair_attempted=True))
 
     assert out["decision"] == "invalid_sql"
     assert out["path_state"]["empty_result_retry_attempted"] is True

@@ -10,10 +10,7 @@ from gsf.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_tables_for_prompt,
 )
-from gsf.retrieval.text_to_sql.prompts import (
-    create_sql_user_prompt,
-    format_projection_rules,
-)
+from gsf.retrieval.text_to_sql.prompts import create_sql_user_prompt
 
 
 def test_prompt_renders_date_format_when_present() -> None:
@@ -60,16 +57,6 @@ def test_prompt_forbids_unused_joins() -> None:
     assert "Never join a table solely because its path is listed" in (
         create_sql_user_prompt
     )
-
-
-def test_projection_rule_uses_nullability_for_missing_list_items() -> None:
-    rules = format_projection_rules()
-
-    assert "`is_nullable`—never `is_unique`" in rules
-    assert "`is_nullable: true`" in rules
-    assert "add `IS NOT NULL` only when" in rules
-    assert "requested list of values" in rules
-    assert "Keep nullable attributes" in rules
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

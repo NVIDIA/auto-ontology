@@ -107,9 +107,7 @@ class EmptyResultValueRepairAgent(BaseAgent):
                 mismatches = find_literal_mismatches(
                     executor, dialect, sql_code, result_was_empty=True
                 )
-                mismatches += find_numeric_scale_mismatches(
-                    executor, dialect, sql_code
-                )
+                mismatches += find_numeric_scale_mismatches(executor, dialect, sql_code)
 
         if mismatches:
             path_state["value_repair_attempted"] = True
