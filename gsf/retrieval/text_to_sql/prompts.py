@@ -7,6 +7,50 @@ import os
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
+_FALSE_ENV_VALUES = {"0", "false", "no", "off"}
+
+
+def detailed_answers_enabled() -> bool:
+    """Return whether SQL may project concise supporting answer fields.
+
+    Detailed answers are the product default. Exact-match evaluation harnesses
+    can opt into strict projection with ``DETAILED_ANSWERS=false``.
+    """
+
+    value = os.environ.get("DETAILED_ANSWERS", "true")
+    return value.strip().lower() not in _FALSE_ENV_VALUES
+
+
+_PROJECTION_RULES = (
+    "**Projection**\n"
+    "- SELECT only the columns explicitly asked; extra columns make the result "
+    "wrong even when the rows are right. For superlative/ranking questions "
+    "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
+    "the ranking key OR the aggregated value, never both, and never add the "
+    "ORDER BY metric unless its value is asked. To identify an entity "
+    "(who/which/what), return one identifying column (name if it exists, else id), "
+    "not both.\n"
+    "- If the user asks for name, project the requested name fields and never add "
+    "IDs unless the user explicitly asks for them.\n"
+    "- Preserve the question's field order in SELECT: project explicitly requested "
+    "outputs from left to right in the same order the user names them.\n"
+    "- If evidence maps an answer concept to specific columns, preserve that "
+    "projection exactly; do not collapse, reshape, or replace those columns "
+    "unless the question explicitly asks for a transformed value.\n"
+)
+
+
+def format_projection_rules() -> str:
+    """Render product-detailed or benchmark-strict projection guidance."""
+
+    if detailed_answers_enabled():
+        return _PROJECTION_RULES
+    return (
+        _PROJECTION_RULES
+        + "- Return exactly the requested output fields and NO others.\n"
+    )
+
+
 main_system_prompt_template = (
     "Today's date is: {{ 'Year': {date.year}, 'Month': {date.month}, 'Day': {date.day}, "
     "'Time': '{date.hour:02}:{date.minute:02}:{date.second:02}' }}.\n\n"
@@ -75,21 +119,7 @@ create_sql_user_prompt = (
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
     "{dialect_rules}"
-    "**Projection**\n"
-    "- SELECT only the columns explicitly asked; extra columns make the result "
-    "wrong even when the rows are right. For superlative/ranking questions "
-    "(most/least/top/highest/lowest/peak/best/worst), select ONLY the item named "
-    "the ranking key OR the aggregated value, never both, and never add the "
-    "ORDER BY metric unless its value is asked. To identify an entity "
-    "(who/which/what), return one identifying column (name if it exists, else id), "
-    "not both.\n"
-    "- If the user asks for name, project the requested name fields and never add "
-    "IDs unless the user explicitly asks for them.\n"
-    "- Preserve the question's field order in SELECT: project explicitly requested "
-    "outputs from left to right in the same order the user names them.\n"
-    "- If evidence maps an answer concept to specific columns, preserve that "
-    "projection exactly; do not collapse, reshape, or replace those columns "
-    "unless the question explicitly asks for a transformed value.\n"
+    "{projection_rules}"
     "**Style**\n"
     "- For counts, preserve the grain of the entity being counted: use "
     "COUNT(DISTINCT entity_identifier) when joins can produce multiple rows per "

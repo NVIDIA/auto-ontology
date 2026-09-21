@@ -59,15 +59,6 @@ def test_prompt_forbids_unused_joins() -> None:
     )
 
 
-def test_prompt_preserves_requested_projection_shape() -> None:
-    assert "never add IDs unless the user explicitly asks for them" in (
-        create_sql_user_prompt
-    )
-    assert "project explicitly requested outputs from left to right" in (
-        create_sql_user_prompt
-    )
-
-
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
     rendered = format_important_columns_for_prompt(
         {

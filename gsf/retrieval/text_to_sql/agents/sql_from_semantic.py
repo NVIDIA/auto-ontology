@@ -51,6 +51,7 @@ from gsf.retrieval.text_to_sql.prompts import (
     format_custom_analyses_section,
     format_dialect_rules,
     format_dual_question_block,
+    format_projection_rules,
     format_sql_examples_section,
     format_value_anchors_section,
 )
@@ -265,6 +266,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
                 dialect_rules=format_dialect_rules(dialect),
+                projection_rules=format_projection_rules(),
                 main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,
