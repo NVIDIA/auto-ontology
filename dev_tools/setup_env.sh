@@ -23,7 +23,7 @@ docker compose rm -sf $GSF_SERVICES >/dev/null 2>&1 || true
 if [[ " $* " =~ \ --dev\  ]]; then
 	SERVICES=$(resolve_infra_services)
 	echo "Starting infrastructure: $SERVICES"
-	docker compose up -d $SERVICES
+	docker compose up -d --build $SERVICES
 
 	echo ""
 	echo "Services:"
