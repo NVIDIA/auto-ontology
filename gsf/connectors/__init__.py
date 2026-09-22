@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from gsf.connectors.base import SQLDatabase
+from gsf.connectors.clickhouse import ClickHouseDatabase
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
@@ -18,6 +19,7 @@ from gsf.connectors.trino import TrinoDatabase
 
 __all__ = [
     "SQLDatabase",
+    "ClickHouseDatabase",
     "DatabricksDatabase",
     "DuckDBDatabase",
     "HeavyDBDatabase",

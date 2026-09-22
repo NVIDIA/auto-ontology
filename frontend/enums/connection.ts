@@ -11,6 +11,7 @@ export enum ConnectionType {
 	HEAVYDB = 'heavydb',
 	KYUUBI = 'kyuubi',
 	TRINO = 'trino',
+	CLICKHOUSE = 'clickhouse',
 }
 
 export const connectionDisplayName: Record<ConnectionType, string> = {
@@ -21,6 +22,7 @@ export const connectionDisplayName: Record<ConnectionType, string> = {
 	[ConnectionType.HEAVYDB]: 'HeavyDB',
 	[ConnectionType.KYUUBI]: 'Apache Kyuubi',
 	[ConnectionType.TRINO]: 'Trino',
+	[ConnectionType.CLICKHOUSE]: 'ClickHouse',
 };
 
 export const isConnectionType = (value: string | null | undefined): value is ConnectionType =>
@@ -221,6 +223,42 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 			placeholder: 'Leave empty to choose from a list',
 			hint: 'Ingest only this schema. Leave empty to pick schemas from a list instead.',
 			optional: true,
+		},
+	],
+	[ConnectionType.CLICKHOUSE]: [
+		{
+			key: 'host',
+			label: 'Host',
+			placeholder: 'clickhouse.example.com',
+			hint: 'A pasted ClickHouse Cloud endpoint may include https://; the scheme is kept as the transport.',
+		},
+		{
+			key: 'port',
+			label: 'Port',
+			placeholder: '8123',
+			optional: true,
+			hint: 'The HTTP interface: 8123 by default, 8443 on ClickHouse Cloud.',
+		},
+		{
+			key: 'user',
+			label: 'User',
+			placeholder: 'default',
+			optional: true,
+			hint: 'Leave empty to connect as the server default user.',
+		},
+		{ key: 'password', label: 'Password', secret: true, optional: true },
+		{
+			key: 'database',
+			label: 'Database',
+			placeholder: 'analytics',
+			hint: 'ClickHouse has no schema below the database, so one connection covers one database. Add a second connection for a second database.',
+		},
+		{
+			key: 'http_scheme',
+			label: 'Protocol',
+			placeholder: 'http',
+			optional: true,
+			hint: 'Leave empty to infer from the port: https on 443 and 8443, http otherwise. Set https explicitly for a TLS listener on any other port — unlike Trino, a password alone does not imply TLS here.',
 		},
 	],
 };

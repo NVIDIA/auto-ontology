@@ -20,6 +20,7 @@ DEFAULT_MYSQL_PORT = "3306"
 DEFAULT_HEAVYDB_PORT = "6274"
 DEFAULT_KYUUBI_PORT = "10000"
 DEFAULT_TRINO_PORT = "8080"
+DEFAULT_CLICKHOUSE_PORT = "8123"
 DEFAULT_HEAVYDB_PROTOCOL = "binary"
 
 
@@ -182,6 +183,62 @@ def build_connection_string(connection: Mapping[str, Any]) -> str:
             params.append(f"http_scheme={_enc(http_scheme)}")
 
         url = f"trino://{credentials}@{host}:{port}/{_enc(catalog)}"
+        if params:
+            url += f"?{'&'.join(params)}"
+        return url
+
+    if conn_type == "clickhouse":
+        host = _require(connection, "host").rstrip("/")
+        # A pasted ClickHouse Cloud endpoint carries its scheme; keep it as the
+        # transport rather than dropping it, since 8443 is the only hint the
+        # connector would otherwise have that the endpoint is TLS.
+        scheme_from_host = ""
+        if host.startswith(("https://", "http://")):
+            scheme_from_host, host = host.split("://", 1)
+
+        # A pasted endpoint carries its port as well as its scheme, and the Port
+        # field is optional, so the two have to be reconciled here. Appending
+        # both yields ``host:8443:8123``, which is not a "wrong port" but an
+        # unparseable URL -- ``urlparse(...).port`` raises rather than returning
+        # anything the connector could fall back from.
+        port_from_host = ""
+        if host.count(":") == 1:
+            host, _, candidate = host.partition(":")
+            if candidate.isdigit():
+                port_from_host = candidate
+            else:
+                # Not a port after all; put it back rather than losing it.
+                host = f"{host}:{candidate}"
+
+        database = _require(connection, "database")
+        port = (
+            str(connection.get("port") or "").strip()
+            or port_from_host
+            or DEFAULT_CLICKHOUSE_PORT
+        )
+
+        # Both credentials are optional: a stock server runs as ``default`` with
+        # an empty password. A password without a user is still sent, as
+        # ``:password@`` -- the connector reads that as the default user (see
+        # ``ClickHouseDatabase._ensure_client``), and dropping it instead would
+        # silently downgrade the connection to unauthenticated and surface as an
+        # auth failure the form gives no way to explain.
+        user = str(connection.get("user") or "").strip()
+        password = str(connection.get("password") or "").strip()
+        credentials = ""
+        if password:
+            credentials = f"{_enc(user)}:{_enc(password)}@"
+        elif user:
+            credentials = f"{_enc(user)}@"
+
+        params = []
+        http_scheme = (
+            str(connection.get("http_scheme") or "").strip().lower() or scheme_from_host
+        )
+        if http_scheme:
+            params.append(f"http_scheme={_enc(http_scheme)}")
+
+        url = f"clickhouse://{credentials}{host}:{port}/{_enc(database)}"
         if params:
             url += f"?{'&'.join(params)}"
         return url

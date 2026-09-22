@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 from gsf.connectors.base import SQLDatabase
 
 from gsf.connectors.connection_string_factory import build_connection_string
+from gsf.connectors.clickhouse import ClickHouseDatabase
 from gsf.connectors.databricks import DatabricksDatabase
 from gsf.connectors.duckdb import DuckDBDatabase
 from gsf.connectors.heavydb import HeavyDBDatabase
@@ -46,6 +47,7 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
     "databricks": DatabricksDatabase,
     "duckdb": DuckDBDatabase,
     "snowflake": SnowflakeDatabase,
+    "clickhouse": ClickHouseDatabase,
     "heavydb": HeavyDBDatabase,
     "kyuubi": KyuubiDatabase,
     "sqlite": SQLiteDatabase,
