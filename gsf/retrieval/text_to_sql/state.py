@@ -42,7 +42,7 @@ class TextToSQLPayload(TypedDict):
     # query shape only — never identifiers or filter values.
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
-    detailed_answers: NotRequired[bool]
+    shorten_answer: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -68,7 +68,7 @@ class AgentState(TypedDict):
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
-    detailed_answers: bool
+    shorten_answer: bool
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str

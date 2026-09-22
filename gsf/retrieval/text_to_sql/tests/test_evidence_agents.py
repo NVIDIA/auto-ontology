@@ -17,7 +17,7 @@ def _run_sql_from_tables(
     question: str,
     evidence: str,
     sql_examples: list[dict] | None = None,
-    detailed_answers: bool | None = None,
+    shorten_answer: bool | None = None,
 ) -> list:
     captured: list = []
     monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
@@ -42,8 +42,8 @@ def _run_sql_from_tables(
         "sql_examples": sql_examples or [],
         "path_state": {"relevant_tables": [{}]},
     }
-    if detailed_answers is not None:
-        state["detailed_answers"] = detailed_answers
+    if shorten_answer is not None:
+        state["shorten_answer"] = shorten_answer
     SQLFromTablesAgent().execute(state)
     return captured
 
@@ -102,7 +102,7 @@ def test_tables_agent_uses_request_projection_configuration(
         monkeypatch,
         question="Which account has the highest balance?",
         evidence="Use accounts.balance.",
-        detailed_answers=False,
+        shorten_answer=True,
     )
 
     assert "Return exactly the requested output fields and NO others" in (

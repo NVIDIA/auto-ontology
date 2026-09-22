@@ -26,10 +26,10 @@ _PROJECTION_RULES = (
 )
 
 
-def format_projection_rules(detailed_answers: bool = True) -> str:
-    """Render product-detailed or benchmark-strict projection guidance."""
+def format_projection_rules(shorten_answer: bool = False) -> str:
+    """Render benchmark-strict guidance only when shorter answers are requested."""
 
-    if detailed_answers:
+    if not shorten_answer:
         return _PROJECTION_RULES
     return (
         _PROJECTION_RULES

@@ -65,8 +65,8 @@ def test_prompt_forbids_unused_joins() -> None:
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
 
-    assert strict_rule not in format_projection_rules(detailed_answers=True)
-    assert strict_rule in format_projection_rules(detailed_answers=False)
+    assert strict_rule not in format_projection_rules(shorten_answer=False)
+    assert strict_rule in format_projection_rules(shorten_answer=True)
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

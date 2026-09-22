@@ -68,9 +68,9 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
 
 @pytest.mark.parametrize(
     ("payload_value", "expected"),
-    [(None, True), (True, True), (False, False)],
+    [(None, False), (True, True), (False, False)],
 )
-def test_build_state_propagates_detailed_answers(
+def test_build_state_propagates_shorten_answer(
     main_module: ModuleType,
     payload_value: bool | None,
     expected: bool,
@@ -81,8 +81,8 @@ def test_build_state_propagates_detailed_answers(
         "connectors": [SimpleNamespace(dialect="sqlite", database_name="db_test")],
     }
     if payload_value is not None:
-        payload["detailed_answers"] = payload_value
+        payload["shorten_answer"] = payload_value
 
     state = main_module._build_state(cast(TextToSQLPayload, payload))
 
-    assert state["detailed_answers"] is expected
+    assert state["shorten_answer"] is expected
