@@ -266,7 +266,9 @@ class SQLFromCandidatesAgent(BaseAgent):
             user_prompt = create_sql_user_prompt.format(
                 dialect=dialect,
                 dialect_rules=format_dialect_rules(dialect),
-                projection_rules=format_projection_rules(),
+                projection_rules=format_projection_rules(
+                    state.get("detailed_answers", True)
+                ),
                 main_question=main_question,
                 observation_block=observation_block,
                 queries=relevant_queries,

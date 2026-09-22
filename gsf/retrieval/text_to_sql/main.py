@@ -131,6 +131,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "evidence": payload.get("evidence") or "",
         "sql_examples": list(payload.get("sql_examples") or []),
         "value_anchors": list(payload.get("value_anchors") or []),
+        "detailed_answers": payload.get("detailed_answers", True),
         "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
         "messages": messages,

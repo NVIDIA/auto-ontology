@@ -64,3 +64,25 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
     assert state["initial_question"] == "How many accounts?"
     assert state["path_state"]["processing_question"] == "How many active accounts?"
     assert state["messages"][1].content == "How many active accounts?"
+
+
+@pytest.mark.parametrize(
+    ("payload_value", "expected"),
+    [(None, True), (True, True), (False, False)],
+)
+def test_build_state_propagates_detailed_answers(
+    main_module: ModuleType,
+    payload_value: bool | None,
+    expected: bool,
+) -> None:
+    payload = {
+        "question": "How many accounts?",
+        "data_retriever": object(),
+        "connectors": [SimpleNamespace(dialect="sqlite", database_name="db_test")],
+    }
+    if payload_value is not None:
+        payload["detailed_answers"] = payload_value
+
+    state = main_module._build_state(cast(TextToSQLPayload, payload))
+
+    assert state["detailed_answers"] is expected

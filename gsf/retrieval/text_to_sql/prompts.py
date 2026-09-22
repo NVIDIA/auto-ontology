@@ -7,20 +7,6 @@ import os
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
-_FALSE_ENV_VALUES = {"0", "false", "no", "off"}
-
-
-def detailed_answers_enabled() -> bool:
-    """Return whether SQL may project concise supporting answer fields.
-
-    Detailed answers are the product default. Exact-match evaluation harnesses
-    can opt into strict projection with ``DETAILED_ANSWERS=false``.
-    """
-
-    value = os.environ.get("DETAILED_ANSWERS", "true")
-    return value.strip().lower() not in _FALSE_ENV_VALUES
-
-
 _PROJECTION_RULES = (
     "**Projection**\n"
     "- SELECT only the columns explicitly asked; extra columns make the result "
@@ -40,10 +26,10 @@ _PROJECTION_RULES = (
 )
 
 
-def format_projection_rules() -> str:
+def format_projection_rules(detailed_answers: bool = True) -> str:
     """Render product-detailed or benchmark-strict projection guidance."""
 
-    if detailed_answers_enabled():
+    if detailed_answers:
         return _PROJECTION_RULES
     return (
         _PROJECTION_RULES

@@ -10,7 +10,10 @@ from gsf.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_tables_for_prompt,
 )
-from gsf.retrieval.text_to_sql.prompts import create_sql_user_prompt
+from gsf.retrieval.text_to_sql.prompts import (
+    create_sql_user_prompt,
+    format_projection_rules,
+)
 
 
 def test_prompt_renders_date_format_when_present() -> None:
@@ -57,6 +60,13 @@ def test_prompt_forbids_unused_joins() -> None:
     assert "Never join a table solely because its path is listed" in (
         create_sql_user_prompt
     )
+
+
+def test_projection_strictness_is_configured_per_request() -> None:
+    strict_rule = "- Return exactly the requested output fields and NO others."
+
+    assert strict_rule not in format_projection_rules(detailed_answers=True)
+    assert strict_rule in format_projection_rules(detailed_answers=False)
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
