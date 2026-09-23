@@ -39,6 +39,7 @@ from auto_ontology.ingestion_service.history import (
     record_run_start,
 )
 from auto_ontology.ingestion_service.scheduler import IntervalScheduler
+from auto_ontology.semantic.cancellation import clear_cancel, request_cancel
 from auto_ontology.semantic.compile import run_semantic_compilation
 
 logger = logging.getLogger(__name__)
@@ -76,7 +77,23 @@ class SemanticScheduler(IntervalScheduler):
         # the startup race can still construct one on its own.
         self._depends_on = depends_on
 
+    def abort(self) -> None:
+        """Stop the in-flight pass at the next *table*, not the next database.
+
+        The base class only sets its own flag, which the pass checks between
+        databases — so an abort could take as long as the slowest single
+        database (312s observed here). Cancelling the semantic work as well
+        makes queued tables no-ops and skips the post-compile stages, which
+        brings a stop down to roughly one table.
+        """
+        request_cancel()
+        super().abort()
+
     async def _run_once(self) -> None:
+        # A cancellation belongs to the pass that was running when it was
+        # requested; leaving it set would abort this one before it starts.
+        clear_cancel()
+
         # Re-check the settings flag on every pass so a disable is honored live:
         # the loop keeps ticking but no-ops until re-enabled, rather than running
         # until the next service restart. Mirrors the lifespan startup gate.
@@ -118,8 +135,11 @@ class SemanticScheduler(IntervalScheduler):
             for index, database_name in enumerate(databases):
                 # Checked per database rather than once per pass, so a stop
                 # request or a disable ends the run at the next boundary instead
-                # of after every database. The database in flight always
-                # finishes: its work runs in a thread that cannot be interrupted.
+                # of after every database. The database in flight is not
+                # abandoned — Python cannot kill its worker threads — but
+                # ``abort`` also cancels the semantic work, so it stops at its
+                # next table and skips the post-compile stages rather than
+                # running to completion.
                 if self.aborting:
                     logger.info(
                         "semantic: stopped on request; %d database(s) not compiled",

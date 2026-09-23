@@ -12,6 +12,7 @@ from auto_ontology.dal.datasources import (
     fetch_table_context,
 )
 from auto_ontology.infra.feature_flags import is_distinct_value_probing_enabled
+from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import SemanticEmbedder
 from auto_ontology.semantic.models import ProcessTableResult
@@ -119,6 +120,12 @@ def compile_semantic_layer(
     ) -> ProcessTableResult | None:
         commit_slot = _OrderedCommitSlot(commit_queue, position)
         table_name = table["name"]
+        # Checked here rather than before submitting: every table is queued up
+        # front, so this is what turns the backlog into no-ops and lets the pool
+        # drain in about one table's time instead of one database's.
+        if is_cancelled():
+            commit_slot.skip_if_unused()
+            return None
         try:
             ctx = fetch_table_context(table["id"])
 
@@ -167,5 +174,12 @@ def compile_semantic_layer(
                     result.attr_names,
                 )
 
-    logger.info("Compilation complete — %d table(s) processed", count)
+    if is_cancelled():
+        logger.info(
+            "Compilation cancelled — %d of %d table(s) compiled before stopping",
+            count,
+            len(tables),
+        )
+    else:
+        logger.info("Compilation complete — %d table(s) processed", count)
     return count
