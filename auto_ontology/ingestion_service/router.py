@@ -96,17 +96,17 @@ async def semantic_reset(
 
     Deletes the semantic nodes and embeddings, then asks for a compilation pass
     so the layer is rebuilt without waiting for the scheduler's next run.
-    Omitting ``database_name`` resets every database. The deletion runs on its
-    own thread while the compilation pass runs on the scheduler's task, so the
-    two overlap.
+    Omitting ``database_name`` resets every database.
+
+    The three steps are strictly ordered — stop the running pass, wait for it to
+    stop, delete, then rebuild — and run as a background task, so this returns
+    immediately while the wait can take minutes. They used to overlap, which
+    lost data in both directions: a pass reads its work list once at the start,
+    so one beginning before the delete finished saw every table still carrying a
+    Term and compiled nothing, while a pass still running during the delete kept
+    writing Terms it had already swept past.
     """
-    trigger_reset_semantic(database_name)
-
-    scheduler = request.app.state.semantic_scheduler
-
-    scheduler.abort()
-    if not scheduler.start():
-        scheduler.trigger()
+    trigger_reset_semantic(request.app.state.semantic_scheduler, database_name)
     return {"status": "accepted"}
 
 

@@ -218,7 +218,7 @@
     },
     "/semantic/reset": {
       "post": {
-        "description": "Trigger a non-blocking reset of a database's semantic layer.\n\nDeletes the semantic nodes and embeddings, then asks for a compilation pass\nso the layer is rebuilt without waiting for the scheduler's next run.\nOmitting ``database_name`` resets every database. The deletion runs on its\nown thread while the compilation pass runs on the scheduler's task, so the\ntwo overlap.",
+        "description": "Trigger a non-blocking reset of a database's semantic layer.\n\nDeletes the semantic nodes and embeddings, then asks for a compilation pass\nso the layer is rebuilt without waiting for the scheduler's next run.\nOmitting ``database_name`` resets every database.\n\nThe three steps are strictly ordered \u2014 stop the running pass, wait for it to\nstop, delete, then rebuild \u2014 and run as a background task, so this returns\nimmediately while the wait can take minutes. They used to overlap, which\nlost data in both directions: a pass reads its work list once at the start,\nso one beginning before the delete finished saw every table still carrying a\nTerm and compiled nothing, while a pass still running during the delete kept\nwriting Terms it had already swept past.",
         "operationId": "semantic_reset_semantic_reset_post",
         "parameters": [
           {
