@@ -1,0 +1,67 @@
+{{/*
+Runs prisma/migrate.sh, which guards then `prisma db push` to sync the
+Postgres schema with prisma/schema.prisma.
+
+Ordering: this is a normal release resource (NOT a Helm hook), created
+alongside the frontend rather than after it. That matters because the frontend
+gates its own startup on the schema (auto-ontology.waitForSchema) so its seed-admin never
+runs before the tables exist; a post-install hook would deadlock that gate
+(frontend would never become Ready, so the hook would never run). The Job's own
+wait-for-postgres init container handles Postgres readiness, and `helm --wait`
+waits for the Job to complete. Naming per `.Release.Revision` gives a fresh Job
+each upgrade (Job specs are immutable, so a stable name could not re-run), and
+ttlSecondsAfterFinished garbage-collects finished Jobs.
+
+Prisma is scoped to the `frontend` schema only (schemas = ["frontend"] +
+multiSchema). Ingestion's vector table lives in the separate `vdb` schema
+(see auto-ontology/vdb), so `db push` never sees it and cannot drop it.
+
+The wrapper first empties conversation_analytics IFF it predates the
+required user_id column (idempotent, no-op otherwise), because `db push`
+cannot add a NOT NULL column to a table that already has rows. See
+frontend/prisma/migrate.sh.
+
+No `--accept-data-loss`: if the `public` schema still drifts from
+prisma/schema.prisma, this intentionally refuses to drop and the Job
+fails. Resolve drift by hand rather than silently dropping data.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: frontend-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "frontend-migrate") | nindent 4 }}
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "frontend-migrate") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "auto-ontology.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres {{ .Values.postgres.service.port }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          {{- include "auto-ontology.initResources" . | nindent 10 }}
+      containers:
+        - name: prisma-migrate
+          image: "{{ include "auto-ontology.image" .Values.frontend.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          workingDir: /app/migrate
+          envFrom:
+            - secretRef:
+                name: {{ include "auto-ontology.secretName" . }}
+          command:
+            - sh
+            - prisma/migrate.sh

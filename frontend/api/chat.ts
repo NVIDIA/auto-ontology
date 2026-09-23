@@ -148,7 +148,7 @@ export const streamChat = (
 		try {
 			const res = await fetch('/api/chat/completions', {
 				method: 'POST',
-				headers: { 'Content-Type': 'application/json', 'x-gsf-source': 'app' },
+				headers: { 'Content-Type': 'application/json', 'x-auto-ontology-source': 'app' },
 				body,
 				signal: controller.signal,
 			});

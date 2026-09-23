@@ -43,7 +43,7 @@ function focusIsInsideSubtree(nodeFocusPath: string, focusId: string | undefined
 // Remembers which nodes the user has explicitly expanded/collapsed, so a
 // page refresh restores the tree as they left it instead of only ever
 // re-deriving it from the `focus` URL param (which stays put on collapse).
-const OPEN_STATE_STORAGE_KEY = 'gsf.dataTree.openState';
+const OPEN_STATE_STORAGE_KEY = 'auto_ontology.dataTree.openState';
 
 function readPersistedOpenState(): Record<string, boolean> {
 	if (typeof window === 'undefined') return {};

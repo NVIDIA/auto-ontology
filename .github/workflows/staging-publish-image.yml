@@ -2,10 +2,10 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Builds the GSF FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
+# Builds the Auto Ontology FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
 # deploy repo consumes it by digest; GitHub and GitLab stay decoupled, linked
 # only through nvcr.io (mirrors staging-publish-chart.yml). Requires repo secret:
-#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/auto-ontology
 #
 # The image serves both the API server (`server`) and the ingestion service
 # (`ingestion_service`); the ingestion entrypoint exposes /health on 3002, which
@@ -22,7 +22,7 @@ on:
   push:
     branches: [main, feat/astra-nightly-deploy]
     paths:
-      - 'gsf/**'
+      - 'auto_ontology/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'Dockerfile'
@@ -30,8 +30,8 @@ on:
 
 env:
   # nvcr.io allows only org/team/image (3 segments); the app image shares the
-  # nvcr.io/nvstaging/gsf/gsf repo with the OCI chart, distinguished by tag.
-  IMAGE: nvcr.io/nvstaging/gsf/gsf
+  # nvcr.io/nvstaging/auto-ontology/auto-ontology repo with the OCI chart, distinguished by tag.
+  IMAGE: nvcr.io/nvstaging/auto-ontology/auto-ontology
 
 jobs:
   publish-image:
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           # Staging app images: tag is stg.<UTC ts> only (no version prefix).
           # The constant "stg." prefix lets the deploy repo's nightly roll
-          # (gsf/gsf-demo-deploy: ci/roll-stg.sh) pick app images and skip the
+          # (auto-ontology/auto-ontology-demo-deploy: ci/roll-stg.sh) pick app images and skip the
           # OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
           t='${{ github.event.inputs.tag }}'
           if [ -z "$t" ]; then

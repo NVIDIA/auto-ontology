@@ -11,7 +11,7 @@ export const VISUALIZATION_ENABLED_KEY = 'visualization_enabled';
 export const DISTINCT_VALUE_PROBING_ENABLED_KEY = 'distinct_value_probing_enabled';
 
 /**
- * Read an opt-out flag the way `gsf/infra/feature_flags.py` does.
+ * Read an opt-out flag the way `auto_ontology/infra/feature_flags.py` does.
  *
  * Both layers read the same row, so they have to canonicalize it the same way
  * or they disagree: the Python reader strips and lowercases, so a stored

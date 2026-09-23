@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Renders docs/openapi/gsf-api.json as a Redoc site and publishes it to GitHub
+# Renders docs/openapi/auto-ontology-api.json as a Redoc site and publishes it to GitHub
 # Pages, because GitHub itself has no OpenAPI viewer — the committed JSON is
 # readable by tooling, not by people.
 #
@@ -21,7 +21,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "docs/openapi/gsf-api.json"
+      - "docs/openapi/auto-ontology-api.json"
       - ".github/workflows/publish-api-docs.yml"
   workflow_dispatch:
 
@@ -58,7 +58,7 @@ jobs:
         env:
           REDOCLY_TELEMETRY: off
         # Pinned to v1: `build-docs` was removed in v2.
-        run: npx --yes @redocly/cli@1 build-docs docs/openapi/gsf-api.json -o site/index.html
+        run: npx --yes @redocly/cli@1 build-docs docs/openapi/auto-ontology-api.json -o site/index.html
 
       - name: Configure Pages
         uses: actions/configure-pages@v5

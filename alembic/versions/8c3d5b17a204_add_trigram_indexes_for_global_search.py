@@ -17,9 +17,9 @@ tables, twice each -- once for ``name`` and once for ``description``.
 The operator class folds case itself, so the indexed expression is the bare
 column rather than ``lower(name)``. That is deliberate and load-bearing in one
 direction: ``ILIKE`` matches these as written, and wrapping them in ``lower()``
-would build indexes that the queries in ``gsf.dal.search`` could no longer use.
+would build indexes that the queries in ``auto_ontology.dal.search`` could no longer use.
 
-The table list is inlined rather than imported from ``gsf.dal.schema``. Importing
+The table list is inlined rather than imported from ``auto_ontology.dal.schema``. Importing
 it would make this revision create whatever the application currently defines
 instead of what it defined here, so adding a searchable entity later would
 silently change what this migration does. A migration is a record of what ran.
@@ -29,7 +29,7 @@ from typing import Sequence, Union
 
 from alembic import op
 
-# Kept in step with `TRIGRAM_SEARCH_TABLES` in `gsf/dal/schema.py`, which
+# Kept in step with `TRIGRAM_SEARCH_TABLES` in `auto_ontology/dal/schema.py`, which
 # declares the same indexes to the metadata so autogenerate does not propose
 # dropping them on the next run.
 SEARCH_TABLES = (

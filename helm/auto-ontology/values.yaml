@@ -1,0 +1,178 @@
+# Default values for the Auto Ontology Helm chart.
+
+# Global image pull policy. With minikube + locally-built images,
+# IfNotPresent prevents the cluster from trying to pull from a remote registry.
+imagePullPolicy: IfNotPresent
+
+# Image pull secrets for private registries (e.g. nvcr.io). Empty for local /
+# minikube (public images). A deployment overlay can set, e.g.:
+#   imagePullSecrets:
+#     - name: nvcr-creds
+imagePullSecrets: []
+
+# When enabled, the chart renders an in-cluster Secret (<release>-secrets) from
+# the values below — convenient for local / minikube. Disable it when an
+# external mechanism (e.g. the External Secrets Operator) supplies that Secret.
+bundledSecret:
+  enabled: true
+
+# Extra annotations merged into the backend / ingestion / frontend pod templates.
+# A GitOps overlay can bump a value here (e.g. rolledAt) to force a fresh rollout
+# even when image references are unchanged.
+podAnnotations: {}
+
+# ------------------------------------------------------------------
+# Shared credentials — populate a single k8s Secret (<release>-secrets)
+# consumed by all Auto Ontology workloads.
+# ------------------------------------------------------------------
+# Postgres
+postgresUser: auto_ontology
+postgresPassword: ""
+postgresDatabase: auto_ontology
+# pgAdmin
+pgadminEmail: admin@example.com
+pgadminPassword: admin
+# NVIDIA NIM — default triplet; every model triplet falls back to these per field.
+# Leave endpoint/model empty to auto-derive them from the API key prefix
+# (sk- -> inference-api, nvapi- -> integrate/build.nvidia.com).
+defaultModelsApiKey: ""
+defaultModelsEndpoint: ""
+defaultModelsModel: ""
+# Legacy value names (pre-triplet). Still honored so existing
+# --set nvidiaApiKey / baseUrl / modelName configs keep working.
+nvidiaApiKey: ""
+baseUrl: ""
+modelName: ""
+# KumoRFM (predictions). Set the URL to a Universal TFM NIM serving the
+# 'kumo-rfm' model; leave it empty to disable the prediction tool. NIMs are
+# unauthenticated by contract, so the key is only needed when a deployment
+# fronts the NIM with an authenticating gateway.
+kumoRfmApiKey: ""
+kumoRfmApiUrl: ""
+# Embedding endpoint/model. Leave empty to inherit from the default triplet /
+# auto-derive from the API key prefix; set to override just the embedder.
+embedEndpoint: ""
+embedModel: ""
+# Ingestion targets - comma-separated list of PG URLs the worker reads from.
+connectionStrings: ""
+# HashiCorp Vault (AppRole) credentials for pulling secrets at runtime.
+vaultAddr: ""
+vaultNamespace: ""
+vaultRoleId: ""
+vaultSecretId: ""
+# Optional Vault mount overrides (defaults shown).
+vaultAuthMount: "approle/nvdcs/dc1"
+vaultKvMount: "auto-ontology"
+# Better Auth signing key (sessions, CSRF, OIDC state). Leave empty to
+# auto-generate a stable random secret on first install and preserve it across
+# upgrades. Set explicitly to share one value across environments/replicas.
+authSecret: ""
+# Public origin of the app — REQUIRED by Better Auth (sessions, CSRF, OIDC
+# redirect URIs). It must match the URL you actually browse to, or auth
+# requests 404 / fail CSRF. The default works when reaching the frontend via
+# `kubectl port-forward svc/frontend 3000:3000`. For NodePort/ingress/https,
+# set this to that exact origin (e.g. https://auto-ontology.example.com).
+appUrl: "http://localhost:3000"
+# Public origin of the separately deployed MCP server, without its `/mcp`
+# endpoint suffix. OAuth access tokens are audience-bound to this URL.
+mcpPublicUrl: "http://localhost:3003"
+# Bootstrap admin account. REQUIRED — self-service sign-up is disabled, so this
+# is the only way the initial admin is provisioned. The frontend creates this
+# admin on first start (email-verified), or resets its password to this value
+# on subsequent starts. Leaving either empty fails the install/upgrade.
+adminEmail: ""
+adminPassword: ""
+
+# ------------------------------------------------------------------
+# Postgres (pgvector)
+# ------------------------------------------------------------------
+postgres:
+  image:
+    repository: pgvector/pgvector
+    tag: pg17
+  service:
+    port: 5432
+  persistence:
+    size: 5Gi
+    # Set to a specific class on clusters without a default dynamic provisioner
+    # (e.g. Astra pdx02: pdx02-cdot03-ainfs01-nfsv3). Empty = cluster default.
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# pgAdmin
+# ------------------------------------------------------------------
+pgadmin:
+  # Optional DB admin UI. Handy for local/minikube; disabled on Astra via the
+  # deploy overlay (auto-ontology.pgadmin.enabled=false).
+  enabled: true
+  image:
+    repository: dpage/pgadmin4
+    tag: latest
+  service:
+    port: 80
+    nodePort: 30050
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# ------------------------------------------------------------------
+# Auto Ontology FastAPI backend
+# ------------------------------------------------------------------
+backend:
+  # The Alembic head revision this chart's image ships. The backend's
+  # wait-for-catalog-schema init container blocks until public.alembic_version
+  # matches it, so new Pods never serve against a schema the migration Job has
+  # not finished applying. Bump this with the migration, in the same commit.
+  alembicRevision: 2c24b6498f41
+  image:
+    repository: nvcr.io/nvstaging/auto-ontology/auto-ontology
+    tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
+  service:
+    port: 3001
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# Ingestion worker (exposes an HTTP API the backend calls to trigger ingest)
+# ------------------------------------------------------------------
+ingestion:
+  image:
+    # Reuses the backend image with a different entrypoint arg.
+    repository: nvcr.io/nvstaging/auto-ontology/auto-ontology
+    tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
+  service:
+    port: 3002
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# ------------------------------------------------------------------
+# Next.js frontend
+# ------------------------------------------------------------------
+frontend:
+  image:
+    repository: nvcr.io/nvstaging/auto-ontology/auto-ontology-frontend
+    tag: 0.0.1
+    # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
+  service:
+    port: 3000
+    nodePort: 30000
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi

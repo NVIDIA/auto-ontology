@@ -31,10 +31,10 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
 	title: {
-		default: 'GSF — NVIDIA',
-		template: 'GSF - %s',
+		default: 'Auto Ontology — NVIDIA',
+		template: 'Auto Ontology - %s',
 	},
-	description: 'NVIDIA GSF — Generative Semantic Fabric',
+	description: 'NVIDIA Auto Ontology',
 	icons: {
 		icon: '/favicon.svg',
 	},
@@ -49,7 +49,7 @@ export default async function RootLayout({
 	const isAdmin = session?.user.role === Role.Admin;
 	// Injected at runtime by the Helm chart from the chart version (.Chart.Version).
 	const appVersion = process.env.APP_VERSION;
-	const pathname = (await headers()).get('x-gsf-pathname') ?? '';
+	const pathname = (await headers()).get('x-auto-ontology-pathname') ?? '';
 	const showAppChrome = Boolean(session) && !isLoginOrOauthPath(pathname);
 
 	return (

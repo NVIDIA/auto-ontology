@@ -5,7 +5,7 @@
 /**
  * Which columns admit a hand-edited sample value.
  *
- * Mirrors `sample_values_editable` in `gsf/utils/column_types.py`, which
+ * Mirrors `sample_values_editable` in `auto_ontology/utils/column_types.py`, which
  * refuses the same edits with a 422 — this only decides whether the catalog UI
  * offers the edit at all. Profiled samples arrive carrying the column's own
  * type, but an edited one is whatever text the user typed, so only a column

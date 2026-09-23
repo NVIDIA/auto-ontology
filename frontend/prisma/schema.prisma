@@ -1,7 +1,7 @@
 // `frontend` only, and deliberately: `db push` reconciles every schema listed
 // here against this file, so naming `public` would hand Prisma authority over
-// GSF's own tables — it proposed dropping `alembic_version` the moment it was
-// added. GSF's schema is Alembic's (see `gsf/dal/schema.py`), and the two stay
+// Auto Ontology's own tables — it proposed dropping `alembic_version` the moment it was
+// added. Auto Ontology's schema is Alembic's (see `auto_ontology/dal/schema.py`), and the two stay
 // out of each other's way by each listing only what it owns.
 datasource db {
   provider = "postgresql"
@@ -196,7 +196,7 @@ model SsoProvider {
 // API tokens for machine-to-machine access (scripts, CI, notebooks). Owned and
 // managed by the Better Auth `apiKey` plugin — field names/types must match the
 // plugin's schema exactly, so this model breaks the snake_case convention the
-// GSF-owned tables use, like the other Better Auth tables above.
+// Auto Ontology-owned tables use, like the other Better Auth tables above.
 //
 // `key` holds a SHA-256 hash of the token, never the token itself: the plaintext
 // is returned once at creation and is unrecoverable afterwards. `referenceId` is
@@ -254,8 +254,8 @@ model Apikey {
 // a dynamically registered MCP client belongs to no one until someone consents.
 //
 // These sit in `frontend` with the rest of Better Auth. `public` is Alembic's
-// (see `gsf/dal/schema.py`); listing it on the datasource would let Prisma
-// propose dropping GSF tables.
+// (see `auto_ontology/dal/schema.py`); listing it on the datasource would let Prisma
+// propose dropping Auto Ontology tables.
 model OauthClient {
   id                               String    @id
   clientId                         String    @unique

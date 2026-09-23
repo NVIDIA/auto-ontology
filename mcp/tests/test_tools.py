@@ -10,8 +10,8 @@ import json
 import re
 from types import SimpleNamespace
 
-from gsf_mcp.config import DEFAULT_SPEC_PATH
-from gsf_mcp.tools import (
+from auto_ontology_mcp.config import DEFAULT_SPEC_PATH
+from auto_ontology_mcp.tools import (
     CURATED,
     apply_description,
     missing_from_spec,

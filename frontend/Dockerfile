@@ -1,10 +1,10 @@
 # ---------------------------------------------------------------------------
-# GSF Next.js frontend image
+# Auto Ontology Next.js frontend image
 # ---------------------------------------------------------------------------
-# Build (from /frontend):  docker build -t gsf-frontend:latest .
+# Build (from /frontend):  docker build -t auto-ontology-frontend:latest .
 # Run:                     docker run --rm -p 3000:3000 \
-#                              -e PYTHON_API_URL=http://gsf:3001 \
-#                              gsf-frontend:latest
+#                              -e PYTHON_API_URL=http://auto-ontology:3001 \
+#                              auto-ontology-frontend:latest
 #
 # Uses Next.js standalone output (NEXT_OUTPUT=standalone) for a small image.
 # The runtime image only contains the standalone server, static assets and
@@ -61,7 +61,7 @@ FROM base-node AS builder
 # Backend URL baked into the Next.js rewrite manifest at build time
 # (Next.js evaluates rewrites() during `next build`, not at server startup).
 # Defaults to the in-cluster Service name used by the helm chart.
-ARG PYTHON_API_URL=http://gsf:3001
+ARG PYTHON_API_URL=http://auto-ontology:3001
 
 ARG PNPM_VERSION
 ENV PNPM_HOME=/pnpm \
@@ -113,7 +113,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma /app/migrate/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts /app/migrate/prisma.config.ts
 RUN cd /app/migrate \
- && echo '{"name":"gsf-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"}}' > package.json \
+ && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"}}' > package.json \
  && npm install --omit=dev --no-audit --no-fund --no-package-lock \
  && chown -R nextjs:nodejs /app/migrate
 

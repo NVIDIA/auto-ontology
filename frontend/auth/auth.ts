@@ -35,7 +35,7 @@ const prisma = getPrisma();
 const isBuildPhase = process.env.NEXT_PHASE === 'phase-production-build';
 
 const mcpResource = (): string => {
-	const publicUrl = process.env.GSF_MCP_PUBLIC_URL?.replace(/\/+$/, '');
+	const publicUrl = process.env.AUTO_ONTOLOGY_MCP_PUBLIC_URL?.replace(/\/+$/, '');
 	if (publicUrl) return `${publicUrl}/mcp`;
 	if (isBuildPhase) return 'https://mcp.invalid/mcp';
 	return 'http://localhost:3003/mcp';
@@ -70,7 +70,7 @@ export const auth = betterAuth({
 	},
 	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
 	// the only credential account is the bootstrap admin seeded from
-	// GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
+	// AUTO_ONTOLOGY_ADMIN_EMAIL / AUTO_ONTOLOGY_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
 	// are added by an admin or provisioned via SSO.
 	emailAndPassword: { enabled: true, disableSignUp: true },
 	// MCP clients (Cursor, the Python SDK) register loopback HTTP and
@@ -105,7 +105,7 @@ export const auth = betterAuth({
 	plugins: [
 		// Two roles only: `admin` (user management) and `viewer` (everything else).
 		admin({ ac, roles, adminRoles: [Role.Admin], defaultRole: Role.Viewer }),
-		// GSF Allows only one SSO provider, so this makes the redirect URI static.
+		// Auto Ontology Allows only one SSO provider, so this makes the redirect URI static.
 		// Better Auth's baseURL already includes `/api/auth`, so this becomes
 		// APP_URL/api/auth/sso/callback — the URI the README tells the IdP to register.
 		sso({ redirectURI: '/sso/callback' }),
@@ -115,10 +115,10 @@ export const auth = betterAuth({
 		// auth/api-token.ts rather than via `enableSessionForAPIKeys` (left off,
 		// its default), so a token never silently becomes a browser session.
 		apiKey({
-			// `gsf_` makes a leaked token greppable in logs and recognisable to
+			// `auto_ontology_` makes a leaked token greppable in logs and recognisable to
 			// secret scanners; `start` keeps the first few characters so the UI can
 			// identify a token it can no longer read.
-			defaultPrefix: 'gsf_',
+			defaultPrefix: 'auto_ontology_',
 			defaultKeyLength: 48,
 			startingCharactersConfig: { shouldStore: true, charactersLength: 10 },
 			// A token without a name is unidentifiable in the revoke list.
@@ -133,9 +133,9 @@ export const auth = betterAuth({
 			// die), but callers may opt into an expiry up to a year out.
 			keyExpiration: { defaultExpiresIn: null, maxExpiresIn: 365 },
 		}),
-		// Makes GSF the authorization server that MCP clients log in against, so
+		// Makes Auto Ontology the authorization server that MCP clients log in against, so
 		// the MCP server holds no client credentials and NVIDIA never needs a
-		// redirect URI registered for it — the only one it ever sees is GSF's,
+		// redirect URI registered for it — the only one it ever sees is Auto Ontology's,
 		// which SSO already uses. Clients register themselves, and those
 		// registrations live in Postgres rather than on an MCP pod's disk.
 		//
@@ -148,7 +148,7 @@ export const auth = betterAuth({
 			// UserInfo requires `openid`. Advertise it so MCP clients that copy
 			// `scopes_supported` from authorization-server metadata include it.
 			scopes: ['openid', 'profile', 'email', 'offline_access'],
-			// The MCP server checks every token against GSF, so opaque tokens retain
+			// The MCP server checks every token against Auto Ontology, so opaque tokens retain
 			// immediate revocation without distributing resource-server credentials.
 			disableJwtPlugin: true,
 			// Keep RFC 7591 registration for existing MCP clients. Both switches are
@@ -158,8 +158,8 @@ export const auth = betterAuth({
 			// UserInfo is the bearer-authenticated replacement for getMcpSession.
 			// Include the grant metadata FastMCP needs under private claim names.
 			customUserInfoClaims: ({ jwt }) => ({
-				'urn:gsf:oauth:client_id': jwt.client_id,
-				'urn:gsf:oauth:scope': jwt.scope,
+				'urn:auto-ontology:oauth:client_id': jwt.client_id,
+				'urn:auto-ontology:oauth:scope': jwt.scope,
 			}),
 			// Every MCP call validates its token here. The app-wide limiter still
 			// applies; the provider's 60/minute UserInfo limit is too low for agents.

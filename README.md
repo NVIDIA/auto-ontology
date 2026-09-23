@@ -1,20 +1,20 @@
-# GSF
+# Auto Ontology
 
-Generative Semantic Fabric adds the structured-data ontology layer to any partner or NVidia agent harness  interface, like NVIDIA AI-Q Claws, etc
+Auto Ontology adds the structured-data ontology layer to any partner or NVidia agent harness  interface, like NVIDIA AI-Q Claws, etc
 
 ## Benchmarks
 
 To run a text-to-SQL benchmark such as BIRD, refer to the
 [ontology SQL evaluation repository](https://github.com/NVIDIA/ontology-sql-eval/).
 
-> **Licensing & contributions.** GSF is distributed under the
+> **Licensing & contributions.** Auto Ontology is distributed under the
 > [Apache License 2.0](./LICENSE). Third-party open-source components
 > bundled, linked, or otherwise used by this project are listed in
 > [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). **This project
 > is currently not accepting external contributions.**
 
 <p>
-<img src="./docs/assets/arch.png" alt="GSF Architecture" width="800">
+<img src="./docs/assets/arch.png" alt="Auto Ontology Architecture" width="800">
 </p>
 
 ## Key Features
@@ -40,7 +40,7 @@ To run a text-to-SQL benchmark such as BIRD, refer to the
 
 ### NVIDIA NIM
 
-GSF uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA
+Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA
 inference API ([inference-api.nvidia.com](https://inference-api.nvidia.com)) or self-hosted NIMs:
 
 - **LLM:**
@@ -87,14 +87,14 @@ back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
 **Kubernetes**
 
-To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
+To deploy Auto Ontology on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
 **Local (Docker Compose)**
 
 1. Clone the repository:
 
    ```bash
-   git clone <repo-url> gsf && cd gsf
+   git clone <repo-url> auto_ontology && cd auto_ontology
    ```
 
 2. Create your environment file (.env) from the template and fill in the values
@@ -119,7 +119,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
    docker compose up -d --build
    ```
 
-   This builds the backend (`gsf`) and frontend (`gsf-frontend`) images, brings
+   This builds the backend (`auto_ontology`) and frontend (`auto-ontology-frontend`) images, brings
    up Postgres and pgAdmin, runs the one-shot `frontend-migrate` job to
    sync the database schema, and starts the app (backend, ingestion service,
    and frontend).
@@ -135,7 +135,7 @@ To deploy GSF on a Kubernetes cluster, see [`DEPLOYMENT.md`](./DEPLOYMENT.md).
 
 ## Connections Management
 
-GSF resolves the source databases it connects to from two sources:
+Auto Ontology resolves the source databases it connects to from two sources:
 
 1. **Added through the UI** — connections created from within the app. With this
    option the connection credentials are **stored in plaintext in Postgres unless
@@ -158,7 +158,7 @@ GSF resolves the source databases it connects to from two sources:
 
 ## Authentication
 
-GSF Supports SSO for authentication.
+Auto Ontology Supports SSO for authentication.
 The Redirect URI should be configured in the IdP as: APP_URL/api/auth/sso/callback
 
 ### API tokens (scripting)
@@ -168,14 +168,14 @@ scripts, notebooks, and scheduled jobs, mint an **API token** instead:
 
 1. Open the user menu (top right) → **API Tokens** → **New token**.
 2. Name it, optionally pick an expiry (default: never), and **copy the token**.
-   GSF stores only a SHA-256 hash of it, so it is shown exactly once. Losing it
+   Auto Ontology stores only a SHA-256 hash of it, so it is shown exactly once. Losing it
    means minting a new one.
 
 Send it as `x-api-key` on any `/api/...` call — `Authorization: Bearer <token>`
 works too:
 
 ```sh
-curl -H "x-api-key: $GSF_API_TOKEN" https://gsf.example.com/api/terms
+curl -H "x-api-key: $AUTO_ONTOLOGY_API_TOKEN" https://auto_ontology.example.com/api/terms
 ```
 
 ```python
@@ -183,12 +183,12 @@ import os
 import requests
 
 session = requests.Session()
-session.headers["x-api-key"] = os.environ["GSF_API_TOKEN"]
+session.headers["x-api-key"] = os.environ["AUTO_ONTOLOGY_API_TOKEN"]
 
-terms = session.get("https://gsf.example.com/api/terms").json()
+terms = session.get("https://auto_ontology.example.com/api/terms").json()
 
 answer = session.post(
-    "https://gsf.example.com/api/chat/completions",
+    "https://auto_ontology.example.com/api/chat/completions",
     json={"question": "How many orders shipped last week?"},
 ).json()
 ```
@@ -200,7 +200,7 @@ Things worth knowing:
   browser. A viewer's token cannot do admin things.
 - **The whole API surface accepts it.** Authentication is resolved in one place
   (`frontend/auth/resolve-user.ts`) for every route, so any endpoint in
-  [`docs/openapi/gsf-api.json`](./docs/openapi/gsf-api.json) that is not
+  [`docs/openapi/auto-ontology-api.json`](./docs/openapi/auto-ontology-api.json) that is not
   `withPublic` works with a token.
 - **Revocation is immediate.** Delete the token in the UI, or delete/ban the
   owning user, and the next request with it gets a 401.
@@ -235,9 +235,9 @@ text-to-SQL graph. Independent questions are passed through unchanged. Internal
 agent thoughts, chart payloads, errors, and raw SQL result sets are not reused as
 context.
 
-Conversation history is scoped to the authenticated GSF user. Browser and
+Conversation history is scoped to the authenticated Auto Ontology user. Browser and
 service callers should use the Next.js gateway, which resolves the user and
-forwards the internal `x-gsf-user-id` header to FastAPI. The FastAPI port is a
+forwards the internal `x-auto-ontology-user-id` header to FastAPI. The FastAPI port is a
 trusted internal service boundary: it must not be exposed publicly because that
 header is not independently verified by FastAPI. A direct FastAPI request
 without `conversation_id` remains stateless; a direct request with
@@ -250,12 +250,12 @@ signed-in user.
 ## MCP server
 
 Agent harnesses such as Cursor and Claude Desktop can query your data through
-GSF's [MCP](https://modelcontextprotocol.io) server. See
+Auto Ontology's [MCP](https://modelcontextprotocol.io) server. See
 [`mcp/`](./mcp/) to run it and [`docs/mcp.md`](./docs/mcp.md) for the details.
 
 ## License
 
-GSF is licensed under the [Apache License, Version 2.0](./LICENSE).
+Auto Ontology is licensed under the [Apache License, Version 2.0](./LICENSE).
 SPDX identifier: `Apache-2.0`.
 
 Each NVIDIA-authored source file in this repository carries an SPDX header
@@ -267,13 +267,13 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 ```
 
-Third-party open-source components used by GSF are enumerated, with their
+Third-party open-source components used by Auto Ontology are enumerated, with their
 upstream licenses and project URLs, in
 [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
 
 ## Contributing
 
 **This project is currently not accepting contributions.** Issues, pull
-requests, and patches submitted from outside the GSF maintainer team will
+requests, and patches submitted from outside the Auto Ontology maintainer team will
 not be reviewed or merged. Security-relevant reports should follow the
 process described in [`SECURITY.md`](./SECURITY.md).

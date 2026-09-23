@@ -12,17 +12,17 @@ on:
     paths:
       - 'frontend/app/api/**'
       - 'frontend/scripts/generate-openapi.ts'
-      # Also inputs to gsf-api.json: the shared zod shapes are inlined into it,
+      # Also inputs to auto-ontology-api.json: the shared zod shapes are inlined into it,
       # the contract types shape what the declarations may express, and the
       # package version is written to `info.version`.
       - 'frontend/lib/openapiSchemas.ts'
       - 'frontend/types/openapi.ts'
       - 'frontend/package.json'
-      - 'gsf/**'
+      - 'auto_ontology/**'
       - 'dev_tools/generate_backend_openapi.py'
       - 'docs/openapi/**'
       # The spec is committed here as well, so a hand-edit must be caught.
-      - 'mcp/gsf_mcp/gsf-api.json'
+      - 'mcp/auto_ontology_mcp/auto-ontology-api.json'
 
 jobs:
   # The public spec is generated from the route handlers plus the *committed*
@@ -55,11 +55,11 @@ jobs:
         working-directory: frontend
         run: pnpm openapi
 
-      # `pnpm openapi` writes the packaged copy too (gsf-mcp reads it at
+      # `pnpm openapi` writes the packaged copy too (auto-ontology-mcp reads it at
       # startup and must work outside a checkout), so both paths are diffed.
       - name: Fail if the committed spec drifted
         run: |
-          git diff --exit-code -- docs/openapi/gsf-api.json mcp/gsf_mcp/gsf-api.json \
+          git diff --exit-code -- docs/openapi/auto-ontology-api.json mcp/auto_ontology_mcp/auto-ontology-api.json \
             || { echo '::error::the committed OpenAPI spec is stale — run `pnpm openapi` and commit both files'; exit 1; }
 
   # Building the FastAPI apps needs the full backend environment, so this job

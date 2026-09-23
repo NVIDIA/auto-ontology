@@ -1,11 +1,11 @@
-# Deploying GSF on Kubernetes
+# Deploying Auto Ontology on Kubernetes
 
 ## Deployment From NVStaging
 
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvstaging/gsf/charts/gsf-0.0.1.tgz \
+   helm fetch https://helm.ngc.nvidia.com/nvstaging/auto-ontology/charts/auto-ontology-0.0.1.tgz \
      --username='$oauthtoken' \
      --password=<API-KEY>
    ```
@@ -29,7 +29,7 @@
 4. Install the chart:
 
    ```bash
-   helm install gsf gsf-0.0.1.tgz \
+   helm install auto_ontology auto-ontology-0.0.1.tgz \
      --set defaultModelsApiKey=<API-KEY> \
      --set postgresPassword=<POSTGRES-PASSWORD> \
      --set connectionStrings=<CONNECTION-STRINGS>
@@ -44,18 +44,18 @@
 ## Staging / Astra nightly deployment
 
 The live staging demo on Astra (cluster `astrastg01-ocp-pdx04`, namespace
-`ns-gsf-demo-deploy`) is GitOps-driven. GitHub and GitLab are **decoupled** and
+`ns-auto-ontology-demo-deploy`) is GitOps-driven. GitHub and GitLab are **decoupled** and
 meet only at the nvcr.io registry:
 
 ```mermaid
 flowchart LR
-  subgraph GitHub["GitHub — NVIDIA/GSF (source + builds)"]
+  subgraph GitHub["GitHub — NVIDIA/auto-ontology (source + builds)"]
     A[staging-publish-image.yml<br/>backend/ingestion image]
     F[staging-publish-frontend.yml<br/>frontend image]
     C[staging-publish-chart.yml<br/>Helm chart]
   end
-  NVCR[(nvcr.io/nvstaging/gsf)]
-  subgraph GitLab["GitLab — gsf/gsf-demo-deploy (deploy)"]
+  NVCR[(nvcr.io/nvstaging/auto-ontology)]
+  subgraph GitLab["GitLab — auto-ontology/auto-ontology-demo-deploy (deploy)"]
     R[ci/roll-stg.sh<br/>nightly schedule]
     V[deployment/stg/values.yaml<br/>umbrella Helm chart]
     W[build-wwi-seed<br/>seed image]
@@ -74,9 +74,9 @@ flowchart LR
 
 | Image | Built by | Repo / tag |
 |---|---|---|
-| Backend + ingestion | GitHub `staging-publish-image.yml` | `nvcr.io/nvstaging/gsf/gsf:stg.<ts>` |
-| Frontend (Next.js) | GitHub `staging-publish-frontend.yml` | `nvcr.io/nvstaging/gsf/gsf-frontend:stg.<ts>` |
-| WWI demo-data seed | GitLab `build-wwi-seed` | `nvcr.io/nvstaging/gsf/gsf-wwi-seed:latest` |
+| Backend + ingestion | GitHub `staging-publish-image.yml` | `nvcr.io/nvstaging/auto-ontology/auto-ontology:stg.<ts>` |
+| Frontend (Next.js) | GitHub `staging-publish-frontend.yml` | `nvcr.io/nvstaging/auto-ontology/auto-ontology-frontend:stg.<ts>` |
+| WWI demo-data seed | GitLab `build-wwi-seed` | `nvcr.io/nvstaging/auto-ontology/auto-ontology-wwi-seed:latest` |
 
 CI validation (`ci-client.yml` runs `pnpm build`) only checks the frontend
 compiles — it does **not** publish an image. Production frontend images come
@@ -90,7 +90,7 @@ variables). Each night it:
 
 1. Resolves the newest `stg.*` backend and frontend images on nvcr.io + digests.
 2. Refreshes the WWI seed digest.
-3. Re-pins those in `deployment/stg/values.yaml` and bumps `gsf.podAnnotations.rolledAt`.
+3. Re-pins those in `deployment/stg/values.yaml` and bumps `auto_ontology.podAnnotations.rolledAt`.
 4. Commits and pushes to `main` (with `-o ci.skip` so the bot commit starts no
    pipeline). ArgoCD auto-syncs within ~3 min — the app redeploys on the newest
    images and the WWI reset → seed → ingest hooks re-run.
@@ -100,11 +100,11 @@ It **builds nothing**; it only re-pins images that already exist on nvcr.io.
 ### Why the Helm chart is published separately (not "nightly")
 
 The staging deployment **is** Helm-based: the deploy repo holds an umbrella Helm
-chart that consumes the portable `gsf` chart (`helm/gsf/`) as an OCI dependency,
+chart that consumes the portable `auto_ontology` chart (`helm/auto-ontology/`) as an OCI dependency,
 and ArgoCD renders/applies it. Two separate lifecycles, deliberately:
 
 - **Chart publish** (`staging-publish-chart.yml`) runs only when the chart
-  *structure* changes (push under `helm/gsf/**`) or manually — never on a timer.
+  *structure* changes (push under `helm/auto-ontology/**`) or manually — never on a timer.
 - **Nightly roll** (`roll-stg`) never touches the chart; it only edits the image
   pointers *inside* the chart's values.
 

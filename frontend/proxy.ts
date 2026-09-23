@@ -23,7 +23,7 @@ const isPublicPath = (pathname: string): boolean =>
  */
 const withPathname = (request: NextRequest): NextResponse => {
 	const requestHeaders = new Headers(request.headers);
-	requestHeaders.set('x-gsf-pathname', request.nextUrl.pathname);
+	requestHeaders.set('x-auto-ontology-pathname', request.nextUrl.pathname);
 	return NextResponse.next({ request: { headers: requestHeaders } });
 };
 

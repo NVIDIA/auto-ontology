@@ -9,7 +9,7 @@ import { Role } from '@/enums/auth';
 /**
  * Access-control statements + roles shared by the Better Auth server and client.
  * `admin` and `viewer` are the only roles. On top of the built-in `user` /
- * `session` resources (`defaultStatements`) we declare GSF's own resources, then
+ * `session` resources (`defaultStatements`) we declare Auto Ontology's own resources, then
  * assign actions per role. Every protected API/page authorizes against these
  * (see `auth/permissions.ts`), so authorization is data here rather than scattered
  * `role === 'admin'` checks.
@@ -56,7 +56,7 @@ const statement = {
 export const ac = createAccessControl(statement);
 
 export const roles = {
-	// Admin: full user/session management plus every GSF resource.
+	// Admin: full user/session management plus every Auto Ontology resource.
 	[Role.Admin]: ac.newRole({
 		...adminAc.statements,
 		analytics: ['read'],

@@ -49,7 +49,7 @@ const LoginForm = () => {
 	const next = params.get('next') || resumeAuthorize(params) || '/chat';
 
 	// The authorize endpoint is a route handler, not a page. Resume it with a
-	// same-origin fetch so a loopback redirect_uri stays on GSF's thank-you
+	// same-origin fetch so a loopback redirect_uri stays on Auto Ontology's thank-you
 	// page instead of Chrome following localhost:8787.
 	const goTo = (destination: string) => {
 		if (destination.startsWith('/api/')) {
@@ -225,7 +225,9 @@ const LoginPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">GSF</span>
+				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+					Auto Ontology
+				</span>
 			</div>
 			<Suspense fallback={<LoginLoading />}>
 				<LoginForm />

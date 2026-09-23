@@ -6,7 +6,7 @@
  * Which of the five things a tag points at.
  *
  * The values are the backend's — see the `TARGET_*` constants in
- * `gsf/dal/tags.py`, which is what puts them in the `type` field, and the
+ * `auto_ontology/dal/tags.py`, which is what puts them in the `type` field, and the
  * `TagTargetType` enum its attach and detach routes validate against.
  */
 export enum TagItemType {

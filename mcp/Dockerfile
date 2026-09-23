@@ -1,13 +1,13 @@
 # ---------------------------------------------------------------------------
-# GSF MCP server image
+# Auto Ontology MCP server image
 # ---------------------------------------------------------------------------
-# Build (from /mcp):  docker build -t gsf-mcp:latest .
+# Build (from /mcp):  docker build -t auto-ontology-mcp:latest .
 # Run:                docker run --rm -p 3003:3003 \
-#                         -e GSF_API_URL=https://gsf.example.com \
-#                         -e GSF_MCP_PUBLIC_URL=https://mcp.example.com \
-#                         gsf-mcp:latest
+#                         -e AUTO_ONTOLOGY_API_URL=https://auto_ontology.example.com \
+#                         -e AUTO_ONTOLOGY_MCP_PUBLIC_URL=https://mcp.example.com \
+#                         auto-ontology-mcp:latest
 #
-# Separate from the FastAPI image: gsf-mcp talks to GSF over HTTP and must
+# Separate from the FastAPI image: auto-ontology-mcp talks to Auto Ontology over HTTP and must
 # not pull the backend's database drivers or model stack.
 # ---------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ RUN curl -LsSf "https://astral.sh/uv/${UV_VERSION}/install.sh" \
 WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md ./
-COPY gsf_mcp/ ./gsf_mcp/
+COPY auto_ontology_mcp/ ./auto_ontology_mcp/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv python install "${PYTHON_VERSION}" \
@@ -59,29 +59,29 @@ FROM $BASE_IMG:$BASE_IMG_TAG AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:${PATH}" \
-    GSF_MCP_HOST=0.0.0.0 \
-    GSF_MCP_PORT=3003
+    AUTO_ONTOLOGY_MCP_HOST=0.0.0.0 \
+    AUTO_ONTOLOGY_MCP_PORT=3003
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         tini \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --system --gid 1000 gsf \
- && useradd  --system --uid 1000 --gid gsf --home /app --shell /usr/sbin/nologin gsf
+ && groupadd --system --gid 1000 auto_ontology \
+ && useradd  --system --uid 1000 --gid auto_ontology --home /app --shell /usr/sbin/nologin auto_ontology
 
 WORKDIR /app
 
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
-COPY --from=builder --chown=gsf:gsf /app /app
+COPY --from=builder --chown=auto_ontology:auto_ontology /app /app
 
-USER gsf
+USER auto_ontology
 
 EXPOSE 3003
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD python -c "import socket,os,sys; p=int(os.environ.get('GSF_MCP_PORT','3003')); s=socket.create_connection(('127.0.0.1',p),3); s.close()"
+    CMD python -c "import socket,os,sys; p=int(os.environ.get('AUTO_ONTOLOGY_MCP_PORT','3003')); s=socket.create_connection(('127.0.0.1',p),3); s.close()"
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["gsf-mcp"]
+CMD ["auto-ontology-mcp"]

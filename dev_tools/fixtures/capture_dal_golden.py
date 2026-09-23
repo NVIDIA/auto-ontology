@@ -5,7 +5,7 @@
 """Snapshot every DAL read against the graph fixture, for the Postgres port.
 
 The refactor replaces ~5,000 lines of SQL with SQL while keeping every
-``gsf.dal`` signature identical. Greenfield cutover means there is no production
+``auto_ontology.dal`` signature identical. Greenfield cutover means there is no production
 data to diff against, so these captures are the **only** fidelity oracle: Phases
 5-10 are graded by replaying them against the Postgres implementation and
 requiring identical output.
@@ -33,7 +33,9 @@ from typing import Any, Callable
 
 logger = logging.getLogger("dev_tools.fixtures.capture_dal_golden")
 
-GOLDEN_DIR = Path(__file__).resolve().parents[2] / "gsf" / "dal" / "tests" / "golden"
+GOLDEN_DIR = (
+    Path(__file__).resolve().parents[2] / "auto_ontology" / "dal" / "tests" / "golden"
+)
 
 UUID_RE = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -53,16 +55,19 @@ def build_id_map() -> dict[str, str]:
     to describe the *same* entity on both backends or the normalised goldens
     compare nothing.
     """
-    from gsf.dal.custom_analyses import list_custom_analyses
-    from gsf.dal.datasources import (
+    from auto_ontology.dal.custom_analyses import list_custom_analyses
+    from auto_ontology.dal.datasources import (
         fetch_databases,
         fetch_schemas_by_ids,
         fetch_schemas_for_database,
     )
-    from gsf.dal.pql_analyses import list_pql_analyses
-    from gsf.dal.sql_attributes import list_sql_attributes
-    from gsf.dal.terms import fetch_all_terms, fetch_column_attributes_by_term_id
-    from gsf.dal.zones import list_zones
+    from auto_ontology.dal.pql_analyses import list_pql_analyses
+    from auto_ontology.dal.sql_attributes import list_sql_attributes
+    from auto_ontology.dal.terms import (
+        fetch_all_terms,
+        fetch_column_attributes_by_term_id,
+    )
+    from auto_ontology.dal.zones import list_zones
 
     id_map: dict[str, str] = {}
 
@@ -114,8 +119,8 @@ def _all_statements() -> list[dict[str, Any]]:
     statement no read can reach is one no golden can contain either, so nothing
     is lost by not finding it.
     """
-    from gsf.dal.datasources import fetch_schemas_by_ids
-    from gsf.dal.exploration import fetch_table_exploration_details
+    from auto_ontology.dal.datasources import fetch_schemas_by_ids
+    from auto_ontology.dal.exploration import fetch_table_exploration_details
 
     seen: dict[str, dict[str, Any]] = {}
     for table_id in {row["table_id"] for row in fetch_schemas_by_ids()}:
@@ -305,22 +310,22 @@ def _fixture_ids() -> dict[str, Any]:
     """Resolve the fixture's entities by name, through the DAL.
 
     **Backend-agnostic on purpose.** This used to be hardcoded SQL, which is
-    why the replay could not grade Postgres at all: under ``GSF_STORE=postgres``
+    why the replay could not grade Postgres at all: under ``AUTO_ONTOLOGY_STORE=postgres``
     it handed the store ids to the Postgres DAL and almost every read came back
     empty, so 49 of 128 comparisons failed for a reason that had nothing to do
     with the DAL. Resolving by name through the same facade the captures use
     means the two backends are asked the same questions about the same fixture.
     """
-    from gsf.dal.custom_analyses import list_custom_analyses
-    from gsf.dal.datasources import (
+    from auto_ontology.dal.custom_analyses import list_custom_analyses
+    from auto_ontology.dal.datasources import (
         fetch_databases,
         fetch_schemas_by_ids,
         fetch_schemas_for_database,
     )
-    from gsf.dal.pql_analyses import list_pql_analyses
-    from gsf.dal.sql_attributes import list_sql_attributes
-    from gsf.dal.terms import fetch_all_terms
-    from gsf.dal.zones import list_zones
+    from auto_ontology.dal.pql_analyses import list_pql_analyses
+    from auto_ontology.dal.sql_attributes import list_sql_attributes
+    from auto_ontology.dal.terms import fetch_all_terms
+    from auto_ontology.dal.zones import list_zones
 
     databases = {row["name"]: row["id"] for row in fetch_databases()}
     columns = fetch_schemas_by_ids()
@@ -412,7 +417,10 @@ def _column_attribute_id(name: str) -> str | None:
     a Term — so this walks the terms the fixture seeded. Slower than a lookup
     and irrelevant at fixture scale.
     """
-    from gsf.dal.terms import fetch_all_terms, fetch_column_attributes_by_term_id
+    from auto_ontology.dal.terms import (
+        fetch_all_terms,
+        fetch_column_attributes_by_term_id,
+    )
 
     for term in fetch_all_terms():
         for attribute in fetch_column_attributes_by_term_id(term["id"]):
@@ -423,7 +431,7 @@ def _column_attribute_id(name: str) -> str | None:
 
 def capture_arg_reads(cap: Capture, ids: dict[str, Any]) -> None:
     """Reads that take arguments, driven off the fixture's known entities."""
-    from gsf.dal import (
+    from auto_ontology.dal import (
         attributes,
         custom_analyses,
         datasources,
@@ -714,11 +722,11 @@ def capture_all() -> Capture:
     cap = Capture(id_map)
 
     for module_name, fn_name in ZERO_ARG_READS:
-        module = importlib.import_module(f"gsf.dal.{module_name}")
+        module = importlib.import_module(f"auto_ontology.dal.{module_name}")
         cap.run(f"{module_name}.{fn_name}", getattr(module, fn_name))
 
     for module_name, fn_name in ZONE_SCOPED_READS:
-        module = importlib.import_module(f"gsf.dal.{module_name}")
+        module = importlib.import_module(f"auto_ontology.dal.{module_name}")
         fn = getattr(module, fn_name)
         for label, zone_ids in _zone_modes(ids):
             cap.run(

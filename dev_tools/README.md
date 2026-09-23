@@ -12,8 +12,8 @@ Local development helpers: environment setup, database seeding, and ingest.
 | `_add_spdx_headers.py` | One-off OSRB helper; kept so the header insertion is reproducible. |
 | `fixtures/` | The test fixtures. **CI depends on these** — see below. |
 
-Everything under `fixtures/` builds the databases that `gsf/dal/tests/test_golden.py`
-and `gsf/connectors/tests/test_postgres.py` replay against, and is driven by
+Everything under `fixtures/` builds the databases that `auto_ontology/dal/tests/test_golden.py`
+and `auto_ontology/connectors/tests/test_postgres.py` replay against, and is driven by
 `.github/workflows/ci-python.yml`. Changing it changes what CI proves. See
 [`fixtures/sql/README.md`](./fixtures/sql/README.md) for what each fixture
 database covers and why.
@@ -23,12 +23,12 @@ docker compose up -d postgres
 uv run --no-sync python -m dev_tools.fixtures.seed_fixtures          # pagila + chinook
 uv run --no-sync alembic upgrade head
 uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
-uv run --no-sync pytest gsf dev_tools -q
+uv run --no-sync pytest auto_ontology dev_tools -q
 ```
 
 ## Running locally
 
-The **frontend** (`frontend/`) and the **Python API** (`gsf/`) must both be running.
+The **frontend** (`frontend/`) and the **Python API** (`auto_ontology/`) must both be running.
 
 ### One-time setup
 
@@ -56,7 +56,7 @@ Then start the app manually:
 
 ```bash
 cd frontend && pnpm dev   # Next.js on port 3000
-uv run python -m gsf.server   # FastAPI on port 3001 (from the repo root)
+uv run python -m auto_ontology.server   # FastAPI on port 3001 (from the repo root)
 ```
 
 Open **http://localhost:3000**.
@@ -67,13 +67,13 @@ Open **http://localhost:3000**.
 
 ## `setup_env.sh`
 
-Brings up the GSF environment via `docker compose`.
+Brings up the Auto Ontology environment via `docker compose`.
 
 | Command | What it starts |
 |---|---|
-| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin, ingestion service) **and** the `gsf` + `gsf-frontend` images (built with `--build`). |
-| `bash ./dev_tools/setup_env.sh --dev` | Infra only. You run `gsf` / `gsf-frontend` locally yourself. |
-| `bash ./dev_tools/setup_env.sh --ds` | Infra **+** `gsf-frontend` in docker. You run `gsf` locally on `:3001`; the containerised frontend reaches it via `host.docker.internal:3001`. |
+| `bash ./dev_tools/setup_env.sh` | Full stack — infra (Postgres, pgAdmin, ingestion service) **and** the `auto_ontology` + `auto-ontology-frontend` images (built with `--build`). |
+| `bash ./dev_tools/setup_env.sh --dev` | Infra only. You run `auto_ontology` / `auto-ontology-frontend` locally yourself. |
+| `bash ./dev_tools/setup_env.sh --ds` | Infra **+** `auto-ontology-frontend` in docker. You run `auto_ontology` locally on `:3001`; the containerised frontend reaches it via `host.docker.internal:3001`. |
 
 ### Endpoints
 
@@ -81,9 +81,9 @@ Brings up the GSF environment via `docker compose`.
 |---|---|
 | Postgres | `localhost:5432` |
 | pgAdmin | <http://localhost:5050> |
-| GSF ingestion service | <http://localhost:3002> |
-| GSF frontend (full stack only) | <http://localhost:3000> |
-| GSF backend (full stack only) | <http://localhost:3001> |
+| Auto Ontology ingestion service | <http://localhost:3002> |
+| Auto Ontology frontend (full stack only) | <http://localhost:3000> |
+| Auto Ontology backend (full stack only) | <http://localhost:3001> |
 
 ### `--dev` workflow
 
@@ -95,11 +95,11 @@ cd frontend && pnpm install && pnpm dev
 
 # terminal 2 — FastAPI (from the repo root)
 uv sync
-uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
+uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
-The app factory is `create_app()` in `gsf/server/__main__.py`; there is no
-`gsf/server/main.py`. `uv run python -m gsf.server` starts the same app without
+The app factory is `create_app()` in `auto_ontology/server/__main__.py`; there is no
+`auto_ontology/server/main.py`. `uv run python -m auto_ontology.server` starts the same app without
 `--reload` — that is what the container runs.
 
 ### `--ds` workflow
@@ -113,7 +113,7 @@ bash ./dev_tools/setup_env.sh --ds
 
 # then, on the host:
 uv sync
-uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
+uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
 > Linux note: `host.docker.internal` works out-of-the-box on Docker Desktop (macOS / Windows). On native Linux Docker you may need to add `--add-host=host.docker.internal:host-gateway` or bind the backend to `0.0.0.0` and use the docker bridge IP.
@@ -137,5 +137,5 @@ Kubernetes:
 - `Dockerfile` — backend (FastAPI / uvicorn). Sources NeMo-Retriever from a
   BuildKit named context, defaulting to a small committed stub.
 - `frontend/Dockerfile` — frontend (Next.js standalone)
-- `helm/gsf/` — Helm chart with deployments, services, optional Ingress,
+- `helm/auto-ontology/` — Helm chart with deployments, services, optional Ingress,
   HPA, PDB and a sample Postgres manifest

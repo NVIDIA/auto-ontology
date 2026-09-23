@@ -2,7 +2,7 @@
 .venv/
 **/__pycache__/
 
-# Build artefacts (e.g. gsf-mcp wheels from `uv build`)
+# Build artefacts (e.g. auto-ontology-mcp wheels from `uv build`)
 dist/
 *.egg-info/
 
@@ -15,7 +15,7 @@ node_modules
 
 # testing
 /coverage
-gsf/tests/test_postgres_connector.py
+auto_ontology/tests/test_postgres_connector.py
 
 # misc
 .DS_Store
@@ -69,3 +69,25 @@ dev_tools/fixtures/sql/*.sqlite
 # checkout's paths and reads API keys from the environment — so it stays out of
 # the repo rather than shipping one developer's setup to everyone.
 helm.sh
+
+# Local, untracked working files (scratch notes, creds, deploy scripts, WIP)
+/COOKBOOK.MD
+/DATABRICKS_SSA_REPORT.md
+/databricks.txt
+/databricks_creds.txt
+/dev_tools/deploy_gsf_host.sh
+/dev_tools/deploy_gsf_k3s.sh
+/dev_tools/deploy_server.sh
+/dev_tools/deploy_to_dev_server.sh
+/dev_tools/generate_openapi_html.py
+/docs/blob-storage-plan.md
+/docs/profiling-catalog-qualification-fix.md
+/helm.sh.bak
+/index.html
+/kdc_ca1/
+/push.sh
+/snowflake_sso.txt
+/spider2_snowflake.txt
+/temp.txt
+/vectors_wiki.py
+/vectors_wiki_load.py

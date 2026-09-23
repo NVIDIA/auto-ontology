@@ -47,7 +47,7 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 						<Icon name={IconName.NvidiaLogo} className="h-4 w-4 text-[#76b900]" />
 					</div>
 					<span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
-						GSF Agent
+						Auto Ontology Agent
 					</span>
 				</div>
 

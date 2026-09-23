@@ -21,19 +21,20 @@ import type { Database } from '@/types/datasources';
 import type { ImportEntityCounts, ImportSummary } from '@/types/modelInterchange';
 
 const FORMAT_LABEL: Record<ModelFormat, string> = {
-	[ModelFormat.GSF]: 'Native GSF',
+	[ModelFormat.AUTO_ONTOLOGY]: 'Native Auto Ontology',
 	[ModelFormat.OSSIE]: 'Apache Ossie',
 };
 
 const EXPORT_FILENAME: Record<ModelFormat, string> = {
-	[ModelFormat.GSF]: 'gsf-model.yaml',
+	[ModelFormat.AUTO_ONTOLOGY]: 'auto-ontology-model.yaml',
 	[ModelFormat.OSSIE]: 'ossie-model.yaml',
 };
 
 const FORMAT_OPTIONS: { value: ModelFormat; description: string }[] = [
 	{
-		value: ModelFormat.GSF,
-		description: 'Everything GSF stores, including catalog objects Ossie cannot name.',
+		value: ModelFormat.AUTO_ONTOLOGY,
+		description:
+			'Everything Auto Ontology stores, including catalog objects Ossie cannot name.',
 	},
 	{
 		value: ModelFormat.OSSIE,
@@ -70,7 +71,7 @@ export const ImportExportView = () => {
 	const [databasesError, setDatabasesError] = useState<string | null>(null);
 	const [selectedDbIds, setSelectedDbIds] = useState<Set<string>>(new Set());
 
-	const [exportFormat, setExportFormat] = useState<ModelFormat>(ModelFormat.GSF);
+	const [exportFormat, setExportFormat] = useState<ModelFormat>(ModelFormat.AUTO_ONTOLOGY);
 	const [exporting, setExporting] = useState(false);
 	const [exportError, setExportError] = useState<string | null>(null);
 	const [exportMessage, setExportMessage] = useState<string | null>(null);
@@ -289,8 +290,8 @@ export const ImportExportView = () => {
 					Import model
 				</h2>
 				<p className="mt-1 text-xs text-zinc-500">
-					Upload a native GSF or Apache Ossie model YAML file to write it into the catalog
-					and semantic layer. The format is detected from the file.
+					Upload a native Auto Ontology or Apache Ossie model YAML file to write it into
+					the catalog and semantic layer. The format is detected from the file.
 				</p>
 
 				<FileUpload
@@ -300,7 +301,7 @@ export const ImportExportView = () => {
 					validate={validateYamlFile}
 					accept=".yaml,.yml"
 					description="YAML files (.yaml, .yml)"
-					aria-label="Upload a GSF or Apache Ossie model YAML file"
+					aria-label="Upload a Auto Ontology or Apache Ossie model YAML file"
 					className="mt-4"
 				/>
 

@@ -8,7 +8,7 @@ import type { ResponseWithError } from './types';
 export type ApiToken = {
 	id: string;
 	name: string | null;
-	/** First characters of the token, e.g. `gsf_a1b2c3` — all the UI can show. */
+	/** First characters of the token, e.g. `auto_ontology_a1b2c3` — all the UI can show. */
 	start: string | null;
 	enabled: boolean;
 	created_at: string;

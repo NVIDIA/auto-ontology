@@ -2,9 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Builds the GSF MCP server image and pushes it to nvcr.io. The Astra deploy
+# Builds the Auto Ontology MCP server image and pushes it to nvcr.io. The Astra deploy
 # repo consumes it by digest. Requires repo secret:
-#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/auto-ontology
 
 name: 'Staging: Publish MCP image to nvcr.io'
 
@@ -21,7 +21,7 @@ on:
       - '.github/workflows/staging-publish-mcp.yml'
 
 env:
-  IMAGE: nvcr.io/nvstaging/gsf/gsf-mcp
+  IMAGE: nvcr.io/nvstaging/auto-ontology/auto-ontology-mcp
 
 jobs:
   publish-mcp:

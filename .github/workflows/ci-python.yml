@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-name: GSF CI
+name: Auto Ontology CI
 
 on:
   push:
@@ -10,10 +10,10 @@ on:
   pull_request:
     branches: [main]
     paths:
-      # Not just `gsf/**`: the fixtures, the migrations and the lockfile all
+      # Not just `auto_ontology/**`: the fixtures, the migrations and the lockfile all
       # change what the suite does, and a green run that skipped them because
       # only `alembic/` changed would be worthless.
-      - 'gsf/**'
+      - 'auto_ontology/**'
       - 'dev_tools/**'
       - 'alembic/**'
       - 'pyproject.toml'
@@ -31,7 +31,7 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Every directory holding Python, not just `gsf/`. The migrations and the
+      # Every directory holding Python, not just `auto_ontology/`. The migrations and the
       # fixture tooling are as easy to break as anything else, and they were
       # unchecked here while passing locally — so the first thing to land badly
       # formatted would have been the thing nobody ran ruff over.
@@ -40,17 +40,17 @@ jobs:
         with:
           version: '0.16.5'
           args: check
-          src: './gsf ./alembic ./dev_tools'
+          src: './auto_ontology ./alembic ./dev_tools'
 
       - name: Ruff format check
         uses: astral-sh/ruff-action@v3
         with:
           version: '0.16.5'
           args: format --check
-          src: './gsf ./alembic ./dev_tools'
+          src: './auto_ontology ./alembic ./dev_tools'
 
   build_image:
-    name: Build GSF Server image
+    name: Build Auto Ontology Server image
     runs-on: ubuntu-latest
     # The `secrets` context is not allowed in `if:` expressions, so surface the
     # NGC key as an env var and gate the nvcr.io login on that instead. The
@@ -81,7 +81,7 @@ jobs:
           username: '$oauthtoken'
           password: ${{ env.NGC_API_KEY }}
 
-      - name: Build GSF Server image (no push)
+      - name: Build Auto Ontology Server image (no push)
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -99,19 +99,19 @@ jobs:
 
     # pgvector, not plain postgres: the vector store creates its collections
     # with `CREATE EXTENSION vector`, and `stock postgres` fails there in a way
-    # that looks like a GSF bug. Pinned to the same tag as docker-compose.yml so
+    # that looks like a Auto Ontology bug. Pinned to the same tag as docker-compose.yml so
     # CI and a developer's laptop disagree about nothing.
     services:
       postgres:
         image: pgvector/pgvector:pg17
         env:
-          POSTGRES_USER: gsf
-          POSTGRES_PASSWORD: gsf
-          POSTGRES_DB: gsf
+          POSTGRES_USER: auto_ontology
+          POSTGRES_PASSWORD: auto_ontology
+          POSTGRES_DB: auto_ontology
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U gsf -d gsf"
+          --health-cmd "pg_isready -U auto_ontology -d auto_ontology"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 20
@@ -119,9 +119,9 @@ jobs:
     env:
       POSTGRES_HOST: localhost
       POSTGRES_PORT: '5432'
-      POSTGRES_USER: gsf
-      POSTGRES_PASSWORD: gsf
-      POSTGRES_DATABASE: gsf
+      POSTGRES_USER: auto_ontology
+      POSTGRES_PASSWORD: auto_ontology
+      POSTGRES_DATABASE: auto_ontology
 
     steps:
       - name: Checkout
@@ -145,18 +145,18 @@ jobs:
       - name: Seed the fixture databases (pagila, chinook)
         run: uv run --no-sync python -m dev_tools.fixtures.seed_fixtures
 
-      - name: Migrate the GSF schema
+      - name: Migrate the Auto Ontology schema
         run: uv run --no-sync alembic upgrade head
 
       - name: Seed the deterministic graph fixture
         env:
           CONNECTION_STRINGS: >-
-            postgresql://gsf:gsf@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/fixtures/sql/chinook.sqlite
+            postgresql://auto_ontology:auto_ontology@localhost:5432/pagila,sqlite:///${{ github.workspace }}/dev_tools/fixtures/sql/chinook.sqlite
         run: uv run --no-sync python -m dev_tools.fixtures.seed_graph_fixture --reset
 
       # `make migrate-check` — the migrations must describe the models. Placed
       # after the upgrade because `alembic check` compares a live database
-      # against gsf/dal/schema.py, so it needs one at the head revision. Catches
+      # against auto_ontology/dal/schema.py, so it needs one at the head revision. Catches
       # a model edited without a matching revision, which otherwise surfaces as
       # an UndefinedColumn in whichever environment deploys first.
       - name: Fail if the schema has drifted from the models
@@ -165,22 +165,22 @@ jobs:
       # `-p no:randomly` is not set and no `-x`: the point of this job is the
       # whole picture, including how many of the fixture-backed tests ran.
       - name: Run the test suite
-        run: uv run --no-sync pytest gsf dev_tools -q --durations=10
+        run: uv run --no-sync pytest auto_ontology dev_tools -q --durations=10
 
       # A skip guard naming the wrong dependency turns a suite off silently and
       # still reports green -- which is how the golden replay and the live
       # connector tests sat unrun. Only the two live-warehouse tests
-      # (GSF_LIVE_DATABRICKS / GSF_LIVE_MYSQL) may skip here.
+      # (AUTO_ONTOLOGY_LIVE_DATABRICKS / AUTO_ONTOLOGY_LIVE_MYSQL) may skip here.
       - name: Fail if the fixture-backed tests silently skipped
         run: |
-          skipped=$(uv run --no-sync pytest gsf dev_tools -q -rs 2>/dev/null \
+          skipped=$(uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
             | grep -c '^SKIPPED' || true)
           echo "skipped: $skipped"
           if [ "$skipped" -gt 2 ]; then
             echo "::error::$skipped tests skipped; expected at most 2 (live" \
                  "Databricks and MySQL). A fixture is probably unreachable, so" \
                  "this run proved less than it appears to."
-            uv run --no-sync pytest gsf dev_tools -q -rs 2>/dev/null \
+            uv run --no-sync pytest auto_ontology dev_tools -q -rs 2>/dev/null \
               | grep '^SKIPPED' || true
             exit 1
           fi

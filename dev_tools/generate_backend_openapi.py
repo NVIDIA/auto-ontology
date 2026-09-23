@@ -29,8 +29,8 @@ OUTPUT_DIR = REPO_ROOT / "docs" / "openapi"
 def _specs() -> dict[str, dict[str, Any]]:
     # Imported lazily: building the apps pulls in the retrieval stack, which is
     # slow and noisy at import time.
-    from gsf.ingestion_service.__main__ import app as ingestion_app
-    from gsf.server.__main__ import create_app
+    from auto_ontology.ingestion_service.__main__ import app as ingestion_app
+    from auto_ontology.server.__main__ import create_app
 
     return {
         "backend.json": create_app().openapi(),

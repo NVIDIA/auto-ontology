@@ -35,7 +35,7 @@ const blockPluginApiKeyRoutes =
 // Better Auth's authorize (and HTML consent) responses 302 to the MCP client's
 // redirect_uri. For Cursor that is `http://localhost:8787/callback`, a process
 // that is gone by the time Chrome paints the tab — "This site can't be reached".
-// Send the browser to a GSF page that delivers the code with fetch instead.
+// Send the browser to a Auto Ontology page that delivers the code with fetch instead.
 const rewriteMcpClientRedirect =
 	(handler: (req: Request) => Promise<Response>) =>
 	async (req: Request): Promise<Response> => {

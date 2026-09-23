@@ -1,0 +1,56 @@
+{{- if .Values.pgadmin.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: pgadmin
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "pgadmin") | nindent 4 }}
+spec:
+  type: NodePort
+  ports:
+    - name: http
+      port: {{ .Values.pgadmin.service.port }}
+      targetPort: 80
+      nodePort: {{ .Values.pgadmin.service.nodePort }}
+  selector:
+    {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pgadmin
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "pgadmin") | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "pgadmin") | nindent 8 }}
+    spec:
+      containers:
+        - name: pgadmin
+          image: "{{ .Values.pgadmin.image.repository }}:{{ .Values.pgadmin.image.tag }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+          env:
+            - name: PGADMIN_DEFAULT_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auto-ontology.secretName" . }}
+                  key: PGADMIN_EMAIL
+            - name: PGADMIN_DEFAULT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "auto-ontology.secretName" . }}
+                  key: PGADMIN_PASSWORD
+            - name: PGADMIN_CONFIG_SERVER_MODE
+              value: "True"
+          resources:
+            {{- toYaml .Values.pgadmin.resources | nindent 12 }}
+{{- end }}

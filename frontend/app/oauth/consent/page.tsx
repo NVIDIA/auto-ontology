@@ -71,7 +71,7 @@ const ConsentForm = () => {
 					Authorize MCP access
 				</h1>
 				<p className="text-sm text-zinc-600 dark:text-zinc-400">
-					{clientId} is requesting access to GSF as your account.
+					{clientId} is requesting access to Auto Ontology as your account.
 				</p>
 			</div>
 
@@ -119,7 +119,9 @@ const ConsentPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">GSF</span>
+				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+					Auto Ontology
+				</span>
 			</div>
 			<Suspense fallback={null}>
 				<ConsentForm />

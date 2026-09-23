@@ -1,19 +1,19 @@
-# Contributing to GSF
+# Contributing to Auto Ontology
 
-Thank you for your interest in contributing to GSF (Generative Semantic Fabric)!
+Thank you for your interest in contributing to Auto Ontology!
 Contributions of all kinds are welcome: bug reports, feature requests,
 documentation improvements, and code.
 
 ## Reporting Issues
 
-- Search [existing issues](https://github.com/NVIDIA/GSF/issues) before filing a
+- Search [existing issues](https://github.com/NVIDIA/auto-ontology/issues) before filing a
   new one.
 - **Do not report security vulnerabilities through GitHub issues.** See
   [SECURITY.md](SECURITY.md) for NVIDIA's coordinated disclosure process.
 
 ## Development Setup
 
-GSF uses [uv](https://docs.astral.sh/uv/) for Python dependency management:
+Auto Ontology uses [uv](https://docs.astral.sh/uv/) for Python dependency management:
 
 ```bash
 uv sync                # install dependencies
@@ -50,5 +50,5 @@ Commits without a valid sign-off cannot be accepted.
 
 ## License
 
-By contributing to GSF, you agree that your contributions will be licensed
+By contributing to Auto Ontology, you agree that your contributions will be licensed
 under the [Apache License 2.0](LICENSE).

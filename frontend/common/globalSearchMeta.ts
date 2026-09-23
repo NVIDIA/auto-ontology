@@ -13,7 +13,7 @@ export const isViewTableType = (tableType: string | null | undefined): boolean =
 
 /**
  * The hit types a tag can be applied to, as `TAGGABLE_SEARCH_TYPES` in
- * `gsf/server/rules/service.py` lists them.
+ * `auto_ontology/server/rules/service.py` lists them.
  *
  * Raw `type` rather than the tab a hit is shown under: a view arrives as a
  * `Table` whose `table_type` says so and is labelled as one, which is why

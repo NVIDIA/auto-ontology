@@ -93,7 +93,7 @@ const TYPE_VIEW_LABEL: Record<Exclude<ExpansionEntityKind, 'connection'>, string
 
 // Matches `ExplorationLinkPathNodeDto.type`/this file's own `TYPE_ICON`/
 // `TYPE_ICON_COLOR` — a path hop's node is always one of these four kinds
-// (see `find_term_link_path` in `gsf/dal/attributes.py`).
+// (see `find_term_link_path` in `auto_ontology/dal/attributes.py`).
 const PATH_NODE_ICON: Record<string, IconName> = {
 	term: IconName.Terms,
 	table: IconName.Table,

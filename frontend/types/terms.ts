@@ -23,7 +23,7 @@ export type Term = {
 	/**
 	 * Aggregate three-state certification status: the term's own
 	 * name/description flags plus every column & sql attribute flag, rolled up
-	 * server-side (see `_certification_flags_clause` in gsf/dal/terms.py) and
+	 * server-side (see `_certification_flags_clause` in auto_ontology/dal/terms.py) and
 	 * zone-scoped to the same boundary as the attribute list endpoints. Both
 	 * `/terms` and `/terms/{id}` return it, and every certification PATCH
 	 * returns the recomputed value — never derive it on the client.

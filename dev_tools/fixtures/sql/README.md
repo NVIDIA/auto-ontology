@@ -14,7 +14,7 @@ fixture from scratch, drop the database first; for SQLite, delete the
 | Fixture | Engine | Source | Licence |
 |---|---|---|---|
 | `pagila` | Postgres | [devrimgunduz/pagila] `pagila-v3.1.0`, trimmed | MIT |
-| `pagila_analytics` | Postgres | GSF-authored addendum to `pagila` | — |
+| `pagila_analytics` | Postgres | Auto Ontology-authored addendum to `pagila` | — |
 | `chinook` | SQLite | [lerocha/chinook-database], unmodified | MIT |
 
 [devrimgunduz/pagila]: https://github.com/devrimgunduz/pagila
@@ -33,7 +33,7 @@ it has the shapes the code special-cases:
 | `payment` partitioned into 22 monthly children | Partitions surface as tables in `information_schema`. Whether the catalog should show them is a real question this fixture forces us to answer. |
 | `film.special_features text[]`, `mpaa_rating` enum, `fulltext tsvector` | Column `data_type` handling for non-scalar types. |
 | 2 domains, incl. `bıgınt` (Turkish dotless i) | Non-ASCII identifiers surviving the round trip. |
-| `film_actor`, `film_category` junction tables | Bridge-table detection (`gsf/semantic/bridge_tables.py`). |
+| `film_actor`, `film_category` junction tables | Bridge-table detection (`auto_ontology/semantic/bridge_tables.py`). |
 | `customer → address → city → country` | Multi-hop `find_join_path` traversal. |
 | Two schemas — `public` and `analytics` | The `Schema` tier, and schema-scoped zones. |
 | 2 cross-schema FKs | Join paths that cross a schema boundary. |
@@ -41,9 +41,9 @@ it has the shapes the code special-cases:
 
 Chinook exists to make the set **multi-database and multi-dialect**. Several
 behaviours are untestable with only one database: cross-database rejection in
-`find_join_path` (`gsf/dal/attributes.py:404`), `delete_by_database` scoping,
+`find_join_path` (`auto_ontology/dal/attributes.py:404`), `delete_by_database` scoping,
 per-database pgvector collection resets, and zones spanning databases. It also
-drives `gsf/connectors/sqlite.py` and a second sqlglot dialect through the
+drives `auto_ontology/connectors/sqlite.py` and a second sqlglot dialect through the
 parsers, and carries a self-referencing FK (`Employee.ReportsTo`) that Pagila
 has nowhere.
 
@@ -54,7 +54,7 @@ Not a verbatim upstream file. Reproduce with
 
 1. **Pinned to `pagila-v3.1.0`, not `master`.** Upstream master targets
    PostgreSQL 18 — it uses `uuidv7()` defaults and `VIRTUAL` generated columns,
-   neither of which exists in PG17. GSF runs `pgvector/pgvector:pg17`. `v3.1.0`
+   neither of which exists in PG17. Auto Ontology runs `pgvector/pgvector:pg17`. `v3.1.0`
    is the newest tag that loads on PG17 **unmodified**, and it still has the
    partitioned table, both domains, the enum, and all 8 views. Pinning beats
    patching: no local edits to a third-party fixture to keep re-applying.

@@ -46,7 +46,9 @@ const HandoffPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">GSF</span>
+				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+					Auto Ontology
+				</span>
 			</div>
 			<Suspense fallback={null}>
 				<HandoffStatus />

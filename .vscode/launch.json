@@ -19,7 +19,7 @@
       "name": "Debug Ingestion Service",
       "type": "debugpy",
       "request": "launch",
-      "module": "gsf.ingestion_service",
+      "module": "auto_ontology.ingestion_service",
       "python": "${workspaceFolder}/.venv/bin/python",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",
@@ -27,10 +27,10 @@
       "justMyCode": false
     },
     {
-      "name": "Debug GSF Server",
+      "name": "Debug Auto Ontology Server",
       "type": "debugpy",
       "request": "launch",
-      "module": "gsf.server",
+      "module": "auto_ontology.server",
       "python": "${workspaceFolder}/.venv/bin/python",
       "cwd": "${workspaceFolder}",
       "envFile": "${workspaceFolder}/.env",

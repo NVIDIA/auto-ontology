@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-/** Mirrors `MAX_TAG_NAME_LENGTH` in `gsf/server/tags/router.py`, which rejects longer. */
+/** Mirrors `MAX_TAG_NAME_LENGTH` in `auto_ontology/server/tags/router.py`, which rejects longer. */
 export const MAX_TAG_NAME_LENGTH = 25;
 
 /**

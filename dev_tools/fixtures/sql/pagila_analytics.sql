@@ -2,7 +2,7 @@
 -- All rights reserved.
 -- SPDX-License-Identifier: Apache-2.0
 --
--- GSF-authored second schema for the Pagila fixture. Not part of upstream
+-- Auto Ontology-authored second schema for the Pagila fixture. Not part of upstream
 -- Pagila -- see dev_tools/fixtures/sql/README.md.
 --
 -- Upstream Pagila is single-schema (everything in `public`), which leaves the

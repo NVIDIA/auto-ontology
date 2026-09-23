@@ -108,7 +108,7 @@ jobs:
           push: false
           load: false
           build-args: |
-            PYTHON_API_URL=http://gsf:3001
+            PYTHON_API_URL=http://auto-ontology:3001
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,mode=max,scope=frontend
           provenance: false

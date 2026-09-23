@@ -2,17 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Deliberately a separate distribution from `gsf-server`, not an extra on it.
-# The MCP server reaches GSF over HTTP like any other client, so it needs none
+# Deliberately a separate distribution from `auto-ontology-server`, not an extra on it.
+# The MCP server reaches Auto Ontology over HTTP like any other client, so it needs none
 # of the backend's database drivers or model tooling — installing
-# `gsf-server` to run it would pull ~450 packages and over a gigabyte, and it
+# `auto-ontology-server` to run it would pull ~450 packages and over a gigabyte, and it
 # would inherit that project's git dependencies. These four deps install in
-# seconds, which is what makes `uvx gsf-mcp` practical on a laptop.
+# seconds, which is what makes `uvx auto-ontology-mcp` practical on a laptop.
 
 [project]
-name = "gsf-mcp"
+name = "auto-ontology-mcp"
 version = "0.1.0"
-description = "MCP server exposing the GSF semantic layer to agent harnesses"
+description = "MCP server exposing the Auto Ontology semantic layer to agent harnesses"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Apache-2.0" }
@@ -24,21 +24,21 @@ dependencies = [
 ]
 
 [project.scripts]
-gsf-mcp = "gsf_mcp.__main__:main"
+auto-ontology-mcp = "auto_ontology_mcp.__main__:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["gsf_mcp"]
+packages = ["auto_ontology_mcp"]
 
 # The tool surface is generated from this spec at startup, so it has to travel
-# with the package. Kept in sync with docs/openapi/gsf-api.json by
+# with the package. Kept in sync with docs/openapi/auto-ontology-api.json by
 # `pnpm openapi`, which writes both copies, and enforced by CI.
 [tool.hatch.build.targets.wheel.force-include]
-"gsf_mcp/gsf-api.json" = "gsf_mcp/gsf-api.json"
-"gsf_mcp/nvidia-mark.svg" = "gsf_mcp/nvidia-mark.svg"
+"auto_ontology_mcp/auto-ontology-api.json" = "auto_ontology_mcp/auto-ontology-api.json"
+"auto_ontology_mcp/nvidia-mark.svg" = "auto_ontology_mcp/nvidia-mark.svg"
 
 [tool.pytest.ini_options]
 addopts = "--import-mode=importlib"

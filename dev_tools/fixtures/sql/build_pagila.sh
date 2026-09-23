@@ -17,7 +17,7 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"; docker rm -f gsf-pagila-build >/dev/null 2>&1 || true' EXIT
+trap 'rm -rf "$WORK"; docker rm -f auto-ontology-pagila-build >/dev/null 2>&1 || true' EXIT
 
 # Newest tag that loads on PostgreSQL 17 unmodified. master targets PG18
 # (uuidv7() defaults, VIRTUAL generated columns) and will not load here.
@@ -32,12 +32,12 @@ curl -fsS --max-time 180 -o "$WORK/schema.sql" "$RAW/pagila-schema.sql"
 curl -fsS --max-time 300 -o "$WORK/data.sql" "$RAW/pagila-data.sql"
 
 echo "== starting throwaway postgres =="
-docker run --rm -d --name gsf-pagila-build \
+docker run --rm -d --name auto-ontology-pagila-build \
   -e POSTGRES_PASSWORD=fixture -p 55433:5432 postgres:17 >/dev/null
 
-PSQL="docker exec -i -e PGPASSWORD=fixture gsf-pagila-build psql -U postgres -v ON_ERROR_STOP=1"
+PSQL="docker exec -i -e PGPASSWORD=fixture auto-ontology-pagila-build psql -U postgres -v ON_ERROR_STOP=1"
 for _ in $(seq 1 60); do
-  if docker exec gsf-pagila-build pg_isready -U postgres >/dev/null 2>&1; then break; fi
+  if docker exec auto-ontology-pagila-build pg_isready -U postgres >/dev/null 2>&1; then break; fi
   sleep 1
 done
 
@@ -63,7 +63,7 @@ $PSQL -d pagila_build -At -c \
 #            COPY ... FROM stdin.
 # --rows-per-insert: a fraction of the size of one INSERT per row.
 echo "== dumping =="
-docker exec -e PGPASSWORD=fixture gsf-pagila-build pg_dump -U postgres \
+docker exec -e PGPASSWORD=fixture auto-ontology-pagila-build pg_dump -U postgres \
   --no-owner --no-privileges --inserts --rows-per-insert=200 \
   pagila_build > "$WORK/dump.sql"
 

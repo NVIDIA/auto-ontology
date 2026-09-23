@@ -9,7 +9,7 @@ import { withPermission } from '@/auth/with-auth';
 import { distinctValueProbingBody } from './openapi';
 
 // Key/value stored in the `configurations` table. The Python ingestion service
-// reads this same key (see gsf/infra/feature_flags.py) once per compilation run
+// reads this same key (see auto_ontology/infra/feature_flags.py) once per compilation run
 // to decide whether to run the per-column SELECT DISTINCT probes. It does NOT
 // gate the bounded row sample, which always runs.
 //

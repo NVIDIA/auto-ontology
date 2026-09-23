@@ -4,7 +4,7 @@
 
 name: MCP CI
 
-# gsf-mcp is its own distribution with its own lightweight dependency set, so
+# auto-ontology-mcp is its own distribution with its own lightweight dependency set, so
 # it gets its own workflow rather than riding along with the backend's: it needs
 # no database drivers, no model tooling, and no NGC access, and installs in
 # seconds.
@@ -56,7 +56,7 @@ jobs:
           enable-cache: true
 
       # Installs the package itself, so the tests exercise the same import
-      # path and packaged spec that a user's `uvx gsf-mcp` would.
+      # path and packaged spec that a user's `uvx auto-ontology-mcp` would.
       - name: Sync dependencies
         working-directory: mcp
         run: uv sync
@@ -98,9 +98,9 @@ jobs:
           /tmp/probe/bin/python - <<'PY'
           import asyncio
           from fastmcp import Client
-          from gsf_mcp.config import load_settings
-          from gsf_mcp.server import build_server
-          from gsf_mcp.tools import CURATED
+          from auto_ontology_mcp.config import load_settings
+          from auto_ontology_mcp.server import build_server
+          from auto_ontology_mcp.tools import CURATED
 
           mcp, client = build_server(load_settings())
 

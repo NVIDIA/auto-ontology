@@ -11,7 +11,7 @@
 //
 // FastAPI owns completion persistence so web and Agent API callers share one
 // history implementation. This route authenticates the caller, forwards its
-// GSF user identity over the private upstream hop, and otherwise preserves SSE.
+// Auto Ontology user identity over the private upstream hop, and otherwise preserves SSE.
 
 import { after } from 'next/server';
 import { withPermission } from '@/auth/with-auth';
@@ -23,7 +23,7 @@ const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-const SOURCE_HEADER = 'x-gsf-source';
+const SOURCE_HEADER = 'x-auto-ontology-source';
 
 const parseBody = (rawBody: string): Record<string, unknown> => {
 	try {

@@ -9,7 +9,7 @@ import { Role } from '@/enums/auth';
 
 /**
  * Idempotently ensure the bootstrap admin account described by the
- * GSF_ADMIN_EMAIL / GSF_ADMIN_PASSWORD env vars. Runs once at server startup
+ * AUTO_ONTOLOGY_ADMIN_EMAIL / AUTO_ONTOLOGY_ADMIN_PASSWORD env vars. Runs once at server startup
  * (see `instrumentation.ts`).
  *
  * - If no account with that email exists, it is created as an email-verified
@@ -24,8 +24,8 @@ import { Role } from '@/enums/auth';
  * value verifies against the normal email/password sign-in flow.
  */
 export const seedAdmin = async (): Promise<void> => {
-	const email = process.env.GSF_ADMIN_EMAIL?.trim().toLowerCase();
-	const password = process.env.GSF_ADMIN_PASSWORD;
+	const email = process.env.AUTO_ONTOLOGY_ADMIN_EMAIL?.trim().toLowerCase();
+	const password = process.env.AUTO_ONTOLOGY_ADMIN_PASSWORD;
 	if (!email || !password) return;
 
 	const prisma = getPrisma();

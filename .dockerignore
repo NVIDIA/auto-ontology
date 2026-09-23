@@ -46,5 +46,5 @@ docker-compose*.yml
 README.md
 SECURITY.md
 *.md
-!gsf/**/*.md
+!auto_ontology/**/*.md
 dev_tools/

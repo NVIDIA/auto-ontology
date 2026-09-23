@@ -19,9 +19,9 @@ from fastmcp.exceptions import ToolError
 from fastmcp.server.http import set_http_request
 from starlette.requests import Request
 
-from gsf_mcp import server
-from gsf_mcp.config import DEFAULT_SPEC_PATH, ConfigError, Settings
-from gsf_mcp.server import (
+from auto_ontology_mcp import server
+from auto_ontology_mcp.config import DEFAULT_SPEC_PATH, ConfigError, Settings
+from auto_ontology_mcp.server import (
     ICON_PATH,
     INSTRUCTIONS,
     CallerAuth,
@@ -30,13 +30,13 @@ from gsf_mcp.server import (
     load_icons,
     load_spec,
 )
-from gsf_mcp.tools import CURATED
-from gsf_mcp import get_version
+from auto_ontology_mcp.tools import CURATED
+from auto_ontology_mcp import get_version
 
 
 def _settings(spec_path: Path = DEFAULT_SPEC_PATH) -> Settings:
     return Settings(
-        api_url="http://gsf.test",
+        api_url="http://auto_ontology.test",
         spec_path=spec_path,
         host="127.0.0.1",
         port=3003,
@@ -93,9 +93,9 @@ def test_ask_question_reports_a_structured_answer() -> None:
     assert set(ask.outputSchema["properties"]) >= {"answer", "sql", "rows"}
 
 
-def test_handshake_advertises_the_gsf_version() -> None:
+def test_handshake_advertises_the_auto_ontology_version() -> None:
     # Not FastMCP's, which is what gets reported if the version is left unset
-    # and reads as a GSF version in a client's server list.
+    # and reads as a Auto Ontology version in a client's server list.
     mcp, client = build_server(_settings())
 
     async def run() -> Any:
@@ -107,7 +107,7 @@ def test_handshake_advertises_the_gsf_version() -> None:
 
     info = asyncio.run(run())
 
-    assert info.name == "gsf"
+    assert info.name == "auto-ontology"
     assert info.version == get_version()
 
 
@@ -125,7 +125,7 @@ def test_handshake_advertises_the_icon() -> None:
 
     assert len(icons) == 1
     assert icons[0].mimeType == "image/svg+xml"
-    # Inline, so a client can draw it without reaching the network or GSF.
+    # Inline, so a client can draw it without reaching the network or Auto Ontology.
     assert icons[0].src.startswith("data:image/svg+xml;base64,")
 
 
@@ -170,7 +170,7 @@ def _sent_headers(
         client = httpx.AsyncClient(
             transport=httpx.MockTransport(handler),
             auth=auth,
-            base_url="http://gsf.test",
+            base_url="http://auto_ontology.test",
         )
         try:
             await client.get("/api/terms")
@@ -204,43 +204,49 @@ def test_no_credential_is_attached_to_the_client_itself() -> None:
 def test_the_signed_in_callers_token_is_forwarded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """GSF issued it, so it goes upstream untouched — no exchange, no unwrapping."""
-    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
+    """Auto Ontology issued it, so it goes upstream untouched — no exchange, no unwrapping."""
+    monkeypatch.setattr(
+        server, "auto_ontology_access_token", lambda: "auto-ontology-issued"
+    )
 
     headers = _sent_headers(CallerAuth())
 
-    assert headers["authorization"] == "Bearer gsf-issued"
+    assert headers["authorization"] == "Bearer auto-ontology-issued"
 
 
 def test_a_smuggled_api_key_cannot_override_the_signed_in_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """FastMCP copies the caller's headers onto the outbound request, and GSF
+    """FastMCP copies the caller's headers onto the outbound request, and Auto Ontology
     resolves x-api-key ahead of a bearer token. Left in place, a caller could
-    sign in as one user and then call GSF as the owner of some other token.
+    sign in as one user and then call Auto Ontology as the owner of some other token.
     """
-    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
+    monkeypatch.setattr(
+        server, "auto_ontology_access_token", lambda: "auto-ontology-issued"
+    )
 
-    headers = _sent_headers(CallerAuth(), {"x-api-key": "gsf_someone_else"})
+    headers = _sent_headers(CallerAuth(), {"x-api-key": "auto_ontology_someone_else"})
 
-    assert headers["authorization"] == "Bearer gsf-issued"
+    assert headers["authorization"] == "Bearer auto-ontology-issued"
     assert "x-api-key" not in headers
 
 
 def test_a_smuggled_bearer_token_cannot_override_it_either(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "gsf_access_token", lambda: "gsf-issued")
+    monkeypatch.setattr(
+        server, "auto_ontology_access_token", lambda: "auto-ontology-issued"
+    )
 
     headers = _sent_headers(CallerAuth(), {"authorization": "Bearer someone-else"})
 
-    assert headers["authorization"] == "Bearer gsf-issued"
+    assert headers["authorization"] == "Bearer auto-ontology-issued"
 
 
 def test_a_request_with_no_signed_in_session_is_an_actionable_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(server, "gsf_access_token", lambda: None)
+    monkeypatch.setattr(server, "auto_ontology_access_token", lambda: None)
 
     with pytest.raises(ToolError, match="Sign in again"):
         _sent_headers(CallerAuth())

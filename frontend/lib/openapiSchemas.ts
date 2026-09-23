@@ -67,7 +67,10 @@ export const acronymSchema = z.object({
 export const apiTokenSchema = z.object({
 	id: z.string(),
 	name: z.string().nullable(),
-	start: z.string().nullable().describe('First characters of the token, e.g. `gsf_a1b2c3`.'),
+	start: z
+		.string()
+		.nullable()
+		.describe('First characters of the token, e.g. `auto_ontology_a1b2c3`.'),
 	enabled: z.boolean(),
 	created_at: timestamp(),
 	expires_at: timestamp().nullable().describe('`null` when the token never expires.'),
