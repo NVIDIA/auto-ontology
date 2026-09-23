@@ -41,6 +41,7 @@ class IntervalScheduler:
         self._trigger = asyncio.Event()
         self._abort = asyncio.Event()
         self._running = False
+        self._paused = False
         self._first_pass_done = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
 
@@ -82,6 +83,27 @@ class IntervalScheduler:
         self._abort.set()
         self._trigger.clear()
 
+    def pause(self) -> None:
+        """Suppress passes until :meth:`resume`.
+
+        ``abort`` alone is not enough to hold the scheduler off: it stops the
+        *current* pass, but the loop keeps ticking and ``_run_pass`` clears the
+        abort flag before each new one. A caller that has to mutate the data a
+        pass reads — the semantic reset deleting the layer — would otherwise
+        race a timer tick or an API trigger that starts a pass against the
+        half-changed state.
+        """
+        self._paused = True
+
+    def resume(self) -> None:
+        """Allow passes again after :meth:`pause`."""
+        self._paused = False
+
+    @property
+    def paused(self) -> bool:
+        """Whether passes are currently suppressed."""
+        return self._paused
+
     @property
     def aborting(self) -> bool:
         """Whether the pass currently running was asked to stop."""
@@ -117,7 +139,15 @@ class IntervalScheduler:
         raise NotImplementedError
 
     async def _run_pass(self) -> None:
-        """Run one pass with a fresh abort flag, surviving unhandled errors."""
+        """Run one pass with a fresh abort flag, surviving unhandled errors.
+
+        A paused scheduler skips the pass entirely rather than aborting it part
+        way: the point of the pause is that the data a pass reads is being
+        rewritten, so starting one at all is what has to be prevented.
+        """
+        if self._paused:
+            logger.info("%s: paused; skipping this pass", self.name)
+            return
         self._abort.clear()
         self._running = True
         try:

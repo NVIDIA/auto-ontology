@@ -50,13 +50,18 @@ SEMANTIC_INTERVAL = timedelta(hours=24)
 
 # Appended when a pass compiles nothing. The count is tables that *needed*
 # compiling (``compile_semantic_layer`` works from the tables with no Term yet),
-# so a settled catalog legitimately reports zero — while the elapsed time can
-# still be minutes, because the FK, SqlAttribute and bridge-table stages run
-# afterwards regardless. Without this, "0 table(s) ... in 620.7s" reads as a
-# stall or a silently failed run.
+# so zero is a legitimate outcome — while the elapsed time can still be minutes,
+# because the FK, SqlAttribute and bridge-table stages run afterwards
+# regardless. Without this, "0 table(s) ... in 620.7s" reads as a stall or a
+# silently failed run.
+#
+# Deliberately does not name a cause. Zero establishes only that nothing needed
+# compiling; whether that is a settled catalog, one whose tables are all
+# excluded by a connection's table filter, or an empty catalog, this cannot
+# tell — and claiming the first would hide the other two.
 _NOTHING_TO_COMPILE = (
-    " (every table already had a term; the elapsed time is the FK, "
-    "SqlAttribute and bridge-table stages, which run on every pass)"
+    " (no table needed compiling; the elapsed time is the FK, SqlAttribute "
+    "and bridge-table stages, which run on every pass)"
 )
 
 

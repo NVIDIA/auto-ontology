@@ -11,6 +11,7 @@ that has to wait that long is indistinguishable from one that hung.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import Any
 from unittest.mock import patch
 
@@ -25,7 +26,7 @@ from auto_ontology.semantic.cancellation import (
 
 
 @pytest.fixture(autouse=True)
-def _clean_flag():
+def _clean_flag() -> Iterator[None]:
     clear_cancel()
     yield
     clear_cancel()
@@ -47,7 +48,9 @@ def test_queued_tables_are_skipped_once_cancelled() -> None:
     """The backlog becomes no-ops, so the pool drains in one table's time."""
     processed: list[str] = []
 
-    def _fake_process_table(table, ctx, **kwargs):
+    def _fake_process_table(
+        table: dict[str, Any], ctx: dict[str, Any], **kwargs: Any
+    ) -> None:
         processed.append(table["name"])
         # Cancel partway through, as a reset would.
         if len(processed) == 1:
@@ -77,7 +80,9 @@ def test_queued_tables_are_skipped_once_cancelled() -> None:
 def test_an_uncancelled_pass_still_processes_everything() -> None:
     processed: list[str] = []
 
-    def _fake_process_table(table, ctx, **kwargs):
+    def _fake_process_table(
+        table: dict[str, Any], ctx: dict[str, Any], **kwargs: Any
+    ) -> None:
         processed.append(table["name"])
         return None
 

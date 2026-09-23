@@ -28,6 +28,16 @@ class _FakeScheduler:
         self._polls_until_idle = stops_after
         self.events: list[str] = []
         self.started = False
+        self.paused = False
+        self.paused_during_delete: bool | None = None
+
+    def pause(self) -> None:
+        self.paused = True
+        self.events.append("pause")
+
+    def resume(self) -> None:
+        self.paused = False
+        self.events.append("resume")
 
     @property
     def running(self) -> bool:
@@ -51,6 +61,10 @@ class _FakeScheduler:
 def _patch_delete(monkeypatch: pytest.MonkeyPatch, scheduler: _FakeScheduler) -> None:
     def _delete(database_name: str | None) -> Any:
         scheduler.events.append("delete")
+        # Recorded from inside the delete: the pause has to still be in force
+        # here, or a timer tick could start a pass against the half-deleted
+        # layer.
+        scheduler.paused_during_delete = scheduler.paused
         return None
 
     monkeypatch.setattr(mod, "delete_semantic_layer", _delete)
@@ -64,7 +78,7 @@ def test_delete_completes_before_the_rebuild_starts(
 
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, "pagila"))
 
-    assert scheduler.events == ["abort", "delete", "start"]
+    assert scheduler.events == ["pause", "abort", "delete", "resume", "start"]
 
 
 def test_delete_waits_for_an_in_flight_pass_to_stop(
@@ -77,7 +91,7 @@ def test_delete_waits_for_an_in_flight_pass_to_stop(
 
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
 
-    assert scheduler.events == ["abort", "delete", "start"]
+    assert scheduler.events == ["pause", "abort", "delete", "resume", "start"]
     # The drain actually waited rather than falling through on the first poll.
     assert scheduler._polls_until_idle < 0
 
@@ -92,7 +106,7 @@ def test_a_pass_that_never_stops_does_not_block_the_reset_forever(
 
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
 
-    assert scheduler.events == ["abort", "delete", "start"]
+    assert scheduler.events == ["pause", "abort", "delete", "resume", "start"]
     assert "still running" in caplog.text
 
 
@@ -110,7 +124,7 @@ def test_a_failed_delete_does_not_start_a_rebuild(
 
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
 
-    assert scheduler.events == ["abort", "delete"]
+    assert scheduler.events == ["pause", "abort", "delete", "resume"]
     assert scheduler.started is False
 
 
@@ -125,4 +139,46 @@ def test_an_already_running_scheduler_is_triggered_rather_than_started(
 
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
 
-    assert scheduler.events == ["abort", "delete", "start", "trigger"]
+    assert scheduler.events == [
+        "pause",
+        "abort",
+        "delete",
+        "resume",
+        "start",
+        "trigger",
+    ]
+
+
+def test_the_scheduler_is_paused_across_the_whole_delete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """abort() alone leaves the loop free to start a pass mid-delete.
+
+    ``_run_pass`` clears the abort flag before each pass, so a timer tick or
+    /semantic/compile landing between the drain and the end of the delete would
+    read the pre-delete catalog, compile nothing, and leave the layer deleted
+    but not rebuilt.
+    """
+    scheduler = _FakeScheduler()
+    _patch_delete(monkeypatch, scheduler)
+
+    asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
+
+    assert scheduler.paused_during_delete is True
+    assert scheduler.paused is False  # and released afterwards
+
+
+def test_the_scheduler_is_resumed_even_when_the_delete_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A scheduler left paused would silently stop compiling for good."""
+    scheduler = _FakeScheduler()
+
+    def _boom(database_name: str | None) -> Any:
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(mod, "delete_semantic_layer", _boom)
+
+    asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
+
+    assert scheduler.paused is False

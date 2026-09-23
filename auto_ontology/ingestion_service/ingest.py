@@ -246,6 +246,13 @@ async def reset_semantic_layer_and_recompile(
     Passing ``None`` resets the semantic layer of every database.
     """
     label = database_name or "<all>"
+    # Paused for the whole stop-and-delete window, not just aborted. abort()
+    # ends the current pass but leaves the loop ticking, and a pass started by a
+    # timer tick or /semantic/compile between the drain and the end of the
+    # delete would read the pre-delete catalog, find every table already
+    # carrying a Term, compile nothing, and leave the layer deleted but not
+    # rebuilt — the exact failure this ordering exists to prevent.
+    scheduler.pause()
     try:
         scheduler.abort()
         if not await _wait_until_idle(scheduler):
@@ -262,6 +269,10 @@ async def reset_semantic_layer_and_recompile(
         # one nor a clean one.
         logger.exception("Background reset-semantic failed for database %s", label)
         return
+    finally:
+        # Always, including the failure path — a paused scheduler that is never
+        # resumed silently stops compiling for good.
+        scheduler.resume()
 
     if not scheduler.start():
         scheduler.trigger()

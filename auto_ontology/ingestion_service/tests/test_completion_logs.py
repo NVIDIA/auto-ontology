@@ -189,7 +189,7 @@ def test_semantic_scheduler_reports_success_and_table_total(
     # 7 per database, summed across both.
     assert "semantic: finished successfully — 2 database(s), 14 table(s)" in text
     # The "nothing to compile" note belongs only on a pass that compiled nothing.
-    assert "every table already had a term" not in text
+    assert "no table needed compiling" not in text
 
 
 def test_semantic_scheduler_explains_a_zero_table_pass(
@@ -211,13 +211,13 @@ def test_semantic_scheduler_explains_a_zero_table_pass(
     assert (
         "semantic: finished successfully — 2 database(s), 0 table(s) compiled" in text
     )
-    assert "every table already had a term" in text
+    assert "no table needed compiling" in text
     assert (
         "Finished semantic compilation successfully for database pagila: "
         "0 table(s) compiled" in text
     )
     # The explanation belongs on the summary only -- once, not once per database.
-    assert text.count("every table already had a term") == 1
+    assert text.count("no table needed compiling") == 1
 
 
 def test_semantic_scheduler_does_not_claim_success_when_one_fails(
