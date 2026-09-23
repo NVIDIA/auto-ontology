@@ -22,9 +22,9 @@ on:
 
 env:
   CHART_DIR: helm/auto-ontology
-  # nvcr.io allows only org/team/image (3 segments). helm push appends the chart
-  # name, so the chart is published to nvcr.io/nvstaging/gsf/auto-ontology (its own
-  # repo in the existing gsf team, next to the gsf/gsf app image repo).
+  # nvcr.io allows only org/team/image (3 segments), so the chart is published to
+  # nvcr.io/nvstaging/gsf/auto-ontology (same repo as the app image, distinct -stg.* tags;
+  # gsf is the existing NGC team, the chart/image names follow the rename).
   OCI_REPO: oci://nvcr.io/nvstaging/gsf
 
 jobs:

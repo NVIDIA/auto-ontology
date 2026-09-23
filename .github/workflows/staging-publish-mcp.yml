@@ -21,7 +21,7 @@ on:
       - '.github/workflows/staging-publish-mcp.yml'
 
 env:
-  IMAGE: nvcr.io/nvstaging/gsf/gsf-mcp
+  IMAGE: nvcr.io/nvstaging/gsf/auto-ontology-mcp
 
 jobs:
   publish-mcp:

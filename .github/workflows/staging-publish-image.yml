@@ -29,10 +29,10 @@ on:
       - '.github/workflows/staging-publish-image.yml'
 
 env:
-  # nvcr.io allows only org/team/image (3 segments). Images stay in the existing
-  # nvstaging/gsf team (repo names unchanged by the Auto Ontology rename); the OCI
-  # chart lives beside them at nvcr.io/nvstaging/gsf/auto-ontology.
-  IMAGE: nvcr.io/nvstaging/gsf/gsf
+  # nvcr.io allows only org/team/image (3 segments); the app image shares the
+  # nvcr.io/nvstaging/gsf/auto-ontology repo with the OCI chart, distinguished by tag.
+  # (gsf is the existing NGC team; only the image/chart names follow the rename.)
+  IMAGE: nvcr.io/nvstaging/gsf/auto-ontology
 
 jobs:
   publish-image:
