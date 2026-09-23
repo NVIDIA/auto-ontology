@@ -29,6 +29,7 @@ class _OrderedCommitQueue:
     def __init__(self) -> None:
         self._condition = threading.Condition()
         self._next_position = 0
+        self._skipped: set[int] = set()
 
     def wait(self, position: int) -> None:
         with self._condition:
@@ -39,8 +40,38 @@ class _OrderedCommitQueue:
         with self._condition:
             while position != self._next_position:
                 self._condition.wait()
-            self._next_position += 1
+            self._advance_locked()
+
+    def skip(self, position: int) -> None:
+        """Give up a turn **without** waiting for it to come round.
+
+        Giving up a turn used to mean waiting for it first, which holds a pool
+        worker for as long as the tables ahead take — and the workers are few
+        (``_WORKERS``). Cancelling a backlog makes every queued table skip at
+        once, so that cost lands exactly when the point is to stop quickly.
+
+        Recording the skip instead releases the worker immediately, and also
+        allows a position to be given up out of order, which waiting cannot
+        express at all: a skip of a position whose predecessors have not had
+        their turns would simply block forever.
+
+        The skip is consumed when its turn arrives, cascading through any run
+        of consecutive skips.
+        """
+        with self._condition:
+            self._skipped.add(position)
+            self._drain_skipped_locked()
             self._condition.notify_all()
+
+    def _advance_locked(self) -> None:
+        self._next_position += 1
+        self._drain_skipped_locked()
+        self._condition.notify_all()
+
+    def _drain_skipped_locked(self) -> None:
+        while self._next_position in self._skipped:
+            self._skipped.discard(self._next_position)
+            self._next_position += 1
 
 
 class _OrderedCommitSlot:
@@ -66,10 +97,15 @@ class _OrderedCommitSlot:
         self._completed = True
 
     def skip_if_unused(self) -> None:
-        """Advance this turn when processing returned before committing."""
+        """Give up this turn when processing returned before committing.
+
+        Non-blocking (see :meth:`_OrderedCommitQueue.skip`): waiting for the
+        turn would hold a pool worker, and cancellation makes every queued
+        table skip at once.
+        """
         if self._entered or self._completed:
             return
-        self._queue.advance(self._position)
+        self._queue.skip(self._position)
         self._completed = True
 
 
@@ -115,6 +151,10 @@ def compile_semantic_layer(
             "usual, but skipping the per-column DISTINCT probes"
         )
 
+    # Set the first time a table is dropped, so the "we are cancelling" line is
+    # logged once rather than once per table.
+    cancel_logged = threading.Event()
+
     def _process(
         table: dict, position: int, display_index: int
     ) -> ProcessTableResult | None:
@@ -124,6 +164,16 @@ def compile_semantic_layer(
         # front, so this is what turns the backlog into no-ops and lets the pool
         # drain in about one table's time instead of one database's.
         if is_cancelled():
+            if not cancel_logged.is_set():
+                cancel_logged.set()
+                # Say this out loud: the tables already running cannot be
+                # interrupted, and one mid-LLM-call can take minutes. Without a
+                # line here the pass goes silent and looks wedged.
+                logger.info(
+                    "Compilation cancelled — dropping the queued tables and "
+                    "waiting for the up-to-%d already running to finish",
+                    _WORKERS,
+                )
             commit_slot.skip_if_unused()
             return None
         try:

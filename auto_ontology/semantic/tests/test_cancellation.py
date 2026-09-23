@@ -109,3 +109,57 @@ def test_scheduler_abort_requests_cancellation() -> None:
 
     assert is_cancelled() is True
     assert scheduler.aborting is True
+
+
+def test_cancelling_a_backlog_larger_than_the_pool_drains_cleanly() -> None:
+    """A backlog far larger than the pool still finishes, with nothing compiled."""
+    request_cancel()  # every table skips, before any is dispatched
+
+    with (
+        patch.object(
+            pipeline, "fetch_all_tables_without_term", return_value=_tables(40)
+        ),
+        patch.object(
+            pipeline, "fetch_table_context", return_value={"columns": [{"n": 1}]}
+        ),
+        patch.object(pipeline, "load_domain_summary", return_value=None),
+        patch.object(pipeline, "is_distinct_value_probing_enabled", return_value=False),
+        patch.object(pipeline, "reset_sampling_breaker"),
+        patch.object(pipeline, "process_table", lambda *a, **k: None),
+    ):
+        # 40 tables against a 3-worker pool: the old blocking skip wedged here.
+        count = pipeline.compile_semantic_layer("db")
+
+    assert count == 0
+
+
+def test_skipped_positions_do_not_strand_a_later_commit() -> None:
+    """A skip must hand the turn on, or the next table waits on it forever."""
+    queue = pipeline._OrderedCommitQueue()
+
+    queue.skip(0)
+    queue.skip(1)
+    # Position 2's turn has to be reachable now that 0 and 1 gave theirs up.
+    with pipeline._OrderedCommitSlot(queue, 2):
+        pass
+
+    # And the run continues in order afterwards.
+    with pipeline._OrderedCommitSlot(queue, 3):
+        pass
+
+
+def test_a_skip_arriving_out_of_order_is_consumed_when_its_turn_comes() -> None:
+    """The case waiting for a turn cannot express — it would block forever.
+
+    Verified: with the previous, blocking implementation this test hangs.
+    """
+    queue = pipeline._OrderedCommitQueue()
+
+    queue.skip(2)  # skipped before 0 and 1 have had their turns
+    with pipeline._OrderedCommitSlot(queue, 0):
+        pass
+    with pipeline._OrderedCommitSlot(queue, 1):
+        pass
+    # 2 was skipped, so 3 is next without anything blocking on 2.
+    with pipeline._OrderedCommitSlot(queue, 3):
+        pass
