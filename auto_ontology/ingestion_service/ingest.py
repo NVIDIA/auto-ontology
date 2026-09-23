@@ -209,6 +209,14 @@ _ABORT_POLL_S = 0.5
 # workaround.
 _background_tasks: set[asyncio.Task[None]] = set()
 
+# One reset at a time. Each call runs as its own task, and the pause is a single
+# boolean, so two overlapping resets would have the first to finish resume the
+# scheduler while the second is still deleting — reopening the window the pause
+# exists to close. Serialising also stops them deleting and rebuilding on top of
+# each other: the second reset cancels the first's rebuild and starts its own,
+# which is what asking for a reset twice should mean.
+_reset_lock = asyncio.Lock()
+
 
 async def _wait_until_idle(scheduler: Any) -> bool:
     """Block until *scheduler* is not mid-pass. False if it never stopped."""
@@ -246,6 +254,14 @@ async def reset_semantic_layer_and_recompile(
     Passing ``None`` resets the semantic layer of every database.
     """
     label = database_name or "<all>"
+    async with _reset_lock:
+        await _reset_semantic_layer_and_recompile(scheduler, database_name, label)
+
+
+async def _reset_semantic_layer_and_recompile(
+    scheduler: Any, database_name: str | None, label: str
+) -> None:
+    """Body of :func:`reset_semantic_layer_and_recompile`, one caller at a time."""
     # Paused for the whole stop-and-delete window, not just aborted. abort()
     # ends the current pass but leaves the loop ticking, and a pass started by a
     # timer tick or /semantic/compile between the drain and the end of the

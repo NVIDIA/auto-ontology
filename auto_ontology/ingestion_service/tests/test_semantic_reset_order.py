@@ -182,3 +182,46 @@ def test_the_scheduler_is_resumed_even_when_the_delete_fails(
     asyncio.run(mod.reset_semantic_layer_and_recompile(scheduler, None))
 
     assert scheduler.paused is False
+
+
+def test_overlapping_resets_do_not_resume_under_each_other(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two resets at once must not have one resume while the other deletes.
+
+    The pause is a single boolean and each reset runs as its own task, so
+    without serialisation the first to finish clears the pause while the second
+    is still deleting — which is exactly the window the pause closes.
+    """
+    scheduler = _FakeScheduler()
+    deletes_in_flight = 0
+    max_concurrent_deletes = 0
+    paused_during_every_delete = []
+
+    async def _delete(database_name: str | None) -> Any:
+        nonlocal deletes_in_flight, max_concurrent_deletes
+        deletes_in_flight += 1
+        max_concurrent_deletes = max(max_concurrent_deletes, deletes_in_flight)
+        paused_during_every_delete.append(scheduler.paused)
+        await asyncio.sleep(0)  # yield, so an unserialised peer could interleave
+        deletes_in_flight -= 1
+        return None
+
+    def _sync_delete(database_name: str | None) -> Any:
+        # to_thread is patched out below, so this is only a marker.
+        raise AssertionError("unused")
+
+    monkeypatch.setattr(mod, "delete_semantic_layer", _sync_delete)
+    monkeypatch.setattr(mod.asyncio, "to_thread", lambda fn, arg: _delete(arg))
+
+    async def _both() -> None:
+        await asyncio.gather(
+            mod.reset_semantic_layer_and_recompile(scheduler, None),
+            mod.reset_semantic_layer_and_recompile(scheduler, None),
+        )
+
+    asyncio.run(_both())
+
+    assert max_concurrent_deletes == 1
+    assert paused_during_every_delete == [True, True]
+    assert scheduler.paused is False
