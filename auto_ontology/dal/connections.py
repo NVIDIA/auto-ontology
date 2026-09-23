@@ -16,7 +16,7 @@ import json
 import logging
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.connectors.vault import read_secret
@@ -82,6 +82,26 @@ def insert_connection(
         ).returning(s.catalog_database)
     )
     return dict(rows[0])
+
+
+def clear_connection(*, database_name: str) -> None:
+    """Detach connection metadata from the catalog database.
+
+    The counterpart to :func:`insert_connection`, and the write that actually
+    makes a database stop being a connection — "connections" are exactly the
+    catalog rows carrying a connection value.
+
+    The row itself stays. ``catalog_schema`` cascades off it, so deleting it
+    here would drop the ingested catalog while leaving behind the semantic rows
+    and pgvector embeddings that are identified *through* it — the half-state
+    :func:`auto_ontology.dal.reset.delete_all_data` orders its own deletes to avoid.
+    Tearing the graph down is that function's job.
+    """
+    store().query_write(
+        update(s.catalog_database)
+        .where(s.catalog_database.c.name == database_name)
+        .values(connection=None)
+    )
 
 
 def verify_connectivity() -> None:

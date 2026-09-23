@@ -1681,6 +1681,73 @@
           "connection": ["manage"]
         },
         "x-auto-ontology-proxied": true
+      },
+      "put": {
+        "description": "connectionsApi.update — rewrite a connection's settings (admin only).",
+        "operationId": "put_api_connections_database_name_",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Connection",
+        "tags": ["connections"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/connections/[database_name]/route.ts",
+        "x-auto-ontology-permissions": {
+          "connection": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
       }
     },
     "/api/connections/{database_name}/sso-federation": {
@@ -1797,7 +1864,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConnectionBody"
+                "$ref": "#/components/schemas/ConnectionTestBody"
               }
             }
           },
@@ -7894,6 +7961,29 @@
         },
         "required": ["connection"],
         "title": "ConnectionBody",
+        "type": "object"
+      },
+      "ConnectionTestBody": {
+        "properties": {
+          "connection": {
+            "additionalProperties": true,
+            "title": "Connection",
+            "type": "object"
+          },
+          "replacing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacing"
+          }
+        },
+        "required": ["connection"],
+        "title": "ConnectionTestBody",
         "type": "object"
       },
       "ConnectionTestResponse": {

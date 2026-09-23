@@ -20,6 +20,7 @@
     "expand_info": "(ids_and_labels: 'list | None') -> 'dict'"
   },
   "connections": {
+    "clear_connection": "(*, database_name: 'str') -> 'None'",
     "insert_connection": "(*, connection: 'str', database_name: 'str') -> 'dict[str, Any]'",
     "list_connections": "() -> 'list[dict[str, Any]]'",
     "verify_connectivity": "() -> 'None'"

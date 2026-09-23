@@ -15,6 +15,7 @@ import type { Connection } from '@/types/connection';
 
 export type ConnectionInfoCardProps = {
 	connection: Connection;
+	onEdit?: (connection: Connection) => void;
 	onDelete?: (databaseName: string) => void;
 	onSsoFederationChange?: (databaseName: string, enabled: boolean) => void;
 	/** Disables the toggle while its request is in flight. */
@@ -24,12 +25,34 @@ export type ConnectionInfoCardProps = {
 
 export const ConnectionInfoCard = ({
 	connection,
+	onEdit,
 	onDelete,
 	onSsoFederationChange,
 	ssoFederationPending = false,
 	disabled = false,
 }: ConnectionInfoCardProps) => {
-	const menuDisabled = disabled || !onDelete;
+	const menuItems = [
+		...(onEdit == null
+			? []
+			: [
+					{
+						label: 'Edit',
+						icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+						onClick: () => onEdit(connection),
+					},
+				]),
+		...(onDelete == null
+			? []
+			: [
+					{
+						label: 'Remove',
+						icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+						onClick: () => onDelete(connection.database_name),
+						danger: true,
+					},
+				]),
+	];
+	const menuDisabled = disabled || menuItems.length === 0;
 	// Only Databricks supports authenticating as the signed-in user.
 	const databricks =
 		connection.connection.type === ConnectionType.DATABRICKS ? connection.connection : null;
@@ -56,14 +79,7 @@ export const ConnectionInfoCard = ({
 					) : (
 						<PopoverMenu
 							className="relative"
-							items={[
-								{
-									label: 'Remove',
-									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
-									onClick: () => onDelete(connection.database_name),
-									danger: true,
-								},
-							]}
+							items={menuItems}
 							trigger={({ toggle }) => (
 								<Button
 									theme={ButtonTheme.IconNeutral}

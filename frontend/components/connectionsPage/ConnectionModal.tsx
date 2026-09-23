@@ -16,9 +16,10 @@ import {
 	ConnectionType,
 	type ConnectionFieldKey,
 } from '@/enums/connection';
-import type { ConnectionInput } from '@/types/connection';
+import type { Connection, ConnectionInput, ConnectionParams } from '@/types/connection';
 
-const BASE_STEPS = ['Select Connector', 'Connect'] as const;
+const TYPE_STEP = 'Select Connector';
+const CONNECT_STEP = 'Connect';
 const SCHEMA_STEP = 'Select Schemas';
 
 /**
@@ -35,26 +36,84 @@ const SCHEMA_SELECTION_TYPES: ReadonlySet<ConnectionType> = new Set([
 
 type FieldValues = Partial<Record<ConnectionFieldKey, string>>;
 
-export type NewConnectionsModalProps = {
+/** The form stores every value as a string; a checkbox is 'true'/''. */
+const toFieldValue = (raw: unknown): string => {
+	if (typeof raw === 'boolean') return raw ? 'true' : '';
+	return typeof raw === 'string' ? raw : '';
+};
+
+const toFieldValues = (params: ConnectionParams): FieldValues => {
+	const stored = params as Record<string, unknown>;
+	return Object.fromEntries(
+		CONNECTION_FIELDS[params.type]
+			.filter((field) => stored[field.key] != null)
+			.map((field) => [field.key, toFieldValue(stored[field.key])]),
+	);
+};
+
+export type ConnectionModalProps = {
 	open: boolean;
+	/**
+	 * Editing when set. The connector type and database name are the connection's
+	 * identity on the backend, so both are fixed for the life of the record.
+	 */
+	connection?: Connection | null;
 	onConfirm: () => void;
 	onCancel: () => void;
 };
 
-export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnectionsModalProps) => {
+export const ConnectionModal = ({
+	open,
+	connection = null,
+	onConfirm,
+	onCancel,
+}: ConnectionModalProps) => {
+	const editing = connection != null;
+
 	const [loading, setLoading] = useState(false);
 	const [testingConnection, setTestingConnection] = useState(false);
 	const [isConnectionTested, setIsConnectionTested] = useState(false);
 	const [testSuccessMessage, setTestSuccessMessage] = useState<string | null>(null);
 	const [activeStep, setActiveStep] = useState(0);
-	const [connectionType, setConnectionType] = useState<ConnectionType>(ConnectionType.POSTGRESQL);
-	const [values, setValues] = useState<FieldValues>({});
+	const [connectionType, setConnectionType] = useState<ConnectionType>(
+		connection?.connection.type ?? ConnectionType.POSTGRESQL,
+	);
+	const [values, setValues] = useState<FieldValues>(() =>
+		connection == null ? {} : toFieldValues(connection.connection),
+	);
 	const [alert, setAlert] = useState<string | null>(null);
+
+	// The stored allowlist is what the picker reopens on, and what a re-test
+	// falls back to rather than silently dropping the connection's scope.
+	const initialSchemas = useMemo(
+		() => (connection?.connection as { schemas?: string[] } | undefined)?.schemas ?? [],
+		[connection],
+	);
 
 	// `availableSchemas` is populated from the connection-test response, so
 	// there's no separate fetch.
 	const [availableSchemas, setAvailableSchemas] = useState<string[]>([]);
-	const [selectedSchemas, setSelectedSchemas] = useState<string[]>([]);
+	const [selectedSchemas, setSelectedSchemas] = useState<string[]>(initialSchemas);
+
+	/**
+	 * Credentials are stripped from everything the API hands back, so an edit
+	 * form cannot show them. Blank therefore means "keep the stored one", which
+	 * is how the backend reads it too.
+	 */
+	const keepCurrentKeys = useMemo<ReadonlySet<ConnectionFieldKey>>(() => {
+		if (connection == null) return new Set();
+		const stored = connection.connection as Record<string, unknown>;
+		return new Set(
+			CONNECTION_FIELDS[connection.connection.type]
+				.filter((field) => field.secret === true && stored[field.key] == null)
+				.map((field) => field.key),
+		);
+	}, [connection]);
+
+	const readOnlyKeys = useMemo<ReadonlySet<ConnectionFieldKey>>(
+		() => (editing ? new Set<ConnectionFieldKey>(['database']) : new Set()),
+		[editing],
+	);
 
 	const supportsSchemaSelection = SCHEMA_SELECTION_TYPES.has(connectionType);
 
@@ -62,13 +121,10 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	// already confirmed it exists, so there is nothing left to choose.
 	const explicitSchema = (values.schema ?? '').trim();
 
-	const steps = useMemo(
-		() =>
-			supportsSchemaSelection && !explicitSchema
-				? [...BASE_STEPS, SCHEMA_STEP]
-				: [...BASE_STEPS],
-		[supportsSchemaSelection, explicitSchema],
-	);
+	const steps = useMemo(() => {
+		const base = editing ? [CONNECT_STEP] : [TYPE_STEP, CONNECT_STEP];
+		return supportsSchemaSelection && !explicitSchema ? [...base, SCHEMA_STEP] : base;
+	}, [editing, supportsSchemaSelection, explicitSchema]);
 
 	// `testOnly` fields (the Databricks schema filter) shape the connection test
 	// but must not end up on the stored connection, so they are dropped unless
@@ -101,19 +157,25 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 
 	const fieldsComplete = useMemo(() => {
 		const allRequiredPresent = CONNECTION_FIELDS[connectionType].every(
-			(field) => field.optional || (values[field.key] ?? '').trim().length > 0,
+			(field) =>
+				field.optional ||
+				keepCurrentKeys.has(field.key) ||
+				(values[field.key] ?? '').trim().length > 0,
 		);
 		// Alternative credentials are each optional on their own, so the "every
 		// required field" check above cannot see that one of them is still needed.
 		const alternatives = CONNECTION_EITHER_FIELDS[connectionType];
 		const alternativeSatisfied =
 			alternatives == null ||
-			alternatives.some((key) => (values[key] ?? '').trim().length > 0);
+			alternatives.some(
+				(key) => keepCurrentKeys.has(key) || (values[key] ?? '').trim().length > 0,
+			);
 
 		return allRequiredPresent && alternativeSatisfied;
-	}, [connectionType, values]);
+	}, [connectionType, values, keepCurrentKeys]);
 
-	const canContinue = activeStep === 0 ? false : fieldsComplete;
+	const onTypeStep = steps[activeStep] === TYPE_STEP;
+	const canContinue = onTypeStep ? false : fieldsComplete;
 
 	const handleNext = useCallback((): void => {
 		setAlert(null);
@@ -125,10 +187,10 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setActiveStep((prev) => Math.max(prev - 1, 0));
 	}, []);
 
-	const resetSchemaState = (): void => {
+	const resetSchemaState = useCallback((): void => {
 		setAvailableSchemas([]);
-		setSelectedSchemas([]);
-	};
+		setSelectedSchemas(initialSchemas);
+	}, [initialSchemas]);
 
 	const handleSelectType = (type: ConnectionType): void => {
 		setConnectionType(type);
@@ -154,7 +216,10 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		setAlert(null);
 		setTestSuccessMessage(null);
 
-		const res = await connectionsApi.test(buildConnection({ forTest: true }));
+		const res = await connectionsApi.test(
+			buildConnection({ forTest: true }),
+			connection?.database_name,
+		);
 		setTestingConnection(false);
 
 		if ('error' in res && res.error) {
@@ -174,37 +239,43 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		// The test response carries the connection's schemas — feed the picker.
 		setAvailableSchemas(res.schemas);
 		setAlert(null);
-	}, [buildConnection]);
+	}, [buildConnection, connection]);
 
-	const handleCreate = useCallback(async (): Promise<void> => {
+	const handleSubmit = useCallback(async (): Promise<void> => {
 		if (!isConnectionTested) {
-			setAlert('Connection must be tested before creating.');
+			setAlert(`Connection must be tested before ${editing ? 'saving' : 'creating'}.`);
 			return;
 		}
 
 		setLoading(true);
 		setAlert(null);
-		const res = await connectionsApi.create(buildConnection());
+		const input = buildConnection();
+		const res =
+			connection == null
+				? await connectionsApi.create(input)
+				: await connectionsApi.update(connection.database_name, input);
 		setLoading(false);
 
 		if ('error' in res && res.error) {
-			setAlert(res.message ?? 'Failed to create connection.');
+			setAlert(res.message ?? `Failed to ${editing ? 'update' : 'create'} the connection.`);
 			return;
 		}
 
 		onConfirm();
-	}, [buildConnection, isConnectionTested, onConfirm]);
+	}, [buildConnection, connection, editing, isConnectionTested, onConfirm]);
 
 	const renderStepContent = (step: number) => {
 		switch (steps[step]) {
-			case 'Select Connector':
+			case TYPE_STEP:
 				return <ConnectionTypeStep onSelect={handleSelectType} />;
-			case 'Connect':
+			case CONNECT_STEP:
 				return (
 					<ConnectionConnectStep
 						connectionType={connectionType}
 						values={values}
 						onFieldChange={handleFieldChange}
+						readOnlyKeys={readOnlyKeys}
+						keepCurrentKeys={keepCurrentKeys}
 						testSuccessMessage={testSuccessMessage}
 						onTestConnection={() => {
 							void handleTestConnection();
@@ -232,46 +303,46 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 	};
 
 	const footerActions: StepperFooterAction[] = useMemo(() => {
-		if (activeStep === 0) {
+		if (onTypeStep) {
 			return [{ label: 'Cancel', onClick: onCancel, variant: 'outline' }];
 		}
 
 		const actions: StepperFooterAction[] = [
-			{ label: 'Back', onClick: handleBack, variant: 'outline' },
+			activeStep === 0
+				? { label: 'Cancel', onClick: onCancel, variant: 'outline' }
+				: { label: 'Back', onClick: handleBack, variant: 'outline' },
 		];
 
 		const isLastStep = activeStep === steps.length - 1;
-		if (isLastStep) {
-			actions.push({
-				label: 'Create',
-				onClick: () => {
-					void handleCreate();
-				},
-				disabled: !canContinue || loading || testingConnection || !isConnectionTested,
-				loading,
-			});
-		} else {
-			// Require a successful test before advancing so the schema list can
-			// load.
-			actions.push({
-				label: 'Next',
-				onClick: handleNext,
-				disabled: !canContinue || loading || testingConnection || !isConnectionTested,
-				loading,
-			});
-		}
+		// Require a successful test before advancing so the schema list can load.
+		const blocked = !canContinue || loading || testingConnection || !isConnectionTested;
+
+		actions.push(
+			isLastStep
+				? {
+						label: editing ? 'Save' : 'Create',
+						onClick: () => {
+							void handleSubmit();
+						},
+						disabled: blocked,
+						loading,
+					}
+				: { label: 'Next', onClick: handleNext, disabled: blocked, loading },
+		);
 
 		return actions;
 	}, [
 		activeStep,
-		steps.length,
 		canContinue,
+		editing,
 		handleBack,
-		handleCreate,
 		handleNext,
+		handleSubmit,
 		isConnectionTested,
 		loading,
 		onCancel,
+		onTypeStep,
+		steps.length,
 		testingConnection,
 	]);
 
@@ -279,7 +350,7 @@ export const NewConnectionsModal = ({ open, onConfirm, onCancel }: NewConnection
 		<ModalWithSteps
 			open={open}
 			onClose={onCancel}
-			title="Create New Connection"
+			title={editing ? `Edit ${connection.database_name}` : 'Create New Connection'}
 			steps={steps}
 			activeStep={activeStep}
 			onActiveStepChange={setActiveStep}

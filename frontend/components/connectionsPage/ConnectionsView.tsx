@@ -12,7 +12,7 @@ import { Size, ButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { ToastVariant } from '@/enums/toast';
 import { ConnectionsInfoCardView } from '@/components/connectionsPage/ConnectionsInfoCardView';
-import { NewConnectionsModal } from '@/components/connectionsPage/NewConnectionsModal';
+import { ConnectionModal } from '@/components/connectionsPage/ConnectionModal';
 import { ConfirmModal } from '@/common/modal';
 import { Toast } from '@/common/Toast';
 import { Icon, IconName } from '@/common/icons';
@@ -24,6 +24,7 @@ export const ConnectionsView = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [connectionModalOpen, setConnectionModalOpen] = useState(false);
+	const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
 	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -55,11 +56,18 @@ export const ConnectionsView = () => {
 	}, [fetchConnections]);
 
 	const handleCreateConnection = () => {
+		setEditingConnection(null);
+		setConnectionModalOpen(true);
+	};
+
+	const handleEditConnection = (connection: Connection) => {
+		setEditingConnection(connection);
 		setConnectionModalOpen(true);
 	};
 
 	const handleConnectionModalClose = () => {
 		setConnectionModalOpen(false);
+		setEditingConnection(null);
 	};
 
 	const handleConnectionModalConfirm = () => {
@@ -181,6 +189,7 @@ export const ConnectionsView = () => {
 					</div>
 					<ConnectionsInfoCardView
 						connections={connections}
+						onEdit={handleEditConnection}
 						onDelete={handleDeleteRequest}
 						onSsoFederationChange={(databaseName, enabled) => {
 							void handleSsoFederationChange(databaseName, enabled);
@@ -197,7 +206,8 @@ export const ConnectionsView = () => {
 					deletingConnection ? (
 						<>
 							Are you sure you want to remove <strong>{deletingConnection}</strong>?
-							Its entire subgraph will be deleted. This action cannot be undone.
+							The connection goes away immediately; its ingested data is cleaned up in
+							the background. This action cannot be undone.
 						</>
 					) : null
 				}
@@ -208,9 +218,10 @@ export const ConnectionsView = () => {
 				error={deleteError}
 			/>
 
-			<NewConnectionsModal
-				key={String(connectionModalOpen)}
+			<ConnectionModal
+				key={`${connectionModalOpen}:${editingConnection?.database_name ?? ''}`}
 				open={connectionModalOpen}
+				connection={editingConnection}
 				onConfirm={handleConnectionModalConfirm}
 				onCancel={handleConnectionModalClose}
 			/>

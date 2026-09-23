@@ -31,25 +31,21 @@ class ConnectionBody(BaseModel):
     connection: dict[str, Any]
 
 
+class ConnectionTestBody(ConnectionBody):
+    replacing: str | None = None
+
+
 class PublicConnection(TypedDict):
     database_name: str
     connection: dict[str, Any]
 
 
-_SECRET_FIELDS = frozenset(
-    {
-        "password",
-        "password_env",
-        "private_key",
-        "private_key_passphrase",
-    }
-)
-
-
 def _serialize_connection(connection: dict[str, Any]) -> PublicConnection:
     """Shape a connection object into a credential-free public payload."""
     public_connection = {
-        key: value for key, value in connection.items() if key not in _SECRET_FIELDS
+        key: value
+        for key, value in connection.items()
+        if key not in service.SECRET_FIELDS
     }
     return {
         "database_name": str(connection.get("database") or ""),
@@ -71,19 +67,28 @@ def is_env_source() -> bool:
 def list_connections() -> dict:
     """List every configured database connection, credential-free.
 
-    ``password`` and ``password_env`` are stripped from each connection object,
-    so the payload is safe to render in the UI. ``database_name`` doubles as the
-    connection's identity in the other routes here.
+    Credentials — passwords, private keys and the Kyuubi truststore password —
+    are stripped from each connection object, so the payload is safe to render
+    in the UI. ``database_name`` doubles as the connection's identity in the
+    other routes here.
     """
     rows = [_serialize_connection(conn) for conn in _list_connections()]
     return {"data": rows, "count": len(rows)}
 
 
 @router.post("/connections/test", response_model=ConnectionTestResponse)
-def test_connection(body: ConnectionBody) -> dict:
-    """Validate a connection and return its schemas (for the schema picker)."""
+def test_connection(body: ConnectionTestBody) -> dict:
+    """Validate a connection and return its schemas (for the schema picker).
+
+    Set ``replacing`` to the ``database_name`` of the connection an edit is
+    about to overwrite. Without it the test rejects the connection for already
+    existing, and blank credentials stay blank instead of being taken from the
+    stored connection the way ``PUT /connections/{database_name}`` would.
+    """
     try:
-        schemas = service.test_connection(body.connection)
+        schemas = service.test_connection(body.connection, replacing=body.replacing)
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
@@ -111,6 +116,41 @@ def create_connection(body: ConnectionBody) -> dict:
         raise HTTPException(
             status_code=422,
             detail=f"Failed to create connection: {exc}",
+        ) from exc
+
+    return {"data": _serialize_connection(row)}
+
+
+@router.put("/connections/{database_name}", response_model=ConnectionResponse)
+def update_connection(
+    body: ConnectionBody,
+    database_name: str = Path(
+        description=(
+            "Catalog database name, which doubles as the connection's identity."
+        )
+    ),
+) -> dict:
+    """Rewrite a connection's settings and return it credential-free.
+
+    ``database`` and ``type`` are the connection's identity and cannot change —
+    sending different ones is a 422. Credentials left blank keep their stored
+    value, since the UI is never given them to send back. Re-ingest is
+    triggered only when the ``schemas`` allowlist changed.
+
+    404 when no connection carries that ``database_name``.
+    """
+    try:
+        row = service.update_connection(
+            database_name=database_name, connection=body.connection
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to update connection: {exc}",
         ) from exc
 
     return {"data": _serialize_connection(row)}
@@ -156,11 +196,12 @@ def delete_connection(
         )
     ),
 ) -> dict:
-    """Remove a connection, returning the deleted row.
+    """Remove a connection, echoing the database name it tore down.
 
-    404 when no connection carries that ``database_name``. Data already ingested
-    from the connection is not removed here — reset it through the ingestion
-    service's ``POST /ingest/delete``.
+    404 when no connection carries that ``database_name``. The connection
+    record is removed synchronously, but deleting the data already ingested
+    from it is handed to the ingestion service and is best-effort — a 200 means
+    the connection is gone, not that its graph is.
     """
     try:
         row = service.delete_connection(database_name)

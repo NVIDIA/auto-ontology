@@ -864,6 +864,31 @@
         "title": "ConnectionBody",
         "type": "object"
       },
+      "ConnectionTestBody": {
+        "properties": {
+          "connection": {
+            "additionalProperties": true,
+            "title": "Connection",
+            "type": "object"
+          },
+          "replacing": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replacing"
+          }
+        },
+        "required": [
+          "connection"
+        ],
+        "title": "ConnectionTestBody",
+        "type": "object"
+      },
       "ConnectionTestResponse": {
         "additionalProperties": true,
         "description": "``schemas`` is empty for connectors that cannot enumerate schemas.",
@@ -5797,7 +5822,7 @@
     },
     "/api/connections": {
       "get": {
-        "description": "List every configured database connection, credential-free.\n\n``password`` and ``password_env`` are stripped from each connection object,\nso the payload is safe to render in the UI. ``database_name`` doubles as the\nconnection's identity in the other routes here.",
+        "description": "List every configured database connection, credential-free.\n\nCredentials \u2014 passwords, private keys and the Kyuubi truststore password \u2014\nare stripped from each connection object, so the payload is safe to render\nin the UI. ``database_name`` doubles as the connection's identity in the\nother routes here.",
         "operationId": "list_connections_api_connections_get",
         "responses": {
           "200": {
@@ -5882,13 +5907,13 @@
     },
     "/api/connections/test": {
       "post": {
-        "description": "Validate a connection and return its schemas (for the schema picker).",
+        "description": "Validate a connection and return its schemas (for the schema picker).\n\nSet ``replacing`` to the ``database_name`` of the connection an edit is\nabout to overwrite. Without it the test rejects the connection for already\nexisting, and blank credentials stay blank instead of being taken from the\nstored connection the way ``PUT /connections/{database_name}`` would.",
         "operationId": "test_connection_api_connections_test_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConnectionBody"
+                "$ref": "#/components/schemas/ConnectionTestBody"
               }
             }
           },
@@ -5924,7 +5949,7 @@
     },
     "/api/connections/{database_name}": {
       "delete": {
-        "description": "Remove a connection, returning the deleted row.\n\n404 when no connection carries that ``database_name``. Data already ingested\nfrom the connection is not removed here \u2014 reset it through the ingestion\nservice's ``POST /ingest/delete``.",
+        "description": "Remove a connection, echoing the database name it tore down.\n\n404 when no connection carries that ``database_name``. The connection\nrecord is removed synchronously, but deleting the data already ingested\nfrom it is handed to the ingestion service and is best-effort \u2014 a 200 means\nthe connection is gone, not that its graph is.",
         "operationId": "delete_connection_api_connections__database_name__delete",
         "parameters": [
           {
@@ -5962,6 +5987,59 @@
           }
         },
         "summary": "Delete Connection",
+        "tags": [
+          "connections"
+        ]
+      },
+      "put": {
+        "description": "Rewrite a connection's settings and return it credential-free.\n\n``database`` and ``type`` are the connection's identity and cannot change \u2014\nsending different ones is a 422. Credentials left blank keep their stored\nvalue, since the UI is never given them to send back. Re-ingest is\ntriggered only when the ``schemas`` allowlist changed.\n\n404 when no connection carries that ``database_name``.",
+        "operationId": "update_connection_api_connections__database_name__put",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConnectionBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_PublicConnection_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Connection",
         "tags": [
           "connections"
         ]
