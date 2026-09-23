@@ -130,7 +130,7 @@ backend:
   # wait-for-catalog-schema init container blocks until public.alembic_version
   # matches it, so new Pods never serve against a schema the migration Job has
   # not finished applying. Bump this with the migration, in the same commit.
-  alembicRevision: 2c24b6498f41
+  alembicRevision: c778a7d94c20
   image:
     repository: nvcr.io/nvstaging/auto-ontology/auto-ontology
     tag: 0.0.1
