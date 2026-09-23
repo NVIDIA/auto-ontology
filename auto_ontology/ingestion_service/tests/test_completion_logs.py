@@ -188,6 +188,36 @@ def test_semantic_scheduler_reports_success_and_table_total(
     assert "Finished semantic compilation successfully for database pagila" in text
     # 7 per database, summed across both.
     assert "semantic: finished successfully — 2 database(s), 14 table(s)" in text
+    # The "nothing to compile" note belongs only on a pass that compiled nothing.
+    assert "every table already had a term" not in text
+
+
+def test_semantic_scheduler_explains_a_zero_table_pass(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A settled catalog compiles nothing, but the pass is not therefore idle.
+
+    The count is tables that *needed* compiling, while the elapsed time also
+    covers the FK / SqlAttribute / bridge-table stages, which run every pass. A
+    bare "0 table(s) ... in 620.7s" reads as a stall or a failed run, so the
+    zero case has to say why.
+    """
+    _patch_semantic_scheduler(monkeypatch, ["pagila", "chinook"], lambda db: 0)
+
+    with caplog.at_level(logging.INFO):
+        asyncio.run(SemanticScheduler()._run_once())
+
+    text = _messages(caplog)
+    assert (
+        "semantic: finished successfully — 2 database(s), 0 table(s) compiled" in text
+    )
+    assert "every table already had a term" in text
+    assert (
+        "Finished semantic compilation successfully for database pagila: "
+        "0 table(s) compiled" in text
+    )
+    # The explanation belongs on the summary only -- once, not once per database.
+    assert text.count("every table already had a term") == 1
 
 
 def test_semantic_scheduler_does_not_claim_success_when_one_fails(

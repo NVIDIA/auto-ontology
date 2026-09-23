@@ -47,6 +47,17 @@ logger = logging.getLogger(__name__)
 # wall-clock time.
 SEMANTIC_INTERVAL = timedelta(hours=24)
 
+# Appended when a pass compiles nothing. The count is tables that *needed*
+# compiling (``compile_semantic_layer`` works from the tables with no Term yet),
+# so a settled catalog legitimately reports zero — while the elapsed time can
+# still be minutes, because the FK, SqlAttribute and bridge-table stages run
+# afterwards regardless. Without this, "0 table(s) ... in 620.7s" reads as a
+# stall or a silently failed run.
+_NOTHING_TO_COMPILE = (
+    " (every table already had a term; the elapsed time is the FK, "
+    "SqlAttribute and bridge-table stages, which run on every pass)"
+)
+
 
 class SemanticScheduler(IntervalScheduler):
     """Drives semantic compilation on startup, on a 24h timer, and on demand."""
@@ -133,9 +144,13 @@ class SemanticScheduler(IntervalScheduler):
                     )
                     succeeded += 1
                     total_tables += tables_processed
+                    # "compiled", not "processed": the count is tables that
+                    # *needed* compiling. The pass summary carries the why when
+                    # it is zero; repeating it per database would be five copies
+                    # of the same sentence.
                     logger.info(
                         "Finished semantic compilation successfully for database %s: "
-                        "%d table(s) processed in %.1fs",
+                        "%d table(s) compiled in %.1fs",
                         database_name,
                         tables_processed,
                         time.monotonic() - database_started,
@@ -177,8 +192,9 @@ class SemanticScheduler(IntervalScheduler):
             else:
                 logger.info(
                     "semantic: finished successfully — %d database(s), "
-                    "%d table(s) processed in %.1fs",
+                    "%d table(s) compiled in %.1fs%s",
                     succeeded,
                     total_tables,
                     elapsed,
+                    "" if total_tables else _NOTHING_TO_COMPILE,
                 )
