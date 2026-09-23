@@ -26,16 +26,16 @@ migration leaves the version table pointing at the last good revision.
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: backend-migrate-{{ .Release.Revision }}
+  name: auto-ontology-migrate-{{ .Release.Revision }}
   labels:
-    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "backend-migrate") | nindent 4 }}
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "auto-ontology-migrate") | nindent 4 }}
 spec:
   backoffLimit: 3
   ttlSecondsAfterFinished: 600
   template:
     metadata:
       labels:
-        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "backend-migrate") | nindent 8 }}
+        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "auto-ontology-migrate") | nindent 8 }}
     spec:
       restartPolicy: OnFailure
       {{- include "auto-ontology.imagePullSecrets" . | nindent 6 }}

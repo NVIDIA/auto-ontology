@@ -111,7 +111,7 @@ present and already pulled. Runs after auto-ontology.waitForDeps, so Postgres is
 {{/*
 Init container that blocks until the backend's Alembic migrations have been
 applied *to the revision this release ships*. Without it the backend goes Ready
-and serves 500s on every catalog call while backend-migrate is still running --
+and serves 500s on every catalog call while auto-ontology-migrate is still running --
 the Job is a normal release resource, so nothing else orders the two.
 
 Gating on a table's existence is not enough: it is satisfied from the first
