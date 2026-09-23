@@ -184,6 +184,53 @@ def test_calculate_columns_profiling_unhashable_values(
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+def test_calculate_columns_profiling_text_typed_array_column(
+    mock_store_samples: MagicMock,
+    mock_store_unique: MagicMock,
+    mock_store_dates: MagicMock,
+) -> None:
+    """A ClickHouse ``Array(String)`` column must not abort the table.
+
+    The declared-type gate matches on substrings, so ``Array(String)`` counts
+    as text and its values reach the date-shape scan — but they are lists, not
+    strings. That used to raise TypeError out of ``re.match``, which the caller
+    caught as "column profiling failed" and dropped the samples, uniqueness and
+    date formats for *every* column in the table, not just this one.
+    """
+    df = pd.DataFrame(
+        {
+            "id": [1, 2],
+            "labels": [["a", "b"], ["c"]],
+            "created": ["2012-08-24", "2014/07/09"],
+        }
+    )
+    connector = _mock_connector()
+    connector.execute.return_value = df
+
+    table = {"id": "t1", "name": "events", "schema_name": "default"}
+    columns = [
+        {"name": "id", "data_type": "Int64"},
+        {"name": "labels", "data_type": "Array(String)"},
+        {"name": "created", "data_type": "String"},
+    ]
+
+    result = calculate_columns_profiling(table, columns, connector)
+
+    assert set(result) == {"id", "labels", "created"}
+    assert result["labels"]["sample_values"] == [["a", "b"], ["c"]]
+
+    # The genuinely-text column is still scanned, so the mixed-format warning
+    # survives the fix rather than being lost with the crash.
+    stored = mock_store_samples.call_args[0][1]
+    assert any(
+        isinstance(v, str) and "mixed date formats observed" in v
+        for v in stored["created"]
+    )
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
 def test_calculate_columns_profiling(
     mock_store_samples: MagicMock,
     mock_store_unique: MagicMock,

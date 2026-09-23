@@ -11,7 +11,7 @@ from collections import Counter, defaultdict
 from contextlib import AbstractContextManager, contextmanager
 from datetime import date, datetime, time as dt_time
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, Sequence
 
 import pandas as pd
 
@@ -255,8 +255,18 @@ def _is_text_sample_type(data_type: str | None) -> bool:
     return any(token in lowered for token in _TEXT_SAMPLE_TYPES)
 
 
-def _date_shapes_seen(values: list[str]) -> list[str]:
+def _date_shapes_seen(values: Sequence[Any]) -> list[str]:
     """Distinct recognized date/timestamp shapes among *values*, in first-seen order.
+
+    Non-string values are skipped rather than matched. The caller gates on the
+    *declared* type, and that gate cannot tell a scalar from a collection of
+    one: ClickHouse's ``Array(String)`` contains the ``string`` token, so an
+    array column reaches here with ``list`` values, which ``re.match`` rejects
+    with a TypeError. That aborted the whole table's profiling — caught one
+    frame up and logged as "column profiling failed", so the samples,
+    uniqueness and date formats for every column in the table were silently
+    dropped. A non-string cannot carry a *textual* date shape anyway, which is
+    the only thing this looks for.
 
     A value that matches none of :data:`_DATE_SHAPE_PATTERNS` is silently
     ignored rather than counted as "no date shape" for the whole column —
@@ -270,6 +280,8 @@ def _date_shapes_seen(values: list[str]) -> list[str]:
     """
     shapes: list[str] = []
     for value in values:
+        if not isinstance(value, str):
+            continue
         for label, pattern in _DATE_SHAPE_PATTERNS:
             if pattern.match(value):
                 if label not in shapes:
