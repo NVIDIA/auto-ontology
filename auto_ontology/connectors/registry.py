@@ -258,21 +258,30 @@ def get_connectors() -> list[SQLDatabase]:
     if _connectors is None:
         from auto_ontology.dal.connections import list_connections
 
-        # Each spec is (connection_string, schema_allowlist). The schema filter
-        # is honoured only during ingestion introspection (Databricks,
-        # Snowflake, Kyuubi, and Trino); it is inert for retrieval, which executes SQL
-        # rather than introspecting.
+        # Each spec is (connection_string, schema_allowlist, table_filter). The
+        # schema filter is honoured only during ingestion introspection
+        # (Databricks, Snowflake, Kyuubi, and Trino); it is inert for retrieval,
+        # which executes SQL rather than introspecting. The table filter is
+        # likewise ingestion-only, but applies to every connector.
         try:
-            specs: list[tuple[str, list[str] | None]] = [
-                (build_connection_string(conn), _schema_filter(conn))
+            specs: list[tuple[str, list[str] | None, TableFilter]] = [
+                (
+                    build_connection_string(conn),
+                    _schema_filter(conn),
+                    _table_filter(conn),
+                )
                 for conn in list_connections()
             ]
         except Exception:
             logger.exception("Failed to load connection strings from the catalog")
             specs = []
         if not specs:
+            # CONNECTION_STRINGS carries no connection dict, so an env-configured
+            # connection cannot express a table filter.
             raw = os.environ.get("CONNECTION_STRINGS", "")
-            specs = [(cs.strip(), None) for cs in raw.split(",") if cs.strip()]
+            specs = [
+                (cs.strip(), None, TableFilter()) for cs in raw.split(",") if cs.strip()
+            ]
         if not specs:
             logger.warning(
                 "No connections configured. Add CONNECTION_STRINGS to your .env "
@@ -282,8 +291,8 @@ def get_connectors() -> list[SQLDatabase]:
 
         loaded: list[SQLDatabase] = []
         seen_database_names: set[str] = set()
-        for cs, schemas in specs:
-            connector = create_connector(cs, schemas=schemas)
+        for cs, schemas, table_filter in specs:
+            connector = create_connector(cs, schemas=schemas, table_filter=table_filter)
             database_name = connector.database_name
             if database_name in seen_database_names:
                 logger.warning(
