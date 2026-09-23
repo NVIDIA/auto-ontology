@@ -5,7 +5,7 @@
 # Publishes the portable Auto Ontology Helm chart to nvcr.io as an OCI artifact. The Astra
 # deploy repo (auto-ontology-app-deploy) consumes it as a chart dependency; GitHub and
 # GitLab stay decoupled, linked only through nvcr.io. Requires repo secret:
-#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/auto-ontology
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
 
 name: 'Staging: Publish Helm chart to nvcr.io'
 
@@ -22,9 +22,10 @@ on:
 
 env:
   CHART_DIR: helm/auto-ontology
-  # nvcr.io allows only org/team/image (3 segments), so the chart is published to
-  # nvcr.io/nvstaging/auto-ontology/auto-ontology (same repo as the app image, distinct -stg.* tags).
-  OCI_REPO: oci://nvcr.io/nvstaging/auto-ontology
+  # nvcr.io allows only org/team/image (3 segments). helm push appends the chart
+  # name, so the chart is published to nvcr.io/nvstaging/gsf/auto-ontology (its own
+  # repo in the existing gsf team, next to the gsf/gsf app image repo).
+  OCI_REPO: oci://nvcr.io/nvstaging/gsf
 
 jobs:
   publish-chart:
@@ -71,4 +72,4 @@ jobs:
 
       - name: Summary
         run: |
-          echo "Published \`${OCI_REPO}/auto_ontology:${{ steps.ver.outputs.version }}\`" >>"$GITHUB_STEP_SUMMARY"
+          echo "Published \`${OCI_REPO}/auto-ontology:${{ steps.ver.outputs.version }}\`" >>"$GITHUB_STEP_SUMMARY"

@@ -5,7 +5,7 @@
 # Builds the Auto Ontology Next.js frontend image and pushes it to nvcr.io. The Astra
 # deploy repo consumes it by digest; GitHub and GitLab stay decoupled, linked
 # only through nvcr.io (mirrors staging-publish-image.yml). Requires repo secret:
-#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/auto-ontology
+#   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
 #
 # PYTHON_API_URL is baked into the Next.js rewrite manifest at build time
 # (Next.js evaluates rewrites() during `next build`), so it must point at the
@@ -27,8 +27,8 @@ on:
 
 env:
   # nvcr.io allows only org/team/image (3 segments); the frontend has its own
-  # repo, distinct from the app/chart repo (nvcr.io/nvstaging/auto-ontology/auto-ontology).
-  IMAGE: nvcr.io/nvstaging/auto-ontology/auto-ontology-frontend
+  # repo, distinct from the app/chart repo (nvcr.io/nvstaging/gsf/gsf).
+  IMAGE: nvcr.io/nvstaging/gsf/gsf-frontend
   # Baked into the Next.js rewrites at build time; must match the in-cluster
   # backend Service name created by the helm chart.
   PYTHON_API_URL: http://auto-ontology:3001
