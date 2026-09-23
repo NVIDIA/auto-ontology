@@ -9,7 +9,7 @@ import { Spinner } from '@nvidia/foundations-react-core';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import {
-	CONNECTION_FIELDS,
+	connectionFieldsFor,
 	connectionDisplayName,
 	type ConnectionFieldKey,
 	type ConnectionType,
@@ -53,7 +53,7 @@ export const ConnectionConnectStep = ({
 	}
 
 	const testButtonDisabled = testDisabled || testingConnection;
-	const fields = CONNECTION_FIELDS[connectionType];
+	const fields = connectionFieldsFor(connectionType);
 
 	return (
 		<div className="flex flex-1 flex-col gap-4 p-2">

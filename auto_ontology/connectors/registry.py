@@ -11,6 +11,7 @@ import os
 import re
 from urllib.parse import urlparse
 
+from auto_ontology.catalog.table_filter import TableFilter, from_connection
 from auto_ontology.connectors.base import SQLDatabase
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
@@ -89,6 +90,24 @@ def _schema_filter(connection: dict) -> list[str] | None:
     return schemas or None
 
 
+def _table_filter(connection: dict) -> TableFilter:
+    """Build the regex table allow/deny filter off a connection dict.
+
+    A malformed pattern is logged and dropped here rather than raised: this runs
+    while loading every configured connection, and one bad pattern must not stop
+    the others from loading. The API validates patterns on save (422), so an
+    invalid one should never reach this point.
+    """
+    try:
+        return from_connection(connection)
+    except ValueError:
+        logger.exception(
+            "Ignoring invalid table filter on connection %r",
+            connection.get("database"),
+        )
+        return TableFilter()
+
+
 def invalidate_connectors_cache() -> None:
     """Drop cached connectors so the next :func:`get_connectors` reloads."""
     global _connectors
@@ -104,12 +123,18 @@ def invalidate_connectors_cache() -> None:
 def create_connector(
     connection_string: str,
     schemas: list[str] | None = None,
+    table_filter: "TableFilter | None" = None,
 ) -> SQLDatabase:
     """Parse *connection_string*, select a connector class, and return an instance.
 
     *schemas* is an optional ingestion allowlist. It is only honoured by
     connectors that support schema filtering (currently Databricks, Snowflake,
     Kyuubi, and Trino); for others it is ignored so their behaviour is unchanged.
+
+    *table_filter* is the connection's regex allow/deny pair. Unlike *schemas*
+    it applies to every connector, because it is enforced centrally in
+    :func:`auto_ontology.catalog.extract.create_dataframe` rather than pushed
+    down into each driver's introspection query.
     """
     try:
         parsed = urlparse(connection_string)
@@ -133,8 +158,16 @@ def create_connector(
             KyuubiDatabase,
             TrinoDatabase,
         ):
-            return connector_class(connection_string, schemas=schemas)
-        return connector_class(connection_string)
+            connector = connector_class(connection_string, schemas=schemas)
+        else:
+            connector = connector_class(connection_string)
+
+        # Carried on the instance rather than passed to __init__: every
+        # connector must honour it, and none of them should have to accept a
+        # new constructor argument to do so.
+        if table_filter is not None and table_filter.active:
+            connector.table_filter = table_filter
+        return connector
 
     except Exception:
         logger.exception(
@@ -193,7 +226,11 @@ def get_connectors_for_subject_token(
         connection_string = build_connection_string(
             {**conn, "access_token_override": access_token}
         )
-        connector = create_connector(connection_string, schemas=_schema_filter(conn))
+        connector = create_connector(
+            connection_string,
+            schemas=_schema_filter(conn),
+            table_filter=_table_filter(conn),
+        )
         federated_names.add(connector.database_name)
         loaded.append(connector)
 

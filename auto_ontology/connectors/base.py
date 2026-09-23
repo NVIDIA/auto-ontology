@@ -34,11 +34,14 @@ Example
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 import pandas as pd
 
 from auto_ontology.utils.sql_identifiers import qualified_name
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from auto_ontology.catalog.table_filter import TableFilter
 
 
 class SQLDatabase(ABC):
@@ -66,6 +69,13 @@ class SQLDatabase(ABC):
     #: has one, but honouring it there means opening a fresh session per
     #: statement, which during ingestion costs far more than the cap saves.
     supports_statement_timeout: bool = False
+
+    #: Optional regex allow/deny filter over relation names, set from the
+    #: connection by :func:`auto_ontology.connectors.registry.create_connector`.
+    #: Connectors do not read it themselves — it is enforced centrally in
+    #: :func:`auto_ontology.catalog.extract.create_dataframe`, so every
+    #: connector honours it without implementing anything.
+    table_filter: "TableFilter | None" = None
 
     @abstractmethod
     def __init__(self, connection_string: str) -> None: ...

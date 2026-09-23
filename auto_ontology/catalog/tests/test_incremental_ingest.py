@@ -100,11 +100,15 @@ def source_db():
         admin.close()
 
 
-def _ingest(database_name: str) -> None:
+def _ingest(database_name: str, *, deny: str | None = None) -> None:
     from auto_ontology.catalog import ingest_catalog
+    from auto_ontology.catalog.table_filter import from_connection
     from auto_ontology.connectors.registry import create_connector
 
-    connector = create_connector(_pg_dsn(database_name))
+    connector = create_connector(
+        _pg_dsn(database_name),
+        table_filter=from_connection({"table_deny_regex": deny} if deny else None),
+    )
     try:
         ingest_catalog(connector)
     finally:
@@ -165,6 +169,22 @@ def test_dropped_table_is_removed(source_db: str) -> None:
     _ingest(source_db)
 
     assert catalog.tables(source_db) == {"customer"}
+
+
+def test_newly_denied_table_is_removed_from_the_catalog(source_db: str) -> None:
+    """Adding a denylist must evict what it excludes, not just stop adding it.
+
+    The operator's reason for excluding a table is that querying it fails, so
+    leaving the already-ingested copy behind would keep retrieval offering it
+    and change nothing they could observe.
+    """
+    _ingest(source_db)
+    assert catalog.tables(source_db) == {"customer", "orders"}
+
+    _ingest(source_db, deny="^orders$")
+
+    assert catalog.tables(source_db) == {"customer"}
+    assert catalog.columns(source_db, "orders") == set()
 
 
 def test_dropped_table_takes_its_columns_with_it(source_db: str) -> None:

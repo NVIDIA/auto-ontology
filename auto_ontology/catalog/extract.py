@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
+from auto_ontology.catalog import table_filter
 from auto_ontology.catalog.normalize import normalize_columns, normalize_tables
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -77,13 +78,26 @@ def _validate_relation_column_coverage(
 
 
 def create_dataframe(connector: "SQLDatabase"):
-    """Extract raw schema DataFrames from any SQLDatabase connector."""
+    """Extract raw schema DataFrames from any SQLDatabase connector.
+
+    The connector's optional ``table_filter`` (set from the connection's
+    allow/deny regexes, see :mod:`auto_ontology.catalog.table_filter`) is applied
+    here, before column-coverage validation — this is the single point every
+    connector's relations pass through, so the filter behaves identically for
+    all of them.
+    """
     tables = connector.get_tables()
     columns = connector.get_columns()
     views = connector.get_views()
     queries = connector.get_queries()
     pks = connector.get_pks()
     fks = connector.get_fks()
+    tables, columns, views = table_filter.apply(
+        tables,
+        columns,
+        views,
+        getattr(connector, "table_filter", None) or table_filter.TableFilter(),
+    )
     _validate_relation_column_coverage(tables, columns)
     return tables, columns, views, queries, pks, fks
 

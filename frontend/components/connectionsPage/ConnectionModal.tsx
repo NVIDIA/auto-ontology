@@ -12,7 +12,7 @@ import { ConnectionSelectDataStep } from '@/components/connectionsPage/steps/Con
 import { ConnectionTypeStep } from '@/components/connectionsPage/steps/ConnectionTypeStep';
 import {
 	CONNECTION_EITHER_FIELDS,
-	CONNECTION_FIELDS,
+	connectionFieldsFor,
 	ConnectionType,
 	type ConnectionFieldKey,
 } from '@/enums/connection';
@@ -45,7 +45,7 @@ const toFieldValue = (raw: unknown): string => {
 const toFieldValues = (params: ConnectionParams): FieldValues => {
 	const stored = params as Record<string, unknown>;
 	return Object.fromEntries(
-		CONNECTION_FIELDS[params.type]
+		connectionFieldsFor(params.type)
 			.filter((field) => stored[field.key] != null)
 			.map((field) => [field.key, toFieldValue(stored[field.key])]),
 	);
@@ -104,7 +104,7 @@ export const ConnectionModal = ({
 		if (connection == null) return new Set();
 		const stored = connection.connection as Record<string, unknown>;
 		return new Set(
-			CONNECTION_FIELDS[connection.connection.type]
+			connectionFieldsFor(connection.connection.type)
 				.filter((field) => field.secret === true && stored[field.key] == null)
 				.map((field) => field.key),
 		);
@@ -131,7 +131,7 @@ export const ConnectionModal = ({
 	// the payload is headed for the test endpoint.
 	const buildConnection = useCallback(
 		({ forTest = false }: { forTest?: boolean } = {}): ConnectionInput => {
-			const fields = CONNECTION_FIELDS[connectionType].filter(
+			const fields = connectionFieldsFor(connectionType).filter(
 				(field) => forTest || !field.testOnly,
 			);
 			const entries = fields.map((field) => [
@@ -156,7 +156,7 @@ export const ConnectionModal = ({
 	);
 
 	const fieldsComplete = useMemo(() => {
-		const allRequiredPresent = CONNECTION_FIELDS[connectionType].every(
+		const allRequiredPresent = connectionFieldsFor(connectionType).every(
 			(field) =>
 				field.optional ||
 				keepCurrentKeys.has(field.key) ||

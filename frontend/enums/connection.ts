@@ -46,7 +46,9 @@ export type ConnectionFieldKey =
 	| 'truststore_password'
 	| 'schema'
 	| 'http_scheme'
-	| 'sso_federation';
+	| 'sso_federation'
+	| 'table_allow_regex'
+	| 'table_deny_regex';
 
 export type ConnectionField = {
 	key: ConnectionFieldKey;
@@ -262,3 +264,33 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		},
 	],
 };
+
+/**
+ * Fields offered for every connector, appended after the type-specific ones.
+ *
+ * Kept separate rather than copied into all eight lists: they are enforced
+ * centrally at catalog extraction (`auto_ontology/catalog/table_filter.py`), so
+ * every connector honours them identically and none may drift.
+ */
+export const COMMON_CONNECTION_FIELDS: ConnectionField[] = [
+	{
+		key: 'table_allow_regex',
+		label: 'Table allowlist (regex)',
+		placeholder: 'Leave empty to ingest every table',
+		optional: true,
+		hint: 'Ingest only tables whose name matches. Unanchored and case-sensitive, so "fact_" matches "fact_sales"; anchor with ^ and $ for an exact name.',
+	},
+	{
+		key: 'table_deny_regex',
+		label: 'Table denylist (regex)',
+		placeholder: 'Leave empty to exclude nothing',
+		optional: true,
+		hint: 'Skip tables whose name matches, even if the allowlist also matches them. Use this for relations the warehouse lists but cannot actually read, such as a broken Distributed table or a Kafka queue.',
+	},
+];
+
+/** Form fields for a connector: its own, plus the ones shared by all of them. */
+export const connectionFieldsFor = (type: ConnectionType): ConnectionField[] => [
+	...CONNECTION_FIELDS[type],
+	...COMMON_CONNECTION_FIELDS,
+];

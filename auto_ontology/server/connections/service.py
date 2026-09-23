@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
+from auto_ontology.catalog.table_filter import FILTER_KEYS, from_connection
 from auto_ontology.connectors.registry import (
     create_connector,
     invalidate_connectors_cache,
@@ -81,8 +82,16 @@ def _with_stored_secrets(
 
 
 def _ingest_scope(connection: dict[str, Any]) -> list[str]:
-    """The schema allowlist that decides what ingestion pulls in."""
-    return sorted(str(schema) for schema in (connection.get("schemas") or []))
+    """Everything that decides *what* ingestion pulls in.
+
+    The schema allowlist plus the table allow/deny regexes. All three change
+    which relations land in the catalog, so an edit to any of them has to
+    re-ingest — otherwise a newly excluded table stays in the catalog and
+    retrieval keeps offering it, which is exactly what the operator used the
+    pattern to prevent.
+    """
+    schemas = sorted(str(schema) for schema in (connection.get("schemas") or []))
+    return schemas + [f"{key}={str(connection.get(key) or '')}" for key in FILTER_KEYS]
 
 
 def _refresh_connection_caches() -> None:
@@ -151,6 +160,11 @@ def test_connection(
 
     requested_schema = str(connection.get("schema") or "").strip()
 
+    # Surface a bad allow/deny pattern here, while the operator is still looking
+    # at the form. Left to ingestion it would be logged and skipped, and the
+    # tables they meant to exclude would be ingested anyway.
+    from_connection(connection)
+
     connection_string = build_connection_string(connection)
     connector = create_connector(connection_string)
     try:
@@ -188,6 +202,10 @@ def create_connection(
     database_name = str(connection.get("database"))
     if not database_name:
         raise ValueError("Database name is required")
+
+    # Raises InvalidTableFilterError (a ValueError) -> 422, rather than storing
+    # a pattern that can never be honoured.
+    from_connection(connection)
 
     if _database_already_connected(database_name):
         raise ValueError(f"A connection for database {database_name!r} already exists")
