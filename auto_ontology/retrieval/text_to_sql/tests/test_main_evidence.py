@@ -88,3 +88,47 @@ def test_build_state_propagates_shorten_answer(
     state = main_module._build_state(cast(TextToSQLPayload, payload))
 
     assert state["shorten_answer"] is expected
+
+
+@pytest.mark.parametrize(
+    ("payload_value", "expected"),
+    [(None, False), (True, True), (False, False)],
+)
+def test_build_state_propagates_calculation_only(
+    main_module: ModuleType,
+    payload_value: bool | None,
+    expected: bool,
+) -> None:
+    payload = {
+        "question": "How many accounts?",
+        "data_retriever": object(),
+        "connectors": [SimpleNamespace(dialect="sqlite", database_name="db_test")],
+    }
+    if payload_value is not None:
+        payload["calculation_only"] = payload_value
+
+    state = main_module._build_state(cast(TextToSQLPayload, payload))
+
+    assert state["calculation_only"] is expected
+
+
+def test_calculation_only_disables_prediction_override(
+    main_module: ModuleType,
+) -> None:
+    state = main_module._build_state(
+        cast(
+            TextToSQLPayload,
+            {
+                "question": "How many accounts?",
+                "calculation_only": True,
+                "prediction": True,
+                "data_retriever": object(),
+                "connectors": [
+                    SimpleNamespace(dialect="sqlite", database_name="db_test")
+                ],
+            },
+        )
+    )
+
+    assert state["calculation_only"] is True
+    assert state["prediction_override"] is None

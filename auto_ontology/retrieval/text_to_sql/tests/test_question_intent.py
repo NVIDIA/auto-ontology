@@ -15,6 +15,7 @@ from auto_ontology.retrieval.text_to_sql.agents import question_intent
 from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
     CALCULATION_SUBTYPE_DEFINITIONS,
     CalculationSubtype,
+    CalculationOnlyQuestionIntentModel,
     QuestionIntentAgent,
     QuestionIntentModel,
     QuestionType,
@@ -187,6 +188,58 @@ def test_prompt_defines_taxonomy_fallback_and_evidence_example() -> None:
     assert "do not repeat it in extracted_evidence" in prompt
     assert '"How is revenue calculated/defined?" is information' in prompt
     assert '"Calculate revenue for 2026" is calculation' in prompt
+
+
+def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_models: list[type] = []
+
+    def invoke(_llm: object, messages: list, model: type) -> object:
+        requested_models.append(model)
+        prompt = str(messages[0].content)
+        assert "Perform three tasks" in prompt
+        assert "Do not select a top-level question type" in prompt
+        assert "## Question types" not in prompt
+        return CalculationOnlyQuestionIntentModel(
+            calculation_subtype=CalculationSubtype.AGGREGATION,
+            rewritten_question="Find revenue by region",
+            extracted_evidence="Revenue excludes refunds.",
+        )
+
+    monkeypatch.setattr(question_intent, "invoke_with_structured_output", invoke)
+    state = _state(
+        calculation_only=True,
+        prediction_override=True,
+        evidence="Use the finance dataset.",
+    )
+
+    result = QuestionIntentAgent().execute(state)
+
+    assert requested_models == [CalculationOnlyQuestionIntentModel]
+    assert result["path_state"]["question_type"] == "calculation"
+    assert result["path_state"]["calculation_subtype"] == "aggregation"
+    assert result["path_state"]["normalized_question"] == "Find revenue by region"
+    assert result["path_state"]["sql_template"]
+    assert result["evidence"] == ("Use the finance dataset.\nRevenue excludes refunds.")
+
+
+def test_calculation_only_failure_defaults_to_calculation_subtype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: None,
+    )
+
+    result = QuestionIntentAgent().execute(
+        _state(calculation_only=True, prediction_override=True)
+    )
+
+    assert result["path_state"]["question_type"] == "calculation"
+    assert result["path_state"]["calculation_subtype"] == "match_based"
+    assert result["path_state"]["sql_template"]
 
 
 def test_graph_entry_starts_with_intent_but_preserves_resume() -> None:

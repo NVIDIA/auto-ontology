@@ -42,6 +42,9 @@ class TextToSQLPayload(TypedDict):
     # query shape only — never identifiers or filter values.
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
+    # When true, intent preprocessing skips top-level type selection but still
+    # classifies the calculation subtype and extracts inline evidence.
+    calculation_only: NotRequired[bool]
     shorten_answer: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
@@ -68,6 +71,7 @@ class AgentState(TypedDict):
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
+    calculation_only: bool
     shorten_answer: bool
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]

@@ -136,16 +136,46 @@ class QuestionIntentModel(StrictLLMOutputModel):
         return self
 
 
+class CalculationOnlyQuestionIntentModel(StrictLLMOutputModel):
+    """Intent fields needed when the caller guarantees a calculation."""
+
+    calculation_subtype: CalculationSubtype = Field(
+        ...,
+        description="The calculation subtype for this question.",
+    )
+    rewritten_question: str = Field(
+        ...,
+        description=(
+            "The user's executable request with supporting inline instructions "
+            "moved to extracted_evidence."
+        ),
+    )
+    extracted_evidence: str = Field(
+        ...,
+        description=(
+            "Supporting instruction or context removed from the question, or an "
+            "empty string when none was removed."
+        ),
+    )
+
+
 def create_question_intent_prompt(
     question: str,
     *,
     prediction_override: bool | None = None,
+    calculation_only: bool = False,
     glossary: list[dict[str, str]] | None = None,
     existing_evidence: str = "",
 ) -> str:
     """Build the classification and evidence-separation prompt."""
     override_instruction = ""
-    if prediction_override is True:
+    if calculation_only:
+        override_instruction = (
+            "\nThis request is calculation-only. Do not select a top-level question "
+            "type. Choose its calculation subtype and still perform rewriting and "
+            "evidence extraction.\n"
+        )
+    elif prediction_override is True:
         override_instruction = (
             "\nThe caller explicitly selected prediction mode. Return question_type "
             '"prediction", but still perform rewriting and evidence extraction.\n'
@@ -193,14 +223,22 @@ def create_question_intent_prompt(
         for subtype in CalculationSubtype
     )
 
-    return f"""You prepare a question for a data agent.
-
-Perform four tasks in one structured response:
+    tasks = (
+        """Perform three tasks in one structured response:
+1. Choose exactly one calculation subtype.
+2. Rewrite the executable question without supporting inline instructions.
+3. Return any removed supporting instruction as extracted_evidence."""
+        if calculation_only
+        else """Perform four tasks in one structured response:
 1. Classify the question as information, prediction, or calculation.
 2. For calculation only, choose exactly one calculation subtype.
 3. Rewrite the executable question without supporting inline instructions.
-4. Return any removed supporting instruction as extracted_evidence.
-{override_instruction}
+4. Return any removed supporting instruction as extracted_evidence."""
+    )
+    question_types = (
+        ""
+        if calculation_only
+        else """
 ## Question types
 - information: asks about catalog or semantic metadata, including what a dataset,
   table, or column means, contains, or connects to, and how an existing measure is
@@ -212,6 +250,14 @@ Perform four tasks in one structured response:
 - calculation: asks the data system to match/filter, rank, compare, count, aggregate,
   compute, or interpret values. "Calculate revenue for 2026" is calculation because
   it requests a derived value. If the type is uncertain, choose calculation.
+"""
+    )
+
+    return f"""You prepare a question for a data agent.
+
+{tasks}
+{override_instruction}
+{question_types}
 
 ## Calculation subtypes
 Use each SQL example only to understand the subtype's structural pattern. The
@@ -274,6 +320,7 @@ class QuestionIntentAgent(BaseAgent):
         question = get_standalone_question(state)
         path_state = state.get("path_state", {})
         override = state.get("prediction_override")
+        calculation_only = state.get("calculation_only", False)
         existing_evidence = state.get("evidence") or ""
 
         messages = [
@@ -281,6 +328,7 @@ class QuestionIntentAgent(BaseAgent):
                 content=create_question_intent_prompt(
                     question,
                     prediction_override=override,
+                    calculation_only=calculation_only,
                     glossary=state.get("glossary"),
                     existing_evidence=existing_evidence,
                 )
@@ -289,7 +337,11 @@ class QuestionIntentAgent(BaseAgent):
         intent = invoke_with_structured_output(
             state["llm"],
             messages,
-            QuestionIntentModel,
+            (
+                CalculationOnlyQuestionIntentModel
+                if calculation_only
+                else QuestionIntentModel
+            ),
         )
 
         if intent is None:
@@ -298,7 +350,7 @@ class QuestionIntentAgent(BaseAgent):
             )
             question_type = (
                 QuestionType.PREDICTION
-                if override is True
+                if override is True and not calculation_only
                 else QuestionType.CALCULATION
             )
             subtype = (
@@ -309,12 +361,16 @@ class QuestionIntentAgent(BaseAgent):
             rewritten = question
             extracted = ""
         else:
-            question_type = intent.question_type
+            question_type = (
+                QuestionType.CALCULATION if calculation_only else intent.question_type
+            )
             subtype = intent.calculation_subtype
             rewritten = intent.rewritten_question.strip() or question
             extracted = intent.extracted_evidence.strip()
 
-            if override is True:
+            if calculation_only:
+                question_type = QuestionType.CALCULATION
+            elif override is True:
                 question_type = QuestionType.PREDICTION
                 subtype = None
             elif override is False and question_type == QuestionType.PREDICTION:
@@ -347,6 +403,7 @@ class QuestionIntentAgent(BaseAgent):
 
 
 __all__ = [
+    "CalculationOnlyQuestionIntentModel",
     "CalculationSubtype",
     "CALCULATION_SUBTYPE_DEFINITIONS",
     "QuestionIntentAgent",

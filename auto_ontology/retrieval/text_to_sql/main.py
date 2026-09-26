@@ -84,11 +84,14 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     custom_prompts_text = f"{custom_prompts}\n\n" if custom_prompts else ""
     domain_rules = list(acronyms or [])
 
+    calculation_only = bool(payload.get("calculation_only", False))
+
     # ``prediction=True`` only means something when the KumoRFM branch was built
     # into the graph at startup; without KUMO_RFM_API_KEY the classify node does
     # not exist, so honouring the override is impossible. Fail loudly rather than
-    # silently answering with SQL.
-    prediction_override = payload.get("prediction")
+    # silently answering with SQL. Calculation-only questions intentionally
+    # ignore this separate interactive-mode selector.
+    prediction_override = None if calculation_only else payload.get("prediction")
     if prediction_override is True and not _prediction_enabled():
         raise ValueError(
             "prediction=true was requested but the prediction flow is not "
@@ -131,6 +134,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "evidence": payload.get("evidence") or "",
         "sql_examples": list(payload.get("sql_examples") or []),
         "value_anchors": list(payload.get("value_anchors") or []),
+        "calculation_only": calculation_only,
         "shorten_answer": payload.get("shorten_answer", False),
         "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,
