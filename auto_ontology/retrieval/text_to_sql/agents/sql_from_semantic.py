@@ -68,6 +68,25 @@ logger = logging.getLogger(__name__)
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
 
 
+def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
+    """Render the intent subtype's SQL example as structural guidance only."""
+    sql_template = (path_state.get("sql_template") or "").strip()
+    if not sql_template:
+        return ""
+    subtype = path_state.get("calculation_subtype") or "calculation"
+    return f"""## Calculation SQL shape reference
+
+The question was classified as `{subtype}`. Use this example only as a structural
+pattern. Adapt it to the available schema and SQL dialect. Never copy its table names,
+column names, or literal values unless the schema and question independently require
+the same identifiers or values.
+
+```sql
+{sql_template}
+```
+"""
+
+
 class SQLFromCandidatesAgent(BaseAgent):
     """
     Agent that constructs SQL from semantic retrieval and prepared schema context.
@@ -130,6 +149,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         evidence = state.get("evidence", "")
         sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
+        calculation_template_section = format_calculation_sql_template(path_state)
         main_question = format_dual_question_block(
             original_question, sanitized_question
         )
@@ -174,6 +194,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             self.logger.info(
                 "Injecting %d verified database value(s) into the SQL prompt.",
                 len(state.get("value_anchors") or []),
+            )
+        if calculation_template_section:
+            self.logger.info(
+                "Injecting the %s calculation SQL shape into the SQL prompt.",
+                path_state.get("calculation_subtype"),
             )
 
         def build_messages() -> list:
@@ -293,6 +318,8 @@ class SQLFromCandidatesAgent(BaseAgent):
                 messages.append(
                     SystemMessage(content=format_authoritative_evidence(evidence))
                 )
+            if calculation_template_section:
+                messages.append(SystemMessage(content=calculation_template_section))
             # Before the query patterns: anchors state what this database
             # contains, which constrains the SQL more tightly than precedent
             # from another database does.

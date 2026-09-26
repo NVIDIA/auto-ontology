@@ -14,7 +14,7 @@ from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
 from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     create_graph,
     route_evidence_refinement,
-    route_prediction_or_evidence,
+    route_question_type_or_evidence,
 )
 
 
@@ -312,14 +312,20 @@ def test_evidence_routing_runs_only_on_evidence_bearing_sql_paths() -> None:
         "construct_sql_from_candidates"
     )
     assert (
-        route_prediction_or_evidence(
-            {"decision": "sql", "evidence": "status = 'Active'"}
+        route_question_type_or_evidence(
+            {
+                "path_state": {"question_type": "calculation"},
+                "evidence": "status = 'Active'",
+            }
         )
         == "refine_evidence"
     )
     assert (
-        route_prediction_or_evidence(
-            {"decision": "prediction", "evidence": "status = 'Active'"}
+        route_question_type_or_evidence(
+            {
+                "path_state": {"question_type": "prediction"},
+                "evidence": "status = 'Active'",
+            }
         )
         == "prediction"
     )
@@ -348,6 +354,6 @@ def test_prediction_graph_can_bypass_refinement(
         for edge in create_graph().compile().get_graph().edges
     }
 
-    assert ("prepare_candidates", "classify_prediction", False) in edges
-    assert ("classify_prediction", "prepare_prediction_graph", True) in edges
-    assert ("classify_prediction", "refine_evidence", True) in edges
+    assert ("question_intent", "question_extraction", False) in edges
+    assert ("prepare_candidates", "prepare_prediction_graph", True) in edges
+    assert ("prepare_candidates", "refine_evidence", True) in edges

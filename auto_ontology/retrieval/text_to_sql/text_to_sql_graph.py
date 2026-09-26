@@ -31,8 +31,8 @@ from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
 from auto_ontology.retrieval.text_to_sql.agents.combined_precheck import (
     CombinedPrecheckAgent,
 )
-from auto_ontology.retrieval.text_to_sql.agents.prediction_classification import (
-    PredictionClassificationAgent,
+from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
+    QuestionIntentAgent,
 )
 from auto_ontology.retrieval.text_to_sql.agents.prediction_graph import (
     PredictionGraphAgent,
@@ -213,9 +213,9 @@ def route_evidence_refinement(state: AgentState) -> str:
     return "construct_sql_from_candidates"
 
 
-def route_prediction_or_evidence(state: AgentState) -> str:
-    """Keep prediction requests separate; refine evidence only on the SQL path."""
-    if route_decision(state) == "prediction":
+def route_question_type_or_evidence(state: AgentState) -> str:
+    """Route the early intent decision after candidates scope prediction inputs."""
+    if state.get("path_state", {}).get("question_type") == "prediction":
         return "prediction"
     return route_evidence_refinement(state)
 
@@ -280,7 +280,7 @@ def wrap_node_with_logging(
 
 
 def _entry_router_fn(state):
-    return state["path_state"].get("_resume_from", "question_extraction")
+    return state["path_state"].get("_resume_from", "question_intent")
 
 
 def create_graph():
@@ -293,6 +293,7 @@ def create_graph():
     # ==================== CREATE AGENT INSTANCES ====================
 
     # Routing agents
+    question_intent_agent = QuestionIntentAgent()
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
@@ -309,6 +310,9 @@ def create_graph():
 
     # Routing nodes (using agent_wrapper)
 
+    question_intent_node = _make_node(
+        "question_intent", agent_wrapper(question_intent_agent)
+    )
     question_extraction_node = _make_node(
         "question_extraction", agent_wrapper(question_extraction_agent)
     )
@@ -385,12 +389,14 @@ def create_graph():
         "_entry_router",
         _entry_router_fn,
         {
+            "question_intent": "question_intent",
             "question_extraction": "question_extraction",
             "reconstruct_sql": "reconstruct_sql",
         },
     )
 
     # Add only nodes instantiated above.
+    graph.add_node("question_intent", question_intent_node)
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -407,23 +413,17 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
+    graph.add_edge("question_intent", "question_extraction")
     graph.add_edge("question_extraction", "retrieve_candidates")
     graph.add_edge("retrieve_candidates", "prepare_candidates")
 
     if prediction_enabled:
-        # After candidate preparation, a decision tree routes prediction questions
-        # to the KumoRFM tool (scoped to the relevant tables just prepared) and
-        # everything else into SQL construction. The prediction path itself is two
-        # nodes: ``prepare_prediction_graph`` (build the graph/model) →
+        # The intent node classified the question before extraction. Routing waits
+        # until candidate preparation so KumoRFM still receives the relevant table
+        # scope. The prediction path itself is two nodes:
+        # ``prepare_prediction_graph`` (build the graph/model) →
         # ``kumo_predict`` (generate PQL + predict), so the slow build step streams
-        # its own progress. Built only when KumoRFM is configured (KUMO_RFM_API_KEY).
-        graph.add_node(
-            "classify_prediction",
-            _make_node(
-                "classify_prediction",
-                agent_wrapper(PredictionClassificationAgent()),
-            ),
-        )
+        # its own progress. Built only when KumoRFM is configured.
         graph.add_node(
             "prepare_prediction_graph",
             _make_node(
@@ -436,8 +436,8 @@ def create_graph():
         )
 
         graph.add_conditional_edges(
-            "classify_prediction",
-            route_prediction_or_evidence,
+            "prepare_candidates",
+            route_question_type_or_evidence,
             {
                 "prediction": "prepare_prediction_graph",
                 "refine_evidence": "refine_evidence",
@@ -453,7 +453,6 @@ def create_graph():
             },
         )
         graph.add_edge("kumo_predict", END)
-        graph.add_edge("prepare_candidates", "classify_prediction")
     else:
         graph.add_conditional_edges(
             "prepare_candidates",

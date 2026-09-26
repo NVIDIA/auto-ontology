@@ -805,41 +805,6 @@ Input: {question}
 Output:"""
 
 
-def create_prediction_classification_prompt(question: str) -> str:
-    return f"""You are a router that decides whether a question requires a PREDICTION.
-
-A PREDICTION question asks for a FUTURE, expected, or currently-unknown value that
-must be forecast or estimated from patterns in the data — it cannot be answered by
-simply querying rows that already exist.
-
-Decision rule: default to NOT a prediction. Answer True ONLY if the question is
-explicitly about the future or an unknown outcome — typically signalled by words
-like "will", "predict", "forecast", "expected", "projected", "likely", "next
-month/quarter/year", "going to", or "at risk".
-
-A question about what ALREADY happened is NEVER a prediction, even when it names a
-specific date, month, or year (past OR future) — counting, listing, or aggregating
-existing rows is a plain data query. "How many X were created/added/sold in <year>"
-asks to COUNT rows that already exist, so it is NOT a prediction.
-
-Prediction (True):
-- "How many orders will customer 42 place in the next 30 days?"
-- "Predict which customers are likely to churn."
-- "What is the expected revenue next quarter?"
-- "Will this user upgrade their subscription?"
-
-Not a prediction (False) — answerable from existing data:
-- "How many GPUs created in 2025?"          (counts existing rows for a year)
-- "How many orders were placed in 2025?"
-- "How many orders did customer 42 place last month?"
-- "List the top 10 customers by revenue."
-- "What was total revenue last quarter?"
-
-Question: {question}
-
-Decide: is this a prediction request?"""
-
-
 def create_pql_generation_prompt(question: str, schema_text: str) -> str:
     return f"""You translate a natural-language question into a single KumoRFM
 Predictive Query Language (PQL) query.

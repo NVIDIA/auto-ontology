@@ -11,14 +11,20 @@ from typing import Any
 import pytest
 from pytest import MonkeyPatch
 
-from auto_ontology.retrieval.text_to_sql.agents import prediction_classification
-from auto_ontology.retrieval.text_to_sql.agents.prediction_classification import (
-    PredictionClassificationAgent,
+from auto_ontology.retrieval.text_to_sql.agents import question_intent
+from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
+    QuestionIntentAgent,
+    QuestionIntentModel,
+    QuestionType,
 )
 
 
 def _state(override: Any) -> dict:
-    state: dict = {"initial_question": "how many orders next month?", "llm": object()}
+    state: dict = {
+        "initial_question": "how many orders next month?",
+        "llm": object(),
+        "path_state": {},
+    }
     if override is not _MISSING:
         state["prediction_override"] = override
     return state
@@ -28,46 +34,56 @@ _MISSING = object()
 
 
 @pytest.fixture
-def _no_llm(monkeypatch: MonkeyPatch) -> list:
-    """Record any classifier call so tests can assert it was skipped."""
+def _prediction_llm(monkeypatch: MonkeyPatch) -> list:
+    """Return a prediction while recording the preprocessing call."""
     calls: list = []
 
-    def fake_invoke(*args: object, **kwargs: object) -> None:
+    def fake_invoke(*args: object, **kwargs: object) -> QuestionIntentModel:
         calls.append(args)
-        return None
+        return QuestionIntentModel(
+            question_type=QuestionType.PREDICTION,
+            calculation_subtype=None,
+            rewritten_question="how many orders next month?",
+            extracted_evidence="",
+        )
 
-    monkeypatch.setattr(
-        prediction_classification, "invoke_with_structured_output", fake_invoke
-    )
+    monkeypatch.setattr(question_intent, "invoke_with_structured_output", fake_invoke)
     return calls
 
 
-def test_true_forces_prediction_without_classifying(_no_llm: list) -> None:
-    result = PredictionClassificationAgent().execute(_state(True))
+def test_true_forces_prediction_while_still_preprocessing(
+    _prediction_llm: list,
+) -> None:
+    result = QuestionIntentAgent().execute(_state(True))
 
-    assert result == {"decision": "prediction"}
-    assert _no_llm == [], "classifier must not run when the caller forced the branch"
-
-
-def test_false_forces_sql_without_classifying(_no_llm: list) -> None:
-    result = PredictionClassificationAgent().execute(_state(False))
-
-    assert result == {"decision": "sql"}
-    assert _no_llm == []
+    assert result["path_state"]["question_type"] == "prediction"
+    assert len(_prediction_llm) == 1
 
 
-def test_none_falls_back_to_classification(_no_llm: list) -> None:
+def test_false_prevents_prediction_but_keeps_preprocessing(
+    _prediction_llm: list,
+) -> None:
+    result = QuestionIntentAgent().execute(_state(False))
+
+    assert result["path_state"]["question_type"] == "calculation"
+    assert result["path_state"]["calculation_subtype"] == "numeric_computation"
+    assert len(_prediction_llm) == 1
+
+
+def test_none_uses_intent_classification(_prediction_llm: list) -> None:
     """An explicit null behaves exactly like today: classify the question."""
-    PredictionClassificationAgent().execute(_state(None))
+    result = QuestionIntentAgent().execute(_state(None))
 
-    assert len(_no_llm) == 1
+    assert result["path_state"]["question_type"] == "prediction"
+    assert len(_prediction_llm) == 1
 
 
-def test_absent_falls_back_to_classification(_no_llm: list) -> None:
+def test_absent_uses_intent_classification(_prediction_llm: list) -> None:
     """A caller that omits the field entirely also classifies."""
-    PredictionClassificationAgent().execute(_state(_MISSING))
+    result = QuestionIntentAgent().execute(_state(_MISSING))
 
-    assert len(_no_llm) == 1
+    assert result["path_state"]["question_type"] == "prediction"
+    assert len(_prediction_llm) == 1
 
 
 def test_chat_request_defaults_to_none() -> None:

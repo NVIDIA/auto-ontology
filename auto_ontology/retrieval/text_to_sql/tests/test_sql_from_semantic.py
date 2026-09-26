@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
+    format_calculation_sql_template,
+)
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_tables_for_prompt,
@@ -67,6 +70,22 @@ def test_projection_strictness_is_configured_per_request() -> None:
 
     assert strict_rule not in format_projection_rules(shorten_answer=False)
     assert strict_rule in format_projection_rules(shorten_answer=True)
+
+
+def test_calculation_sql_template_is_structural_guidance() -> None:
+    rendered = format_calculation_sql_template(
+        {
+            "calculation_subtype": "ranking",
+            "sql_template": (
+                "SELECT Title FROM posts ORDER BY ViewCount DESC LIMIT 5;"
+            ),
+        }
+    )
+
+    assert "classified as `ranking`" in rendered
+    assert "SELECT Title FROM posts" in rendered
+    assert "Never copy its table names" in rendered
+    assert format_calculation_sql_template({}) == ""
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
