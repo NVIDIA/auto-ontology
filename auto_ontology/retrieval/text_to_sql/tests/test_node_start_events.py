@@ -21,6 +21,7 @@ from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     announce_node_start,
     wrap_node_with_logging,
 )
+from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
 
 
 class _State(TypedDict):
@@ -89,6 +90,10 @@ def test_announcing_outside_a_stream_is_not_fatal() -> None:
     writer; a missing progress event must not take the run down."""
 
     announce_node_start("validate_sql_query")
+
+
+def test_information_agent_has_a_streaming_label() -> None:
+    assert NODE_LABELS["information_agent"] == "Answering from metadata"
 
 
 def test_node_still_runs_when_announcing_fails(monkeypatch: Any) -> None:

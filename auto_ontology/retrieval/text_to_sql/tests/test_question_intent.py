@@ -22,6 +22,7 @@ from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
 )
 from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     _entry_router_fn,
+    route_after_candidate_retrieval,
     route_question_type_or_evidence,
 )
 
@@ -184,6 +185,8 @@ def test_prompt_defines_taxonomy_fallback_and_evidence_example() -> None:
     assert "ARR: annual recurring revenue" in prompt
     assert "Revenue excludes refunds." in prompt
     assert "do not repeat it in extracted_evidence" in prompt
+    assert '"How is revenue calculated/defined?" is information' in prompt
+    assert '"Calculate revenue for 2026" is calculation' in prompt
 
 
 def test_graph_entry_starts_with_intent_but_preserves_resume() -> None:
@@ -204,3 +207,19 @@ def test_non_prediction_types_follow_sql_evidence_route(
     }
 
     assert route_question_type_or_evidence(state) == "refine_evidence"
+
+
+@pytest.mark.parametrize(
+    ("question_type", "route"),
+    [
+        ("information", "information"),
+        ("calculation", "prepare_candidates"),
+        ("prediction", "prepare_candidates"),
+    ],
+)
+def test_information_routes_before_candidate_preparation(
+    question_type: str, route: str
+) -> None:
+    state = {"path_state": {"question_type": question_type}}
+
+    assert route_after_candidate_retrieval(state) == route

@@ -34,6 +34,9 @@ from auto_ontology.retrieval.text_to_sql.agents.combined_precheck import (
 from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
     QuestionIntentAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.information_agent import (
+    InformationAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.prediction_graph import (
     PredictionGraphAgent,
 )
@@ -220,6 +223,13 @@ def route_question_type_or_evidence(state: AgentState) -> str:
     return route_evidence_refinement(state)
 
 
+def route_after_candidate_retrieval(state: AgentState) -> str:
+    """Send information requests to metadata answering before SQL preparation."""
+    if state.get("path_state", {}).get("question_type") == "information":
+        return "information"
+    return "prepare_candidates"
+
+
 def _make_node(name, fn):
     """
     Create a node with logging wrapper.
@@ -296,6 +306,7 @@ def create_graph():
     question_intent_agent = QuestionIntentAgent()
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
+    information_agent = InformationAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     evidence_refinement_agent = EvidenceRefinementAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
@@ -319,6 +330,7 @@ def create_graph():
     retrieve_candidates_node = _make_node(
         "retrieve_candidates", agent_wrapper(retrieval_agent)
     )
+    information_node = _make_node("information_agent", agent_wrapper(information_agent))
     prepare_candidates_node = _make_node(
         "prepare_candidates", agent_wrapper(candidate_preparation_agent)
     )
@@ -399,6 +411,7 @@ def create_graph():
     graph.add_node("question_intent", question_intent_node)
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
+    graph.add_node("information_agent", information_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("refine_evidence", refine_evidence_node)
     graph.add_node("check_value_repair", value_repair_node)
@@ -415,7 +428,15 @@ def create_graph():
     # Minimal flow using only the defined nodes.
     graph.add_edge("question_intent", "question_extraction")
     graph.add_edge("question_extraction", "retrieve_candidates")
-    graph.add_edge("retrieve_candidates", "prepare_candidates")
+    graph.add_conditional_edges(
+        "retrieve_candidates",
+        route_after_candidate_retrieval,
+        {
+            "information": "information_agent",
+            "prepare_candidates": "prepare_candidates",
+        },
+    )
+    graph.add_edge("information_agent", END)
 
     if prediction_enabled:
         # The intent node classified the question before extraction. Routing waits
@@ -551,4 +572,5 @@ __all__ = [
     "AgentState",
     "create_graph",
     "get_question_for_processing",
+    "route_after_candidate_retrieval",
 ]

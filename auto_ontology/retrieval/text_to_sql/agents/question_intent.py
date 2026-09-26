@@ -202,13 +202,16 @@ Perform four tasks in one structured response:
 4. Return any removed supporting instruction as extracted_evidence.
 {override_instruction}
 ## Question types
-- information: asks for existing descriptive facts or records without deriving,
-  comparing, ranking, counting, aggregating, forecasting, or applying a formula.
+- information: asks about catalog or semantic metadata, including what a dataset,
+  table, or column means, contains, or connects to, and how an existing measure is
+  defined or calculated. "How is revenue calculated/defined?" is information because
+  it asks for the stored definition rather than requesting a result.
 - prediction: asks to predict, forecast, estimate, project, or assess the likelihood
   of a future or currently unknown outcome. A query about existing historical rows
   is not prediction merely because it contains a date.
 - calculation: asks the data system to match/filter, rank, compare, count, aggregate,
-  compute, or interpret values. If the type is uncertain, choose calculation.
+  compute, or interpret values. "Calculate revenue for 2026" is calculation because
+  it requests a derived value. If the type is uncertain, choose calculation.
 
 ## Calculation subtypes
 Use each SQL example only to understand the subtype's structural pattern. The
