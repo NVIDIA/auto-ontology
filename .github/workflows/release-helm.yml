@@ -126,7 +126,7 @@ jobs:
       chart-version: ${{ inputs.version || steps.version.outputs.chart-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           sparse-checkout: .github/actions
           persist-credentials: false
@@ -157,13 +157,13 @@ jobs:
       DRY_RUN: ${{ inputs.dry-run }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: ${{ inputs.source-ref || github.ref }}
           persist-credentials: false
 
       - name: Setup Helm
-        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
 
       - name: Setup Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -194,7 +194,7 @@ jobs:
 
       - name: Upload packaged chart artifact
         if: ${{ inputs.dry-run }}
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: auto-ontology-helm-chart
           path: dist/${{ inputs.chart-name }}-${{ env.CHART_VERSION }}.tgz
