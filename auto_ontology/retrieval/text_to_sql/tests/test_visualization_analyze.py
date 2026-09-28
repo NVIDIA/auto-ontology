@@ -48,6 +48,32 @@ def test_detail_listing_uses_complete_table(monkeypatch: MonkeyPatch) -> None:
     assert calls == [VisualizationDecisionModel]
 
 
+def test_missing_render_decision_skips_chart_generation(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    calls: list[type[BaseModel]] = []
+
+    def invoke(
+        _llm: object,
+        _messages: list[BaseMessage],
+        schema: type[BaseModel],
+    ) -> None:
+        calls.append(schema)
+        return None
+
+    monkeypatch.setattr(analyze, "invoke_with_structured_output", invoke)
+
+    charts = analyze.analyze_and_visualize(
+        object(),
+        "Give me specifications of all AWS clusters",
+        "SELECT name, location, gpu_count FROM cluster_passport",
+        '[{"name":"a","location":"us-west","gpu_count":64}]',
+    )
+
+    assert charts is None
+    assert calls == [VisualizationDecisionModel]
+
+
 def test_comparison_continues_to_chart_generation(monkeypatch: MonkeyPatch) -> None:
     responses = iter(
         [

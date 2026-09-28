@@ -63,7 +63,10 @@ def analyze_and_visualize(
         decision = invoke_with_structured_output(
             llm, decision_messages, VisualizationDecisionModel
         )
-        if decision is not None and decision.render_as == "table":
+        if decision is None:
+            logger.info("analyze_and_visualize: render decision failed — skip")
+            return None
+        if decision.render_as != "chart":
             logger.info("analyze_and_visualize: complete result table is preferable")
             return None
 
