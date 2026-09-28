@@ -45,6 +45,38 @@ on:
         type: boolean
         default: false
 
+  # Called by release-all.yml, with the same inputs as a manual run.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Image tag to release (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'Target nvcr.io org[/team]'
+        required: false
+        type: string
+        default: 'nvcr.io/nvstaging/gsf'
+      dry-run:
+        description: 'Build without logging in or pushing'
+        required: false
+        type: boolean
+        default: false
+      overwrite:
+        description: 'Push even if the tag already exists'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      NGC_API_KEY:
+        required: true
+
 env:
   PLATFORMS: linux/amd64,linux/arm64
 

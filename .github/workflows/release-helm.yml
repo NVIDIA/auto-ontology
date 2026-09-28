@@ -64,6 +64,53 @@ on:
         type: string
         default: 'auto-ontology'
 
+  # Called by release-all.yml, with the same inputs as a manual run.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Chart version, SemVer (e.g. 1.0.0); empty for the app version padded to SemVer'
+        required: false
+        type: string
+        default: ''
+      app-version:
+        description: 'Image tag the chart deploys (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      org:
+        description: 'NGC org'
+        required: false
+        type: string
+        default: 'nvstaging'
+      team:
+        description: 'NGC team (empty for org level)'
+        required: false
+        type: string
+        default: 'gsf'
+      image-registry:
+        description: 'Registry values.yaml must name: where the images are once published'
+        required: false
+        type: string
+        default: 'nvcr.io/nvidia/gsf'
+      dry-run:
+        description: 'Build chart without publishing to NGC'
+        required: false
+        type: boolean
+        default: false
+      chart-name:
+        description: 'Helm chart name'
+        required: false
+        type: string
+        default: 'auto-ontology'
+    secrets:
+      NGC_API_KEY:
+        required: true
+
 env:
   HELM_CHART_DIR: helm/auto-ontology
 

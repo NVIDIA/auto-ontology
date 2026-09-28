@@ -1,0 +1,71 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Stages a whole release in nvstaging/gsf: runs release-docker.yml, then
+# release-helm.yml once every image is pushed. The chart only names images by
+# tag, so publishing it before they exist would ship a chart nothing can pull.
+#
+# Run it on a release branch: dispatched on release/v1.0 with no version, both
+# take it from the branch, giving images tagged 1.0 and chart 1.0.0. Registry,
+# org and team use the defaults of the two workflows; run them individually to
+# override those. Requires repo secret:
+#   NGC_API_KEY - see release-docker.yml and release-helm.yml
+
+name: Release - All
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version / image tag (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      chart-version:
+        description: 'Chart version, SemVer (e.g. 1.0.0); empty for the release version padded to SemVer'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'Build the images and chart without logging in or publishing'
+        required: false
+        type: boolean
+        default: false
+      overwrite:
+        description: 'Push images even if the tag already exists'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    name: Docker
+    uses: ./.github/workflows/release-docker.yml
+    with:
+      version: ${{ inputs.version }}
+      source-ref: ${{ inputs.source-ref }}
+      dry-run: ${{ inputs.dry-run }}
+      overwrite: ${{ inputs.overwrite }}
+    secrets:
+      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
+
+  helm:
+    name: Helm Chart
+    needs: docker
+    uses: ./.github/workflows/release-helm.yml
+    with:
+      version: ${{ inputs.chart-version }}
+      app-version: ${{ inputs.version }}
+      source-ref: ${{ inputs.source-ref }}
+      dry-run: ${{ inputs.dry-run }}
+    secrets:
+      NGC_API_KEY: ${{ secrets.NGC_API_KEY }}
