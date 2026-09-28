@@ -19,9 +19,9 @@ from auto_ontology.retrieval.text_to_sql.visualization.helpers import (
     parse_sql_response_to_dataframe,
 )
 from auto_ontology.retrieval.text_to_sql.visualization.prompts import (
-    IS_TABLE_REQUEST_PROMPT,
+    VISUALIZATION_DECISION_PROMPT,
     VISUALIZATION_PROMPT,
-    IsTableRequestModel,
+    VisualizationDecisionModel,
     VisualizationRecommendation,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
@@ -37,8 +37,8 @@ def analyze_and_visualize(
 ) -> list[dict[str, Any]] | None:
     """Recommend charts for an SQL result and return ResultChart JSON specs.
 
-    Returns ``None`` when visualization should be skipped (empty data, user
-    asked for a table, LLM failure, etc.). Never raises.
+    Returns ``None`` when visualization should be skipped (empty data, the
+    complete result is more appropriate, LLM failure, etc.). Never raises.
     """
     try:
         df = parse_sql_response_to_dataframe(sql_response_from_db)
@@ -46,18 +46,25 @@ def analyze_and_visualize(
             logger.info("analyze_and_visualize: no tabular data — skip")
             return None
 
-        # Explicit table request → no charts.
-        table_messages = [
+        # Decide before building a chart: a detail/listing question often has a
+        # numeric column, but charting that one measure would silently discard
+        # the other fields the user asked to see.
+        decision_messages = [
             SystemMessage(content="You are a data visualization expert."),
             HumanMessage(
-                content=IS_TABLE_REQUEST_PROMPT.format(question=question),
+                content=VISUALIZATION_DECISION_PROMPT.format(
+                    sql=sql,
+                    question=question,
+                    df_size=len(df),
+                    df_columns=list(df.columns),
+                ),
             ),
         ]
-        table_check = invoke_with_structured_output(
-            llm, table_messages, IsTableRequestModel
+        decision = invoke_with_structured_output(
+            llm, decision_messages, VisualizationDecisionModel
         )
-        if table_check is not None and table_check.is_table_request:
-            logger.info("analyze_and_visualize: user requested table — skip")
+        if decision is not None and decision.render_as == "table":
+            logger.info("analyze_and_visualize: complete result table is preferable")
             return None
 
         viz_messages = [

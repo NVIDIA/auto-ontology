@@ -12,17 +12,17 @@ ChartType = Literal["bar", "hbar", "line", "area", "grouped-bar", "delta", "kpi"
 ValueFormat = Literal["number", "compact", "percent", "currency"]
 
 
-class IsTableRequestModel(BaseModel):
-    """Whether the user explicitly asked for a table (skip charts)."""
+class VisualizationDecisionModel(BaseModel):
+    """Whether the complete SQL result or a chart best answers the question."""
 
     model_config = ConfigDict(extra="forbid")
 
-    is_table_request: bool = Field(
+    render_as: Literal["chart", "table"] = Field(
         ...,
         description=(
-            "True only if the user explicitly requested a table format "
-            "(e.g. 'as a table', 'in tabular form', 'show rows'). "
-            "False otherwise."
+            "Use table when answering requires preserving the result's descriptive "
+            "columns; use chart for a requested comparison, trend, ranking, "
+            "distribution, aggregate, or visualization."
         ),
     )
 
@@ -78,12 +78,34 @@ class VisualizationRecommendation(BaseModel):
     )
 
 
-IS_TABLE_REQUEST_PROMPT = """\
+VISUALIZATION_DECISION_PROMPT = """\
+I have a dataset resulting from the following SQL query:
+{sql}
+
 The natural language question corresponding to this query is:
 {question}
 
-Check if the user explicitly requested a table format.
-Return True if the user explicitly requested a table format, False otherwise.
+The dataset has the following structure:
+Size: {df_size}
+Columns: {df_columns}
+
+Decide whether the answer should render as a chart or as the complete result table.
+
+Use "table" when:
+- The user asks for records, rows, a list, inventory, specifications, attributes,
+  configuration, details, or "all" information about each entity.
+- Multiple descriptive columns are essential to answering the question.
+- A chart would select only one numeric field and omit other requested fields.
+- The user explicitly requests tabular output.
+
+Use "chart" when:
+- The user asks for a comparison, trend, ranking, distribution, aggregate, change
+  over time, or a specific visualization.
+- A single scalar or one-entity metric is naturally represented as a KPI.
+
+Numeric columns such as counts do not by themselves make a detail/listing request
+chartable. Choose "table" whenever charting would answer only one facet of the
+question or discard requested information.
 """
 
 VISUALIZATION_PROMPT = """\
