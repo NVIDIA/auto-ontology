@@ -15,23 +15,7 @@ To install a published release:
      --password=<API-KEY>
    ```
 
-2. Create the nvcr.io image-pull secret:
-
-   ```bash
-   kubectl create secret docker-registry nvcr-creds \
-     --docker-server=nvcr.io \
-     --docker-username='$oauthtoken' \
-     --docker-password=<API-KEY>
-   ```
-
-3. Attach the pull secret to the default ServiceAccount so pods inherit it:
-
-   ```bash
-   kubectl patch serviceaccount default \
-     -p '{"imagePullSecrets":[{"name":"nvcr-creds"}]}'
-   ```
-
-4. Install the chart:
+2. Install the chart:
 
    ```bash
    helm install auto-ontology auto-ontology-1.0.0.tgz \
@@ -40,7 +24,7 @@ To install a published release:
      --set connectionStrings=<CONNECTION-STRINGS>
    ```
 
-5. Expose the UI:
+3. Expose the UI:
 
    ```bash
    kubectl port-forward frontend 3000:3000
