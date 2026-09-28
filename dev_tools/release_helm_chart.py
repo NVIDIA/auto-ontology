@@ -10,7 +10,7 @@ Publishes ``<org>[/<team>]/<name>:<version>``, served from
 The chart is staged in nvstaging, but it is written for where it ends up. NGC
 Catalog publishing copies the chart from nvstaging to nvidia byte for byte
 and rewrites nothing in it, so the images ``values.yaml`` names must already
-be their published paths (``--image-registry``, default nvcr.io/nvidia/gsf),
+be their published paths (``--image-registry``, default nvcr.io/nvidia),
 not the nvstaging ones release-docker.yml pushes to -- a customer cannot pull
 from nvstaging. NeMo-Retriever's chart does the same. Before packaging, this
 checks that ``values.yaml`` names exactly ``<image-registry>/<image>:
@@ -45,7 +45,7 @@ import yaml
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
 # Where the images live once the catalog publishing MR copies them there.
-PUBLISHED_IMAGE_REGISTRY = "nvcr.io/nvidia/gsf"
+PUBLISHED_IMAGE_REGISTRY = "nvcr.io/nvidia"
 
 # values.yaml key -> the image release-docker.yml publishes for it.
 CHART_IMAGES = {

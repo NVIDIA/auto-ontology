@@ -3,14 +3,14 @@
 ## Deploying a Release
 
 A release is staged in `nvstaging/gsf`, then copied to the public
-`nvidia/gsf` by an NGC Catalog publishing merge request.
+`nvidia` org by an NGC Catalog publishing merge request.
 
 To install a published release:
 
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvidia/gsf/charts/auto-ontology-1.0.0.tgz \
+   helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz \
      --username='$oauthtoken' \
      --password=<API-KEY>
    ```

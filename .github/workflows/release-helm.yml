@@ -6,8 +6,8 @@
 # <org>[/<team>]/<chart-name>:<version>. Run release-docker.yml first.
 #
 # The chart is staged in nvstaging/gsf but names the images' published paths
-# (<image-registry>, default nvcr.io/nvidia/gsf): NGC Catalog publishing copies
-# it to nvidia/gsf unmodified, and customers cannot pull from nvstaging.
+# (<image-registry>, default nvcr.io/nvidia): NGC Catalog publishing copies
+# it to nvidia unmodified, and customers cannot pull from nvstaging.
 # dev_tools/release_helm_chart.py refuses to publish unless values.yaml names
 # exactly <image-registry>/<image>:<app-version>.
 #
@@ -52,7 +52,7 @@ on:
         description: 'Registry values.yaml must name: where the images are once published'
         required: false
         type: string
-        default: 'nvcr.io/nvidia/gsf'
+        default: 'nvcr.io/nvidia'
       dry-run:
         description: 'Build chart without publishing to NGC'
         required: false
@@ -96,7 +96,7 @@ on:
         description: 'Registry values.yaml must name: where the images are once published'
         required: false
         type: string
-        default: 'nvcr.io/nvidia/gsf'
+        default: 'nvcr.io/nvidia'
       dry-run:
         description: 'Build chart without publishing to NGC'
         required: false

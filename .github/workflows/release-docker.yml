@@ -5,7 +5,7 @@
 # Builds the three Auto Ontology release images (backend + ingestion, frontend,
 # MCP) for amd64 and arm64 and pushes them to <registry>/<image>:<version>.
 # These are the staged images: NGC Catalog publishing later copies them to
-# nvidia/gsf. The chart is published separately by release-helm.yml, and its
+# nvidia. The chart is published separately by release-helm.yml, and its
 # values.yaml names the images at that published path, with the tag pushed here.
 #
 # Run it on a release branch: dispatched on release/v1.0 with no version, it
