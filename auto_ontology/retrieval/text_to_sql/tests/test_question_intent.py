@@ -341,6 +341,10 @@ def test_calculation_only_failure_defaults_to_calculation_subtype(
 def test_graph_entry_starts_with_intent_but_preserves_resume() -> None:
     assert _entry_router_fn({"path_state": {}}) == "question_intent"
     assert (
+        _entry_router_fn({"path_state": {"_resume_from": "question_extraction"}})
+        == "question_intent"
+    )
+    assert (
         _entry_router_fn({"path_state": {"_resume_from": "reconstruct_sql"}})
         == "reconstruct_sql"
     )
