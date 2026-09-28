@@ -1,11 +1,17 @@
 # Deploying Auto Ontology on Kubernetes
 
-## Deployment From NVStaging
+## Deploying a Release
+
+Releases are published by two manually-dispatched GitHub workflows:
+`release-docker.yml` pushes the images to `nvcr.io/0966117469611503/<image>:1.0`
+(the `gsf` enterprise org), and `release-helm.yml` pushes the chart to the NGC
+Helm registry as `0966117469611503/auto-ontology:1.0.0`. Pulling either needs an
+API key with access to that org.
 
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvstaging/auto-ontology/charts/auto-ontology-0.0.1.tgz \
+   helm fetch https://helm.ngc.nvidia.com/0966117469611503/charts/auto-ontology-1.0.0.tgz \
      --username='$oauthtoken' \
      --password=<API-KEY>
    ```
@@ -29,7 +35,7 @@
 4. Install the chart:
 
    ```bash
-   helm install auto_ontology auto-ontology-0.0.1.tgz \
+   helm install auto-ontology auto-ontology-1.0.0.tgz \
      --set defaultModelsApiKey=<API-KEY> \
      --set postgresPassword=<POSTGRES-PASSWORD> \
      --set connectionStrings=<CONNECTION-STRINGS>

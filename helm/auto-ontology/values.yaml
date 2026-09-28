@@ -132,8 +132,8 @@ backend:
   # not finished applying. Bump this with the migration, in the same commit.
   alembicRevision: c778a7d94c20
   image:
-    repository: nvcr.io/nvstaging/gsf/auto-ontology
-    tag: 0.0.1
+    repository: nvcr.io/0966117469611503/auto-ontology
+    tag: "1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3001
@@ -149,8 +149,8 @@ backend:
 ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
-    repository: nvcr.io/nvstaging/gsf/auto-ontology
-    tag: 0.0.1
+    repository: nvcr.io/0966117469611503/auto-ontology
+    tag: "1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3002
@@ -165,8 +165,8 @@ ingestion:
 # ------------------------------------------------------------------
 frontend:
   image:
-    repository: nvcr.io/nvstaging/gsf/auto-ontology-frontend
-    tag: 0.0.1
+    repository: nvcr.io/0966117469611503/auto-ontology-frontend
+    tag: "1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3000
