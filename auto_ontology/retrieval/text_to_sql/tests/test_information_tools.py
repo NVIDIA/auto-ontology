@@ -233,6 +233,54 @@ def test_get_column_returns_calculation_metadata(
     assert result["data"]["connected_tables"][0]["id"] == "table-2"
 
 
+def test_get_column_pages_until_it_finds_column_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requested_id = "column-after-first-page"
+    page_starts: list[int] = []
+
+    monkeypatch.setattr(
+        information_tools,
+        "fetch_parent_table_id_for_column",
+        lambda _column_id: "table-1",
+    )
+
+    def fetch_page(
+        _table_id: str,
+        *,
+        skip: int,
+        limit: int,
+    ) -> dict:
+        page_starts.append(skip)
+        if skip == 0:
+            return {"columns": [{"id": f"column-{index}"} for index in range(limit)]}
+        return {"columns": [{"id": requested_id, "column_name": "late_column"}]}
+
+    monkeypatch.setattr(information_tools, "fetch_columns_for_table", fetch_page)
+    monkeypatch.setattr(
+        information_tools,
+        "fetch_column_exploration_details",
+        lambda _column_id: {},
+    )
+    monkeypatch.setattr(
+        information_tools,
+        "fetch_table_by_id",
+        lambda _table_id: {"id": "table-1", "name": "wide_table"},
+    )
+    monkeypatch.setattr(
+        information_tools,
+        "fetch_join_neighbors",
+        lambda _table_id: [],
+    )
+
+    result = information_tools.get_column(column_id=requested_id)
+
+    assert result["ok"] is True
+    assert result["data"]["column"]["id"] == requested_id
+    assert result["truncated"] is False
+    assert page_starts == [0, information_tools.MAX_COLUMNS]
+
+
 def test_semantic_fk_tool_only_returns_semantic_fk_attributes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

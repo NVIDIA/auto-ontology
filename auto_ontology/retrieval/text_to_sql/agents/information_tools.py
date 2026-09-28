@@ -379,14 +379,22 @@ def get_column(
 
     assert resolved_column_id is not None
     assert resolved_table_id is not None
-    table_columns = fetch_columns_for_table(
-        resolved_table_id, skip=0, limit=MAX_COLUMNS + 1
-    ) or {"columns": []}
-    columns = list(table_columns.get("columns") or [])
-    column = next(
-        (item for item in columns if str(item.get("id")) == resolved_column_id),
-        None,
-    )
+    column = None
+    skip = 0
+    while column is None:
+        table_columns = fetch_columns_for_table(
+            resolved_table_id,
+            skip=skip,
+            limit=MAX_COLUMNS,
+        )
+        columns = list((table_columns or {}).get("columns") or [])
+        column = next(
+            (item for item in columns if str(item.get("id")) == resolved_column_id),
+            None,
+        )
+        if column is not None or len(columns) < MAX_COLUMNS:
+            break
+        skip += len(columns)
     if column is None:
         return _error("not_found", f"Column id {resolved_column_id!r} was not found.")
 
@@ -401,7 +409,7 @@ def get_column(
             "connected_tables": neighbors[:MAX_CONNECTIONS],
             "limits": {"connections": MAX_CONNECTIONS},
         },
-        truncated=(len(columns) > MAX_COLUMNS or len(neighbors) > MAX_CONNECTIONS),
+        truncated=len(neighbors) > MAX_CONNECTIONS,
     )
 
 
