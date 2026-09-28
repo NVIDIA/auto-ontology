@@ -47,6 +47,9 @@ on:
 env:
   PLATFORMS: linux/amd64,linux/arm64
 
+permissions:
+  contents: read
+
 jobs:
   determine-version:
     name: Determine Release Version
@@ -55,9 +58,10 @@ jobs:
       version: ${{ steps.version.outputs.version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           sparse-checkout: .github/actions
+          persist-credentials: false
 
       - name: Extract version from branch or input
         id: version
@@ -88,6 +92,9 @@ jobs:
             build-args: ''
     env:
       IMAGE_REF: ${{ inputs.registry }}/${{ matrix.image }}:${{ needs.determine-version.outputs.version }}
+      # Dispatch inputs reach the shell through the environment, never by
+      # interpolation into a script that runs with the NGC key available.
+      DRY_RUN: ${{ inputs.dry-run }}
     steps:
       - name: Free disk space
         run: |
@@ -96,9 +103,10 @@ jobs:
           df -h /
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
 
       - name: Setup Docker Buildx
         uses: ./.github/actions/setup-docker-buildx
@@ -125,7 +133,7 @@ jobs:
       - name: Build and Push Multi-platform Image
         run: |
           OUTPUT=--push
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             OUTPUT=
           fi
           docker buildx build \
@@ -138,7 +146,7 @@ jobs:
 
       - name: Summary
         run: |
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             echo "Built (dry run, not pushed): \`$IMAGE_REF\`" >>"$GITHUB_STEP_SUMMARY"
           else
             echo "Published Docker image: \`$IMAGE_REF\`" >>"$GITHUB_STEP_SUMMARY"

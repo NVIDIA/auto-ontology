@@ -59,6 +59,9 @@ on:
 env:
   HELM_CHART_DIR: helm/auto-ontology
 
+permissions:
+  contents: read
+
 jobs:
   determine-version:
     name: Determine Release Version
@@ -68,9 +71,10 @@ jobs:
       chart-version: ${{ inputs.version || steps.version.outputs.chart-version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           sparse-checkout: .github/actions
+          persist-credentials: false
 
       - name: Extract version from branch or input
         id: version
@@ -89,17 +93,24 @@ jobs:
       NGC_CLI_ORG: ${{ inputs.org }}
       NGC_CLI_TEAM: ${{ inputs.team }}
       NGC_CLI_FORMAT_TYPE: json
+      # Dispatch inputs reach the shell through the environment, never by
+      # interpolation into a script that runs with the NGC key available.
+      ORG: ${{ inputs.org }}
+      TEAM: ${{ inputs.team }}
+      CHART_NAME: ${{ inputs.chart-name }}
+      DRY_RUN: ${{ inputs.dry-run }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
 
       - name: Setup Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@1a275c3b69536ee54be43f2070a358922e12c8d4 # v4.3.1
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
 
@@ -112,13 +123,13 @@ jobs:
       - name: Release Helm chart
         run: |
           DRY_RUN_FLAG=""
-          if [ "${{ inputs.dry-run }}" = "true" ]; then
+          if [ "$DRY_RUN" = "true" ]; then
             DRY_RUN_FLAG="--dry-run"
           fi
           python dev_tools/release_helm_chart.py \
-            --org "${{ inputs.org }}" \
-            --team "${{ inputs.team }}" \
-            --name "${{ inputs.chart-name }}" \
+            --org "$ORG" \
+            --team "$TEAM" \
+            --name "$CHART_NAME" \
             --chart-dir "${HELM_CHART_DIR}" \
             --version "${CHART_VERSION}" \
             --app-version "${APP_VERSION}" \
@@ -126,7 +137,7 @@ jobs:
 
       - name: Upload packaged chart artifact
         if: ${{ inputs.dry-run }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: auto-ontology-helm-chart
           path: dist/${{ inputs.chart-name }}-${{ env.CHART_VERSION }}.tgz
@@ -138,8 +149,8 @@ jobs:
           echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
           echo "|---------|-------|" >> "$GITHUB_STEP_SUMMARY"
           echo "| Chart source | \`${HELM_CHART_DIR}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Chart | \`${{ inputs.chart-name }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Chart | \`$CHART_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| App version (image tag) | \`${APP_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| NGC | \`${{ inputs.org }}${{ inputs.team && format('/{0}', inputs.team) }}/${{ inputs.chart-name }}:${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
-          echo "| Dry Run | \`${{ inputs.dry-run }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| NGC | \`${ORG}${TEAM:+/$TEAM}/${CHART_NAME}:${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry Run | \`$DRY_RUN\` |" >> "$GITHUB_STEP_SUMMARY"
