@@ -231,8 +231,9 @@ def create_question_intent_prompt(
         )
     elif prediction_override is False:
         override_instruction = (
-            "\nThe caller explicitly selected SQL mode. Do not return question_type "
-            '"prediction"; classify the request as information or calculation.\n'
+            "\nThe caller explicitly disabled prediction mode. Do not return "
+            'question_type "prediction"; classify the request as information or '
+            "calculation.\n"
         )
 
     glossary_entries = [

@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""The `prediction` API parameter forces the branch instead of classifying."""
+"""The `prediction` API parameter forces or excludes prediction intent."""
 
 from __future__ import annotations
 
@@ -69,6 +69,26 @@ def test_false_prevents_prediction_but_keeps_preprocessing(
     assert result["path_state"]["question_type"] == "calculation"
     assert result["path_state"]["calculation_subtype"] == "numeric_computation"
     assert len(_prediction_llm) == 1
+
+
+def test_false_preserves_information_classification(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    def fake_invoke(*_args: object, **_kwargs: object) -> QuestionIntentModel:
+        return QuestionIntentModel(
+            question_type=QuestionType.INFORMATION,
+            calculation_subtype=None,
+            rewritten_question="describe the orders dataset",
+            extracted_evidence="",
+            target_db=None,
+        )
+
+    monkeypatch.setattr(question_intent, "invoke_with_structured_output", fake_invoke)
+
+    result = QuestionIntentAgent().execute(_state(False))
+
+    assert result["path_state"]["question_type"] == "information"
+    assert result["path_state"]["calculation_subtype"] is None
 
 
 def test_none_uses_intent_classification(_prediction_llm: list) -> None:

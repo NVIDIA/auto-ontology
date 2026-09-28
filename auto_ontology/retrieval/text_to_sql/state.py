@@ -58,8 +58,8 @@ class TextToSQLPayload(TypedDict):
     acronyms: NotRequired[list[dict[str, str]]]
     custom_prompts: NotRequired[str]
     target_db: NotRequired[str]
-    # Force the branch instead of classifying: True -> prediction, False -> SQL,
-    # None/absent -> classify.
+    # Prediction override: True forces prediction, False excludes prediction while
+    # still classifying as information/calculation, and None/absent classifies freely.
     prediction: NotRequired[bool | None]
 
 

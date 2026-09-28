@@ -50,10 +50,10 @@ class ChatRequest(BaseModel):
             "chart step."
         ),
     )
-    # Force the prediction/SQL branch instead of classifying the question:
-    # True  -> go straight to the KumoRFM prediction flow
-    # False -> go straight to the regular text-to-SQL flow
-    # None  -> classify as usual (default)
+    # Control prediction routing while preserving information classification:
+    # True  -> force the KumoRFM prediction flow
+    # False -> exclude prediction; classify as information or calculation
+    # None  -> classify among all intents (default)
     prediction: bool | None = None
     # Scope retrieval/SQL to one connected database. When omitted (and more
     # than one connector is loaded), the pipeline does not pin a database.
