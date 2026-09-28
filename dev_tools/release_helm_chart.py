@@ -5,16 +5,27 @@
 """Package ``helm/auto-ontology`` and publish it to the NGC Helm chart registry.
 
 Publishes ``<org>[/<team>]/<name>:<version>``, served from
-``https://helm.ngc.nvidia.com/<org>[/<team>]/charts/``. Before packaging,
-checks that the chart's ``values.yaml`` pulls the images release-docker.yml
-publishes -- ``nvcr.io/<org>[/<team>]/<image>:<app-version>`` -- so a release
-can't ship a chart that installs some other build.
+``https://helm.ngc.nvidia.com/<org>[/<team>]/charts/``.
+
+The chart is staged in nvstaging, but it is written for where it ends up. NGC
+Catalog publishing copies the chart from nvstaging to nvidia byte for byte
+and rewrites nothing in it, so the images ``values.yaml`` names must already
+be their published paths (``--image-registry``, default nvcr.io/nvidia/gsf),
+not the nvstaging ones release-docker.yml pushes to -- a customer cannot pull
+from nvstaging. NeMo-Retriever's chart does the same. Before packaging, this
+checks that ``values.yaml`` names exactly ``<image-registry>/<image>:
+<app-version>``, so a release can't ship a chart that installs another build
+or a registry customers can't reach.
 
 Usage (from the repo root)::
 
     helm lint helm/auto-ontology
     python dev_tools/release_helm_chart.py \\
         --org nvstaging --team gsf --version 1.0.0 --app-version 1.0 [--dry-run]
+
+Installing the staged chart before it is published needs the nvstaging images
+set explicitly (``--set backend.image.repository=nvcr.io/nvstaging/gsf/...``
+and likewise for ingestion and frontend).
 
 Requires ``pip install ngcsdk pyyaml``; ``NGC_CLI_API_KEY`` is needed to publish.
 Run by ``.github/workflows/release-helm.yml``.
@@ -33,6 +44,8 @@ import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 DIST_DIR = REPO_ROOT / "dist"
+# Where the images live once the catalog publishing MR copies them there.
+PUBLISHED_IMAGE_REGISTRY = "nvcr.io/nvidia/gsf"
 
 # values.yaml key -> the image release-docker.yml publishes for it.
 CHART_IMAGES = {
@@ -160,6 +173,11 @@ def main() -> None:
         default="Auto Ontology: FastAPI backend, ingestion worker, Next.js "
         "frontend and Postgres (pgvector)",
     )
+    parser.add_argument(
+        "--image-registry",
+        default=PUBLISHED_IMAGE_REGISTRY,
+        help="Where values.yaml must say the images are: their published path",
+    )
     parser.add_argument("-r", "--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -168,8 +186,7 @@ def main() -> None:
         sys.exit(f"ERROR: chart directory does not exist: {chart_dir}")
 
     values = yaml.safe_load((chart_dir / "values.yaml").read_text())
-    registry = f"nvcr.io/{_namespace(args)}"
-    errors = _check_images(values, registry, args.app_version)
+    errors = _check_images(values, args.image_registry, args.app_version)
     if errors:
         print("ERROR: values.yaml does not match this release:", file=sys.stderr)
         for error in errors:

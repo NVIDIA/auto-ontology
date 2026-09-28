@@ -3,10 +3,13 @@
 # SPDX-License-Identifier: Apache-2.0
 
 # Publishes the Auto Ontology Helm chart to the NGC Helm chart registry as
-# <org>[/<team>]/<chart-name>:<version>. Run release-docker.yml first: the
-# chart's values.yaml must already point at
-# nvcr.io/<org>[/<team>]/<image>:<app-version>,
-# and dev_tools/release_helm_chart.py refuses to publish when it doesn't.
+# <org>[/<team>]/<chart-name>:<version>. Run release-docker.yml first.
+#
+# The chart is staged in nvstaging/gsf but names the images' published paths
+# (<image-registry>, default nvcr.io/nvidia/gsf): NGC Catalog publishing copies
+# it to nvidia/gsf unmodified, and customers cannot pull from nvstaging.
+# dev_tools/release_helm_chart.py refuses to publish unless values.yaml names
+# exactly <image-registry>/<image>:<app-version>.
 #
 # Run it on a release branch: dispatched on release/v1.0 with no versions, it
 # packages that branch as chart 1.0.0 deploying images tagged 1.0.
@@ -45,6 +48,11 @@ on:
         required: false
         type: string
         default: 'gsf'
+      image-registry:
+        description: 'Registry values.yaml must name: where the images are once published'
+        required: false
+        type: string
+        default: 'nvcr.io/nvidia/gsf'
       dry-run:
         description: 'Build chart without publishing to NGC'
         required: false
@@ -98,6 +106,7 @@ jobs:
       ORG: ${{ inputs.org }}
       TEAM: ${{ inputs.team }}
       CHART_NAME: ${{ inputs.chart-name }}
+      IMAGE_REGISTRY: ${{ inputs.image-registry }}
       DRY_RUN: ${{ inputs.dry-run }}
     steps:
       - name: Checkout code
@@ -133,6 +142,7 @@ jobs:
             --chart-dir "${HELM_CHART_DIR}" \
             --version "${CHART_VERSION}" \
             --app-version "${APP_VERSION}" \
+            --image-registry "$IMAGE_REGISTRY" \
             $DRY_RUN_FLAG
 
       - name: Upload packaged chart artifact
@@ -152,5 +162,6 @@ jobs:
           echo "| Chart | \`$CHART_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Version | \`${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| App version (image tag) | \`${APP_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Images (as published) | \`${IMAGE_REGISTRY}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| NGC | \`${ORG}${TEAM:+/$TEAM}/${CHART_NAME}:${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
           echo "| Dry Run | \`$DRY_RUN\` |" >> "$GITHUB_STEP_SUMMARY"
