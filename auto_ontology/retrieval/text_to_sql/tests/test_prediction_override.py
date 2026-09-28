@@ -45,6 +45,7 @@ def _prediction_llm(monkeypatch: MonkeyPatch) -> list:
             calculation_subtype=None,
             rewritten_question="how many orders next month?",
             extracted_evidence="",
+            target_db=None,
         )
 
     monkeypatch.setattr(question_intent, "invoke_with_structured_output", fake_invoke)

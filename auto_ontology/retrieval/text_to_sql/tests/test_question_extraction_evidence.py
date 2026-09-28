@@ -2,6 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -100,7 +101,8 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
             question_type=QuestionType.CALCULATION,
             calculation_subtype=CalculationSubtype.AGGREGATION,
             rewritten_question="find revenue",
-            extracted_evidence="Use the test_dataset dataset.",
+            extracted_evidence="",
+            target_db="test_dataset",
         ),
     )
     state = {
@@ -109,6 +111,7 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
         "evidence": "Revenue means gross_sales minus refunds.",
         "path_state": {},
         "glossary": [],
+        "connectors": [SimpleNamespace(database_name="test_dataset")],
     }
     state.update(QuestionIntentAgent().execute(state))
     captured_messages: list = []
@@ -135,6 +138,7 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
     prompt = captured_messages[0].content
     assert "## Input\n\nfind revenue" in prompt
     assert "Revenue means gross_sales minus refunds." in prompt
-    assert "Use the test_dataset dataset." in prompt
+    assert "Use the test_dataset dataset." not in prompt
+    assert state["path_state"]["target_db"] == "test_dataset"
     assert state["initial_question"] == "find revenue in test_dataset dataset"
     assert result["path_state"]["normalized_question"] == "find revenue"

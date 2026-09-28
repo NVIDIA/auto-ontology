@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -45,6 +46,7 @@ def test_every_calculation_subtype_is_valid(subtype: CalculationSubtype) -> None
         calculation_subtype=subtype,
         rewritten_question="question",
         extracted_evidence="",
+        target_db=None,
     )
 
     assert model.calculation_subtype == subtype
@@ -77,6 +79,7 @@ def test_model_rejects_mismatched_type_and_subtype(
             calculation_subtype=subtype,
             rewritten_question="question",
             extracted_evidence="",
+            target_db=None,
         )
 
 
@@ -92,6 +95,7 @@ def test_non_calculation_types_accept_null_subtype(
         calculation_subtype=None,
         rewritten_question="question",
         extracted_evidence="",
+        target_db=None,
     )
 
     assert model.question_type == question_type
@@ -107,24 +111,110 @@ def test_agent_rewrites_question_and_merges_extracted_evidence(
             question_type=QuestionType.CALCULATION,
             calculation_subtype=CalculationSubtype.AGGREGATION,
             rewritten_question="find revenue",
-            extracted_evidence="Use the test_dataset dataset.",
+            extracted_evidence="",
+            target_db="test_datset",
         ),
     )
-    state = _state(evidence="Revenue means gross_sales minus refunds.")
+    state = _state(
+        evidence="Revenue means gross_sales minus refunds.",
+        connectors=[SimpleNamespace(database_name="test_dataset")],
+    )
 
     result = QuestionIntentAgent().execute(state)
 
     assert state["initial_question"] == "find revenue in test_dataset dataset"
     assert result["path_state"]["question_type"] == "calculation"
     assert result["path_state"]["calculation_subtype"] == "aggregation"
-    assert result["path_state"]["extracted_evidence"] == (
-        "Use the test_dataset dataset."
-    )
+    assert result["path_state"]["extracted_evidence"] == ""
     assert result["path_state"]["normalized_question"] == "find revenue"
+    assert result["path_state"]["target_db"] == "test_dataset"
     assert "AVG(T1.height_cm)" in result["path_state"]["sql_template"]
-    assert result["evidence"] == (
-        "Revenue means gross_sales minus refunds.\nUse the test_dataset dataset."
+    assert result["evidence"] == "Revenue means gross_sales minus refunds."
+
+
+def test_agent_ignores_question_database_when_no_configured_name_is_close(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.MATCH_BASED,
+            rewritten_question="find revenue",
+            extracted_evidence="",
+            target_db="unrelated_database",
+        ),
     )
+    state = _state(connectors=[SimpleNamespace(database_name="sales")])
+
+    result = QuestionIntentAgent().execute(state)
+
+    assert "target_db" not in result["path_state"]
+
+
+def test_prompt_lists_configured_databases() -> None:
+    prompt = create_question_intent_prompt(
+        "Find revenue in finance",
+        available_databases=["sales", "finance"],
+    )
+
+    assert "## Available databases" in prompt
+    assert "- sales" in prompt
+    assert "- finance" in prompt
+    assert "Set target_db to an exact name from this list" in prompt
+    assert "Correct an obvious typo or very close variant" in prompt
+    assert "If no listed name is close, return null" in prompt
+
+
+def test_agent_preserves_existing_target_when_question_does_not_select_one(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.MATCH_BASED,
+            rewritten_question="find revenue",
+            extracted_evidence="",
+            target_db=None,
+        ),
+    )
+    state = _state(
+        path_state={"target_db": "sales"},
+        connectors=[SimpleNamespace(database_name="sales")],
+    )
+
+    result = QuestionIntentAgent().execute(state)
+
+    assert result["path_state"]["target_db"] == "sales"
+
+
+def test_agent_rejects_question_database_conflicting_with_existing_target(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.MATCH_BASED,
+            rewritten_question="find revenue",
+            extracted_evidence="",
+            target_db="finance",
+        ),
+    )
+    state = _state(
+        path_state={"target_db": "sales"},
+        connectors=[
+            SimpleNamespace(database_name="sales"),
+            SimpleNamespace(database_name="finance"),
+        ],
+    )
+
+    with pytest.raises(ValueError, match="conflicts with"):
+        QuestionIntentAgent().execute(state)
 
 
 def test_agent_does_not_duplicate_existing_evidence(
@@ -139,6 +229,7 @@ def test_agent_does_not_duplicate_existing_evidence(
             calculation_subtype=CalculationSubtype.MATCH_BASED,
             rewritten_question="find revenue",
             extracted_evidence=evidence,
+            target_db=None,
         ),
     )
 
@@ -182,7 +273,8 @@ def test_prompt_defines_taxonomy_fallback_and_evidence_example() -> None:
     assert "ORDER BY ViewCount DESC" in prompt
     assert 'Do not return question_type "prediction"' in prompt
     assert 'rewritten_question: "find revenue"' in prompt
-    assert "Use the test_dataset dataset." in prompt
+    assert 'target_db: "test_dataset"' in prompt
+    assert "belongs only in target_db" in prompt
     assert "ARR: annual recurring revenue" in prompt
     assert "Revenue excludes refunds." in prompt
     assert "do not repeat it in extracted_evidence" in prompt
@@ -205,13 +297,16 @@ def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
             calculation_subtype=CalculationSubtype.AGGREGATION,
             rewritten_question="Find revenue by region",
             extracted_evidence="Revenue excludes refunds.",
+            target_db="finance",
         )
 
     monkeypatch.setattr(question_intent, "invoke_with_structured_output", invoke)
     state = _state(
+        initial_question="Find revenue by region in the finance database",
         calculation_only=True,
         prediction_override=True,
-        evidence="Use the finance dataset.",
+        evidence="Use booked revenue.",
+        connectors=[SimpleNamespace(database_name="finance")],
     )
 
     result = QuestionIntentAgent().execute(state)
@@ -220,8 +315,9 @@ def test_calculation_only_skips_type_selection_but_keeps_subtype_and_evidence(
     assert result["path_state"]["question_type"] == "calculation"
     assert result["path_state"]["calculation_subtype"] == "aggregation"
     assert result["path_state"]["normalized_question"] == "Find revenue by region"
+    assert result["path_state"]["target_db"] == "finance"
     assert result["path_state"]["sql_template"]
-    assert result["evidence"] == ("Use the finance dataset.\nRevenue excludes refunds.")
+    assert result["evidence"] == ("Use booked revenue.\nRevenue excludes refunds.")
 
 
 def test_calculation_only_failure_defaults_to_calculation_subtype(

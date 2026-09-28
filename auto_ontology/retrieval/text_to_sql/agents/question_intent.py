@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from difflib import get_close_matches
 from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict
@@ -14,6 +15,9 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage
 from pydantic import Field, model_validator
 
+from auto_ontology.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -87,6 +91,36 @@ def _load_calculation_subtypes() -> dict[str, dict[str, str]]:
 
 
 CALCULATION_SUBTYPE_DEFINITIONS = _load_calculation_subtypes()
+DATABASE_NAME_SIMILARITY_CUTOFF = 0.8
+
+
+def _resolve_question_target_database_name(
+    requested_database: str,
+    available_databases: list[str],
+) -> str | None:
+    """Resolve an explicit question hint, tolerating a close database-name typo."""
+    requested = requested_database.strip()
+    if not requested:
+        return None
+
+    exact_matches = [
+        database
+        for database in available_databases
+        if database.casefold() == requested.casefold()
+    ]
+    if len(exact_matches) == 1:
+        return exact_matches[0]
+
+    names_by_casefold = {
+        database.casefold(): database for database in available_databases
+    }
+    close_matches = get_close_matches(
+        requested.casefold(),
+        names_by_casefold,
+        n=1,
+        cutoff=DATABASE_NAME_SIMILARITY_CUTOFF,
+    )
+    return names_by_casefold[close_matches[0]] if close_matches else None
 
 
 class QuestionIntentModel(StrictLLMOutputModel):
@@ -116,6 +150,13 @@ class QuestionIntentModel(StrictLLMOutputModel):
         description=(
             "Supporting instruction or context removed from the question, or an "
             "empty string when none was removed."
+        ),
+    )
+    target_db: str | None = Field(
+        ...,
+        description=(
+            "The exact configured database explicitly requested in the question, "
+            "or null when the question does not select one."
         ),
     )
 
@@ -157,6 +198,13 @@ class CalculationOnlyQuestionIntentModel(StrictLLMOutputModel):
             "empty string when none was removed."
         ),
     )
+    target_db: str | None = Field(
+        ...,
+        description=(
+            "The exact configured database explicitly requested in the question, "
+            "or null when the question does not select one."
+        ),
+    )
 
 
 def create_question_intent_prompt(
@@ -166,6 +214,7 @@ def create_question_intent_prompt(
     calculation_only: bool = False,
     glossary: list[dict[str, str]] | None = None,
     existing_evidence: str = "",
+    available_databases: list[str] | None = None,
 ) -> str:
     """Build the classification and evidence-separation prompt."""
     override_instruction = ""
@@ -208,6 +257,23 @@ def create_question_intent_prompt(
             "but do not repeat it in extracted_evidence.\n"
             f"{existing_evidence.strip()}\n"
         )
+
+    database_names = list(dict.fromkeys(available_databases or []))
+    database_section = (
+        "\n## Available databases\n"
+        + (
+            "\n".join(f"- {name}" for name in database_names)
+            if database_names
+            else "(none)"
+        )
+        + "\n\n"
+        "Set target_db to an exact name from this list only when the question "
+        "explicitly asks to use that database. Correct an obvious typo or very close "
+        "variant to the exact listed name. If no listed name is close, return null. "
+        "A database selection is routing metadata: remove its phrase from "
+        "rewritten_question and do not put it in extracted_evidence. Do not infer a "
+        "database merely because its name resembles a business entity.\n"
+    )
 
     subtype_section = "\n".join(
         (
@@ -268,9 +334,10 @@ the user's question.
 
 ## Evidence separation
 Move text to extracted_evidence only when it instructs the agent how or where to
-interpret/calculate the answer, such as a dataset/table hint, formula, definition,
-mapping, or domain rule. Keep actual business filters, dates, entities, requested
-measures, grouping, ranking, and output constraints in rewritten_question.
+interpret/calculate the answer, such as a table hint, formula, definition, mapping,
+or domain rule. A configured database hint belongs only in target_db, never in
+extracted_evidence. Keep actual business filters, dates, entities, requested measures,
+grouping, ranking, and output constraints in rewritten_question.
 
 Do not invent evidence. If no evidence is embedded in the question, return an empty
 string. The rewritten question must remain understandable on its own.
@@ -278,7 +345,8 @@ string. The rewritten question must remain understandable on its own.
 Examples:
 - "find revenue in test_dataset dataset"
   → rewritten_question: "find revenue"
-  → extracted_evidence: "Use the test_dataset dataset."
+  → extracted_evidence: ""
+  → target_db: "test_dataset" (only when it appears in Available databases)
 - "What is revenue by region, where revenue means gross_sales minus refunds?"
   → rewritten_question: "What is revenue by region?"
   → extracted_evidence: "Revenue means gross_sales minus refunds."
@@ -286,7 +354,7 @@ Examples:
   → rewritten_question: unchanged
   → extracted_evidence: ""
 
-{glossary_section}{evidence_section}
+{database_section}{glossary_section}{evidence_section}
 Question:
 {question}"""
 
@@ -322,6 +390,14 @@ class QuestionIntentAgent(BaseAgent):
         override = state.get("prediction_override")
         calculation_only = state.get("calculation_only", False)
         existing_evidence = state.get("evidence") or ""
+        connectors = list(state.get("connectors") or [])
+        available_databases = list(
+            dict.fromkeys(
+                str(database_name)
+                for connector in connectors
+                if (database_name := getattr(connector, "database_name", None))
+            )
+        )
 
         messages = [
             SystemMessage(
@@ -331,6 +407,7 @@ class QuestionIntentAgent(BaseAgent):
                     calculation_only=calculation_only,
                     glossary=state.get("glossary"),
                     existing_evidence=existing_evidence,
+                    available_databases=available_databases,
                 )
             )
         ]
@@ -360,6 +437,7 @@ class QuestionIntentAgent(BaseAgent):
             )
             rewritten = question
             extracted = ""
+            selected_target_db = None
         else:
             question_type = (
                 QuestionType.CALCULATION if calculation_only else intent.question_type
@@ -367,6 +445,7 @@ class QuestionIntentAgent(BaseAgent):
             subtype = intent.calculation_subtype
             rewritten = intent.rewritten_question.strip() or question
             extracted = intent.extracted_evidence.strip()
+            selected_target_db = intent.target_db
 
             if calculation_only:
                 question_type = QuestionType.CALCULATION
@@ -376,6 +455,25 @@ class QuestionIntentAgent(BaseAgent):
             elif override is False and question_type == QuestionType.PREDICTION:
                 question_type = QuestionType.CALCULATION
                 subtype = CalculationSubtype.NUMERIC_COMPUTATION
+
+        if selected_target_db:
+            resolved_target_db = _resolve_question_target_database_name(
+                selected_target_db, available_databases
+            )
+            if resolved_target_db is not None:
+                existing_target_db = path_state.get("target_db")
+                if existing_target_db:
+                    resolved_existing_target_db = resolve_target_database_name(
+                        str(existing_target_db), connectors
+                    )
+                    if resolved_existing_target_db != resolved_target_db:
+                        raise ValueError(
+                            "Database selected in the question conflicts with the "
+                            "caller-selected target_db "
+                            f"{resolved_existing_target_db!r}: "
+                            f"{resolved_target_db!r} was requested."
+                        )
+                path_state["target_db"] = resolved_target_db
 
         path_state["question_type"] = question_type.value
         path_state["calculation_subtype"] = subtype.value if subtype else None
@@ -389,9 +487,11 @@ class QuestionIntentAgent(BaseAgent):
 
         merged_evidence = _merge_evidence(existing_evidence, extracted)
         self.logger.info(
-            "Question intent: type=%s subtype=%s rewritten=%r evidence_extracted=%s",
+            "Question intent: type=%s subtype=%s target_db=%s rewritten=%r "
+            "evidence_extracted=%s",
             question_type.value,
             subtype.value if subtype else None,
+            path_state.get("target_db"),
             rewritten,
             bool(extracted),
         )
