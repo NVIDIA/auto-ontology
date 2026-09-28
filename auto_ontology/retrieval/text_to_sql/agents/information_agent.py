@@ -43,13 +43,26 @@ class InformationActionType(StrEnum):
 class InformationToolArguments(StrictLLMOutputModel):
     """The bounded set of identifiers accepted by metadata tools."""
 
+    database_id: str | None = None
     dataset_id: str | None = None
     dataset_name: str | None = None
+    schema_id: str | None = None
     table_id: str | None = None
     table_name: str | None = None
     column_id: str | None = None
     column_name: str | None = None
     database_name: str | None = None
+    term_id: str | None = None
+    term_name: str | None = None
+    column_attribute_id: str | None = None
+    column_attribute_name: str | None = None
+    sql_attribute_id: str | None = None
+    sql_attribute_name: str | None = None
+    search: str | None = None
+    query: str | None = None
+    labels: list[str] | None = None
+    skip: int | None = Field(default=None, ge=0)
+    limit: int | None = Field(default=None, ge=1, le=100)
 
 
 class InformationAgentAction(StrictLLMOutputModel):
@@ -149,14 +162,27 @@ data and you do not write SQL. Use only the supplied candidates and read-only to
 observations. Never invent tables, columns, formulas, descriptions, or relationships.
 
 Available tools:
+- list_databases: catalog databases (the root of the lazy data tree).
+- list_schemas: schemas for a database_id.
+- list_tables: tables for a schema_id.
+- list_columns: a bounded column page for a table_id, with skip/limit.
 - get_dataset: dataset identity plus bounded schemas and tables.
 - get_table: table details, columns, semantic attributes, and connected tables.
 - get_column: column details, calculation/semantic attributes, owning table, and
   connected tables.
 - get_table_semantic_fks: semantic foreign-key connections for a table.
+- get_term: one glossary Term with its represented tables, ColumnAttributes, and
+  SqlAttributes.
+- list_terms: bounded glossary browsing, optionally filtered by search text.
+- get_column_attribute: one semantic ColumnAttribute with its Term, primary/referencing
+  columns, descriptions, samples, and relationships.
+- get_sql_attribute: one derived SqlAttribute with its Term, expression, and full SQL.
+- search_semantic_layer: vector-search Terms, ColumnAttributes, SqlAttributes, and
+  CustomAnalyses when the supplied candidates do not identify the right metadata.
 
 Prefer IDs already present in candidates or observations. Use the dataset name to
-scope name lookups. If the user asks how a measure is calculated or defined, report
+scope name lookups. Prefer exact metadata tools over vector search when an ID or exact
+name is known. If the user asks how a measure is calculated or defined, report
 its description/formula or SQL semantic attributes, owning table/column, and connected
 tables. If the user asks which columns a table has, list them and its connected tables.
 State clearly when metadata is missing or ambiguous.
@@ -313,7 +339,11 @@ class InformationAgent(BaseAgent):
             seen_calls.add(signature)
             tool_call_count += 1
             try:
-                result = run_information_tool(action.tool, arguments)
+                result = run_information_tool(
+                    action.tool,
+                    arguments,
+                    semantic_retriever=state.get("semantic_retriever"),
+                )
             except Exception as exc:
                 self.logger.exception("Information metadata tool failed")
                 result = {

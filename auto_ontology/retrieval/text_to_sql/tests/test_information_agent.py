@@ -91,7 +91,9 @@ def test_agent_uses_multiple_tools_and_emits_terminal_response(
         lambda *_args, **_kwargs: next(actions),
     )
 
-    def run_tool(tool: InformationToolName, _arguments: dict) -> dict:
+    def run_tool(
+        tool: InformationToolName, _arguments: dict, **_kwargs: object
+    ) -> dict:
         if tool == InformationToolName.GET_COLUMN:
             return {
                 "ok": True,
@@ -230,6 +232,53 @@ def test_first_prompt_is_grounded_with_candidates(
     assert '"dataset": "sales"' in prompts[0]
     assert '"id": "attr-1"' in prompts[0]
     assert '"table_id": "table-1"' in prompts[0]
+    assert "get_term" in prompts[0]
+    assert "get_column_attribute" in prompts[0]
+    assert "get_sql_attribute" in prompts[0]
+    assert "list_terms" in prompts[0]
+    assert "search_semantic_layer" in prompts[0]
+
+
+def test_semantic_search_tool_receives_state_retriever(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    retriever = object()
+    actions = iter(
+        [
+            InformationAgentAction(
+                action=InformationActionType.TOOL,
+                tool=InformationToolName.SEARCH_SEMANTIC_LAYER,
+                arguments=InformationToolArguments(
+                    query="revenue",
+                    labels=["Term", "ColumnAttribute"],
+                    limit=5,
+                ),
+            ),
+            _answer_action(),
+        ]
+    )
+    monkeypatch.setattr(
+        information_agent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: next(actions),
+    )
+    captured: dict[str, object] = {}
+
+    def run_tool(
+        _tool: InformationToolName,
+        _arguments: dict,
+        **kwargs: object,
+    ) -> dict:
+        captured.update(kwargs)
+        return {"ok": True, "data": {"matches": []}}
+
+    monkeypatch.setattr(information_agent, "run_information_tool", run_tool)
+    state = _state()
+    state["semantic_retriever"] = retriever
+
+    InformationAgent().execute(state)
+
+    assert captured["semantic_retriever"] is retriever
 
 
 def test_reasoning_limit_stops_repeated_calls(
