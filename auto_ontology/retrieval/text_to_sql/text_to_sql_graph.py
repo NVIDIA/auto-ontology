@@ -290,9 +290,7 @@ def wrap_node_with_logging(
 
 
 def _entry_router_fn(state):
-    if state["path_state"].get("_resume_from") == "reconstruct_sql":
-        return "reconstruct_sql"
-    return "question_intent"
+    return state["path_state"].get("_resume_from", "question_intent")
 
 
 def create_graph():
