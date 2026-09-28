@@ -25,7 +25,7 @@ To install a published release:
 3. Expose the UI:
 
    ```bash
-   kubectl port-forward frontend 3000:3000
+   kubectl port-forward svc/frontend 3000:3000
    ```
 
 ## Staging / Astra nightly deployment
