@@ -3,25 +3,7 @@
 ## Deploying a Release
 
 A release is staged in `nvstaging/gsf`, then copied to the public
-`nvidia/gsf` by an NGC Catalog publishing merge request:
-
-| | Staged by | Published to |
-|---|---|---|
-| Images | `release-docker.yml` → `nvcr.io/nvstaging/gsf/<image>:1.0` | `nvcr.io/nvidia/gsf/<image>:1.0` |
-| Chart | `release-helm.yml` → NGC Helm registry `nvstaging/gsf/auto-ontology:1.0.0` | `nvidia/gsf/auto-ontology:1.0.0` |
-
-Publishing copies the chart unmodified, so its `values.yaml` names the images
-at their **published** path (`nvcr.io/nvidia/gsf/...`) even while it is still
-in staging. Installing the staged chart therefore needs the staged images set
-explicitly:
-
-```bash
-helm install auto-ontology auto-ontology-1.0.0.tgz \
-  --set backend.image.repository=nvcr.io/nvstaging/gsf/auto-ontology \
-  --set ingestion.image.repository=nvcr.io/nvstaging/gsf/auto-ontology \
-  --set frontend.image.repository=nvcr.io/nvstaging/gsf/auto-ontology-frontend \
-  ...
-```
+`nvidia/gsf` by an NGC Catalog publishing merge request.
 
 To install a published release:
 
