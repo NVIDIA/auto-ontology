@@ -10,9 +10,7 @@ To install a published release:
 1. Fetch the chart from NGC:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz \
-     --username='$oauthtoken' \
-     --password=<API-KEY>
+   helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz
    ```
 
 2. Install the chart:
