@@ -32,7 +32,7 @@ on:
         description: 'Target nvcr.io org[/team]'
         required: false
         type: string
-        default: 'nvcr.io/0966117469611503'
+        default: 'nvcr.io/nvstaging/gsf'
       dry-run:
         description: 'Build without logging in or pushing'
         required: false

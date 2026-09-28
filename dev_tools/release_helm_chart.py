@@ -14,7 +14,7 @@ Usage (from the repo root)::
 
     helm lint helm/auto-ontology
     python dev_tools/release_helm_chart.py \\
-        --org 0966117469611503 --version 1.0.0 --app-version 1.0 [--dry-run]
+        --org nvstaging --team gsf --version 1.0.0 --app-version 1.0 [--dry-run]
 
 Requires ``pip install ngcsdk pyyaml``; ``NGC_CLI_API_KEY`` is needed to publish.
 Run by ``.github/workflows/release-helm.yml``.

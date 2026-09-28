@@ -39,12 +39,12 @@ on:
         description: 'NGC org'
         required: false
         type: string
-        default: '0966117469611503'
+        default: 'nvstaging'
       team:
         description: 'NGC team (empty for org level)'
         required: false
         type: string
-        default: ''
+        default: 'gsf'
       dry-run:
         description: 'Build chart without publishing to NGC'
         required: false
