@@ -46,13 +46,13 @@ To run a text-to-SQL benchmark such as BIRD, refer to the
 
 ### NVIDIA NIM
 
-Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted NVIDIA
-inference API ([inference-api.nvidia.com](https://inference-api.nvidia.com)) or self-hosted NIMs:
+Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
+[NVIDIA API catalog](https://build.nvidia.com) (`integrate.api.nvidia.com`) or
+self-hosted NIMs. The defaults in `.env.example` are:
 
-- **LLM:**
-  [aws/anthropic/bedrock-claude-opus-4-8](https://inference.nvidia.com/aws/anthropic/bedrock-claude-opus-4-8?search=opus)
-- **Embeddings:**
-  [nemotron-3-embed-1b](https://inference.nvidia.com/nvidia/nvidia/nemotron-3-embed-1b)
+- **LLM:** `nvidia/nemotron-3-nano-30b-a3b`
+- **Embeddings:** `nvidia/nemotron-3-embed-1b`
+- **Reranking:** `nvidia/llama-nemotron-rerank-vl-1b-v2`
 
 The endpoints and models are configured via the `DEFAULT_MODELS_ENDPOINT`, `DEFAULT_MODELS_MODEL`,
 `EMBED_ENDPOINT`, and `EMBED_MODEL` environment variables and require a
@@ -84,8 +84,8 @@ back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 - **Docker** with **Docker Compose v2** (e.g. Docker Desktop on macOS/Windows,
   Docker Engine on Linux) for the local stack. For Kubernetes deployments see
   [`DEPLOYMENT.md`](./DEPLOYMENT.md).
-- An **NVIDIA API key** for NVIDIA NIM (chat and ingestion) from the NVIDIA
-  inference API at <https://inference-api.nvidia.com>.
+- An **NVIDIA API key** (`nvapi-...`) for NVIDIA NIM (chat and ingestion) from
+  the NVIDIA API catalog at <https://build.nvidia.com>.
 - Connection details for the source database(s) you want to query
   (Databricks, Postgres, Snowflake, or DuckDB).
 
