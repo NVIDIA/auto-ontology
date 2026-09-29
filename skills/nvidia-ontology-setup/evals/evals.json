@@ -4,10 +4,10 @@
     {
       "id": "setup-eval-001-underspecified",
       "prompt": "Use the nvidia-ontology-setup skill to handle this request safely: Install Auto Ontology for me.",
-      "expected_output": "The request is underspecified, so the agent asks the required questions before running a command: target (full Compose, --dev, --ds, Helm, or MCP-only against an existing instance), whether DEFAULT_MODELS_API_KEY is set, source database / CONNECTION_STRINGS vs UI connections, and whether host port 5432 is free. It does not guess Compose and run it silently.",
+      "expected_output": "The request is underspecified, so the agent asks the required questions before running a command: target (Helm on Kubernetes as the official install, Docker Compose on one machine, a developer --dev/--ds workflow, or MCP-only against an existing instance), whether DEFAULT_MODELS_API_KEY is available, the bootstrap admin account, source database / CONNECTION_STRINGS vs UI connections, and for Compose whether host port 5432 is free. It does not guess a target and run it silently.",
       "assertions": [
         "Loads nvidia-ontology-setup before choosing an installation path",
-        "Asks which target is wanted \u2014 Compose, --dev, --ds, Helm, or MCP-only",
+        "Asks which target is wanted \u2014 Helm, Compose, a developer workflow, or MCP-only \u2014 and presents Helm as the official install",
         "Asks about DEFAULT_MODELS_API_KEY / NIM credentials",
         "Does not silently assume defaults and emit a single install command"
       ],
@@ -17,14 +17,14 @@
     {
       "id": "setup-eval-002-use-existing-scripts",
       "prompt": "I cloned NVIDIA/auto-ontology and filled in .env. Host port 5432 is free. How do I start the full local stack?",
-      "expected_output": "The agent invokes the existing setup path from the repository root \u2014 ./dev_tools/setup_env.sh or docker compose up -d --build \u2014 wrapped with log_setup.sh. It does not write a new docker-compose file or a custom install script.",
+      "expected_output": "The agent uses the existing Compose file from the repository root: docker compose up -d --build after .env is filled. It does not write a new docker-compose file or a custom install script, and it does not present dev_tools/setup_env.sh as the installer.",
       "assertions": [
-        "Uses dev_tools/setup_env.sh or docker compose up -d --build from the repo root",
-        "Wraps the command with skills/nvidia-ontology-setup/scripts/log_setup.sh",
-        "Does not invent a second installer"
+        "Uses docker compose up -d --build from the repo root",
+        "Does not invent a second installer",
+        "Does not treat the developer script dev_tools/setup_env.sh as the installation"
       ],
       "expected_skill": "nvidia-ontology-setup",
-      "expected_script": "skills/nvidia-ontology-setup/scripts/log_setup.sh"
+      "expected_script": null
     },
     {
       "id": "setup-eval-003-auth-secret-cookies",
@@ -106,6 +106,19 @@
         "Explains that CONNECTION_STRINGS is ignored once any UI-managed connection exists",
         "Recommends adding the warehouse as a UI-managed connection",
         "States table filters exist only on UI-managed connections and does not overstate the guarantee"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-010-helm-install",
+      "prompt": "Install Auto Ontology 1.0.0 on our Kubernetes cluster. I have kubectl and helm access and a NIM API key.",
+      "expected_output": "Use the published Helm chart from DEPLOYMENT.md: helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz, then helm install with defaultModelsApiKey, postgresPassword, adminEmail and adminPassword (required, or the install fails), and optionally connectionStrings. Set appUrl to the origin users will browse to unless they use kubectl port-forward svc/frontend 3000:3000. The user sets the secret values themselves rather than pasting them into the conversation. Do not use dev_tools/setup_env.sh or build images.",
+      "assertions": [
+        "Uses the published Helm chart rather than dev_tools/setup_env.sh or docker compose",
+        "Includes adminEmail and adminPassword in the install",
+        "Addresses appUrl for the origin users will browse to",
+        "Does not ask the user to paste secrets into the conversation"
       ],
       "expected_skill": "nvidia-ontology-setup",
       "expected_script": null

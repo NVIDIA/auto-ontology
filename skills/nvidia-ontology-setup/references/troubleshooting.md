@@ -6,8 +6,8 @@ SPDX-License-Identifier: Apache-2.0
 
 # Auto Ontology setup troubleshooting
 
-Read this before searching the web. Wrap diagnosis commands with
-`scripts/log_setup.sh` so the session is replayable.
+Read this before searching the web. Redact secrets before sharing command
+output.
 
 ## UI loads without the left navigation (or looks broken after restart)
 
@@ -35,8 +35,8 @@ field falls back to `DEFAULT_MODELS_*`.
 A mismatch puts stored vectors and query vectors in different spaces; answers
 look like "nothing found."
 
-Confirm the logged (redacted) triplets in `.nvidia-ontology-setup.log` match what you
-intended.
+Confirm the triplets in `.env` (or the Helm values) are the same for the
+ingestion service and the backend.
 
 ## Connections: UI vs `CONNECTION_STRINGS` vs Vault
 

@@ -27,33 +27,33 @@ Global
 Requires API Key or External Credential: Yes
 Credential Type(s): NVIDIA NIM API key (`DEFAULT_MODELS_API_KEY`); optional source-database connection strings; GitHub credentials to `uvx` auto-ontology-mcp while Auto Ontology is unpublished on PyPI
 
-Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate. Install logging redacts passwords, tokens, and API keys.
+Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate.
 
 ## Known Risks and Mitigations
 
 Risk: The skill may propose compose, helm, or `.env` edits that break a running instance or store connection passwords in plaintext when Vault is only partially configured.
-Mitigation: Ask the required target questions first; wrap commands with `scripts/log_setup.sh`; treat partial Vault config as plaintext; do not invent a second installer.
+Mitigation: Ask the required target questions first; default to the published Helm chart; never ask users to paste secrets into the conversation; treat partial Vault config as plaintext; do not invent a second installer.
 
 Risk: Guidance could be copied into the public nvidia/skills catalog.
 Mitigation: This skill contains no staging hostnames, cluster names, or Vault paths.
 
 ## References
 
-- Repository-root `README.md`, `.env.example`, `dev_tools/setup_env.sh`, `DEPLOYMENT.md`
+- Repository-root `DEPLOYMENT.md` (Helm), `README.md`, `.env.example`, `docker-compose.yml`, `dev_tools/setup_env.sh` (developer workflows)
 - `docs/mcp.md` troubleshooting
 - [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [evals/evals.json](evals/evals.json) — candidate dataset; representative Tier-3 result below
 
 ## Skill Output
 
-Output type(s): Deployment plans, shell commands, configuration instructions, install log lines, connection and readiness receipts
-Output format: Markdown with inline bash code blocks; append-only `.nvidia-ontology-setup.log`
+Output type(s): Deployment plans, shell commands, configuration instructions, connection and readiness receipts
+Output format: Markdown with inline bash code blocks
 Output parameters: Commands run from the Auto Ontology repository root unless noted
-Other properties: `.nvidia-ontology-setup.log` is gitignored; do not commit it
+Other properties: Never ask users to paste secrets; they set chart values or `.env` themselves
 
 ## Skill Version
 
-0.2.0 (source: frontmatter)
+0.3.0 (source: frontmatter)
 
 ## Evaluation Agents Used
 

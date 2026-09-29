@@ -55,7 +55,7 @@ statuses:
   - blocked
 gates:
   - target mode and destructive actions are approved before commands run
-  - install and troubleshooting commands use the redacting log wrapper
+  - the published Helm chart is the default install; setup_env.sh is for developer workflows only
   - the public web origin is used for REST and MCP discovery
   - source connection succeeds before ingestion is treated as complete
   - ingest and query use the same embedding endpoint and model

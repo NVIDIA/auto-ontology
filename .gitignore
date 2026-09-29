@@ -91,6 +91,3 @@ helm.sh
 /temp.txt
 /vectors_wiki.py
 /vectors_wiki_load.py
-
-# Append-only Auto Ontology setup log written by skills/nvidia-ontology-setup/scripts/log_setup.sh
-.nvidia-ontology-setup.log

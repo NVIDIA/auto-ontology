@@ -1,9 +1,10 @@
 ---
 name: nvidia-ontology-setup
-version: "0.2.0"
+version: "0.3.0"
 description: >-
-  Set up or troubleshoot the Auto Ontology runtime. Use for Docker Compose,
-  local or Helm setup, and MCP connection to an existing deployment.
+  Set up or troubleshoot the Auto Ontology runtime. Use for Helm (the official
+  install), Docker Compose, developer setup, and MCP connection to an existing
+  deployment.
 license: Apache-2.0
 metadata:
   author: "NVIDIA <opensource@nvidia.com>"
@@ -22,9 +23,10 @@ metadata:
 
 Bring up the current Auto Ontology implementation, troubleshoot it, or connect an agent
 to an instance that is already running. Do not invent a second installer:
-invoke the commands in the repository-root `README.md` and
-`dev_tools/setup_env.sh`. Typed setup, connection, ingestion, compilation, and
-readiness artifacts are in
+the official installation is the Helm chart in repository-root `DEPLOYMENT.md`;
+Docker Compose runs the same stack on one machine. `dev_tools/setup_env.sh` is a
+developer tool, not an installer. Typed setup, connection, ingestion,
+compilation, and readiness artifacts are in
 [runtime-contract.yaml](assets/runtime-contract.yaml).
 
 On failure, read [troubleshooting.md](references/troubleshooting.md) instead of
@@ -36,69 +38,66 @@ searching the web.
 
 Ask these if not already clear. Do not guess a default and emit a command.
 
-1. **Target** — full Docker Compose stack, local `--dev` (infra in Docker, apps
-   on the host), `--ds` (frontend in Docker, FastAPI on the host), Helm /
-   Kubernetes, or “Auto Ontology is already up, I only need MCP”?
-2. **NVIDIA NIM key** — is `DEFAULT_MODELS_API_KEY` (or `NVIDIA_API_KEY`) set?
-   Chat and ingest need it.
-3. **Source database** — Postgres, Snowflake, Databricks, or DuckDB connection
-   string for `CONNECTION_STRINGS`, or will connections be added in the UI?
-4. **Port conflicts** — is host `5432` free? `POSTGRES_PORT` only remaps the
+1. **Target** — Helm on Kubernetes (the official install, and the default
+   recommendation), Docker Compose on one machine, a developer workflow
+   (`--dev` / `--ds`, only when changing Auto Ontology itself), or "Auto
+   Ontology is already up, I only need MCP"?
+2. **NVIDIA NIM key** — is `DEFAULT_MODELS_API_KEY` (Helm:
+   `defaultModelsApiKey`) available? Chat and ingest need it.
+3. **Admin account** — the email and password for the bootstrap admin.
+   Self-service sign-up is disabled, so this is the only way to sign in.
+4. **Source database** — a connection string (`CONNECTION_STRINGS` /
+   `connectionStrings`), or will connections be added in the UI?
+5. **Helm only** — which chart version, and the URL users will browse to
+   (`appUrl`).
+6. **Compose only** — is host `5432` free? `POSTGRES_PORT` only remaps the
    host side; containers still use 5432 internally.
 
-## Available scripts
+Never ask the user to paste secrets into the conversation. Have them set the
+values themselves, for example in a values file kept out of git.
 
-| Script | Purpose | Arguments |
-| --- | --- | --- |
-| `scripts/log_setup.sh` | Run and redact-log installation or troubleshooting commands | Optional `--model ID`, then `-- COMMAND [ARGS...]` |
+## Install with Helm (official)
 
-## Setup logging (mandatory)
-
-Invoke the script through the shell available to the agent. Wrap **every**
-install, compose, helm, and troubleshooting command with
-[`scripts/log_setup.sh`](scripts/log_setup.sh) so the session is
-debuggable. Pass the model id when the harness knows it:
+Releases are published to the public NGC `nvidia` org (chart and images). Follow
+`DEPLOYMENT.md` with the version the user named:
 
 ```bash
-# from the Auto Ontology repository root
-./skills/nvidia-ontology-setup/scripts/log_setup.sh --model "$NVIDIA_ONTOLOGY_SETUP_MODEL" -- \
-  ./dev_tools/setup_env.sh
+helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-<VERSION>.tgz
+helm install auto-ontology auto-ontology-<VERSION>.tgz \
+  --set defaultModelsApiKey=<API-KEY> \
+  --set postgresPassword=<POSTGRES-PASSWORD> \
+  --set adminEmail=<ADMIN-EMAIL> \
+  --set adminPassword=<ADMIN-PASSWORD> \
+  --set connectionStrings=<CONNECTION-STRINGS>   # optional; or add connections in the UI
+kubectl port-forward svc/frontend 3000:3000
 ```
 
-The script appends timestamp, model, cwd, the command (with secret flags
-redacted) and redacted env, and exit code to `.nvidia-ontology-setup.log` (gitignored). Do not
-restate flags in this skill; log what actually ran.
+- `adminEmail` and `adminPassword` are required; the install fails without them.
+- `appUrl` must be the exact origin users browse to. The default
+  (`http://localhost:3000`) only fits the port-forward above; set it for a
+  NodePort, ingress, or HTTPS origin.
+- `authSecret` is generated on first install and kept across upgrades; set it
+  only to share one value across environments.
+- If the chart fetch returns 404, that version is not published yet. Ask the
+  user; do not fall back to the internal staging registry.
 
-## Prerequisites for local installation
+This skill does not cover Astra GitOps.
 
-From the repository root:
+## Local: Docker Compose
+
+For running the whole stack on one machine. From the repository root:
 
 ```bash
 cp .env.example .env
-# edit .env — AUTH_SECRET and APP_URL are required
+# edit .env — AUTH_SECRET, APP_URL, AUTO_ONTOLOGY_ADMIN_EMAIL and
+# AUTO_ONTOLOGY_ADMIN_PASSWORD are required
+docker compose up -d --build
 ```
 
 `AUTH_SECRET` and `APP_URL` are required. Without them every page fails with a
 Better Auth "default secret" error. Fill `DEFAULT_MODELS_API_KEY` and a
 `CONNECTION_STRINGS` value (or plan to add connections in the UI). The full
 variable list is `.env.example`.
-
-For `--dev` / `--ds` you also need:
-
-```bash
-cd frontend && pnpm install   # Next.js
-# from repo root:
-uv sync
-```
-
-## Local: full Compose stack
-
-Preferred when the user wants a running Auto Ontology without iterating on the code.
-
-```bash
-./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh
-# equivalent: docker compose up -d --build
-```
 
 This builds `auto-ontology` and `auto-ontology-frontend`, starts Postgres, pgAdmin, the ingestion
 service, runs the one-shot migrate job, and starts the app.
@@ -111,17 +110,22 @@ service, runs the one-shot migrate job, and starts the app.
 | pgAdmin | http://localhost:5050 |
 | Postgres | localhost:`$POSTGRES_PORT` (from `.env`, default 5432) |
 
-## Local: `--dev` (apps on the host)
+## Developer workflows (`--dev`, `--ds`)
 
-Infra only (Postgres, pgAdmin, ingestion). You run Next.js and FastAPI:
+Only for people changing Auto Ontology itself; these are not installations.
+`dev_tools/setup_env.sh` starts part of the stack in Docker and leaves the rest
+to run from the checkout. Both need the `.env` above plus:
 
 ```bash
-./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --dev
+cd frontend && pnpm install   # Next.js
+# from repo root:
+uv sync
 ```
 
-Then two terminals:
+`--dev` runs infra only (Postgres, pgAdmin, ingestion); you run Next.js and FastAPI:
 
 ```bash
+./dev_tools/setup_env.sh --dev
 cd frontend && pnpm dev
 # repo root:
 uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
@@ -131,10 +135,10 @@ The app factory is `create_app()` in `auto_ontology/server/__main__.py`. There i
 `auto_ontology/server/main.py`. `uv run python -m auto_ontology.server` is the same app without
 reload (what the container runs).
 
-## Local: `--ds` (frontend in Docker, API on the host)
+`--ds` runs the frontend in Docker and FastAPI on the host:
 
 ```bash
-./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --ds
+./dev_tools/setup_env.sh --ds
 uv run python -m auto_ontology.server
 ```
 
@@ -148,16 +152,9 @@ firewalled from other machines. On native Linux Docker you may need
 
 ## Limitations
 
-This skill uses the repository's existing installers and does not cover Astra
-GitOps, change semantic definitions, or treat partial Vault configuration as
-secret storage. Ask before destructive volume deletion.
-
-## Kubernetes
-
-Do not paste Helm credentials into the conversation. Point at repository-root
-`DEPLOYMENT.md` and ask the user for chart source, `defaultModelsApiKey`,
-`postgresPassword`, and `connectionStrings`. This skill does not cover Astra
-GitOps.
+This skill uses the repository's existing Helm chart and Compose file and does
+not cover Astra GitOps, change semantic definitions, or treat partial Vault
+configuration as secret storage. Ask before destructive volume deletion.
 
 ## Auto Ontology is already up — MCP only
 
@@ -183,7 +180,9 @@ curl -s -o /dev/null -w '%{http_code}\n' "$AUTO_ONTOLOGY_API_URL/.well-known/oau
 
 ## Examples
 
-- Full local stack: use `./dev_tools/setup_env.sh` through the logging wrapper.
+- Kubernetes: install the published Helm chart from `DEPLOYMENT.md` with the
+  admin account and `appUrl` set.
+- One machine: `docker compose up -d --build` after filling `.env`.
 - Existing deployment: do not reinstall; configure `AUTO_ONTOLOGY_API_URL` and verify
   OAuth discovery before connecting the MCP client.
 
@@ -217,7 +216,7 @@ end-to-end rather than implying it is.
 
 ## Verify
 
-1. UI loads at http://localhost:3000 (or the deployed `APP_URL`) and shows
+1. UI loads at http://localhost:3000 (or the deployed `APP_URL` / Helm `appUrl`) and shows
    the left navigation. Missing nav → stale cookie; see
    [troubleshooting.md](references/troubleshooting.md).
 2. `GET /api/semantic-compilation/status` on the **web** origin authenticates
@@ -229,15 +228,18 @@ end-to-end rather than implying it is.
 ## Stop
 
 ```bash
-docker compose down          # keep volumes
-docker compose down -v       # wipe Postgres / pgAdmin data
+helm uninstall auto-ontology  # Helm; also deletes the postgres-data PVC and its data
+docker compose down           # Compose; keep volumes
+docker compose down -v        # Compose; wipe Postgres / pgAdmin data
 ```
+
+Both `helm uninstall` and `docker compose down -v` destroy data; ask first.
 
 ## Troubleshooting
 
 Use [troubleshooting.md](references/troubleshooting.md) for stale sessions,
 model-key failures, embedding mismatches, port conflicts, and partial Vault
-configuration. Log the command and redact secrets before sharing evidence.
+configuration. Redact secrets before sharing command output as evidence.
 
 ## See also
 

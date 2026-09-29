@@ -19,8 +19,16 @@ To install a published release:
    helm install auto-ontology auto-ontology-1.0.0.tgz \
      --set defaultModelsApiKey=<API-KEY> \
      --set postgresPassword=<POSTGRES-PASSWORD> \
+     --set adminEmail=<ADMIN-EMAIL> \
+     --set adminPassword=<ADMIN-PASSWORD> \
      --set connectionStrings=<CONNECTION-STRINGS>
    ```
+
+   `adminEmail` and `adminPassword` are required: self-service sign-up is
+   disabled, so they create the first admin, and the install fails without
+   them. If users will reach the app somewhere other than
+   `http://localhost:3000` (the port-forward below), also set `appUrl` to that
+   exact origin.
 
 3. Expose the UI:
 
