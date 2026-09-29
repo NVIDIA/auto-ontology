@@ -1,15 +1,20 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Contributing to Auto Ontology
 
-Thank you for your interest in contributing to Auto Ontology!
-Contributions of all kinds are welcome: bug reports, feature requests,
-documentation improvements, and code.
+**This project is currently not accepting external contributions.** Issues,
+pull requests, and patches submitted from outside the Auto Ontology maintainer
+team will not be reviewed or merged. This matches the
+[Contributing](README.md#contributing) section of the README.
 
-## Reporting Issues
+**Do not report security vulnerabilities through GitHub issues.** See
+[SECURITY.md](SECURITY.md) for NVIDIA's coordinated disclosure process.
 
-- Search [existing issues](https://github.com/NVIDIA/auto-ontology/issues) before filing a
-  new one.
-- **Do not report security vulnerabilities through GitHub issues.** See
-  [SECURITY.md](SECURITY.md) for NVIDIA's coordinated disclosure process.
+The rest of this file is for the Auto Ontology maintainers.
 
 ## Development Setup
 
@@ -26,29 +31,16 @@ See the `Makefile` (`make help`) for build and migration targets, and
 
 ## Pull Requests
 
-1. Fork the repository and create your branch from `main`.
+1. Create your branch from `main`.
 2. Add tests for new functionality and make sure the full test suite passes.
 3. Keep pull requests focused — one logical change per PR.
 4. Pull requests targeting `main` require **an approving review from a code
    owner** before they can be merged. Code owners (see `.github/CODEOWNERS`)
    are automatically requested for review. Because a code owner cannot
    approve their own pull request, one of the other owners must review it.
-
-## Developer Certificate of Origin (DCO)
-
-All contributions must be signed off to certify that you wrote the change or
-otherwise have the right to submit it under the project license, per the
-[Developer Certificate of Origin](https://developercertificate.org/).
-
-Add a `Signed-off-by` line to every commit (use `git commit -s`):
-
-```
-Signed-off-by: Your Name <your.email@example.com>
-```
-
-Commits without a valid sign-off cannot be accepted.
+5. New files carry the NVIDIA copyright and SPDX license header used across
+   the repository.
 
 ## License
 
-By contributing to Auto Ontology, you agree that your contributions will be licensed
-under the [Apache License 2.0](LICENSE).
+Auto Ontology is licensed under the [Apache License 2.0](LICENSE).

@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Auto Ontology
 
 Auto Ontology adds the structured-data ontology layer to any partner or NVidia agent harness  interface, like NVIDIA AI-Q Claws, etc
@@ -275,11 +281,38 @@ SPDX-License-Identifier: Apache-2.0
 
 Third-party open-source components used by Auto Ontology are enumerated, with their
 upstream licenses and project URLs, in
-[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md).
+[`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md). Components added by the
+container images are listed separately in
+[`CONTAINER_THIRD_PARTY_NOTICES.md`](./CONTAINER_THIRD_PARTY_NOTICES.md).
+
+## Notice and Disclaimer
+
+NOTICE AND DISCLAIMER: This software automatically retrieves, accesses or
+interacts with external materials. Those retrieved materials are not
+distributed with this software and are governed solely by separate terms,
+conditions and licenses. You are solely responsible for finding, reviewing and
+complying with all applicable terms, conditions, and licenses, and for
+verifying the security, integrity and suitability of any retrieved materials
+for your specific use case. This software is provided "AS IS", without warranty
+of any kind. The author makes no representations or warranties regarding any
+retrieved materials, and assumes no liability for any losses, damages,
+liabilities or legal consequences from your use or inability to use this
+software or any retrieved materials. Use this software and the retrieved
+materials at your own risk.
+
+External materials Auto Ontology interacts with at run time:
+
+| Material | When | Terms |
+| --- | --- | --- |
+| NVIDIA-hosted model APIs ([build.nvidia.com](https://build.nvidia.com), `integrate.api.nvidia.com`) for LLM, embedding, and reranking | Chat, ingestion, and semantic compilation, with the default model configuration | Terms of the NVIDIA API catalog and of each model |
+| Any other OpenAI-compatible model endpoint you configure (`*_ENDPOINT` / `*_MODEL`) | Same | Terms of that provider and model |
+| KumoRFM predictive-query service | Only when `KUMO_RFM_API_KEY` is set | Kumo's terms |
+| Your source databases | Ingestion, profiling, and query execution | Your agreements for those systems |
 
 ## Contributing
 
 **This project is currently not accepting contributions.** Issues, pull
 requests, and patches submitted from outside the Auto Ontology maintainer team will
 not be reviewed or merged. Security-relevant reports should follow the
-process described in [`SECURITY.md`](./SECURITY.md).
+process described in [`SECURITY.md`](./SECURITY.md). Maintainer workflow is in
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).
