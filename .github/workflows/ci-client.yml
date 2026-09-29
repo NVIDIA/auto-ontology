@@ -28,7 +28,10 @@ jobs:
           fetch-depth: 1
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v5
+        # Held at v4: the enterprise action allowlist does not admit v5, and a
+        # blocked action fails the workflow before any step runs. The Node 20
+        # deprecation warning it emits is the lesser cost.
+        uses: pnpm/action-setup@v4
         with:
           version: '10.33.0'
           run_install: false
