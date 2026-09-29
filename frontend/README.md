@@ -25,4 +25,4 @@ To learn more about Next.js, take a look at the following resources:
 
 You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
 
-run gsf from root - cd gsf && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001
+run auto_ontology from root - cd auto_ontology && uv run --project .. uvicorn server.main:app --reload --host 127.0.0.1 --port 3001

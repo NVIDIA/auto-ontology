@@ -2,8 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Publishes the portable GSF Helm chart to nvcr.io as an OCI artifact. The Astra
-# deploy repo (gsf-app-deploy) consumes it as a chart dependency; GitHub and
+# Publishes the portable Auto Ontology Helm chart to nvcr.io as an OCI artifact. The Astra
+# deploy repo (auto-ontology-app-deploy) consumes it as a chart dependency; GitHub and
 # GitLab stay decoupled, linked only through nvcr.io. Requires repo secret:
 #   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
 
@@ -18,12 +18,13 @@ on:
   push:
     branches: [main]
     paths:
-      - 'helm/gsf/**'
+      - 'helm/auto-ontology/**'
 
 env:
-  CHART_DIR: helm/gsf
+  CHART_DIR: helm/auto-ontology
   # nvcr.io allows only org/team/image (3 segments), so the chart is published to
-  # nvcr.io/nvstaging/gsf/gsf (same repo as the app image, distinct -stg.* tags).
+  # nvcr.io/nvstaging/gsf/auto-ontology (same repo as the app image, distinct -stg.* tags;
+  # gsf is the existing NGC team, the chart/image names follow the rename).
   OCI_REPO: oci://nvcr.io/nvstaging/gsf
 
 jobs:
@@ -32,12 +33,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Setup Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: v3.16.4
 
@@ -67,8 +68,8 @@ jobs:
           helm package "$CHART_DIR" \
             --version "${{ steps.ver.outputs.version }}" \
             --app-version "${{ steps.ver.outputs.version }}"
-          helm push "gsf-${{ steps.ver.outputs.version }}.tgz" "$OCI_REPO"
+          helm push "auto-ontology-${{ steps.ver.outputs.version }}.tgz" "$OCI_REPO"
 
       - name: Summary
         run: |
-          echo "Published \`${OCI_REPO}/gsf:${{ steps.ver.outputs.version }}\`" >>"$GITHUB_STEP_SUMMARY"
+          echo "Published \`${OCI_REPO}/auto-ontology:${{ steps.ver.outputs.version }}\`" >>"$GITHUB_STEP_SUMMARY"

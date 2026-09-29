@@ -132,7 +132,7 @@ export const AnalyticsView = () => {
 
 		const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8;' });
 		const url = URL.createObjectURL(blob);
-		const filename = `gsf-analytics-${formatDate(Date.now(), 'YYYY-MM')}.csv`;
+		const filename = `auto-ontology-analytics-${formatDate(Date.now(), 'YYYY-MM')}.csv`;
 		const anchor = document.createElement('a');
 		anchor.href = url;
 		anchor.download = filename;

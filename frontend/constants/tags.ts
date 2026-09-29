@@ -2,6 +2,9 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+/** Mirrors `MAX_TAG_NAME_LENGTH` in `auto_ontology/server/tags/router.py`, which rejects longer. */
+export const MAX_TAG_NAME_LENGTH = 25;
+
 /**
  * Query param asking `/api/tags` to resolve `created_by` / `modified_by` to the
  * accounts they name.
@@ -18,23 +21,12 @@ export const AUTHORS_PARAM = 'authors';
 export const AUTHORS_PARAM_ON = '1';
 
 /**
- * The `created_by` / `modified_by` a tag carries when no person asked for it.
- * Mirrors `SYSTEM_ACTOR` in `gsf/dal/tags.py`.
+ * Shown wherever a person would be named and there is none.
  *
- * Distinct from a null, which means the author was never recorded — a tag made
- * by a caller that reached the backend without the gateway. Both are rendered,
- * and differently: one deployment made the tag, the other simply cannot say who
- * did.
+ * The only alternative to an account, deliberately: a tag with no author, a
+ * label with no account and no rule, and an id whose account has since been
+ * deleted all read the same way. A reader can act on "a person or a rule did
+ * this" and can do nothing with which flavour of nobody it was, so no screen
+ * offers a second answer for it.
  */
-export const SYSTEM_ACTOR = 'system';
-
-/** Shown for `SYSTEM_ACTOR`. */
-export const SYSTEM_ACTOR_LABEL = 'Auto Generated';
-
-/**
- * Shown for a null author, and for an id whose account is gone — the ids are
- * not foreign keys, so a deleted user leaves one behind that resolves to
- * nothing. Both are the same thing to a reader: there is a tag, and nobody left
- * to attribute it to.
- */
-export const UNKNOWN_ACTOR_LABEL = 'Unknown';
+export const AUTO_GENERATED_LABEL = 'Auto Generated';

@@ -18,9 +18,10 @@ export const openapi: OpenApiRoute = {
 				.literal(AUTHORS_PARAM_ON)
 				.optional()
 				.describe(
-					'Resolve `created_by` / `modified_by` to the accounts they name, adding ' +
-						'`created_by_user` and `modified_by_user` beside them. Off by default: this ' +
-						"view renders a tag's name and the objects carrying it, and reads no author.",
+					'Resolve the account ids this answer carries to the accounts they ' +
+						'name: `created_by` and `modified_by`, added beside them as ' +
+						'`*_user`. Off by default, and the detail view asks for it — it ' +
+						'shows who curated the tag.',
 				),
 		}),
 	},

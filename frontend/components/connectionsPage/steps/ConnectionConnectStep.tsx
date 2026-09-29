@@ -9,16 +9,22 @@ import { Spinner } from '@nvidia/foundations-react-core';
 import { Button } from '@/common/Button';
 import { Size, ButtonTheme } from '@/enums/button';
 import {
-	CONNECTION_FIELDS,
+	connectionFieldsFor,
 	connectionDisplayName,
 	type ConnectionFieldKey,
 	type ConnectionType,
 } from '@/enums/connection';
 
+const EMPTY_KEYS: ReadonlySet<ConnectionFieldKey> = new Set();
+
 export type ConnectionConnectStepProps = {
 	connectionType: ConnectionType;
 	values: Partial<Record<ConnectionFieldKey, string>>;
 	onFieldChange: (key: ConnectionFieldKey, value: string) => void;
+	/** Shown but not editable — the connection's identity on the backend. */
+	readOnlyKeys?: ReadonlySet<ConnectionFieldKey>;
+	/** Blank keeps the stored value, so these are never required. */
+	keepCurrentKeys?: ReadonlySet<ConnectionFieldKey>;
 	loading?: boolean;
 	testSuccessMessage?: string | null;
 	onTestConnection?: () => void;
@@ -30,6 +36,8 @@ export const ConnectionConnectStep = ({
 	connectionType,
 	values,
 	onFieldChange,
+	readOnlyKeys = EMPTY_KEYS,
+	keepCurrentKeys = EMPTY_KEYS,
 	loading = false,
 	testSuccessMessage = null,
 	onTestConnection,
@@ -45,7 +53,7 @@ export const ConnectionConnectStep = ({
 	}
 
 	const testButtonDisabled = testDisabled || testingConnection;
-	const fields = CONNECTION_FIELDS[connectionType];
+	const fields = connectionFieldsFor(connectionType);
 
 	return (
 		<div className="flex flex-1 flex-col gap-4 p-2">
@@ -134,11 +142,17 @@ export const ConnectionConnectStep = ({
 						);
 					}
 
+					const readOnly = readOnlyKeys.has(field.key);
+					const keepsCurrent = keepCurrentKeys.has(field.key);
+					const className = readOnly
+						? `${inputClassName} cursor-not-allowed bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`
+						: inputClassName;
+
 					return (
 						<label key={field.key} className="flex flex-col gap-1.5">
 							<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
 								{field.label}
-								{field.optional ? null : (
+								{field.optional || keepsCurrent ? null : (
 									<span className="ml-0.5 text-red-500">*</span>
 								)}
 							</span>
@@ -151,8 +165,9 @@ export const ConnectionConnectStep = ({
 									placeholder={field.placeholder}
 									rows={5}
 									spellCheck={false}
+									readOnly={readOnly}
 									data-testid={`connection-field-${field.key}`}
-									className={`${inputClassName} resize-y`}
+									className={`${className} resize-y`}
 								/>
 							) : (
 								<input
@@ -161,9 +176,15 @@ export const ConnectionConnectStep = ({
 									onChange={onChange}
 									placeholder={field.placeholder}
 									autoComplete={field.secret ? 'new-password' : 'off'}
+									readOnly={readOnly}
 									data-testid={`connection-field-${field.key}`}
-									className={inputClassName}
+									className={className}
 								/>
+							)}
+							{keepsCurrent && (
+								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									Leave empty to keep the stored value.
+								</span>
 							)}
 							{field.hint != null && (
 								<span className="text-xs text-zinc-500 dark:text-zinc-400">

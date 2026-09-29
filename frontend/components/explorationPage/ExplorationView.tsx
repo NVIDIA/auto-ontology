@@ -67,7 +67,7 @@ const LINK_PATH_ORIGIN_PREFIX = '__link_path__:';
 const linkPathOriginId = (edgeId: string): string => `${LINK_PATH_ORIGIN_PREFIX}${edgeId}`;
 
 // The four types an `ExplorationLinkPathHopDto` node can be (see
-// `find_term_link_path` in `gsf/dal/attributes.py`) — narrows the backend's
+// `find_term_link_path` in `auto_ontology/dal/attributes.py`) — narrows the backend's
 // plain `string` `type` down to `ExpansionNodeInput`'s stricter `NodeType`
 // union, since a hop node otherwise carries no compile-time guarantee of
 // matching it.
@@ -725,7 +725,7 @@ export const ExplorationView = () => {
 						label: attribute.name,
 					});
 					// The real direction is `(ColumnAttribute)-[:PROPERTY_OF]->(Term)`
-					// (see `fetch_column_attributes` in `gsf/dal/terms.py`) — drawn
+					// (see `fetch_column_attributes` in `auto_ontology/dal/terms.py`) — drawn
 					// from the term regardless, same as every other structural edge
 					// `addExpansion` grafts on.
 					expansionEdges.push({ source: termEntity.id, target: attributeNodeId });
@@ -1727,7 +1727,7 @@ export const ExplorationView = () => {
 					// A `table`/`column` side carries its own database/schema
 					// ids (a `column` its owning `table_id`/`table_name` too —
 					// see `_enrich_catalog_path_nodes` in
-					// `gsf/dal/attributes.py`) so either can be expanded
+					// `auto_ontology/dal/attributes.py`) so either can be expanded
 					// onward exactly like a Term's/Schema's/Column's own
 					// Table (or a Table's own Column) neighbours elsewhere in
 					// this file — `columnAttribute` never does (no such

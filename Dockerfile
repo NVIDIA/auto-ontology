@@ -1,23 +1,21 @@
-# syntax=docker/dockerfile:1.7
-
 # ---------------------------------------------------------------------------
-# GSF FastAPI backend image
+# Auto Ontology FastAPI backend image
 # ---------------------------------------------------------------------------
 # Build (default — uses the committed nemo-retriever stub; image starts and
 # serves /api/health but real chat/datasource calls raise NotImplementedError):
 #
-#   docker build -t gsf:latest .
+#   docker build -t auto-ontology:latest .
 #
 # Build with the real NeMo-Retriever source — point a BuildKit named context
 # at any local clone of the upstream repo (no copy into this repo):
 #
 #   docker build \
 #       --build-context nemo=/path/to/NeMo-Retriever \
-#       -t gsf:latest .
+#       -t auto-ontology:latest .
 #
 # Run:
 #
-#   docker run --rm -p 3001:3001 --env-file .env gsf:latest
+#   docker run --rm -p 3001:3001 --env-file .env auto-ontology:latest
 #
 # ---------------------------------------------------------------------------
 
@@ -82,32 +80,32 @@ RUN apt-get update \
         libpq5 \
         tini \
  && rm -rf /var/lib/apt/lists/* \
- && groupadd --system --gid 1000 gsf \
- && useradd  --system --uid 1000 --gid gsf --home /app --shell /usr/sbin/nologin gsf
+ && groupadd --system --gid 1000 auto_ontology \
+ && useradd  --system --uid 1000 --gid auto_ontology --home /app --shell /usr/sbin/nologin auto_ontology
 
 WORKDIR /app
 
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=gsf:gsf gsf/ ./gsf/
-COPY --chown=gsf:gsf pyproject.toml ./
+COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
+COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
 # Schema migrations for the `public` schema, run by the `migrate` mode below.
-COPY --chown=gsf:gsf alembic/ ./alembic/
-COPY --chown=gsf:gsf alembic.ini ./
+COPY --chown=auto_ontology:auto_ontology alembic/ ./alembic/
+COPY --chown=auto_ontology:auto_ontology alembic.ini ./
 
 # Dispatcher entrypoint: selects between the FastAPI server, the ingestion
 # service, and the one-shot schema migration based on the first arg.
-# Defaults to gsf.server.
+# Defaults to auto_ontology.server.
 COPY --chmod=0755 <<'EOF' /usr/local/bin/entrypoint.sh
 #!/bin/sh
 set -e
 mode="${1:-server}"
 case "$mode" in
   server)
-    exec python -m gsf.server
+    exec python -m auto_ontology.server
     ;;
   ingestion_service)
-    exec python -m gsf.ingestion_service
+    exec python -m auto_ontology.ingestion_service
     ;;
   migrate)
     # Owns `public` only. Prisma owns `frontend` and migrates separately;
@@ -122,7 +120,7 @@ case "$mode" in
 esac
 EOF
 
-USER gsf
+USER auto_ontology
 
 EXPOSE 3001
 

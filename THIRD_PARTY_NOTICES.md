@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-Generative Semantic Fabric (GSF) — Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+Auto Ontology — Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
 
 This product includes the third-party open-source software listed below.
 The complete text of each license referenced here is reproduced in the
@@ -131,7 +131,7 @@ accompanies each upstream project at the URLs above.
 - **PostgreSQL License** — https://opensource.org/license/postgresql/
 - **OpenLDAP Public License** — https://www.openldap.org/software/release/license.html
 
-The Apache 2.0 license under which GSF is distributed is fully compatible
+The Apache 2.0 license under which Auto Ontology is distributed is fully compatible
 with each of the licenses listed above when those components are used as
 unmodified upstream dependencies. If you redistribute any modified copy of
 a third-party component, you must preserve and follow the terms of that

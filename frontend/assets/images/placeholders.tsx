@@ -4,6 +4,8 @@
 
 import type { ReactNode } from 'react';
 
+import { Icon, IconName } from '@/common/icons';
+
 const PlaceholderFrame = ({ children }: { children: ReactNode }) => (
 	<div
 		className="flex h-40 w-56 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-300/90 bg-zinc-50/80 dark:border-zinc-600 dark:bg-zinc-900/40"
@@ -59,6 +61,15 @@ export const Placeholders = {
 						clipRule="evenodd"
 					/>
 				</svg>
+			</PlaceholderFrame>
+		);
+	},
+	NoRules: function NoRules() {
+		return (
+			<PlaceholderFrame>
+				{/* The icon rules are drawn with everywhere else, taken from the icon
+				    set rather than copied so the two never drift apart. */}
+				<Icon name={IconName.Lightning} className={iconClassName} />
 			</PlaceholderFrame>
 		);
 	},

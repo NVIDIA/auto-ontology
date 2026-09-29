@@ -14,6 +14,7 @@ import type { Connection } from '@/types/connection';
 type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
+	onEdit?: (connection: Connection) => void;
 	onDelete?: (databaseName: string) => void;
 	onSsoFederationChange?: (databaseName: string, enabled: boolean) => void;
 	/** Database name whose SSO-federation request is currently in flight. */
@@ -23,6 +24,7 @@ type ConnectionsInfoCardViewProps = {
 export const ConnectionsInfoCardView = ({
 	connections,
 	loading = false,
+	onEdit,
 	onDelete,
 	onSsoFederationChange,
 	ssoFederationPending = null,
@@ -53,6 +55,7 @@ export const ConnectionsInfoCardView = ({
 				<ConnectionInfoCard
 					key={connection.database_name}
 					connection={connection}
+					onEdit={onEdit}
 					onDelete={onDelete}
 					onSsoFederationChange={onSsoFederationChange}
 					ssoFederationPending={ssoFederationPending === connection.database_name}

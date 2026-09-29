@@ -1,0 +1,186 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Builds the three Auto Ontology release images (backend + ingestion, frontend,
+# MCP) for amd64 and arm64 and pushes them to <registry>/<image>:<version>.
+# These are the staged images: NGC Catalog publishing later copies them to
+# nvidia. The chart is published separately by release-helm.yml, and its
+# values.yaml names the images at that published path, with the tag pushed here.
+#
+# Run it on a release branch: dispatched on release/v1.0 with no version, it
+# builds that branch and tags the images 1.0. Requires repo secret:
+#   NGC_API_KEY - an NGC API key with push access to the target registry
+#                 (shared with the staging-publish-* workflows, so the key
+#                 must also keep push access to nvcr.io/nvstaging/gsf)
+
+name: Release - Docker
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Image tag to release (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'Target nvcr.io org[/team]'
+        required: false
+        type: string
+        default: 'nvcr.io/nvstaging/gsf'
+      dry-run:
+        description: 'Build without logging in or pushing'
+        required: false
+        type: boolean
+        default: false
+      overwrite:
+        description: 'Push even if the tag already exists'
+        required: false
+        type: boolean
+        default: false
+
+  # Called by release-all.yml, with the same inputs as a manual run.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Image tag to release (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      registry:
+        description: 'Target nvcr.io org[/team]'
+        required: false
+        type: string
+        default: 'nvcr.io/nvstaging/gsf'
+      dry-run:
+        description: 'Build without logging in or pushing'
+        required: false
+        type: boolean
+        default: false
+      overwrite:
+        description: 'Push even if the tag already exists'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      NGC_API_KEY:
+        required: true
+
+env:
+  PLATFORMS: linux/amd64,linux/arm64
+
+permissions:
+  contents: read
+
+jobs:
+  determine-version:
+    name: Determine Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Extract version from branch or input
+        id: version
+        uses: ./.github/actions/determine-release-version
+        with:
+          version: ${{ inputs.version }}
+
+  build-and-publish:
+    name: Build & Publish ${{ matrix.image }}
+    needs: determine-version
+    runs-on: ubuntu-latest
+    strategy:
+      # One image failing shouldn't cancel the others mid-push; a re-run with
+      # `overwrite` finishes whichever did not make it.
+      fail-fast: false
+      matrix:
+        include:
+          - image: auto-ontology
+            context: .
+            build-args: ''
+          - image: auto-ontology-frontend
+            context: frontend
+            # Baked into the Next.js rewrites at build time; must match the
+            # in-cluster backend Service name created by the helm chart.
+            build-args: --build-arg PYTHON_API_URL=http://auto-ontology:3001
+          - image: auto-ontology-mcp
+            context: mcp
+            build-args: ''
+    env:
+      IMAGE_REF: ${{ inputs.registry }}/${{ matrix.image }}:${{ needs.determine-version.outputs.version }}
+      # Dispatch inputs reach the shell through the environment, never by
+      # interpolation into a script that runs with the NGC key available.
+      DRY_RUN: ${{ inputs.dry-run }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost || true
+          df -h /
+
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        uses: ./.github/actions/setup-docker-buildx
+        with:
+          use-qemu: 'true'
+          platforms: ${{ env.PLATFORMS }}
+
+      - name: Login to NGC
+        if: ${{ !inputs.dry-run }}
+        uses: ./.github/actions/docker-login-ngc
+        with:
+          password: ${{ secrets.NGC_API_KEY }}
+
+      # A release tag others have already pulled should not change underneath
+      # them.
+      - name: Refuse to overwrite an existing tag
+        if: ${{ !inputs.dry-run && !inputs.overwrite }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE_REF" >/dev/null 2>&1; then
+            echo "::error::$IMAGE_REF already exists; bump the version or re-run with overwrite"
+            exit 1
+          fi
+
+      - name: Build and Push Multi-platform Image
+        run: |
+          OUTPUT=--push
+          if [ "$DRY_RUN" = "true" ]; then
+            OUTPUT=
+          fi
+          docker buildx build \
+            --platform "$PLATFORMS" \
+            --provenance=false \
+            ${{ matrix.build-args }} \
+            -t "$IMAGE_REF" \
+            $OUTPUT \
+            "${{ matrix.context }}"
+
+      - name: Summary
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "Built (dry run, not pushed): \`$IMAGE_REF\`" >>"$GITHUB_STEP_SUMMARY"
+          else
+            echo "Published Docker image: \`$IMAGE_REF\`" >>"$GITHUB_STEP_SUMMARY"
+          fi

@@ -256,6 +256,89 @@ wheels = [
 ]
 
 [[package]]
+name = "auto-ontology-server"
+version = "1.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "alembic" },
+    { name = "apache-ossie-nvidia-gsf" },
+    { name = "databricks-sql-connector" },
+    { name = "duckdb" },
+    { name = "fastapi" },
+    { name = "httpx" },
+    { name = "hvac" },
+    { name = "importlib-metadata" },
+    { name = "langchain-openai" },
+    { name = "langchain-postgres" },
+    { name = "langgraph" },
+    { name = "mysql-connector-python" },
+    { name = "nemo-retriever" },
+    { name = "nvidia-sdfm", extra = ["kumorfm"] },
+    { name = "pandas" },
+    { name = "psycopg", extra = ["binary"] },
+    { name = "psycopg-pool" },
+    { name = "pure-sasl" },
+    { name = "pydantic" },
+    { name = "pyheavydb" },
+    { name = "pyhive", extra = ["hive-pure-sasl"] },
+    { name = "pyjks" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "snowflake-connector-python" },
+    { name = "sqlalchemy" },
+    { name = "thrift" },
+    { name = "thrift-sasl" },
+    { name = "trino" },
+    { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "alembic", specifier = ">=1.19.1" },
+    { name = "apache-ossie-nvidia-gsf", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia" },
+    { name = "databricks-sql-connector", specifier = ">=4.4.0" },
+    { name = "duckdb", specifier = ">=1.5.5" },
+    { name = "fastapi", specifier = ">=0.141.1" },
+    { name = "httpx", specifier = ">=0.28.1" },
+    { name = "hvac", specifier = ">=2.4.0" },
+    { name = "importlib-metadata", specifier = ">=8.7.1" },
+    { name = "langchain-openai", specifier = ">=1.6.0" },
+    { name = "langchain-postgres", specifier = ">=0.0.17" },
+    { name = "langgraph", specifier = ">=1.2.11" },
+    { name = "mysql-connector-python", specifier = ">=26.7.0" },
+    { name = "nemo-retriever", specifier = ">=26.8.1" },
+    { name = "nvidia-sdfm", extras = ["kumorfm"], specifier = ">=0.2.1" },
+    { name = "pandas", specifier = ">=2.3.3,<3" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
+    { name = "psycopg-pool", specifier = ">=3.3.1" },
+    { name = "pure-sasl", specifier = ">=0.6.2" },
+    { name = "pydantic", specifier = ">=2.13.5" },
+    { name = "pyheavydb", specifier = ">=8.0.1.post1" },
+    { name = "pyhive", extras = ["hive-pure-sasl"], specifier = ">=0.7.0" },
+    { name = "pyjks", specifier = ">=20.0.0" },
+    { name = "python-dotenv", specifier = ">=1.2.3" },
+    { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "snowflake-connector-python", specifier = ">=4.7.2" },
+    { name = "sqlalchemy", specifier = ">=2.0.52" },
+    { name = "thrift", specifier = ">=0.24.0" },
+    { name = "thrift-sasl", specifier = ">=0.4.3" },
+    { name = "trino", specifier = ">=0.339.0" },
+    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=9.1.1" },
+    { name = "ruff", specifier = ">=0.16.5" },
+]
+
+[[package]]
 name = "backoff"
 version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1019,89 +1102,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/22/7d/df987d7d81e7ad2f7516d9e9d56ff29c54dbc6d8587e425688dca9a28e49/grpcio_tools-1.81.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:bdbdc927be2e0ea13c32564a72ee31d712a716fb6f8c0d53d37a77d8277c272c", size = 3370488, upload-time = "2026-06-11T12:50:47.199Z" },
     { url = "https://files.pythonhosted.org/packages/ba/c5/5a63444d694ea47bf670138208f71830cc1759c402c8818092b28ab2dc5f/grpcio_tools-1.81.1-cp313-cp313-win32.whl", hash = "sha256:9d383724bcd67244b6def9e9164c640ee9380c0b7534ee7545a6fb0022a59afe", size = 1008229, upload-time = "2026-06-11T12:50:49.527Z" },
     { url = "https://files.pythonhosted.org/packages/00/75/3945e26d5c94ae6ed9be5caef73d4d66c47dc8cfdd7b4995efaf942754e0/grpcio_tools-1.81.1-cp313-cp313-win_amd64.whl", hash = "sha256:f3eb15849979ca7bb864ce81a74d68b0f225a7f111ed3fe212bfc08cf9812b10", size = 1174523, upload-time = "2026-06-11T12:50:51.755Z" },
-]
-
-[[package]]
-name = "gsf-server"
-version = "0.1.1"
-source = { editable = "." }
-dependencies = [
-    { name = "alembic" },
-    { name = "apache-ossie-nvidia-gsf" },
-    { name = "databricks-sql-connector" },
-    { name = "duckdb" },
-    { name = "fastapi" },
-    { name = "httpx" },
-    { name = "hvac" },
-    { name = "importlib-metadata" },
-    { name = "langchain-openai" },
-    { name = "langchain-postgres" },
-    { name = "langgraph" },
-    { name = "mysql-connector-python" },
-    { name = "nemo-retriever" },
-    { name = "nvidia-sdfm", extra = ["kumorfm"] },
-    { name = "pandas" },
-    { name = "psycopg", extra = ["binary"] },
-    { name = "psycopg-pool" },
-    { name = "pure-sasl" },
-    { name = "pydantic" },
-    { name = "pyheavydb" },
-    { name = "pyhive", extra = ["hive-pure-sasl"] },
-    { name = "pyjks" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "snowflake-connector-python" },
-    { name = "sqlalchemy" },
-    { name = "thrift" },
-    { name = "thrift-sasl" },
-    { name = "trino" },
-    { name = "uvicorn", extra = ["standard"] },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "alembic", specifier = ">=1.19.1" },
-    { name = "apache-ossie-nvidia-gsf", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia" },
-    { name = "databricks-sql-connector", specifier = ">=4.4.0" },
-    { name = "duckdb", specifier = ">=1.5.5" },
-    { name = "fastapi", specifier = ">=0.141.1" },
-    { name = "httpx", specifier = ">=0.28.1" },
-    { name = "hvac", specifier = ">=2.4.0" },
-    { name = "importlib-metadata", specifier = ">=8.7.1" },
-    { name = "langchain-openai", specifier = ">=1.6.0" },
-    { name = "langchain-postgres", specifier = ">=0.0.17" },
-    { name = "langgraph", specifier = ">=1.2.11" },
-    { name = "mysql-connector-python", specifier = ">=26.7.0" },
-    { name = "nemo-retriever", specifier = ">=26.8.1" },
-    { name = "nvidia-sdfm", extras = ["kumorfm"], specifier = ">=0.2.1" },
-    { name = "pandas", specifier = ">=2.3.3,<3" },
-    { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
-    { name = "psycopg-pool", specifier = ">=3.3.1" },
-    { name = "pure-sasl", specifier = ">=0.6.2" },
-    { name = "pydantic", specifier = ">=2.13.5" },
-    { name = "pyheavydb", specifier = ">=8.0.1.post1" },
-    { name = "pyhive", extras = ["hive-pure-sasl"], specifier = ">=0.7.0" },
-    { name = "pyjks", specifier = ">=20.0.0" },
-    { name = "python-dotenv", specifier = ">=1.2.3" },
-    { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "snowflake-connector-python", specifier = ">=4.7.2" },
-    { name = "sqlalchemy", specifier = ">=2.0.52" },
-    { name = "thrift", specifier = ">=0.24.0" },
-    { name = "thrift-sasl", specifier = ">=0.4.3" },
-    { name = "trino", specifier = ">=0.339.0" },
-    { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=9.1.1" },
-    { name = "ruff", specifier = ">=0.16.5" },
 ]
 
 [[package]]
@@ -3523,8 +3523,8 @@ name = "secretstorage"
 version = "3.5.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "cryptography", marker = "sys_platform != 'win32'" },
-    { name = "jeepney", marker = "sys_platform != 'win32'" },
+    { name = "cryptography" },
+    { name = "jeepney" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1c/03/e834bcd866f2f8a49a85eaff47340affa3bfa391ee9912a952a1faa68c7b/secretstorage-3.5.0.tar.gz", hash = "sha256:f04b8e4689cbce351744d5537bf6b1329c6fc68f91fa666f60a380edddcd11be", size = 19884, upload-time = "2025-11-23T19:02:53.191Z" }
 wheels = [

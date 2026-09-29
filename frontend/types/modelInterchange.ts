@@ -4,7 +4,7 @@
 
 import type { ModelFormat } from '@/enums/modelInterchange';
 
-/** Per-entity counts returned by POST /api/model/import (see gsf/dal/model_interchange.py). */
+/** Per-entity counts returned by POST /api/model/import (see auto_ontology/dal/model_interchange.py). */
 export type ImportEntityCounts = {
 	databases: number;
 	schemas: number;

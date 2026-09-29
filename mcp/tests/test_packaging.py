@@ -11,13 +11,13 @@ from pathlib import Path
 
 import pytest
 
-import gsf_mcp
-from gsf_mcp.config import DEFAULT_SPEC_PATH
-from gsf_mcp.server import ICON_PATH
+import auto_ontology_mcp
+from auto_ontology_mcp.config import DEFAULT_SPEC_PATH
+from auto_ontology_mcp.server import ICON_PATH
 
-_PACKAGE_DIR = Path(gsf_mcp.__file__).resolve().parent
+_PACKAGE_DIR = Path(auto_ontology_mcp.__file__).resolve().parent
 _PROJECT_DIR = _PACKAGE_DIR.parent
-_CANONICAL_SPEC = _PROJECT_DIR.parent / "docs" / "openapi" / "gsf-api.json"
+_CANONICAL_SPEC = _PROJECT_DIR.parent / "docs" / "openapi" / "auto-ontology-api.json"
 _CANONICAL_MARK = _PROJECT_DIR.parent / "frontend" / "public" / "favicon.svg"
 
 
@@ -38,7 +38,7 @@ def test_packaged_spec_matches_the_canonical_one() -> None:
         pytest.skip("installed outside the repo; nothing to compare against")
 
     assert DEFAULT_SPEC_PATH.read_bytes() == _CANONICAL_SPEC.read_bytes(), (
-        "The packaged spec drifted from docs/openapi/gsf-api.json. "
+        "The packaged spec drifted from docs/openapi/auto-ontology-api.json. "
         "Run `pnpm openapi` and commit both files."
     )
 
@@ -64,27 +64,29 @@ def test_both_assets_are_forced_into_the_wheel() -> None:
     # startup and finds nothing.
     forced = _pyproject()["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
 
-    assert "gsf_mcp/gsf-api.json" in forced
-    assert "gsf_mcp/nvidia-mark.svg" in forced
+    assert "auto_ontology_mcp/auto-ontology-api.json" in forced
+    assert "auto_ontology_mcp/nvidia-mark.svg" in forced
 
 
 def test_console_script_is_declared() -> None:
-    # The whole point of the separate distribution: `gsf-mcp` on PATH, and
-    # `uvx gsf-mcp` without installing anything.
-    assert _pyproject()["project"]["scripts"] == {"gsf-mcp": "gsf_mcp.__main__:main"}
+    # The whole point of the separate distribution: `auto-ontology-mcp` on PATH, and
+    # `uvx auto-ontology-mcp` without installing anything.
+    assert _pyproject()["project"]["scripts"] == {
+        "auto-ontology-mcp": "auto_ontology_mcp.__main__:main"
+    }
 
 
 def test_stays_independent_of_the_backend_distribution() -> None:
-    # Depending on gsf-server would drag in ~450 packages and its git
+    # Depending on auto-ontology-server would drag in ~450 packages and its git
     # dependencies, which is the thing this package exists to avoid.
     names = _pyproject()["project"]["dependencies"]
 
-    assert not any("gsf-server" in name for name in names)
+    assert not any("auto-ontology-server" in name for name in names)
     assert len(names) <= 5
 
 
 def test_version_is_reported_not_raised() -> None:
     # Running from an uninstalled source tree is a normal way to develop and
     # must not stop the server from starting.
-    assert isinstance(gsf_mcp.get_version(), str)
-    assert gsf_mcp.get_version()
+    assert isinstance(auto_ontology_mcp.get_version(), str)
+    assert auto_ontology_mcp.get_version()

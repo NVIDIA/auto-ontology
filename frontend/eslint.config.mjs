@@ -37,7 +37,7 @@ const eslintConfig = defineConfig([
 	...nextVitals,
 	...nextTs,
 	routeAuthCoverage,
-	globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts']),
+	globalIgnores(['.next/**', 'out/**', 'build/**', 'next-env.d.ts', '.cache/**']),
 ]);
 
 export default eslintConfig;

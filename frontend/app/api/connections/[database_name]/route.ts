@@ -5,5 +5,8 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
+// connectionsApi.update — rewrite a connection's settings (admin only).
+export const PUT = withPermission({ connection: ['manage'] })((req) => proxyToBackend(req));
+
 // connectionsApi.delete — remove a connection (admin only).
 export const DELETE = withPermission({ connection: ['manage'] })((req) => proxyToBackend(req));

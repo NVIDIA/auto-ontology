@@ -74,7 +74,7 @@ export type ErrorEvent = {
 
 /**
  * Message 2 — the chart or fallback result table, generated and persisted
- * server-side (see `gsf/server/chat/router.py`'s `_pump`) right after the SQL
+ * server-side (see `auto_ontology/server/chat/router.py`'s `_pump`) right after the SQL
  * answer, using the same guarantee as Message 1: it exists whether or not a
  * browser tab is still around to ask for it. Omitted entirely when there was
  * no executed result to visualize.

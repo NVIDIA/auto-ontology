@@ -31,7 +31,7 @@ export const openapi: OpenApiRoute = {
 			201: {
 				description:
 					'The created token. `token` is the plaintext secret and is returned ' +
-					'only here — GSF stores just its hash.',
+					'only here — Auto Ontology stores just its hash.',
 				schema: apiTokenSchema.extend({ token: z.string() }),
 			},
 			400: { description: '`name` is missing, or `expires_in_days` is out of range.' },

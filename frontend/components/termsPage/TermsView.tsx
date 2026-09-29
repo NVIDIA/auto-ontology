@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import { Breadcrumbs } from '@/common/Breadcrumbs';
@@ -220,6 +221,10 @@ const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 da
 
 export const TermsView = () => {
 	const router = useRouter();
+	// The tag picker's options come from the shared cache rather than a read of
+	// this page's own, so opening a term after a column attribute doesn't ask
+	// for the vocabulary twice.
+	const queryClient = useQueryClient();
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
@@ -317,7 +322,7 @@ export const TermsView = () => {
 		async (skip: number, limit: number) => {
 			const query = debouncedSearchQuery;
 			const res = await termsApi.list({
-				...(query ? { q: query } : {}),
+				...(query ? { query } : {}),
 				skip,
 				limit,
 			});
@@ -913,7 +918,7 @@ export const TermsView = () => {
 			// userZoneIds = null → all zones accessible).
 			const [res, tagOptions] = await Promise.all([
 				termsApi.getColumnAttributes(focusId),
-				fetchTagOptions(),
+				fetchTagOptions(queryClient),
 			]);
 			const attrs = res.error ? [] : (res.data ?? []);
 			const attr = attrs.find((a) => a.id === attrId);
@@ -1001,14 +1006,14 @@ export const TermsView = () => {
 				],
 			};
 		},
-		[focusId],
+		[focusId, queryClient],
 	);
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
 			const [res, tagOptions] = await Promise.all([
 				sqlAttributesApi.get(attrId),
-				fetchTagOptions(),
+				fetchTagOptions(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {
@@ -1067,144 +1072,147 @@ export const TermsView = () => {
 				],
 			};
 		},
-		[],
+		[queryClient],
 	);
 
-	const getSinglePage = useCallback(async (termId: string): Promise<SinglePageFormat> => {
-		const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
-			termsApi.get(termId),
-			termsApi.getColumnAttributes(termId),
-			termsApi.getSqlAttributes(termId),
-			fetchTagOptions(),
-		]);
-		if (res.error || !res.data) {
-			return {
-				sections: [],
-				header: { header: { title: 'Term not found' } },
-			};
-		}
-		const term = res.data;
-		const termAttrs = attrsRes?.data ?? [];
-		const termSqlAttrs = sqlAttrsRes?.data ?? [];
-		// The header reads this when the term isn't on a page the list loaded,
-		// which is the normal case for a link straight into a term.
-		setFocusedTermDetail(term);
-		const relatedTerms = term.related_terms ?? [];
-		// Populate the sqlAttrs/columnAttrs caches from this term's own
-		// attributes (fetched per-term above) rather than a global list —
-		// the Terms list endpoint only returns counts, not the attribute
-		// nodes themselves, to avoid pulling every attribute in the graph
-		// on every page load. This keeps breadcrumb titles working once
-		// the user has opened this term's detail page.
-		setSqlAttrs(termSqlAttrs);
-		setColumnAttrs(termAttrs);
+	const getSinglePage = useCallback(
+		async (termId: string): Promise<SinglePageFormat> => {
+			const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
+				termsApi.get(termId),
+				termsApi.getColumnAttributes(termId),
+				termsApi.getSqlAttributes(termId),
+				fetchTagOptions(queryClient),
+			]);
+			if (res.error || !res.data) {
+				return {
+					sections: [],
+					header: { header: { title: 'Term not found' } },
+				};
+			}
+			const term = res.data;
+			const termAttrs = attrsRes?.data ?? [];
+			const termSqlAttrs = sqlAttrsRes?.data ?? [];
+			// The header reads this when the term isn't on a page the list loaded,
+			// which is the normal case for a link straight into a term.
+			setFocusedTermDetail(term);
+			const relatedTerms = term.related_terms ?? [];
+			// Populate the sqlAttrs/columnAttrs caches from this term's own
+			// attributes (fetched per-term above) rather than a global list —
+			// the Terms list endpoint only returns counts, not the attribute
+			// nodes themselves, to avoid pulling every attribute in the graph
+			// on every page load. This keeps breadcrumb titles working once
+			// the user has opened this term's detail page.
+			setSqlAttrs(termSqlAttrs);
+			setColumnAttrs(termAttrs);
 
-		return {
-			header: {
+			return {
 				header: {
-					title: term.name,
-					titleEditable: true,
-					certification: { certified: term.name_certified },
+					header: {
+						title: term.name,
+						titleEditable: true,
+						certification: { certified: term.name_certified },
+					},
 				},
-			},
-			sections: [
-				{
-					type: ComposerSectionKind.TEXT_CARD,
-					id: 'description',
-					title: 'Description',
-					body: term.description ?? '',
-					editable: true,
-					certification: { certified: term.description_certified },
-				},
-				{
-					type: ComposerSectionKind.TAG_LIST,
-					id: 'synonyms',
-					title: 'Synonyms',
-					values: term.synonyms ?? [],
-				},
-				{
-					type: ComposerSectionKind.ENTITY_CHIPS,
-					id: 'entities',
-					title: 'Entities',
-					entities: (term.tables ?? []).map((table) => ({
-						id: table.id,
-						name: table.name,
-						focusId: [table.db_id, table.schema_id, table.id].join('|'),
-					})),
-				},
-				entityTagsSection(term.tags, tagOptions),
-				{
-					type: ComposerSectionKind.ZONES_CHIPS,
-					id: 'zones',
-					title: 'Zones',
-					zones: term.zones.map((z) => ({
-						id: z.id,
-						name: z.name,
-						color: z.color,
-						enabled: z.enabled,
-					})),
-				},
-				{
-					type: ComposerSectionKind.RELATED_TERMS_CHIPS,
-					id: 'related_terms',
-					title: 'Related Terms',
-					terms: relatedTerms.map((t) => ({
-						id: t.id,
-						name: t.name,
-					})),
-				},
-				{
-					type: ComposerSectionKind.DATA_TABLE,
-					id: 'column_attributes',
-					title: 'Column Attributes',
-					rowIdKey: 'id',
-					layout: 'fixed',
-					columns: [
-						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-						{ key: 'description', label: 'Description', truncate: true },
-						{
-							key: 'certification',
-							label: 'Certification',
-							type: ComposerColumnType.CERTIFICATION,
-							align: 'center',
-							width: 'w-44',
-						},
-					],
-					rows: termAttrs.map((attr) => ({
-						id: attr.id,
-						name: attr.name,
-						description: attr.description ?? '',
-						certification: attributeStatus(attr),
-					})),
-				},
-				{
-					type: ComposerSectionKind.DATA_TABLE,
-					id: 'sql_attributes',
-					title: 'SQL Attributes',
-					rowIdKey: 'id',
-					layout: 'fixed',
-					columns: [
-						{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
-						{ key: 'description', label: 'Description', truncate: true },
-						{
-							key: 'certification',
-							label: 'Certification',
-							type: ComposerColumnType.CERTIFICATION,
-							align: 'center',
-							width: 'w-44',
-						},
-					],
-					rows: termSqlAttrs.map((attr) => ({
-						id: attr.id,
-						name: attr.name,
-						description: attr.description ?? '',
-						certification: attributeStatus(attr),
-					})),
-					emptyMessage: 'SQL attribute does not exist',
-				},
-			],
-		};
-	}, []);
+				sections: [
+					{
+						type: ComposerSectionKind.TEXT_CARD,
+						id: 'description',
+						title: 'Description',
+						body: term.description ?? '',
+						editable: true,
+						certification: { certified: term.description_certified },
+					},
+					{
+						type: ComposerSectionKind.TAG_LIST,
+						id: 'synonyms',
+						title: 'Synonyms',
+						values: term.synonyms ?? [],
+					},
+					{
+						type: ComposerSectionKind.ENTITY_CHIPS,
+						id: 'entities',
+						title: 'Entities',
+						entities: (term.tables ?? []).map((table) => ({
+							id: table.id,
+							name: table.name,
+							focusId: [table.db_id, table.schema_id, table.id].join('|'),
+						})),
+					},
+					entityTagsSection(term.tags, tagOptions),
+					{
+						type: ComposerSectionKind.ZONES_CHIPS,
+						id: 'zones',
+						title: 'Zones',
+						zones: term.zones.map((z) => ({
+							id: z.id,
+							name: z.name,
+							color: z.color,
+							enabled: z.enabled,
+						})),
+					},
+					{
+						type: ComposerSectionKind.RELATED_TERMS_CHIPS,
+						id: 'related_terms',
+						title: 'Related Terms',
+						terms: relatedTerms.map((t) => ({
+							id: t.id,
+							name: t.name,
+						})),
+					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'column_attributes',
+						title: 'Column Attributes',
+						rowIdKey: 'id',
+						layout: 'fixed',
+						columns: [
+							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{
+								key: 'certification',
+								label: 'Certification',
+								type: ComposerColumnType.CERTIFICATION,
+								align: 'center',
+								width: 'w-44',
+							},
+						],
+						rows: termAttrs.map((attr) => ({
+							id: attr.id,
+							name: attr.name,
+							description: attr.description ?? '',
+							certification: attributeStatus(attr),
+						})),
+					},
+					{
+						type: ComposerSectionKind.DATA_TABLE,
+						id: 'sql_attributes',
+						title: 'SQL Attributes',
+						rowIdKey: 'id',
+						layout: 'fixed',
+						columns: [
+							{ key: 'name', label: 'Attribute Name', width: 'w-1/3' },
+							{ key: 'description', label: 'Description', truncate: true },
+							{
+								key: 'certification',
+								label: 'Certification',
+								type: ComposerColumnType.CERTIFICATION,
+								align: 'center',
+								width: 'w-44',
+							},
+						],
+						rows: termSqlAttrs.map((attr) => ({
+							id: attr.id,
+							name: attr.name,
+							description: attr.description ?? '',
+							certification: attributeStatus(attr),
+						})),
+						emptyMessage: 'SQL attribute does not exist',
+					},
+				],
+			};
+		},
+		[queryClient],
+	);
 
 	const listedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedTerm =

@@ -1,0 +1,214 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+# Publishes the Auto Ontology Helm chart to the NGC Helm chart registry as
+# <org>[/<team>]/<chart-name>:<version>. Run release-docker.yml first.
+#
+# The chart is staged in nvstaging/gsf but names the images' published paths
+# (<image-registry>, default nvcr.io/nvidia): NGC Catalog publishing copies
+# it to nvidia unmodified, and customers cannot pull from nvstaging.
+# dev_tools/release_helm_chart.py refuses to publish unless values.yaml names
+# exactly <image-registry>/<image>:<app-version>.
+#
+# Run it on a release branch: dispatched on release/v1.0 with no versions, it
+# packages that branch as chart 1.0.0 deploying images tagged 1.0.
+# Requires repo secret:
+#   NGC_API_KEY - an NGC API key with chart write access to <org>[/<team>]
+#                 (shared with the staging-publish-* workflows, so the key
+#                 must also keep push access to nvcr.io/nvstaging/gsf)
+
+name: Release - Helm Chart
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Chart version, SemVer (e.g. 1.0.0); empty for the app version padded to SemVer'
+        required: false
+        type: string
+        default: ''
+      app-version:
+        description: 'Image tag the chart deploys (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      org:
+        description: 'NGC org'
+        required: false
+        type: string
+        default: 'nvstaging'
+      team:
+        description: 'NGC team (empty for org level)'
+        required: false
+        type: string
+        default: 'gsf'
+      image-registry:
+        description: 'Registry values.yaml must name: where the images are once published'
+        required: false
+        type: string
+        default: 'nvcr.io/nvidia'
+      dry-run:
+        description: 'Build chart without publishing to NGC'
+        required: false
+        type: boolean
+        default: false
+      chart-name:
+        description: 'Helm chart name'
+        required: false
+        type: string
+        default: 'auto-ontology'
+
+  # Called by release-all.yml, with the same inputs as a manual run.
+  workflow_call:
+    inputs:
+      version:
+        description: 'Chart version, SemVer (e.g. 1.0.0); empty for the app version padded to SemVer'
+        required: false
+        type: string
+        default: ''
+      app-version:
+        description: 'Image tag the chart deploys (e.g. 1.0); empty to take it from the release/vX.Y branch'
+        required: false
+        type: string
+        default: ''
+      source-ref:
+        description: 'Git ref to build from; empty for the branch this runs on'
+        required: false
+        type: string
+        default: ''
+      org:
+        description: 'NGC org'
+        required: false
+        type: string
+        default: 'nvstaging'
+      team:
+        description: 'NGC team (empty for org level)'
+        required: false
+        type: string
+        default: 'gsf'
+      image-registry:
+        description: 'Registry values.yaml must name: where the images are once published'
+        required: false
+        type: string
+        default: 'nvcr.io/nvidia'
+      dry-run:
+        description: 'Build chart without publishing to NGC'
+        required: false
+        type: boolean
+        default: false
+      chart-name:
+        description: 'Helm chart name'
+        required: false
+        type: string
+        default: 'auto-ontology'
+    secrets:
+      NGC_API_KEY:
+        required: true
+
+env:
+  HELM_CHART_DIR: helm/auto-ontology
+
+permissions:
+  contents: read
+
+jobs:
+  determine-version:
+    name: Determine Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      app-version: ${{ steps.version.outputs.version }}
+      chart-version: ${{ inputs.version || steps.version.outputs.chart-version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          sparse-checkout: .github/actions
+          persist-credentials: false
+
+      - name: Extract version from branch or input
+        id: version
+        uses: ./.github/actions/determine-release-version
+        with:
+          version: ${{ inputs.app-version }}
+
+  release-helm:
+    name: Build & Publish Helm Chart
+    needs: determine-version
+    runs-on: ubuntu-latest
+    env:
+      CHART_VERSION: ${{ needs.determine-version.outputs.chart-version }}
+      APP_VERSION: ${{ needs.determine-version.outputs.app-version }}
+      NGC_CLI_API_KEY: ${{ secrets.NGC_API_KEY }}
+      NGC_CLI_ORG: ${{ inputs.org }}
+      NGC_CLI_TEAM: ${{ inputs.team }}
+      NGC_CLI_FORMAT_TYPE: json
+      # Dispatch inputs reach the shell through the environment, never by
+      # interpolation into a script that runs with the NGC key available.
+      ORG: ${{ inputs.org }}
+      TEAM: ${{ inputs.team }}
+      CHART_NAME: ${{ inputs.chart-name }}
+      IMAGE_REGISTRY: ${{ inputs.image-registry }}
+      DRY_RUN: ${{ inputs.dry-run }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.source-ref || github.ref }}
+          persist-credentials: false
+
+      - name: Setup Helm
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Setup Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: pip install ngcsdk pyyaml
+
+      - name: Lint Helm chart
+        run: helm lint "${HELM_CHART_DIR}"
+
+      - name: Release Helm chart
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "$DRY_RUN" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python dev_tools/release_helm_chart.py \
+            --org "$ORG" \
+            --team "$TEAM" \
+            --name "$CHART_NAME" \
+            --chart-dir "${HELM_CHART_DIR}" \
+            --version "${CHART_VERSION}" \
+            --app-version "${APP_VERSION}" \
+            --image-registry "$IMAGE_REGISTRY" \
+            $DRY_RUN_FLAG
+
+      - name: Upload packaged chart artifact
+        if: ${{ inputs.dry-run }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: auto-ontology-helm-chart
+          path: dist/${{ inputs.chart-name }}-${{ env.CHART_VERSION }}.tgz
+          if-no-files-found: error
+
+      - name: Summary
+        run: |
+          echo "### Helm Chart Release" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Setting | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Chart source | \`${HELM_CHART_DIR}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Chart | \`$CHART_NAME\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Version | \`${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| App version (image tag) | \`${APP_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Images (as published) | \`${IMAGE_REGISTRY}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| NGC | \`${ORG}${TEAM:+/$TEAM}/${CHART_NAME}:${CHART_VERSION}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Dry Run | \`$DRY_RUN\` |" >> "$GITHUB_STEP_SUMMARY"

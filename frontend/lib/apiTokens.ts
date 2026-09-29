@@ -21,7 +21,7 @@ export const MAX_NAME_LENGTH = 64;
 /**
  * Token metadata safe to return to a client. Deliberately omits `key`, which
  * holds the token's hash, and the plugin's rate-limit/refill bookkeeping, which
- * GSF does not use.
+ * Auto Ontology does not use.
  *
  * Snake_case because that is what the API publishes; the Better Auth model
  * behind it is camelCase, so `toApiToken` maps at the boundary rather than

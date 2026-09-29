@@ -1,0 +1,8 @@
+# Code owners are automatically requested for review on every pull request.
+# The main branch ruleset requires 1 approving review AND review from a code
+# owner, so a PR cannot merge without an approval from someone listed here.
+# Note: a code owner cannot approve their own PR — when one of them opens a
+# pull request, one of the others has to review it.
+
+# Default owners for the entire repository: Global Owners
+* @yuvalshkolar @tomer-levin-nv @liavnave

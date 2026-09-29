@@ -1,0 +1,63 @@
+{{/*
+Applies the backend's Alembic migrations, which own the `public` Postgres
+schema (catalog + semantic tier).
+
+Separate from frontend-migrate because the two own different schemas and
+neither may touch the other's: Alembic owns `public`, Prisma owns `frontend`,
+and langchain_postgres owns `vdb`. Alembic's autogenerate is filtered to
+`public` in alembic/env.py precisely so it can never propose dropping a Prisma
+table -- and Prisma's datasource lists only `frontend` for the mirror reason.
+The two Jobs are independent and may run in either order.
+
+Ordering follows frontend-migrate: a normal release resource, NOT a Helm hook.
+The backend gates on the schema being present -- via the wait-for-catalog-schema
+init container, which blocks on `public.catalog_database` -- so a post-install hook
+would deadlock (the Deployment would never become Ready, so the hook would never
+run). `helm --wait` waits for the Job to complete.
+
+Named per `.Release.Revision` because Job specs are immutable — a stable name
+could not re-run on upgrade — and ttlSecondsAfterFinished garbage-collects
+finished Jobs.
+
+Alembic applies each revision in a transaction and records it in
+public.alembic_version, so re-running is a no-op rather than an error. A failed
+migration leaves the version table pointing at the last good revision.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: auto-ontology-migrate-{{ .Release.Revision }}
+  labels:
+    {{- include "auto-ontology.componentLabels" (dict "Chart" .Chart "Release" .Release "Values" .Values "component" "auto-ontology-migrate") | nindent 4 }}
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "auto-ontology.componentSelectorLabels" (dict "root" . "component" "auto-ontology-migrate") | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      {{- include "auto-ontology.imagePullSecrets" . | nindent 6 }}
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox:1.36
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres {{ .Values.postgres.service.port }}; do
+                echo "waiting for postgres..."
+                sleep 2
+              done
+          {{- include "auto-ontology.initResources" . | nindent 10 }}
+      containers:
+        - name: alembic-migrate
+          image: "{{ include "auto-ontology.image" .Values.backend.image }}"
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          envFrom:
+            - secretRef:
+                name: {{ include "auto-ontology.secretName" . }}
+          args:
+            - migrate

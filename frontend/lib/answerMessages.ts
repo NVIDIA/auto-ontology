@@ -9,9 +9,9 @@
 // The two bubbles land at different times because charts are a separate step
 // run after the SQL pipeline resolves: Message 1 ships as soon as the answer
 // is ready, Message 2 once the chart step (run server-side, right inside
-// `_pump` — see gsf/server/chat/router.py) finishes and streams back as its
+// `_pump` — see auto_ontology/server/chat/router.py) finishes and streams back as its
 // own `charts` SSE event. FastAPI builds and persists both (Message 2's
-// formatting lives in gsf/server/chat/helpers.py now — there is no client-side
+// formatting lives in auto_ontology/server/chat/helpers.py now — there is no client-side
 // equivalent to keep in sync anymore), so history always matches the live view
 // regardless of whether any browser tab stuck around to watch.
 

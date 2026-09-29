@@ -16,15 +16,15 @@ from __future__ import annotations
 import logging
 import os
 
-from gsf.utils.embedding_rows import (
+from auto_ontology.utils.embedding_rows import (
     CatalogEmbeddingRowsOp,
 )
 from nemo_retriever.operators.vdb import IngestVdbOperator
-from gsf.catalog import ingest_catalog
-from gsf.utils import get_embed_params
-from gsf.utils.embedding import batch_embed
-from gsf.vdb import get_data_vdb
-from gsf.connectors.registry import create_connector
+from auto_ontology.catalog import ingest_catalog
+from auto_ontology.utils import get_embed_params
+from auto_ontology.utils.embedding import batch_embed
+from auto_ontology.vdb import get_data_vdb
+from auto_ontology.connectors.registry import create_connector
 
 logger = logging.getLogger("dev_tools.local_ingest")
 

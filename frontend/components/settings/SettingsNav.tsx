@@ -4,16 +4,15 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { connectionsApi } from '@/api/connections';
 
 type NavItem = { label: string; href: string };
 
 const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/connections' };
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
 const TAGS_NAV_ITEM: NavItem = { label: 'Tags', href: '/settings/tags' };
+const RULES_NAV_ITEM: NavItem = { label: 'Rules', href: '/settings/rules' };
 const SEMANTIC_INPUT_NAV_ITEM: NavItem = {
 	label: 'Semantic Input',
 	href: '/settings/semantic-input',
@@ -41,32 +40,27 @@ function rowClassName(selected: boolean) {
 	}`;
 }
 
+export type SettingsNavProps = {
+	/**
+	 * Connections come from the CONNECTION_STRINGS env var, so they are fixed by
+	 * config and the section is dropped. Resolved by the server layout rather
+	 * than fetched here: a client-side lookup rendered the link for as long as
+	 * the request took, then took it away again.
+	 */
+	connectionsEnvManaged: boolean;
+};
+
 // The whole Settings section is admin-only (gated in app/settings/layout.tsx),
 // so no per-item role checks are needed here.
-export const SettingsNav = () => {
+export const SettingsNav = ({ connectionsEnvManaged }: SettingsNavProps) => {
 	const pathname = usePathname();
-	// Hide the Connections section when connections are managed via the
-	// CONNECTION_STRINGS env var (they are fixed by config, not editable here).
-	const [envManaged, setEnvManaged] = useState(false);
-
-	useEffect(() => {
-		let active = true;
-		void (async () => {
-			const res = await connectionsApi.isEnvSource();
-			if (active && typeof res === 'boolean') {
-				setEnvManaged(res);
-			}
-		})();
-		return () => {
-			active = false;
-		};
-	}, []);
 
 	const items: NavItem[] = [];
-	if (!envManaged) items.push(CONNECTIONS_NAV_ITEM);
+	if (!connectionsEnvManaged) items.push(CONNECTIONS_NAV_ITEM);
 	items.push(
 		ZONES_NAV_ITEM,
 		TAGS_NAV_ITEM,
+		RULES_NAV_ITEM,
 		SEMANTIC_INPUT_NAV_ITEM,
 		USERS_NAV_ITEM,
 		SSO_NAV_ITEM,

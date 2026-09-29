@@ -3,14 +3,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Resolves the Better Auth user ids in a tag's `created_by` / `modified_by` to
- * the names the Tags settings page renders.
+ * Resolves the Better Auth user ids a tag read carries to the names the Tags
+ * settings pages render: a tag's own `created_by` / `modified_by`, and the
+ * `tagged_by` on each object a tag labels, which is a page of its own.
  *
  * Here, in the gateway, for two reasons. FastAPI cannot do it: the accounts live
  * in the `frontend` schema Prisma owns, which the backend has no model for and
  * deliberately does not reach into. And the browser should not: the admin
  * `listUsers` call is a second round trip returning a *page* of users, so every
- * author past that page would render as "Unknown" — which is also what a
+ * author past that page would render as "Auto Generated" — which is also what a
  * deleted account renders as, making the two indistinguishable.
  *
  * The same join as the analytics report (`lib/apiSelects.ts`), for the same
@@ -21,7 +22,7 @@ import { getPrisma } from '@/lib/prisma';
 import { userCan } from '@/auth/permissions';
 import { PROXY_CACHE_CONTROL } from '@/auth/proxy-backend';
 import type { ResolvedUser } from '@/auth/resolve-user';
-import { AUTHORS_PARAM, AUTHORS_PARAM_ON, SYSTEM_ACTOR } from '@/constants/tags';
+import { AUTHORS_PARAM, AUTHORS_PARAM_ON } from '@/constants/tags';
 
 /**
  * Whether this read should carry authors: the caller asked for them, and may
@@ -45,19 +46,31 @@ const authorSelect = { id: true, name: true, email: true } as const;
 
 type Row = Record<string, unknown>;
 
-/** The tags in a `{ data }` envelope — one from a write, a list from a read. */
-const tagsIn = (payload: Row): Row[] => {
+const isRow = (value: unknown): value is Row => typeof value === 'object' && value !== null;
+
+/**
+ * The rows in a `{ data }` envelope — one from a write, a list from a read.
+ *
+ * Tags on the tag routes, and the objects a tag labels on its `targets` route.
+ * The two are read the same way here because they are enriched the same way:
+ * whichever author columns a row carries get resolved, and a row carrying none
+ * costs nothing.
+ */
+const rowsIn = (payload: Row): Row[] => {
 	const rows = Array.isArray(payload.data) ? payload.data : [payload.data];
-	return rows.filter((row): row is Row => typeof row === 'object' && row !== null);
+	return rows.filter(isRow);
 };
 
 /**
- * The id to look up, or null when there is nothing to look up: no author
- * recorded, or `SYSTEM_ACTOR`, which names no account and is rendered from the
- * sentinel itself.
+ * The id to look up, or null when the column holds nothing to look one up by.
+ *
+ * An id that names no account is not filtered out here, and does not need to
+ * be: the lookup simply does not find it, which the pages render exactly as
+ * they render a null — "Auto Generated". That covers a deleted account and the
+ * legacy `system` an earlier version stored alike.
  */
 const lookupId = (value: unknown): string | null =>
-	typeof value === 'string' && value !== '' && value !== SYSTEM_ACTOR ? value : null;
+	typeof value === 'string' && value !== '' ? value : null;
 
 /**
  * The upstream answer, rebuilt around a body this module may have rewritten.
@@ -78,13 +91,13 @@ const respond = (body: string, upstream: Response): Response =>
 	});
 
 /**
- * The backend's answer with `created_by_user` / `modified_by_user` added beside
- * the ids it stored.
+ * The backend's answer with `created_by_user` / `modified_by_user` — and, on a
+ * page of tagged objects, `tagged_by_user` — added beside the ids it stored.
  *
  * Every branch that cannot add them answers with the body unchanged rather than
  * failing: an error response, a body that is not the expected envelope, or a
- * failed user lookup. A tag whose author will not resolve still reads correctly
- * as "Unknown", whereas a 500 here would lose the whole list over a decoration.
+ * failed user lookup. A tag whose author will not resolve still reads as "Auto
+ * Generated", whereas a 500 here would lose the whole list over a decoration.
  */
 export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 	const body = await upstream.text();
@@ -99,12 +112,18 @@ export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 	if (typeof payload !== 'object' || payload === null) return respond(body, upstream);
 
 	// Mutated in place below, so the envelope keeps whatever else it carries —
-	// a list's `count`, a tag detail's `items`.
-	const rows = tagsIn(payload as Row);
+	// a list's `count`, a page's `total`.
+	const rows = rowsIn(payload as Row);
+	// One lookup for all three columns, since a tag curated and a label applied
+	// are commonly the same person and the union is what makes that one row read.
 	const ids = [
 		...new Set(
 			rows
-				.flatMap((row) => [lookupId(row.created_by), lookupId(row.modified_by)])
+				.flatMap((row) => [
+					lookupId(row.created_by),
+					lookupId(row.modified_by),
+					lookupId(row.tagged_by),
+				])
 				.filter((id): id is string => id !== null),
 		),
 	];
@@ -121,11 +140,21 @@ export const withTagAuthors = async (upstream: Response): Promise<Response> => {
 		return respond(body, upstream);
 	}
 
+	// Set only where the row has the column, so a tag does not gain a
+	// `tagged_by_user` and a tagged object does not gain an author it has no id
+	// for — a null there means "no account", which is a claim about a column
+	// this row does not carry.
 	for (const row of rows) {
-		const createdBy = lookupId(row.created_by);
-		const modifiedBy = lookupId(row.modified_by);
-		row.created_by_user = createdBy === null ? null : (authors.get(createdBy) ?? null);
-		row.modified_by_user = modifiedBy === null ? null : (authors.get(modifiedBy) ?? null);
+		if ('created_by' in row || 'modified_by' in row) {
+			const createdBy = lookupId(row.created_by);
+			const modifiedBy = lookupId(row.modified_by);
+			row.created_by_user = createdBy === null ? null : (authors.get(createdBy) ?? null);
+			row.modified_by_user = modifiedBy === null ? null : (authors.get(modifiedBy) ?? null);
+		}
+		if ('tagged_by' in row) {
+			const taggedBy = lookupId(row.tagged_by);
+			row.tagged_by_user = taggedBy === null ? null : (authors.get(taggedBy) ?? null);
+		}
 	}
 
 	return respond(JSON.stringify(payload), upstream);

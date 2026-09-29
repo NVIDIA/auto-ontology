@@ -6,6 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
 import { EmptyState } from '@/common/EmptyState';
@@ -51,6 +52,10 @@ const focusedTagType = (focusId: string | null): TagItemType | null => {
 };
 
 export function DataWorkspaceView() {
+	// Where the tag picker's options are read from — shared with every other
+	// page that offers them, so walking the tree doesn't re-read the
+	// vocabulary at each table and column.
+	const queryClient = useQueryClient();
 	const searchParams = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const treeFocusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
@@ -181,11 +186,11 @@ export function DataWorkspaceView() {
 			// section, and beside the hydration rather than after it.
 			const [, tagOptions] = await Promise.all([
 				hydrateBranchForFocus(treeFocus),
-				focusedTagType(treeFocus) == null ? [] : fetchTagOptions(),
+				focusedTagType(treeFocus) == null ? [] : fetchTagOptions(queryClient),
 			]);
 			return buildTreeFocusPageFormat(treeFocus, databasesRef.current, tagOptions);
 		},
-		[hydrateBranchForFocus],
+		[hydrateBranchForFocus, queryClient],
 	);
 
 	const focusedEntityId = useMemo(() => {

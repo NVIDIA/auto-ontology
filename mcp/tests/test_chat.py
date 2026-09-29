@@ -15,8 +15,8 @@ import pytest
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
-from gsf_mcp import chat
-from gsf_mcp.config import DEFAULT_SPEC_PATH, Settings
+from auto_ontology_mcp import chat
+from auto_ontology_mcp.config import DEFAULT_SPEC_PATH, Settings
 
 _ANSWER = {
     "response": "There are 42 active customers.",
@@ -43,7 +43,7 @@ _LIVE_ANSWER = {
 
 def _settings(chat_timeout_s: float = 900.0) -> Settings:
     return Settings(
-        api_url="http://gsf.test",
+        api_url="http://auto_ontology.test",
         spec_path=DEFAULT_SPEC_PATH,
         host="127.0.0.1",
         port=3003,
@@ -243,7 +243,9 @@ def test_reports_an_unreachable_deployment() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("connection refused")
 
-    with pytest.raises(ToolError, match="Could not reach GSF at http://gsf.test"):
+    with pytest.raises(
+        ToolError, match="Could not reach Auto Ontology at http://auto_ontology.test"
+    ):
         _call(_server(handler), {"question": "q"})
 
 
@@ -251,7 +253,7 @@ def test_names_the_knob_when_a_run_times_out() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ReadTimeout("too slow")
 
-    with pytest.raises(ToolError, match="GSF_MCP_CHAT_TIMEOUT_S"):
+    with pytest.raises(ToolError, match="AUTO_ONTOLOGY_MCP_CHAT_TIMEOUT_S"):
         _call(_server(handler, chat_timeout_s=5.0), {"question": "q"})
 
 

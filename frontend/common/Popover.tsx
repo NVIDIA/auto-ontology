@@ -21,6 +21,13 @@ type PopoverProps = {
 	/** The panel's own width and padding — its surface and position are set here. */
 	panelClassName?: string;
 	className?: string;
+	/**
+	 * Told whether the panel is showing, for a caller that has to react to it —
+	 * dimming what the panel covers, say. Reported for every way the panel
+	 * closes: the trigger, an outside click, Escape, anything that moves the
+	 * trigger, and the popover itself being unmounted with the panel up.
+	 */
+	onOpenChange?: (open: boolean) => void;
 };
 
 /**
@@ -40,6 +47,7 @@ export const Popover = ({
 	align = PopoverAlign.Right,
 	panelClassName = '',
 	className = '',
+	onOpenChange,
 }: PopoverProps) => {
 	// Coordinates are captured together with the open state so the panel never
 	// paints a frame at a previous trigger's position.
@@ -47,6 +55,28 @@ export const Popover = ({
 	const anchorRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
 	const open = position != null;
+
+	// Held in a ref so an inline callback does not re-report on every render.
+	const onOpenChangeRef = useRef(onOpenChange);
+	useEffect(() => {
+		onOpenChangeRef.current = onOpenChange;
+	}, [onOpenChange]);
+
+	// `true` on the way in and `false` from the cleanup, rather than reporting
+	// `open` itself. The cleanup also runs when this component goes away, which
+	// is the close a caller would otherwise never hear about: reporting `open`
+	// covers every dismissal the panel performs and none of the ones performed
+	// *on* it, leaving a caller that dims what the panel covers dimmed for good.
+	// `RuleTagPopover` is rendered only while the search has results, so an
+	// emptying result list is exactly that case.
+	useEffect(() => {
+		if (!open) return;
+
+		onOpenChangeRef.current?.(true);
+		return () => {
+			onOpenChangeRef.current?.(false);
+		};
+	}, [open]);
 
 	useEffect(() => {
 		if (!open) return;

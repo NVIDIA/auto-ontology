@@ -22,10 +22,10 @@ export const connectionsApi = {
 	create: (input: ConnectionInput): Promise<CreateResponse> =>
 		requests.post<{ data: Connection }>('connections', { connection: input }),
 
-	test: async (input: ConnectionInput): Promise<TestResponse> => {
+	test: async (input: ConnectionInput, replacing?: string): Promise<TestResponse> => {
 		const res = await requests.post<{ success: boolean; schemas?: string[] }>(
 			'connections/test',
-			{ connection: input },
+			{ connection: input, ...(replacing == null ? {} : { replacing }) },
 		);
 
 		if (res.error || res.success !== true) {
@@ -36,6 +36,15 @@ export const connectionsApi = {
 		// that don't enumerate them) so the UI can offer a schema picker.
 		return { success: true, schemas: res.schemas ?? [] };
 	},
+
+	// Rewrites every setting except the connection's identity: `database` (which
+	// doubles as the connection's name) and `type` come back as a 422 if they
+	// differ from the stored ones. Credentials left blank keep their stored
+	// value, since `getAll` strips them and the edit form has none to send back.
+	update: (databaseName: string, input: ConnectionInput): Promise<CreateResponse> =>
+		requests.put<{ data: Connection }>(`connections/${encodeURIComponent(databaseName)}`, {
+			connection: input,
+		}),
 
 	// Narrow update: flips "authenticate as signed-in user" without re-sending
 	// credentials, so the connections page can toggle it inline.

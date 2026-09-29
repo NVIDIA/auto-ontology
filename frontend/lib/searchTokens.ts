@@ -3,7 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The two ways global search splits a query, mirroring `gsf/dal/search.py`.
+ * The two ways global search splits a query, mirroring `auto_ontology/dal/search.py`.
  *
  * The backend reads one query twice — as substrings for name and description,
  * as whole words for synonyms — and the two splits are not the same. Anything

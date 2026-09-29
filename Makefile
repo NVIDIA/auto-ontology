@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
-# GSF image build / publish helpers
+# Auto Ontology image build / publish helpers
 # ---------------------------------------------------------------------------
 # These targets wrap the `docker buildx build` invocations needed to build
 # the backend and frontend images and (optionally) push them to NVIDIA's NGC
-# container registry. See `helm/gsf/README.md` for the full deploy story;
+# container registry. See `helm/auto-ontology/README.md` for the full deploy story;
 # this file only covers building and publishing the images.
 #
 # Common flow (one-time):
@@ -14,7 +14,7 @@
 #
 # Variables (override on the command line):
 #
-#   REGISTRY        Full nvcr.io path, e.g. nvcr.io/nvidian/sw-gsf
+#   REGISTRY        Full nvcr.io path, e.g. nvcr.io/nvidian/sw-auto-ontology
 #                   (required for `publish*` targets)
 #   TAG             Image tag. Defaults to `git describe`.
 #   NEMO            Path to a local NeMo-Retriever clone. Defaults to
@@ -23,7 +23,7 @@
 #                   serves /api/health but raises NotImplementedError on
 #                   real chat/data calls).
 #   PYTHON_API_URL  Backend URL baked into the frontend's Next.js rewrites
-#                   at build time. Defaults to http://gsf:3001
+#                   at build time. Defaults to http://auto-ontology:3001
 #                   (matches the in-cluster service the helm chart creates).
 #   PLATFORMS       Comma-separated platforms for multi-arch publish.
 #                   Defaults to linux/amd64,linux/arm64.
@@ -32,11 +32,11 @@
 REGISTRY       ?=
 TAG            ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 NEMO           ?= ../NeMo-Retriever
-PYTHON_API_URL ?= http://gsf:3001
+PYTHON_API_URL ?= http://auto-ontology:3001
 PLATFORMS      ?= linux/amd64,linux/arm64
 
-BACKEND_IMAGE  := gsf
-FRONTEND_IMAGE := gsf-frontend
+BACKEND_IMAGE  := auto-ontology
+FRONTEND_IMAGE := auto-ontology-frontend
 
 # --build-context for NeMo-Retriever: pass `NEMO=stub` to skip and use the
 # committed vendor/nemo_retriever_stub/ default baked into the Dockerfile.
@@ -60,7 +60,7 @@ endif
         publish publish publish-frontend
 
 help:
-	@echo "GSF image targets:"
+	@echo "Auto Ontology image targets:"
 	@echo "  make build               Build both images locally (host arch only)"
 	@echo "  make build       Build backend image locally"
 	@echo "  make build-frontend      Build frontend image locally"
@@ -69,10 +69,10 @@ help:
 	@echo "  make publish-frontend    Build + push frontend image"
 	@echo "  make login NGC_TOKEN=... docker login nvcr.io via NGC API token"
 	@echo ""
-	@echo "Schema targets (backend owns the \`gsf\` schema; Prisma owns \`public\`):"
+	@echo "Schema targets (backend owns the \`auto_ontology\` schema; Prisma owns \`public\`):"
 	@echo "  make migrate             Apply Alembic migrations (alembic upgrade head)"
 	@echo "  make migrate-check       Fail if the schema has drifted from the metadata"
-	@echo "  make migrate-revision m=\"...\"  Autogenerate a revision from gsf/dal/schema.py"
+	@echo "  make migrate-revision m=\"...\"  Autogenerate a revision from auto_ontology/dal/schema.py"
 	@echo
 	@echo "Required for publish*: REGISTRY=nvcr.io/<org>/<team>"
 	@echo "Current REGISTRY=$(REGISTRY) TAG=$(TAG) NEMO=$(NEMO)"
@@ -87,9 +87,9 @@ login:
 
 # Ensure a docker-container builder exists for multi-arch builds.
 builder:
-	@docker buildx inspect gsf-builder >/dev/null 2>&1 \
-	  || docker buildx create --name gsf-builder --driver docker-container --use
-	@docker buildx use gsf-builder
+	@docker buildx inspect auto-ontology-builder >/dev/null 2>&1 \
+	  || docker buildx create --name auto-ontology-builder --driver docker-container --use
+	@docker buildx use auto-ontology-builder
 
 build:
 	docker buildx build $(NEMO_CTX_ARG) -t $(BACKEND_REF) --load .
@@ -116,18 +116,18 @@ publish: publish publish-frontend
 require-registry:
 	@if [ -z "$(REGISTRY)" ]; then \
 	  echo "ERROR: REGISTRY is required for publish targets."; \
-	  echo "       e.g. make publish REGISTRY=nvcr.io/nvidian/sw-gsf"; \
+	  echo "       e.g. make publish REGISTRY=nvcr.io/nvidian/sw-auto-ontology"; \
 	  exit 2; \
 	fi
 
 # --- Schema migrations -------------------------------------------------
-# The backend owns the `gsf` Postgres schema. Prisma owns `public` and migrates
+# The backend owns the `auto_ontology` Postgres schema. Prisma owns `public` and migrates
 # separately (frontend/prisma/migrate.sh); the two are independent.
 
 migrate:
 	uv run alembic upgrade head
 
-# Fails when gsf/dal/schema.py and the database disagree. Run this in CI:
+# Fails when auto_ontology/dal/schema.py and the database disagree. Run this in CI:
 # a schema change committed without its migration is invisible until deploy.
 migrate-check:
 	uv run alembic check

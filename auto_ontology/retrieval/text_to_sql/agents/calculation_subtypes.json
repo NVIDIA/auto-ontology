@@ -1,0 +1,47 @@
+[
+  {
+    "type": "match_based",
+    "description": "Retrieve rows matching explicit values or conditions.",
+    "sql_template": "SELECT COUNT(GasStationID)\nFROM gasstations\nWHERE Country = 'CZE' AND Segment = 'Premium';"
+  },
+  {
+    "type": "ranking",
+    "description": "Request top or bottom N records, or order records by a measure.",
+    "sql_template": "SELECT Title\nFROM posts\nORDER BY ViewCount DESC\nLIMIT 5;"
+  },
+  {
+    "type": "comparison",
+    "description": "Compare a value with another value, threshold, or condition.",
+    "sql_template": "SELECT COUNT(id)\nFROM cards\nWHERE edhrecRank > 12000 AND borderColor = 'borderless';"
+  },
+  {
+    "type": "counting",
+    "description": "Count records or distinct values that satisfy conditions.",
+    "sql_template": "SELECT COUNT(T2.member_id)\nFROM zip_code AS T1\nINNER JOIN member AS T2 ON T1.zip_code = T2.zip\nWHERE T1.state = 'Maryland';"
+  },
+  {
+    "type": "aggregation",
+    "description": "Apply a standard aggregate such as sum, average, minimum, or maximum.",
+    "sql_template": "SELECT AVG(T1.height_cm)\nFROM superhero AS T1\nINNER JOIN publisher AS T2 ON T1.publisher_id = T2.id\nWHERE T2.publisher_name = 'Marvel Comics';"
+  },
+  {
+    "type": "domain_knowledge",
+    "description": "Apply a domain rule, specialized threshold, or domain-specific interpretation.",
+    "sql_template": "SELECT T1.ID,\n       STRFTIME('%Y', CURRENT_TIMESTAMP) - STRFTIME('%Y', T1.Birthday) AS age\nFROM Patient AS T1\nINNER JOIN Laboratory AS T2 ON T1.ID = T2.ID\nWHERE T1.ID IN (\n    SELECT ID\n    FROM Laboratory\n    WHERE HCT > 52\n    GROUP BY ID\n    HAVING COUNT(ID) >= 2\n);"
+  },
+  {
+    "type": "numeric_computation",
+    "description": "Perform arithmetic, a ratio, percentage, or another derived formula.",
+    "sql_template": "SELECT CAST(SUM(IIF(T2.Age > 65, 1, 0)) AS REAL) * 100 / COUNT(T1.Id) AS percentage\nFROM posts AS T1\nINNER JOIN users AS T2 ON T1.OwnerUserId = T2.Id\nWHERE T1.Score > 20;"
+  },
+  {
+    "type": "synonym",
+    "description": "Map an alternate term in the question to a stored concept or value.",
+    "sql_template": "SELECT COUNT(T1.client_id)\nFROM client AS T1\nINNER JOIN district AS T2 ON T1.district_id = T2.district_id\nWHERE T1.gender = 'F' AND T2.A2 = 'Jesenik';"
+  },
+  {
+    "type": "value_illustration",
+    "description": "Use an example or descriptive phrase to identify the corresponding stored value.",
+    "sql_template": "SELECT COUNT(T1.account_id)\nFROM loan AS T1\nINNER JOIN account AS T2 ON T1.account_id = T2.account_id\nWHERE T2.frequency = 'POPLATEK TYDNE' AND T1.amount < 200000;"
+  }
+]

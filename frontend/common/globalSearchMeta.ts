@@ -11,6 +11,34 @@ const VIEW_TABLE_TYPES = new Set(['view', 'materialized view']);
 export const isViewTableType = (tableType: string | null | undefined): boolean =>
 	VIEW_TABLE_TYPES.has((tableType ?? '').toLowerCase());
 
+/**
+ * The hit types a tag can be applied to, as `TAGGABLE_SEARCH_TYPES` in
+ * `auto_ontology/server/rules/service.py` lists them.
+ *
+ * Raw `type` rather than the tab a hit is shown under: a view arrives as a
+ * `Table` whose `table_type` says so and is labelled as one, which is why
+ * `View` is deliberately absent. Databases and Schemas are containers a tag is
+ * not applied to, and the two analysis kinds have no tag column at all.
+ */
+const TAGGABLE_SEARCH_TYPES = new Set<SearchObjectType>([
+	SearchObjectType.Term,
+	SearchObjectType.Table,
+	SearchObjectType.Column,
+	SearchObjectType.Attribute,
+	SearchObjectType.SqlAttribute,
+]);
+
+/**
+ * Whether a rule saved over a search would put its tags on this hit.
+ *
+ * Mirrors `_taggable_targets`: a kind that cannot carry a tag is dropped, and
+ * so is a hit with no id, because a label needs something to point at. `id` is
+ * typed as a string, but the search normalises a missing one to null rather
+ * than leaving the row out.
+ */
+export const isTaggableSearchHit = (item: GlobalSearchItem): boolean =>
+	TAGGABLE_SEARCH_TYPES.has(item.type) && Boolean(item.id);
+
 /** UI type for a hit. Graph labels pass through; Table + view table_type → View. */
 export const searchObjectTypeFromHit = (
 	item: Pick<GlobalSearchItem, 'type' | 'table_type'>,

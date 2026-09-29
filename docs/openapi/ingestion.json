@@ -111,7 +111,7 @@
     }
   },
   "info": {
-    "title": "GSF Ingestion Service",
+    "title": "Auto Ontology Ingestion Service",
     "version": "0.1.0"
   },
   "openapi": "3.1.0",
@@ -218,7 +218,7 @@
     },
     "/semantic/reset": {
       "post": {
-        "description": "Trigger a non-blocking reset of a database's semantic layer.\n\nDeletes the semantic nodes and embeddings, then asks for a compilation pass\nso the layer is rebuilt without waiting for the scheduler's next run.\nOmitting ``database_name`` resets every database. The deletion runs on its\nown thread while the compilation pass runs on the scheduler's task, so the\ntwo overlap.",
+        "description": "Trigger a non-blocking reset of a database's semantic layer.\n\nDeletes the semantic nodes and embeddings, then asks for a compilation pass\nso the layer is rebuilt without waiting for the scheduler's next run.\nOmitting ``database_name`` resets every database.\n\nThe three steps are strictly ordered \u2014 stop the running pass, wait for it to\nstop, delete, then rebuild \u2014 and run as a background task, so this returns\nimmediately while the wait can take minutes. They used to overlap, which\nlost data in both directions: a pass reads its work list once at the start,\nso one beginning before the delete finished saw every table still carrying a\nTerm and compiled nothing, while a pass still running during the delete kept\nwriting Terms it had already swept past.",
         "operationId": "semantic_reset_semantic_reset_post",
         "parameters": [
           {
@@ -265,7 +265,7 @@
     },
     "/semantic/status": {
       "get": {
-        "description": "Report whether a compilation pass is executing right now, when the last\none finished successfully, and when it last failed (if that's more recent\nthan the last success).\n\nBacked by the ``semantic_compilation_history`` table (see ``history.py``),\nwhich this service owns \u2014 the GSF API server relays this response rather\nthan reading that table itself.",
+        "description": "Report whether a compilation pass is executing right now, when the last\none finished successfully, and when it last failed (if that's more recent\nthan the last success).\n\nBacked by the ``semantic_compilation_history`` table (see ``history.py``),\nwhich this service owns \u2014 the Auto Ontology API server relays this response rather\nthan reading that table itself.",
         "operationId": "semantic_status_semantic_status_get",
         "responses": {
           "200": {

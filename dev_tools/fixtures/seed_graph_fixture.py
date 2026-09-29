@@ -4,7 +4,7 @@
 
 """Build the canonical fixture: catalog + a hand-authored semantic layer.
 
-This is the input to the golden capture in ``gsf/dal/tests/test_golden.py``. It
+This is the input to the golden capture in ``auto_ontology/dal/tests/test_golden.py``. It
 must be **deterministic** — same fixture databases in, same catalog out —
 because the goldens are compared byte for byte after id normalisation.
 
@@ -13,7 +13,7 @@ Two deliberate choices:
 * **The semantic layer is hand-authored, not compiled.** ``/semantic/compile``
   drives an LLM, so it needs credentials and returns something slightly
   different every run. Neither is acceptable for a fidelity oracle. Writing the
-  same artifacts directly through ``gsf.dal`` is reproducible and exercises the
+  same artifacts directly through ``auto_ontology.dal`` is reproducible and exercises the
   same write paths the DAL port has to preserve.
 * **Embedding is stubbed out.** The service-layer creates embed into pgvector
   after writing the graph. Goldens capture graph reads, so the embed call is
@@ -44,8 +44,8 @@ logger = logging.getLogger("dev_tools.fixtures.seed_graph_fixture")
 
 def ingest_catalog() -> None:
     """Write both fixture databases' catalogs into the graph."""
-    from gsf.catalog import ingest_catalog as write_catalog
-    from gsf.connectors.registry import create_connector
+    from auto_ontology.catalog import ingest_catalog as write_catalog
+    from auto_ontology.connectors.registry import create_connector
 
     raw = os.environ.get("CONNECTION_STRINGS", "")
     connection_strings = [cs.strip() for cs in raw.split(",") if cs.strip()]
@@ -79,7 +79,7 @@ def _catalog_index() -> dict[str, dict[tuple[str, ...], str]]:
     if _CATALOG_INDEX is not None:
         return _CATALOG_INDEX
 
-    from gsf.dal.datasources import (
+    from auto_ontology.dal.datasources import (
         fetch_databases,
         fetch_schemas_by_ids,
         fetch_schemas_for_database,
@@ -299,18 +299,19 @@ PQL_ANALYSES: tuple[tuple[str, str, str, str], ...] = (
 
 
 def seed_terms() -> dict[str, str]:
-    from gsf.dal.terms import merge_term, update_term
+    from auto_ontology.dal.terms import update_term, upsert_table_term
 
     term_ids: dict[str, str] = {}
     for name, description, (db, schema, table), synonyms in TERMS:
-        term_id = merge_term(
+        persisted = upsert_table_term(
             name=name,
             description=description,
             table_id=_table_id(db, schema, table),
             synonyms=synonyms,
         )
-        if term_id is None:
-            raise RuntimeError(f"merge_term returned None for {name!r}")
+        if persisted is None:
+            raise RuntimeError(f"upsert_table_term returned None for {name!r}")
+        term_id, _ = persisted
         term_ids[name] = term_id
 
     # Certification flags must not be uniform, or a golden cannot tell a
@@ -322,7 +323,7 @@ def seed_terms() -> dict[str, str]:
 
 
 def seed_column_attributes() -> dict[tuple[str, str], str]:
-    from gsf.dal.attributes import merge_column_attribute
+    from auto_ontology.dal.attributes import merge_column_attribute
 
     attr_ids: dict[tuple[str, str], str] = {}
     for term_name, (
@@ -347,14 +348,14 @@ def seed_column_attributes() -> dict[tuple[str, str], str]:
 
 
 def seed_semantic_fks(attr_ids: dict[tuple[str, str], str]) -> None:
-    from gsf.dal.attributes import merge_semantic_fk
+    from auto_ontology.dal.attributes import merge_semantic_fk
 
     for (db, schema, table, column), key in SEMANTIC_FKS:
         merge_semantic_fk(_column_id(db, schema, table, column), attr_ids[key])
 
 
 def seed_sql_attributes(term_ids: dict[str, str]) -> list[str]:
-    from gsf.server.sql_attributes import service
+    from auto_ontology.server.sql_attributes import service
 
     created: list[str] = []
     for name, description, expression, term_name, source in SQL_ATTRIBUTES:
@@ -370,7 +371,7 @@ def seed_sql_attributes(term_ids: dict[str, str]) -> list[str]:
 
 
 def seed_custom_analyses() -> list[str]:
-    from gsf.server.custom_analyses import service
+    from auto_ontology.server.custom_analyses import service
 
     created: list[str] = []
     for name, description, sql in CUSTOM_ANALYSES:
@@ -382,7 +383,7 @@ def seed_custom_analyses() -> list[str]:
 
 
 def seed_pql_analyses() -> None:
-    from gsf.dal.pql_analyses import upsert_pql_analysis_node
+    from auto_ontology.dal.pql_analyses import upsert_pql_analysis_node
 
     for analysis_id, name, description, pql in PQL_ANALYSES:
         upsert_pql_analysis_node(analysis_id, name, description, pql)
@@ -394,7 +395,7 @@ def seed_zones() -> list[dict[str, Any]]:
     Zone scoping is where a silent access-control regression would hide, so the
     fixture has to make the three interesting cases distinguishable.
     """
-    from gsf.dal.zones import create_zone, set_zone_enabled
+    from auto_ontology.dal.zones import create_zone, set_zone_enabled
 
     film_domain = create_zone(
         name="Film domain",
@@ -443,8 +444,8 @@ def _stub_embedding() -> None:
     capture graph reads, and pgvector contents are not part of any DAL read
     result.
     """
-    from gsf.server.custom_analyses import service as ca_service
-    from gsf.server.sql_attributes import service as sa_service
+    from auto_ontology.server.custom_analyses import service as ca_service
+    from auto_ontology.server.sql_attributes import service as sa_service
 
     sa_service._embed_sql_attribute = lambda *a, **k: None  # type: ignore[assignment]
     sa_service._reembed_sql_attribute = lambda *a, **k: None  # type: ignore[assignment]
@@ -462,8 +463,8 @@ def reset_graph() -> None:
     ``MATCH (n) DETACH DELETE n`` swept them up incidentally, and a fixture
     built on top of leftover zones is not reproducible.
     """
-    from gsf.dal.reset import delete_all_data
-    from gsf.dal.zones import delete_zone, list_zones
+    from auto_ontology.dal.reset import delete_all_data
+    from auto_ontology.dal.zones import delete_zone, list_zones
 
     global _CATALOG_INDEX
     _CATALOG_INDEX = None
@@ -526,11 +527,11 @@ def _log_summary(zones: list[dict[str, Any]]) -> None:
     without error and produced nothing — but it must not reintroduce a
     store-specific query, so it counts what the DAL can see.
     """
-    from gsf.dal.datasources import fetch_databases, fetch_schemas_by_ids
-    from gsf.dal.custom_analyses import list_custom_analyses
-    from gsf.dal.pql_analyses import list_pql_analyses
-    from gsf.dal.sql_attributes import list_sql_attributes
-    from gsf.dal.terms import count_terms
+    from auto_ontology.dal.datasources import fetch_databases, fetch_schemas_by_ids
+    from auto_ontology.dal.custom_analyses import list_custom_analyses
+    from auto_ontology.dal.pql_analyses import list_pql_analyses
+    from auto_ontology.dal.sql_attributes import list_sql_attributes
+    from auto_ontology.dal.terms import count_terms
 
     columns = fetch_schemas_by_ids()
     counts = {

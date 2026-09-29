@@ -1,0 +1,12 @@
+apiVersion: v2
+name: auto-ontology
+description: Auto Ontology - FastAPI backend, ingestion worker, Next.js frontend, Postgres (pgvector) and pgAdmin.
+type: application
+version: 1.0.0
+appVersion: "1.0"
+keywords:
+  - auto-ontology
+  - nvidia
+  - rag
+  - fastapi
+  - nextjs

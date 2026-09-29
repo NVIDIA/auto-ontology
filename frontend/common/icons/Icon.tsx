@@ -38,6 +38,7 @@ import PlusSvg from './svg/plus.svg';
 import DownloadSvg from './svg/download.svg';
 import UploadSvg from './svg/upload.svg';
 import CodeBracketSvg from './svg/code-bracket.svg';
+import LightningSvg from './svg/lightning.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -74,6 +75,7 @@ export enum IconName {
 	Download = 'download',
 	Upload = 'upload',
 	CodeBracket = 'code-bracket',
+	Lightning = 'lightning',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -111,6 +113,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Download]: DownloadSvg,
 	[IconName.Upload]: UploadSvg,
 	[IconName.CodeBracket]: CodeBracketSvg,
+	[IconName.Lightning]: LightningSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

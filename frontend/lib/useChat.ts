@@ -129,7 +129,7 @@ export const useChat = () => {
 
 	// Message 2 — the chart, or the fallback result table, that the backend
 	// already generated and persisted itself right after the SQL answer (see
-	// `_pump` in gsf/server/chat/router.py). Rendering it is now just "append
+	// `_pump` in auto_ontology/server/chat/router.py). Rendering it is now just "append
 	// what arrived on the wire" — no second request, and no "only the
 	// submitting tab" caveat: it rides the same buffered stream `onResult`
 	// did, so both a live send and a reattached `/chat/watch` get it exactly

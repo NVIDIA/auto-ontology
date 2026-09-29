@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-# Builds the GSF FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
+# Builds the Auto Ontology FastAPI/ingestion app image and pushes it to nvcr.io. The Astra
 # deploy repo consumes it by digest; GitHub and GitLab stay decoupled, linked
 # only through nvcr.io (mirrors staging-publish-chart.yml). Requires repo secret:
 #   NGC_API_KEY - an NGC API key with push access to nvcr.io/nvstaging/gsf
@@ -22,7 +22,7 @@ on:
   push:
     branches: [main, feat/astra-nightly-deploy]
     paths:
-      - 'gsf/**'
+      - 'auto_ontology/**'
       - 'pyproject.toml'
       - 'uv.lock'
       - 'Dockerfile'
@@ -30,8 +30,9 @@ on:
 
 env:
   # nvcr.io allows only org/team/image (3 segments); the app image shares the
-  # nvcr.io/nvstaging/gsf/gsf repo with the OCI chart, distinguished by tag.
-  IMAGE: nvcr.io/nvstaging/gsf/gsf
+  # nvcr.io/nvstaging/gsf/auto-ontology repo with the OCI chart, distinguished by tag.
+  # (gsf is the existing NGC team; only the image/chart names follow the rename.)
+  IMAGE: nvcr.io/nvstaging/gsf/auto-ontology
 
 jobs:
   publish-image:
@@ -45,7 +46,7 @@ jobs:
           df -h /
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
@@ -55,7 +56,7 @@ jobs:
           set -euo pipefail
           # Staging app images: tag is stg.<UTC ts> only (no version prefix).
           # The constant "stg." prefix lets the deploy repo's nightly roll
-          # (gsf/gsf-demo-deploy: ci/roll-stg.sh) pick app images and skip the
+          # (auto-ontology/auto-ontology-demo-deploy: ci/roll-stg.sh) pick app images and skip the
           # OCI chart tags (<chartver>-stg.*) sharing this nvcr.io repo.
           t='${{ github.event.inputs.tag }}'
           if [ -z "$t" ]; then
@@ -65,10 +66,10 @@ jobs:
           echo "Image tag: $t"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Login to nvcr.io
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: nvcr.io
           username: '$oauthtoken'
@@ -76,7 +77,7 @@ jobs:
 
       - name: Build & push (linux/amd64)
         id: build
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile

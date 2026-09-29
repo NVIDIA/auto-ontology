@@ -6,6 +6,7 @@ import { connectionsApi } from '@/api/connections';
 import { requireAdmin } from '@/auth/auth-guards';
 import { getPrisma } from '@/lib/prisma';
 import { DISTINCT_VALUE_PROBING_ENABLED_KEY, readOptOutFlag } from '@/lib/configurations';
+import { readConnectionsEnvSource } from '@/lib/server/connections';
 import { SemanticCompilationForm } from './SemanticCompilationForm';
 
 const CONFIG_KEY = 'semantic_compilation_enabled';
@@ -19,7 +20,7 @@ const SemanticCompilationPage = async () => {
 		getPrisma().configuration.findUnique({ where: { key: CONFIG_KEY } }),
 		getPrisma().configuration.findUnique({ where: { key: PROBING_CONFIG_KEY } }),
 		connectionsApi.getAll(),
-		connectionsApi.isEnvSource(),
+		readConnectionsEnvSource(),
 	]);
 	// `connections.count` only reflects UI-managed connections (stored on the
 	// catalog database row / Vault) — it's always 0 when connections instead

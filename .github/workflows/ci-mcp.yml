@@ -4,7 +4,7 @@
 
 name: MCP CI
 
-# gsf-mcp is its own distribution with its own lightweight dependency set, so
+# auto-ontology-mcp is its own distribution with its own lightweight dependency set, so
 # it gets its own workflow rather than riding along with the backend's: it needs
 # no database drivers, no model tooling, and no NGC access, and installs in
 # seconds.
@@ -23,19 +23,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Ruff lint
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4.1.0
         with:
           version: '0.15.9'
           args: check
           src: './mcp'
 
       - name: Ruff format check
-        uses: astral-sh/ruff-action@v3
+        uses: astral-sh/ruff-action@v4.1.0
         with:
           version: '0.15.9'
           args: format --check
@@ -46,17 +46,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
       # Installs the package itself, so the tests exercise the same import
-      # path and packaged spec that a user's `uvx gsf-mcp` would.
+      # path and packaged spec that a user's `uvx auto-ontology-mcp` would.
       - name: Sync dependencies
         working-directory: mcp
         run: uv sync
@@ -70,12 +70,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -98,9 +98,9 @@ jobs:
           /tmp/probe/bin/python - <<'PY'
           import asyncio
           from fastmcp import Client
-          from gsf_mcp.config import load_settings
-          from gsf_mcp.server import build_server
-          from gsf_mcp.tools import CURATED
+          from auto_ontology_mcp.config import load_settings
+          from auto_ontology_mcp.server import build_server
+          from auto_ontology_mcp.tools import CURATED
 
           mcp, client = build_server(load_settings())
 

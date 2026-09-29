@@ -60,20 +60,20 @@ reviews:
   # The rules that live in CLAUDE.md and frontend/AGENTS.md, restated where the
   # reviewer will actually apply them.
   path_instructions:
-    - path: 'gsf/dal/**/*.py'
+    - path: 'auto_ontology/dal/**/*.py'
       instructions: >-
         The store is Postgres, queried with SQLAlchemy Core — flag any ORM
         usage. schema.py is the single source of truth for the schema and its
         column types and constraints are deliberate; a change to them needs a
         justification in the PR. Schema changes require an Alembic revision.
-        Sessions come from gsf/dal/session.py's pooled engine; flag
+        Sessions come from auto_ontology/dal/session.py's pooled engine; flag
         hand-rolled engines or connections.
     - path: 'alembic/versions/**/*.py'
       instructions: >-
         Never edit a migration that has already been applied — it must be
         superseded by a new revision. Check that down_revision chains
         correctly and that the downgrade path is real, not a stub.
-    - path: 'gsf/server/**/*.py'
+    - path: 'auto_ontology/server/**/*.py'
       instructions: >-
         Routes belong under the /api/ prefix in datasources/router.py with
         orchestration in service.py; flag business logic in route handlers.
@@ -81,7 +81,7 @@ reviews:
         functions must be plain `def`, not `async def`. Any change to a
         request or response model needs the committed OpenAPI spec
         regenerated.
-    - path: 'gsf/**/*.py'
+    - path: 'auto_ontology/**/*.py'
       instructions: >-
         Type hints are required on all function signatures. Flag broad
         `except Exception` without re-raise or logging, blocking I/O inside
@@ -128,14 +128,14 @@ reviews:
       - name: Tests for backend behaviour changes
         mode: warning
         instructions: >-
-          If the PR changes behaviour under gsf/ (not just types, comments or
-          formatting), it should add or update tests under gsf/tests or
+          If the PR changes behaviour under auto_ontology/ (not just types, comments or
+          formatting), it should add or update tests under auto_ontology/tests or
           dev_tools. Pass if tests were added or updated, if the change is
           non-behavioural, or if the PR explains why a test is impractical.
       - name: Migration accompanies schema change
         mode: warning
         instructions: >-
-          If gsf/dal/schema.py is modified, an Alembic revision under
+          If auto_ontology/dal/schema.py is modified, an Alembic revision under
           alembic/versions must be added in the same PR. Pass if a revision is
           present or if the schema.py edit only touches comments or docstrings.
 
@@ -163,7 +163,7 @@ reviews:
     # with prettier over the same lines.
     biome:
       enabled: false
-    # Off: helm/gsf/templates are Go templates, not YAML, so a YAML linter
+    # Off: helm/auto-ontology/templates are Go templates, not YAML, so a YAML linter
     # reports syntax errors on every one of them.
     yamllint:
       enabled: false

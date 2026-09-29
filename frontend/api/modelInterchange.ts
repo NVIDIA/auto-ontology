@@ -21,7 +21,7 @@ export const modelInterchangeApi = {
 		requests.postBlob('model/export', { databases: databaseIds, format }),
 
 	/**
-	 * Import a native GSF or Apache Ossie model YAML file, applying it and
+	 * Import a native Auto Ontology or Apache Ossie model YAML file, applying it and
 	 * optionally refreshing VDB embeddings. The backend detects the format from the file.
 	 */
 	importModel: (

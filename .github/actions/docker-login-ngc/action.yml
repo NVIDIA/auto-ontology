@@ -1,0 +1,28 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Login to NGC Registry
+description: Authenticate with NVIDIA NGC Container Registry
+
+inputs:
+  registry:
+    description: 'Registry URL'
+    required: false
+    default: 'nvcr.io'
+  password:
+    description: 'NGC API token'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Log in to NGC Registry
+      shell: bash
+      # Passed through env rather than interpolated into the script, so the
+      # token never becomes part of the command text.
+      env:
+        NGC_PASSWORD: ${{ inputs.password }}
+        NGC_REGISTRY: ${{ inputs.registry }}
+      run: |
+        printf '%s' "$NGC_PASSWORD" | docker login "$NGC_REGISTRY" --username '$oauthtoken' --password-stdin

@@ -12,6 +12,7 @@ import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock } from '@/common/Skeleton';
 import { authApi, type SsoProvider } from '@/api/auth';
 import { useSession } from '@/auth/auth-client';
+import { resumeAuthorizeFromApp } from '@/auth/oauth-loopback';
 import { SkeletonVariant } from '@/enums/skeleton';
 
 const inputClass =
@@ -35,7 +36,7 @@ const LoginLoading = () => (
 // signing in has to hand the user back to the authorize endpoint with them —
 // otherwise the browser lands on /chat and the client that started the flow
 // waits for a code that will never come.
-const AUTHORIZE_PATH = '/api/auth/mcp/authorize';
+const AUTHORIZE_PATH = '/api/auth/oauth2/authorize';
 
 const resumeAuthorize = (params: URLSearchParams): string | null =>
 	params.has('client_id') && params.get('response_type') === 'code'
@@ -47,12 +48,12 @@ const LoginForm = () => {
 	const params = useSearchParams();
 	const next = params.get('next') || resumeAuthorize(params) || '/chat';
 
-	// The authorize endpoint is a route handler, not a page, so the client router
-	// cannot render it — it needs a real navigation to follow the redirect back
-	// to the waiting client.
+	// The authorize endpoint is a route handler, not a page. Resume it with a
+	// same-origin fetch so a loopback redirect_uri stays on Auto Ontology's thank-you
+	// page instead of Chrome following localhost:8787.
 	const goTo = (destination: string) => {
 		if (destination.startsWith('/api/')) {
-			window.location.assign(destination);
+			void resumeAuthorizeFromApp(destination);
 			return;
 		}
 		router.push(destination);
@@ -85,7 +86,7 @@ const LoginForm = () => {
 	useEffect(() => {
 		if (!session) return;
 		if (next.startsWith('/api/')) {
-			window.location.assign(next);
+			void resumeAuthorizeFromApp(next);
 			return;
 		}
 		router.replace(next);
@@ -224,7 +225,9 @@ const LoginPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">GSF</span>
+				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+					Auto Ontology
+				</span>
 			</div>
 			<Suspense fallback={<LoginLoading />}>
 				<LoginForm />

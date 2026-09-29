@@ -1,0 +1,54 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
+name: Determine Release Version
+description: >-
+  Resolve the release version from an explicit input, or else from the release
+  branch the workflow runs on (release/v1.0 -> 1.0).
+
+inputs:
+  version:
+    description: 'Explicit version; empty to take it from the branch'
+    required: false
+    default: ''
+
+outputs:
+  version:
+    description: 'Release version, used as the image tag and appVersion (e.g. 1.0)'
+    value: ${{ steps.version.outputs.version }}
+  chart-version:
+    description: 'The same version padded to SemVer for Helm (e.g. 1.0.0)'
+    value: ${{ steps.version.outputs.chart-version }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract version from branch or input
+      id: version
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        if [ -n "$INPUT_VERSION" ]; then
+          VERSION="$INPUT_VERSION"
+        else
+          # Extract from branch name (release/vX.Y[.Z] -> X.Y[.Z])
+          VERSION="${GITHUB_REF#refs/heads/release/}"
+          VERSION="${VERSION#v}"
+        fi
+
+        # Run from anything but a release branch without a version, and the
+        # line above leaves the whole ref behind (refs/heads/main).
+        if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+          echo "::error::no release version: '$VERSION' (from ${GITHUB_REF}); run on a release/vX.Y branch or pass a version"
+          exit 1
+        fi
+
+        # Helm requires SemVer; the image tag keeps the branch's own form.
+        CHART_VERSION="$VERSION"
+        [[ "$VERSION" =~ ^[0-9]+\.[0-9]+$ ]] && CHART_VERSION="$VERSION.0"
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "chart-version=$CHART_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Releasing version: $VERSION (chart $CHART_VERSION)"

@@ -13,7 +13,10 @@
  * hands the staged tag ids back — writes the difference.
  */
 
+import type { QueryClient } from '@tanstack/react-query';
+
 import { tagsApi } from '@/api/tags';
+import { tagQueries } from '@/lib/queries/tags';
 import { ComposerSectionKind } from '@/enums/datasources';
 import type { TagItemType } from '@/enums/tags';
 import type { ComposerEntityTagsSection } from '@/types/composer-section';
@@ -33,19 +36,36 @@ export const TAGS_SECTION_ID = 'tags';
  * A failed read answers `[]`: the chips an object already carries come from its
  * own payload and stay readable, so an empty picker (which explains itself) is
  * a smaller loss than failing the page over a control. Call it beside the
- * object's own fetch — the section is then built from one snapshot, and a tag
- * created elsewhere appears on the next refetch rather than needing its own
- * subscription.
+ * object's own fetch — the section is then built from one snapshot.
  *
- * That refetch is what keeps the picker current, and it is why this asks for no
- * authors and holds no cache. It runs on every detail page open and again after
- * every save, so anything the answer carries is paid for on each of them — and
- * a cached list would show a vocabulary that no longer matches the one the
- * settings page has just been edited in.
+ * Read through the query cache rather than straight from the API, which is
+ * what stops every detail page open from re-reading the whole vocabulary: the
+ * root layout has already started that read, and a copy still inside its
+ * `staleTime` is handed back without asking again.
+ *
+ * `fetchQuery` rather than `ensureQueryData`, which returns whatever is held
+ * however old it is. That is not enough here, because nothing on a detail
+ * page subscribes to the vocabulary: this reads it without an observer, so
+ * the invalidation the settings page fires after a rename finds no active
+ * query to refetch and only marks the entry. `fetchQuery` reads that mark —
+ * an invalidated query is stale whatever its age — and so re-reads before
+ * answering, where `ensureQueryData` would go on offering the old name.
+ *
+ * `retry` is restated because `fetchQuery` turns it off where the caller
+ * leaves it unset, and the one retry the provider asks for is wanted here
+ * too: this answers `[]` on failure, and a dropped connection emptying the
+ * picker is worth a second attempt.
+ *
+ * Takes the client rather than reaching for it, because a page builds its
+ * sections inside a callback rather than while rendering, and hooks cannot be
+ * called from there.
  */
-export const fetchTagOptions = async (): Promise<TagChip[]> => {
-	const res = await tagsApi.getAll();
-	return res.error ? [] : (res.data ?? []);
+export const fetchTagOptions = async (queryClient: QueryClient): Promise<TagChip[]> => {
+	try {
+		return await queryClient.fetchQuery({ ...tagQueries.vocabulary(), retry: 1 });
+	} catch {
+		return [];
+	}
 };
 
 /** The tags section as every detail page wants it: editable, titled, in place. */

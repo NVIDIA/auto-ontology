@@ -3,4 +3,4 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { ConnectionsView } from './ConnectionsView';
-export { NewConnectionsModal } from './NewConnectionsModal';
+export { ConnectionModal } from './ConnectionModal';

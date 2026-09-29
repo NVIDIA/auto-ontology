@@ -4,7 +4,8 @@
 
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Database } from '@/types/datasources';
 import { zonesApi } from '@/api/zones';
 import { datasources } from '@/api/datasources';
@@ -23,6 +24,7 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { ZonesDataTree } from '@/components/settings/ZonesDataTree';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
+import { invalidateZoneList, patchZoneList, zoneQueries } from '@/lib/queries/zones';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
 import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
@@ -240,11 +242,33 @@ export default function ZonesSettingsPage() {
 	const currentUserId = session?.user?.id ?? '';
 	const isAdmin = session?.user?.role === Role.Admin;
 
+	const queryClient = useQueryClient();
+
 	const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
 	const [editingZoneId, setEditingZoneId] = useState<string | null>(null);
-	const [zones, setZones] = useState<Zone[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+
+	// Prefetched by the root layout for this same account, so the cards are
+	// usually drawn on the first pass rather than after a round trip. Held off
+	// until the session names a user: the list is read on their behalf, and
+	// `uid` is what the route scopes it by.
+	const {
+		data: zones = [],
+		isPending,
+		error: loadError,
+	} = useQuery({ ...zoneQueries.list(currentUserId), enabled: currentUserId !== '' });
+	const loading = isPending || currentUserId === '';
+	const error = loadError?.message ?? null;
+
+	/**
+	 * Writes the zones a change has just produced back to where they are read
+	 * from, so a create, a rename or a toggle redraws without re-reading the
+	 * list. The same entry the layout filled, which is what keeps the page and
+	 * the cache from drifting apart.
+	 */
+	const patchZones = useCallback(
+		(update: (held: Zone[]) => Zone[]) => patchZoneList(queryClient, currentUserId, update),
+		[queryClient, currentUserId],
+	);
 
 	const [modalOpen, setModalOpen] = useState(false);
 	const [activeStep, setActiveStep] = useState(0);
@@ -292,39 +316,10 @@ export default function ZonesSettingsPage() {
 			color !== (initialEditColor ?? DEFAULT_ZONE_COLOR) ||
 			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems));
 
-	const loadZones = useCallback(async () => {
-		if (!currentUserId) return;
-		setLoading(true);
-		const response = await zonesApi.getAll(currentUserId);
-		if (response.error) {
-			setError(response.message ?? 'Failed to load zones.');
-			setZones([]);
-			setLoading(false);
-			return;
-		}
-		setError(null);
-		setZones(response.data ?? []);
-		setLoading(false);
-	}, [currentUserId]);
-
-	useEffect(() => {
-		if (!currentUserId) return;
-		let cancelled = false;
-		zonesApi.getAll(currentUserId).then((response) => {
-			if (cancelled) return;
-			if (response.error) {
-				setError(response.message ?? 'Failed to load zones.');
-				setZones([]);
-			} else {
-				setError(null);
-				setZones(response.data ?? []);
-			}
-			setLoading(false);
-		});
-		return () => {
-			cancelled = true;
-		};
-	}, [currentUserId]);
+	const reloadZones = useCallback(
+		() => invalidateZoneList(queryClient, currentUserId),
+		[queryClient, currentUserId],
+	);
 
 	const openCreateModal = () => {
 		setModalMode('create');
@@ -375,6 +370,11 @@ export default function ZonesSettingsPage() {
 	const canSubmit = !submitting && normalizedName.length > 0 && !nameExists;
 	const canGoNext = normalizedName.length > 0 && !nameExists;
 
+	// The three tree loaders below list their `useState` setters, which React
+	// keeps stable — so the identities here do not change and nothing re-runs
+	// because of them. They are named because the compiler's dependency
+	// inference reads them as dependencies, and a list it cannot match is one
+	// it refuses to preserve.
 	const loadTreeDatabases = useCallback(async (): Promise<Database[]> => {
 		setTreeLoading(true);
 		const response = await datasources.getDBs();
@@ -389,7 +389,7 @@ export default function ZonesSettingsPage() {
 		setTreeDatabases(nextDatabases);
 		setTreeLoading(false);
 		return nextDatabases;
-	}, []);
+	}, [setTreeLoading, setTreeError, setTreeDatabases]);
 
 	const hydrateTreeForSelectedItems = useCallback(
 		async (baseDatabases: Database[], selected: Set<string>): Promise<Database[]> => {
@@ -431,18 +431,24 @@ export default function ZonesSettingsPage() {
 		[],
 	);
 
-	const loadSchemasForDatabase = useCallback(async (dbId: string) => {
-		const response = await datasources.getSchemasForDatabase(dbId);
-		if (response.error || !response.data) return [];
-		setTreeDatabases((prev) => mergeSchemasIntoDatabase(prev, dbId, response.data ?? []));
-		return response.data ?? [];
-	}, []);
+	const loadSchemasForDatabase = useCallback(
+		async (dbId: string) => {
+			const response = await datasources.getSchemasForDatabase(dbId);
+			if (response.error || !response.data) return [];
+			setTreeDatabases((prev) => mergeSchemasIntoDatabase(prev, dbId, response.data ?? []));
+			return response.data ?? [];
+		},
+		[setTreeDatabases],
+	);
 
-	const loadTablesForSchema = useCallback(async (schemaId: string) => {
-		const response = await datasources.getTablesForSchema(schemaId);
-		if (response.error || !response.data) return;
-		setTreeDatabases((prev) => mergeTablesIntoSchema(prev, schemaId, response.data ?? []));
-	}, []);
+	const loadTablesForSchema = useCallback(
+		async (schemaId: string) => {
+			const response = await datasources.getTablesForSchema(schemaId);
+			if (response.error || !response.data) return;
+			setTreeDatabases((prev) => mergeTablesIntoSchema(prev, schemaId, response.data ?? []));
+		},
+		[setTreeDatabases],
+	);
 
 	const goToDataStep = async () => {
 		if (!canGoNext || submitting) return;
@@ -503,7 +509,7 @@ export default function ZonesSettingsPage() {
 			const created: ZoneCreated | undefined = response.data;
 			if (created != null) {
 				const { id, name: n, label, description: d, color: c, enabled: en } = created;
-				setZones((prev) => {
+				await patchZones((prev) => {
 					const next = [
 						...prev.filter((z) => z.id !== created.id),
 						{ id, name: n, label, description: d, color: c, enabled: en },
@@ -511,7 +517,7 @@ export default function ZonesSettingsPage() {
 					return next.sort((a, b) => a.name.localeCompare(b.name));
 				});
 			} else {
-				await loadZones();
+				await reloadZones();
 			}
 			setSubmitting(false);
 			setModalOpen(false);
@@ -549,7 +555,7 @@ export default function ZonesSettingsPage() {
 
 		const updated = response?.data;
 		if (updated != null) {
-			setZones((prev) =>
+			await patchZones((prev) =>
 				prev.map((zone) =>
 					zone.id === updated.id
 						? {
@@ -562,7 +568,7 @@ export default function ZonesSettingsPage() {
 				),
 			);
 		} else {
-			await loadZones();
+			await reloadZones();
 		}
 		setModalOpen(false);
 	};
@@ -590,7 +596,7 @@ export default function ZonesSettingsPage() {
 			return;
 		}
 
-		setZones((prev) => prev.filter((zone) => zone.id !== confirmDeleteZone.id));
+		await patchZones((prev) => prev.filter((zone) => zone.id !== confirmDeleteZone.id));
 		setConfirmDeleteZone(null);
 	};
 
@@ -599,7 +605,7 @@ export default function ZonesSettingsPage() {
 		const nextEnabled = !zone.enabled;
 		setTogglingZoneId(zone.id);
 		setToggleError(null);
-		setZones((prev) =>
+		await patchZones((prev) =>
 			prev.map((z) => (z.id === zone.id ? { ...z, enabled: nextEnabled } : z)),
 		);
 
@@ -607,7 +613,7 @@ export default function ZonesSettingsPage() {
 		setTogglingZoneId(null);
 
 		if (response.error) {
-			setZones((prev) =>
+			await patchZones((prev) =>
 				prev.map((z) => (z.id === zone.id ? { ...z, enabled: zone.enabled } : z)),
 			);
 			setToggleError(response.message ?? 'Failed to update zone status.');
