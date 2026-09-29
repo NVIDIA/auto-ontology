@@ -15,7 +15,13 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # The frontend and MCP images are built from their own directories, so each
 # carries a copy of the root notice files to put under /licenses/.
-NOTICE_FILES = ("LICENSE", "THIRD_PARTY_NOTICES.md", "CONTAINER_THIRD_PARTY_NOTICES.md")
+NOTICE_FILES = (
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "CONTAINER_THIRD_PARTY_NOTICES.md",
+    "OPEN_SOURCE_NOTICE",
+    "OPEN_SOURCE_NOTICE.license",
+)
 IMAGE_CONTEXTS = ("frontend", "mcp")
 
 # Files that cannot carry a comment header, are generated, or are third-party

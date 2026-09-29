@@ -81,7 +81,7 @@ COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=auto_ontology:auto_ontology /app /app
 
 # License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
-COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md /licenses/
+COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md OPEN_SOURCE_NOTICE /licenses/
 
 USER auto_ontology
 

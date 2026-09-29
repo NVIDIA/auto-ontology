@@ -11,7 +11,14 @@ base image. The application's own open-source dependencies (Python and npm
 packages) are listed separately in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 Every image ships these files under `/licenses/`: `LICENSE`,
-`THIRD_PARTY_NOTICES.md`, and this file.
+`THIRD_PARTY_NOTICES.md`, this file, and `OPEN_SOURCE_NOTICE`.
+
+## Source code
+
+Source code for the open-source components added on top of the base image is
+archived by NVIDIA at https://opensource.nvidia.com/oss/teams/nvidia, as stated
+in `OPEN_SOURCE_NOTICE`. Auto Ontology's own source code is at
+https://github.com/NVIDIA/auto-ontology.
 
 ## Base image
 

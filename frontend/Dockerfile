@@ -123,7 +123,7 @@ RUN cd /app/migrate \
  && chown -R nextjs:nodejs /app/migrate
 
 # License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
-COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md /licenses/
+COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md OPEN_SOURCE_NOTICE /licenses/
 
 USER nextjs
 
