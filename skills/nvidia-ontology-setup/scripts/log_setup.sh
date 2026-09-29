@@ -59,7 +59,8 @@ is_sensitive_key() {
 	local upper
 	upper="$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]' | tr -cd 'A-Z')"
 	case "$upper" in
-	*PASSWORD* | *SECRET* | *TOKEN* | *APIKEY* | *CONNECTIONSTRING* | *ROLEID*)
+	*PASSWORD* | *PASSWD* | *SECRET* | *TOKEN* | *APIKEY* | *CONNECTIONSTRING* | \
+		*ROLEID* | *CREDENTIAL* | *PRIVATEKEY* | *ACCESSKEY* | *ENCRYPTIONKEY*)
 		return 0
 		;;
 	esac
@@ -189,6 +190,14 @@ redact_logged_command() {
 			;;
 		--*=*)
 			out+=("$(redact_assignment "$arg")")
+			;;
+		--*)
+			# --db-passwd VALUE: mask the value of any secret-named flag.
+			out+=("$arg")
+			if is_sensitive_key "${arg#--}" && [[ $((i + 1)) -lt $n ]]; then
+				out+=("***")
+				skip_next=1
+			fi
 			;;
 		*=*)
 			out+=("$(redact_csv_assignments "$arg")")

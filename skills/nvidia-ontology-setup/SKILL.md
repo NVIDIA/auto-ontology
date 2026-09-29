@@ -187,6 +187,34 @@ curl -s -o /dev/null -w '%{http_code}\n' "$AUTO_ONTOLOGY_API_URL/.well-known/oau
 - Existing deployment: do not reinstall; configure `AUTO_ONTOLOGY_API_URL` and verify
   OAuth discovery before connecting the MCP client.
 
+## Connect a source
+
+Connections come from one of two places, and only one is used:
+
+- **UI-managed** (Settings → Connections, or the API below). When any exist,
+  `CONNECTION_STRINGS` is ignored.
+- **`CONNECTION_STRINGS`** in `.env` is a fallback used only when there are no
+  UI-managed connections. `GET /api/connections/source` reports whether it is
+  set; it cannot carry schema or table filters.
+
+To add a UI-managed connection (permission `connection:manage`):
+
+1. `POST /api/connections/test` validates credentials and returns the schemas
+   for the allowlist. A 422 carries the driver's error; fix it before creating.
+2. `POST /api/connections` stores the connection. The 201 only means it was
+   saved: ingestion is triggered best-effort and may fail or still be running.
+3. Verify it landed: `GET /api/datasources/dbs` (`catalog:read`) lists the
+   database with the expected tables, `GET /api/semantic-compilation/status`
+   reports progress, and MCP `check_readiness` reports no blockers.
+
+Scope is set per connection: a schema allowlist, plus `table_allow_regex` /
+`table_deny_regex` applied at catalog extraction (deny wins; unqualified,
+case-sensitive names). Env connections have neither. The full table-level scope
+guarantee is still open in
+[#255](https://github.com/NVIDIA/auto-ontology/issues/255), so if particular tables must never be
+catalogued, sampled, or embedded, say that this is not yet enforceable
+end-to-end rather than implying it is.
+
 ## Verify
 
 1. UI loads at http://localhost:3000 (or the deployed `APP_URL`) and shows

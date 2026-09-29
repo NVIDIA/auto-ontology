@@ -85,6 +85,30 @@
       ],
       "expected_skill": "nvidia-ontology-setup",
       "expected_script": null
+    },
+    {
+      "id": "setup-eval-008-connect-source-workflow",
+      "prompt": "Auto Ontology is running and I'm signed in as an admin. Add our Postgres warehouse as a source and tell me when it's ready to answer questions.",
+      "expected_output": "Test first with POST /api/connections/test (connection:manage), fix any 422 before creating, then POST /api/connections. A 201 only means the connection was saved; ingestion is triggered best-effort, so do not report readiness yet. Verify the database and expected tables appear in GET /api/datasources/dbs, check semantic-compilation status, and run MCP check_readiness before saying it can answer questions.",
+      "assertions": [
+        "Tests the connection before creating it",
+        "Does not treat the 201 from POST /api/connections as proof that ingestion finished",
+        "Verifies the catalog, semantic compilation, and check_readiness before claiming readiness"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-009-env-vs-ui-connections",
+      "prompt": "CONNECTION_STRINGS in .env points at our warehouse, but after I added a different database in Settings -> Connections the warehouse disappeared from answers. Why? Also, can I exclude our telemetry tables from the warehouse?",
+      "expected_output": "CONNECTION_STRINGS is only a fallback used when there are no UI-managed connections; once a UI connection exists, the env connections are ignored. Add the warehouse as a UI connection too. Table exclusion is only available on UI-managed connections (table_allow_regex / table_deny_regex at catalog extraction); env connections cannot carry filters, and the full table-level guarantee is still tracked in #255, so do not promise that excluded tables can never be catalogued, sampled, or embedded.",
+      "assertions": [
+        "Explains that CONNECTION_STRINGS is ignored once any UI-managed connection exists",
+        "Recommends adding the warehouse as a UI-managed connection",
+        "States table filters exist only on UI-managed connections and does not overstate the guarantee"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
     }
   ]
 }
