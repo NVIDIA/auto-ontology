@@ -4,10 +4,10 @@ All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# GSF install troubleshooting
+# Auto Ontology setup troubleshooting
 
 Read this before searching the web. Wrap diagnosis commands with
-`scripts/log_install.sh` so the session is replayable.
+`scripts/log_setup.sh` so the session is replayable.
 
 ## UI loads without the left navigation (or looks broken after restart)
 
@@ -35,12 +35,12 @@ field falls back to `DEFAULT_MODELS_*`.
 A mismatch puts stored vectors and query vectors in different spaces; answers
 look like "nothing found."
 
-Confirm the logged (redacted) triplets in `.gsf-install.log` match what you
+Confirm the logged (redacted) triplets in `.nvidia-ontology-setup.log` match what you
 intended.
 
 ## Connections: UI vs `CONNECTION_STRINGS` vs Vault
 
-GSF resolves source databases from two places:
+Auto Ontology resolves source databases from two places:
 
 1. Connections added in the UI. Credentials are stored in plaintext on the
    catalog row unless Vault is fully configured.
@@ -71,7 +71,7 @@ leave `GSF_MCP_HOST` unset.
 
 ## "This request carried no signed-in session"
 
-The grant expired or was revoked in GSF. Sign in again from the MCP client.
+The grant expired or was revoked in Auto Ontology. Sign in again from the MCP client.
 There is no server-side token to paste; do not try to configure one.
 
 ## `ask_question` returned an empty answer, with no SQL and no error
@@ -85,7 +85,7 @@ credential.
 If the deployment is ready, the question's vocabulary is the problem —
 `search_terms` for the nouns in it.
 
-## "GSF cannot answer right now"
+## "Auto Ontology cannot answer right now"
 
 Usually the semantic layer was never compiled; confirm with
 `check_readiness` or `GET /api/semantic-compilation/status`. It also appears

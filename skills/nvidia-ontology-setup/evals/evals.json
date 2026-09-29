@@ -1,0 +1,90 @@
+{
+  "skill_name": "nvidia-ontology-setup",
+  "evals": [
+    {
+      "id": "setup-eval-001-underspecified",
+      "prompt": "Use the nvidia-ontology-setup skill to handle this request safely: Install Auto Ontology for me.",
+      "expected_output": "The request is underspecified, so the agent asks the required questions before running a command: target (full Compose, --dev, --ds, Helm, or MCP-only against an existing instance), whether DEFAULT_MODELS_API_KEY is set, source database / CONNECTION_STRINGS vs UI connections, and whether host port 5432 is free. It does not guess Compose and run it silently.",
+      "assertions": [
+        "Loads nvidia-ontology-setup before choosing an installation path",
+        "Asks which target is wanted \u2014 Compose, --dev, --ds, Helm, or MCP-only",
+        "Asks about DEFAULT_MODELS_API_KEY / NIM credentials",
+        "Does not silently assume defaults and emit a single install command"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-002-use-existing-scripts",
+      "prompt": "I cloned NVIDIA/GSF and filled in .env. How do I start the full local stack?",
+      "expected_output": "The agent invokes the existing setup path from the repository root \u2014 ./dev_tools/setup_env.sh or docker compose up -d --build \u2014 wrapped with log_setup.sh. It does not write a new docker-compose file or a custom install script.",
+      "assertions": [
+        "Uses dev_tools/setup_env.sh or docker compose up -d --build from the repo root",
+        "Wraps the command with skills/nvidia-ontology-setup/scripts/log_setup.sh",
+        "Does not invent a second installer"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": "skills/nvidia-ontology-setup/scripts/log_setup.sh"
+    },
+    {
+      "id": "setup-eval-003-auth-secret-cookies",
+      "prompt": "After I restarted docker compose the Auto Ontology UI at localhost:3000 loads but the left navigation is missing.",
+      "expected_output": "Stale Better Auth session cookie, typically after AUTH_SECRET changed or the database was reset. Clear site data for localhost:3000 or delete better-auth.session_token and sign in again. This is not a compose or frontend-build failure.",
+      "assertions": [
+        "Identifies a stale Better Auth cookie / AUTH_SECRET change",
+        "Tells the user to clear site data or better-auth.session_token and sign in again",
+        "Does not rebuild images as the first fix"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-004-postgres-port-host-only",
+      "prompt": "5432 is taken on my laptop so I set POSTGRES_PORT=15432 in .env. The Auto Ontology container still talks to Postgres on 5432. Is that a bug?",
+      "expected_output": "Not a bug. POSTGRES_PORT only changes the host-side port mapping. Containers always reach Postgres on 5432 on the compose network. Host access becomes localhost:15432.",
+      "assertions": [
+        "States that POSTGRES_PORT is host-side only",
+        "States that containers still use 5432 internally",
+        "Does not tell the user to change the container Postgres port"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-005-mcp-already-up",
+      "prompt": "Auto Ontology is already running at https://ontology.example.com. I only need my coding agent to query it.",
+      "expected_output": "Do not reinstall. Point GSF_API_URL at the web app and run gsf-mcp (uvx from the mcp subdirectory). Confirm GET $GSF_API_URL/.well-known/oauth-authorization-server returns 200. Client config uses the /mcp suffix; the user signs in; no token on the MCP server.",
+      "assertions": [
+        "Does not run docker compose or setup_env.sh",
+        "Sets GSF_API_URL to the web app URL, not FastAPI :3001",
+        "Checks OAuth discovery returns 200",
+        "Does not configure a server-side API token on gsf-mcp"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-006-vault-partial",
+      "prompt": "I set VAULT_ADDR and VAULT_NAMESPACE but left ROLE_ID empty. Are my UI-added connection passwords in Vault?",
+      "expected_output": "No. Vault is enabled only when VAULT_ADDR, VAULT_NAMESPACE, VAULT_ROLE_ID, and VAULT_SECRET_ID are all set. Partial configuration is ignored with a warning and credentials stay plaintext on the catalog row.",
+      "assertions": [
+        "Requires all four Vault variables",
+        "States that partial config falls back to plaintext",
+        "Does not claim passwords are in Vault"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    },
+    {
+      "id": "setup-eval-007-embed-triplet-mismatch",
+      "prompt": "Ingest succeeded but every question comes back as if there were no matching data. EMBED_MODEL at query time is not the one I used at ingest.",
+      "expected_output": "EMBED_ENDPOINT and EMBED_MODEL must be identical for ingest and query. A mismatch puts stored vectors and query vectors in different spaces. Align the embed triplet and re-ingest; this is not a chat-prompt problem.",
+      "assertions": [
+        "States embed endpoint and model must match between ingest and query",
+        "Recommends aligning the embed triplet rather than rewriting the question"
+      ],
+      "expected_skill": "nvidia-ontology-setup",
+      "expected_script": null
+    }
+  ]
+}

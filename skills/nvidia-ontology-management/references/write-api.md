@@ -52,17 +52,33 @@ through compilation, ingest, or model import.
 
 | Method | Path | Permission | Notes |
 | --- | --- | --- | --- |
-| GET | `/api/semantic-compilation/status` | `chat:use` | Whether any Term exists (`calculated`) |
-| POST | `/api/semantic-compilation/reset` | `semanticCompilation:manage` | **Destructive.** Deletes every database's compiled semantic layer. 202. Not a cleanup step after a small edit. |
+| GET | `/api/semantic-compilation/status` | `chat:use` | Global status. `calculated` only means at least one Term exists; `running: false` does not prove the ingestion service is reachable. |
+| PUT | `/api/configurations/semantic-compilation` | `semanticCompilation:manage` | Set `enabled`; enabling triggers a run best-effort. |
+| POST | `/api/semantic-compilation/reset` | `semanticCompilation:manage` | **Destructive and asynchronous.** Accepts a delete-and-rebuild of every database's compiled layer. 202 is not completion; poll and verify. Not cleanup after a small edit. |
 
 ## Model interchange
 
 | Method | Path | Permission | Notes |
 | --- | --- | --- | --- |
-| POST | `/api/model/export` | `modelInterchange:export` | JSON body `ExportRequest`: `databases` (empty = all), `format` `gsf` \| `ossie`. Response is YAML. |
-| POST | `/api/model/import` | `modelInterchange:import` | Multipart YAML. Query `replace` (default true), `embed` (default true). Native GSF vs Ossie is detected from the document root (`data_layer`/`semantic_layer` vs `semantic_model`). |
+| POST | `/api/model/export` | `modelInterchange:export` | JSON body `ExportRequest`: catalog database **IDs** in `databases` (empty = all), `format` `gsf` \| `ossie`. Response is YAML. |
+| POST | `/api/model/import` | `modelInterchange:import` | Multipart or raw YAML. Query `replace` (default true), `embed` (default true). Native Auto Ontology vs Ossie is detected from the document root (`data_layer`/`semantic_layer` vs `semantic_model`). |
 
-## Exploration (read; lineage)
+For mutation and publication safeguards, use
+[publication.md](publication.md). Request success is not persisted parity.
+
+## Reusable analysis definitions
+
+These publish reusable definitions, not arbitrary external result rows:
+
+| Method | Path | Permission | Notes |
+| --- | --- | --- | --- |
+| POST | `/api/custom-analyses/validate` | `analysis:manage` | Validate SQL against catalogued tables; parse or resolution failure is 422. |
+| POST/PUT/DELETE | `/api/custom-analyses` or `/api/custom-analyses/{analysis_id}` | `analysis:manage` | Create, replace, or delete supported SQL definitions. Name or SQL conflicts return 409. |
+| GET | `/api/custom-analyses` | `analysis:read` | List reusable SQL definitions. |
+| POST/PUT/DELETE | `/api/pql-analyses` or `/api/pql-analyses/{analysis_id}` | `analysis:manage` | Create, replace, or delete PQL definitions. PQL is validated at prediction time. |
+| GET | `/api/pql-analyses` | `analysis:read` | List reusable PQL definitions. |
+
+## Exploration (read; semantic relationships)
 
 All `catalog:read`:
 
@@ -76,7 +92,9 @@ All `catalog:read`:
 
 ## Verify after a write
 
-Prefer MCP `check_answerable` then `ask_question`. REST equivalents:
+For model import, first re-export the same database-ID scope and compare exact
+persisted structure and properties. Then use MCP `check_answerable` and
+`ask_question` for positive and negative behavior checks. REST equivalents:
 
 - `POST /api/question-entity-coverage`
 - `POST /api/chat/completions` (SSE; `chat:use`)
