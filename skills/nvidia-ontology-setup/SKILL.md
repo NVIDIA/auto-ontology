@@ -53,22 +53,30 @@ Ask these if not already clear. Do not guess a default and emit a command.
 6. **Compose only** — is host `5432` free? `POSTGRES_PORT` only remaps the
    host side; containers still use 5432 internally.
 
-Never ask the user to paste secrets into the conversation. Have them set the
-values themselves, for example in a values file kept out of git.
+Never ask the user to paste secrets into the conversation, and never put them
+in command arguments. Have the user write them into a values file or `.env`.
 
 ## Install with Helm (official)
 
 Releases are published to the public NGC `nvidia` org (chart and images). Follow
 `DEPLOYMENT.md` with the version the user named:
 
+The user creates a values file for the secrets in an editor (not on the
+command line, so they stay out of shell history and process arguments),
+`chmod 600`, and out of git:
+
+```yaml
+# auto-ontology-secrets.yaml
+defaultModelsApiKey: <API-KEY>
+postgresPassword: <POSTGRES-PASSWORD>
+adminEmail: <ADMIN-EMAIL>
+adminPassword: <ADMIN-PASSWORD>
+connectionStrings: <CONNECTION-STRINGS>   # optional; or add connections in the UI
+```
+
 ```bash
 helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-<VERSION>.tgz
-helm install auto-ontology auto-ontology-<VERSION>.tgz \
-  --set defaultModelsApiKey=<API-KEY> \
-  --set postgresPassword=<POSTGRES-PASSWORD> \
-  --set adminEmail=<ADMIN-EMAIL> \
-  --set adminPassword=<ADMIN-PASSWORD> \
-  --set connectionStrings=<CONNECTION-STRINGS>   # optional; or add connections in the UI
+helm install auto-ontology auto-ontology-<VERSION>.tgz -f auto-ontology-secrets.yaml
 kubectl port-forward svc/frontend 3000:3000
 ```
 

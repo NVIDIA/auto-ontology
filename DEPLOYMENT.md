@@ -13,15 +13,23 @@ To install a published release:
    helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz
    ```
 
-2. Install the chart:
+2. Put the secrets in a values file. Create it in an editor rather than on
+   the command line, so they stay out of shell history and process arguments,
+   restrict it with `chmod 600`, and keep it out of git:
+
+   ```yaml
+   # auto-ontology-secrets.yaml
+   defaultModelsApiKey: <API-KEY>
+   postgresPassword: <POSTGRES-PASSWORD>
+   adminEmail: <ADMIN-EMAIL>
+   adminPassword: <ADMIN-PASSWORD>
+   connectionStrings: <CONNECTION-STRINGS>   # optional; or add connections in the UI
+   ```
+
+3. Install the chart:
 
    ```bash
-   helm install auto-ontology auto-ontology-1.0.0.tgz \
-     --set defaultModelsApiKey=<API-KEY> \
-     --set postgresPassword=<POSTGRES-PASSWORD> \
-     --set adminEmail=<ADMIN-EMAIL> \
-     --set adminPassword=<ADMIN-PASSWORD> \
-     --set connectionStrings=<CONNECTION-STRINGS>
+   helm install auto-ontology auto-ontology-1.0.0.tgz -f auto-ontology-secrets.yaml
    ```
 
    `adminEmail` and `adminPassword` are required: self-service sign-up is
@@ -30,7 +38,7 @@ To install a published release:
    `http://localhost:3000` (the port-forward below), also set `appUrl` to that
    exact origin.
 
-3. Expose the UI:
+4. Expose the UI:
 
    ```bash
    kubectl port-forward svc/frontend 3000:3000

@@ -113,10 +113,11 @@
     {
       "id": "setup-eval-010-helm-install",
       "prompt": "Install Auto Ontology 1.0.0 on our Kubernetes cluster. I have kubectl and helm access and a NIM API key.",
-      "expected_output": "Use the published Helm chart from DEPLOYMENT.md: helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz, then helm install with defaultModelsApiKey, postgresPassword, adminEmail and adminPassword (required, or the install fails), and optionally connectionStrings. Set appUrl to the origin users will browse to unless they use kubectl port-forward svc/frontend 3000:3000. The user sets the secret values themselves rather than pasting them into the conversation. Do not use dev_tools/setup_env.sh or build images.",
+      "expected_output": "Use the published Helm chart from DEPLOYMENT.md: helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.0.0.tgz, then helm install -f with a values file the user creates containing defaultModelsApiKey, postgresPassword, adminEmail and adminPassword (required, or the install fails), and optionally connectionStrings; secrets are not passed with --set. Set appUrl to the origin users will browse to unless they use kubectl port-forward svc/frontend 3000:3000. The user sets the secret values themselves rather than pasting them into the conversation. Do not use dev_tools/setup_env.sh or build images.",
       "assertions": [
         "Uses the published Helm chart rather than dev_tools/setup_env.sh or docker compose",
         "Includes adminEmail and adminPassword in the install",
+        "Passes secrets through a values file rather than --set arguments",
         "Addresses appUrl for the origin users will browse to",
         "Does not ask the user to paste secrets into the conversation"
       ],
