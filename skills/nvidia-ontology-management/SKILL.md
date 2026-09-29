@@ -36,7 +36,7 @@ Choose the focused workflow before acting:
 MCP tools only **read**. Create, patch, import, and compile-reset go through
 the Next.js `/api/...` gateway. Governed result rows require an approved source
 writer; Auto Ontology has no generic result-row writeback endpoint. Request bodies and
-field types live in `docs/openapi/gsf-api.json`; this skill names operations and
+field types live in `docs/openapi/auto-ontology-api.json`; this skill names operations and
 permissions only.
 
 ## Prerequisites
@@ -109,7 +109,7 @@ revision, certification history, or version lineage.
 
 - `POST /api/model/export` — YAML of catalog + semantic layer.
   Permission `modelInterchange:export`. Body may set catalog database **IDs**
-  in `databases` (empty = all) and `format` (`gsf` or `ossie`).
+  in `databases` (empty = all) and `format` (`auto_ontology` or `ossie`).
 - `POST /api/model/import` — multipart YAML; native Auto Ontology
   (`data_layer` / `semantic_layer`) or Apache Ossie (`semantic_model`).
   Query `replace` (default true) and `embed` (default true). Permission
@@ -137,4 +137,4 @@ before changing the model or resetting compilation.
 - [publication.md](references/publication.md)
 - `nvidia-ontology-query` — how to call Auto Ontology and validate query results
 - `nvidia-ontology-setup` — deployment not ready
-- `mcp/gsf_mcp/tools.py` — live read-tool allow-list
+- `mcp/auto_ontology_mcp/tools.py` — live read-tool allow-list

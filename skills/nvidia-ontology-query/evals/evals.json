@@ -16,7 +16,7 @@
     {
       "id": "query-eval-002-no-fastapi-public",
       "prompt": "I'll POST questions to http://localhost:3001/api/chat/completions with a conversation_id from our partner app.",
-      "expected_output": "Do not expose or call FastAPI :3001 from a partner app. Public clients use the Next.js gateway on the web origin (:3000). FastAPI trusts x-gsf-user-id and does not independently verify it. conversation_id on a direct FastAPI call requires that internal header.",
+      "expected_output": "Do not expose or call FastAPI :3001 from a partner app. Public clients use the Next.js gateway on the web origin (:3000). FastAPI trusts x-auto-ontology-user-id and does not independently verify it. conversation_id on a direct FastAPI call requires that internal header.",
       "assertions": [
         "Directs the caller to the Next.js gateway, not FastAPI :3001",
         "Explains that FastAPI is a trusted internal boundary",

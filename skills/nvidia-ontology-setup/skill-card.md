@@ -25,7 +25,7 @@ Global
 ### Requirements / Dependencies
 
 Requires API Key or External Credential: Yes
-Credential Type(s): NVIDIA NIM API key (`DEFAULT_MODELS_API_KEY`); optional source-database connection strings; GitHub credentials to `uvx` gsf-mcp while Auto Ontology is unpublished on PyPI
+Credential Type(s): NVIDIA NIM API key (`DEFAULT_MODELS_API_KEY`); optional source-database connection strings; GitHub credentials to `uvx` auto-ontology-mcp while Auto Ontology is unpublished on PyPI
 
 Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate. Install logging redacts passwords, tokens, and API keys.
 

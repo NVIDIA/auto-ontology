@@ -28,7 +28,7 @@ NemoClaw skill pack.
 Credential order on every `/api` route (`frontend/auth/resolve-user.ts`):
 
 1. Session cookie
-2. Auto Ontology API token (`gsf_…`, `x-api-key` or Bearer)
+2. Auto Ontology API token (`auto_ontology_…`, `x-api-key` or Bearer)
 3. Auto Ontology-issued OAuth access token (MCP)
 4. SSO id token (AI-Q)
 

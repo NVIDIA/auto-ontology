@@ -54,8 +54,8 @@ API catalog or a second installer.
 | Job | Owner | Skills do |
 | --- | --- | --- |
 | Install commands | `dev_tools/setup_env.sh`, `docker-compose.yml`, `DEPLOYMENT.md` | Invoke them; log what ran |
-| Live read tools | `mcp/gsf_mcp/tools.py` (handshake tool list) | Prefer MCP; sequence reads; never copy the tool table |
-| REST shapes and permissions | `docs/openapi/gsf-api.json` | Name the operation and permission; link; do not paste schemas |
+| Live read tools | `mcp/auto_ontology_mcp/tools.py` (handshake tool list) | Prefer MCP; sequence reads; never copy the tool table |
+| REST shapes and permissions | `docs/openapi/auto-ontology-api.json` | Name the operation and permission; link; do not paste schemas |
 
 MCP is read-only by design. Writes go through the Next.js `/api/...` surface.
 The live MCP tool list at handshake is the source of truth if it disagrees
@@ -74,7 +74,7 @@ and build.nvidia.com/skills. That pipeline requires, per skill:
 
 ```yaml
 name: Auto Ontology
-repo: NVIDIA/GSF
+repo: NVIDIA/auto-ontology
 skills:
   - path: skills/nvidia-ontology-setup/
     catalog_dir: nvidia-ontology-setup

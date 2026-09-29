@@ -31,7 +31,7 @@ Do not include secrets in prompts/logs/output; use least-privilege credentials; 
 
 ## Known Risks and Mitigations
 
-Risk: An agent may call FastAPI `:3001` with `x-gsf-user-id` and impersonate a user, or share `conversation_id` across users.
+Risk: An agent may call FastAPI `:3001` with `x-auto-ontology-user-id` and impersonate a user, or share `conversation_id` across users.
 Mitigation: Skill requires the Next.js gateway for public clients; FastAPI is an internal boundary; conversation ids are per Auto Ontology user.
 
 Risk: SSO bearer verification does not check `aud`, so any token from the configured issuer is accepted.
@@ -42,8 +42,8 @@ Mitigation: Resolve the material question first, then validate SQL, rows, trunca
 
 ## References
 
-- `mcp/README.md`, `docs/mcp.md`, `mcp/gsf_mcp/tools.py`
-- `docs/openapi/gsf-api.json`
+- `mcp/README.md`, `docs/mcp.md`, `mcp/auto_ontology_mcp/tools.py`
+- `docs/openapi/auto-ontology-api.json`
 - `frontend/auth/resolve-user.ts`, `frontend/auth/bearer.ts`
 - [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
 - [references/stack.md](references/stack.md)

@@ -55,19 +55,19 @@ ignored with a warning and falls back to plaintext. `VAULT_AUTH_MOUNT` and
 
 ## MCP client cannot discover how to sign in
 
-`$GSF_API_URL/.well-known/oauth-authorization-server` must return JSON
+`$AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server` must return JSON
 (`200`). A redirect to the login page means the deployment predates that
 route — run the frontend from the checkout (`pnpm dev`).
 
-`GSF_API_URL` is the **web app**, default `http://localhost:3000`, not
+`AUTO_ONTOLOGY_API_URL` is the **web app**, default `http://localhost:3000`, not
 FastAPI `:3001`.
 
 ## "Protected resource ... does not match expected ..."
 
 The MCP server advertised the address it bound to, and the client reached it
 under a different spelling of the same host — almost always `127.0.0.1`
-versus `localhost`. Set `GSF_MCP_PUBLIC_URL` to the URL the client uses, or
-leave `GSF_MCP_HOST` unset.
+versus `localhost`. Set `AUTO_ONTOLOGY_MCP_PUBLIC_URL` to the URL the client uses, or
+leave `AUTO_ONTOLOGY_MCP_HOST` unset.
 
 ## "This request carried no signed-in session"
 

@@ -66,11 +66,11 @@ memberships when downstream joins require the full set.
 
 Fail closed around known product limitations:
 
-- [issue #250](https://github.com/NVIDIA/GSF/issues/250): replacement may
+- [issue #250](https://github.com/NVIDIA/auto-ontology/issues/250): replacement may
   retain an omitted semantic FK;
-- [issue #265](https://github.com/NVIDIA/GSF/issues/265): replacement may
+- [issue #265](https://github.com/NVIDIA/auto-ontology/issues/265): replacement may
   retain existing properties instead of updating them;
-- [issue #267](https://github.com/NVIDIA/GSF/issues/267): a different physical
+- [issue #267](https://github.com/NVIDIA/auto-ontology/issues/267): a different physical
   ID with the same natural database name may surface as HTTP 500.
 
 Do not bypass these failures with direct Postgres edits. A `success: true`

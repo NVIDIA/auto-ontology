@@ -46,7 +46,7 @@ browser. Hand mutations and publication to `nvidia-ontology-management`.
 ## Prefer MCP for reads
 
 When the harness speaks MCP, use it. The **handshake tool list** is the live
-source of truth (`mcp/gsf_mcp/tools.py`). Do not copy a tool table into the
+source of truth (`mcp/auto_ontology_mcp/tools.py`). Do not copy a tool table into the
 session; if the handshake and this skill disagree, trust the handshake.
 
 Sequence (the server also advertises this so models do not jump straight to
@@ -65,7 +65,7 @@ Everything on MCP **reads**. There is no MCP tool for raw databases, schemas,
 or columns on purpose. `describe_table` is the legitimate table view: terms
 and SQL attributes the table participates in.
 
-Connect: `GSF_API_URL` is the **web app**. Run `gsf-mcp`, point the client at
+Connect: `AUTO_ONTOLOGY_API_URL` is the **web app**. Run `auto-ontology-mcp`, point the client at
 `…/mcp`, user signs in. No token on the MCP server. Details:
 repository `mcp/README.md` and `docs/mcp.md`.
 
@@ -73,20 +73,20 @@ repository `mcp/README.md` and `docs/mcp.md`.
 
 When MCP is unavailable, public clients call the authenticated **Next.js
 gateway**, not FastAPI
-`:3001`. FastAPI trusts `x-gsf-user-id` and must not be exposed. A direct
+`:3001`. FastAPI trusts `x-auto-ontology-user-id` and must not be exposed. A direct
 FastAPI request without `conversation_id` is stateless; with
 `conversation_id` it requires that internal header.
 
 Auth (any of these; resolved in one place):
 
 - Browser session cookie
-- API token: `x-api-key: $GSF_API_TOKEN` (`Authorization: Bearer` works for
-  `gsf_…` tokens too). Token acts as its owner.
+- API token: `x-api-key: $AUTO_ONTOLOGY_API_TOKEN` (`Authorization: Bearer` works for
+  `auto_ontology_…` tokens too). Token acts as its owner.
 - Auto Ontology-issued OAuth access token (MCP sign-in)
 - SSO id token (`Authorization: Bearer <jwt>`), e.g. AI-Q — see
   [stack.md](references/stack.md)
 
-Shapes: `docs/openapi/gsf-api.json`. Do not scrape all ~87 operations. A write
+Shapes: `docs/openapi/auto-ontology-api.json`. Do not scrape all ~87 operations. A write
 request hands off to `nvidia-ontology-management`; this skill does not turn a read-only
 question into a mutation.
 
@@ -108,7 +108,7 @@ import os
 import requests
 
 session = requests.Session()
-session.headers["x-api-key"] = os.environ["GSF_API_TOKEN"]
+session.headers["x-api-key"] = os.environ["AUTO_ONTOLOGY_API_TOKEN"]
 
 terms = session.get("https://ontology.example.com/api/terms").json()
 

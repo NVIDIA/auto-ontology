@@ -16,7 +16,7 @@
     },
     {
       "id": "setup-eval-002-use-existing-scripts",
-      "prompt": "I cloned NVIDIA/GSF and filled in .env. How do I start the full local stack?",
+      "prompt": "I cloned NVIDIA/auto-ontology and filled in .env. How do I start the full local stack?",
       "expected_output": "The agent invokes the existing setup path from the repository root \u2014 ./dev_tools/setup_env.sh or docker compose up -d --build \u2014 wrapped with log_setup.sh. It does not write a new docker-compose file or a custom install script.",
       "assertions": [
         "Uses dev_tools/setup_env.sh or docker compose up -d --build from the repo root",
@@ -53,12 +53,12 @@
     {
       "id": "setup-eval-005-mcp-already-up",
       "prompt": "Auto Ontology is already running at https://ontology.example.com. I only need my coding agent to query it.",
-      "expected_output": "Do not reinstall. Point GSF_API_URL at the web app and run gsf-mcp (uvx from the mcp subdirectory). Confirm GET $GSF_API_URL/.well-known/oauth-authorization-server returns 200. Client config uses the /mcp suffix; the user signs in; no token on the MCP server.",
+      "expected_output": "Do not reinstall. Point AUTO_ONTOLOGY_API_URL at the web app and run auto-ontology-mcp (uvx from the mcp subdirectory). Confirm GET $AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server returns 200. Client config uses the /mcp suffix; the user signs in; no token on the MCP server.",
       "assertions": [
         "Does not run docker compose or setup_env.sh",
-        "Sets GSF_API_URL to the web app URL, not FastAPI :3001",
+        "Sets AUTO_ONTOLOGY_API_URL to the web app URL, not FastAPI :3001",
         "Checks OAuth discovery returns 200",
-        "Does not configure a server-side API token on gsf-mcp"
+        "Does not configure a server-side API token on auto-ontology-mcp"
       ],
       "expected_skill": "nvidia-ontology-setup",
       "expected_script": null

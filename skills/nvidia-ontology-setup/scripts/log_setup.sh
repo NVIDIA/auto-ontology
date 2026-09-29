@@ -190,16 +190,16 @@ redact_logged_command() {
 		RERANK_MODEL \
 		INGESTION_SERVICE_URL \
 		PYTHON_API_URL \
-		GSF_API_URL \
-		GSF_MCP_HOST \
-		GSF_MCP_PORT \
-		GSF_MCP_PUBLIC_URL \
+		AUTO_ONTOLOGY_API_URL \
+		AUTO_ONTOLOGY_MCP_HOST \
+		AUTO_ONTOLOGY_MCP_PORT \
+		AUTO_ONTOLOGY_MCP_PUBLIC_URL \
 		VAULT_ADDR \
 		VAULT_NAMESPACE \
 		VAULT_ROLE_ID \
 		VAULT_SECRET_ID \
-		GSF_ADMIN_EMAIL \
-		GSF_ADMIN_PASSWORD; do
+		AUTO_ONTOLOGY_ADMIN_EMAIL \
+		AUTO_ONTOLOGY_ADMIN_PASSWORD; do
 		if [[ -n "${!key+x}" ]]; then
 			printf '  %s=%s\n' "$key" "$(redact_value "$key" "${!key}")"
 		fi

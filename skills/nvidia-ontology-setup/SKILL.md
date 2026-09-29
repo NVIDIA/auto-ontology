@@ -100,7 +100,7 @@ Preferred when the user wants a running Auto Ontology without iterating on the c
 # equivalent: docker compose up -d --build
 ```
 
-This builds `gsf` and `gsf-frontend`, starts Postgres, pgAdmin, the ingestion
+This builds `auto-ontology` and `auto-ontology-frontend`, starts Postgres, pgAdmin, the ingestion
 service, runs the one-shot migrate job, and starts the app.
 
 | Service | URL |
@@ -124,18 +124,18 @@ Then two terminals:
 ```bash
 cd frontend && pnpm dev
 # repo root:
-uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
+uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
-The app factory is `create_app()` in `gsf/server/__main__.py`. There is no
-`gsf/server/main.py`. `uv run python -m gsf.server` is the same app without
+The app factory is `create_app()` in `auto_ontology/server/__main__.py`. There is no
+`auto_ontology/server/main.py`. `uv run python -m auto_ontology.server` is the same app without
 reload (what the container runs).
 
 ## Local: `--ds` (frontend in Docker, API on the host)
 
 ```bash
 ./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --ds
-uv run uvicorn gsf.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
+uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
 ```
 
 The frontend image bakes `PYTHON_API_URL=http://host.docker.internal:3001`.
@@ -156,30 +156,30 @@ GitOps.
 
 ## Auto Ontology is already up — MCP only
 
-Do not reinstall. Point `GSF_API_URL` at the **web app** (Compose UI is
+Do not reinstall. Point `AUTO_ONTOLOGY_API_URL` at the **web app** (Compose UI is
 `:3000`, not FastAPI `:3001`):
 
 ```bash
-GSF_API_URL=http://localhost:3000 uvx --from "git+https://github.com/NVIDIA/GSF.git#subdirectory=mcp" gsf-mcp
+AUTO_ONTOLOGY_API_URL=http://localhost:3000 uvx --from "git+https://github.com/NVIDIA/auto-ontology.git#subdirectory=mcp" auto-ontology-mcp
 ```
 
 Until the package is on PyPI this needs GitHub credentials that can read
-`NVIDIA/GSF`. Client config uses the MCP server URL with a `/mcp` suffix.
+`NVIDIA/auto-ontology`. Client config uses the MCP server URL with a `/mcp` suffix.
 People sign in through Auto Ontology; do not put a token on the MCP server.
 
 Confirm the deployment is new enough to be an authorization server:
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' "$GSF_API_URL/.well-known/oauth-authorization-server"
+curl -s -o /dev/null -w '%{http_code}\n' "$AUTO_ONTOLOGY_API_URL/.well-known/oauth-authorization-server"
 ```
 
 `200` is required. Anything else: run the frontend from the checkout
-(`pnpm dev`) and point `GSF_API_URL` at that port.
+(`pnpm dev`) and point `AUTO_ONTOLOGY_API_URL` at that port.
 
 ## Examples
 
 - Full local stack: use `./dev_tools/setup_env.sh` through the logging wrapper.
-- Existing deployment: do not reinstall; configure `GSF_API_URL` and verify
+- Existing deployment: do not reinstall; configure `AUTO_ONTOLOGY_API_URL` and verify
   OAuth discovery before connecting the MCP client.
 
 ## Verify
