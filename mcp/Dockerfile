@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # ---------------------------------------------------------------------------
 # Auto Ontology MCP server image
 # ---------------------------------------------------------------------------
@@ -75,6 +79,9 @@ WORKDIR /app
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder --chown=auto_ontology:auto_ontology /app /app
+
+# License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
+COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md /licenses/
 
 USER auto_ontology
 

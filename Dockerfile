@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # ---------------------------------------------------------------------------
 # Auto Ontology FastAPI backend image
 # ---------------------------------------------------------------------------
@@ -119,6 +123,9 @@ case "$mode" in
     ;;
 esac
 EOF
+
+# License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
+COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md /licenses/
 
 USER auto_ontology
 

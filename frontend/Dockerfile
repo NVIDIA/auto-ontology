@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # ---------------------------------------------------------------------------
 # Auto Ontology Next.js frontend image
 # ---------------------------------------------------------------------------
@@ -28,6 +32,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
  && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
+ && apt-get purge -y --auto-remove curl gnupg \
  && rm -rf /var/lib/apt/lists/*
 
 ############################
@@ -116,6 +121,9 @@ RUN cd /app/migrate \
  && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"}}' > package.json \
  && npm install --omit=dev --no-audit --no-fund --no-package-lock \
  && chown -R nextjs:nodejs /app/migrate
+
+# License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
+COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md /licenses/
 
 USER nextjs
 

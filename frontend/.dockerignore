@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 **/.git
 **/.gitignore
 **/.gitattributes
@@ -25,6 +29,8 @@ node_modules
 
 # Tests / docs / tooling
 **/*.md
+!THIRD_PARTY_NOTICES.md
+!CONTAINER_THIRD_PARTY_NOTICES.md
 !prisma/**/*.md
 **/test
 **/tests

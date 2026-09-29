@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 # Build output
 .next/
 out/
@@ -14,3 +18,7 @@ generated/
 pnpm-lock.yaml
 package-lock.json
 yarn.lock
+
+# Copies of the repo-root notice files, kept byte-identical (dev_tools/tests/test_licensing.py)
+THIRD_PARTY_NOTICES.md
+CONTAINER_THIRD_PARTY_NOTICES.md
