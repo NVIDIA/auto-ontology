@@ -61,7 +61,7 @@ through compilation, ingest, or model import.
 | Method | Path | Permission | Notes |
 | --- | --- | --- | --- |
 | POST | `/api/model/export` | `modelInterchange:export` | JSON body `ExportRequest`: catalog database **IDs** in `databases` (empty = all), `format` `auto_ontology` \| `ossie`. Response is YAML. |
-| POST | `/api/model/import` | `modelInterchange:import` | Multipart `file` (the only form in the OpenAPI spec) or a raw YAML request body, which the handler and gateway also accept. Query `replace` (default true), `embed` (default true). Native Auto Ontology vs Ossie is detected from the document root (`data_layer`/`semantic_layer` vs `semantic_model`). |
+| POST | `/api/model/import` | `modelInterchange:import` | YAML import; request forms and query parameters are in the OpenAPI spec. Pitfall: `replace` defaults to true, so confirm with the user before importing over existing definitions. |
 
 For mutation and publication safeguards, use
 [publication.md](publication.md). Request success is not persisted parity.

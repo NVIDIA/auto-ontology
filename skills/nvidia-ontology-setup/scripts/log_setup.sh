@@ -175,6 +175,12 @@ redact_logged_command() {
 				skip_next=1
 			fi
 			;;
+		--user=*)
+			out+=("--user=***")
+			;;
+		-u?*)
+			out+=("-u***")
+			;;
 		--header=*)
 			out+=("--header=$(redact_header "${arg#--header=}")")
 			;;
