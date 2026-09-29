@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Entity extraction and VDB (vector-database) resolution.
 
 Split out of clarify.py: this module owns "what entities does the question

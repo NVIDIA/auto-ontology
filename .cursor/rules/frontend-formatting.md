@@ -4,6 +4,12 @@ globs: frontend/**/*.{ts,tsx,js,jsx,css,json,md}
 alwaysApply: false
 ---
 
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Frontend Formatting — Prettier (MANDATORY)
 
 After editing **any** file under `frontend/`, you **MUST** run Prettier before finishing:

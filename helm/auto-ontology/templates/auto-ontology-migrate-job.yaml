@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 {{/*
 Applies the backend's Alembic migrations, which own the `public` Postgres
 schema (catalog + semantic tier).

@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Read metadata layer (Table, Column, fk, join) from the store.
 
 All direct store access lives in auto_ontology/dal/datasources.py.

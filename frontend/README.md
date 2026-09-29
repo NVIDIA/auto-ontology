@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 This is a [Next.js](https://nextjs.org) app. **The Python API in `python/` must be running** for `/data` and other API-backed routes. See the **[root README](../../README.md)** for full setup.
 
 ## Getting Started

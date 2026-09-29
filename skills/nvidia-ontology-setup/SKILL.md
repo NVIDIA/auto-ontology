@@ -17,6 +17,12 @@ metadata:
     - troubleshooting
 ---
 
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # Auto Ontology setup
 
 ## Purpose

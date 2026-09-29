@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """External-knowledge (KB) parsing, formatting, and coverage matching.
 
 Split out of clarify.py: this module owns the "does external knowledge cover

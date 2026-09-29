@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 """Output-type skip predicate for the interactive clarification pipeline.
 
 Determines whether the output type (scalar vs table) is obvious from the question,

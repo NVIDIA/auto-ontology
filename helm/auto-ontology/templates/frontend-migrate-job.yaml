@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+# All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+
 {{/*
 Runs prisma/migrate.sh, which guards then `prisma db push` to sync the
 Postgres schema with prisma/schema.prisma.

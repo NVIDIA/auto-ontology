@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+// All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // `frontend` only, and deliberately: `db push` reconciles every schema listed
 // here against this file, so naming `public` would hand Prisma authority over
 // Auto Ontology's own tables — it proposed dropping `alembic_version` the moment it was
