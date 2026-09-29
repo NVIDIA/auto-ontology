@@ -42,7 +42,7 @@ Source code for the base container is provided by NVIDIA with that image.
 
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
-| Node.js, including npm (NodeSource package) | 22.x | MIT, plus the licenses of its bundled dependencies | https://github.com/nodejs/node |
+| Node.js, including its bundled npm and Corepack (NodeSource package) | 22.x | MIT, plus the licenses of its bundled dependencies | https://github.com/nodejs/node |
 | npm packages in the Next.js standalone bundle | per `frontend/pnpm-lock.yaml` | see `THIRD_PARTY_NOTICES.md` (Frontend runtime) | — |
 | Prisma CLI and engines (`/app/migrate`) | 7.7.0 | Apache-2.0 | https://github.com/prisma/prisma |
 | dotenv (`/app/migrate`) | 17.4.2 | BSD-2-Clause | https://github.com/motdotla/dotenv |
@@ -59,8 +59,9 @@ Source code for the base container is provided by NVIDIA with that image.
 | `ca-certificates` (Ubuntu package) | jammy | MPL-2.0 (certificate data), GPL-2.0-or-later (scripts) | https://packages.ubuntu.com/jammy/ca-certificates |
 | `tini` (Ubuntu package) | jammy | MIT | https://github.com/krallin/tini |
 
-Build-only tools (uv, compilers, `curl`, `gnupg`, pnpm, corepack) are used in
-earlier build stages and are not present in the final images.
+Build-only tools (uv, compilers, `curl`, `gnupg`, pnpm) are used in earlier
+build stages and are not present in the final images. The frontend image keeps
+the npm and Corepack that ship with Node.js.
 
 ## Updating this file
 
