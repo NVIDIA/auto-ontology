@@ -15,23 +15,8 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
 
-@pytest.mark.parametrize(
-    ("path_state", "expected_database"),
-    [
-        ({"retrieval_database": "retrieved-db"}, "retrieved-db"),
-        (
-            {
-                "target_db": "target-db",
-                "retrieval_database": "retrieved-db",
-            },
-            "target-db",
-        ),
-    ],
-)
-def test_table_discovery_uses_retrieval_database(
+def test_table_discovery_uses_target_database(
     monkeypatch: pytest.MonkeyPatch,
-    path_state: dict,
-    expected_database: str,
 ) -> None:
     database_names: list[str | None] = []
 
@@ -55,7 +40,7 @@ def test_table_discovery_uses_retrieval_database(
         AgentState,
         {
             "data_retriever": object(),
-            "path_state": path_state,
+            "path_state": {"target_db": "target-db"},
         },
     )
 
@@ -66,7 +51,7 @@ def test_table_discovery_uses_retrieval_database(
     )
 
     assert result == []
-    assert database_names == [expected_database]
+    assert database_names == ["target-db"]
 
 
 def test_reconstruction_uses_evidence_from_state(

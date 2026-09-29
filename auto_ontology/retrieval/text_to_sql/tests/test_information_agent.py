@@ -32,7 +32,7 @@ def _state() -> dict[str, Any]:
             "question_type": "information",
             "normalized_question": "How is revenue calculated?",
             "entities": ["revenue"],
-            "retrieval_database": "sales",
+            "target_db": "sales",
             "retrieved_column_attributes": [
                 {
                     "id": "attr-1",

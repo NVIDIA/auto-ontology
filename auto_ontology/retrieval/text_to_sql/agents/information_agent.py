@@ -137,7 +137,7 @@ def _initial_context(state: AgentState) -> dict[str, Any]:
         "question": get_question_for_processing(state),
         "entities": path_state.get("entities") or [],
         "subject": path_state.get("subject"),
-        "dataset": path_state.get("retrieval_database") or path_state.get("target_db"),
+        "dataset": path_state.get("target_db"),
         "extracted_evidence": path_state.get("extracted_evidence") or "",
         "column_attribute_candidates": candidates("retrieved_column_attributes"),
         "sql_attribute_candidates": candidates("retrieved_sql_attributes"),
