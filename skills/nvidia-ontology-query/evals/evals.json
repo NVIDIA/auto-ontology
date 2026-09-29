@@ -27,7 +27,7 @@
     },
     {
       "id": "query-eval-003-conversation-409",
-      "prompt": "Two overlapping POSTs to /api/chat/completions with the same conversation_id. What happens?",
+      "prompt": "As an authenticated user with chat:use and conversation:write, I send two overlapping POSTs to /api/chat/completions with the same conversation_id. What happens?",
       "expected_output": "The second request returns 409 Conversation in progress. Wait for [DONE] on the SSE stream before sending the next turn. conversation_id is scoped to the authenticated Auto Ontology user.",
       "assertions": [
         "Names 409 Conversation in progress",

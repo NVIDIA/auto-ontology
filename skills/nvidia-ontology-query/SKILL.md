@@ -93,10 +93,12 @@ question into a mutation.
 ### Chat
 
 `POST /api/chat/completions` — SSE `step` / `result` / `error` / `charts`,
-then `[DONE]`. Permission `chat:use`.
+then `[DONE]`. Permission `chat:use`; a request with `conversation_id` also
+needs `conversation:write`, or it gets 403.
 
 - Omit `conversation_id` for a one-shot (no history, no chart step).
-- Supply a client-generated UUID to create or continue a thread.
+- Supply a client-generated UUID to create or continue a thread (needs
+  `chat:use` and `conversation:write`).
 - Wait for `[DONE]` before the next turn; overlapping requests return
   **`409 Conversation in progress`**.
 - A 404 on a conversation id means it belongs to another user.

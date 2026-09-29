@@ -109,7 +109,7 @@ service, runs the one-shot migrate job, and starts the app.
 | FastAPI (internal) | http://localhost:3001 |
 | Ingestion | http://localhost:3002 |
 | pgAdmin | http://localhost:5050 |
-| Postgres | localhost:5432 |
+| Postgres | localhost:`$POSTGRES_PORT` (from `.env`, default 5432) |
 
 ## Local: `--dev` (apps on the host)
 
@@ -135,11 +135,16 @@ reload (what the container runs).
 
 ```bash
 ./skills/nvidia-ontology-setup/scripts/log_setup.sh -- ./dev_tools/setup_env.sh --ds
-uv run uvicorn auto_ontology.server.__main__:create_app --factory --reload --host 127.0.0.1 --port 3001
+uv run python -m auto_ontology.server
 ```
 
-The frontend image bakes `PYTHON_API_URL=http://host.docker.internal:3001`.
-On native Linux Docker you may need `--add-host=host.docker.internal:host-gateway`.
+The frontend image bakes `PYTHON_API_URL=http://host.docker.internal:3001`, so
+the API must accept connections from the container, not just loopback.
+`python -m auto_ontology.server` binds `0.0.0.0:3001` (what `setup_env.sh --ds`
+prints); a `--host 127.0.0.1` uvicorn is unreachable from the container on
+Linux. Because FastAPI trusts `x-auto-ontology-user-id`, keep port 3001
+firewalled from other machines. On native Linux Docker you may need
+`--add-host=host.docker.internal:host-gateway`.
 
 ## Limitations
 

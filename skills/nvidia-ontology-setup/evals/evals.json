@@ -16,7 +16,7 @@
     },
     {
       "id": "setup-eval-002-use-existing-scripts",
-      "prompt": "I cloned NVIDIA/auto-ontology and filled in .env. How do I start the full local stack?",
+      "prompt": "I cloned NVIDIA/auto-ontology and filled in .env. Host port 5432 is free. How do I start the full local stack?",
       "expected_output": "The agent invokes the existing setup path from the repository root \u2014 ./dev_tools/setup_env.sh or docker compose up -d --build \u2014 wrapped with log_setup.sh. It does not write a new docker-compose file or a custom install script.",
       "assertions": [
         "Uses dev_tools/setup_env.sh or docker compose up -d --build from the repo root",

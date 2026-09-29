@@ -78,6 +78,9 @@ redact_value() {
 }
 
 # Helm --set a=1,postgresPassword=secret  (and KEY=VALUE / --flag=VALUE).
+# A secret value may itself contain commas (PASSWORD=first,second), so once a
+# sensitive key is seen everything after its `=` is masked, rather than
+# trusting later commas as assignment boundaries.
 redact_csv_assignments() {
 	local remaining="$1" out="" piece key
 	while [[ -n "$remaining" ]]; do
@@ -92,6 +95,7 @@ redact_csv_assignments() {
 			key="${piece%%=*}"
 			if is_sensitive_key "$key"; then
 				piece="${key}=***"
+				remaining=""
 			fi
 		fi
 		if [[ -n "$out" ]]; then
@@ -118,6 +122,25 @@ redact_assignment() {
 	redact_csv_assignments "$input"
 }
 
+# curl -H "x-api-key: KEY" / -H "Authorization: Bearer TOKEN".
+redact_header() {
+	local header="$1" name
+	name="${header%%:*}"
+	if [[ "$header" == *:* ]]; then
+		case "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]' | tr -d ' ')" in
+		authorization | proxy-authorization | cookie | set-cookie)
+			printf '%s: ***' "$name"
+			return
+			;;
+		esac
+		if is_sensitive_key "$name"; then
+			printf '%s: ***' "$name"
+			return
+		fi
+	fi
+	printf '%s' "$header"
+}
+
 redact_logged_command() {
 	local -a args=("$@") out=()
 	local i n arg skip_next=0
@@ -138,12 +161,25 @@ redact_logged_command() {
 				skip_next=1
 			fi
 			;;
-		--password | --token | --secret | --docker-password)
+		--password | --token | --secret | --docker-password | -u | --user)
 			out+=("$arg")
 			if [[ $((i + 1)) -lt $n ]]; then
 				out+=("***")
 				skip_next=1
 			fi
+			;;
+		-H | --header)
+			out+=("$arg")
+			if [[ $((i + 1)) -lt $n ]]; then
+				out+=("$(redact_header "${args[$((i + 1))]}")")
+				skip_next=1
+			fi
+			;;
+		--header=*)
+			out+=("--header=$(redact_header "${arg#--header=}")")
+			;;
+		-H?*)
+			out+=("-H$(redact_header "${arg#-H}")")
 			;;
 		--*=*)
 			out+=("$(redact_assignment "$arg")")
