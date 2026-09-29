@@ -58,6 +58,15 @@ CONNECTOR_REGISTRY: dict[str, type[SQLDatabase]] = {
 _connectors: list[SQLDatabase] | None = None
 
 
+def parse_connection_strings(raw: str) -> list[str]:
+    """Return connection URLs separated by commas, newlines, or both."""
+    return [
+        connection_string.strip()
+        for connection_string in re.split(r"[,\r\n]+", raw)
+        if connection_string.strip()
+    ]
+
+
 def _redact(connection_string: str) -> str:
     """Mask the password/token in a connection string before logging it.
 
@@ -280,7 +289,8 @@ def get_connectors() -> list[SQLDatabase]:
             # connection cannot express a table filter.
             raw = os.environ.get("CONNECTION_STRINGS", "")
             specs = [
-                (cs.strip(), None, TableFilter()) for cs in raw.split(",") if cs.strip()
+                (connection_string, None, TableFilter())
+                for connection_string in parse_connection_strings(raw)
             ]
         if not specs:
             logger.warning(

@@ -16,7 +16,10 @@ import logging
 import os
 
 from auto_ontology.connectors.connection_string_factory import build_connection_string
-from auto_ontology.connectors.registry import create_connector
+from auto_ontology.connectors.registry import (
+    create_connector,
+    parse_connection_strings,
+)
 from auto_ontology.dal.connections import list_connections
 
 logger = logging.getLogger(__name__)
@@ -25,7 +28,7 @@ logger = logging.getLogger(__name__)
 def resolve_connection_strings() -> list[str]:
     """Return the connection strings to process this pass (env var or the catalog)."""
     raw = os.environ.get("CONNECTION_STRINGS", "")
-    connections = [cs.strip() for cs in raw.split(",") if cs.strip()]
+    connections = parse_connection_strings(raw)
     if connections:
         logger.info("connections: using CONNECTION_STRINGS env (%d)", len(connections))
         return connections
