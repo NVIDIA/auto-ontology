@@ -462,7 +462,6 @@ class CandidateRetrievalAgent(BaseAgent):
         llm = state["llm"]
         semantic_retriever = state.get("semantic_retriever")
         target_db = path_state.get("target_db")
-        retrieval_database = target_db
 
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
@@ -574,7 +573,7 @@ class CandidateRetrievalAgent(BaseAgent):
                     all_custom_hits = []
                     all_sql_attr_hits = []
                 else:
-                    retrieval_database = selected_database
+                    target_db = selected_database
                     initial_hit_count = (
                         len(all_col_attr_hits)
                         + len(all_custom_hits)
@@ -670,10 +669,12 @@ class CandidateRetrievalAgent(BaseAgent):
             path_state["retrieved_subject_term"] = subject_term
         else:
             path_state.pop("retrieved_subject_term", None)
-        if retrieval_database:
-            path_state["retrieval_database"] = retrieval_database
-        else:
-            path_state.pop("retrieval_database", None)
+        if target_db:
+            # Persist the explicit or automatically selected database as the
+            # effective scope for every downstream step. Without this,
+            # candidate preparation searches all databases again and can combine
+            # tables that no single connector can query.
+            path_state["target_db"] = target_db
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "

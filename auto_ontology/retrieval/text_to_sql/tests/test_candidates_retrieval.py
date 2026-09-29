@@ -174,7 +174,7 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
     )
     path_state = result["path_state"]
 
-    assert path_state["retrieval_database"] == "db-a"
+    assert path_state["target_db"] == "db-a"
     for key in (
         "retrieved_column_attributes",
         "retrieved_custom_analyses",
@@ -306,5 +306,5 @@ def test_explicit_target_db_preserves_existing_search_behavior(
 
     assert len(calls) == 4
     assert {database_name for _, _, database_name in calls} == {"db-a"}
-    assert result["path_state"]["retrieval_database"] == "db-a"
+    assert result["path_state"]["target_db"] == "db-a"
     assert len(result["path_state"]["retrieved_column_attributes"]) == 2
