@@ -62,6 +62,16 @@ route — run the frontend from the checkout (`pnpm dev`).
 `AUTO_ONTOLOGY_API_URL` is the **web app**, default `http://localhost:3000`, not
 FastAPI `:3001`.
 
+## Sign-in or MCP login fails although discovery works
+
+Users, sessions, API keys, and the MCP OAuth tables live in the Prisma
+`frontend` schema, synced by the `frontend-migrate` job, not by the backend's
+`auto-ontology-migrate`. Read its log even if it exited 0; it has finished
+without an error before while leaving MCP login broken:
+
+- Compose: `docker compose logs frontend-migrate`
+- Helm: `kubectl logs job/frontend-migrate-<release revision>`
+
 ## "Protected resource ... does not match expected ..."
 
 The MCP server advertised the address it bound to, and the client reached it

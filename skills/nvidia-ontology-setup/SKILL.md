@@ -107,8 +107,19 @@ Better Auth "default secret" error. Fill `DEFAULT_MODELS_API_KEY` and a
 `CONNECTION_STRINGS` value (or plan to add connections in the UI). The full
 variable list is `.env.example`.
 
-This builds `auto-ontology` and `auto-ontology-frontend`, starts Postgres, pgAdmin, the ingestion
-service, runs the one-shot migrate job, and starts the app.
+This builds `auto-ontology` and `auto-ontology-frontend`, starts Postgres,
+pgAdmin, and the ingestion service, runs two one-shot migrate jobs, and starts
+the app:
+
+- `auto-ontology-migrate` applies Alembic migrations to the backend's `public`
+  schema (catalog and semantic tier). The backend waits for it.
+- `frontend-migrate` syncs the Prisma `frontend` schema: users, sessions, API
+  keys, and the OAuth tables MCP sign-in uses. The frontend waits for it.
+
+If sign-in or MCP login fails, check both with `docker compose ps -a` and
+`docker compose logs frontend-migrate`. Read the `frontend-migrate` log even
+when it exited 0: it has finished without an error before while leaving MCP
+login broken.
 
 | Service | URL |
 | --- | --- |
