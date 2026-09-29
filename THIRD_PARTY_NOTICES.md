@@ -17,26 +17,35 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
 | Alembic | >=1.19.1 | MIT | https://github.com/sqlalchemy/alembic |
-| databricks-sql-connector | >=4.3.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
-| DuckDB | >=1.5.2 | MIT | https://github.com/duckdb/duckdb-python |
-| FastAPI | >=0.115.0 | MIT | https://github.com/fastapi/fastapi |
+| apache-ossie-nvidia-gsf | git (`converters/nvidia`) | Apache-2.0 | https://github.com/apache/ossie |
+| databricks-sql-connector | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
+| DuckDB | >=1.5.5 | MIT | https://github.com/duckdb/duckdb-python |
+| FastAPI | >=0.141.1 | MIT | https://github.com/fastapi/fastapi |
 | HTTPX | >=0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
 | hvac | >=2.4.0 | Apache-2.0 | https://github.com/hvac/hvac |
-| langchain-openai | >=1.3.0 | MIT | https://github.com/langchain-ai/langchain |
+| importlib-metadata | >=8.7.1 | Apache-2.0 | https://github.com/python/importlib_metadata |
+| langchain-openai | >=1.6.0 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
-| LangGraph | >=1.2.0 | MIT | https://github.com/langchain-ai/langgraph |
-| NeMo Retriever | ==26.8rc1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
-| nvidia-sdfm | >=0.1.0 | Apache-2.0 | https://github.com/NVIDIA/nvidia-sdfm-sdk |
-| pandas | >=2.0,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
-| psycopg (`psycopg[binary]`) | >=3.3.3 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
+| LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
+| mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
+| NeMo Retriever | >=26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
+| nvidia-sdfm (`nvidia-sdfm[kumorfm]`) | >=0.2.1 | Apache-2.0 — see note below | https://github.com/NVIDIA/nvidia-sdfm-sdk |
+| pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
+| psycopg (`psycopg[binary]`) | >=3.3.4 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
 | psycopg-pool | >=3.3.1 | LGPL-3.0-only | https://github.com/psycopg/psycopg |
-| Pydantic | >=2.0 | MIT | https://github.com/pydantic/pydantic |
+| pure-sasl | >=0.6.2 | MIT | https://github.com/thobbs/pure-sasl |
+| Pydantic | >=2.13.5 | MIT | https://github.com/pydantic/pydantic |
 | pyheavydb | >=8.0.1.post1 | Apache-2.0 | https://github.com/heavyai/pyheavydb |
-| python-dotenv | >=1.2.2 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
+| PyHive (`pyhive[hive-pure-sasl]`) | >=0.7.0 | Apache-2.0 | https://github.com/dropbox/PyHive |
+| pyjks | >=20.0.0 | MIT | https://github.com/kurtbrose/pyjks |
+| python-dotenv | >=1.2.3 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
 | PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
-| snowflake-connector-python | >=4.6.0 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
-| SQLAlchemy | >=2.0 | MIT | https://github.com/sqlalchemy/sqlalchemy |
-| Uvicorn (`uvicorn[standard]`) | >=0.32.0 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
+| snowflake-connector-python | >=4.7.2 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
+| SQLAlchemy | >=2.0.52 | MIT | https://github.com/sqlalchemy/sqlalchemy |
+| Thrift | >=0.24.0 | Apache-2.0 | https://github.com/apache/thrift |
+| thrift-sasl | >=0.4.3 | Apache-2.0 | https://github.com/cloudera/thrift_sasl |
+| trino | >=0.339.0 | Apache-2.0 | https://github.com/trinodb/trino-python-client |
+| Uvicorn (`uvicorn[standard]`) | >=0.52.4 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
 
 The `binary` extra installs the `psycopg-binary` wheel, which bundles
 prebuilt native libraries rather than linking the system ones. Those carry
@@ -46,13 +55,22 @@ repo: libpq (PostgreSQL License), OpenSSL 3 (Apache-2.0), MIT Kerberos
 system libpq instead — `psycopg[c]` or plain `psycopg` — avoids bundling
 them.
 
+`mysql-connector-python` is licensed under GPL-2.0 with Oracle's Universal
+FOSS Exception, which lets it be combined with software under OSI-approved
+licenses such as Apache-2.0. It is used unmodified.
+
+`nvidia-sdfm[kumorfm]` resolves to NVIDIA wheels vendored under
+`vendor/wheels/`: `nvidia-sdfm` 0.2.1, `sdfm-connectors` 0.3.0 and `kumorfm`
+2.29.0, all Apache-2.0. `kumorfm` bundles Mermaid (MIT); its license text
+ships in the wheel as `kumorfm/rfm/assets/MERMAID_LICENSE`.
+
 ### Backend development dependencies (not redistributed)
 
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
 | HTTPX | >=0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
-| pytest | >=9.0.3 | MIT | https://github.com/pytest-dev/pytest |
-| Ruff | >=0.15.9 | MIT | https://github.com/astral-sh/ruff |
+| pytest | >=9.1.1 | MIT | https://github.com/pytest-dev/pytest |
+| Ruff | >=0.16.5 | MIT | https://github.com/astral-sh/ruff |
 
 ### Sample databases (test fixtures, not redistributed in any build artifact)
 
@@ -77,22 +95,28 @@ accompanies each upstream project at the URLs above.
 
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
-| @better-auth/api-key | ^1.6.20 | MIT | https://github.com/better-auth/better-auth |
-| @better-auth/sso | ^1.6.20 | MIT | https://github.com/better-auth/better-auth |
-| @nvidia/foundations-react-core | ^0.604.1 | Proprietary (NVIDIA internal) | https://gitlab-master.nvidia.com/maas/kaizen-ui/foundations-react-core |
+| @better-auth/api-key | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| @better-auth/core | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| @better-auth/mcp | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| @better-auth/oauth-provider | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| @better-auth/sso | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| @nvidia/foundations-react-core (Kaizen UI) | ^0.604.1 | Apache-2.0 | https://www.npmjs.com/package/@nvidia/foundations-react-core |
 | @prisma/adapter-pg | ^7.7.0 | Apache-2.0 | https://github.com/prisma/prisma |
 | @prisma/client | ^7.7.0 | Apache-2.0 | https://github.com/prisma/prisma |
-| axios | ^1.16.0 | MIT | https://github.com/axios/axios |
-| better-auth | ^1.6.20 | MIT | https://github.com/better-auth/better-auth |
-| cytoscape | ^3.34.0 | MIT | https://github.com/cytoscape/cytoscape.js |
-| cytoscape-euler | ^1.2.4 | MIT | https://github.com/cytoscape/cytoscape.js-euler |
+| @sigma/node-border | ^3.0.0 | MIT | https://github.com/jacomyal/sigma.js |
+| @tanstack/react-query | ^5.103.2 | MIT | https://github.com/TanStack/query |
+| axios | ^1.20.0 | MIT | https://github.com/axios/axios |
+| better-auth | 1.7.4 | MIT | https://github.com/better-auth/better-auth |
+| d3-force | ^3.0.0 | ISC | https://github.com/d3/d3-force |
 | dayjs | ^1.11.21 | MIT | https://github.com/iamkun/dayjs |
 | dotenv | ^17.4.2 | BSD-2-Clause | https://github.com/motdotla/dotenv |
+| graphology | ^0.26.0 | MIT | https://github.com/graphology/graphology |
 | jose | ^6.1.0 | MIT | https://github.com/panva/jose |
-| Next.js (next) | 16.2.6 | MIT | https://github.com/vercel/next.js |
+| Next.js (next) | 16.3.5 | MIT | https://github.com/vercel/next.js |
 | node-postgres (pg) | ^8.20.0 | MIT | https://github.com/brianc/node-postgres |
 | React (react) | 19.2.4 | MIT | https://github.com/facebook/react |
 | React DOM (react-dom) | 19.2.4 | MIT | https://github.com/facebook/react |
+| sigma | ^3.0.3 | MIT | https://github.com/jacomyal/sigma.js |
 | zod | ^4.4.3 | MIT | https://github.com/colinhacks/zod |
 
 ### Frontend development / build dependencies
@@ -101,21 +125,21 @@ accompanies each upstream project at the URLs above.
 | --- | --- | --- | --- |
 | @svgr/webpack | ^8.1.0 | MIT | https://github.com/gregberge/svgr |
 | @tailwindcss/postcss | ^4 | MIT | https://github.com/tailwindlabs/tailwindcss |
-| @types/cytoscape-euler | ^1.2.4 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
+| @types/d3-force | ^3.0.10 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | @types/node | ^20 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | @types/pg | ^8.20.0 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | @types/react | ^19 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | @types/react-dom | ^19 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | ESLint | ^9 | MIT | https://github.com/eslint/eslint |
-| eslint-config-next | 16.2.6 | MIT | https://github.com/vercel/next.js |
+| eslint-config-next | 16.3.5 | MIT | https://github.com/vercel/next.js |
 | Prettier | ^3.8.1 | MIT | https://github.com/prettier/prettier |
 | Prisma CLI (prisma) | ^7.7.0 | Apache-2.0 | https://github.com/prisma/prisma |
 | Tailwind CSS | ^4 | MIT | https://github.com/tailwindlabs/tailwindcss |
 | ts-morph | ^28.0.0 | MIT | https://github.com/dsherret/ts-morph |
 | tsx | ^4.23.11 | MIT | https://github.com/privatenumber/tsx |
 | TypeScript | ^5 | Apache-2.0 | https://github.com/microsoft/TypeScript |
-| Vite | ^8.0.4 | MIT | https://github.com/vitejs/vite |
-| Vitest | ^4.1.2 | MIT | https://github.com/vitest-dev/vitest |
+| Vite | ^8.3.0 | MIT | https://github.com/vitejs/vite |
+| Vitest | ^4.1.11 | MIT | https://github.com/vitest-dev/vitest |
 
 ---
 
@@ -128,6 +152,10 @@ accompanies each upstream project at the URLs above.
 - **BSD 3-Clause "New" or "Revised" License** — https://opensource.org/license/bsd-3-clause/
 - **GNU Lesser General Public License v3.0 only (LGPL-3.0-only)** —
   https://www.gnu.org/licenses/lgpl-3.0.html
+- **GNU General Public License v2.0 (GPL-2.0)** —
+  https://www.gnu.org/licenses/old-licenses/gpl-2.0.html; **Universal FOSS
+  Exception, Version 1.0** — https://oss.oracle.com/licenses/universal-foss-exception/
+- **ISC License** — https://opensource.org/license/isc-license-txt/
 - **PostgreSQL License** — https://opensource.org/license/postgresql/
 - **OpenLDAP Public License** — https://www.openldap.org/software/release/license.html
 
