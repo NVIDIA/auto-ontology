@@ -71,15 +71,23 @@ export const POST = withPermission({ chat: ['use'] })(async (req, { user }) => {
 	const subjectToken = await resolveSubjectToken(req.headers, user.id);
 	if (subjectToken) upstreamHeaders.Authorization = `Bearer ${subjectToken}`;
 
-	const upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
-		method: 'POST',
-		headers: upstreamHeaders,
-		body,
-		// Disable Node's transparent decompression so we can pipe bytes 1:1.
-		// @ts-expect-error — `duplex` is required by Node's fetch when
-		// streaming bodies; not yet in DOM lib types.
-		duplex: 'half',
-	});
+	let upstream: Response;
+	try {
+		upstream = await fetch(`${PYTHON_API_URL}/api/chat/completions`, {
+			method: 'POST',
+			headers: upstreamHeaders,
+			body,
+			// Disable Node's transparent decompression so we can pipe bytes 1:1.
+			// @ts-expect-error — `duplex` is required by Node's fetch when
+			// streaming bodies; not yet in DOM lib types.
+			duplex: 'half',
+		});
+	} catch {
+		return new Response('Backend connection failed', {
+			status: 502,
+			headers: { 'Content-Type': 'text/plain' },
+		});
+	}
 
 	if (!upstream.ok || !upstream.body) {
 		// Forward the upstream body verbatim so structured errors (e.g. the

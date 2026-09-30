@@ -582,7 +582,7 @@ async def chat_completions(
     subject_token = _subject_token(http_request)
 
     pool = get_pool()
-    worker = pool.acquire()
+    worker = await asyncio.to_thread(pool.acquire)
     slot = _Slot(
         key=key,
         worker=worker,
