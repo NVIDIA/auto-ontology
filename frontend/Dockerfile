@@ -118,7 +118,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
 COPY --from=builder --chown=nextjs:nodejs /app/prisma /app/migrate/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts /app/migrate/prisma.config.ts
 RUN cd /app/migrate \
- && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"}}' > package.json \
+ && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"},"overrides":{"deepmerge-ts":"^8.0.2"}}' > package.json \
  && npm install --omit=dev --no-audit --no-fund --no-package-lock \
  && chown -R nextjs:nodejs /app/migrate
 
