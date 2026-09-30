@@ -2,7 +2,9 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Separate value anchors that name schema from the ones that name data.
+"""Compare what a value anchor names against the schema in scope.
+
+Separate value anchors that name schema from the ones that name data.
 
 Anchors are produced by matching phrases from the question against stored
 values, with no knowledge of what the schema calls things. A phrase that is
@@ -23,6 +25,14 @@ is never dropped: a bare number is a real filter value often enough, and
 column names routinely carry numbers of their own (units, ranges, bracket
 labels) that would swallow it, whereas the phrases this is meant to catch
 always carry a word.
+
+The same comparison read the other way finds tables. An anchor names the
+table its value was matched in, and a table outside the scope retrieval built
+cannot be referenced at all — so an anchor can report where a filter value
+lives while the table holding it stays unreachable, which is a question lost
+for want of a table already identified. Those tables belong in the candidate
+pool the relevance filter judges, not in the answer: most of them are not
+wanted, and the filter is what separates them.
 """
 
 from __future__ import annotations
@@ -85,4 +95,33 @@ def split_schema_named_anchors(
     return kept, naming_schema
 
 
-__all__ = ["split_schema_named_anchors"]
+def anchor_tables_missing_from_scope(
+    value_anchors: list[dict] | None,
+    relevant_tables: list[dict] | None,
+) -> list[str]:
+    """Names of the tables anchors point at that no table in scope carries.
+
+    Anchors naming schema are passed over: their column was never a match for
+    the phrase, so the table holding it is no more likely to be wanted than
+    any other. On this benchmark those reach a gold table a quarter as often
+    as the anchors kept, which is the difference between a candidate worth
+    offering and noise.
+
+    Order follows the anchors, so the strongest match is proposed first, and a
+    table named by several anchors is proposed once.
+    """
+    anchors, in_scope = list(value_anchors or []), list(relevant_tables or [])
+    kept, _ = split_schema_named_anchors(anchors, in_scope)
+    known = {
+        str(table.get("name") or "").lower() for table in in_scope if table.get("name")
+    }
+
+    missing: dict[str, str] = {}
+    for anchor in kept:
+        name = str(anchor.get("tbl") or "").strip()
+        if name and name.lower() not in known:
+            missing.setdefault(name.lower(), name)
+    return list(missing.values())
+
+
+__all__ = ["anchor_tables_missing_from_scope", "split_schema_named_anchors"]

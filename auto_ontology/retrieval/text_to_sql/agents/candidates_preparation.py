@@ -41,7 +41,7 @@ from auto_ontology.dal.custom_analyses import (
     fetch_custom_analyses_with_sql,
     fetch_tables_from_custom_analyses,
 )
-from auto_ontology.dal.datasources import fetch_tables_by_ids
+from auto_ontology.dal.datasources import fetch_tables_by_ids, find_table_id_by_name
 from auto_ontology.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
@@ -71,6 +71,7 @@ from auto_ontology.retrieval.text_to_sql.state import (
     rules_to_text,
 )
 from auto_ontology.retrieval.text_to_sql.value_anchors import (
+    anchor_tables_missing_from_scope,
     split_schema_named_anchors,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
@@ -246,7 +247,8 @@ class CandidatePreparationAgent(BaseAgent):
     Output:
     - path_state["candidates"]: Flat list of candidate dicts (same as retrieved, enriched)
     - path_state["relevant_tables"]: Deduplicated list of relevant table dicts
-        (same per-table dict shape as ``get_relevant_tables``)
+        (same per-table dict shape as ``get_relevant_tables``), including the
+        tables value anchors point at, which the relevance filter then judges
     - path_state["relevant_queries"]: Relevant queries for context
     - path_state["similar_questions"]: Similar questions from history
     - path_state["custom_analyses"]: Filtered complex candidates
@@ -591,6 +593,33 @@ class CandidatePreparationAgent(BaseAgent):
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
+        # --- 4e. Add the tables value anchors point at ---
+        # An anchor reports the table its value was matched in, and retrieval
+        # reaches that table by its own route or not at all — §6 below can only
+        # discard anchors, never act on one. Added here rather than beside §5c's
+        # force-include so the relevance filter sees them as candidates: most
+        # anchor tables are not wanted, and deciding that is the filter's job.
+        incoming_anchors = list(state.get("value_anchors") or [])
+        anchor_table_ids = [
+            table_id
+            for table_id in (
+                find_table_id_by_name(name, target_db)
+                for name in anchor_tables_missing_from_scope(
+                    incoming_anchors, relevant_tables
+                )
+            )
+            if table_id
+        ]
+        if anchor_table_ids:
+            anchor_tables = fetch_tables_by_ids(anchor_table_ids)
+            prev_len = len(relevant_tables)
+            relevant_tables = _merge_tables(relevant_tables, anchor_tables)
+            self.logger.info(
+                "Added %d table(s) a value anchor points at: %s",
+                len(relevant_tables) - prev_len,
+                [t["name"] for t in anchor_tables],
+            )
+
         # Term rows are global (no database_name), so a Term shared across two
         # databases (e.g. the same domain ingested as both a full DB and a
         # "_template" variant) can pull wrong-DB tables into relevant_tables via
@@ -716,7 +745,6 @@ class CandidatePreparationAgent(BaseAgent):
         # phrase belonging to a column name still arrives pointing at whichever
         # unrelated column holds it as data. The tables in scope are only known
         # here, which is what makes the two separable — see value_anchors.py.
-        incoming_anchors = list(state.get("value_anchors") or [])
         kept_anchors, schema_named_anchors = split_schema_named_anchors(
             incoming_anchors, relevant_tables
         )

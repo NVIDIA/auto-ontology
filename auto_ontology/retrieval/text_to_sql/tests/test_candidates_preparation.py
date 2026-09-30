@@ -290,6 +290,9 @@ def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:
     )
     monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
     monkeypatch.setattr(
+        candidates_preparation, "find_table_id_by_name", lambda name, db=None: None
+    )
+    monkeypatch.setattr(
         candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
     )
 
@@ -309,6 +312,100 @@ def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:
     )
 
     assert CandidatePreparationAgent().execute(state)["value_anchors"] == [region]
+
+
+def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
+    monkeypatch,
+) -> None:
+    """q758's shape: the anchor found 'Human' in a table retrieval never saw."""
+    superhero = {
+        "id": "superhero",
+        "name": "superhero",
+        "schema_name": "main",
+        "database_name": "db",
+        "columns": [{"name": "race_id"}, {"name": "height_cm"}],
+    }
+    race = {
+        "id": "race",
+        "name": "race",
+        "schema_name": "main",
+        "database_name": "db",
+        "columns": [{"name": "id"}, {"name": "race"}],
+    }
+    human = {
+        "phrase": "human",
+        "kind": "value",
+        "tbl": "race",
+        "col": "race",
+        "stored_value": "Human",
+    }
+    judged: list[list[str]] = []
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+
+    def record_and_keep(
+        self,
+        state,
+        question,
+        tables,
+        custom_analyses=None,
+        attribute_join_paths=None,
+    ):
+        judged.append([table["name"] for table in tables])
+        return tables, ""
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent, "_filter_tables_by_relevance", record_and_keep
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_tables_from_custom_analyses", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [superhero],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_table_id_by_name",
+        lambda name, db=None: "race" if name == "race" else None,
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda ids: [race] if list(ids) == ["race"] else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
+    )
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "hair colour of the human superhero 185 cm tall",
+            "data_retriever": object(),
+            "value_anchors": [human],
+            "path_state": {
+                "target_db": "db",
+                "retrieved_custom_analyses": [{"id": "analysis"}],
+            },
+        },
+    )
+
+    result = CandidatePreparationAgent().execute(state)
+
+    assert judged == [["superhero", "race"]]
+    assert "race" in [t["name"] for t in result["path_state"]["relevant_tables"]]
+    # The anchor still names data, so §6 keeps it: the table arriving in scope
+    # is not what the schema-naming check looks at.
+    assert result["value_anchors"] == [human]
 
 
 # --------------------------------------------------------------------------
