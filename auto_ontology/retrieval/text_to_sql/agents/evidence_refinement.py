@@ -50,7 +50,10 @@ _OPERATOR_CUES: tuple[tuple[re.Pattern[str], str], ...] = (
 
 _SYSTEM_PROMPT = """\
 You refine evidence before SQL generation by correcting only mistakes that are
-certain from the user's question or the supplied column sample values.
+certain from the user's question, verified database value anchors, or supplied
+column sample values. Prefer an exact value anchor for the named table and column;
+only fall back to that column's sample values when no matching anchor proves the
+stored representation.
 
 Return complete corrected lines, not substring patches. For every repair:
 - copy original_line exactly from the numbered evidence, without its ``N| `` prefix;
@@ -60,10 +63,12 @@ Return complete corrected lines, not substring patches. For every repair:
   in corrected_line (quotes around a string are optional in corrected_value).
 
 Allowed repairs:
-1. string_representation: fix a string value or its casing only when one sample
-   value for the named table and column proves the exact stored representation;
+1. string_representation: fix a string value or its casing only when one value
+   anchor, or as a fallback one sample value, for the named table and column proves
+   the exact stored representation;
 2. constant_value: replace a mistaken scalar constant only when the sanitized
-   question explicitly supplies the intended constant, or a column sample proves it;
+   question explicitly supplies the intended constant, a value anchor proves it,
+   or as a fallback a column sample proves it;
 3. predicate_operator: change only =, !=, <>, >, >=, <, or <= when the sanitized
    question makes the evidence operator unquestionably wrong. For example, "at
    least", "starting from", and "on or after" are inclusive; "more than" is strict.
@@ -113,6 +118,19 @@ def _unquote_literal(value: str) -> str:
     if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
         return value[1:-1]
     return value
+
+
+def _format_value_anchors(value_anchors: list[dict[str, Any]]) -> str:
+    """Render only exact anchor facts needed to validate evidence values."""
+    lines: list[str] = []
+    for anchor in value_anchors:
+        table = str(anchor.get("tbl") or "").strip()
+        column = str(anchor.get("col") or "").strip()
+        value = str(anchor.get("stored_value") or "")
+        if anchor.get("kind", "value") == "absent" or not (table and column and value):
+            continue
+        lines.append(f'- {table}."{column}" has stored value {value!r}')
+    return "\n".join(lines)
 
 
 def _question_contains_literal(question: str, literal: str) -> bool:
@@ -177,6 +195,44 @@ def _sample_supports(
     return _unquote_literal(repair.corrected_value) in samples
 
 
+def _anchor_supports(
+    repair: EvidenceLineRepair,
+    value_anchors: list[dict[str, Any]],
+) -> bool:
+    """Return whether an exact value anchor proves the repaired scalar."""
+    if not repair.table_name or not repair.column_name:
+        return False
+
+    wanted_table = repair.table_name.casefold().strip()
+    wanted_column = repair.column_name.casefold().strip()
+    wanted_value = _unquote_literal(repair.corrected_value)
+    for anchor in value_anchors:
+        anchor_table = str(anchor.get("tbl") or "").casefold().strip()
+        anchor_column = str(anchor.get("col") or "").casefold().strip()
+        anchor_value = str(anchor.get("stored_value") or "")
+        if (
+            anchor.get("kind", "value") != "absent"
+            and anchor_table
+            and (
+                anchor_table == wanted_table
+                or wanted_table.rsplit(".", 1)[-1] == anchor_table
+            )
+            and anchor_column == wanted_column
+            and anchor_value == wanted_value
+        ):
+            return True
+    return False
+
+
+def _stored_value_supports(
+    repair: EvidenceLineRepair,
+    value_anchors: list[dict[str, Any]],
+    tables: list[dict[str, Any]],
+) -> bool:
+    """Check exact value anchors first, then fall back to column samples."""
+    return _anchor_supports(repair, value_anchors) or _sample_supports(repair, tables)
+
+
 def _corrected_line_contains_value(repair: EvidenceLineRepair) -> bool:
     value = _unquote_literal(repair.corrected_value)
     return bool(value) and value in repair.corrected_line
@@ -206,6 +262,7 @@ def _valid_repair(
     line: str,
     question: str,
     tables: list[dict[str, Any]],
+    value_anchors: list[dict[str, Any]],
 ) -> bool:
     if (
         repair.original_line != line
@@ -229,10 +286,10 @@ def _valid_repair(
     if not _corrected_line_contains_value(repair):
         return False
     if repair.kind == "string_representation":
-        return _sample_supports(repair, tables)
+        return _stored_value_supports(repair, value_anchors, tables)
     return _question_contains_literal(
         question, repair.corrected_value
-    ) or _sample_supports(repair, tables)
+    ) or _stored_value_supports(repair, value_anchors, tables)
 
 
 def apply_evidence_repairs(
@@ -240,6 +297,7 @@ def apply_evidence_repairs(
     repairs: list[EvidenceLineRepair],
     question: str,
     tables: list[dict[str, Any]],
+    value_anchors: list[dict[str, Any]] | None = None,
 ) -> tuple[str, list[dict[str, str | int]]]:
     """Atomically apply validated full-line repairs.
 
@@ -259,7 +317,9 @@ def apply_evidence_repairs(
         original_with_ending = lines[index]
         line_ending = original_with_ending[len(original_with_ending.rstrip("\r\n")) :]
         original_line = original_with_ending.removesuffix(line_ending)
-        if not _valid_repair(repair, original_line, question, tables):
+        if not _valid_repair(
+            repair, original_line, question, tables, list(value_anchors or [])
+        ):
             return evidence, []
         lines[index] = repair.corrected_line + line_ending
         accepted.append(repair.model_dump())
@@ -284,6 +344,7 @@ class EvidenceRefinementAgent(BaseAgent):
         path_state = dict(state.get("path_state") or {})
         question = get_question_for_processing(state)
         tables = list(path_state.get("relevant_tables") or [])
+        value_anchors = list(state.get("value_anchors") or [])
         numbered_evidence = "\n".join(
             f"{index}| {line}" for index, line in enumerate(evidence.splitlines(), 1)
         )
@@ -291,10 +352,17 @@ class EvidenceRefinementAgent(BaseAgent):
             tables,
             target_db=path_state.get("target_db"),
         )
+        anchors_block = _format_value_anchors(value_anchors)
+        values_context = (
+            f"Verified database value anchors (use these first):\n{anchors_block}\n\n"
+            if anchors_block
+            else ""
+        )
         prompt = (
             f"Sanitized question:\n{question}\n\n"
             f"Evidence (line numbers are metadata only):\n{numbered_evidence}\n\n"
-            f"Relevant tables, columns, and sample values:\n{tables_block}"
+            f"{values_context}"
+            f"Relevant tables, columns, and fallback sample values:\n{tables_block}"
         )
 
         result = safe_invoke_structured_nr(
@@ -308,7 +376,7 @@ class EvidenceRefinementAgent(BaseAgent):
             return {"evidence": evidence, "path_state": path_state}
 
         refined, accepted = apply_evidence_repairs(
-            evidence, result.repairs, question, tables
+            evidence, result.repairs, question, tables, value_anchors
         )
         if result.reasoning.strip():
             record_thought(path_state, _GRAPH_NODE_NAME, result.reasoning.strip())

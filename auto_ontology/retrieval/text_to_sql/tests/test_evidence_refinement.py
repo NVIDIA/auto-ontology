@@ -100,6 +100,73 @@ def test_repairs_string_representation_only_when_sample_proves_it() -> None:
     assert len(accepted) == 1
 
 
+def test_repairs_string_representation_from_value_anchor_before_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = "human refers to race.race = 'human'"
+    repair = _repair(
+        original_line=evidence,
+        corrected_line="human refers to race.race = 'Human'",
+        corrected_value="Human",
+        kind="string_representation",
+        table_name="db.main.race",
+        column_name="race",
+    )
+    anchors = [
+        {
+            "phrase": "human",
+            "kind": "value",
+            "tbl": "race",
+            "col": "race",
+            "stored_value": "Human",
+        }
+    ]
+
+    def fail_if_samples_are_checked(*_args) -> bool:
+        raise AssertionError("sample values must not be checked after an anchor match")
+
+    monkeypatch.setattr(
+        evidence_refinement, "_sample_supports", fail_if_samples_are_checked
+    )
+
+    refined, accepted = apply_evidence_repairs(
+        evidence, [repair], "Show human races", [], anchors
+    )
+
+    assert refined == "human refers to race.race = 'Human'"
+    assert len(accepted) == 1
+
+
+def test_falls_back_to_sample_when_value_anchor_does_not_match() -> None:
+    evidence = "restricted refers to accounts.status = 'restricted'"
+    repair = _repair(
+        original_line=evidence,
+        corrected_line="restricted refers to accounts.status = 'Restricted'",
+        corrected_value="Restricted",
+        kind="string_representation",
+        table_name="accounts",
+        column_name="status",
+    )
+    unrelated_anchor = {
+        "phrase": "active",
+        "kind": "value",
+        "tbl": "accounts",
+        "col": "status",
+        "stored_value": "Active",
+    }
+
+    refined, accepted = apply_evidence_repairs(
+        evidence,
+        [repair],
+        "Show restricted accounts",
+        _tables(),
+        [unrelated_anchor],
+    )
+
+    assert refined == "restricted refers to accounts.status = 'Restricted'"
+    assert len(accepted) == 1
+
+
 def test_repairs_complete_line_without_substring_patch_protocol() -> None:
     evidence = "Italian refers to nationality = 'italian'"
     repair = _repair(
@@ -302,6 +369,39 @@ def test_agent_records_original_and_accepted_repairs(
     assert "Show restricted accounts" in captured["messages"][1].content
     assert "Restricted" in captured["messages"][1].content
     assert captured["schema"] is EvidenceRefinementResult
+
+
+def test_agent_supplies_value_anchors_before_fallback_samples(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def _invoke(messages, _schema):
+        captured["prompt"] = messages[1].content
+        return EvidenceRefinementResult()
+
+    monkeypatch.setattr(evidence_refinement, "safe_invoke_structured_nr", _invoke)
+    anchor = {
+        "phrase": "human",
+        "kind": "value",
+        "tbl": "race",
+        "col": "race",
+        "stored_value": "Human",
+    }
+    state = {
+        "initial_question": "Show human races",
+        "evidence": "race = 'human'",
+        "value_anchors": [anchor],
+        "path_state": {"relevant_tables": []},
+    }
+
+    EvidenceRefinementAgent().execute(state)
+
+    prompt = captured["prompt"]
+    assert prompt.index("Verified database value anchors (use these first)") < (
+        prompt.index("fallback sample values")
+    )
+    assert "race.\"race\" has stored value 'Human'" in prompt
 
 
 def test_evidence_routing_runs_only_on_evidence_bearing_sql_paths() -> None:
