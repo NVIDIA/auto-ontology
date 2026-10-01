@@ -55,6 +55,17 @@ packages = ["auto_ontology"]
 
 [tool.uv]
 package = true
+# Patched versions of transitive dependencies flagged by nSpect.
+# PyJWT is a constraint, so its dependents' upper bounds still apply. urllib3
+# is an override because nemo-retriever pins urllib3==2.7.0 exactly; an
+# override replaces every other range, so it keeps the <3 bound requests and
+# botocore declare.
+constraint-dependencies = [
+    "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors, mcp)
+]
+override-dependencies = [
+    "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
+]
 
 [[tool.uv.index]]
 name = "vendored-sdfm"
