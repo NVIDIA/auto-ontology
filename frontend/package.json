@@ -62,7 +62,8 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"deepmerge-ts": "^8.0.2"
+			"deepmerge-ts": "^8.0.2",
+			"dompurify": "^3.4.16"
 		}
 	}
 }
