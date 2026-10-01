@@ -62,6 +62,7 @@ package = true
 # botocore declare.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors, mcp)
+    "virtualenv>=21.14.2",  # CVE-2026-102930 (via ray)
 ]
 override-dependencies = [
     "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
