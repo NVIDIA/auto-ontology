@@ -45,3 +45,9 @@ addopts = "--import-mode=importlib"
 
 [dependency-groups]
 dev = ["pytest>=8"]
+
+[tool.uv]
+# Patched version of a transitive dependency flagged by nSpect.
+constraint-dependencies = [
+    "pyjwt>=2.15.1",  # BDSA-2026-35552 (via mcp)
+]
