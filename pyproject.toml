@@ -74,9 +74,7 @@ url = "vendor/wheels"
 format = "flat"
 
 [tool.uv.sources]
-# Pinned to apache/ossie#499, which renames the converter from GSF to Auto
-# Ontology and adopts flat Ossie documents. Drop `rev` once it merges.
-apache-ossie-nvidia-auto-ontology = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia", rev = "e3204e4cda67bad33ec5833e7a454d020960680f" }
+apache-ossie-nvidia-auto-ontology = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
 # apache-ossie-nvidia-auto-ontology = { path = "../ossie/converters/nvidia", editable = true }
 
 [dependency-groups]
