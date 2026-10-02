@@ -23,7 +23,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | Component | Version | License | Project URL |
 | --- | --- | --- | --- |
 | Alembic | >=1.19.1 | MIT | https://github.com/sqlalchemy/alembic |
-| apache-ossie-nvidia-gsf | git (`converters/nvidia`) | Apache-2.0 | https://github.com/apache/ossie |
+| apache-ossie-nvidia-auto-ontology | git (`converters/nvidia`) | Apache-2.0 | https://github.com/apache/ossie |
 | databricks-sql-connector | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
 | DuckDB | >=1.5.5 | MIT | https://github.com/duckdb/duckdb-python |
 | FastAPI | >=0.141.1 | MIT | https://github.com/fastapi/fastapi |

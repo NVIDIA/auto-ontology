@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import Response
-from ossie_nvidia_gsf import GSFConversionError
+from ossie_nvidia_auto_ontology import AutoOntologyConversionError
 from pydantic import ValidationError
 
 from auto_ontology.dal.model_interchange import (
@@ -44,7 +44,7 @@ def export_model(body: ExportRequest) -> Response:
         yaml_text = service.export_model(body)
     except UnknownDatabaseIdsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    except GSFConversionError as exc:
+    except AutoOntologyConversionError as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Cannot express this model as Apache Ossie YAML: {exc}",
@@ -88,7 +88,7 @@ async def import_model(
         summary = service.import_model(yaml_text, replace=replace, embed=embed)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
-    except GSFConversionError as exc:
+    except AutoOntologyConversionError as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Cannot read this file as Apache Ossie YAML: {exc}",

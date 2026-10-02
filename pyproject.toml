@@ -36,7 +36,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "sqlalchemy>=2.0.52",
     "alembic>=1.19.1",
-    "apache-ossie-nvidia-gsf",
+    "apache-ossie-nvidia-auto-ontology",
     "langchain-postgres>=0.0.17",
     "pyhive[hive-pure-sasl]>=0.7.0",
     "thrift>=0.24.0",
@@ -74,11 +74,10 @@ url = "vendor/wheels"
 format = "flat"
 
 [tool.uv.sources]
-# Upstream moved this from `converters/gsf` to `converters/nvidia` and renamed
-# the distribution and its import package (`ossie_gsf` -> `ossie_nvidia_gsf`).
-# The three names Auto Ontology imports are unchanged.
-apache-ossie-nvidia-gsf = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia" }
-# apache-ossie-nvidia-gsf = { path = "../ossie/converters/nvidia", editable = true }
+# Pinned to apache/ossie#499, which renames the converter from GSF to Auto
+# Ontology and adopts flat Ossie documents. Drop `rev` once it merges.
+apache-ossie-nvidia-auto-ontology = { git = "https://github.com/apache/ossie.git", subdirectory = "converters/nvidia", rev = "e3204e4cda67bad33ec5833e7a454d020960680f" }
+# apache-ossie-nvidia-auto-ontology = { path = "../ossie/converters/nvidia", editable = true }
 
 [dependency-groups]
 dev = [

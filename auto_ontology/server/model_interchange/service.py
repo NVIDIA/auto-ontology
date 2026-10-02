@@ -12,10 +12,10 @@ from collections.abc import Mapping
 from typing import Any
 
 import yaml
-from ossie_nvidia_gsf import (
-    GSFConversionError,
-    convert_gsf_to_ossie,
-    convert_ossie_to_gsf,
+from ossie_nvidia_auto_ontology import (
+    AutoOntologyConversionError,
+    convert_auto_ontology_to_ossie,
+    convert_ossie_to_auto_ontology,
 )
 
 from auto_ontology.connectors import get_connectors
@@ -32,6 +32,8 @@ from auto_ontology.server.model_interchange.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_AUTO_ONTOLOGY_ROOT_KEYS = frozenset(AutoOntologyModelDocument.model_fields)
 
 
 def _dialect_by_database_name() -> dict[str, str]:
@@ -60,12 +62,14 @@ def _dialect_by_database_name() -> dict[str, str]:
 def detect_model_format(payload: Mapping[str, Any]) -> ModelFormat:
     """Tell an Apache Ossie document apart from a native Auto Ontology one.
 
-    The two vocabularies do not overlap at the root: Ossie holds its models
-    under ``semantic_model``, Auto Ontology under ``data_layer``/``semantic_layer``.
+    Only a root holding Auto Ontology's own keys is read as native. Anything
+    else goes to the Ossie converter, which rejects what it cannot read; read
+    as native, it would validate as an empty document, and an import with
+    ``replace`` would then wipe the catalog.
     """
-    return (
-        ModelFormat.OSSIE if "semantic_model" in payload else ModelFormat.AUTO_ONTOLOGY
-    )
+    if _AUTO_ONTOLOGY_ROOT_KEYS.intersection(payload):
+        return ModelFormat.AUTO_ONTOLOGY
+    return ModelFormat.OSSIE
 
 
 def _table_id_by_column_id(document: AutoOntologyModelDocument) -> dict[str, str]:
@@ -146,7 +150,7 @@ def _validate_ossie_metric_names(document: AutoOntologyModelDocument) -> None:
         f"{name!r} ({count})" for name, count in counts.items() if name and count > 1
     ]
     if duplicates:
-        raise GSFConversionError(
+        raise AutoOntologyConversionError(
             "Cannot export custom analyses with duplicate names as Apache Ossie "
             f"metrics: {', '.join(duplicates)}"
         )
@@ -164,7 +168,9 @@ def export_model(request: ExportRequest) -> str:
     )
     if request.format is ModelFormat.OSSIE:
         _validate_ossie_metric_names(document)
-        return convert_gsf_to_ossie(_dump_yaml(_project_terms_onto_one_table(document)))
+        return convert_auto_ontology_to_ossie(
+            _dump_yaml(_project_terms_onto_one_table(document))
+        )
     return _dump_yaml(document)
 
 
@@ -180,7 +186,7 @@ def import_model(
         raise ValueError("YAML document must deserialize to a mapping")
     source_format = detect_model_format(payload)
     if source_format is ModelFormat.OSSIE:
-        payload = yaml.safe_load(convert_ossie_to_gsf(yaml_text))
+        payload = yaml.safe_load(convert_ossie_to_auto_ontology(yaml_text))
     document = AutoOntologyModelDocument.model_validate(payload)
     embed_buffer = ImportEmbedBuffer() if embed else None
     summary = dal.apply_import_model(

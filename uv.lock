@@ -199,9 +199,9 @@ wheels = [
 ]
 
 [[package]]
-name = "apache-ossie-nvidia-gsf"
+name = "apache-ossie-nvidia-auto-ontology"
 version = "0.1.0.dev0"
-source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia#b5da5d66f0da4a0cd3388d52201dbf5523221a77" }
+source = { git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=e3204e4cda67bad33ec5833e7a454d020960680f#e3204e4cda67bad33ec5833e7a454d020960680f" }
 dependencies = [
     { name = "pyyaml" },
     { name = "sqlglot" },
@@ -268,7 +268,7 @@ version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "alembic" },
-    { name = "apache-ossie-nvidia-gsf" },
+    { name = "apache-ossie-nvidia-auto-ontology" },
     { name = "databricks-sql-connector" },
     { name = "duckdb" },
     { name = "fastapi" },
@@ -308,7 +308,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "alembic", specifier = ">=1.19.1" },
-    { name = "apache-ossie-nvidia-gsf", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia" },
+    { name = "apache-ossie-nvidia-auto-ontology", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=e3204e4cda67bad33ec5833e7a454d020960680f" },
     { name = "databricks-sql-connector", specifier = ">=4.4.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
