@@ -438,6 +438,13 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
     monkeypatch.setattr(
         candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
     )
+    bridge_calls: list[list[str]] = []
+
+    def fake_bridges(ids, allowed=None):
+        bridge_calls.append(list(ids))
+        return [], [], 0
+
+    monkeypatch.setattr(candidates_preparation, "find_kept_table_bridges", fake_bridges)
 
     state = cast(
         AgentState,
@@ -455,6 +462,7 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
     result = CandidatePreparationAgent().execute(state)
 
     assert judged == [["superhero", "race"]]
+    assert bridge_calls == [["superhero", "race"]]
     assert "race" in [t["name"] for t in result["path_state"]["relevant_tables"]]
     # The anchor still names data, so §6 keeps it: the table arriving in scope
     # is not what the schema-naming check looks at.
