@@ -48,6 +48,10 @@ from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
 )
 from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
+from auto_ontology.retrieval.text_to_sql.agents.sql_selection import (
+    SQLSelectionAgent,
+)
+from auto_ontology.retrieval.text_to_sql import candidate_flags
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
 )
@@ -370,6 +374,13 @@ def create_graph():
         "construct_sql_from_candidates",
         agent_wrapper(sql_from_candidates_agent),
     )
+    # Only built when asked for: with it absent the generator's slot 0 ships,
+    # which is the behaviour every run had before candidates existed.
+    select_sql_candidate_node = (
+        _make_node("select_sql_candidate", agent_wrapper(SQLSelectionAgent()))
+        if candidate_flags.selection_enabled()
+        else None
+    )
     reconstruct_sql_node = _make_node(
         "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)
     )
@@ -417,6 +428,8 @@ def create_graph():
     if combined_precheck_node is not None:
         graph.add_node("precheck_combined", combined_precheck_node)
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
+    if select_sql_candidate_node is not None:
+        graph.add_node("select_sql_candidate", select_sql_candidate_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
@@ -484,14 +497,23 @@ def create_graph():
         )
 
     graph.add_edge("refine_evidence", "construct_sql_from_candidates")
+    # Selection sits between generation and validation so that whatever it
+    # elects is validated and repaired on the same path slot 0 would have been.
+    post_generate_target = (
+        "select_sql_candidate"
+        if select_sql_candidate_node is not None
+        else "validate_sql_query"
+    )
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
         route_decision,
         {
-            "validate_sql_query": "validate_sql_query",
+            "validate_sql_query": post_generate_target,
             "unconstructable": "unconstructable_sql_response",
         },
     )
+    if select_sql_candidate_node is not None:
+        graph.add_edge("select_sql_candidate", "validate_sql_query")
 
     # When any pre-execution probe check is enabled, every route that would
     # otherwise go straight to execution is funnelled through the merged

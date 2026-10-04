@@ -535,6 +535,8 @@ def embed_custom_analyses(
     from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
     from nemo_retriever.operators.vdb import IngestVdbOperator
 
+    from auto_ontology.utils.embedding import _embed_with_retry
+
     docs = _custom_analysis_docs(analysis_id)
     if not docs:
         logger.info(
@@ -575,22 +577,30 @@ def embed_custom_analyses(
     df = pd.DataFrame(rows)
 
     before = time.time()
-    embedded = embed_text_main_text_embed(
+    # Through the same retry the catalog embeds use. The library catches per
+    # frame, so one refused request zeroes every row it was given -- and this
+    # frame is usually a handful of rows, so a single transient 5xx empties it
+    # and aborts the whole ingest at whichever database it landed on.
+    embedded = _embed_with_retry(
+        lambda part: embed_text_main_text_embed(
+            part,
+            model_name=embed_params.model_name,
+            embed_invoke_url=embed_params.embed_invoke_url,
+            api_key=embed_params.api_key,
+            embed_modality=embed_params.embed_modality,
+        ),
         df,
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
+        label=f"CustomAnalysis {database_name or '<all>'}",
     )
 
     with_embeddings = [
         row
-        for row in embedded.to_dict(orient="records")
+        for row in (embedded.to_dict(orient="records") if embedded is not None else [])
         if (row.get("metadata") or {}).get("embedding")
     ]
     if not with_embeddings:
         raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} CustomAnalysis rows "
+            f"Embedding step produced 0/{len(df)} CustomAnalysis rows "
             f"with embeddings; check upstream embed errors (often a transient "
             f"{embed_params.embed_invoke_url} 5xx)."
         )

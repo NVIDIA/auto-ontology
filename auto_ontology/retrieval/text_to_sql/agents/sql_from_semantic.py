@@ -23,14 +23,23 @@ Design Decisions:
 """
 
 import logging
+import random
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
-from auto_ontology.utils.llm_invoke import safe_invoke_with_structured_output
+from auto_ontology.utils.llm_invoke import (
+    get_llm_client,
+    safe_invoke_with_structured_output,
+)
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
+from auto_ontology.retrieval.text_to_sql.agents.sql_execution import _run_sql
+from auto_ontology.retrieval.text_to_sql import candidate_flags as flags
+from auto_ontology.retrieval.text_to_sql import candidate_strategies as strategies
 from auto_ontology.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
@@ -57,9 +66,36 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_sql_examples_section,
     format_value_anchors_section,
 )
-from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
+from auto_ontology.retrieval.text_to_sql.models import (
+    SQLDecompositionModel,
+    SQLDecompositionTreeModel,
+    SQLGenerationModel,
+    SQLQueryPlanModel,
+    SyntheticSQLExamplesModel,
+)
 
 logger = logging.getLogger(__name__)
+
+# Sampling clients are keyed by temperature and reused across questions:
+# building a ChatNVIDIA per candidate per question is pure overhead, and the
+# client carries no per-request state.
+_sampling_llm_cache: dict[float, Any] = {}
+
+
+def _get_sampling_llm(temperature: float):
+    """A cached LLM client at *temperature*, for candidate diversity.
+
+    gpt-5.x / o-series ignore an explicit temperature because their provider
+    default already samples, so for those the schema shuffle is the diversity
+    lever; nemotron and claude need the raised temperature to actually
+    diverge.
+    """
+    client = _sampling_llm_cache.get(temperature)
+    if client is None:
+        client = get_llm_client(temperature=temperature)
+        _sampling_llm_cache[temperature] = client
+    return client
+
 
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
 # (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
@@ -147,7 +183,8 @@ class SQLFromCandidatesAgent(BaseAgent):
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
         evidence = state.get("evidence", "")
-        sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
+        sql_examples = list(state.get("sql_examples") or [])
+        sql_examples_section = format_sql_examples_section(sql_examples)
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
         calculation_template_section = format_calculation_sql_template(path_state)
         main_question = format_dual_question_block(
@@ -201,13 +238,32 @@ class SQLFromCandidatesAgent(BaseAgent):
                 path_state.get("calculation_subtype"),
             )
 
-        def build_messages() -> list:
+        def build_messages(
+            tables_variant: list[dict] | None = None,
+            *,
+            examples_variant: list[dict] | None = None,
+            schema_directive: str = "",
+            strategy: str = "",
+        ) -> list:
             """
             Build messages for SQL construction.
 
             Includes semantic candidate context, similar questions, and optionally
             extracted file data or file excerpts.
+
+            The four keyword arguments are what makes one candidate slot differ
+            from another: a reordered schema, a different slice of reference
+            examples, a schema-reading directive, and a strategy instruction.
+            All default to the single-candidate behaviour.
             """
+            tables_for_prompt = (
+                relevant_tables if tables_variant is None else tables_variant
+            )
+            examples_section = (
+                sql_examples_section
+                if examples_variant is None
+                else format_sql_examples_section(examples_variant)
+            )
             relevance_reasoning = path_state.get("table_relevance_reasoning", "")
             observation_block = ""
             if relevance_reasoning:
@@ -276,15 +332,15 @@ class SQLFromCandidatesAgent(BaseAgent):
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
                 + format_tables_for_prompt(
-                    relevant_tables, target_db=target_db, dialect=dialect
+                    tables_for_prompt, target_db=target_db, dialect=dialect
                 )
-                if relevant_tables
+                if tables_for_prompt
                 else "No tables available."
             )
             important_columns = format_important_columns_for_prompt(
                 primary_attribute,
                 attribute_join_paths,
-                relevant_tables,
+                tables_for_prompt,
                 target_db=target_db,
                 dialect=dialect,
             )
@@ -310,10 +366,17 @@ class SQLFromCandidatesAgent(BaseAgent):
             system_prompt = create_sql_from_candidates_prompt(
                 dialect=dialect,
                 target_db=target_db,
-                has_sql_examples=bool(sql_examples_section),
+                has_sql_examples=bool(examples_section),
             )
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
+            # Before the evidence and example blocks: these say how this
+            # candidate should differ from its siblings, and they have to hold
+            # even where the shared context would push every slot the same way.
+            if strategy:
+                messages.append(SystemMessage(content=strategy))
+            if schema_directive:
+                messages.append(SystemMessage(content=schema_directive))
             if evidence:
                 messages.append(
                     SystemMessage(content=format_authoritative_evidence(evidence))
@@ -327,8 +390,8 @@ class SQLFromCandidatesAgent(BaseAgent):
                 messages.append(SystemMessage(content=value_anchors_section))
             # After evidence, so that on any conflict the authoritative block is
             # the one the model read first and the advisory one qualifies it.
-            if sql_examples_section:
-                messages.append(SystemMessage(content=sql_examples_section))
+            if examples_section:
+                messages.append(SystemMessage(content=examples_section))
             messages.append(HumanMessage(content=user_prompt))
 
             # Add calendar time window reminder if needed
@@ -350,40 +413,249 @@ class SQLFromCandidatesAgent(BaseAgent):
 
         schema = SQLGenerationModel
 
-        def run_with_context() -> tuple:
-            """Invoke LLM with messages, optionally including file snippets and extracted data."""
-            messages = build_messages()
+        def build_synthetic_examples(
+            artifact: SyntheticSQLExamplesModel,
+        ) -> list[dict]:
+            """Keep only the invented demonstrations the target database accepts.
+
+            A generated example is instruction, not decoration: an invalid one
+            actively teaches the final call a table or column that does not
+            exist. Executing each is cheap next to the LLM call that wrote it.
+            """
+            kept: list[dict] = []
+            for example in artifact.examples:
+                checked = _run_sql(example.sql, connector)
+                if checked.error:
+                    continue
+                kept.append(
+                    {
+                        "question": example.question,
+                        "sql": example.sql,
+                        "evidence": getattr(example, "reasoning", "") or "",
+                        "db": path_state.get("target_db") or "",
+                    }
+                )
+            return kept
+
+        def generate_candidate(index: int) -> tuple:
+            """Produce one SQL candidate, returning ``(response, messages, tag)``.
+
+            Slot 0 uses the base client and the untouched schema order, so
+            ``BIRD_NCAND=1`` reproduces the previous behaviour exactly. Other
+            slots run a two-stage method: build an explicit intermediate
+            artifact, then translate that artifact into SQL in a second call.
+            """
+            started = time.monotonic()
+            tag = strategies.strategy_for_slot(index, n_candidates)
+
+            if strategies.slot_samples(index, n_candidates):
+                tables_variant = strategies.shuffled_tables(
+                    relevant_tables, random.Random(1000 + index)
+                )
+                client = _get_sampling_llm(candidate_temp)
+            else:
+                tables_variant = None
+                client = llm
+
+            examples_variant = (
+                None
+                if n_candidates < 2
+                else strategies.rotate_examples(sql_examples, index)
+            )
+            directive = (
+                strategies.schema_directive(index, path_state.get("entity_columns"))
+                if n_candidates > 1
+                else ""
+            )
+
+            def stage1(stage1_messages: list, artifact_schema):
+                try:
+                    return safe_invoke_with_structured_output(
+                        client, stage1_messages, artifact_schema
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Candidate %d [%s] stage 1 failed: %s: %s",
+                        index,
+                        tag,
+                        type(exc).__name__,
+                        exc,
+                    )
+                    return None
+
+            if tag == "baseline":
+                messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=directive,
+                )
+            elif tag.startswith("query_plan"):
+                stage1_messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=directive,
+                    strategy=strategies.QUERY_PLAN_ARTIFACT_PROMPT,
+                )
+                artifact = stage1(stage1_messages, SQLQueryPlanModel)
+                if artifact is None:
+                    return None, stage1_messages, tag
+                messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=directive,
+                    strategy=strategies.QUERY_PLAN_TRANSLATION_PROMPT.format(
+                        artifact=artifact.plan
+                    ),
+                )
+            elif tag == "decomposition":
+                tree_mode = flags.decomposition_tree()
+                stage1_messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=directive,
+                    strategy=(
+                        strategies.DECOMPOSITION_TREE_ARTIFACT_PROMPT
+                        if tree_mode
+                        else strategies.DECOMPOSITION_ARTIFACT_PROMPT
+                    ),
+                )
+                artifact = stage1(
+                    stage1_messages,
+                    SQLDecompositionTreeModel if tree_mode else SQLDecompositionModel,
+                )
+                if artifact is None:
+                    return None, stage1_messages, tag
+                artifact_text = (
+                    strategies.format_decomposition_tree(artifact)
+                    if tree_mode
+                    else strategies.format_decomposition_list(artifact)
+                )
+                translation = (
+                    strategies.DECOMPOSITION_TREE_TRANSLATION_PROMPT
+                    if tree_mode
+                    else strategies.DECOMPOSITION_TRANSLATION_PROMPT
+                )
+                messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=directive,
+                    strategy=translation.format(artifact=artifact_text),
+                )
+            elif tag == "synthetic_examples":
+                # Cross-database examples stay hidden while inventing the
+                # same-schema ones: they would anchor the generator back onto
+                # the very signal this strategy exists to replace.
+                stage1_messages = build_messages(
+                    tables_variant,
+                    examples_variant=[],
+                    schema_directive=directive,
+                    strategy=strategies.synthetic_artifact_prompt(),
+                )
+                artifact = stage1(stage1_messages, SyntheticSQLExamplesModel)
+                if artifact is None:
+                    return None, stage1_messages, tag
+                synthetic = build_synthetic_examples(artifact)
+                if not synthetic:
+                    self.logger.info(
+                        "Candidate %d [%s]: no invented example survived execution.",
+                        index,
+                        tag,
+                    )
+                    return None, stage1_messages, tag
+                messages = build_messages(
+                    tables_variant,
+                    examples_variant=synthetic,
+                    schema_directive=directive,
+                    strategy=strategies.SYNTHETIC_USE_PROMPT,
+                )
+            elif tag == "alt_table_set":
+                # One-shot SQL behind a hard table-set divergence directive.
+                # The goal is to fail on different questions than slot 0, not
+                # merely to word the same wrong reading differently.
+                messages = build_messages(
+                    tables_variant,
+                    examples_variant=examples_variant,
+                    schema_directive=(f"{directive}\n\n" if directive else "")
+                    + strategies.ALT_TABLE_SET_STRATEGY,
+                )
+            else:
+                raise AssertionError(f"Unknown candidate strategy: {tag}")
+
             try:
-                response = safe_invoke_with_structured_output(llm, messages, schema)
+                response = safe_invoke_with_structured_output(client, messages, schema)
             except Exception as e:
                 self.logger.error(
-                    "LLM structured output failed: %s: %s",
+                    "LLM structured output failed (candidate %d): %s: %s",
+                    index,
                     type(e).__name__,
                     e,
                     exc_info=True,
                 )
-                return None, messages
-            if response and hasattr(response, "response") and response.response:
-                self.logger.info(
-                    "LLM response generated: %s...",
-                    response.response[:100],
-                )
-            return response, messages
+                return None, messages, tag
 
-        MAX_RETRIES = 3
-        response, messages = None, []
-        for attempt in range(1, MAX_RETRIES + 1):
-            response, messages = run_with_context()
             if response is not None:
-                break
-            self.logger.warning(
-                "LLM returned None on attempt %d/%d — retrying.",
-                attempt,
-                MAX_RETRIES,
+                self.logger.info(
+                    "Candidate %d [%s] produced SQL in %.1fs.",
+                    index,
+                    tag,
+                    time.monotonic() - started,
+                )
+            return response, messages, tag
+
+        n_candidates = flags.num_candidates()
+        candidate_temp = flags.candidate_temperature()
+        candidates: list = []
+        messages: list = []
+
+        if n_candidates < 2:
+            # Single-candidate path, retry-on-None preserved exactly.
+            MAX_RETRIES = 3
+            response = None
+            for attempt in range(1, MAX_RETRIES + 1):
+                response, messages, _ = generate_candidate(0)
+                if response is not None:
+                    break
+                self.logger.warning(
+                    "LLM returned None on attempt %d/%d — retrying.",
+                    attempt,
+                    MAX_RETRIES,
+                )
+            if response is not None:
+                candidates = [response]
+        else:
+            # The shared in-flight semaphore in llm_invoke is what keeps real
+            # endpoint concurrency polite, so this pool only bounds threads.
+            results: list = [None] * n_candidates
+            base_messages: list = []
+            with ThreadPoolExecutor(
+                max_workers=min(n_candidates, flags.max_parallel()),
+                thread_name_prefix="sqlcand",
+            ) as pool:
+                futures = {
+                    pool.submit(generate_candidate, i): i for i in range(n_candidates)
+                }
+                for future in as_completed(futures):
+                    index = futures[future]
+                    candidate, candidate_messages, _tag = future.result()
+                    results[index] = candidate
+                    if index == 0:
+                        base_messages = candidate_messages
+            candidates = [
+                candidate
+                for candidate in results
+                if candidate is not None
+                and candidate.sql_code
+                and candidate.sql_code.strip()
+            ]
+            messages = base_messages
+            self.logger.info(
+                "Generated %d/%d usable SQL candidates.", len(candidates), n_candidates
             )
 
+        response = candidates[0] if candidates else None
+
         if response is None:
-            self.logger.error("LLM returned None after %d attempts.", MAX_RETRIES)
+            self.logger.error("No usable SQL candidate produced.")
             return {
                 "path_state": {
                     **path_state,
@@ -427,6 +699,10 @@ class SQLFromCandidatesAgent(BaseAgent):
                 "path_state": {
                     **path_state,
                     "sql_generation_result": response,  # Keep as object (Pydantic model)
+                    # The whole pool, for the selection node and for callers
+                    # measuring the best-of-N ceiling. Holds one entry on the
+                    # single-candidate path.
+                    "sql_candidates": candidates,
                     "relevant_tables": relevant_tables if has_sql else [],
                     "custom_analyses_used": custom_analyses_used,
                 },

@@ -262,3 +262,171 @@ class SQLGenerationModel(StrictModel):
                 "sql_code must be the full executable statement; response must be a real explanation."
             )
         return v
+
+
+# ==================== CANDIDATE STAGE-1 ARTIFACTS ====================
+#
+# Each of these is the intermediate product of a two-stage candidate: the
+# first LLM call returns the artifact, the second translates it into SQL.
+# They never reach the caller — only the SQLGenerationModel that follows does.
+
+
+class SQLQueryPlanModel(StrictModel):
+    """Intermediate artifact for the first stage of query-plan generation."""
+
+    plan: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A numbered execution plan in plain English, with no SQL: "
+            "(1) tables and why each is needed; (2) joins with both key columns; "
+            "(3) filters with exact literals; (4) target row grain and "
+            "aggregation; (5) exact output columns, ordering, and LIMIT."
+        ),
+    )
+
+
+class SQLDecompositionModel(StrictModel):
+    """Intermediate artifact for divide-and-conquer generation."""
+
+    sub_questions: List[NonEmptyStr] = Field(
+        ...,
+        min_length=2,
+        max_length=4,
+        description=(
+            "Two to four independently answerable sub-questions. Each names "
+            "the table, columns, and predicate/aggregate needed, but contains "
+            "no complete final SQL query."
+        ),
+    )
+    composition: NonEmptyStr = Field(
+        ...,
+        description=(
+            "How the sub-question answers compose into one SQL statement, "
+            "including the final row grain and projection."
+        ),
+    )
+
+
+class DecompositionNode(StrictModel):
+    """One node of a divide-and-conquer decomposition tree."""
+
+    label: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Hierarchical position, e.g. '1', '2', or '1.1' for a sub-question "
+            "that must be solved before its parent."
+        ),
+    )
+    question: NonEmptyStr = Field(
+        ..., description="The sub-question this node answers, in plain English."
+    )
+    analysis: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Which table holds the answer, which columns are read, which keys "
+            "join them, and the exact filter literals."
+        ),
+    )
+    pseudo_sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "SQL for this node with unresolved parts left as bracketed natural "
+            "language, e.g. "
+            "SELECT gender FROM client WHERE <youngest in lowest-salary branch>. "
+            "A child node's pseudo SQL replaces the placeholder in its parent."
+        ),
+    )
+
+
+class SQLDecompositionTreeModel(StrictModel):
+    """Recursive divide-and-conquer artifact with explicit assembly.
+
+    The flat variant produces a linear list of table-access steps, which is
+    the same object the query-plan generator already builds. This keeps the
+    nesting and the bottom-up substitution that make the decomposition a
+    structurally different derivation.
+    """
+
+    main_analysis: NonEmptyStr = Field(
+        ...,
+        description=(
+            "What the target question asks for: the output columns, the row "
+            "grain, and which part cannot be answered without a sub-question."
+        ),
+    )
+    main_pseudo_sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Top-level SQL with each unresolved condition left as bracketed "
+            "natural language to be filled by the nodes below."
+        ),
+    )
+    nodes: List[DecompositionNode] = Field(
+        ...,
+        min_length=1,
+        max_length=6,
+        description=(
+            "Sub-questions in the order they must be solved. Nest with dotted "
+            "labels whenever a sub-question needs its own sub-question."
+        ),
+    )
+    assembly: NonEmptyStr = Field(
+        ...,
+        description=(
+            "How each node's pseudo SQL substitutes into its parent's "
+            "placeholder, from the deepest node upward."
+        ),
+    )
+    simplification: NonEmptyStr = Field(
+        ...,
+        description=(
+            "How the assembled query collapses nested subqueries into joins "
+            "and drops redundant clauses without changing the row grain."
+        ),
+    )
+
+
+class SyntheticSQLExample(StrictModel):
+    """One same-schema demonstration generated at inference time."""
+
+    question: NonEmptyStr = Field(
+        ...,
+        description=(
+            "A realistic but different question answerable from the available "
+            "schema. It must not paraphrase or answer the user's target question."
+        ),
+    )
+    reasoning: str = Field(
+        default="",
+        # Overrides StrictModel's str_min_length=1: this field is optional, and
+        # a model that answers it with "" must not fail the whole batch.
+        min_length=0,
+        description=(
+            "The derivation that turns the question into the SQL: which tables "
+            "are needed and why, which keys join them, which filters apply with "
+            "their exact literals, the row grain, and the final projection. "
+            "A demonstration teaches the procedure it shows, so this must read "
+            "as the work, not as a restatement of the query."
+        ),
+    )
+    sql: NonEmptyStr = Field(
+        ...,
+        description=(
+            "Complete executable SQL for the synthetic question, using only "
+            "tables and columns from the supplied schema."
+        ),
+    )
+
+
+class SyntheticSQLExamplesModel(StrictModel):
+    """The batch of same-schema demonstrations for one candidate slot."""
+
+    examples: List[SyntheticSQLExample] = Field(
+        ...,
+        min_length=2,
+        max_length=8,
+        description=(
+            "Demonstrations that together show how this schema is meant to be "
+            "queried: varying join depth, aggregation, and filtering."
+        ),
+    )

@@ -161,9 +161,25 @@ def _extract_answer(final_state: dict) -> dict:
         else:
             final_response = ""
 
-    if isinstance(final_response, dict):
-        return final_response
-    return {"response": str(final_response)}
+    answer = (
+        final_response
+        if isinstance(final_response, dict)
+        else {"response": str(final_response)}
+    )
+
+    # SQL strings only, not the generation models: this rides out to API
+    # callers, and it exists so a caller can score the best-of-N ceiling
+    # without reading the generator's debug log, which runs clear it. Absent
+    # rather than empty when nothing generated SQL, so paths that never reach
+    # the generator (the entry router, the information agent) are unchanged.
+    candidates = [
+        sql
+        for candidate in (path_state.get("sql_candidates") or [])
+        if (sql := (getattr(candidate, "sql_code", "") or "").strip())
+    ]
+    if candidates:
+        answer["sql_candidates"] = candidates
+    return answer
 
 
 def _sql_about_to_run(node_name: str, node_output: dict, node_path_state: dict) -> str:
