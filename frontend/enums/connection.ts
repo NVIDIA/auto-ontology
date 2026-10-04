@@ -89,27 +89,27 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 	[ConnectionType.DATABRICKS]: [
 		{
 			key: 'host',
-			label: 'Server hostname',
+			label: 'Server Hostname',
 			placeholder: 'dbc-a1b2345c-d6e7.cloud.databricks.com',
 		},
 		{
 			key: 'http_path',
-			label: 'HTTP path',
+			label: 'HTTP Path',
 			placeholder: '/sql/1.0/warehouses/a1b234c567d8e9fa',
 		},
-		{ key: 'password', label: 'Access token', secret: true },
+		{ key: 'password', label: 'Access Token', secret: true },
 		{ key: 'database', label: 'Catalog', placeholder: 'main' },
 		{
 			key: 'schema',
 			label: 'Schema',
-			placeholder: 'Leave empty to choose from a list',
+			placeholder: 'Leave Empty to Choose from a List',
 			hint: 'Ingest only this schema. The connection test verifies it exists, and the schema selection step is skipped. Leave empty to pick schemas from a list instead.',
 			optional: true,
 			testOnly: true,
 		},
 		{
 			key: 'sso_federation',
-			label: 'Authenticate as signed-in user (SSO)',
+			label: 'Authenticate as Signed-In User (SSO)',
 			hint: 'Chat queries run with the signed-in user’s own Databricks privileges instead of the access token above. Requires a Databricks federation policy trusting your SSO issuer. Ingestion always uses the access token.',
 			optional: true,
 			boolean: true,
@@ -142,7 +142,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		},
 		{
 			key: 'private_key',
-			label: 'Private key (PEM)',
+			label: 'Private Key (PEM)',
 			placeholder: '-----BEGIN PRIVATE KEY-----',
 			secret: true,
 			optional: true,
@@ -151,7 +151,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		},
 		{
 			key: 'private_key_passphrase',
-			label: 'Private key passphrase',
+			label: 'Private Key Passphrase',
 			secret: true,
 			optional: true,
 			hint: 'Only needed if the private key above is encrypted.',
@@ -197,7 +197,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		},
 		{
 			key: 'truststore_password',
-			label: 'Truststore password',
+			label: 'Truststore Password',
 			secret: true,
 			optional: true,
 		},
@@ -222,7 +222,7 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 		{
 			key: 'schema',
 			label: 'Schema',
-			placeholder: 'Leave empty to choose from a list',
+			placeholder: 'Leave Empty to Choose from a List',
 			hint: 'Ingest only this schema. Leave empty to pick schemas from a list instead.',
 			optional: true,
 		},
@@ -275,15 +275,15 @@ export const CONNECTION_FIELDS: Record<ConnectionType, ConnectionField[]> = {
 export const COMMON_CONNECTION_FIELDS: ConnectionField[] = [
 	{
 		key: 'table_allow_regex',
-		label: 'Table allowlist (regex)',
-		placeholder: 'Leave empty to ingest every table',
+		label: 'Table Allowlist (Regex)',
+		placeholder: 'Leave Empty to Ingest Every Table',
 		optional: true,
 		hint: 'Ingest only tables whose name matches. Unanchored and case-sensitive, so "fact_" matches "fact_sales"; anchor with ^ and $ for an exact name.',
 	},
 	{
 		key: 'table_deny_regex',
-		label: 'Table denylist (regex)',
-		placeholder: 'Leave empty to exclude nothing',
+		label: 'Table Denylist (Regex)',
+		placeholder: 'Leave Empty to Exclude Nothing',
 		optional: true,
 		hint: 'Skip tables whose name matches, even if the allowlist also matches them. Use this for relations the warehouse lists but cannot actually read, such as a broken Distributed table or a Kafka queue.',
 	},

@@ -2536,12 +2536,65 @@
       "get": {
         "description": "Anyone may list custom analyses; only admins (analysis:manage) may add one.",
         "operationId": "get_api_custom_analyses",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the analysis name.",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the analysis name.",
+              "title": "Query"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_CustomAnalysis_"
+                  "$ref": "#/components/schemas/PagedListResponse_CustomAnalysis_"
                 }
               }
             },
@@ -2552,6 +2605,16 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Custom Analyses",
@@ -4267,12 +4330,65 @@
       "get": {
         "description": "Anyone may list PQL analyses; only admins (analysis:manage) may add one.",
         "operationId": "get_api_pql_analyses",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on the analysis name.",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on the analysis name.",
+              "title": "Query"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ListResponse_PqlAnalysis_"
+                  "$ref": "#/components/schemas/PagedListResponse_PqlAnalysis_"
                 }
               }
             },
@@ -4283,6 +4399,16 @@
           },
           "403": {
             "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "summary": "List Pql Analyses",
@@ -4539,7 +4665,7 @@
           {
             "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -4551,7 +4677,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the rule name or on the name of a tag it applies.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -5750,7 +5876,7 @@
           {
             "description": "Case-insensitive substring filter on the tag name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -5762,7 +5888,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the tag name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -6329,7 +6455,7 @@
           {
             "description": "Case-insensitive substring filter on the term name.",
             "in": "query",
-            "name": "q",
+            "name": "query",
             "required": false,
             "schema": {
               "anyOf": [
@@ -6341,7 +6467,7 @@
                 }
               ],
               "description": "Case-insensitive substring filter on the term name.",
-              "title": "Q"
+              "title": "Query"
             }
           },
           {
@@ -9283,25 +9409,6 @@
         "title": "IdRef",
         "type": "object"
       },
-      "ListResponse_CustomAnalysis_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/CustomAnalysis"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": ["data", "count"],
-        "title": "ListResponse[CustomAnalysis]",
-        "type": "object"
-      },
       "ListResponse_DatabaseSummary_": {
         "additionalProperties": true,
         "properties": {
@@ -9357,25 +9464,6 @@
         },
         "required": ["data", "count"],
         "title": "ListResponse[GlobalSearchItem]",
-        "type": "object"
-      },
-      "ListResponse_PqlAnalysis_": {
-        "additionalProperties": true,
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/PqlAnalysis"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": ["data", "count"],
-        "title": "ListResponse[PqlAnalysis]",
         "type": "object"
       },
       "ListResponse_PublicConnection_": {
@@ -9608,6 +9696,52 @@
         },
         "required": ["data", "count", "total"],
         "title": "PagedListResponse[ColumnAttribute]",
+        "type": "object"
+      },
+      "PagedListResponse_CustomAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CustomAnalysis"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[CustomAnalysis]",
+        "type": "object"
+      },
+      "PagedListResponse_PqlAnalysis_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PqlAnalysis"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[PqlAnalysis]",
         "type": "object"
       },
       "PagedListResponse_Rule_": {

@@ -42,7 +42,7 @@ from auto_ontology.dal.attributes import (
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 from auto_ontology.utils.model_config import resolve
@@ -473,7 +473,7 @@ def _llm_pick_hit(
     )
 
     result = invoke_with_structured_output(
-        get_non_reasoning_llm_client(max_tokens=4096),
+        get_llm_client(max_tokens=4096),
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
         FkHitSelection,
     )

@@ -57,7 +57,7 @@ export const ConnectionConnectStep = ({
 
 	return (
 		<div className="flex flex-1 flex-col gap-4 p-2">
-			<p className="text-sm text-zinc-600 dark:text-zinc-400">
+			<p className="text-sm text-body dark:text-zinc-400">
 				Connect to {connectionDisplayName[connectionType]}
 			</p>
 			<div className="flex w-full flex-col gap-3">
@@ -67,14 +67,14 @@ export const ConnectionConnectStep = ({
 					}: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
 						onFieldChange(field.key, target.value);
 					const inputClassName =
-						'rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-900 outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100';
+						'rounded-lg border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-heading outline-none focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100';
 
 					// Boolean fields render as a checkbox; the modal stores every
 					// value as a string, so 'true'/'' is the on/off representation.
 					if (field.boolean) {
 						return (
 							<label key={field.key} className="flex flex-col gap-1.5">
-								<span className="flex items-center gap-2 text-sm font-medium text-zinc-800 dark:text-zinc-200">
+								<span className="flex items-center gap-2 text-sm font-medium text-heading dark:text-zinc-200">
 									<input
 										type="checkbox"
 										checked={values[field.key] === 'true'}
@@ -87,7 +87,7 @@ export const ConnectionConnectStep = ({
 									{field.label}
 								</span>
 								{field.hint != null && (
-									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									<span className="text-xs text-secondary dark:text-zinc-400">
 										{field.hint}
 									</span>
 								)}
@@ -115,7 +115,7 @@ export const ConnectionConnectStep = ({
 						const encoded = values[field.key] ?? '';
 						return (
 							<label key={field.key} className="flex flex-col gap-1.5">
-								<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+								<span className="text-sm font-medium text-heading dark:text-zinc-200">
 									{field.label}
 									{field.optional ? null : (
 										<span className="ml-0.5 text-red-500">*</span>
@@ -129,12 +129,12 @@ export const ConnectionConnectStep = ({
 									className={`${inputClassName} file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1 file:text-sm dark:file:bg-zinc-800 dark:file:text-zinc-200`}
 								/>
 								{encoded !== '' && (
-									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									<span className="text-xs text-secondary dark:text-zinc-400">
 										{`Loaded ${Math.round((encoded.length * 3) / 4 / 1024)} KB`}
 									</span>
 								)}
 								{field.hint != null && (
-									<span className="text-xs text-zinc-500 dark:text-zinc-400">
+									<span className="text-xs text-secondary dark:text-zinc-400">
 										{field.hint}
 									</span>
 								)}
@@ -145,12 +145,12 @@ export const ConnectionConnectStep = ({
 					const readOnly = readOnlyKeys.has(field.key);
 					const keepsCurrent = keepCurrentKeys.has(field.key);
 					const className = readOnly
-						? `${inputClassName} cursor-not-allowed bg-zinc-50 text-zinc-500 dark:bg-zinc-800/60 dark:text-zinc-400`
+						? `${inputClassName} cursor-not-allowed bg-zinc-50 text-secondary dark:bg-zinc-800/60 dark:text-zinc-400`
 						: inputClassName;
 
 					return (
 						<label key={field.key} className="flex flex-col gap-1.5">
-							<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+							<span className="text-sm font-medium text-heading dark:text-zinc-200">
 								{field.label}
 								{field.optional || keepsCurrent ? null : (
 									<span className="ml-0.5 text-red-500">*</span>
@@ -182,12 +182,12 @@ export const ConnectionConnectStep = ({
 								/>
 							)}
 							{keepsCurrent && (
-								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+								<span className="text-xs text-secondary dark:text-zinc-400">
 									Leave empty to keep the stored value.
 								</span>
 							)}
 							{field.hint != null && (
-								<span className="text-xs text-zinc-500 dark:text-zinc-400">
+								<span className="text-xs text-secondary dark:text-zinc-400">
 									{field.hint}
 								</span>
 							)}

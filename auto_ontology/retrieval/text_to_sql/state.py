@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from nemo_retriever.graph.retriever import Retriever
@@ -46,6 +46,7 @@ class TextToSQLPayload(TypedDict):
     # classifies the calculation subtype and extracts inline evidence.
     calculation_only: NotRequired[bool]
     shorten_answer: NotRequired[bool]
+    validate_sql_values: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -63,16 +64,31 @@ class TextToSQLPayload(TypedDict):
     prediction: NotRequired[bool | None]
 
 
+class RetryRestoreState(TypedDict):
+    """Immutable request boundary used to restart the full SQL pipeline."""
+
+    initial_question: str
+    evidence: str
+    messages: list[BaseMessage]
+    sql_examples: list[dict[str, str]]
+    value_anchors: list[dict[str, str]]
+    glossary: list[dict[str, str]]
+    path_state: dict
+
+
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
+    reasoning_llm: NotRequired[ChatNVIDIA]
     initial_question: str
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]
     calculation_only: bool
     shorten_answer: bool
+    validate_sql_values: bool
+    sql_value_validation_cache: dict
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]
     decision: str
@@ -87,6 +103,8 @@ class AgentState(TypedDict):
     # domain_rules so prompts can inject them without the custom-analysis SQL.
     # After ``question_extraction``, this is narrowed to the entries the LLM used.
     glossary: NotRequired[list[dict[str, str]]]
+    restore_from: RetryRestoreState
+    full_pipeline_attempt: int
 
 
 def get_original_question(state: AgentState) -> str:
@@ -136,6 +154,7 @@ def rules_to_text(rules: list[dict[str, str]]) -> str:
 __all__ = [
     "AgentPayload",
     "TextToSQLPayload",
+    "RetryRestoreState",
     "AgentState",
     "get_original_question",
     "get_standalone_question",

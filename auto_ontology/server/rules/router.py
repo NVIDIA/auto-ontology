@@ -333,7 +333,7 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
 
 @router.get("/rules", response_model=RulePageResponse)
 def list_rules(
-    q: str | None = Query(
+    query: str | None = Query(
         default=None,
         description=(
             "Case-insensitive substring filter on the rule name or on the name "
@@ -345,9 +345,9 @@ def list_rules(
 ) -> dict:
     """Return rules, with the tags each applies.
 
-    *q*, when given, keeps the rules whose name contains it, and those applying
-    a tag whose name does -- the two things the settings list shows, so a search
-    that hides a row can be explained by what is on screen.
+    *query*, when given, keeps the rules whose name contains it, and those
+    applying a tag whose name does -- the two things the settings list shows,
+    so a search that hides a row can be explained by what is on screen.
 
     Rules come back ordered by name, case-insensitively, and *skip*/*limit*
     select one page of that order; ``total`` counts every match so a caller
@@ -356,10 +356,12 @@ def list_rules(
     Empty for a deployment where nobody has saved one, which the Rules settings
     page shows as its ordinary empty state.
     """
-    rules = rules_dal.list_rules(search=q, skip=skip, limit=limit)
+    rules = rules_dal.list_rules(search=query, skip=skip, limit=limit)
     # The count is a second read, so it is worth skipping for the request that
     # asked for everything: a whole unpaged list already is its own total.
-    total = rules_dal.count_rules(search=q) if skip or limit is not None else len(rules)
+    total = (
+        rules_dal.count_rules(search=query) if skip or limit is not None else len(rules)
+    )
     return {"data": rules, "count": len(rules), "total": total}
 
 

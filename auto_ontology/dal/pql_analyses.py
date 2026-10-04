@@ -19,11 +19,12 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store
+from auto_ontology.dal.sql_fragments import name_contains
 from auto_ontology.semantic.constants import LABEL_PQL_ANALYSIS
 
 if TYPE_CHECKING:
@@ -48,19 +49,58 @@ class PqlAnalysisPqlConflict(Exception):
 # ---------------------------------------------------------------------------
 
 
-def list_pql_analyses() -> list[dict[str, Any]]:
-    """Every PqlAnalysis as ``{id, name, description, pql}``, by name."""
-    return [
-        dict(r)
-        for r in store().query_read(
-            select(
-                s.pql_analysis.c.id,
-                s.pql_analysis.c.name,
-                s.pql_analysis.c.description,
-                s.pql_analysis.c.pql,
-            ).order_by(s.pql_analysis.c.name)
+def _matching(search: str | None) -> list:
+    """The WHERE for *search*, or nothing at all when there is none.
+
+    One function so :func:`list_pql_analyses` and :func:`count_pql_analyses`
+    cannot come to disagree about what matches — a page and a total taken from
+    different filters would leave the list asking for rows that are not there.
+    """
+    if not search or not search.strip():
+        return []
+    return [name_contains(s.pql_analysis.c.name, search)]
+
+
+def list_pql_analyses(
+    *,
+    search: str | None = None,
+    skip: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """PqlAnalyses as ``{id, name, description, pql}``, paged.
+
+    *search*, when given, keeps the analyses whose name contains it,
+    case-insensitively.
+
+    Ordered by name case-insensitively then by id — the id breaks ties between
+    same-named analyses, without which a page boundary could repeat one and
+    skip another. *skip* and *limit* select a window of that order, and *limit*
+    omitted returns every matching analysis. Pair with
+    :func:`count_pql_analyses` for the total.
+    """
+    statement = (
+        select(
+            s.pql_analysis.c.id,
+            s.pql_analysis.c.name,
+            s.pql_analysis.c.description,
+            s.pql_analysis.c.pql,
         )
-    ]
+        .where(*_matching(search))
+        .order_by(func.lower(s.pql_analysis.c.name), s.pql_analysis.c.id)
+        .offset(skip or None)
+    )
+    if limit is not None:
+        statement = statement.limit(limit)
+
+    return [dict(r) for r in store().query_read(statement)]
+
+
+def count_pql_analyses(*, search: str | None = None) -> int:
+    """The unpaged size of :func:`list_pql_analyses`, from the same filter."""
+    rows = store().query_read(
+        select(func.count(s.pql_analysis.c.id).label("total")).where(*_matching(search))
+    )
+    return int(rows[0]["total"]) if rows else 0
 
 
 def _find_conflict(column, value: str, exclude_id: str | None):

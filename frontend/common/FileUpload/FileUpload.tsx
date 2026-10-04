@@ -110,10 +110,10 @@ export const FileUpload = ({
 						}`
 			} ${className}`}
 		>
-			<Icon name={IconName.Upload} className="h-6 w-6 text-zinc-400 dark:text-zinc-500" />
+			<Icon name={IconName.Upload} className="h-6 w-6 text-secondary dark:text-zinc-500" />
 			{value ? (
 				<div className="flex items-center gap-2">
-					<span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+					<span className="text-sm font-medium text-heading dark:text-zinc-200">
 						{value.name}
 					</span>
 					<Button
@@ -133,13 +133,13 @@ export const FileUpload = ({
 				</div>
 			) : (
 				<>
-					<p className="text-sm text-zinc-700 dark:text-zinc-300">
+					<p className="text-sm text-body dark:text-zinc-300">
 						<span className="font-medium text-[#5e9400] dark:text-[#a3d63a]">
 							{label}
 						</span>{' '}
 						or drag and drop
 					</p>
-					{description ? <p className="text-xs text-zinc-500">{description}</p> : null}
+					{description ? <p className="text-xs text-secondary">{description}</p> : null}
 				</>
 			)}
 			<input

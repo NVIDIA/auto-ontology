@@ -7,7 +7,7 @@
 import { useMemo } from 'react';
 import type { ParsedTable, TableRow } from '@/lib/parseSqlResponse';
 import { EmptyState } from '@/common/EmptyState';
-import { Table } from '@/common/Table';
+import { Table, TABLE_THEAD_CLASSNAME } from '@/common/Table';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { usePagination } from '@/hooks/usePagination';
 import type { TableColumn } from '@/types/table';
@@ -30,7 +30,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 				header: col,
 				truncate: true,
 				maxWidthClass: 'max-w-[240px]',
-				className: 'text-zinc-700 dark:text-zinc-300',
+				className: 'text-body dark:text-zinc-300',
 				cell: (row) => row[col],
 				title: (row) => row[col],
 			})),
@@ -38,7 +38,7 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 	);
 
 	if (columns.length === 0 || rows.length === 0) {
-		return <EmptyState variant={EmptyStateVariant.Inline} title="No data available" />;
+		return <EmptyState variant={EmptyStateVariant.Inline} title="No Data Available" />;
 	}
 
 	return (
@@ -50,8 +50,8 @@ export const DynamicTable = ({ table }: DynamicTableProps) => {
 			textClassName="text-xs"
 			cellClassName="px-3 py-2"
 			containerClassName="overflow-hidden rounded-lg border border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-900"
-			theadClassName="sticky top-0 border-b border-zinc-200 bg-zinc-50 text-left font-semibold text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200"
-			bodyClassName="text-zinc-700 dark:text-zinc-300"
+			theadClassName={`sticky top-0 ${TABLE_THEAD_CLASSNAME}`}
+			bodyClassName="text-body dark:text-zinc-300"
 			rowClassName="border-b border-zinc-100 last:border-b-0 dark:border-zinc-800"
 			scrollClassName="max-h-[478px] overflow-auto"
 			pagination={pagination}

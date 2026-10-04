@@ -210,18 +210,24 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 						className="flex min-w-0 cursor-pointer flex-col gap-1.5 overflow-hidden rounded-xl border border-zinc-200 bg-white px-3 py-2.5 select-none [&_*]:cursor-pointer transition-colors hover:border-[#76b900]/50 hover:bg-[#76b900]/5 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-[#76b900]/40 dark:hover:bg-[#76b900]/10"
 					>
 						<div className="flex min-w-0 items-center gap-2 overflow-hidden">
-							<Icon name={typeIcon} className="h-4 w-4 shrink-0 text-zinc-400" />
-							<span className="min-w-0 truncate text-sm font-medium text-zinc-900 dark:text-zinc-100">
+							<Icon name={typeIcon} className="h-4 w-4 shrink-0 text-secondary" />
+							<span className="min-w-0 truncate text-sm font-medium text-heading dark:text-zinc-100">
 								<HighlightedText text={item.name ?? item.id} query={query} />
 							</span>
-							{status != null && <CertificationBadge status={status} iconOnly />}
-							<span className="ml-auto shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+							{/* The whole card is one link, and the badge's name folds
+							    into it, so the badge does not take focus of its own. */}
+							{status != null && (
+								<CertificationBadge status={status} iconOnly focusable={false} />
+							)}
+							<span className="ml-auto shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-body dark:bg-zinc-800 dark:text-zinc-300">
 								{typeLabel}
 							</span>
 						</div>
 						{item.synonyms && item.synonyms.length > 0 ? (
-							<p className="min-w-0 truncate pl-6 text-xs text-zinc-500 dark:text-zinc-400">
-								<span className="text-zinc-400 dark:text-zinc-500">Synonyms: </span>
+							<p className="min-w-0 truncate pl-6 text-xs text-secondary dark:text-zinc-400">
+								<span className="text-secondary dark:text-zinc-500">
+									Synonyms:{' '}
+								</span>
 								{item.synonyms.map((synonym, index) => (
 									<span key={`${item.id}-${synonym}`}>
 										{index > 0 ? ', ' : null}
@@ -231,7 +237,7 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 							</p>
 						) : null}
 						{item.description ? (
-							<p className="line-clamp-2 min-w-0 overflow-hidden pl-6 text-xs leading-5 text-zinc-400 dark:text-zinc-500">
+							<p className="line-clamp-2 min-w-0 overflow-hidden pl-6 text-xs leading-5 text-secondary dark:text-zinc-500">
 								<HighlightedText
 									text={descriptionWithVisibleMatch(item.description, query)}
 									query={query}
@@ -239,17 +245,17 @@ export const GlobalSearchResults = ({ items, query, onNavigate }: GlobalSearchRe
 							</p>
 						) : null}
 						{path !== '' && (
-							<p className="truncate pl-6 text-xs text-zinc-500 dark:text-zinc-400">
+							<p className="truncate pl-6 text-xs text-secondary dark:text-zinc-400">
 								{path}
 							</p>
 						)}
 						{termName != null ? (
-							<p className="flex min-w-0 items-center gap-1.5 pl-6 text-xs text-zinc-500 dark:text-zinc-400">
+							<p className="flex min-w-0 items-center gap-1.5 pl-6 text-xs text-secondary dark:text-zinc-400">
 								<Icon
 									name={SEARCH_TYPE_ICON[SearchObjectType.Term]}
-									className="h-3.5 w-3.5 shrink-0 text-zinc-400"
+									className="h-3.5 w-3.5 shrink-0 text-secondary"
 								/>
-								<span className="shrink-0 text-zinc-400 dark:text-zinc-500">
+								<span className="shrink-0 text-secondary dark:text-zinc-500">
 									Term:{' '}
 								</span>
 								<span className="min-w-0 truncate">{termName}</span>

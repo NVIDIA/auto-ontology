@@ -54,6 +54,9 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
     SQLReconstructionAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.sql_value_validation import (
+    SQLValueValidationAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.sql_unconstructable import (
     SQLUnconstructableAgent,
 )
@@ -115,6 +118,14 @@ def route_sql_validation(state: AgentState) -> str:
         return "invalid_sql"
 
     return "valid_sql"
+
+
+def route_sql_execution(state: AgentState) -> str:
+    """Route successful short answers around the empty-LIKE repair node."""
+    route = route_sql_validation(state)
+    if route == "valid_sql" and state.get("shorten_answer", False):
+        return "valid_sql_without_like_check"
+    return route
 
 
 def _make_soft_check_router(check_name: str):
@@ -207,6 +218,23 @@ def route_decision(state: AgentState) -> str:
         logger.debug("Mapped decision '%s' → '%s'", decision, mapped)
 
     return mapped
+
+
+def route_generated_sql(state: AgentState) -> str:
+    """Optionally validate values after initial SQL generation."""
+    route = route_decision(state)
+    if route == "validate_sql_query" and state.get("validate_sql_values", False):
+        return "validate_sql_values"
+    return route
+
+
+def route_reconstructed_sql(state: AgentState) -> str:
+    """Optionally validate values after each successful reconstruction."""
+    if state.get("decision") != "unconstructable" and state.get(
+        "validate_sql_values", False
+    ):
+        return "validate_sql_values"
+    return "validate_sql_query"
 
 
 def route_evidence_refinement(state: AgentState) -> str:
@@ -311,6 +339,7 @@ def create_graph():
     evidence_refinement_agent = EvidenceRefinementAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
+    sql_value_validation_agent = SQLValueValidationAgent()
     sql_validation_agent = SQLValidationAgent()
     sql_execution_agent = SQLExecutionAgent()
     empty_like_result_check_agent = EmptyLikeResultCheckAgent()
@@ -373,6 +402,9 @@ def create_graph():
     reconstruct_sql_node = _make_node(
         "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)
     )
+    validate_sql_values_node = _make_node(
+        "validate_sql_values", agent_wrapper(sql_value_validation_agent)
+    )
 
     validate_sql_query_node = _make_node(
         "validate_sql_query", agent_wrapper(sql_validation_agent)
@@ -418,6 +450,7 @@ def create_graph():
         graph.add_node("precheck_combined", combined_precheck_node)
     graph.add_node("construct_sql_from_candidates", construct_sql_from_candidates_node)
     graph.add_node("reconstruct_sql", reconstruct_sql_node)
+    graph.add_node("validate_sql_values", validate_sql_values_node)
     graph.add_node("validate_sql_query", validate_sql_query_node)
     graph.add_node("execute_sql_query", execute_sql_query_node)
     graph.add_node("check_empty_like_result", check_empty_like_result_node)
@@ -486,9 +519,10 @@ def create_graph():
     graph.add_edge("refine_evidence", "construct_sql_from_candidates")
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
-        route_decision,
+        route_generated_sql,
         {
             "validate_sql_query": "validate_sql_query",
+            "validate_sql_values": "validate_sql_values",
             "unconstructable": "unconstructable_sql_response",
         },
     )
@@ -528,9 +562,10 @@ def create_graph():
     # SQL execution → route (use route_sql_validation to enforce attempt limits)
     graph.add_conditional_edges(
         "execute_sql_query",
-        route_sql_validation,
+        route_sql_execution,
         {
             "valid_sql": "check_empty_like_result",
+            "valid_sql_without_like_check": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
         },
@@ -555,7 +590,15 @@ def create_graph():
         },
     )
 
-    graph.add_edge("reconstruct_sql", "validate_sql_query")
+    graph.add_conditional_edges(
+        "reconstruct_sql",
+        route_reconstructed_sql,
+        {
+            "validate_sql_values": "validate_sql_values",
+            "validate_sql_query": "validate_sql_query",
+        },
+    )
+    graph.add_edge("validate_sql_values", "validate_sql_query")
 
     graph.add_edge("unconstructable_sql_response", END)
 
@@ -567,9 +610,12 @@ def create_graph():
 __all__ = [
     "INTENT_VALIDATION_SKIPPED_AFTER",
     "NODE_START_EVENT",
+    "route_generated_sql",
+    "route_reconstructed_sql",
     "TextToSQLPayload",
     "AgentState",
     "create_graph",
     "get_question_for_processing",
     "route_after_candidate_retrieval",
+    "route_sql_execution",
 ]

@@ -211,7 +211,7 @@ export default function RulesSettingsPage() {
 				error={rules.length > 0 ? error : null}
 			>
 				<div className="w-full space-y-5">
-					<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+					<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
 						Rules
 					</h1>
 
@@ -225,7 +225,7 @@ export default function RulesSettingsPage() {
 						<SearchInput
 							value={query}
 							onChange={setQuery}
-							placeholder="Search rules…"
+							placeholder="Search Rules…"
 							aria-label="Search rules"
 							className="w-full"
 						/>
@@ -278,9 +278,9 @@ export default function RulesSettingsPage() {
 									<div className="flex items-center gap-2 px-4 py-3">
 										<Icon
 											name={IconName.Lightning}
-											className="h-4 w-4 shrink-0 text-[#76b900]"
+											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
 										/>
-										<span className="min-w-0 flex-1 truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+										<span className="min-w-0 flex-1 truncate text-sm font-semibold text-heading dark:text-zinc-100">
 											{rule.name}
 										</span>
 										<div className="relative w-[26px] shrink-0">
@@ -343,7 +343,7 @@ export default function RulesSettingsPage() {
 											/>
 										</div>
 									</div>
-									<div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200/90 px-4 py-2.5 text-xs text-zinc-500 dark:border-zinc-700/90 dark:text-zinc-400">
+									<div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-zinc-200/90 px-4 py-2.5 text-xs text-secondary dark:border-zinc-700/90 dark:text-zinc-400">
 										<Icon
 											name={IconName.Users}
 											className="h-3.5 w-3.5 shrink-0"
@@ -352,7 +352,7 @@ export default function RulesSettingsPage() {
 										<RuleAuthor author={rule.created_by_user} />
 										<span className="ml-auto flex items-center gap-3">
 											<span>Last Modified</span>
-											<span className="text-zinc-600 dark:text-zinc-300">
+											<span className="text-body dark:text-zinc-300">
 												{formatDate(rule.modified)}
 											</span>
 										</span>
@@ -381,11 +381,11 @@ export default function RulesSettingsPage() {
 				<div>
 					<label
 						htmlFor="rule-name"
-						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100"
 					>
 						<Icon
 							name={IconName.Lightning}
-							className="h-4 w-4 text-zinc-500 dark:text-zinc-400"
+							className="h-4 w-4 text-secondary dark:text-zinc-400"
 						/>
 						Rule Name
 					</label>
@@ -394,13 +394,13 @@ export default function RulesSettingsPage() {
 						type="text"
 						value={name}
 						onChange={(event) => setName(event.target.value)}
-						placeholder="Type rule name"
-						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+						placeholder="Type Rule Name"
+						className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 					/>
 					{/* The tags and the search are on the information card, and are not
 					    editable — worth saying inside the dialog that changes the one
 					    thing about a rule that is. */}
-					<p className="mt-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+					<p className="mt-1.5 text-xs text-secondary dark:text-zinc-400">
 						Renaming does not change what the rule matches or the tags it applies.
 					</p>
 				</div>
@@ -423,7 +423,7 @@ export default function RulesSettingsPage() {
 			    given the choice of whether to accept it. */}
 			<ConfirmModal
 				open={confirmDelete !== null}
-				title="Delete rule"
+				title="Delete Rule"
 				className="w-[520px] max-w-full"
 				message={
 					confirmDelete == null ? (
@@ -432,7 +432,7 @@ export default function RulesSettingsPage() {
 						<>
 							<p>{`Are you sure you want to delete "${confirmDelete.name}"? This action cannot be undone.`}</p>
 							<fieldset className="mt-4">
-								<legend className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+								<legend className="text-xs font-medium text-heading dark:text-zinc-200">
 									The tags this rule applied
 								</legend>
 								<div className="mt-2 space-y-2">
@@ -450,10 +450,10 @@ export default function RulesSettingsPage() {
 												className={RADIO_CLASSNAME}
 											/>
 											<span>
-												<span className="block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+												<span className="block text-sm font-medium text-heading dark:text-zinc-100">
 													{option.label}
 												</span>
-												<span className="block text-xs text-zinc-500 dark:text-zinc-400">
+												<span className="block text-xs text-secondary dark:text-zinc-400">
 													{option.description}
 												</span>
 											</span>

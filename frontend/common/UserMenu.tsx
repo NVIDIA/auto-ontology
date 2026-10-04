@@ -42,7 +42,7 @@ export const UserMenu = ({ version }: { version?: string }) => {
 				// The fixed width is what gives a long email something to be
 				// clipped against, since the menu is otherwise as wide as its
 				// widest item.
-				<div className="w-56 px-3 py-1 text-xs text-zinc-400 dark:text-zinc-500">
+				<div className="w-56 px-3 py-1 text-xs text-secondary dark:text-zinc-500">
 					{version ? <p>Version {version}</p> : null}
 					<Text text={fullName} variant={TextVariant.Strong} />
 					{roleLabel ? <p className="text-[10px]">{roleLabel}</p> : null}

@@ -19,11 +19,11 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import delete, literal, select
+from sqlalchemy import delete, func, literal, select
 
 from auto_ontology.dal import schema as s
 from auto_ontology.dal.session import store, write_transaction
-from auto_ontology.dal.sql_fragments import column_description_expr
+from auto_ontology.dal.sql_fragments import column_description_expr, name_contains
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.server.sql_utils import SqlParseError
 
@@ -113,15 +113,45 @@ def _out_of_zone(table_ids: list[str]):
 # ---------------------------------------------------------------------------
 
 
+def _matching(zone_ids: list[str] | None, search: str | None) -> list:
+    """The WHERE every read of the visible analysis set applies.
+
+    One function so :func:`list_custom_analyses` and
+    :func:`count_custom_analyses` cannot come to disagree about what matches —
+    a page and a total taken from different filters would leave the list asking
+    for rows that are not there.
+    """
+    conditions = [_has_sql()]
+    if zone_ids is not None:
+        resolved = resolve_accessible_catalog_ids(zone_ids)
+        conditions.append(~_out_of_zone(list(resolved["table_ids"])))
+    if search and search.strip():
+        conditions.append(name_contains(s.custom_analysis.c.name, search))
+    return conditions
+
+
 def list_custom_analyses(
     zone_ids: list[str] | None = None,
+    *,
+    search: str | None = None,
+    skip: int = 0,
+    limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Analyses with their SQL text, ordered by name.
+    """Analyses with their SQL text, paged.
 
     *zone_ids* is an authorization boundary, not a relevance filter: an analysis
     touching even one out-of-zone table is excluded outright, because returning
     its SQL would disclose the names and columns of tables the caller may not
     see. ``None`` returns everything, for admin callers.
+
+    *search*, when given, keeps the analyses whose name contains it,
+    case-insensitively.
+
+    Ordered by name case-insensitively then by id — the id breaks ties between
+    same-named analyses, without which a page boundary could repeat one and
+    skip another. *skip* and *limit* select a window of that order, and *limit*
+    omitted returns every matching analysis. Pair with
+    :func:`count_custom_analyses` for the total.
     """
     statement = (
         select(
@@ -130,14 +160,28 @@ def list_custom_analyses(
             s.custom_analysis.c.description,
             _sql_text().label("sql"),
         )
-        .where(_has_sql())
-        .order_by(s.custom_analysis.c.name)
+        .where(*_matching(zone_ids, search))
+        .order_by(func.lower(s.custom_analysis.c.name), s.custom_analysis.c.id)
+        .offset(skip or None)
     )
-    if zone_ids is not None:
-        resolved = resolve_accessible_catalog_ids(zone_ids)
-        statement = statement.where(~_out_of_zone(list(resolved["table_ids"])))
+    if limit is not None:
+        statement = statement.limit(limit)
 
     return [dict(r) for r in store().query_read(statement)]
+
+
+def count_custom_analyses(
+    zone_ids: list[str] | None = None,
+    *,
+    search: str | None = None,
+) -> int:
+    """The unpaged size of :func:`list_custom_analyses`, from the same filter."""
+    rows = store().query_read(
+        select(func.count(s.custom_analysis.c.id).label("total")).where(
+            *_matching(zone_ids, search)
+        )
+    )
+    return int(rows[0]["total"]) if rows else 0
 
 
 def find_analysis_by_name(

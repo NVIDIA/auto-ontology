@@ -103,7 +103,7 @@ export default async function RootLayout({
 			lang="en"
 			className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
 		>
-			<body className="flex h-full flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+			<body className="flex h-full flex-col bg-white text-heading dark:bg-zinc-950 dark:text-zinc-100">
 				<QueryProvider>
 					<TooltipProvider openDelayDuration={400} skipDelayDuration={0}>
 						{showAppChrome ? (

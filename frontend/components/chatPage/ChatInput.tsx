@@ -97,10 +97,10 @@ export const ChatInput = ({ onSend, onStop, isLoading }: ChatInputProps) => {
 				<textarea
 					ref={textareaRef}
 					rows={1}
-					placeholder="Ask a question…"
+					placeholder="Ask a Question…"
 					onInput={handleInput}
 					onKeyDown={handleKeyDown}
-					className="flex-1 resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
+					className="flex-1 resize-none rounded-xl border border-zinc-300 bg-zinc-50 px-4 py-2.5 text-sm text-heading outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-1 focus:ring-[#76b900] dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100 dark:placeholder:text-zinc-500"
 				/>
 
 				{isLoading ? (

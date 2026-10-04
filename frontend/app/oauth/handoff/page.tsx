@@ -39,7 +39,7 @@ const HandoffStatus = () => {
 	}
 
 	return (
-		<OauthStatus title="Thank you">
+		<OauthStatus title="Thank You">
 			Authentication successful. You can close this page.
 		</OauthStatus>
 	);
@@ -50,7 +50,7 @@ const HandoffPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
 					Auto Ontology
 				</span>
 			</div>

@@ -63,7 +63,10 @@ export const ConnectionInfoCard = ({
 		<article className="flex h-fit flex-col rounded-lg border border-zinc-200/90 bg-white shadow-sm dark:border-zinc-700/90 dark:bg-zinc-950">
 			<header className="flex w-full items-center justify-between gap-2 px-4 py-5">
 				<div className="flex min-w-0 items-center gap-1">
-					<Icon name={IconName.Database} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Database}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					<Text
 						as="h3"
 						text={connection.database_name}
@@ -74,7 +77,7 @@ export const ConnectionInfoCard = ({
 					{menuDisabled ? (
 						<Icon
 							name={IconName.DotsVertical}
-							className="h-4 w-4 text-zinc-300 dark:text-zinc-600"
+							className="h-4 w-4 text-disabled dark:text-zinc-600"
 						/>
 					) : (
 						<PopoverMenu
@@ -110,10 +113,10 @@ export const ConnectionInfoCard = ({
 							className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-zinc-300 accent-[#76b900] disabled:cursor-default dark:border-zinc-600"
 						/>
 						<span className="min-w-0">
-							<span className="block text-xs font-medium text-zinc-800 dark:text-zinc-200">
-								Authenticate as signed-in user
+							<span className="block text-xs font-medium text-heading dark:text-zinc-200">
+								Authenticate as Signed-In User
 							</span>
-							<span className="block text-xs text-zinc-500 dark:text-zinc-400">
+							<span className="block text-xs text-secondary dark:text-zinc-400">
 								{ssoFederationOn
 									? 'Chat runs SQL with each user’s own Databricks privileges.'
 									: 'Chat runs SQL with this connection’s stored access token.'}

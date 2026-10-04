@@ -115,11 +115,11 @@ export const Toast = ({
 			<div className="pointer-events-auto flex max-w-md items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
 				<VariantIcon variant={variant} />
 				{resolvedTitle ? (
-					<span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<span className="text-sm font-semibold text-heading dark:text-zinc-100">
 						{resolvedTitle}
 					</span>
 				) : null}
-				<span className="text-sm text-zinc-800 dark:text-zinc-200">
+				<span className="text-sm text-heading dark:text-zinc-200">
 					{capitalizeFirst(message)}
 				</span>
 				<Button

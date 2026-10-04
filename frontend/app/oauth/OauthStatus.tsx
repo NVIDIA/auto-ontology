@@ -4,7 +4,7 @@
 
 export const OauthStatus = ({ title, children }: { title: string; children: React.ReactNode }) => (
 	<div className="flex w-full max-w-md flex-col gap-3 text-center">
-		<h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{title}</h1>
-		<p className="text-sm text-zinc-600 dark:text-zinc-400">{children}</p>
+		<h1 className="text-xl font-semibold text-heading dark:text-zinc-100">{title}</h1>
+		<p className="text-sm text-body dark:text-zinc-400">{children}</p>
 	</div>
 );

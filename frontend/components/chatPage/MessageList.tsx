@@ -63,7 +63,7 @@ export const MessageList = ({
 						<Icon name={IconName.ChatBubble} className="h-7 w-7 text-[#76b900]" />
 					</div>
 				}
-				title="Ask a question"
+				title="Ask a Question"
 				description="Type a natural-language question and the system will search your data, construct a SQL query, and return results."
 			/>
 		);

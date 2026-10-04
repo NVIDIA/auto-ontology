@@ -11,8 +11,6 @@ export type RulesListParams = PageParams & {
 	/**
 	 * Case-insensitive substring, matched against a rule's name and against the
 	 * names of the tags it applies — the two things a rule's card shows.
-	 *
-	 * Goes up as `?q=`, which is what the route calls it.
 	 */
 	query?: string;
 };
@@ -37,7 +35,7 @@ export const rulesApi = {
 	 */
 	getAll: (params?: RulesListParams): Promise<ApiPagedResponse<Rule[]>> =>
 		requests.get('rules', {
-			...(params?.query ? { q: params.query } : {}),
+			...(params?.query ? { query: params.query } : {}),
 			...pageQuery(params),
 		}),
 

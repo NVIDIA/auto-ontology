@@ -287,7 +287,7 @@ export const ConnectionModal = ({
 			case SCHEMA_STEP:
 				return (
 					<div className="flex flex-col gap-2">
-						<p className="px-2 text-xs text-zinc-500 dark:text-zinc-400">
+						<p className="px-2 text-xs text-secondary dark:text-zinc-400">
 							Leave empty to ingest all schemas.
 						</p>
 						<ConnectionSelectDataStep

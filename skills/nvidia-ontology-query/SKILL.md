@@ -134,7 +134,7 @@ it belongs to the signed-in user.
 
 MCP first. REST fallback:
 
-- `GET /api/terms` (`q`, `skip`, `limit`)
+- `GET /api/terms` (`query`, `skip`, `limit`)
 - `GET /api/terms/{term_id}`
 - `GET /api/exploration/tables/{table_id}/details`
 - `GET /api/exploration/graph`

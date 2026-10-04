@@ -19,6 +19,19 @@ from sqlalchemy import ColumnElement, func, select
 from auto_ontology.dal import schema as s
 
 
+def name_contains(column: ColumnElement, search: str) -> ColumnElement:
+    """Case-insensitive substring match on *column*, wildcards escaped.
+
+    The caller means a literal substring. Unescaped, ``_`` matches any
+    character (so ``customer_id`` also finds ``customerXid``) and a lone ``%``
+    returns every row.
+    """
+    needle = (
+        search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    )
+    return column.ilike(f"%{needle}%", escape="\\")
+
+
 def _non_blank(column: ColumnElement) -> ColumnElement:
     """The column's value, or ``NULL`` when it is absent or whitespace.
 

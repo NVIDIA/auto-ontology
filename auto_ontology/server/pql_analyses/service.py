@@ -19,6 +19,7 @@ from typing import Any
 from auto_ontology.dal.pql_analyses import (
     PqlAnalysisNameConflict,
     PqlAnalysisPqlConflict,
+    count_pql_analyses,
     delete_pql_analysis_node,
     embed_pql_analyses,
     find_pql_analysis_by_name,
@@ -33,6 +34,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "PqlAnalysisNameConflict",
     "PqlAnalysisPqlConflict",
+    "count_pql_analyses",
     "list_pql_analyses",
     "create_pql_analysis",
     "update_pql_analysis",

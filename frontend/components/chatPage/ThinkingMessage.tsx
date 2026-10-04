@@ -46,7 +46,7 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 					<div className="flex h-6 w-6 items-center justify-center rounded-md bg-[#76b900]/15">
 						<Icon name={IconName.NvidiaLogo} className="h-4 w-4 text-[#76b900]" />
 					</div>
-					<span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+					<span className="text-xs font-semibold text-body dark:text-zinc-200">
 						Auto Ontology Agent
 					</span>
 				</div>
@@ -56,7 +56,7 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 						{completedSteps.map((step, i) => (
 							<li
 								key={`${step.node}-${i}`}
-								className="flex items-start gap-2 text-xs text-zinc-500 dark:text-zinc-400"
+								className="flex items-start gap-2 text-xs text-secondary dark:text-zinc-400"
 							>
 								<Icon
 									name={IconName.Check}
@@ -65,7 +65,7 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 								<span>
 									<span>{step.label}</span>
 									{step.thought && (
-										<span className="block text-zinc-400 dark:text-zinc-500">
+										<span className="block text-secondary dark:text-zinc-500">
 											{step.thought}
 										</span>
 									)}
@@ -77,10 +77,10 @@ export const ThinkingMessage = ({ steps, liveSql }: ThinkingMessageProps) => {
 
 				<div className="flex w-full flex-col items-start gap-2">
 					{activeStep && (
-						<span className="text-sm text-zinc-800 dark:text-zinc-100">
+						<span className="text-sm text-heading dark:text-zinc-100">
 							<span>{activeStep.label}</span>
 							{activeStep.thought && (
-								<span className="block text-xs font-normal text-zinc-500 dark:text-zinc-400">
+								<span className="block text-xs font-normal text-secondary dark:text-zinc-400">
 									{activeStep.thought}
 								</span>
 							)}

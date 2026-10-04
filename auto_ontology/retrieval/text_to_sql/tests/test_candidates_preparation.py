@@ -10,11 +10,64 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
+    AnchorColumnModel,
     TableRelevanceModel,
     TableRemovalModel,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
+
+
+def test_anchor_maps_evidence_to_schema_table_column(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, messages, _model):
+        captured["prompt"] = messages[-1].content
+        return AnchorColumnModel(anchor_id="frpm", reasoning="Evidence matches")
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": FakeLlm(),
+            "evidence": "eligible rate = FRPM / Enrollment",
+        },
+    )
+    contexts = {
+        "frpm": {
+            "attr_name": "FRPM Count (K-12)",
+            "schema_name": "main",
+            "table_name": "frpm",
+            "col_name": "frpm_count_k12",
+            "attr_description": "Eligible meal-program students.",
+        },
+        "enrollment": {
+            "attr_name": "Enrollment (K-12)",
+            "schema_name": "main",
+            "table_name": "frpm",
+            "col_name": "enrollment_k12",
+            "attr_description": "K-12 student enrollment.",
+        },
+    }
+
+    anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
+        state, "Which school has the highest eligible rate?", contexts
+    )
+
+    assert anchor_id == "frpm"
+    assert "Authoritative evidence:" in captured["prompt"]
+    assert "main.frpm.frpm_count_k12" in captured["prompt"]
+    assert "main.frpm.enrollment_k12" in captured["prompt"]
+    assert "FRPM Count (K-12)" not in captured["prompt"]
+    assert "schema.table.column physical references" in captured["prompt"]
 
 
 def test_column_metadata_backfill_requires_samples_and_nullability() -> None:

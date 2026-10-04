@@ -14,7 +14,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from auto_ontology.semantic.deterministic import to_term_name
 from auto_ontology.semantic.domain import DomainSummary
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 from pydantic import BaseModel, ConfigDict, Field
@@ -205,7 +205,7 @@ def _extract_synonyms(description: str) -> list[str]:
     if not description:
         return []
     result = invoke_with_structured_output(
-        get_non_reasoning_llm_client(temperature=0.0, max_tokens=1024),
+        get_llm_client(temperature=0.0, max_tokens=1024),
         [
             SystemMessage(content=_SYNONYM_SYSTEM),
             HumanMessage(content=f"Description: {description}"),
@@ -245,7 +245,7 @@ def extract_term(
         f"{domain_block}"
     )
     result = invoke_with_structured_output(
-        get_non_reasoning_llm_client(temperature=0.0, max_tokens=4096),
+        get_llm_client(temperature=0.0, max_tokens=4096),
         [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
         RawTableTermsResult,
     )

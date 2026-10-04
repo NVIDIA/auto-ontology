@@ -29,6 +29,7 @@ NODE_LABELS: dict[str, str] = {
     "precheck_combined": "Checking joins and filter values",
     "construct_sql_from_candidates": "Constructing SQL",
     "reconstruct_sql": "Reconstructing SQL",
+    "validate_sql_values": "Validating filter values",
     "validate_sql_query": "Validating SQL and intent",
     "execute_sql_query": "Executing SQL",
     "check_empty_like_result": "Checking results",

@@ -36,6 +36,9 @@ def main_fixture(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
     """
 
     monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        llm_invoke, "get_non_reasoning_llm_client", lambda **_kwargs: None
+    )
     module = importlib.import_module("auto_ontology.retrieval.text_to_sql.main")
     monkeypatch.setattr(module, "_COMBINED_PRECHECK_IN_GRAPH", False)
     return module

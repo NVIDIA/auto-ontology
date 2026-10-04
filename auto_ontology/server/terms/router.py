@@ -44,7 +44,7 @@ class ColumnAttributeUpdate(BaseModel):
 
 @router.get("/terms", response_model=TermsPageResponse)
 def list_terms(
-    q: str | None = Query(
+    query: str | None = Query(
         default=None,
         description="Case-insensitive substring filter on the term name.",
     ),
@@ -53,7 +53,7 @@ def list_terms(
 ) -> dict:
     """Return Term nodes.
 
-    *q*, when given, filters to terms whose name contains it
+    *query*, when given, filters to terms whose name contains it
     (case-insensitive).
 
     Terms come back ordered by name, and *skip*/*limit* select one page of
@@ -73,7 +73,9 @@ def list_terms(
     ``/terms/{term_id}/sql-attributes`` below — this endpoint stays
     counts-only so the Terms list never pulls attribute nodes it won't show.
     """
-    return term_service.list_terms_page(zone_ids=None, search=q, skip=skip, limit=limit)
+    return term_service.list_terms_page(
+        zone_ids=None, search=query, skip=skip, limit=limit
+    )
 
 
 @router.get(

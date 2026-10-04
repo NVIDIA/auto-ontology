@@ -39,8 +39,8 @@ export const ColorPicker = ({
 					colorClass={selectedColorClass}
 					size={Size.LARGE}
 					onClick={toggle}
-					aria-label="Pick color"
-					title="Pick color"
+					aria-label="Pick Color"
+					title="Pick Color"
 				/>
 			)}
 		>

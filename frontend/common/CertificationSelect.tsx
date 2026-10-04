@@ -6,7 +6,7 @@
 
 import { useState } from 'react';
 import { Spinner } from '@nvidia/foundations-react-core';
-import { CertificationBadge } from '@/common/CertificationBadge';
+import { CertificationBadge, CERTIFICATION_LABEL } from '@/common/CertificationBadge';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { Icon, IconName } from '@/common/icons';
 import { fieldStatus } from '@/lib/certification';
@@ -52,7 +52,7 @@ export const CertificationSelect = ({
 	const items = [
 		{
 			label: 'Pending Approval',
-			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-zinc-400" />,
+			icon: <Icon name={IconName.Certification} className="h-4 w-4 text-secondary" />,
 			onClick: () => {
 				void select(false);
 			},
@@ -75,16 +75,22 @@ export const CertificationSelect = ({
 					type="button"
 					onClick={toggle}
 					disabled={saving}
-					title={saving ? 'Saving certification…' : 'Set certification'}
+					// The badge inside is decorative, so the trigger has to name the
+					// status it is about to change as well as the action.
+					title={
+						saving
+							? 'Saving Certification…'
+							: `Set Certification (${CERTIFICATION_LABEL[status]})`
+					}
 					className={`inline-flex items-center gap-1 ${saving ? 'cursor-default opacity-70' : 'cursor-pointer'}`}
 				>
-					<CertificationBadge status={status} iconOnly={!showLabel} />
+					<CertificationBadge status={status} iconOnly={!showLabel} decorative />
 					{saving ? (
 						<Spinner aria-label="Saving certification" className="h-3.5 w-3.5" />
 					) : (
 						<Icon
 							name={IconName.ChevronRight}
-							className="h-3 w-3 rotate-90 text-zinc-400"
+							className="h-3 w-3 rotate-90 text-secondary"
 						/>
 					)}
 				</button>

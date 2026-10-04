@@ -134,10 +134,10 @@ export const SemanticCompilationForm = ({
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-xl">
-				<h1 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
 					Semantic Compilation
 				</h1>
-				<p className="mb-4 text-xs text-zinc-500">
+				<p className="mb-4 text-xs text-secondary">
 					When enabled, the ingestion service compiles the semantic layer for every
 					connected database on startup and once every 24 hours. Enabling it also triggers
 					a compilation run immediately.
@@ -145,7 +145,7 @@ export const SemanticCompilationForm = ({
 
 				{!hasDatabases && (
 					<div className="mb-3 flex items-center rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-						<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+						<span className="text-sm font-medium text-heading dark:text-zinc-100">
 							Please connect any data source
 						</span>
 					</div>
@@ -156,12 +156,12 @@ export const SemanticCompilationForm = ({
 						{enabled && hasHistory && (
 							<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 								<div className="flex flex-col">
-									<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+									<span className="text-sm font-medium text-heading dark:text-zinc-100">
 										{running && 'Semantic compilation is running'}
 										{!running && failed && 'Semantic compilation failed'}
 										{!running && !failed && 'Semantic compilation is ready'}
 									</span>
-									<span className="text-xs text-zinc-500">
+									<span className="text-xs text-secondary">
 										{failed && !running
 											? `Last attempt: ${formatDate(lastFailureAt as string, 'MMM DD YYYY, HH:mm Z')}`
 											: `Last semantic compilation: ${
@@ -175,20 +175,20 @@ export const SemanticCompilationForm = ({
 									</span>
 								</div>
 								{running ? (
-									<span title="Semantic compilation is running">
+									<span title="Semantic Compilation Is Running">
 										<Spinner className="h-4 w-4 shrink-0 text-[#76b900]" />
 									</span>
 								) : failed ? (
 									<span
 										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-red-500/15 text-red-600 dark:text-red-400"
-										title="Semantic compilation failed"
+										title="Semantic Compilation Failed"
 									>
 										<Icon name={IconName.Close} className="h-3 w-3" />
 									</span>
 								) : (
 									<span
 										className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#76b900]/15 text-[#76b900]"
-										title="Semantic compilation is ready"
+										title="Semantic Compilation Is Ready"
 									>
 										<Icon name={IconName.Check} className="h-3 w-3" />
 									</span>
@@ -198,7 +198,7 @@ export const SemanticCompilationForm = ({
 
 						{!enabled && (
 							<div className="mb-3 flex items-center rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
-								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+								<span className="text-sm font-medium text-heading dark:text-zinc-100">
 									You can enable the semantic compilation
 								</span>
 							</div>
@@ -209,10 +209,10 @@ export const SemanticCompilationForm = ({
 						    compilation on, and stays editable afterwards. */}
 						<div className="mb-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 							<div className="flex flex-col pr-4">
-								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+								<span className="text-sm font-medium text-heading dark:text-zinc-100">
 									Distinct Value Scanning
 								</span>
-								<span className="text-xs text-zinc-500">
+								<span className="text-xs text-secondary">
 									{probingEnabled
 										? 'Scans low-cardinality text columns for their full value set, so rare categories are captured too.'
 										: 'Off — columns keep only the values seen in each table’s row sample.'}
@@ -228,16 +228,16 @@ export const SemanticCompilationForm = ({
 
 						<div className="flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 							<div className="flex flex-col">
-								<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-									Enable semantic compilation
+								<span className="text-sm font-medium text-heading dark:text-zinc-100">
+									Enable Semantic Compilation
 								</span>
-								<span className="text-xs text-zinc-500">
+								<span className="text-xs text-secondary">
 									{enabled ? 'Running on the 24h schedule.' : 'Currently off.'}
 								</span>
 							</div>
 							<Toggle
 								checked={enabled}
-								aria-label="Enable semantic compilation"
+								aria-label="Enable Semantic Compilation"
 								disabled={saving}
 								onChange={handleToggle}
 							/>
@@ -246,10 +246,10 @@ export const SemanticCompilationForm = ({
 						{enabled && (
 							<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
 								<div className="flex flex-col">
-									<span className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
-										Reset semantic layer
+									<span className="text-sm font-medium text-heading dark:text-zinc-100">
+										Reset Semantic Layer
 									</span>
-									<span className="text-xs text-zinc-500">
+									<span className="text-xs text-secondary">
 										Deletes the semantic layer for every database, and rebuild
 										it from scratch.
 									</span>
@@ -270,7 +270,7 @@ export const SemanticCompilationForm = ({
 
 			<ConfirmModal
 				open={confirmModalOpen}
-				title="Reset semantic layer"
+				title="Reset Semantic Layer"
 				message="This deletes the semantic layer and a rebuild will be triggered."
 				confirmLabel="Reset"
 				onConfirm={handleReset}

@@ -138,7 +138,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 						href={catalogPathFromFocusId(
 							`${target.databaseId}|${target.schemaId}|${target.id}|${row.id}`,
 						)}
-						className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
 						aria-label={`Open ${row.column_name} in Data`}
 						title={`Open ${row.column_name} in Data`}
 					>
@@ -164,7 +164,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 			cell: (row) => (
 				<NextLink
 					href={`/terms?focus=${encodeURIComponent(row.id)}`}
-					className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+					className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
 					aria-label={`Open ${row.name} term`}
 					title={`Open ${row.name} term`}
 				>
@@ -183,14 +183,14 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 					rowKey={(row) => row.id}
 					pagination={columnsPage.pagination}
 					containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-					emptyMessage="No columns"
+					emptyMessage="No Columns"
 				/>
 			);
 		}
 
 		if (type === 'queries') {
 			if (details.queries.length === 0) {
-				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL queries" />;
+				return <EmptyState variant={EmptyStateVariant.Inline} title="No SQL Queries" />;
 			}
 			return (
 				<ul className="space-y-4">
@@ -238,7 +238,7 @@ export const DataDetailsModal = ({ target, type, onClose }: DataDetailsModalProp
 									? IconName.Terms
 									: IconName.Link
 						}
-						className="h-5 w-5 shrink-0 text-[#76b900]"
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
 					/>
 					<Text as="h2" variant={TextVariant.Heading}>
 						{target?.name} ({title})

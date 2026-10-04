@@ -28,8 +28,8 @@ export const ResultChartCarousel: FC<{ spec: ChartCarouselSpec }> = ({ spec }) =
 					<button
 						type="button"
 						className="result-chart-carousel-button"
-						aria-label="Previous chart"
-						title="Previous chart"
+						aria-label="Previous Chart"
+						title="Previous Chart"
 						onClick={previous}
 					>
 						<ChevronLeft className="h-4 w-4" />
@@ -40,8 +40,8 @@ export const ResultChartCarousel: FC<{ spec: ChartCarouselSpec }> = ({ spec }) =
 					<button
 						type="button"
 						className="result-chart-carousel-button"
-						aria-label="Next chart"
-						title="Next chart"
+						aria-label="Next Chart"
+						title="Next Chart"
 						onClick={next}
 					>
 						<ChevronRight className="h-4 w-4" />

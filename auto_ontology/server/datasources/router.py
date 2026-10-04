@@ -15,11 +15,11 @@ from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.pql_analyses import service as pql_analyses_dal
 from auto_ontology.server.models import NodeUpdateResult
 from auto_ontology.server.responses import (
-    CustomAnalysisListResponse,
+    CustomAnalysisPageResponse,
     CustomAnalysisResponse,
     DatabaseListResponse,
     IdResponse,
-    PqlAnalysisListResponse,
+    PqlAnalysisPageResponse,
     PqlAnalysisResponse,
     SchemasPayload,
     SqlValidationResponse,
@@ -148,11 +148,35 @@ def list_databases() -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/custom-analyses", response_model=CustomAnalysisListResponse)
-def list_custom_analyses() -> dict:
-    """CustomAnalysis nodes joined with their HAS_SQL neighbour."""
-    rows = custom_analyses_dal.list_custom_analyses(zone_ids=None)
-    return _count_payload(rows)
+@router.get("/custom-analyses", response_model=CustomAnalysisPageResponse)
+def list_custom_analyses(
+    query: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the analysis name.",
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """CustomAnalysis nodes joined with their HAS_SQL neighbour.
+
+    *query*, when given, keeps the analyses whose name contains it
+    (case-insensitive).
+
+    Analyses come back ordered by name, and *skip*/*limit* select one page of
+    that order; ``total`` counts every match, so a caller knows when to stop
+    asking. Omitting *limit* returns every matching analysis.
+    """
+    rows = custom_analyses_dal.list_custom_analyses(
+        zone_ids=None, search=query, skip=skip, limit=limit
+    )
+    # The count is a second read, so it is worth skipping for the request that
+    # asked for everything: a whole unpaged list already is its own total.
+    total = (
+        custom_analyses_dal.count_custom_analyses(zone_ids=None, search=query)
+        if skip or limit is not None
+        else len(rows)
+    )
+    return {**_count_payload(rows), "total": total}
 
 
 @router.post("/custom-analyses/validate", response_model=SqlValidationResponse)
@@ -255,10 +279,28 @@ def delete_custom_analysis(analysis_id: str) -> dict:
 # ---------------------------------------------------------------------------
 
 
-@router.get("/pql-analyses", response_model=PqlAnalysisListResponse)
-def list_pql_analyses() -> dict:
-    """All PqlAnalysis nodes ``{id, name, description, pql}``."""
-    return _count_payload(pql_analyses_dal.list_pql_analyses())
+@router.get("/pql-analyses", response_model=PqlAnalysisPageResponse)
+def list_pql_analyses(
+    query: str | None = Query(
+        default=None,
+        description="Case-insensitive substring filter on the analysis name.",
+    ),
+    skip: int = SKIP_QUERY,
+    limit: int | None = LIMIT_QUERY,
+) -> dict:
+    """PqlAnalysis nodes ``{id, name, description, pql}``.
+
+    *query*, ``skip`` and ``limit`` behave as they do on ``/custom-analyses``:
+    a name filter over a page of the name order, with ``total`` counting
+    every match rather than the rows on this page.
+    """
+    rows = pql_analyses_dal.list_pql_analyses(search=query, skip=skip, limit=limit)
+    total = (
+        pql_analyses_dal.count_pql_analyses(search=query)
+        if skip or limit is not None
+        else len(rows)
+    )
+    return {**_count_payload(rows), "total": total}
 
 
 @router.post("/pql-analyses", status_code=201, response_model=PqlAnalysisResponse)

@@ -76,7 +76,7 @@ __all__ = [
     "ConnectionListResponse",
     "ConnectionResponse",
     "ConnectionTestResponse",
-    "CustomAnalysisListResponse",
+    "CustomAnalysisPageResponse",
     "CustomAnalysisResponse",
     "DataExplorationGraphResponse",
     "DataResponse",
@@ -94,7 +94,7 @@ __all__ = [
     "ModelImportResponse",
     "ObjectPageResponse",
     "PagedListResponse",
-    "PqlAnalysisListResponse",
+    "PqlAnalysisPageResponse",
     "PqlAnalysisResponse",
     "RulePageResponse",
     "RuleResponse",
@@ -315,10 +315,10 @@ GlobalSearchCountResponse = DataResponse[dict[str, int]]
 
 # Analyses
 CustomAnalysisResponse = DataResponse[CustomAnalysis]
-CustomAnalysisListResponse = ListResponse[CustomAnalysis]
+CustomAnalysisPageResponse = PagedListResponse[CustomAnalysis]
 SqlValidationResponse = DataResponse[SqlValidationResult]
 PqlAnalysisResponse = DataResponse[PqlAnalysis]
-PqlAnalysisListResponse = ListResponse[PqlAnalysis]
+PqlAnalysisPageResponse = PagedListResponse[PqlAnalysis]
 
 # Terms and attributes
 TermResponse = DataResponse[Term]

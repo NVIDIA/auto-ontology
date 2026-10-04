@@ -159,6 +159,12 @@ class QuestionIntentModel(StrictLLMOutputModel):
             "or null when the question does not select one."
         ),
     )
+    relevant_sql_example_numbers: list[int] = Field(
+        default_factory=list,
+        description=(
+            "One-based numbers of SQL examples structurally relevant to the request."
+        ),
+    )
 
     @model_validator(mode="after")
     def _subtype_matches_type(self) -> QuestionIntentModel:
@@ -205,6 +211,12 @@ class CalculationOnlyQuestionIntentModel(StrictLLMOutputModel):
             "or null when the question does not select one."
         ),
     )
+    relevant_sql_example_numbers: list[int] = Field(
+        default_factory=list,
+        description=(
+            "One-based numbers of SQL examples structurally relevant to the request."
+        ),
+    )
 
 
 def create_question_intent_prompt(
@@ -215,6 +227,7 @@ def create_question_intent_prompt(
     glossary: list[dict[str, str]] | None = None,
     existing_evidence: str = "",
     available_databases: list[str] | None = None,
+    sql_examples: list[dict[str, str]] | None = None,
 ) -> str:
     """Build the classification and evidence-separation prompt."""
     override_instruction = ""
@@ -276,6 +289,34 @@ def create_question_intent_prompt(
         "database merely because its name resembles a business entity.\n"
     )
 
+    sql_example_blocks: list[str] = []
+    for number, example in enumerate(sql_examples or [], 1):
+        example_question = " ".join(str(example.get("question") or "").split())
+        example_evidence = " ".join(str(example.get("evidence") or "").split())
+        example_sql = str(example.get("sql") or "").strip()
+        if not (example_question and example_sql):
+            continue
+        lines = [
+            f"{number}. Question: {example_question}",
+            f"   SQL: {example_sql}",
+        ]
+        if example_evidence:
+            lines.insert(1, f"   Evidence: {example_evidence}")
+        sql_example_blocks.append("\n".join(lines))
+    sql_examples_section = (
+        "\n## Candidate SQL examples\n"
+        + ("\n\n".join(sql_example_blocks) if sql_example_blocks else "(none)")
+        + "\n\n"
+        "Return in relevant_sql_example_numbers only examples whose SQL structure "
+        "fits the executable request: the same requested output shape, aggregation "
+        "or calculation pattern, grouping grain, ranking/limit behavior, and result "
+        "cardinality. Different business subjects may still share a useful pattern. "
+        "Reject examples with a different aggregation, projection shape, grouping, "
+        "ranking structure, or kind of result. Do not retain an example merely "
+        "because its wording or entities are similar. Return an empty list when no "
+        "example is structurally relevant. Use the one-based numbers shown above.\n"
+    )
+
     subtype_section = "\n".join(
         (
             f"- {subtype.value}: {CALCULATION_SUBTYPE_DEFINITIONS[subtype.value]['description']}\n"
@@ -291,16 +332,18 @@ def create_question_intent_prompt(
     )
 
     tasks = (
-        """Perform three tasks in one structured response:
+        """Perform four tasks in one structured response:
 1. Choose exactly one calculation subtype.
 2. Rewrite the executable question without supporting inline instructions.
-3. Return any removed supporting instruction as extracted_evidence."""
+3. Return any removed supporting instruction as extracted_evidence.
+4. Filter the candidate SQL examples by structural relevance."""
         if calculation_only
-        else """Perform four tasks in one structured response:
+        else """Perform five tasks in one structured response:
 1. Classify the question as information, prediction, or calculation.
 2. For calculation only, choose exactly one calculation subtype.
 3. Rewrite the executable question without supporting inline instructions.
-4. Return any removed supporting instruction as extracted_evidence."""
+4. Return any removed supporting instruction as extracted_evidence.
+5. Filter the candidate SQL examples by structural relevance."""
     )
     question_types = (
         ""
@@ -355,7 +398,7 @@ Examples:
   → rewritten_question: unchanged
   → extracted_evidence: ""
 
-{database_section}{glossary_section}{evidence_section}
+{database_section}{glossary_section}{evidence_section}{sql_examples_section}
 Question:
 {question}"""
 
@@ -391,6 +434,7 @@ class QuestionIntentAgent(BaseAgent):
         override = state.get("prediction_override")
         calculation_only = state.get("calculation_only", False)
         existing_evidence = state.get("evidence") or ""
+        sql_examples = list(state.get("sql_examples") or [])
         connectors = list(state.get("connectors") or [])
         available_databases = list(
             dict.fromkeys(
@@ -409,6 +453,7 @@ class QuestionIntentAgent(BaseAgent):
                     glossary=state.get("glossary"),
                     existing_evidence=existing_evidence,
                     available_databases=available_databases,
+                    sql_examples=sql_examples,
                 )
             )
         ]
@@ -439,6 +484,7 @@ class QuestionIntentAgent(BaseAgent):
             rewritten = question
             extracted = ""
             selected_target_db = None
+            filtered_sql_examples = sql_examples
         else:
             question_type = (
                 QuestionType.CALCULATION if calculation_only else intent.question_type
@@ -447,6 +493,14 @@ class QuestionIntentAgent(BaseAgent):
             rewritten = intent.rewritten_question.strip() or question
             extracted = intent.extracted_evidence.strip()
             selected_target_db = intent.target_db
+            selected_example_numbers = set(intent.relevant_sql_example_numbers)
+            filtered_sql_examples = [
+                example
+                for number, example in enumerate(sql_examples, 1)
+                if number in selected_example_numbers
+                and str(example.get("question") or "").strip()
+                and str(example.get("sql") or "").strip()
+            ]
 
             if calculation_only:
                 question_type = QuestionType.CALCULATION
@@ -497,7 +551,10 @@ class QuestionIntentAgent(BaseAgent):
             bool(extracted),
         )
 
-        result: Dict[str, Any] = {"path_state": path_state}
+        result: Dict[str, Any] = {
+            "path_state": path_state,
+            "sql_examples": filtered_sql_examples,
+        }
         if merged_evidence or existing_evidence or extracted:
             result["evidence"] = merged_evidence
         return result

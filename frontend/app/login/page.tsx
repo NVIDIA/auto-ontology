@@ -16,7 +16,7 @@ import { resumeAuthorizeFromApp } from '@/auth/oauth-loopback';
 import { SkeletonVariant } from '@/enums/skeleton';
 
 const inputClass =
-	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
+	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
 
 const LoginLoading = () => (
 	<div
@@ -122,7 +122,7 @@ const LoginForm = () => {
 		return <LoginLoading />;
 	}
 
-	// SSO configured: show a "Sign in with SSO" button (no auto-login) so the
+	// SSO configured: show a "Sign In with SSO" button (no auto-login) so the
 	// user explicitly starts the flow, plus the password backdoor for the local
 	// bootstrap admin.
 	if (ssoEnabled && !passwordMode) {
@@ -136,7 +136,7 @@ const LoginForm = () => {
 						type="button"
 						onClick={() => handleSso(provider.provider_id)}
 					>
-						Sign in with SSO
+						Sign In with SSO
 					</Button>
 				))}
 				<Button
@@ -148,7 +148,7 @@ const LoginForm = () => {
 						setShowPasswordLogin(true);
 					}}
 				>
-					Sign in with password
+					Sign In with Password
 				</Button>
 			</div>
 		);
@@ -158,10 +158,7 @@ const LoginForm = () => {
 	return (
 		<form onSubmit={handleSubmit} className="flex w-full max-w-sm flex-col gap-4">
 			<div className="flex flex-col gap-1.5">
-				<label
-					htmlFor="email"
-					className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
-				>
+				<label htmlFor="email" className="text-xs font-medium text-body dark:text-zinc-400">
 					Email
 				</label>
 				<input
@@ -177,7 +174,7 @@ const LoginForm = () => {
 			<div className="flex flex-col gap-1.5">
 				<label
 					htmlFor="password"
-					className="text-xs font-medium text-zinc-600 dark:text-zinc-400"
+					className="text-xs font-medium text-body dark:text-zinc-400"
 				>
 					Password
 				</label>
@@ -225,7 +222,7 @@ const LoginPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
 					Auto Ontology
 				</span>
 			</div>

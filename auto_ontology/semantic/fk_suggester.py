@@ -13,7 +13,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.semantic.deterministic import fk_source_columns
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -181,7 +181,7 @@ def suggest_potential_foreign_keys(
     )
 
     result = invoke_with_structured_output(
-        get_non_reasoning_llm_client(temperature=0.0),
+        get_llm_client(temperature=0.0),
         [SystemMessage(content=_SYSTEM), HumanMessage(content=prompt)],
         FkAndPkResult,
     )

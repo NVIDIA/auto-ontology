@@ -29,6 +29,7 @@
     "CustomAnalysisNameConflict": "class(Exception)",
     "CustomAnalysisSqlConflict": "class(Exception)",
     "CustomAnalysisSqlError": "class(SqlParseError)",
+    "count_custom_analyses": "(zone_ids: 'list[str] | None' = None, *, search: 'str | None' = None) -> 'int'",
     "custom_analysis_exists": "(database_name: 'str | None' = None) -> 'bool'",
     "delete_custom_analysis_node": "(analysis_id: 'str') -> 'None'",
     "detach_existing_sql_edges": "(analysis_id: 'str') -> 'None'",
@@ -40,7 +41,7 @@
     "find_analysis_by_name": "(name: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "find_analysis_by_sql": "(sql: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "get_custom_analysis_by_id": "(analysis_id: 'str') -> 'str | None'",
-    "list_custom_analyses": "(zone_ids: 'list[str] | None' = None) -> 'list[dict[str, Any]]'"
+    "list_custom_analyses": "(zone_ids: 'list[str] | None' = None, *, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'"
   },
   "datasources": {
     "apply_metadata_batch": "(database_name: 'str', table_rows: 'list[dict]', column_rows: 'list[dict]') -> 'None'",
@@ -103,13 +104,14 @@
   "pql_analyses": {
     "PqlAnalysisNameConflict": "class(Exception)",
     "PqlAnalysisPqlConflict": "class(Exception)",
+    "count_pql_analyses": "(*, search: 'str | None' = None) -> 'int'",
     "delete_pql_analysis_node": "(analysis_id: 'str') -> 'None'",
     "embed_pql_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'VDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_pql_analyses_by_ids": "(analysis_ids: 'list[str]') -> 'dict[str, dict[str, str]]'",
     "find_pql_analysis_by_name": "(name: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "find_pql_analysis_by_pql": "(pql: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "get_pql_analysis_by_id": "(analysis_id: 'str') -> 'str | None'",
-    "list_pql_analyses": "() -> 'list[dict[str, Any]]'",
+    "list_pql_analyses": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "upsert_pql_analysis_node": "(analysis_id: 'str', name: 'str', description: 'str', pql: 'str') -> 'None'"
   },
   "reset": {
@@ -178,6 +180,7 @@
   },
   "sql_fragments": {
     "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
+    "name_contains": "(column: 'ColumnElement', search: 'str') -> 'ColumnElement'",
     "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {

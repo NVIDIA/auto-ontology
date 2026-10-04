@@ -78,6 +78,13 @@ export type TableProps<T> = {
 	className?: string;
 	/** When set, rows become clickable and receive pointer/hover affordances. */
 	onRowClick?: (row: T, index: number) => void;
+	/**
+	 * Set when a cell already links to where the row click goes. The row click
+	 * stays a pointer shortcut and the row keeps its table semantics: claiming
+	 * the keyboard on it would add a tab stop next to the link's, and turn a
+	 * row holding a link and a menu into a button with focusable children.
+	 */
+	rowClickIsPointerShortcut?: boolean;
 	/** Empty-state title shown instead of the table when `rows` is empty. Defaults to `—`. */
 	emptyMessage?: ReactNode;
 };

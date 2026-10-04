@@ -33,7 +33,7 @@ export const ChartToolbar: FC<{
 		<button
 			type="button"
 			className="result-chart-tool"
-			title="Download the chart data as CSV"
+			title="Download the Chart Data as CSV"
 			onClick={() => downloadCsv(spec)}
 		>
 			<Download className="h-3.5 w-3.5" />

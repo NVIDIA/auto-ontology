@@ -48,7 +48,7 @@ class TagTarget(BaseModel):
 
 @router.get("/tags", response_model=TagPageResponse)
 def list_tags(
-    q: str | None = Query(
+    query: str | None = Query(
         default=None,
         description="Case-insensitive substring filter on the tag name.",
     ),
@@ -57,7 +57,7 @@ def list_tags(
 ) -> dict:
     """Return tags, ordered by name.
 
-    *q*, when given, keeps the tags whose name contains it -- a name is the
+    *query*, when given, keeps the tags whose name contains it -- a name is the
     whole of what the settings list shows, so there is nothing else to search
     by.
 
@@ -66,11 +66,11 @@ def list_tags(
     matching tag, which is what the tag picker asks for: it offers the whole
     vocabulary on every detail page and narrows it in the browser.
     """
-    rows = dal.list_tags(search=q, skip=skip, limit=limit)
+    rows = dal.list_tags(search=query, skip=skip, limit=limit)
     # The count is a second read, so it is worth skipping for the request that
     # asked for everything: a whole unpaged list already is its own total. Same
     # bargain the rule list and the targets list below make.
-    total = dal.count_tags(search=q) if skip or limit is not None else len(rows)
+    total = dal.count_tags(search=query) if skip or limit is not None else len(rows)
     return {"data": rows, "count": len(rows), "total": total}
 
 

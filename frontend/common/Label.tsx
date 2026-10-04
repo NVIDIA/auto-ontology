@@ -16,9 +16,9 @@ const LABEL_GREEN =
 const LABEL_GREEN_HOVER =
 	'hover:border-[#76b900]/70 hover:bg-[#76b900]/20 hover:text-[#3d6200] dark:hover:border-[#76b900]/60 dark:hover:bg-[#76b900]/25 dark:hover:text-[#b6e05a]';
 const LABEL_NEUTRAL =
-	'border-zinc-200 bg-zinc-100 text-zinc-700 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
+	'border-zinc-200 bg-zinc-100 text-body dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300';
 const LABEL_MUTED =
-	'border-zinc-200 bg-zinc-100 text-zinc-400 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500';
+	'border-zinc-200 bg-zinc-100 text-secondary dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-500';
 
 function zoneLabelStyle(color: string): CSSProperties {
 	return { backgroundColor: `${color}26`, color, borderColor: `${color}60` };

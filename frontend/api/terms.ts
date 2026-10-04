@@ -80,18 +80,14 @@ type ListResult = {
 type ListResponse = ResponseWithError<ListResult>;
 
 export type TermsListParams = PageParams & {
-	/**
-	 * Case-insensitive substring filter on the term name.
-	 *
-	 * Goes up as `?q=`, which is what the route calls it.
-	 */
+	/** Case-insensitive substring filter on the term name. */
 	query?: string;
 };
 
 export const termsApi = {
 	list: (params?: TermsListParams): Promise<ListResponse> =>
 		requests.get<ListResult>('terms', {
-			...(params?.query ? { q: params.query } : {}),
+			...(params?.query ? { query: params.query } : {}),
 			...pageQuery(params),
 		}),
 	get: (id: string): Promise<SingleResponse> => requests.get<SingleResult>(`terms/${id}`),

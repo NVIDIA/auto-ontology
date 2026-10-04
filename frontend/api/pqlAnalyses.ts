@@ -2,11 +2,18 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { requests } from './requests';
+import { pageQuery, requests } from './requests';
 import type { PqlAnalysis } from '@/types/analysis';
-import type { ResponseWithCount, ResponseWithError } from './types';
+import type { ApiPagedResponse, PageParams, ResponseWithCount, ResponseWithError } from './types';
 
-type ListResponse = ResponseWithError<ResponseWithCount<PqlAnalysis[]>>;
+/** One page of the list: `count` is this page, `total` every match. */
+type ListResult = ResponseWithCount<PqlAnalysis[]> & { total: number };
+type ListResponse = ApiPagedResponse<PqlAnalysis[]>;
+
+export type PqlAnalysesListParams = PageParams & {
+	/** Case-insensitive substring filter on the analysis name. */
+	query?: string;
+};
 
 export type PqlAnalysisCreatePayload = {
 	name: string;
@@ -19,8 +26,11 @@ type UpdateResponse = ResponseWithError<{ data: PqlAnalysis }>;
 type DeleteResponse = ResponseWithError<{ data: { id: string } }>;
 
 export const pqlAnalyses = {
-	list: (): Promise<ListResponse> =>
-		requests.get<ResponseWithCount<PqlAnalysis[]>>('pql-analyses'),
+	list: (params?: PqlAnalysesListParams): Promise<ListResponse> =>
+		requests.get<ListResult>('pql-analyses', {
+			...(params?.query ? { query: params.query } : {}),
+			...pageQuery(params),
+		}),
 	create: (payload: PqlAnalysisCreatePayload): Promise<CreateResponse> =>
 		requests.post<{ data: PqlAnalysis }>('pql-analyses', payload),
 	update: (id: string, payload: PqlAnalysisCreatePayload): Promise<UpdateResponse> =>

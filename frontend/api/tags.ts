@@ -17,11 +17,7 @@ import type {
 
 /** One page of tags, optionally narrowed by a search. */
 export type TagsListParams = PageParams & {
-	/**
-	 * Case-insensitive substring, matched against a tag's name.
-	 *
-	 * Goes up as `?q=`, which is what the route calls it.
-	 */
+	/** Case-insensitive substring, matched against a tag's name. */
 	query?: string;
 	/**
 	 * Resolve `created_by` / `modified_by` to the accounts they name — see
@@ -42,7 +38,7 @@ export const tagsApi = {
 	 */
 	getAll: (params?: TagsListParams): Promise<ApiPagedResponse<Tag[]>> =>
 		requests.get('tags', {
-			...(params?.query ? { q: params.query } : {}),
+			...(params?.query ? { query: params.query } : {}),
 			...(params?.authors ? { [AUTHORS_PARAM]: AUTHORS_PARAM_ON } : {}),
 			...pageQuery(params),
 		}),

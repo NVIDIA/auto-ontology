@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon, IconName } from '@/common/icons';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
+import { TABLE_THEAD_CLASSNAME } from '@/common/Table';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme } from '@/enums/button';
@@ -45,7 +46,7 @@ const PromptEditor = ({
 	return (
 		<div className="space-y-3 p-4">
 			<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
-				<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+				<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-secondary">
 					Prompt
 				</span>
 				<div className="space-y-2">
@@ -54,8 +55,8 @@ const PromptEditor = ({
 						value={value}
 						onChange={(e) => setValue(e.target.value)}
 						rows={3}
-						placeholder="Enter your custom prompt prefix…"
-						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-600"
+						placeholder="Enter Your Custom Prompt Prefix…"
+						className="w-full resize-y rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm leading-relaxed text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-600"
 					/>
 					<div className="flex justify-end gap-2">
 						<Button
@@ -91,8 +92,8 @@ const AcronymRow = ({
 	onDelete: (a: Acronym) => void;
 }) => (
 	<tr className="border-b border-zinc-100 transition-colors last:border-b-0 hover:bg-zinc-50/80 dark:border-zinc-800 dark:hover:bg-zinc-900/50">
-		<td className="px-3 py-2 font-medium text-zinc-800 dark:text-zinc-200">{acronym.name}</td>
-		<td className="px-3 py-2 wrap-anywhere text-zinc-800 dark:text-zinc-200">
+		<td className="px-3 py-2 font-medium text-heading dark:text-zinc-200">{acronym.name}</td>
+		<td className="px-3 py-2 wrap-anywhere text-heading dark:text-zinc-200">
 			{acronym.description}
 		</td>
 		<td className="relative px-2 py-2 text-right">
@@ -236,10 +237,10 @@ const AcronymsSection = () => {
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 			<div className="flex items-center justify-between">
 				<div className="flex items-baseline gap-2">
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 						Glossary
 					</h2>
-					<span className="text-sm text-zinc-500 dark:text-zinc-400">
+					<span className="text-sm text-secondary dark:text-zinc-400">
 						Define definitions for your account, department, or database context
 					</span>
 				</div>
@@ -264,14 +265,10 @@ const AcronymsSection = () => {
 			) : hasAcronyms ? (
 				<div className="mt-4 overflow-visible rounded-md border border-zinc-200/90 dark:border-zinc-700">
 					<table className="w-full min-w-[28rem] text-left text-sm">
-						<thead className="border-b border-zinc-200 bg-zinc-100/95 dark:border-zinc-700 dark:bg-zinc-800/90">
-							<tr>
-								<th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-									Name
-								</th>
-								<th className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-300">
-									Description
-								</th>
+						<thead>
+							<tr className={TABLE_THEAD_CLASSNAME}>
+								<th className="px-3 py-2">Name</th>
+								<th className="px-3 py-2">Description</th>
 								<th className="w-10" />
 							</tr>
 						</thead>
@@ -290,7 +287,7 @@ const AcronymsSection = () => {
 			) : (
 				<EmptyState
 					variant={EmptyStateVariant.Inline}
-					title="No Glossary definitions created yet"
+					title="No Glossary Definitions Created Yet"
 					action={{
 						label: 'Add Definition',
 						icon: IconName.ChatBubble,
@@ -309,7 +306,7 @@ const AcronymsSection = () => {
 				canSubmit={Boolean(canSubmit)}
 			>
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+					<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
 						Name
 					</label>
 					<input
@@ -317,7 +314,7 @@ const AcronymsSection = () => {
 						value={name}
 						onChange={(e) => setName(e.target.value)}
 						placeholder="Name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${nameExists ? 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30' : 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30'}`}
 					/>
 					{nameExists && (
 						<p className="mt-1 text-xs text-red-500 dark:text-red-400">
@@ -325,13 +322,13 @@ const AcronymsSection = () => {
 						</p>
 					)}
 					{checkingName && name.trim() && (
-						<p className="mt-1 text-xs text-zinc-400 dark:text-zinc-500">
+						<p className="mt-1 text-xs text-secondary dark:text-zinc-500">
 							Checking name…
 						</p>
 					)}
 				</div>
 				<div>
-					<label className="mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100">
+					<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
 						Description
 					</label>
 					<textarea
@@ -339,14 +336,14 @@ const AcronymsSection = () => {
 						onChange={(e) => setDescription(e.target.value)}
 						placeholder="Add Short Description"
 						rows={4}
-						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
+						className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 dark:focus:border-[#a3d63a] dark:focus:ring-[#a3d63a]/30"
 					/>
 				</div>
 			</ModalCreateNewItem>
 
 			<ConfirmModal
 				open={confirmDelete !== null}
-				title="Delete acronym"
+				title="Delete Acronym"
 				message="Are you sure you want to delete this acronym? This action cannot be undone."
 				onConfirm={handleDelete}
 				onCancel={() => setConfirmDelete(null)}
@@ -393,10 +390,10 @@ const SettingsSection = ({
 		<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
 			<div className="flex items-center justify-between border-b border-zinc-200/90 px-5 py-3.5 dark:border-zinc-700/90">
 				<div className="flex items-baseline gap-2">
-					<h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+					<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
 						{title}
 					</h2>
-					<span className="text-sm text-zinc-500 dark:text-zinc-400">{subtitle}</span>
+					<span className="text-sm text-secondary dark:text-zinc-400">{subtitle}</span>
 				</div>
 				<Button
 					theme={ButtonTheme.Outline}
@@ -419,10 +416,10 @@ const SettingsSection = ({
 			) : hasPrompts ? (
 				<div className="space-y-3 p-4">
 					<div className="rounded-lg border border-zinc-200/90 bg-white p-4 dark:border-zinc-700/90 dark:bg-zinc-900/60">
-						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-zinc-500">
+						<span className="mb-2 block text-xs font-semibold uppercase tracking-wide text-secondary">
 							Prompt
 						</span>
-						<p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed text-zinc-700 dark:text-zinc-300">
+						<p className="whitespace-pre-wrap wrap-anywhere text-sm leading-relaxed text-body dark:text-zinc-300">
 							{prompts[0].content}
 						</p>
 					</div>
@@ -510,7 +507,7 @@ export default function SemanticInputSettingsPage() {
 			<main className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 				<div className="w-full space-y-5">
 					<SettingsSection
-						title="Custom prompts"
+						title="Custom Prompts"
 						subtitle="Default prompt prefixes automatically applied to all user prompts in this account"
 						prompts={prompts}
 						loading={loading}

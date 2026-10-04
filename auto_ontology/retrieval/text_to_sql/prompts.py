@@ -34,6 +34,13 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
     return (
         _PROJECTION_RULES
         + "- Return exactly the requested output fields and NO others.\n"
+        "- When the question or evidence requests one aggregate over two "
+        "alternative categories joined by 'and' (for example, a count for X and Y), "
+        "return ONE aggregate and combine the category predicates with OR in the "
+        "filter. Do NOT project separate conditional aggregates for X and Y. Apply "
+        "this only to one aggregate over alternatives; if separate results, a "
+        "comparison, a per-category breakdown, or distinct metrics are explicitly "
+        "requested, preserve those separate outputs.\n"
     )
 
 
@@ -47,6 +54,8 @@ main_system_prompt_template = (
 create_sql_user_prompt = (
     "## Task\n"
     "Construct a SQL query that answers the user's question.\n"
+    "When Authoritative Evidence is provided, fulfill every rule in it. Never "
+    "ignore, omit, weaken, or substitute any evidence rule.\n"
     "Dialect: {dialect}.\n\n"
     "## Question\n"
     "{main_question}\n"
@@ -82,13 +91,10 @@ create_sql_user_prompt = (
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
     "**Joins**\n"
-    "- Treat the listed join paths as a menu of valid options, not as instructions "
-    "to use every path. Join a table only when it contributes a value used by the "
-    "question in SELECT, WHERE, GROUP BY, HAVING, or ORDER BY, or when it is a "
-    "necessary intermediate table connecting another required table. If removing "
-    "a join would not change the answer, omit it. Never join a table solely because "
-    "its path is listed. Choose the join type (INNER / LEFT / RIGHT) from the "
-    "question's intent and avoid fan-out from many-to-many joins.\n\n"
+    "- When evidence rules map to columns in different tables, include the joins "
+    "that connect those tables using the listed paths. Choose the join type "
+    "(INNER / LEFT / RIGHT) from the question's intent and avoid fan-out from "
+    "many-to-many joins.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
@@ -107,10 +113,16 @@ create_sql_user_prompt = (
     "{dialect_rules}"
     "{projection_rules}"
     "**Style**\n"
-    "- For counts, preserve the grain of the entity being counted: use "
-    "COUNT(DISTINCT entity_identifier) when joins can produce multiple rows per "
-    "entity, and use COUNT(*) only when each row represents exactly one requested "
-    "entity.\n"
+    "- Preserve the natural row grain. Use SELECT DISTINCT only when the question "
+    "explicitly asks for distinct, different, or unique results; do not add it as "
+    "a precaution or to hide duplication caused by an incorrect join. For counts, "
+    "use COUNT(DISTINCT entity_identifier) when the question asks for unique "
+    "entities or a necessary one-to-many join would otherwise count the same "
+    "requested entity more than once. Use COUNT(*) when each input row represents "
+    "exactly one requested entity.\n"
+    "- When a projected field has `is_nullable: true` in the schema metadata, "
+    "add an `IS NOT NULL` predicate for that field so the result excludes rows "
+    "where the projected value is NULL.\n"
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
@@ -350,10 +362,8 @@ ORDER BY total_sales DESC;"""
   or CASE logic within the SQL.
 - SEMANTIC HINT (if present) shows a likely starting table and suggested join
   paths derived from the semantic model. Treat it as a strong hint: prefer it
-  when it fits, but if AVAILABLE TABLES provide a simpler or more direct answer,
-  use them instead. Never force the semantic hint if it doesn't match the question.
-- SUGGESTED JOIN PATHS show column-level join conditions. Use only the hops you
-  actually need:
+  when it fits. Never force the semantic hint if it doesn't match the question.
+- SUGGESTED JOIN PATHS show verified column-level join conditions:
 {join_template}
   Follow hops in order when the path spans more than one table.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
@@ -362,9 +372,6 @@ ORDER BY total_sales DESC;"""
 - SQL ATTRIBUTES: derived metrics or formulas with pre-defined SQL expressions.
   If one matches the question's intent, incorporate its expression or SQL pattern
   into your query. Treat them like reusable building blocks for calculations.
-- Prefer the fewest joins that still correctly answer the question. If all
-  required fields exist in a single table, use only that table. If a shorter
-  join path covers the question equally well, choose it over a longer chain.
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
@@ -400,21 +407,39 @@ total sales.
 """
 
 
-def format_authoritative_evidence(evidence: str) -> str:
+def format_authoritative_evidence(
+    evidence: str, *, evidence_first_sql: bool = False
+) -> str:
     """Wrap evidence verbatim with strict instructions for SQL use and validation."""
     if not evidence:
         return ""
 
+    construction_order = (
+        "- Start SQL construction from the evidence, before adding anything else "
+        "from the question. Decompose it into individual rules. For every rule, "
+        "map each business entity or concept it names to the physical table and "
+        "column whose name and description in the Available Schema best match that "
+        "meaning. Build the evidence-required projections, formulas, filters, and "
+        "joins as the query's backbone; only then add the remaining requirements "
+        "from the question. Do not skip an evidence rule or map by name alone when "
+        "a column description resolves the meaning. Never invent a mapping that "
+        "the supplied schema does not support; state that limitation in thought.\n"
+        if evidence_first_sql
+        else ""
+    )
     return (
         "## Authoritative Evidence\n"
         "This evidence is critical. The generated SQL MUST follow every instruction "
         "in it exactly, even when another approach appears equivalent.\n"
+        f"{construction_order}"
         "- Whenever the evidence explains a value or where that value is stored, "
         "include the value in the SQL using the stated column, table, filter, and "
         "operator. Do not substitute another value or location.\n"
         "- Whenever the evidence explains a formula, calculate that exact formula "
         "from the stated available tables and columns. Do not replace it with a "
-        "shortcut or precomputed field.\n\n"
+        "shortcut or precomputed field. Preserve the evidence's stated order of "
+        "all formula terms, operands, predicates, and conditions exactly; never "
+        "reorder them, even when the reordered expression appears equivalent.\n\n"
         "Evidence (verbatim):\n"
         f"{evidence}"
     )
@@ -845,6 +870,7 @@ def create_intent_validation_prompt(
     joins_validated_elsewhere: bool = False,
     has_evidence: bool = False,
     used_schema_context: str = "",
+    shorten_answer: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
         original_question, sanitized_question, processing_question
@@ -887,6 +913,18 @@ def create_intent_validation_prompt(
         if has_evidence
         else ""
     )
+    projection_criterion = (
+        "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
+        "Compare the outermost SELECT output with the exact output fields requested "
+        "by the question and Authoritative Evidence. The SQL must return every "
+        "requested field, exactly once, in the requested shape, and NO additional "
+        "fields. Aggregates and transformed values count as output fields. Never "
+        "accept extra context as helpful, and never remove a requested field. Record "
+        "every extra, missing, duplicated, reordered, or reshaped field in "
+        "projection_issues and mark the SQL invalid."
+        if shorten_answer
+        else ""
+    )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
         "(catalog metadata only for tables and columns referenced by the query):\n"
@@ -906,6 +944,7 @@ Check for CRITICAL issues ONLY (be lenient):
 {join_criterion}
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 {evidence_criterion}
+{projection_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

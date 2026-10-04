@@ -33,7 +33,7 @@ from auto_ontology.dal.terms import get_term_record_for_table
 from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from auto_ontology.server.sql_attributes.service import create_sql_attribute
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 from auto_ontology.utils.rerank import get_rerank_kwargs
@@ -177,7 +177,7 @@ def _generate_bridge_sql_attribute(
         else "Join the bridge table to each related entity table using the FK pairs."
     )
 
-    llm = get_non_reasoning_llm_client(temperature=0.0)
+    llm = get_llm_client(temperature=0.0)
     messages = [
         SystemMessage(
             content=(

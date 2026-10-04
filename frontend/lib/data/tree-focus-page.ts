@@ -322,7 +322,7 @@ export function buildTreeFocusPageFormat(
 					items: [
 						{ label: 'Column', value: column.column_name },
 						{
-							label: 'Data type',
+							label: 'Data Type',
 							value: column.data_type.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },

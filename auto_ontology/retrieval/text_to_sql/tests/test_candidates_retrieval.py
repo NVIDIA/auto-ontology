@@ -41,19 +41,20 @@ def _state(
     entities: list[str],
     *,
     target_db: str | None = None,
+    evidence: str | None = None,
 ) -> AgentState:
     path_state: dict[str, Any] = {"entities": entities}
     if target_db is not None:
         path_state["target_db"] = target_db
-    return cast(
-        AgentState,
-        {
-            "initial_question": "question",
-            "llm": object(),
-            "path_state": path_state,
-            "semantic_retriever": object(),
-        },
-    )
+    state = {
+        "initial_question": "question",
+        "llm": object(),
+        "path_state": path_state,
+        "semantic_retriever": object(),
+    }
+    if evidence is not None:
+        state["evidence"] = evidence
+    return cast(AgentState, state)
 
 
 def test_selects_database_by_entity_coverage_before_total_hits() -> None:
@@ -308,3 +309,44 @@ def test_explicit_target_db_preserves_existing_search_behavior(
     assert {database_name for _, _, database_name in calls} == {"db-a"}
     assert result["path_state"]["target_db"] == "db-a"
     assert len(result["path_state"]["retrieved_column_attributes"]) == 2
+
+
+def test_full_evidence_adds_column_attribute_vector_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = "Eligible rate equals eligible count divided by total enrollment."
+    calls: list[tuple[str, str, int, str | None]] = []
+
+    def fake_search(
+        _retriever: object,
+        query: str,
+        label: str,
+        k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        calls.append((query, label, k, database_name))
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            score = 0.1 if query == evidence else 0.2
+            return [_hit("eligible-rate", "db-a", score)]
+        return []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (custom, sql),
+    )
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda *_: False
+    )
+
+    result = CandidateRetrievalAgent().execute(
+        _state(["eligible rate"], target_db="db-a", evidence=evidence)
+    )
+
+    assert (evidence, LABEL_COLUMN_ATTRIBUTE, 3, "db-a") in calls
+    hits = result["path_state"]["retrieved_column_attributes"]
+    assert len(hits) == 1
+    assert hits[0]["id"] == "eligible-rate"
+    assert hits[0]["query_evidence"] == evidence
+    assert hits[0]["query_entities"] == ["eligible rate"]

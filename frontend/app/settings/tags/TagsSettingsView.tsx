@@ -5,7 +5,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -19,12 +19,15 @@ import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { SearchInput } from '@/common/SearchInput';
 import { SkeletonRows } from '@/common/Skeleton';
+import { Table } from '@/common/Table';
+import { Text } from '@/common/Text';
 import { AUTO_GENERATED_LABEL, MAX_TAG_NAME_LENGTH } from '@/constants/tags';
 import { ButtonTheme, Size } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
 import { invalidateTagVocabulary } from '@/lib/queries/tags';
+import type { TableColumn } from '@/types/table';
 import type { Tag, TagAuthor } from '@/types/tags';
 
 import { TagDetailView } from './TagDetailView';
@@ -51,15 +54,11 @@ const modifiedLabel = (tag: Tag): string =>
 	tag.modified === tag.created ? 'Never' : formatDate(tag.modified);
 
 /**
- * The footprint of an author column, in one place because three things have to
- * agree on it: the header, the cell, and the blank one a never-edited tag gets.
- *
- * `pl-6` is what separates an author column from the date column before it. The
- * dates are right-aligned, so their text ends at the column edge and the row's
- * `gap-3` alone leaves it almost touching the next avatar — the padding turns
- * the four columns into the two pairs they read as.
+ * Every cell keeps its content on a 20px line — the height of an author avatar
+ * — because the table aligns cells to their top edge. Without it the dates
+ * would sit a few pixels above the avatar beside them.
  */
-const AUTHOR_COLUMN = 'w-40 shrink-0 pl-6';
+const CELL_LINE = 'text-xs leading-5 text-secondary dark:text-zinc-400';
 
 /**
  * Who an author column names, with the initial the rest of the app draws a
@@ -76,21 +75,20 @@ const TagAuthorCell = ({ author }: { author: TagAuthor | null | undefined }) => 
 	const label = name || AUTO_GENERATED_LABEL;
 
 	return (
-		<span className={`flex min-w-0 items-center gap-2 ${AUTHOR_COLUMN}`}>
+		<span className="flex min-w-0 items-center gap-2">
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
-			<span className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
-				{label}
-			</span>
+			<span className={`min-w-0 truncate ${CELL_LINE}`}>{label}</span>
 		</span>
 	);
 };
 
 const TagsList = () => {
+	const router = useRouter();
 	// This page is the only one that writes the vocabulary, and every picker in
 	// the app reads it. Each write below tells the cache so, which is what
 	// keeps a tag renamed here from lingering under its old name in a picker
@@ -236,6 +234,109 @@ const TagsList = () => {
 	// fraction of the vocabulary. Same arrangement as the Rules list.
 	const searching = debouncedQuery !== '';
 
+	const columns: TableColumn<Tag>[] = [
+		{
+			key: 'name',
+			header: 'Name',
+			// A real link rather than the row's click handler alone: it keeps
+			// middle-click and "open in new tab" on the tag's name. The row stays
+			// clickable too, so the whole width still opens the tag.
+			cell: (tag) => (
+				<Link
+					href={tagPath(tag.id)}
+					prefetch={false}
+					onClick={(e) => e.stopPropagation()}
+					className="flex min-w-0 items-center gap-3"
+				>
+					<Icon
+						name={IconName.Tag}
+						className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-500"
+					/>
+					<Text text={tag.name} />
+				</Link>
+			),
+			className: 'text-heading dark:text-zinc-200',
+		},
+		{
+			key: 'created_by',
+			header: 'Created By',
+			width: 'w-40',
+			cell: (tag) => <TagAuthorCell author={tag.created_by_user} />,
+		},
+		{
+			key: 'created',
+			header: 'Created Date',
+			width: 'w-32',
+			nowrap: true,
+			headerClassName: 'text-right',
+			className: `text-right ${CELL_LINE}`,
+			cell: (tag) => formatDate(tag.created),
+		},
+		{
+			key: 'modified_by',
+			header: 'Modified By',
+			width: 'w-40',
+			// Blank rather than an author for a tag nothing has edited: there is no
+			// editor at all, which is the same thing the date column says as "Never".
+			cell: (tag) =>
+				tag.modified === tag.created ? null : (
+					<TagAuthorCell author={tag.modified_by_user} />
+				),
+		},
+		{
+			key: 'modified',
+			header: 'Modified Date',
+			width: 'w-32',
+			nowrap: true,
+			headerClassName: 'text-right',
+			className: `text-right ${CELL_LINE}`,
+			cell: (tag) => modifiedLabel(tag),
+		},
+		{
+			key: 'actions',
+			header: 'Actions',
+			width: 'w-20',
+			nowrap: true,
+			headerClassName: 'text-right',
+			cell: (tag) => (
+				// Stop propagation so opening the menu never also opens the tag.
+				<span
+					role="presentation"
+					onClick={(e) => e.stopPropagation()}
+					className="flex justify-end"
+				>
+					<PopoverMenu
+						items={[
+							{
+								label: 'Rename Tag',
+								icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+								onClick: () => openRenameModal(tag),
+							},
+							{
+								label: 'Delete Tag',
+								icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+								onClick: () => handleRequestDelete(tag),
+								danger: true,
+							},
+						]}
+						trigger={({ toggle }) => (
+							<Button
+								theme={ButtonTheme.IconNeutral}
+								size={Size.SMALL}
+								iconOnly
+								type="button"
+								onClick={toggle}
+								aria-label={`Actions for ${tag.name}`}
+							>
+								<Icon name={IconName.DotsVertical} className="h-4 w-4" />
+							</Button>
+						)}
+					/>
+				</span>
+			),
+		},
+	];
+
 	return (
 		<>
 			<InfiniteScroll
@@ -249,7 +350,7 @@ const TagsList = () => {
 			>
 				<div className="w-full space-y-5">
 					<div className="flex items-center gap-3">
-						<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">
+						<h1 className="text-base font-semibold text-heading dark:text-zinc-100">
 							Tags
 						</h1>
 						{tags.length > 0 || searching ? (
@@ -279,7 +380,7 @@ const TagsList = () => {
 						<SearchInput
 							value={query}
 							onChange={setQuery}
-							placeholder="Search tags…"
+							placeholder="Search Tags…"
 							aria-label="Search tags"
 							className="w-full"
 						/>
@@ -296,104 +397,15 @@ const TagsList = () => {
 							<SkeletonRows rows={4} />
 						</div>
 					) : tags.length > 0 ? (
-						/* No `overflow-hidden` here, deliberately: it would clip the
-						   absolutely positioned action menu of every row. */
-						<div className="rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]">
-							<div className="flex items-center gap-3 border-b border-zinc-200/90 px-4 py-2 text-xs font-semibold tracking-wide text-zinc-500 uppercase dark:border-zinc-700/90 dark:text-zinc-400">
-								<span className="min-w-0 flex-1">Name</span>
-								<span className={AUTHOR_COLUMN}>Created By</span>
-								<span className="w-28 shrink-0 text-right">Created Date</span>
-								<span className={AUTHOR_COLUMN}>Modified By</span>
-								<span className="w-28 shrink-0 text-right">Modified Date</span>
-								{/* The action button's exact footprint (`Size.SMALL`,
-							    `iconOnly`), so the date columns line up with these
-							    headers and nothing pads the right edge. */}
-								<span className="w-[26px] shrink-0" aria-hidden="true" />
-							</div>
-							<ul className="divide-y divide-zinc-200/90 dark:divide-zinc-700/90">
-								{tags.map((tag) => (
-									<li
-										key={tag.id}
-										className="flex items-center gap-3 pr-4 transition-colors last:rounded-b-lg hover:bg-zinc-50 dark:hover:bg-zinc-800/40"
-									>
-										{/* A real link rather than a row-wide click handler: it
-									    keeps keyboard and middle-click behaviour for free, and
-									    leaving the action menu outside it is what stops the
-									    menu button from also opening the tag. */}
-										<Link
-											href={tagPath(tag.id)}
-											prefetch={false}
-											className="flex min-w-0 flex-1 items-center gap-3 py-3 pl-4"
-										>
-											<Icon
-												name={IconName.Tag}
-												className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500"
-											/>
-											<span className="min-w-0 flex-1 truncate text-sm text-zinc-800 dark:text-zinc-200">
-												{tag.name}
-											</span>
-											<TagAuthorCell author={tag.created_by_user} />
-											<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
-												{formatDate(tag.created)}
-											</span>
-											{/* Blank rather than an author for a tag nothing has
-										    edited: there is no editor at all, which is the same
-										    thing the date column says as "Never". */}
-											{tag.modified === tag.created ? (
-												<span className={AUTHOR_COLUMN} />
-											) : (
-												<TagAuthorCell author={tag.modified_by_user} />
-											)}
-											<span className="w-28 shrink-0 text-right text-xs text-zinc-500 dark:text-zinc-400">
-												{modifiedLabel(tag)}
-											</span>
-										</Link>
-										<div className="relative w-[26px] shrink-0">
-											<PopoverMenu
-												items={[
-													{
-														label: 'Rename Tag',
-														icon: (
-															<Icon
-																name={IconName.Pencil}
-																className="h-3.5 w-3.5"
-															/>
-														),
-														onClick: () => openRenameModal(tag),
-													},
-													{
-														label: 'Delete Tag',
-														icon: (
-															<Icon
-																name={IconName.Trash}
-																className="h-3.5 w-3.5"
-															/>
-														),
-														onClick: () => handleRequestDelete(tag),
-														danger: true,
-													},
-												]}
-												trigger={({ toggle }) => (
-													<Button
-														theme={ButtonTheme.IconNeutral}
-														size={Size.SMALL}
-														iconOnly
-														type="button"
-														onClick={toggle}
-														aria-label={`Actions for ${tag.name}`}
-													>
-														<Icon
-															name={IconName.DotsVertical}
-															className="h-4 w-4"
-														/>
-													</Button>
-												)}
-											/>
-										</div>
-									</li>
-								))}
-							</ul>
-						</div>
+						<Table
+							columns={columns}
+							rows={tags}
+							rowKey={(tag) => tag.id}
+							onRowClick={(tag) => router.push(tagPath(tag.id))}
+							rowClickIsPointerShortcut
+							containerClassName="overflow-hidden rounded-lg border border-zinc-200/90 bg-white/90 shadow-sm ring-1 ring-zinc-950/[0.04] dark:border-zinc-700/90 dark:bg-zinc-950/50 dark:ring-white/[0.06]"
+							bodyClassName="divide-y divide-zinc-200/90 dark:divide-zinc-700/90"
+						/>
 					) : null}
 
 					{/* A search that matches nothing is not a deployment with no
@@ -403,7 +415,7 @@ const TagsList = () => {
 						<EmptyState
 							variant={EmptyStateVariant.Inline}
 							icon={IconName.Tag}
-							title={searching ? 'No tags match your search' : 'No tags yet'}
+							title={searching ? 'No Tags Match Your Search' : 'No Tags Yet'}
 							description={
 								searching
 									? undefined
@@ -436,14 +448,14 @@ const TagsList = () => {
 				<div>
 					<label
 						htmlFor="tag-name"
-						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-zinc-900 dark:text-zinc-100"
+						className="mb-1.5 flex items-center gap-2 text-sm font-semibold text-heading dark:text-zinc-100"
 					>
 						<Icon
 							name={IconName.Tag}
-							className="h-4 w-4 text-zinc-500 dark:text-zinc-400"
+							className="h-4 w-4 text-secondary dark:text-zinc-400"
 						/>
 						Tag Name
-						<span className="font-normal text-zinc-400 dark:text-zinc-500">
+						<span className="font-normal text-secondary dark:text-zinc-500">
 							(Max. {MAX_TAG_NAME_LENGTH})
 						</span>
 					</label>
@@ -459,8 +471,8 @@ const TagsList = () => {
 							// makes it stale rather than helpful.
 							setSubmitError(null);
 						}}
-						placeholder="Type tag name"
-						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
+						placeholder="Type Tag Name"
+						className={`w-full rounded-lg border bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500 ${submitError == null ? 'border-zinc-300 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600' : 'border-red-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/30 dark:border-red-500 dark:focus:border-red-400 dark:focus:ring-red-400/30'}`}
 					/>
 				</div>
 
@@ -477,7 +489,7 @@ const TagsList = () => {
 
 			<ConfirmModal
 				open={confirmDeleteTag !== null}
-				title="Delete tag"
+				title="Delete Tag"
 				message={
 					confirmDeleteTag == null
 						? ''
@@ -496,7 +508,7 @@ const TagsList = () => {
 export const TagsSettingsSkeleton = () => (
 	<main className={TAGS_PANEL_CLASSNAME}>
 		<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
-			<h1 className="text-base font-semibold text-zinc-900 dark:text-zinc-100">Tags</h1>
+			<h1 className="text-base font-semibold text-heading dark:text-zinc-100">Tags</h1>
 			<div className="py-2" role="status" aria-label="Loading tags">
 				<SkeletonRows rows={4} />
 			</div>

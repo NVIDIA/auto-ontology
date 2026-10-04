@@ -34,7 +34,7 @@
 		"dotenv": "^17.4.2",
 		"graphology": "^0.26.0",
 		"jose": "^6.1.0",
-		"next": "16.3.5",
+		"next": "16.3.7",
 		"pg": "^8.20.0",
 		"react": "19.2.4",
 		"react-dom": "19.2.4",
@@ -50,7 +50,7 @@
 		"@types/react": "^19",
 		"@types/react-dom": "^19",
 		"eslint": "^9",
-		"eslint-config-next": "16.3.5",
+		"eslint-config-next": "16.3.7",
 		"prettier": "^3.8.1",
 		"prisma": "^7.7.0",
 		"tailwindcss": "^4",
@@ -62,7 +62,8 @@
 	},
 	"pnpm": {
 		"overrides": {
-			"deepmerge-ts": "^7.1.6"
+			"deepmerge-ts": "^8.0.2",
+			"dompurify": "^3.4.16"
 		}
 	}
 }

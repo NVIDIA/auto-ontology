@@ -28,7 +28,7 @@ export const SearchInput = ({
 		className={`flex items-center gap-2 rounded-lg border border-zinc-300 bg-white px-3 py-2 transition-colors focus-within:border-[#76b900] focus-within:ring-2 focus-within:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 ${className}`}
 	>
 		<svg
-			className="h-4 w-4 shrink-0 text-zinc-400"
+			className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-400"
 			viewBox="0 0 20 20"
 			fill="currentColor"
 			aria-hidden
@@ -46,7 +46,7 @@ export const SearchInput = ({
 			placeholder={placeholder}
 			autoFocus={autoFocus}
 			aria-label={ariaLabel ?? placeholder}
-			className="flex-1 bg-transparent text-sm text-zinc-700 outline-none placeholder:text-zinc-400 dark:text-zinc-300 dark:placeholder:text-zinc-500"
+			className="flex-1 bg-transparent text-sm text-body outline-none placeholder:text-secondary dark:text-zinc-300 dark:placeholder:text-zinc-500"
 		/>
 		{value !== '' && (
 			<Button

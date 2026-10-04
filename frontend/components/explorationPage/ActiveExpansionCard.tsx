@@ -122,14 +122,14 @@ const PathChain = ({ hops }: { hops: ExplorationLinkPathHopDto[] }) => {
 					<div className="flex items-center gap-2">
 						<Icon
 							name={PATH_NODE_ICON[node.type] ?? IconName.Connection}
-							className={`h-4 w-4 shrink-0 ${PATH_NODE_ICON_COLOR[node.type] ?? 'text-zinc-400'}`}
+							className={`h-4 w-4 shrink-0 ${PATH_NODE_ICON_COLOR[node.type] ?? 'text-secondary'}`}
 						/>
 						<Text as="p" text={node.name ?? node.id} variant={TextVariant.Label} />
 					</div>
 					{index < hops.length && (
 						<div className="ml-2 flex items-center gap-1.5 py-1 pl-[7px]">
 							<div className="h-4 w-px bg-zinc-300 dark:bg-zinc-600" />
-							<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400">
+							<span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-secondary dark:bg-zinc-800 dark:text-zinc-400">
 								{hops[index].relationship}
 							</span>
 						</div>
@@ -159,7 +159,7 @@ const ConnectionDetails = ({ hops }: { hops: ExplorationLinkPathHopDto[] | null 
 			<EmptyState
 				variant={EmptyStateVariant.Inline}
 				icon={IconName.Link}
-				title="No connection found"
+				title="No Connection Found"
 				description="These terms no longer share a common table."
 			/>
 		);
@@ -201,7 +201,7 @@ type ActiveExpansionCardProps = {
 export const ActiveExpansionCard = ({ node, onClose, onView }: ActiveExpansionCardProps) => (
 	<section className="absolute right-4 top-20 bottom-28 z-20 flex w-[380px] flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-900">
 		<header className="flex shrink-0 items-center justify-between border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-			<p className="text-xs font-semibold text-zinc-600 dark:text-zinc-300">
+			<p className="text-xs font-semibold text-body dark:text-zinc-300">
 				Showing info on this {TYPE_LABEL[node.kind]}
 			</p>
 			<Button
@@ -216,7 +216,7 @@ export const ActiveExpansionCard = ({ node, onClose, onView }: ActiveExpansionCa
 			</Button>
 		</header>
 		<div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
-			<div className="flex items-start gap-3">
+			<div className="flex items-start gap-2">
 				<Icon
 					name={TYPE_ICON[node.kind]}
 					className={`mt-0.5 h-5 w-5 shrink-0 ${TYPE_ICON_COLOR[node.kind]}`}

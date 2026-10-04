@@ -202,9 +202,9 @@ def _matching(search: str | None) -> list[ColumnElement[bool]]:
     matched something invisible would hide rows for a reason nothing on screen
     explains.
 
-    Case-insensitive substring, like the term list's ``q``. The tag half is an
-    ``EXISTS`` rather than a join, so a rule applying three matching tags is one
-    row rather than three.
+    Case-insensitive substring, like the term list's ``query``. The tag half is
+    an ``EXISTS`` rather than a join, so a rule applying three matching tags is
+    one row rather than three.
 
     One function so :func:`list_rules` and :func:`count_rules` cannot come to
     disagree about what matches -- a page and a total taken from different

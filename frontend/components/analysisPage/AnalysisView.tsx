@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { Button, SelectButton } from '@/common/Button';
@@ -12,7 +12,9 @@ import { EmptyState } from '@/common/EmptyState';
 import { Size, ButtonTheme, SelectButtonTheme } from '@/enums/button';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { Icon, IconName } from '@/common/icons';
+import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { PopoverMenu } from '@/common/PopoverMenu';
+import { SearchInput } from '@/common/SearchInput';
 import { SkeletonCard } from '@/common/Skeleton';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
 import { SqlBlock, SqlEditor } from '@/common/SqlBlock';
@@ -20,6 +22,8 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { analyses } from '@/api/analyses';
 import { pqlAnalyses } from '@/api/pqlAnalyses';
+import { useDebouncedValue } from '@/hooks/useDebouncedValue';
+import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 
 export type AnalysisViewProps = Record<string, never>;
 
@@ -29,9 +33,9 @@ type AnalysisMode = 'sql' | 'pql';
 type AnalysisItem = { id: string; name: string; description: string; code: string };
 
 const FIELD_INPUT_CLASSNAME =
-	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 outline-none transition-colors placeholder:text-zinc-400 focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
+	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';
 
-const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-zinc-900 dark:text-zinc-100';
+const FIELD_LABEL_CLASSNAME = 'mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100';
 
 const MODE_LABEL: Record<AnalysisMode, string> = { sql: 'SQL', pql: 'PQL' };
 const SKELETON_CARD_HEIGHT = 184;
@@ -63,9 +67,9 @@ export const AnalysisView = () => {
 	}
 	const mode: AnalysisMode = tabOverride ?? urlMode;
 	const setMode = (next: AnalysisMode) => setTabOverride(next);
-	const [items, setItems] = useState<AnalysisItem[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState<string | null>(null);
+	const [searchQuery, setSearchQuery] = useState('');
+	const debouncedSearchQuery = useDebouncedValue(searchQuery.trim(), 1000);
+	const [hasLoaded, setHasLoaded] = useState(false);
 	const [loadingSkeletonCount, setLoadingSkeletonCount] = useState(3);
 
 	const [modalOpen, setModalOpen] = useState(false);
@@ -97,53 +101,66 @@ export const AnalysisView = () => {
 		return () => window.removeEventListener('resize', updateLoadingSkeletonCount);
 	}, []);
 
-	useEffect(() => {
-		let cancelled = false;
-
-		(async () => {
-			setLoading(true);
+	const fetchAnalysesPage = useCallback(
+		async (skip: number, limit: number) => {
+			const params = {
+				...(debouncedSearchQuery ? { query: debouncedSearchQuery } : {}),
+				skip,
+				limit,
+			};
 			if (isPql) {
-				const res = await pqlAnalyses.list();
-				if (cancelled) return;
-				if (res.error) {
-					setError(res.message ?? 'Failed to load PQL analyses');
-					setItems([]);
-				} else {
-					setError(null);
-					setItems(
-						(res.data ?? []).map((a) => ({
-							id: a.id,
-							name: a.name,
-							description: a.description,
-							code: a.pql,
-						})),
-					);
-				}
-			} else {
-				const res = await analyses.list();
-				if (cancelled) return;
-				if (res.error) {
-					setError(res.message ?? 'Failed to load custom analyses');
-					setItems([]);
-				} else {
-					setError(null);
-					setItems(
-						(res.data ?? []).map((a) => ({
-							id: a.id,
-							name: a.name,
-							description: a.description,
-							code: a.sql,
-						})),
-					);
-				}
+				const res = await pqlAnalyses.list(params);
+				if (res.error) return { error: res.message ?? 'Failed to load PQL analyses' };
+				setHasLoaded(true);
+				return {
+					items: (res.data ?? []).map((a) => ({
+						id: a.id,
+						name: a.name,
+						description: a.description,
+						code: a.pql,
+					})),
+					total: res.total ?? 0,
+				};
 			}
-			setLoading(false);
-		})();
+			const res = await analyses.list(params);
+			if (res.error) return { error: res.message ?? 'Failed to load custom analyses' };
+			setHasLoaded(true);
+			return {
+				items: (res.data ?? []).map((a) => ({
+					id: a.id,
+					name: a.name,
+					description: a.description,
+					code: a.sql,
+				})),
+				total: res.total ?? 0,
+			};
+		},
+		[debouncedSearchQuery, isPql],
+	);
 
-		return () => {
-			cancelled = true;
-		};
-	}, [mode, isPql]);
+	const {
+		items,
+		setItems,
+		isLoading: loading,
+		isLoadingMore,
+		error,
+		hasMore,
+		loadMore,
+		reload,
+	} = useInfiniteList(fetchAnalysesPage, {
+		pageSize: DEFAULT_PAGE_SIZE,
+		itemKey: (item) => item.id,
+	});
+
+	useEffect(() => {
+		// `error` stops this as it stops `InfiniteScroll`'s sentinel: a failed
+		// page leaves `hasMore` true and clears `isLoadingMore`, and `loadMore`
+		// clears the error before retrying, so without the guard a server that
+		// keeps failing is retried in a loop. The Retry control owns that.
+		if (focusId == null || loading || isLoadingMore || !hasMore || error != null) return;
+		if (items.some((item) => item.id === focusId)) return;
+		loadMore();
+	}, [focusId, items, loading, isLoadingMore, hasMore, error, loadMore]);
 
 	useEffect(() => {
 		if (focusId == null || loading) return;
@@ -210,7 +227,10 @@ export const AnalysisView = () => {
 			setDeleteError(res.message ?? `Failed to delete ${MODE_LABEL[mode]} analysis`);
 			return;
 		}
-		setItems((prev) => prev.filter((a) => a.id !== deletingItem.id));
+		// Not a client-side filter: the next page is read from the count of
+		// rows fetched so far, and the delete shifted every later row up one,
+		// so one analysis would never be read at all.
+		reload();
 		setDeletingItem(null);
 	};
 
@@ -305,22 +325,25 @@ export const AnalysisView = () => {
 		}
 
 		const saved = savedItem;
-		setItems((prev) => {
-			if (editingId !== null) {
-				return prev.map((a) => (a.id === editingId ? saved : a));
-			}
-			const without = prev.filter((a) => a.id !== saved.id);
-			return [saved, ...without];
-		});
+		// A create and a rename both move rows in the server's name order,
+		// which leaves the next page read from a window that no longer lines
+		// up with what is held. An edit that keeps the name cannot reorder
+		// anything, so it patches the card in place.
+		const renamed = items.some((a) => a.id === editingId && a.name !== saved.name);
+		if (editingId === null || renamed) {
+			reload();
+		} else {
+			setItems((prev) => prev.map((a) => (a.id === editingId ? saved : a)));
+		}
 		setModalOpen(false);
 	};
 
 	return (
 		<div className="flex h-full w-full flex-col bg-white dark:bg-zinc-950">
 			<header className="flex items-center gap-3 border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-				<Icon name={IconName.ChartBar} className="h-5 w-5 text-[#76b900]" />
-				<h1 className="text-lg font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-					{isPql ? 'PQL analyses' : 'Custom analyses'}
+				<Icon name={IconName.ChartBar} className="h-5 w-5 text-body dark:text-zinc-300" />
+				<h1 className="text-lg font-semibold tracking-tight text-heading dark:text-zinc-100">
+					{isPql ? 'PQL Analyses' : 'Custom Analyses'}
 				</h1>
 				<div className="ml-4 flex items-center gap-1 rounded-lg bg-zinc-100 p-1 dark:bg-zinc-800">
 					<SelectButton
@@ -347,12 +370,28 @@ export const AnalysisView = () => {
 						shadow
 					>
 						<Icon name={IconName.Plus} className="h-4 w-4" />
-						Create new analysis
+						Create New {MODE_LABEL[mode]} Analysis
 					</Button>
 				</div>
 			</header>
 
-			<div className="flex-1 overflow-y-auto px-6 py-6">
+			<InfiniteScroll
+				className="flex-1 px-6 py-6"
+				onLoadMore={loadMore}
+				isLoading={isLoadingMore}
+				hasMore={hasMore}
+				error={items.length > 0 ? error : null}
+			>
+				{hasLoaded && (
+					<SearchInput
+						value={searchQuery}
+						onChange={setSearchQuery}
+						placeholder={`Search ${MODE_LABEL[mode]} Analyses…`}
+						aria-label={`Search ${MODE_LABEL[mode]} analyses`}
+						className="mb-6 w-full"
+					/>
+				)}
+
 				{loading && (
 					<div
 						className="flex min-h-[calc(100dvh-7rem)] flex-col gap-4"
@@ -365,7 +404,7 @@ export const AnalysisView = () => {
 					</div>
 				)}
 
-				{!loading && error != null && (
+				{!loading && error != null && items.length === 0 && (
 					<div className="mx-auto max-w-lg rounded-2xl border border-red-200/80 bg-white/90 px-8 py-10 text-center shadow-xl shadow-red-100/50 dark:border-red-900/50 dark:bg-zinc-950/80 dark:shadow-none">
 						<h2 className="text-lg font-semibold tracking-tight text-red-800 dark:text-red-300">
 							Couldn&apos;t load {MODE_LABEL[mode]} analyses
@@ -373,17 +412,34 @@ export const AnalysisView = () => {
 						<pre className="mt-4 max-w-full overflow-x-auto rounded-lg border border-red-100 bg-red-50/80 p-3 text-left text-xs text-red-900/80 dark:border-red-900/40 dark:bg-red-950/40 dark:text-red-200">
 							{error}
 						</pre>
+						{/* `reload`, not `loadMore`: a failed first page leaves
+						    nothing fetched, so `loadMore` sees the list as ended
+						    and returns without asking for anything. */}
+						<div className="mt-4 flex justify-center">
+							<Button
+								theme={ButtonTheme.Secondary}
+								size={Size.SMALL}
+								type="button"
+								onClick={reload}
+							>
+								Retry
+							</Button>
+						</div>
 					</div>
 				)}
 
 				{!loading && error == null && items.length === 0 && (
 					<EmptyState
 						variant={EmptyStateVariant.Borderless}
-						title={`No ${MODE_LABEL[mode]} Analyses found`}
+						title={
+							debouncedSearchQuery
+								? `No ${MODE_LABEL[mode]} Analyses Match Your Search`
+								: `No ${MODE_LABEL[mode]} Analyses Created Yet`
+						}
 					/>
 				)}
 
-				{!loading && error == null && items.length > 0 && (
+				{!loading && items.length > 0 && (
 					<ul className="flex flex-col gap-4">
 						{items.map((a) => (
 							<li
@@ -396,7 +452,18 @@ export const AnalysisView = () => {
 								}`}
 							>
 								<div className="flex items-start justify-between gap-3">
-									<Text as="h2" text={a.name} variant={TextVariant.CardTitle} />
+									<div className="flex min-w-0 flex-1 items-center gap-2">
+										<Icon
+											name={IconName.ChartBar}
+											className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+										/>
+										<Text
+											as="h2"
+											text={a.name}
+											variant={TextVariant.CardTitle}
+											fill
+										/>
+									</div>
 									<PopoverMenu
 										className="shrink-0"
 										items={[
@@ -460,12 +527,16 @@ export const AnalysisView = () => {
 						))}
 					</ul>
 				)}
-			</div>
+			</InfiniteScroll>
 
 			<ModalCreateNewItem
 				open={modalOpen}
 				onClose={handleClose}
-				title={`${isEditing ? 'Edit' : 'Add'} ${MODE_LABEL[mode]} Analysis`}
+				title={
+					isEditing
+						? `Edit ${MODE_LABEL[mode]} Analysis`
+						: `Create New ${MODE_LABEL[mode]} Analysis`
+				}
 				submitLabel={submitting ? 'Saving…' : 'Save'}
 				onSubmit={handleSubmit}
 				canSubmit={canSubmit}
@@ -511,7 +582,7 @@ export const AnalysisView = () => {
 				</div>
 
 				{validationMessage != null && (
-					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600 dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
+					<p className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-body dark:border-zinc-700 dark:bg-zinc-900/60 dark:text-zinc-300">
 						{validationMessage}
 					</p>
 				)}
@@ -527,7 +598,7 @@ export const AnalysisView = () => {
 				open={deletingItem !== null}
 				onCancel={handleDeleteClose}
 				onConfirm={handleDeleteConfirm}
-				title={`Delete ${MODE_LABEL[mode]} analysis`}
+				title={`Delete ${MODE_LABEL[mode]} Analysis`}
 				message={
 					<>
 						Are you sure you want to delete <strong>{deletingItem?.name}</strong>? This

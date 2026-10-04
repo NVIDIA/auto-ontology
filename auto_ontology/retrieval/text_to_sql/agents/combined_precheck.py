@@ -99,7 +99,11 @@ class CombinedPrecheckAgent(BaseAgent):
             )
             return True
 
-        if is_db_probe_proactive():
+        # The agentic post-generation validator already checks every literal
+        # against the database and shares its findings across reconstructions.
+        # Running the deterministic literal probe as well would repeat those
+        # database reads. Join and JSONB checks remain independent.
+        if is_db_probe_proactive() and not state.get("validate_sql_values", False):
             any_invalid = run_subcheck(self._value_check) or any_invalid
 
         join_ok = True

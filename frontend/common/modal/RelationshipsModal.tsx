@@ -104,7 +104,7 @@ export const RelationshipsModal = ({
 								? IconName.Terms
 								: catalogNodeInfo[row.nodeType].icon
 						}
-						className="h-4 w-4 text-[#76b900]"
+						className="h-4 w-4 text-body dark:text-zinc-300"
 					/>
 					{row.layer === ExplorationLayer.Semantic
 						? 'Term'
@@ -134,7 +134,7 @@ export const RelationshipsModal = ({
 				if (href == null) {
 					return (
 						<span
-							className="flex h-6 w-6 items-center justify-center rounded text-zinc-300 dark:text-zinc-600"
+							className="flex h-6 w-6 items-center justify-center rounded text-disabled dark:text-zinc-600"
 							title={`${row.name} has no catalog location to open`}
 						>
 							<Icon name={IconName.ExternalLink} className="h-3.5 w-3.5" />
@@ -144,7 +144,7 @@ export const RelationshipsModal = ({
 				return (
 					<NextLink
 						href={href}
-						className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
+						className="flex h-6 w-6 items-center justify-center rounded text-secondary transition-colors hover:bg-zinc-100 hover:text-[#76b900] dark:hover:bg-zinc-700"
 						aria-label={`Open ${row.name}`}
 						title={`Open ${row.name}`}
 					>
@@ -186,7 +186,10 @@ export const RelationshipsModal = ({
 		<Modal open={node != null} onClose={onClose} className="w-full max-w-3xl">
 			<header className="flex items-center justify-between border-b border-zinc-200 px-5 py-4 dark:border-zinc-700">
 				<div className="flex min-w-0 items-center gap-2">
-					<Icon name={IconName.Link} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Link}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					<Text as="h2" variant={TextVariant.Heading}>
 						{node?.name} — Related Entities ({total})
 					</Text>
@@ -216,7 +219,7 @@ export const RelationshipsModal = ({
 						rowKey={(row) => row.id}
 						pagination={pagination}
 						containerClassName="overflow-hidden rounded-lg border border-zinc-200 dark:border-zinc-700"
-						emptyMessage="No related entities"
+						emptyMessage="No Related Entities"
 					/>
 				)}
 			</div>

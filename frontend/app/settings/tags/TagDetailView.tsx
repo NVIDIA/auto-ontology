@@ -8,7 +8,6 @@ import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useState } from 'react';
 
 import { tagsApi } from '@/api/tags';
-import { Breadcrumbs } from '@/common/Breadcrumbs';
 import { formatDate } from '@/common/date';
 import { EmptyState } from '@/common/EmptyState';
 import { Icon, IconName } from '@/common/icons';
@@ -16,6 +15,7 @@ import { InfiniteScroll } from '@/common/InfiniteScroll';
 import { SkeletonBlock, SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { AUTO_GENERATED_LABEL } from '@/constants/tags';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { EmptyStateVariant } from '@/enums/emptyState';
 import { TagItemType } from '@/enums/tags';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
@@ -66,8 +66,11 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 	if (item.rule != null) {
 		return (
 			<span className="flex min-w-0 items-center gap-1.5" title={item.rule.name}>
-				<Icon name={IconName.Lightning} className="h-3.5 w-3.5 shrink-0 text-[#76b900]" />
-				<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">
+				<Icon
+					name={IconName.Lightning}
+					className="h-3.5 w-3.5 shrink-0 text-body dark:text-zinc-300"
+				/>
+				<span className="min-w-0 truncate text-body dark:text-zinc-300">
 					{item.rule.name}
 				</span>
 			</span>
@@ -82,11 +85,11 @@ const TaggedByCell = ({ item }: { item: TagItem }) => {
 		<span className="flex min-w-0 items-center gap-2" title={label}>
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${known ? 'bg-[#76b900] text-white' : 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
-			<span className="min-w-0 truncate text-zinc-600 dark:text-zinc-300">{label}</span>
+			<span className="min-w-0 truncate text-body dark:text-zinc-300">{label}</span>
 		</span>
 	);
 };
@@ -101,9 +104,9 @@ const COLUMNS: TableColumn<TagItem>[] = [
 			<span className="flex min-w-0 items-center gap-2">
 				<Icon
 					name={TYPE_ICONS[item.type]}
-					className="h-4 w-4 shrink-0 text-zinc-400 dark:text-zinc-500"
+					className="h-4 w-4 shrink-0 text-secondary dark:text-zinc-500"
 				/>
-				<span className="min-w-0 truncate text-zinc-800 dark:text-zinc-200">
+				<span className="min-w-0 truncate text-heading dark:text-zinc-200">
 					{item.name}
 				</span>
 			</span>
@@ -114,7 +117,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Type',
 		width: 'w-44',
 		nowrap: true,
-		className: 'text-zinc-600 dark:text-zinc-400',
+		className: 'text-body dark:text-zinc-400',
 		cell: (item) => TYPE_LABELS[item.type],
 	},
 	{
@@ -122,7 +125,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Location',
 		truncate: true,
 		title: (item) => item.path ?? '',
-		className: 'text-zinc-600 dark:text-zinc-400',
+		className: 'text-body dark:text-zinc-400',
 		// Only a term has no location: it is a glossary entry, not a catalog object.
 		cell: (item) => item.path ?? '—',
 	},
@@ -138,7 +141,7 @@ const COLUMNS: TableColumn<TagItem>[] = [
 		header: 'Tagged',
 		width: 'w-32',
 		nowrap: true,
-		className: 'text-zinc-500 dark:text-zinc-400',
+		className: 'text-secondary dark:text-zinc-400',
 		cell: (item) => formatDate(item.tagged),
 	},
 ];
@@ -223,13 +226,14 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 		if (path != null) router.push(path);
 	};
 
+	useBreadcrumbTrail(tag == null ? [] : [{ label: tag.name }]);
+
 	// Nothing to head the page with, so it gets its own screen rather than an
-	// error banner under a blank title. The action matters: the breadcrumb's
-	// last crumb is plain text, so a lone "Tags" crumb is not a way back.
+	// error banner under a blank title. The action matters: the trail ends at
+	// "Tags" here, and a crumb the reader is already on is not a way back.
 	if (error != null) {
 		return (
 			<div className={`w-full space-y-5 ${TAGS_PANEL_PADDING}`}>
-				<Breadcrumbs items={[{ label: 'Tags' }]} />
 				<EmptyState
 					icon={IconName.Tag}
 					title="This tag could not be opened"
@@ -251,24 +255,16 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 			error={items.length > 0 ? itemsError : null}
 		>
 			<div className="w-full space-y-5">
-				{/* The tag's own crumb is added only once its name is known: the id in
-				    the URL is not a label, and an empty crumb after the separator
-				    reads as a tag whose name is blank. */}
-				<Breadcrumbs
-					items={
-						tag == null
-							? [{ label: 'Tags' }]
-							: [{ label: 'Tags', href: TAGS_PATH }, { label: tag.name }]
-					}
-				/>
-
 				<div className="flex items-center gap-2">
-					<Icon name={IconName.Tag} className="h-5 w-5 shrink-0 text-[#76b900]" />
+					<Icon
+						name={IconName.Tag}
+						className="h-5 w-5 shrink-0 text-body dark:text-zinc-300"
+					/>
 					{tag == null ? (
 						<SkeletonBlock className="h-5 w-48" />
 					) : (
 						<>
-							<h1 className="min-w-0 truncate text-base font-semibold text-zinc-900 dark:text-zinc-100">
+							<h1 className="min-w-0 truncate text-base font-semibold text-heading dark:text-zinc-100">
 								{tag.name}
 							</h1>
 							{/* How many objects carry the tag, which a scrolled list
@@ -277,7 +273,7 @@ export const TagDetailView = ({ tagId }: TagDetailViewProps) => {
 							    Withheld until a page has landed, since a list that
 							    failed to load has no count rather than a count of
 							    none. */}
-							<span className="ml-auto shrink-0 text-xs text-zinc-500 dark:text-zinc-400">
+							<span className="ml-auto shrink-0 text-xs text-secondary dark:text-zinc-400">
 								{itemsLoading || itemsError != null ? null : `${total} tagged · `}
 								Created {formatDate(tag.created)}
 							</span>

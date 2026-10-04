@@ -14,7 +14,12 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import Field
 
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.connector_routing import (
+    resolve_connector_from_tables,
+)
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
@@ -24,9 +29,11 @@ from auto_ontology.utils.llm_invoke import (
     safe_invoke_structured_nr,
 )
 from auto_ontology.utils.sample_values import stringify_sample_values
+from auto_ontology.utils.sql_identifiers import qualified_name, quoted_identifier
 
 _GRAPH_NODE_NAME = "refine_evidence"
 _COMPARISON_OPERATORS = frozenset({"=", "!=", "<>", ">", ">=", "<", "<="})
+_COMPARISON_RE = re.compile(r"(?<![<>=!])(?:>=|<=|!=|<>|=|>|<)(?![<>=])")
 _FORMULA_OPERATOR_RE = re.compile(r"[*+/]")
 _OPERATOR_CUES: tuple[tuple[re.Pattern[str], str], ...] = (
     (
@@ -62,6 +69,10 @@ Return complete corrected lines, not substring patches. For every repair:
 - set corrected_value to the exact final scalar value or comparison operator used
   in corrected_line (quotes around a string are optional in corrected_value).
 
+Also return corrected_question as the complete supplied sanitized question with
+the same proven scalar/operator corrections applied wherever those values occur in
+its grounded rules. If no repair applies to the question, copy it unchanged.
+
 Allowed repairs:
 1. string_representation: fix a string value or its casing only when one value
    anchor, or as a fallback one sample value, for the named table and column proves
@@ -73,10 +84,64 @@ Allowed repairs:
    question makes the evidence operator unquestionably wrong. For example, "at
    least", "starting from", and "on or after" are inclusive; "more than" is strict.
 
-Never change formulas, arithmetic, table names, column names, mappings, prose,
+Never change formulas, arithmetic, schema names, table names, column names, mappings, prose,
 logical connectors, ordering, grouping, or projection instructions. Never add or
 remove evidence. If a repair is uncertain, return no patch for it. An empty repair
 list is the correct answer whenever the evidence may already be valid."""
+
+_GROUNDING_SYSTEM_PROMPT = """\
+Ground field references before value correction. Use only the supplied relevant
+tables section and exact qualified-column list.
+
+Return the complete grounded_question and grounded_evidence, ready for SQL
+generation. Replace field references with the exact dialect-quoted physical
+references supplied in the prompt. Copy those references verbatim.
+
+STRICT SCOPE:
+- Replace ONLY fields that are described or mapped in the Evidence section.
+- Treat the natural-language phrase before evidence cues such as "refers to",
+  "means", "is defined as", or "corresponds to" as the concept label for the
+  physical field on the right-hand side.
+- In grounded_question, search case-insensitively for that concept label or its
+  semantic equivalent. If present, you MUST replace the minimal matching question
+  phrase with the complete grounded rule from evidence: the physical column AND
+  its operator, value, formula, or condition. Copy those rule inputs unchanged at
+  this phase; value correction happens later. Never leave that question concept in
+  natural language after grounding its evidence.
+  The question phrase does NOT need to match the evidence wording exactly:
+  account for capitalization, singular/plural forms, inflections, and ordinary
+  paraphrases. Preserve surrounding qualifiers and all unrelated wording. If the
+  evidence-defined concept is not semantically present in the question, leave the
+  question unchanged. Do not ground any other question field or phrase.
+- In grounded_evidence, replace only the evidence's own field references.
+- A field appearing in the tables section but not described by evidence MUST remain
+  untouched in both outputs.
+
+Preserve every scalar value, operator, formula, arithmetic expression, filter,
+grouping, ordering, projection, and unrelated word exactly. Explicit
+quoted/backticked column names in evidence are authoritative and must map to that
+exact catalog column, never to a semantically similar column. If an
+evidence-described field is uncertain, leave it unchanged."""
+
+
+class EvidenceGroundingResult(StrictLLMOutputModel):
+    """Structured schema-grounding response produced before value repair."""
+
+    reasoning: str = Field(default="")
+    grounded_question: str = Field(
+        description=(
+            "Complete question with the minimal semantic phrase corresponding to "
+            "each evidence-described field replaced by its complete grounded rule "
+            "(physical field plus operator/value/formula), even when wording "
+            "differs; every other part must be unchanged."
+        )
+    )
+    grounded_evidence: str = Field(
+        description=(
+            "Complete evidence with only its field references grounded; values, "
+            "operators, formulas, and all unrelated text must be unchanged."
+        )
+    )
 
 
 class EvidenceLineRepair(StrictLLMOutputModel):
@@ -111,6 +176,154 @@ class EvidenceRefinementResult(StrictLLMOutputModel):
 
     reasoning: str = Field(default="")
     repairs: list[EvidenceLineRepair] = Field(default_factory=list)
+    corrected_question: str = Field(
+        default="",
+        description=(
+            "Complete grounded question with the same accepted value/operator "
+            "corrections applied. Never change schema, table, or column references."
+        ),
+    )
+
+
+def _catalog_columns(
+    tables: list[dict[str, Any]],
+    target_db: str | None,
+    dialect: str | None,
+    connector: Any | None = None,
+) -> list[dict[str, str]]:
+    """Flatten relevant tables into validated physical-column targets."""
+    result: list[dict[str, str]] = []
+    for table in tables:
+        raw_table = str(table.get("name") or "").strip()
+        schema = str(table.get("schema_name") or "").strip()
+        database = str(table.get("database_name") or target_db or "").strip()
+        table_description = str(table.get("description") or "").strip()
+        if not raw_table:
+            continue
+        qualified_table = (
+            connector.qualify(schema or None, raw_table)
+            if connector is not None
+            else qualified_name(database, schema, raw_table, dialect=dialect)
+        )
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                continue
+            raw_column = str(column.get("name") or "").strip()
+            if not raw_column:
+                continue
+            column_details = [
+                str(column.get(key) or "").strip()
+                for key in ("description", "usage_evidence", "constraints", "format")
+                if str(column.get(key) or "").strip()
+            ]
+            result.append(
+                {
+                    "table": raw_table,
+                    "schema": schema,
+                    "qualified_table": qualified_table,
+                    "column": raw_column,
+                    "physical": (
+                        f"{qualified_table}.{quoted_identifier(raw_column, dialect)}"
+                    ),
+                    "table_description": table_description,
+                    "column_description": " | ".join(column_details),
+                }
+            )
+    return result
+
+
+def _explicit_identifier_targets(
+    evidence: str,
+    catalog_columns: list[dict[str, str]],
+) -> dict[str, str]:
+    """Resolve quoted identifiers for validation without rewriting evidence."""
+    locked: dict[str, str] = {}
+    for match in re.finditer(r"`([^`]+)`|\"([^\"]+)\"", evidence):
+        identifier = (match.group(1) or match.group(2) or "").strip()
+        if not identifier:
+            continue
+        candidates = [
+            entry
+            for entry in catalog_columns
+            if entry["column"].casefold() == identifier.casefold()
+        ]
+        if len(candidates) > 1:
+            candidates = [
+                entry
+                for entry in candidates
+                if re.search(
+                    rf"(?<!\w){re.escape(entry['table'])}(?!\w)",
+                    evidence,
+                    re.IGNORECASE,
+                )
+            ]
+        if len(candidates) == 1:
+            locked[match.group(0)] = candidates[0]["physical"]
+    return locked
+
+
+def validate_schema_grounding(
+    question: str,
+    evidence: str,
+    result: EvidenceGroundingResult,
+    tables: list[dict[str, Any]],
+    *,
+    target_db: str | None = None,
+    dialect: str | None = None,
+    connector: Any | None = None,
+) -> tuple[str, str, bool]:
+    """Accept a complete LLM grounding atomically or preserve both inputs."""
+    catalog_columns = _catalog_columns(tables, target_db, dialect, connector)
+    grounded_question = result.grounded_question.strip()
+    grounded_evidence = result.grounded_evidence.strip()
+    if not grounded_question or not grounded_evidence:
+        return question, evidence, False
+
+    explicit_targets = _explicit_identifier_targets(evidence, catalog_columns)
+    if any(physical not in grounded_evidence for physical in explicit_targets.values()):
+        return question, evidence, False
+
+    changed = grounded_question != question or grounded_evidence != evidence
+    allowed_physical = {entry["physical"] for entry in catalog_columns}
+    if changed and not any(
+        physical in f"{grounded_question}\n{grounded_evidence}"
+        for physical in allowed_physical
+    ):
+        return question, evidence, False
+
+    return grounded_question, grounded_evidence, changed
+
+
+def _validate_corrected_question(
+    grounded_question: str,
+    corrected_question: str,
+    accepted_repairs: list[dict[str, str | int]],
+    tables: list[dict[str, Any]],
+    *,
+    target_db: str | None,
+    dialect: str | None,
+    connector: Any | None,
+) -> str:
+    """Accept value-only question updates while locking every physical field."""
+    candidate = corrected_question.strip()
+    if not candidate:
+        return grounded_question
+    if not accepted_repairs:
+        return grounded_question if candidate != grounded_question else candidate
+
+    physical_columns = {
+        entry["physical"]
+        for entry in _catalog_columns(tables, target_db, dialect, connector)
+    }
+    original_fields = {
+        physical for physical in physical_columns if physical in grounded_question
+    }
+    corrected_fields = {
+        physical for physical in physical_columns if physical in candidate
+    }
+    if corrected_fields != original_fields:
+        return grounded_question
+    return candidate
 
 
 def _unquote_literal(value: str) -> str:
@@ -257,6 +470,62 @@ def _is_local_line_correction(repair: EvidenceLineRepair) -> bool:
     return changed_chars <= max(32, value_length * 3 + 8)
 
 
+def _repair_preserves_field_side(repair: EvidenceLineRepair) -> bool:
+    """Allow the repair to change only the operator or its right-hand scalar."""
+    original_match = _COMPARISON_RE.search(repair.original_line)
+    corrected_match = _COMPARISON_RE.search(repair.corrected_line)
+    if original_match is None or corrected_match is None:
+        return False
+
+    original_left = repair.original_line[: original_match.start()]
+    corrected_left = repair.corrected_line[: corrected_match.start()]
+    if original_left != corrected_left:
+        return False
+
+    original_operator = original_match.group(0)
+    corrected_operator = corrected_match.group(0)
+    if repair.kind == "predicate_operator":
+        return (
+            corrected_operator == repair.corrected_value.strip()
+            and repair.original_line[original_match.end() :]
+            == repair.corrected_line[corrected_match.end() :]
+        )
+    if original_operator != corrected_operator:
+        return False
+
+    corrected_rhs = repair.corrected_line[corrected_match.end() :]
+    value = _unquote_literal(repair.corrected_value)
+    value_match = re.search(re.escape(value), corrected_rhs)
+    if not value or value_match is None:
+        return False
+
+    allowed_start = value_match.start()
+    allowed_end = value_match.end()
+    if allowed_start > 0 and corrected_rhs[allowed_start - 1] in {"'", '"'}:
+        allowed_start -= 1
+    if allowed_end < len(corrected_rhs) and corrected_rhs[allowed_end] in {"'", '"'}:
+        allowed_end += 1
+
+    original_rhs = repair.original_line[original_match.end() :]
+    changed = [
+        opcode
+        for opcode in SequenceMatcher(
+            None, original_rhs, corrected_rhs, autojunk=False
+        ).get_opcodes()
+        if opcode[0] != "equal"
+    ]
+    return bool(changed) and all(
+        allowed_start <= new_start <= new_end <= allowed_end
+        for _, _, _, new_start, new_end in changed
+    )
+
+
+def _has_formula_on_right_hand_side(line: str) -> bool:
+    """Detect arithmetic formulas without mistaking punctuation in field names."""
+    comparison = _COMPARISON_RE.search(line)
+    return bool(comparison and _FORMULA_OPERATOR_RE.search(line[comparison.end() :]))
+
+
 def _valid_repair(
     repair: EvidenceLineRepair,
     line: str,
@@ -270,8 +539,9 @@ def _valid_repair(
         or "\n" in repair.original_line
         or "\n" in repair.corrected_line
         or not repair.corrected_value.strip()
-        or _FORMULA_OPERATOR_RE.search(line)
+        or _has_formula_on_right_hand_side(line)
         or not _is_local_line_correction(repair)
+        or not _repair_preserves_field_side(repair)
     ):
         return False
 
@@ -344,13 +614,88 @@ class EvidenceRefinementAgent(BaseAgent):
         path_state = dict(state.get("path_state") or {})
         question = get_question_for_processing(state)
         tables = list(path_state.get("relevant_tables") or [])
-        value_anchors = list(state.get("value_anchors") or [])
-        numbered_evidence = "\n".join(
-            f"{index}| {line}" for index, line in enumerate(evidence.splitlines(), 1)
-        )
+        target_db = path_state.get("target_db")
+        connector = resolve_connector_from_tables(tables, state.get("connectors") or [])
+        dialect = getattr(connector, "dialect", None)
         tables_block = format_tables_for_prompt(
             tables,
-            target_db=path_state.get("target_db"),
+            target_db=target_db,
+            dialect=dialect,
+        )
+        catalog_columns = _catalog_columns(tables, target_db, dialect, connector)
+        qualified_columns_block = (
+            "\n".join(
+                (
+                    f"- {entry['physical']}"
+                    + (
+                        f" | table: {entry['table_description']}"
+                        if entry["table_description"]
+                        else ""
+                    )
+                    + (
+                        f" | column: {entry['column_description']}"
+                        if entry["column_description"]
+                        else ""
+                    )
+                )
+                for entry in catalog_columns
+            )
+            or "(none)"
+        )
+
+        grounding_prompt = (
+            f"Question:\n{question}\n\n"
+            f"Evidence:\n{evidence}\n\n"
+            "Relevant dialect-quoted columns (the only allowed mapping targets; "
+            "copy references verbatim):\n"
+            f"{qualified_columns_block}"
+        )
+        grounding_result = safe_invoke_structured_nr(
+            [
+                SystemMessage(content=_GROUNDING_SYSTEM_PROMPT),
+                HumanMessage(content=grounding_prompt),
+            ],
+            EvidenceGroundingResult,
+        )
+        if grounding_result is None:
+            grounded_question, grounded_evidence, grounding_applied = (
+                question,
+                evidence,
+                False,
+            )
+        else:
+            grounded_question, grounded_evidence, grounding_applied = (
+                validate_schema_grounding(
+                    question,
+                    evidence,
+                    grounding_result,
+                    tables,
+                    target_db=target_db,
+                    dialect=dialect,
+                    connector=connector,
+                )
+            )
+        if grounding_result is None:
+            self.logger.warning(
+                "Evidence schema grounding failed — keeping question and evidence "
+                "unchanged"
+            )
+        elif grounding_result.reasoning.strip():
+            grounding_reasoning = grounding_result.reasoning.strip()
+            record_thought(path_state, _GRAPH_NODE_NAME, grounding_reasoning)
+        if grounding_applied:
+            path_state["normalized_question"] = grounded_question
+            self.logger.info("Applied LLM-grounded question and evidence")
+        else:
+            self.logger.info("No certain evidence schema groundings found")
+
+        # Value correction is deliberately phase 2. It receives already-grounded
+        # field references, and apply_evidence_repairs enforces that those field
+        # references cannot change.
+        value_anchors = list(state.get("value_anchors") or [])
+        numbered_evidence = "\n".join(
+            f"{index}| {line}"
+            for index, line in enumerate(grounded_evidence.splitlines(), 1)
         )
         anchors_block = _format_value_anchors(value_anchors)
         values_context = (
@@ -359,7 +704,7 @@ class EvidenceRefinementAgent(BaseAgent):
             else ""
         )
         prompt = (
-            f"Sanitized question:\n{question}\n\n"
+            f"Sanitized question:\n{grounded_question}\n\n"
             f"Evidence (line numbers are metadata only):\n{numbered_evidence}\n\n"
             f"{values_context}"
             f"Relevant tables, columns, and fallback sample values:\n{tables_block}"
@@ -371,17 +716,31 @@ class EvidenceRefinementAgent(BaseAgent):
         )
         if result is None:
             self.logger.warning(
-                "Evidence refinement failed — keeping original evidence"
+                "Evidence value refinement failed — keeping schema-grounded evidence"
             )
-            return {"evidence": evidence, "path_state": path_state}
+            return {"evidence": grounded_evidence, "path_state": path_state}
 
         refined, accepted = apply_evidence_repairs(
-            evidence, result.repairs, question, tables, value_anchors
+            grounded_evidence,
+            result.repairs,
+            grounded_question,
+            tables,
+            value_anchors,
         )
+        final_question = _validate_corrected_question(
+            grounded_question,
+            result.corrected_question,
+            accepted,
+            tables,
+            target_db=target_db,
+            dialect=dialect,
+            connector=connector,
+        )
+        if final_question != question:
+            path_state["normalized_question"] = final_question
         if result.reasoning.strip():
             record_thought(path_state, _GRAPH_NODE_NAME, result.reasoning.strip())
         if accepted:
-            path_state["evidence_original"] = evidence
             path_state["evidence_repairs_applied"] = accepted
             self.logger.info("Applied %d evidence repair(s)", len(accepted))
         else:
@@ -392,7 +751,9 @@ class EvidenceRefinementAgent(BaseAgent):
 
 __all__ = [
     "EvidenceRefinementAgent",
+    "EvidenceGroundingResult",
     "EvidenceRefinementResult",
     "EvidenceLineRepair",
+    "validate_schema_grounding",
     "apply_evidence_repairs",
 ]

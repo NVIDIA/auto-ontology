@@ -18,7 +18,7 @@ export const SemanticNotReady = () => (
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6 text-[#76b900]" />
 			</div>
 		}
-		title="Semantic layer not ready"
+		title="Semantic Layer Not Ready"
 		description="The semantic layer hasn't been created yet, so I can't answer questions."
 	/>
 );

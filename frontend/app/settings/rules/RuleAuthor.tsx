@@ -29,13 +29,11 @@ export const RuleAuthor = ({ author }: { author?: TagAuthor | null }) => {
 		<span className="flex min-w-0 items-center gap-2">
 			<span
 				aria-hidden="true"
-				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-zinc-500 dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
+				className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold ${name === '' ? 'bg-zinc-200 text-secondary dark:bg-zinc-700 dark:text-zinc-400' : 'bg-[#76b900] text-white'}`}
 			>
 				{label.charAt(0).toUpperCase()}
 			</span>
-			<span className="min-w-0 truncate text-xs text-zinc-600 dark:text-zinc-300">
-				{label}
-			</span>
+			<span className="min-w-0 truncate text-xs text-body dark:text-zinc-300">{label}</span>
 		</span>
 	);
 };

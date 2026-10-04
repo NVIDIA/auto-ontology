@@ -74,7 +74,7 @@ export const UsersManager = () => {
 			cell: (user) => (
 				<div>
 					<div className="font-medium">{user.name || '—'}</div>
-					<div className="text-xs text-zinc-400">{user.email}</div>
+					<div className="text-xs text-secondary">{user.email}</div>
 				</div>
 			),
 		},
@@ -125,10 +125,10 @@ export const UsersManager = () => {
 	return (
 		<div className="h-full overflow-auto p-6">
 			<div className="mx-auto max-w-3xl">
-				<h1 className="mb-1 text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
 					Users
 				</h1>
-				<p className="mb-4 text-xs text-zinc-500">
+				<p className="mb-4 text-xs text-secondary">
 					Manage roles and access. Admins manage users; viewers can access all other
 					pages.
 				</p>
@@ -143,7 +143,7 @@ export const UsersManager = () => {
 						rows={users}
 						rowKey={(user) => user.id}
 						layout="auto"
-						emptyMessage="No users found"
+						emptyMessage="No Users Found"
 					/>
 				)}
 			</div>

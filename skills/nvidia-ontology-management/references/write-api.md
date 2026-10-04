@@ -15,7 +15,7 @@ Call the **Next.js** origin (`APP_URL`, local `:3000`), not FastAPI `:3001`.
 
 | Method | Path | Permission | Notes |
 | --- | --- | --- | --- |
-| GET | `/api/terms` | `catalog:read` | Query `q`, `skip`, `limit` |
+| GET | `/api/terms` | `catalog:read` | Query `query`, `skip`, `limit` |
 | GET | `/api/terms/{term_id}` | `catalog:read` | |
 | PATCH | `/api/terms/{term_id}` | `catalog:edit` | `TermUpdate`: `name`, `description`, `name_certified`, `description_certified`. Renaming invalidates cached SQL-attribute description suggestions. |
 

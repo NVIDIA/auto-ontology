@@ -15,7 +15,7 @@ const PlaceholderFrame = ({ children }: { children: ReactNode }) => (
 	</div>
 );
 
-const iconClassName = 'h-12 w-12 text-zinc-300 dark:text-zinc-600';
+const iconClassName = 'h-12 w-12 text-disabled dark:text-zinc-600';
 
 export const Placeholders = {
 	NoConnections: function NoConnections() {

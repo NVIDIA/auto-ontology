@@ -54,7 +54,7 @@ const ConsentForm = () => {
 
 	if (outcome === 'granted') {
 		return (
-			<OauthStatus title="Thank you">
+			<OauthStatus title="Thank You">
 				Authentication successful. You can close this page.
 			</OauthStatus>
 		);
@@ -62,7 +62,7 @@ const ConsentForm = () => {
 
 	if (outcome === 'denied') {
 		return (
-			<OauthStatus title="Authorization cancelled">
+			<OauthStatus title="Authorization Cancelled">
 				You can close this page and return to the application that started sign-in.
 			</OauthStatus>
 		);
@@ -71,20 +71,20 @@ const ConsentForm = () => {
 	return (
 		<div className="flex w-full max-w-md flex-col gap-5">
 			<div className="space-y-2 text-center">
-				<h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+				<h1 className="text-xl font-semibold text-heading dark:text-zinc-100">
 					Authorize MCP access
 				</h1>
-				<p className="text-sm text-zinc-600 dark:text-zinc-400">
+				<p className="text-sm text-body dark:text-zinc-400">
 					{clientId} is requesting access to Auto Ontology as your account.
 				</p>
 			</div>
 
 			{scopes.length ? (
 				<div className="rounded-md border border-zinc-200 p-4 dark:border-zinc-700">
-					<p className="mb-2 text-xs font-medium text-zinc-600 dark:text-zinc-400">
+					<p className="mb-2 text-xs font-medium text-body dark:text-zinc-400">
 						Requested access
 					</p>
-					<ul className="space-y-1 text-sm text-zinc-800 dark:text-zinc-200">
+					<ul className="space-y-1 text-sm text-heading dark:text-zinc-200">
 						{scopes.map((scope) => (
 							<li key={scope}>{scope}</li>
 						))}
@@ -123,7 +123,7 @@ const ConsentPage = () => (
 		<div className="flex flex-col items-center gap-6">
 			<div className="flex items-center gap-2">
 				<Icon name={IconName.NvidiaLogo} className="h-6 w-6" />
-				<span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+				<span className="text-lg font-semibold text-heading dark:text-zinc-100">
 					Auto Ontology
 				</span>
 			</div>

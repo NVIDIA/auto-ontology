@@ -56,7 +56,7 @@ export const SqlEditor = ({
 			rows={rows}
 			spellCheck={false}
 			aria-label={label}
-			className="block w-full resize-y bg-transparent p-3 font-mono text-xs leading-relaxed text-[#76b900] outline-none placeholder:text-zinc-600"
+			className="block w-full resize-y bg-transparent p-3 font-mono text-xs leading-relaxed text-[#76b900] outline-none placeholder:text-zinc-500"
 		/>
 	</div>
 );

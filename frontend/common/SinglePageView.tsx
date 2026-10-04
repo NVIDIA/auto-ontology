@@ -4,7 +4,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import {
 	SinglePageComposer,
 	type ComposerEditValue,
@@ -37,6 +37,7 @@ export type SinglePageViewProps = {
 	) => void | Promise<void>;
 	inlineSaveSectionId?: string;
 	hideEditToolbar?: boolean;
+	headerActions?: ReactNode;
 };
 
 export const SinglePageView = ({
@@ -55,6 +56,7 @@ export const SinglePageView = ({
 	onDataTableCertificationChange,
 	inlineSaveSectionId,
 	hideEditToolbar,
+	headerActions,
 }: SinglePageViewProps): React.JSX.Element | null => {
 	const [loading, setLoading] = useState(true);
 	const [props, setProps] = useState<SinglePageFormat | null>(null);
@@ -133,6 +135,7 @@ export const SinglePageView = ({
 				onDataTableCertificationChange={onDataTableCertificationChange}
 				inlineSaveSectionId={inlineSaveSectionId}
 				hideEditToolbar={hideEditToolbar}
+				headerActions={headerActions}
 			/>
 		</div>
 	);

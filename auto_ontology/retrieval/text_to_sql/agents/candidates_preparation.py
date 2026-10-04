@@ -1250,12 +1250,21 @@ class CandidatePreparationAgent(BaseAgent):
             )
             return ids[0], ""
 
+        def _physical_column(ctx: dict) -> str:
+            parts = (
+                ctx.get("schema_name"),
+                ctx.get("table_name"),
+                ctx.get("col_name"),
+            )
+            return ".".join(str(part) for part in parts if part) or "(unknown)"
+
         attrs_block = "\n".join(
-            f"- id: {aid} | {ctx['attr_name']} "
-            f"(table: {ctx.get('table_name', '?')}, column: {ctx.get('col_name', '?')})"
+            f"- id: {aid} | physical column: {_physical_column(ctx)}"
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
             for aid, ctx in contexts.items()
         )
+        evidence = str(state.get("evidence") or "").strip()
+        evidence_block = f"\n\nAuthoritative evidence:\n{evidence}" if evidence else ""
         messages = [
             SystemMessage(
                 content=(
@@ -1265,10 +1274,12 @@ class CandidatePreparationAgent(BaseAgent):
             ),
             HumanMessage(
                 content=(
-                    f"Question: {question}\n\n"
+                    f"Question: {question}{evidence_block}\n\n"
                     f"Available column attributes:\n{attrs_block}\n\n"
                     "Return the id of the single column attribute that best represents "
-                    "the primary subject of the question."
+                    "the primary subject of the question. Map evidence concepts to "
+                    "the listed schema.table.column physical references, not to "
+                    "semantic attribute names."
                 )
             ),
         ]

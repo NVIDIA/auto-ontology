@@ -186,7 +186,7 @@ def _matching(search: str | None) -> list[ColumnElement[bool]]:
     query could match without hiding rows for a reason nothing on screen
     explains.
 
-    Case-insensitive substring, as the rule list's ``q`` is. One function so
+    Case-insensitive substring, as the rule list's ``query`` is. One function so
     :func:`list_tags` and :func:`count_tags` cannot come to disagree about what
     matches -- a page and a total taken from different filters would leave the
     list asking for rows that are not there.

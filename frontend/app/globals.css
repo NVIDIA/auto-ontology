@@ -9,6 +9,16 @@
 
 @theme {
 	--color-foreground: #09090b;
+
+	/*
+	 * Design-system text tones (text-heading / text-body / text-secondary /
+	 * text-disabled). The palette only defines light-mode values, so dark mode
+	 * keeps its per-component `dark:text-zinc-*` overrides.
+	 */
+	--color-heading: #252a30;
+	--color-body: #4c5054;
+	--color-secondary: #85878a;
+	--color-disabled: #b3b4b7;
 }
 
 /*
@@ -66,7 +76,7 @@
 	align-items: center;
 	gap: 0.75rem;
 	font-size: 0.875rem;
-	color: #52525b; /* zinc-600 */
+	color: var(--color-body);
 }
 
 .nv-pagination-navigation-group {
@@ -199,8 +209,8 @@ body {
 :root {
 	--color-brand: #76b900;
 	--result-chart-neutral: #8c8c95;
-	--result-chart-fg: #18181b;
-	--result-chart-muted: #71717a;
+	--result-chart-fg: var(--color-heading);
+	--result-chart-muted: var(--color-secondary);
 	--result-chart-border: #e4e4e7;
 	--result-chart-surface: #fafafa;
 	--result-chart-tooltip-bg: #18181b;

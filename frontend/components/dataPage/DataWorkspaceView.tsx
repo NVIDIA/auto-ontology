@@ -9,8 +9,10 @@ import { useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
+import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 import { EmptyState } from '@/common/EmptyState';
 import { IconName } from '@/common/icons';
+import { useBreadcrumbTrail } from '@/contexts/BreadcrumbContext';
 import { SkeletonBlock, SkeletonCard, SkeletonRows } from '@/common/Skeleton';
 import { DataModels } from '@/enums/datasources';
 import { EmptyStateVariant } from '@/enums/emptyState';
@@ -22,6 +24,7 @@ import type { ComposerEditValue } from '@/common/SinglePageComposer';
 import { Toast } from '@/common/Toast';
 import type { Column, Database, Schema, Table } from '@/types/datasources';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
+import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
 import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
 import {
@@ -35,6 +38,47 @@ import { datasources } from '@/api/datasources';
 export type DataWorkspaceViewProps = Record<string, never>;
 
 type CatalogNodePatch = Partial<Database> & Partial<Schema> & Partial<Table> & Partial<Column>;
+
+const catalogTrail = (focusId: string | null, databases: Database[]): BreadcrumbItem[] => {
+	const resolved = resolveTreeNode(focusId, databases);
+	const crumb = (label: string, ...ids: string[]): BreadcrumbItem => ({
+		label,
+		href: catalogPathFromFocusId(ids.join('|')),
+	});
+
+	switch (resolved.type) {
+		case DataModels.DB: {
+			const { database } = resolved;
+			return [crumb(database.name, database.id)];
+		}
+		case DataModels.SCHEMA: {
+			const { database, schema } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+			];
+		}
+		case DataModels.TABLE: {
+			const { database, schema, table } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+				crumb(table.name, database.id, schema.id, table.id),
+			];
+		}
+		case DataModels.COLUMN: {
+			const { database, schema, table, column } = resolved;
+			return [
+				crumb(database.name, database.id),
+				crumb(schema.schema_name, database.id, schema.id),
+				crumb(table.name, database.id, schema.id, table.id),
+				crumb(column.column_name, database.id, schema.id, table.id, column.id),
+			];
+		}
+		default:
+			return [];
+	}
+};
 
 /**
  * Which kind of tag target the focused node is, or null for the kinds that
@@ -199,6 +243,10 @@ export function DataWorkspaceView() {
 		return segments[segments.length - 1] ?? null;
 	}, [treeFocusId]);
 
+	// Breadcrumbs live in the top bar, so the workspace names the catalog node
+	// it has open rather than drawing a second trail of its own.
+	useBreadcrumbTrail(catalogTrail(treeFocusId, treeDatabases));
+
 	// Merges a patch into the matching catalog node anywhere in the tree and
 	// bumps the epoch so the detail page rebuilds with the new values.
 	const applyNodePatch = useCallback((entityId: string, patch: CatalogNodePatch) => {
@@ -342,7 +390,7 @@ export function DataWorkspaceView() {
 			<EmptyState
 				variant={EmptyStateVariant.Borderless}
 				icon={IconName.Database}
-				title="No Databases found"
+				title="No Databases Found"
 			/>
 		);
 	}

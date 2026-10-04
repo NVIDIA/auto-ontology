@@ -165,7 +165,7 @@ const LegendItem = ({
 }) => {
 	const color = NODE_TYPE_ACCENT_COLOR[kind];
 	return (
-		<span className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200">
+		<span className="flex items-center gap-1.5 text-xs font-medium text-body dark:text-zinc-200">
 			<span
 				className="h-3 w-3 rounded-full border"
 				style={{ borderColor: color, backgroundColor: `${color}33` }}
@@ -2253,7 +2253,7 @@ export const ExplorationView = () => {
 				)}
 
 			<div className="absolute bottom-4 right-4 z-20 rounded-lg border border-zinc-200 bg-white px-3 py-2 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-				<p className="text-xs text-zinc-500 dark:text-zinc-400">
+				<p className="text-xs text-secondary dark:text-zinc-400">
 					Viewing:{' '}
 					{layer === ExplorationLayer.Semantic ? 'Semantic Objects' : 'Data Objects'}
 				</p>

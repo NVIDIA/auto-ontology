@@ -118,7 +118,7 @@ accompanies each upstream project at the URLs above.
 | dotenv | ^17.4.2 | BSD-2-Clause | https://github.com/motdotla/dotenv |
 | graphology | ^0.26.0 | MIT | https://github.com/graphology/graphology |
 | jose | ^6.1.0 | MIT | https://github.com/panva/jose |
-| Next.js (next) | 16.3.5 | MIT | https://github.com/vercel/next.js |
+| Next.js (next) | 16.3.7 | MIT | https://github.com/vercel/next.js |
 | node-postgres (pg) | ^8.20.0 | MIT | https://github.com/brianc/node-postgres |
 | React (react) | 19.2.4 | MIT | https://github.com/facebook/react |
 | React DOM (react-dom) | 19.2.4 | MIT | https://github.com/facebook/react |
@@ -137,7 +137,7 @@ accompanies each upstream project at the URLs above.
 | @types/react | ^19 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | @types/react-dom | ^19 | MIT | https://github.com/DefinitelyTyped/DefinitelyTyped |
 | ESLint | ^9 | MIT | https://github.com/eslint/eslint |
-| eslint-config-next | 16.3.5 | MIT | https://github.com/vercel/next.js |
+| eslint-config-next | 16.3.7 | MIT | https://github.com/vercel/next.js |
 | Prettier | ^3.8.1 | MIT | https://github.com/prettier/prettier |
 | Prisma CLI (prisma) | ^7.7.0 | Apache-2.0 | https://github.com/prisma/prisma |
 | Tailwind CSS | ^4 | MIT | https://github.com/tailwindlabs/tailwindcss |

@@ -220,7 +220,7 @@ export const TagInput = forwardRef<TagInputHandle, TagInputProps>(function TagIn
 				onBlur={handleBlur}
 				placeholder={value.length === 0 ? placeholder : ''}
 				aria-label={ariaLabel ?? 'Add tag'}
-				className="min-w-[6rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-sm text-zinc-800 outline-none placeholder:text-zinc-400 disabled:cursor-not-allowed dark:text-zinc-100"
+				className="min-w-[6rem] flex-1 border-0 bg-transparent px-1 py-0.5 text-sm text-heading outline-none placeholder:text-secondary disabled:cursor-not-allowed dark:text-zinc-100"
 			/>
 		</div>
 	);

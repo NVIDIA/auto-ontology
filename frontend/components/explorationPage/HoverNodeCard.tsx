@@ -41,26 +41,26 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 				/>
 				<div className="min-w-0 flex-1">
 					<div className="flex items-baseline gap-2">
-						<h2 className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+						<h2 className="truncate text-sm font-semibold text-heading dark:text-zinc-100">
 							{node.name}
 						</h2>
-						<span className="shrink-0 text-xs capitalize text-zinc-400">
+						<span className="shrink-0 text-xs capitalize text-secondary">
 							{node.layer === ExplorationLayer.Semantic
 								? 'Term'
 								: catalogNodeInfo[node.nodeType].title}
 						</span>
 					</div>
 					{node.layer === ExplorationLayer.Data && (
-						<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+						<p className="mt-0.5 truncate text-xs text-secondary dark:text-zinc-500">
 							{node.databaseName} • {node.schemaName}
 						</p>
 					)}
 					{node.layer === ExplorationLayer.Semantic && node.synonyms.length > 0 && (
-						<p className="mt-0.5 truncate text-xs text-zinc-400 dark:text-zinc-500">
+						<p className="mt-0.5 truncate text-xs text-secondary dark:text-zinc-500">
 							Synonyms: {node.synonyms.join(', ')}
 						</p>
 					)}
-					<p className="mt-1 line-clamp-2 text-xs leading-5 text-zinc-500 dark:text-zinc-400">
+					<p className="mt-1 line-clamp-2 text-xs leading-5 text-secondary dark:text-zinc-400">
 						{node.description || 'No Description'}
 					</p>
 				</div>
@@ -82,8 +82,8 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 									: ''
 							} ${index < 2 ? 'border-b border-zinc-200 dark:border-zinc-700' : ''}`}
 						>
-							<dt className="text-zinc-400">{item.label}</dt>
-							<dd className="mt-0.5 font-medium text-zinc-700 dark:text-zinc-200">
+							<dt className="text-secondary">{item.label}</dt>
+							<dd className="mt-0.5 font-medium text-body dark:text-zinc-200">
 								{item.value}
 							</dd>
 						</div>
@@ -102,8 +102,8 @@ export const HoverNodeCard = ({ node, x, y }: HoverNodeCardProps) => {
 								index < 2 ? 'border-r border-zinc-200 dark:border-zinc-700' : ''
 							}`}
 						>
-							<dt className="text-zinc-400">{item.label}</dt>
-							<dd className="mt-0.5 font-medium text-zinc-700 dark:text-zinc-200">
+							<dt className="text-secondary">{item.label}</dt>
+							<dd className="mt-0.5 font-medium text-body dark:text-zinc-200">
 								{item.value}
 							</dd>
 						</div>
