@@ -16,6 +16,7 @@ from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
+from auto_ontology.dal.pii import purge_expired_sample_values
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
 
@@ -49,6 +50,10 @@ def _run_semantic_compilation(
     domain_summary: DomainSummary | None = None,
 ) -> int:
     """Body of :func:`run_semantic_compilation`, run under the concurrency bound."""
+    purged_samples = purge_expired_sample_values()
+    if purged_samples:
+        logger.info("Purged %d expired column sample set(s)", purged_samples)
+
     summary = domain_summary or load_domain_summary(database_name)
 
     started = time.monotonic()

@@ -51,7 +51,10 @@ from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import (
+    ProbeExecutor,
+    allowed_table_scope,
+)
 from auto_ontology.retrieval.text_to_sql.db_probe.join_path_check import (
     build_case_dirty_join_repair_error,
     build_join_path_repair_error,
@@ -88,7 +91,12 @@ class JoinPathCheckAgent(BaseAgent):
         dialect = getattr(connector, "dialect", None)
         database_name = path_state.get("target_db")
 
-        with ProbeExecutor(connector) as executor:
+        with ProbeExecutor(
+            connector,
+            enforce_data_policy=True,
+            database_name=database_name,
+            allowed_tables=allowed_table_scope(relevant_tables),
+        ) as executor:
             mismatches = find_join_path_mismatches(
                 executor, dialect, sql_code, database_name
             )

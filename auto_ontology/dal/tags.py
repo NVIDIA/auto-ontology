@@ -70,6 +70,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.pii import clear_tagged_pii_sample_values
 from auto_ontology.dal.session import store, write_transaction
 
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
@@ -239,6 +240,36 @@ def get_tag(tag_id: str) -> dict[str, Any] | None:
     """
     rows = store().query_read(select(*_COLUMNS).where(s.tag.c.id == tag_id))
     return rows[0] if rows else None
+
+
+def get_tag_by_name(name: str) -> dict[str, Any] | None:
+    """One tag by its case-insensitive, trimmed name."""
+
+    rows = store().query_read(
+        select(*_COLUMNS).where(_FOLDED_NAME == name.strip().lower())
+    )
+    return rows[0] if rows else None
+
+
+def get_or_create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
+    """Return the named tag, creating it safely when it does not exist.
+
+    The unique index remains the concurrency guard. If another worker creates
+    the same tag after our initial read, :func:`create_tag` reports the
+    collision and this function re-reads the winning row.
+    """
+
+    normalized_name = name.strip()
+    existing = get_tag_by_name(normalized_name)
+    if existing is not None:
+        return existing
+    try:
+        return create_tag(name=normalized_name, created_by=created_by)
+    except ValueError:
+        existing = get_tag_by_name(normalized_name)
+        if existing is None:
+            raise
+        return existing
 
 
 def existing_tag_ids(tag_ids: list[str]) -> set[str]:
@@ -677,6 +708,8 @@ def update_tag(
             raise
         raise ValueError(f"Tag with name {name!r} already exists") from exc
 
+    if rows and name.strip().casefold() == "pii":
+        clear_tagged_pii_sample_values()
     return rows[0] if rows else None
 
 
@@ -778,6 +811,8 @@ def attach_tag(
             raise
         return None
 
+    if kind == TARGET_COLUMN:
+        clear_tagged_pii_sample_values([item_id])
     return fetch_tags_map(kind, [item_id]).get(item_id, [])
 
 
@@ -832,6 +867,7 @@ def attach_tags_by_rule(
                 .returning(s.tag_target.c.id)
             )
         )
+    clear_tagged_pii_sample_values()
     return applied
 
 
@@ -964,6 +1000,7 @@ def apply_labels_now_matched(
                     .returning(s.tag_target.c.id)
                 )
             )
+        clear_tagged_pii_sample_values()
     return applied
 
 

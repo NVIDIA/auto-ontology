@@ -66,6 +66,7 @@ def execute_chat_sql(
     *,
     kind: str = "chat SQL",
     timeout_s: int | None = CHAT_STATEMENT_TIMEOUT_S,
+    log_statement: bool = True,
 ) -> pd.DataFrame:
     """Log and run one agent-issued statement, capped in time where supported.
 
@@ -73,7 +74,8 @@ def execute_chat_sql(
     unchanged, so adding a cap here never breaks a connector that has no way to
     honour it.
     """
-    log_chat_sql(connector, sql, kind=kind)
+    if log_statement:
+        log_chat_sql(connector, sql, kind=kind)
 
     if timeout_s is not None and getattr(
         connector, "supports_statement_timeout", False

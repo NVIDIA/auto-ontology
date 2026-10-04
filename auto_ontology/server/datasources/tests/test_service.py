@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -16,6 +17,14 @@ from auto_ontology.server.datasources import service
 
 def _patched_column(**props: object) -> dict[str, object]:
     return {"id": "col-1", "label": Labels.COLUMN, "props": props}
+
+
+@pytest.fixture(autouse=True)
+def allow_sample_data_movement() -> Iterator[MagicMock]:
+    with patch.object(
+        service, "is_column_id_safe_for_data_movement", return_value=True
+    ) as mocked:
+        yield mocked
 
 
 @patch.object(service, "_refresh_semantic_column_attribute_embeddings")
@@ -69,6 +78,22 @@ def test_sample_values_are_refused_on_a_non_text_column(
 
     with pytest.raises(ValueError, match="integer"):
         service.update_node_properties("col-1", {"sample_values": ["abc"]})
+
+    mock_patch.assert_not_called()
+
+
+@patch.object(service, "patch_catalog_node")
+@patch.object(service, "fetch_node_properties_by_id")
+def test_sample_values_are_refused_for_pii_or_unprocessed_column(
+    mock_fetch: MagicMock,
+    mock_patch: MagicMock,
+    allow_sample_data_movement: MagicMock,
+) -> None:
+    mock_fetch.return_value = {"data_type": "text"}
+    allow_sample_data_movement.return_value = False
+
+    with pytest.raises(ValueError, match="PII classification"):
+        service.update_node_properties("col-1", {"sample_values": ["secret"]})
 
     mock_patch.assert_not_called()
 

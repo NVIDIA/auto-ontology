@@ -68,9 +68,24 @@ class _Catalog:
         self.schema = _add(s.catalog_schema, database_id=self.db, name="public")
         self.orders = _add(s.catalog_table, schema_id=self.schema, name="orders")
         self.items = _add(s.catalog_table, schema_id=self.schema, name="items")
-        self.orders_id = _add(s.catalog_column, table_id=self.orders, name="id")
-        self.orders_total = _add(s.catalog_column, table_id=self.orders, name="total")
-        self.items_id = _add(s.catalog_column, table_id=self.items, name="id")
+        self.orders_id = _add(
+            s.catalog_column,
+            table_id=self.orders,
+            name="id",
+            pii_processed=True,
+        )
+        self.orders_total = _add(
+            s.catalog_column,
+            table_id=self.orders,
+            name="total",
+            pii_processed=True,
+        )
+        self.items_id = _add(
+            s.catalog_column,
+            table_id=self.items,
+            name="id",
+            pii_processed=True,
+        )
 
 
 @pytest.fixture
@@ -134,6 +149,29 @@ def test_curated_values_survive_a_batch_with_nothing_to_say(catalogs):
     column = _row(s.catalog_column, target.orders_total)
     assert column["description"] == "curated"
     assert column["sample_values"] == "a,b"
+
+
+def test_unprocessed_column_rejects_incoming_samples(catalogs):
+    target, _ = catalogs
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == target.orders_total)
+        .values(pii_processed=False)
+    )
+
+    apply_metadata_batch(
+        target.name,
+        [],
+        [
+            {
+                "table_name": "orders",
+                "column_name": "total",
+                "sample_values": "secret",
+            }
+        ],
+    )
+
+    assert _row(s.catalog_column, target.orders_total)["sample_values"] is None
 
 
 def test_columns_are_scoped_to_their_table(catalogs):

@@ -40,7 +40,10 @@ from auto_ontology.dal.attributes import (
     find_unlinked_fk_columns,
     merge_semantic_fk,
 )
-from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import (
+    ProbeExecutor,
+    allowed_table_scope,
+)
 from auto_ontology.utils.llm_invoke import (
     get_non_reasoning_llm_client,
     invoke_with_structured_output,
@@ -315,13 +318,14 @@ def _resolve_via_vdb(
     selected = _llm_pick_hit(col, merged)
     if selected:
         return selected
-    return _match_hit_by_sample_values(col, merged, connector)
+    return _match_hit_by_sample_values(col, merged, connector, database_name)
 
 
 def _match_hit_by_sample_values(
     col: dict[str, Any],
     hits: list[dict[str, Any]],
     connector: SQLDatabase | None,
+    database_name: str | None = None,
 ) -> str | None:
     """Choose the best VDB hit whose physical column contains every FK sample.
 
@@ -330,7 +334,7 @@ def _match_hit_by_sample_values(
     where every one of the FK's distinct sample values actually appears.
     """
     samples = _distinct_samples(col.get("sample_values"))
-    if connector is None or not samples:
+    if connector is None or not samples or not database_name:
         return None
 
     source_column = str(col.get("name") or "").lower()
@@ -346,7 +350,21 @@ def _match_hit_by_sample_values(
         return None
 
     matches: list[dict[str, Any]] = []
-    with ProbeExecutor(connector, max_calls=len(matching_name_hits)) as executor:
+    with ProbeExecutor(
+        connector,
+        max_calls=len(matching_name_hits),
+        enforce_data_policy=True,
+        database_name=database_name,
+        allowed_tables=allowed_table_scope(
+            [
+                {
+                    "name": (hit.get("metadata") or {}).get("table_name"),
+                    "schema_name": (hit.get("metadata") or {}).get("schema_name"),
+                }
+                for hit in matching_name_hits
+            ]
+        ),
+    ) as executor:
         for hit in matching_name_hits:
             sql = _sample_match_sql(
                 hit.get("metadata") or {},

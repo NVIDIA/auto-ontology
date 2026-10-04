@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import threading
 import time
@@ -28,6 +29,7 @@ from auto_ontology.dal.datasources import (
     store_column_sample_values,
     store_column_uniqueness,
 )
+from auto_ontology.dal.pii import clear_column_sample_values
 from auto_ontology.semantic.date_format import infer_date_format, is_date_type
 from auto_ontology.dal.terms import (
     fetch_terms_and_attributes_for_table,
@@ -49,8 +51,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Row cap for the per-column profiling sample.
-_PROFILING_SAMPLE_LIMIT = 1000
+
+def _bounded_positive_env(name: str, default: int, hard_max: int) -> int:
+    """Read a deployment limit without allowing it to weaken the hard cap."""
+
+    try:
+        configured = int(os.environ.get(name, "").strip() or default)
+    except (TypeError, ValueError):
+        configured = default
+    return min(max(configured, 1), hard_max)
+
+
+# Deployments may tighten these limits, but never raise the code-level caps.
+_PROFILING_SAMPLE_LIMIT = _bounded_positive_env("PROFILING_SAMPLE_MAX_ROWS", 1000, 1000)
+# Column cap for one profiling query. Wide tables are processed deterministically
+# from catalog order rather than allowing an unbounded SELECT list.
+_PROFILING_MAX_COLUMNS = _bounded_positive_env("PROFILING_SAMPLE_MAX_COLUMNS", 64, 64)
 # How long a profiling query may run before it is cancelled, on connectors that
 # support a cap. A bounded sample off a healthy warehouse is seconds; anything
 # past this is an engine that cannot get resources, and waiting out the driver's
@@ -410,16 +426,19 @@ def calculate_columns_profiling(
     *,
     probe_distinct_values: bool = True,
 ) -> dict[str, dict[str, Any]]:
-    """Profile a table's columns from a live sample of up to 1000 rows.
+    """Profile classified non-PII columns from a bounded live sample.
 
-    Runs ``SELECT * ... LIMIT 1000`` and, for every column, computes an
+    Runs an explicit, policy-filtered ``SELECT ... LIMIT 1000`` and computes an
     ``is_unique`` flag (all non-null values distinct) and the 5 most-common
     values. For non-unique text columns whose sample yields fewer than 5
     distinct values, runs a ``SELECT DISTINCT`` probe to capture rare enum
     values that the row prefix may have missed.
 
     ``probe_distinct_values`` gates only that second step. The bounded
-    ``SELECT * ... LIMIT 1000`` always runs; the DISTINCT probe is the
+    The bounded row sample runs only for columns whose PII classification has
+    completed and which do not carry the ``PII`` tag. Unprocessed and PII
+    columns are never selected from the source database. The DISTINCT probe is
+    the
     unbounded one (a full-column scan per column on warehouses where
     ``DISTINCT`` + ``LIMIT`` does not early-stop), so it is what the
     "Distinct Value Scanning" setting turns off. With it off, a column keeps
@@ -453,14 +472,41 @@ def calculate_columns_profiling(
     """
     schema_name = table.get("schema_name")
     table_name = table["name"]
+    unsafe_ids = [
+        str(column["id"])
+        for column in columns
+        if column.get("id")
+        and (column.get("pii_processed") is not True or bool(column.get("is_pii")))
+    ]
+    clear_column_sample_values(unsafe_ids)
+
+    eligible_columns = [
+        column
+        for column in columns
+        if column.get("name")
+        and column.get("pii_processed") is True
+        and not bool(column.get("is_pii"))
+    ][:_PROFILING_MAX_COLUMNS]
+    if not eligible_columns:
+        logger.info(
+            "[%s] column profiling skipped — no classified non-PII columns",
+            table_name,
+        )
+        return {}
+
     # Qualification is the connector's rule, not ours: engines with a
     # catalog.schema.table namespace prepend their bound catalog here, and a
     # two-level name would resolve against the wrong catalog.
     qualified = connector.qualify(schema_name, table_name)
+    selected = ", ".join(
+        quoted_identifier(str(column["name"]), getattr(connector, "dialect", None))
+        for column in eligible_columns
+    )
 
     try:
         df = _execute_capped(
-            connector, f"SELECT * FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}"
+            connector,
+            f"SELECT {selected} FROM {qualified} LIMIT {_PROFILING_SAMPLE_LIMIT}",
         )
     except Exception as exc:
         _sampling_breaker.record_failure(connector, exc)
@@ -474,7 +520,9 @@ def calculate_columns_profiling(
         return {}
 
     type_by_column = {
-        col.get("name"): col.get("data_type") for col in columns if col.get("name")
+        col.get("name"): col.get("data_type")
+        for col in eligible_columns
+        if col.get("name")
     }
 
     profiling: dict[str, dict[str, Any]] = {}
@@ -764,8 +812,9 @@ def process_table(
 
     ``probe_distinct_values`` mirrors the "Distinct Value Scanning" setting,
     read once per run by the caller. It gates only the per-column ``SELECT
-    DISTINCT`` probes; the bounded row sample always runs. Defaults to True so
-    a direct caller keeps the historical behaviour.
+    DISTINCT`` probes; the bounded row sample still runs for classified,
+    non-PII columns. Defaults to True so a direct caller keeps the historical
+    DISTINCT behaviour.
 
     ``commit_slot`` lets the parallel pipeline impose canonical table ordering
     only on persistence. Direct callers fall back to the process-local lock.
@@ -773,11 +822,10 @@ def process_table(
     table_id = table["id"]
     table_name = table["name"]
 
-    # Columns profiling — requires a live connector; skipped only when one is
-    # unavailable. The bounded SELECT * ... LIMIT sample runs unconditionally;
-    # the setting gates the unbounded DISTINCT probes inside. It persists
-    # sample_values, is_unique, and format onto Column nodes, and maps those
-    # values for FK detection below.
+    # Columns profiling — requires a live connector and at least one classified
+    # non-PII column. The setting gates the unbounded DISTINCT probes inside.
+    # It persists sample_values, is_unique, and format onto eligible Column
+    # nodes, and maps those values for FK detection below.
     connector = _resolve_connector(database_name)
     columns_profiling_samples: dict[str, dict[str, Any]] = {}
     if connector is not None and _sampling_breaker.is_open(connector):

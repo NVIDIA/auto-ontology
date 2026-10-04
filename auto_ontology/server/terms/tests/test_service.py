@@ -52,3 +52,27 @@ def test_a_missing_attribute_still_answers_not_found(
         service.update_column_attribute("term-1", "attr-1", sample_values=["abc"])
         is None
     )
+
+
+@patch(
+    "auto_ontology.server.terms.service.is_column_id_safe_for_data_movement",
+    return_value=False,
+)
+@patch("auto_ontology.dal.attributes.update_column_attribute")
+@patch("auto_ontology.dal.attributes.fetch_column_attribute_column")
+def test_pii_sample_values_are_refused_before_metadata_write(
+    mock_fetch_column: MagicMock,
+    mock_update: MagicMock,
+    _mock_safe: MagicMock,
+) -> None:
+    mock_fetch_column.return_value = {"id": "col-1", "data_type": "text"}
+
+    with pytest.raises(ValueError, match="classified as non-PII"):
+        service.update_column_attribute(
+            "term-1",
+            "attr-1",
+            name="Renamed",
+            sample_values=["secret"],
+        )
+
+    mock_update.assert_not_called()

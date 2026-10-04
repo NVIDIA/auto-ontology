@@ -69,6 +69,7 @@ def _stub_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(mod, "get_embed_params", lambda: {})
     monkeypatch.setattr(mod, "ingest_catalog", lambda c: ([1, 2, 3], [1, 2]))
+    monkeypatch.setattr(mod, "detect_and_tag_pii", lambda columns: None)
     monkeypatch.setattr(mod, "CatalogEmbeddingRowsOp", lambda **kw: lambda pair: pair)
     monkeypatch.setattr(
         mod, "batch_embed_chunks", lambda rows, params, label="": iter(())
@@ -120,6 +121,56 @@ def test_run_ingest_logs_no_success_when_extraction_raises(
     assert "finished successfully" not in _messages(caplog)
 
 
+def test_run_ingest_tags_persisted_columns_before_embedding(
+    _stub_ingest: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import auto_ontology.ingestion_service.ingest as mod
+
+    order: list[str] = []
+
+    def ingest(_connector: Any) -> tuple[list[int], list[int]]:
+        order.append("catalog")
+        return [1], [2]
+
+    def detect(_columns: Any) -> None:
+        order.append("pii")
+
+    def embedding_rows(**_kwargs: Any) -> Any:
+        def build(pair: Any) -> Any:
+            order.append("embedding")
+            return pair
+
+        return build
+
+    monkeypatch.setattr(mod, "ingest_catalog", ingest)
+    monkeypatch.setattr(mod, "detect_and_tag_pii", detect)
+    monkeypatch.setattr(mod, "CatalogEmbeddingRowsOp", embedding_rows)
+
+    mod.run_ingest(_Connector("pagila"))
+
+    assert order == ["catalog", "pii", "embedding"]
+
+
+def test_pii_failure_does_not_fail_catalog_ingestion(
+    _stub_ingest: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import auto_ontology.ingestion_service.ingest as mod
+
+    def fail(_columns: Any) -> None:
+        raise RuntimeError("classifier unavailable")
+
+    monkeypatch.setattr(mod, "detect_and_tag_pii", fail)
+
+    with caplog.at_level(logging.INFO):
+        mod.run_ingest(_Connector("pagila"))
+
+    text = _messages(caplog)
+    assert "PII detection failed for database pagila" in text
+    assert "Data ingestion finished successfully for database pagila" in text
+
+
 def test_trigger_ingest_re_applies_the_rules(
     _stub_ingest: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -133,6 +184,10 @@ def test_trigger_ingest_re_applies_the_rules(
 
     monkeypatch.setattr(mod, "invalidate_connectors_cache", lambda: None)
     monkeypatch.setattr(mod, "get_connectors", lambda: [_Connector("pagila")])
+    pii_runs: list[bool] = []
+    monkeypatch.setattr(
+        mod, "detect_and_tag_pii", lambda _columns: pii_runs.append(True)
+    )
     ran = _stub_rules(monkeypatch)
 
     mod.trigger_ingest({"database": "pagila"})
@@ -141,6 +196,7 @@ def test_trigger_ingest_re_applies_the_rules(
             thread.join(timeout=10)
 
     assert ran == [True]
+    assert pii_runs == [True]
 
 
 # --------------------------------------------------------------------------

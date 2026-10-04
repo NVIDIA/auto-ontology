@@ -24,7 +24,7 @@ from auto_ontology.semantic.visit_enter import (
     _keep_persisted_sample,
     _sample_key,
     _sampling_breaker,
-    calculate_columns_profiling,
+    calculate_columns_profiling as _calculate_columns_profiling,
     process_table,
     reset_sampling_breaker,
 )
@@ -44,6 +44,20 @@ def _mock_connector(dialect: str = "postgres") -> MagicMock:
         schema, table, dialect=dialect
     )
     return connector
+
+
+def calculate_columns_profiling(
+    table: dict,
+    columns: list[dict],
+    connector: MagicMock,
+    **kwargs: object,
+) -> dict:
+    """Run legacy profiling tests with explicitly non-PII synthetic columns."""
+
+    governed = [
+        {**column, "pii_processed": True, "is_pii": False} for column in columns
+    ]
+    return _calculate_columns_profiling(table, governed, connector, **kwargs)
 
 
 @pytest.mark.parametrize(
@@ -567,10 +581,59 @@ def test_distinct_probe_is_gated_but_the_row_sample_is_not(
     on_sql = [c[0][0] for c in on.execute.call_args_list]
 
     # Both sample the rows; only the enabled one issues the DISTINCT probe.
-    assert sum("SELECT * FROM" in s for s in off_sql) == 1
-    assert sum("SELECT * FROM" in s for s in on_sql) == 1
+    assert sum('SELECT "status" FROM' in s for s in off_sql) == 1
+    assert sum('SELECT "status" FROM' in s for s in on_sql) == 1
     assert not any("SELECT DISTINCT" in s for s in off_sql)
     assert sum("SELECT DISTINCT" in s for s in on_sql) == 1
+
+
+@patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
+@patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
+@patch("auto_ontology.semantic.visit_enter.store_column_sample_values")
+@patch("auto_ontology.semantic.visit_enter.clear_column_sample_values")
+def test_profiling_never_selects_pii_or_unprocessed_columns(
+    mock_clear_samples: MagicMock,
+    _mock_store_samples: MagicMock,
+    _mock_store_unique: MagicMock,
+    _mock_store_dates: MagicMock,
+) -> None:
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"status": ["open", "closed"]})
+    table = {"id": "t1", "name": "customers", "schema_name": "public"}
+    columns = [
+        {
+            "id": "safe",
+            "name": "status",
+            "data_type": "text",
+            "pii_processed": True,
+            "is_pii": False,
+        },
+        {
+            "id": "pii",
+            "name": "email",
+            "data_type": "text",
+            "pii_processed": True,
+            "is_pii": True,
+        },
+        {
+            "id": "pending",
+            "name": "notes",
+            "data_type": "text",
+            "pii_processed": False,
+            "is_pii": False,
+        },
+    ]
+
+    result = _calculate_columns_profiling(
+        table, columns, connector, probe_distinct_values=False
+    )
+
+    sql = connector.execute.call_args.args[0]
+    assert '"status"' in sql
+    assert '"email"' not in sql
+    assert '"notes"' not in sql
+    assert set(result) == {"status"}
+    mock_clear_samples.assert_called_once_with(["pii", "pending"])
 
 
 @patch("auto_ontology.semantic.visit_enter.get_connectors")
@@ -610,7 +673,17 @@ def test_row_sample_runs_even_with_the_setting_off(
     mock_get_connectors.return_value = [spy]
 
     table = {"id": "t1", "name": "orders", "description": "", "schema_name": "public"}
-    ctx = {"columns": [{"name": "amount", "data_type": "numeric"}], "fks": []}
+    ctx = {
+        "columns": [
+            {
+                "name": "amount",
+                "data_type": "numeric",
+                "pii_processed": True,
+                "is_pii": False,
+            }
+        ],
+        "fks": [],
+    }
 
     process_table(
         table,
@@ -620,7 +693,7 @@ def test_row_sample_runs_even_with_the_setting_off(
         probe_distinct_values=False,
     )
 
-    assert executed == ["SELECT * FROM `nvapp`.`public`.`orders` LIMIT 1000"]
+    assert executed == ["SELECT `amount` FROM `nvapp`.`public`.`orders` LIMIT 1000"]
 
 
 @patch("auto_ontology.semantic.visit_enter.calculate_columns_profiling")

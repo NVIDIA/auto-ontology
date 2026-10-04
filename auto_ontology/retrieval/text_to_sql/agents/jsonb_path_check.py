@@ -32,7 +32,10 @@ from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import (
+    ProbeExecutor,
+    allowed_table_scope,
+)
 from auto_ontology.retrieval.text_to_sql.db_probe.jsonb_path_check import (
     build_jsonb_path_repair_error,
     find_jsonb_path_mismatches,
@@ -85,7 +88,12 @@ class JsonbPathCheckAgent(BaseAgent):
                 if col_name and data_type:
                     known_types[(table_name.lower(), col_name.lower())] = data_type
 
-        with ProbeExecutor(connector) as executor:
+        with ProbeExecutor(
+            connector,
+            enforce_data_policy=True,
+            database_name=path_state.get("target_db"),
+            allowed_tables=allowed_table_scope(relevant_tables),
+        ) as executor:
             mismatches = find_jsonb_path_mismatches(
                 executor, dialect, sql_code, known_types=known_types
             )

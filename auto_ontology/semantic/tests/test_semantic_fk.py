@@ -130,7 +130,7 @@ def test_vdb_resolution_uses_sql_fallback_when_llm_abstains(
     )
 
     assert selected == "target-attr"
-    mock_sql_fallback.assert_called_once_with(column, [hit], connector)
+    mock_sql_fallback.assert_called_once_with(column, [hit], connector, "database")
 
 
 def test_column_attribute_embedding_includes_physical_table() -> None:
@@ -181,6 +181,7 @@ def _run_sample_fallback(
             column,
             hits,
             MagicMock(dialect="postgresql"),
+            "warehouse",
         )
     return selected, executor
 
@@ -261,6 +262,21 @@ def test_sql_fallback_skips_without_samples_or_connector(
     assert (
         semantic_fk._match_hit_by_sample_values(
             {"sample_values": '["72"]'}, [hit], None
+        )
+        is None
+    )
+    mock_executor.assert_not_called()
+
+
+@patch("auto_ontology.semantic.semantic_fk.ProbeExecutor")
+def test_sql_fallback_skips_without_database_identity(
+    mock_executor: MagicMock,
+) -> None:
+    column = {"name": "id", "table_name": "tags", "sample_values": '["72"]'}
+
+    assert (
+        semantic_fk._match_hit_by_sample_values(
+            column, [_hit("target", "table-2")], MagicMock()
         )
         is None
     )

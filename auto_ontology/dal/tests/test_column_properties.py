@@ -63,6 +63,7 @@ class World:
             table_id=self.tables[table],
             name=name,
             ordinal_position=position,
+            pii_processed=True,
         )
         self.columns[f"{table}.{name}"] = cid
         return cid
@@ -81,6 +82,7 @@ def _row(column_id: str) -> dict:
     return store().query_read(
         select(
             s.catalog_column.c.sample_values,
+            s.catalog_column.c.sample_values_updated_at,
             s.catalog_column.c.is_unique,
             s.catalog_column.c.format,
         ).where(s.catalog_column.c.id == column_id)
@@ -100,6 +102,21 @@ def test_store_column_sample_values_writes_json_encoded_lists(world) -> None:
 
     row = _row(world.columns["orders.status"])
     assert json.loads(row["sample_values"]) == ["open", "closed"]
+    assert row["sample_values_updated_at"] is not None
+
+
+def test_store_column_sample_values_blocks_unprocessed_column(world) -> None:
+    world.table("orders")
+    column_id = world.column("orders", "status")
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == column_id)
+        .values(pii_processed=False)
+    )
+
+    d.store_column_sample_values(world.tables["orders"], {"status": ["secret"]})
+
+    assert _row(column_id)["sample_values"] is None
 
 
 def test_store_column_sample_values_is_a_noop_for_empty_input(world) -> None:

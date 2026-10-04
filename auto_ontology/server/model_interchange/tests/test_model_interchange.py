@@ -224,22 +224,20 @@ def test_assemble_export_document_keeps_sample_value_types() -> None:
 @pytest.mark.parametrize(
     ("supplied", "expected"),
     [
-        ([1, 2], "[1, 2]"),
-        (["1", "2"], '["1", "2"]'),
-        ([{"k": 1}], '[{"k": 1}]'),
-        # JSON carries the type with each value, so a column whose samples
-        # disagree is stored as it arrived rather than narrowed.
-        (["a", 1], '["a", 1]'),
+        ([1, 2], None),
+        (["1", "2"], None),
+        ([{"k": 1}], None),
+        (["a", 1], None),
         ([], None),
     ],
 )
 @patch("auto_ontology.dal.model_interchange._resolve_entities_batch")
-def test_import_catalog_encodes_supplied_sample_values(
+def test_import_catalog_drops_unclassified_sample_values(
     mock_resolve: MagicMock,
     supplied: list,
     expected: str | None,
 ) -> None:
-    """Types survive the round trip, so a re-import restores what was exported."""
+    """Imported values cannot bypass local PII classification."""
     from collections import defaultdict
 
     from auto_ontology.dal import schema as s

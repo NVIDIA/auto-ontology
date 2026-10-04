@@ -31,6 +31,7 @@ from auto_ontology.dal.datasources import (
     fetch_tables_for_schema,
     patch_catalog_node,
 )
+from auto_ontology.dal.pii import is_column_id_safe_for_data_movement
 from auto_ontology.dal.terms import (
     fetch_column_attribute_embedding_contexts_by_column_id,
 )
@@ -118,6 +119,11 @@ def _reject_uneditable_sample_values(node_id: str) -> None:
     props = fetch_node_properties_by_id(node_id, Labels.COLUMN)
     if props is None:
         return
+    if not is_column_id_safe_for_data_movement(node_id):
+        raise ValueError(
+            "Sample values are disabled until PII classification completes, "
+            "and remain disabled for columns tagged PII."
+        )
     error = sample_values_edit_error(props.get("data_type"))
     if error is not None:
         raise ValueError(error)

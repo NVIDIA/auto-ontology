@@ -29,6 +29,7 @@ from sqlalchemy import (
     case,
     column,
     distinct,
+    exists,
     func,
     literal,
     select,
@@ -454,26 +455,36 @@ def _set_column_property(table_id: str, values: dict[str, Any], column: str) -> 
         return
 
     target = s.catalog_column.c[column]
-    store().query_write(
-        update(s.catalog_column)
-        .where(
-            and_(
-                s.catalog_column.c.table_id == table_id,
-                s.catalog_column.c.name.in_(list(values)),
+    assignments: dict[str, Any] = {
+        column: case(
+            {name: literal(value, target.type) for name, value in values.items()},
+            value=s.catalog_column.c.name,
+            else_=target,
+        )
+    }
+    conditions = [
+        s.catalog_column.c.table_id == table_id,
+        s.catalog_column.c.name.in_(list(values)),
+    ]
+    if column == "sample_values":
+        assignments["sample_values_updated_at"] = func.now()
+        pii_tagged = exists(
+            select(1)
+            .select_from(s.tag_target.join(s.tag, s.tag_target.c.tag_id == s.tag.c.id))
+            .where(
+                s.tag_target.c.column_id == s.catalog_column.c.id,
+                func.lower(s.tag.c.name) == "pii",
             )
         )
-        .values(
-            **{
-                column: case(
-                    {
-                        name: literal(value, target.type)
-                        for name, value in values.items()
-                    },
-                    value=s.catalog_column.c.name,
-                    else_=target,
-                )
-            }
+        conditions.extend(
+            [
+                s.catalog_column.c.pii_processed.is_(True),
+                ~pii_tagged,
+            ]
         )
+
+    store().query_write(
+        update(s.catalog_column).where(and_(*conditions)).values(**assignments)
     )
 
 
@@ -617,6 +628,24 @@ def apply_metadata_batch(
                     for row in column_rows
                 ]
             )
+            pii_tagged = exists(
+                select(1)
+                .select_from(
+                    s.tag_target.join(
+                        s.tag,
+                        s.tag_target.c.tag_id == s.tag.c.id,
+                    )
+                )
+                .where(
+                    s.tag_target.c.column_id == s.catalog_column.c.id,
+                    func.lower(s.tag.c.name) == "pii",
+                )
+            )
+            safe_sample = and_(
+                incoming.c.sample_values.is_not(None),
+                s.catalog_column.c.pii_processed.is_(True),
+                ~pii_tagged,
+            )
             store().query_write(
                 update(s.catalog_column)
                 .where(
@@ -638,8 +667,13 @@ def apply_metadata_batch(
                     description=func.coalesce(
                         incoming.c.description, s.catalog_column.c.description
                     ),
-                    sample_values=func.coalesce(
-                        incoming.c.sample_values, s.catalog_column.c.sample_values
+                    sample_values=case(
+                        (safe_sample, incoming.c.sample_values),
+                        else_=s.catalog_column.c.sample_values,
+                    ),
+                    sample_values_updated_at=case(
+                        (safe_sample, func.now()),
+                        else_=s.catalog_column.c.sample_values_updated_at,
                     ),
                 )
             )
@@ -670,6 +704,10 @@ def patch_catalog_node(
         values = {k: v for k, v in properties.items() if k in columns and k != "id"}
         if isinstance(values.get("sample_values"), list):
             values["sample_values"] = dump_sample_values(values["sample_values"])
+        if "sample_values" in values and table is s.catalog_column:
+            values["sample_values_updated_at"] = (
+                func.now() if values["sample_values"] is not None else None
+            )
         rows = store().query_read(select(table.c.id).where(table.c.id == node_id))
         if not rows:
             continue
@@ -1041,6 +1079,15 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
         .where(s.column__foreign_key.c.target_column_id == s.catalog_column.c.id)
         .exists()
     )
+    is_pii = (
+        select(literal(1))
+        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+        .where(
+            s.tag_target.c.column_id == s.catalog_column.c.id,
+            func.lower(s.tag.c.name) == "pii",
+        )
+        .exists()
+    )
     columns = [
         {
             "id": r["id"],
@@ -1050,6 +1097,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
             "ordinal_position": r["ordinal_position"],
             "sample_values": r["sample_values"],
             "format": r["format"],
+            "pii_processed": bool(r["pii_processed"]),
+            "is_pii": bool(r["is_pii"]),
             "is_foreign_key_target": bool(r["is_foreign_key_target"]),
         }
         for r in store().query_read(
@@ -1061,6 +1110,8 @@ def fetch_table_context(table_id: str) -> dict[str, Any]:
                 s.catalog_column.c.ordinal_position,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.format,
+                s.catalog_column.c.pii_processed,
+                is_pii.label("is_pii"),
                 is_fk_target.label("is_foreign_key_target"),
             )
             .where(s.catalog_column.c.table_id == table_id)

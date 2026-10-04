@@ -12,6 +12,7 @@ from typing import Any
 from auto_ontology.dal import attributes as attributes_dal
 from auto_ontology.dal import sql_attributes as sql_attr_dal
 from auto_ontology.dal import terms as terms_dal
+from auto_ontology.dal.pii import is_column_id_safe_for_data_movement
 from auto_ontology.dal.users import resolve_accessible_catalog_ids
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.server.datasources import service as datasources_service
@@ -119,6 +120,11 @@ def update_column_attribute(
             error = sample_values_edit_error(owning_column.get("data_type"))
             if error is not None:
                 raise ValueError(error)
+            if not is_column_id_safe_for_data_movement(owning_column["id"]):
+                raise ValueError(
+                    "Sample values cannot be stored until the column is classified "
+                    "as non-PII"
+                )
 
     row = attributes_dal.update_column_attribute(
         attr_id,

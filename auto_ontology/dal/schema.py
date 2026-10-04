@@ -218,6 +218,14 @@ catalog_column = Table(
     # A JSON string, read back as a string by callers. Promoting it to jsonb is
     # a deliberate follow-up with its consumers updated, not a free change.
     Column("sample_values", Text, nullable=True),
+    # Retention clock for profiled or manually supplied sample values. NULL
+    # means no samples are retained; governance cleanup clears both fields.
+    Column(
+        "sample_values_updated_at",
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    ),
     # How the values are *written*, not what they are: 'YYMMDD', 'YYYY-MM-DD'.
     # Generic storage notation despite only date inference filling it today
     # (`auto_ontology.semantic.date_format`) -- an address or id profiler would write the
@@ -239,6 +247,10 @@ catalog_column = Table(
     # A genuine integer, despite the parser handing the write path a string --
     # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
+    # Set only after automatic PII classification completes. Tag edits are
+    # deliberately independent: removing an automatically assigned PII tag is
+    # a user override and must not make the next ingest add it back.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
 )

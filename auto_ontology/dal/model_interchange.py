@@ -68,7 +68,7 @@ from auto_ontology.server.model_interchange.schemas import (
     ModelTerm,
 )
 from auto_ontology.server.sql_utils import get_dialects, get_schemas, validate_sql
-from auto_ontology.utils.sample_values import dump_sample_values, parse_sample_values
+from auto_ontology.utils.sample_values import parse_sample_values
 
 logger = logging.getLogger(__name__)
 
@@ -1096,7 +1096,9 @@ def _import_catalog(
                         name=column.name,
                         description=column.description,
                         data_type=column.type,
-                        sample_values=column.sample_values,
+                        # Imported values have not passed this deployment's PII
+                        # policy and must not reach storage or embeddings.
+                        sample_values=[],
                         is_unique=column.is_unique,
                         table_yaml_id=table.id,
                         table_name=table.name,
@@ -1110,12 +1112,7 @@ def _import_catalog(
                                 "name": column.name,
                                 "description": column.description,
                                 "data_type": column.type,
-                                # Encoded the same way a profiled column is, so
-                                # an imported document round-trips with its
-                                # types intact.
-                                "sample_values": dump_sample_values(
-                                    column.sample_values
-                                ),
+                                "sample_values": None,
                                 "is_unique": column.is_unique,
                                 "is_nullable": column.is_nullable,
                                 "ordinal_position": ordinal,
@@ -1144,7 +1141,7 @@ def _import_catalog(
                                     column_name=column.name,
                                     column_description=column.description,
                                     data_type=column.type,
-                                    sample_values=column.sample_values,
+                                    sample_values=None,
                                     table_name=table.name,
                                     schema_name=schema.name,
                                     database_name=schema_db_name,

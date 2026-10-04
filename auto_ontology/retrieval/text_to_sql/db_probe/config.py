@@ -30,6 +30,18 @@ def _float_env(name: str, default: float) -> float:
         return default
 
 
+def _bounded_int_env(name: str, default: int, hard_max: int) -> int:
+    """Read a positive integer limit that deployments may only tighten."""
+
+    return min(max(_int_env(name, default), 1), hard_max)
+
+
+def _bounded_float_env(name: str, default: float, hard_max: float) -> float:
+    """Read a positive float limit that deployments may only tighten."""
+
+    return min(max(_float_env(name, default), 0.1), hard_max)
+
+
 def is_db_probe_proactive() -> bool:
     """Whether the *proactive* pre-execution literal check is wired in.
 
@@ -71,17 +83,19 @@ def is_db_probe_join_path_check() -> bool:
 
 # Hard caps — keep Phase 1 cheap and always-on-safe.
 # Total read-only queries allowed per question.
-DB_PROBE_MAX_CALLS = _int_env("DB_PROBE_MAX_CALLS", 40)
+DB_PROBE_MAX_CALLS = _bounded_int_env("DB_PROBE_MAX_CALLS", 40, 100)
 # Max rows returned per probe (also the auto-appended LIMIT).
-DB_PROBE_MAX_ROWS = _int_env("DB_PROBE_MAX_ROWS", 50)
+DB_PROBE_MAX_ROWS = _bounded_int_env("DB_PROBE_MAX_ROWS", 50, 100)
+# Max result columns retained from a probe.
+DB_PROBE_MAX_RESULT_COLUMNS = _bounded_int_env("DB_PROBE_MAX_RESULT_COLUMNS", 16, 32)
 # Per-probe wall-clock timeout (seconds).
-DB_PROBE_TIMEOUT_S = _float_env("DB_PROBE_TIMEOUT_S", 5.0)
+DB_PROBE_TIMEOUT_S = _bounded_float_env("DB_PROBE_TIMEOUT_S", 5.0, 30.0)
 # Only probe the first N relevant tables.
-DB_PROBE_MAX_TABLES = _int_env("DB_PROBE_MAX_TABLES", 8)
+DB_PROBE_MAX_TABLES = _bounded_int_env("DB_PROBE_MAX_TABLES", 8, 32)
 # Only probe the first N columns per table (per probe kind).
-DB_PROBE_MAX_COLS_PER_TABLE = _int_env("DB_PROBE_MAX_COLS_PER_TABLE", 8)
+DB_PROBE_MAX_COLS_PER_TABLE = _bounded_int_env("DB_PROBE_MAX_COLS_PER_TABLE", 8, 32)
 # A DISTINCT probe is kept only if the column has <= this many distinct values.
-DB_PROBE_LOW_CARD_THRESHOLD = _int_env("DB_PROBE_LOW_CARD_THRESHOLD", 20)
+DB_PROBE_LOW_CARD_THRESHOLD = _bounded_int_env("DB_PROBE_LOW_CARD_THRESHOLD", 20, 100)
 
 
 __all__ = [
@@ -90,6 +104,7 @@ __all__ = [
     "is_db_probe_join_path_check",
     "DB_PROBE_MAX_CALLS",
     "DB_PROBE_MAX_ROWS",
+    "DB_PROBE_MAX_RESULT_COLUMNS",
     "DB_PROBE_TIMEOUT_S",
     "DB_PROBE_MAX_TABLES",
     "DB_PROBE_MAX_COLS_PER_TABLE",

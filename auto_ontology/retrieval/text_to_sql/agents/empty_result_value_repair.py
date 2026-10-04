@@ -37,7 +37,10 @@ from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import (
+    ProbeExecutor,
+    allowed_table_scope,
+)
 from auto_ontology.retrieval.text_to_sql.db_probe.literal_check import (
     build_value_repair_error,
     find_literal_mismatches,
@@ -103,7 +106,12 @@ class EmptyResultValueRepairAgent(BaseAgent):
             connector = resolve_connector_from_tables(relevant_tables, connectors)
             dialect = getattr(connector, "dialect", None)
 
-            with ProbeExecutor(connector) as executor:
+            with ProbeExecutor(
+                connector,
+                enforce_data_policy=True,
+                database_name=path_state.get("target_db"),
+                allowed_tables=allowed_table_scope(relevant_tables),
+            ) as executor:
                 # Reached only when the query came back empty, so the extra
                 # high-cardinality literal check is warranted here (and only here).
                 mismatches = find_literal_mismatches(

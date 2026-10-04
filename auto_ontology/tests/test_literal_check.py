@@ -22,8 +22,10 @@ class _ScriptedConnector:
 
     def __init__(self, results: list[pd.DataFrame]) -> None:
         self._results = list(results)
+        self.seen: list[str] = []
 
     def execute(self, sql: str) -> pd.DataFrame:
+        self.seen.append(sql)
         return self._results.pop(0)
 
 
@@ -381,7 +383,7 @@ def test_probe_qualifies_column_and_drops_table_alias():
         "SELECT * FROM set_translations AS st WHERE st.language = 'Korean'",
     )
 
-    probe = executor.log[0]["sql"]
+    probe = connector.seen[0]
     assert "set_translations.language" in probe
     assert " AS st" not in probe
 
