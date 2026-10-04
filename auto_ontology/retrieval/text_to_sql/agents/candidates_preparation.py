@@ -114,7 +114,13 @@ _RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
 # already stored on the Column row (profiling at ingestion) and reach here
 # for free via fetch_tables_by_ids's nested `columns`, so this adds no extra
 # DB round trip, only extra prompt tokens.
-_RELEVANCE_FILTER_MAX_COLS = 25
+#
+# Truncation is silent and costs the answer when the cut column is the one
+# that justified the table: on BIRD dev, 5 wrong drops all named a column
+# past position 25 in a 44-column table. Env-overridable because the right
+# value is schema-dependent — it has to exceed the widest table the filter
+# must reason about, not the median one.
+_RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25"))
 
 # Off by default. find_anchor_hub_siblings() pulls in tables that share a
 # hub with the anchor's own table via FK — see its docstring for why. Opt-in
@@ -133,6 +139,16 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
 _TABLE_BRIDGE_RECONCILIATION_ENABLED = os.environ.get(
     "TABLE_BRIDGE_RECONCILIATION_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes")
+
+# Pools this size or smaller skip the relevance filter. Default 2 is the
+# long-standing behaviour. The filter drops a uniquely-needed table at a
+# near-constant rate whatever the pool size (BIRD dev: 2.0% at 2-4 candidates,
+# 2.5% at 5-7, 2.2% at 8+), so raising this buys recoveries and perturbations
+# in roughly equal measure — 4 was the only value measured to recover more
+# than it risks, and every larger bypass lands at the same break-even.
+_RELEVANCE_FILTER_BYPASS_MAX_TABLES = int(
+    os.environ.get("RELEVANCE_FILTER_BYPASS_MAX_TABLES", "2")
+)
 
 # How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
 # Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
@@ -1014,7 +1030,12 @@ class CandidatePreparationAgent(BaseAgent):
         attribute_join_paths: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
-        if len(tables) <= 2:
+        if len(tables) <= _RELEVANCE_FILTER_BYPASS_MAX_TABLES:
+            self.logger.info(
+                "Relevance filter bypassed: %d candidate table(s) <= bypass max %d",
+                len(tables),
+                _RELEVANCE_FILTER_BYPASS_MAX_TABLES,
+            )
             return tables, ""
 
         try:
