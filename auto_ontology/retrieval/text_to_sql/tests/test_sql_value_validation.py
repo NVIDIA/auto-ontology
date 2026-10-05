@@ -12,7 +12,6 @@ from auto_ontology.retrieval.text_to_sql.agents.combined_precheck import (
 from auto_ontology.retrieval.text_to_sql.agents.sql_value_validation import (
     SQLValueValidationAgent,
     ValueQueryArguments,
-    ValueReview,
     ValueSubstitution,
     ValueValidationAction,
     ValueValidationActionType,
@@ -101,35 +100,13 @@ def _query_action(proof_query: str) -> ValueValidationAction:
     )
 
 
-def _finish_action(
-    original_sql: str,
-    absence_query: str,
-    proof_query: str,
-    *,
-    corrected_sql: str | None = None,
-    corrected_evidence: str | None = None,
-) -> ValueValidationAction:
+def _finish_action() -> ValueValidationAction:
     return ValueValidationAction(
         action=ValueValidationActionType.FINISH,
-        corrected_sql=corrected_sql or original_sql,
-        corrected_evidence=corrected_evidence,
-        reviewed_check_ids=["value_1"],
-        reviews=[
-            ValueReview(
-                check_id="value_1",
-                original_literal="'actve'",
-                final_literal="'Active'",
-                status="corrected",
-                proof_query=proof_query,
-            )
-        ],
         substitutions=[
             ValueSubstitution(
                 check_id="value_1",
-                original_literal="'actve'",
                 replacement_literal="'Active'",
-                absence_query=absence_query,
-                proof_query=proof_query,
             )
         ],
         reasoning="The database stores the status as Active.",
@@ -152,6 +129,48 @@ def test_extracts_filter_and_case_values_but_not_case_output_labels() -> None:
     ]
     assert "'YES'" not in {check["literal"] for check in checks}
     assert "'NO'" not in {check["literal"] for check in checks}
+
+
+def test_prompt_lists_checked_columns_and_short_observations() -> None:
+    checks = extract_value_checks(
+        "SELECT * FROM accounts WHERE status = 'actve'",
+        "sqlite",
+    )
+    prompt = sql_value_validation._render_prompt(
+        question="Show active accounts",
+        sql="SELECT * FROM accounts WHERE status = 'actve'",
+        evidence="",
+        checks=checks,
+        columns_block=sql_value_validation._checked_columns_block(checks, _tables()),
+        connector_context="test:sqlite",
+        observations=[
+            "OK rows=0 SELECT status FROM accounts WHERE status = 'actve'",
+            "OK rows=50 SELECT status FROM accounts :: Active, Open (+45 more)",
+        ],
+        findings={},
+        calls_remaining=18,
+    )
+
+    assert "value_1: 'actve' | status = 'actve'" in prompt
+    assert "- status (text)" in prompt
+    assert "country" not in prompt
+    assert "age" not in prompt
+    assert "is_string" not in prompt
+    assert "elapsed_ms" not in prompt
+    assert "Relevant schema" not in prompt
+    assert "(+45 more)" in prompt
+
+
+def test_prompt_keeps_only_recent_observations() -> None:
+    observations = [f"OK rows=0 SELECT {index}" for index in range(10)]
+
+    rendered = sql_value_validation._render_observations(observations)
+
+    assert rendered.startswith("2 earlier probes omitted")
+    assert "SELECT 0" not in rendered
+    assert "SELECT 1" not in rendered
+    assert "SELECT 2" in rendered
+    assert "SELECT 9" in rendered
 
 
 def test_prompt_requires_trim_and_like_before_semantic_synonyms() -> None:
@@ -196,13 +215,7 @@ def test_agent_repairs_sql_and_matching_evidence_and_caches_probe(
         [
             _query_action(absence_query),
             _query_action(proof_query),
-            _finish_action(
-                original_sql,
-                absence_query,
-                proof_query,
-                corrected_sql=corrected_sql,
-                corrected_evidence="active status means accounts.status = 'Active'",
-            ),
+            _finish_action(),
         ]
     )
     monkeypatch.setattr(
@@ -243,12 +256,7 @@ def test_cached_probe_is_reused_without_database_call(
         [
             _query_action(absence_query),
             _query_action(proof_query),
-            _finish_action(
-                original_sql,
-                absence_query,
-                proof_query,
-                corrected_sql=corrected_sql,
-            ),
+            _finish_action(),
         ]
     )
     monkeypatch.setattr(
@@ -271,12 +279,7 @@ def test_cached_probe_is_reused_without_database_call(
         [
             _query_action(absence_query),
             _query_action(proof_query),
-            _finish_action(
-                original_sql,
-                absence_query,
-                proof_query,
-                corrected_sql=corrected_sql,
-            ),
+            _finish_action(),
         ]
     )
     monkeypatch.setattr(
@@ -291,18 +294,11 @@ def test_cached_probe_is_reused_without_database_call(
     assert second["path_state"]["sql_code"] == corrected_sql
 
 
-def test_unproven_or_structural_sql_change_is_rejected(
+def test_unproven_substitution_is_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     original_sql = "SELECT * FROM accounts WHERE status = 'actve'"
-    absence_query = "SELECT status FROM accounts WHERE status = 'actve'"
-    proof_query = "SELECT status FROM accounts WHERE status = 'Active'"
-    action = _finish_action(
-        original_sql,
-        absence_query,
-        proof_query,
-        corrected_sql=("SELECT country FROM accounts WHERE status = 'Active'"),
-    )
+    action = _finish_action()
     monkeypatch.setattr(
         sql_value_validation,
         "resolve_connector_from_tables",

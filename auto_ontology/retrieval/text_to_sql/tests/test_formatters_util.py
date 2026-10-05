@@ -72,7 +72,7 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
             }
         ]
     )
-    assert "TABLE: dw.SIS_DEPARTMENT" in rendered
+    assert "table\ndw.SIS_DEPARTMENT" in rendered
     assert "dw.dw." not in rendered
 
 
@@ -121,7 +121,7 @@ def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
         ],
         dialect="spark",
     )
-    assert "TABLE: lakehouse.lakehouse.events" in rendered
+    assert "table\nlakehouse.lakehouse.events" in rendered
 
 
 def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
@@ -145,8 +145,9 @@ def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
             }
         ]
     )
-    assert "status (varchar) | sample values: open, closed" in rendered
-    assert "channel (varchar) | sample values: web, store" in rendered
+    assert "column | type | is_nullable | sample values" in rendered
+    assert "status | varchar | unknown | open, closed" in rendered
+    assert "channel | varchar | unknown | web, store" in rendered
     assert "['open'" not in rendered
 
 
@@ -179,9 +180,10 @@ def test_prompt_renders_column_nullability_states() -> None:
         ]
     )
 
-    assert "id (int) | is_nullable: false" in rendered
-    assert "category (text) | is_nullable: true" in rendered
-    assert "legacy_value (text) | is_nullable: unknown" in rendered
+    assert "column | type | is_nullable" in rendered
+    assert "id | int | false" in rendered
+    assert "category | text | true" in rendered
+    assert "legacy_value | text | unknown" in rendered
 
 
 def test_prompt_renders_date_format_when_present() -> None:
@@ -202,7 +204,10 @@ def test_prompt_renders_date_format_when_present() -> None:
             }
         ]
     )
-    assert "format: YYMMDD" in rendered
+    assert "description | format" in rendered
+    assert "Match_Date | text | unknown | Date the match was played. | YYMMDD" in (
+        rendered
+    )
 
 
 def test_semantic_context_keeps_catalog_on_spark() -> None:
@@ -304,7 +309,7 @@ def test_semantic_context_matches_table_section_spelling() -> None:
         dialect="spark",
     )
 
-    assert "TABLE: lakehouse.lakehouse.clusters" in tables_section
+    assert "lakehouse.lakehouse.clusters" in tables_section
     assert "Table: lakehouse.lakehouse.clusters" in hint
 
 
@@ -326,7 +331,7 @@ def test_prompt_falls_back_to_target_db_when_table_has_no_database() -> None:
         dialect="spark",
     )
 
-    assert "TABLE: lakehouse.lakehouse.events" in rendered
+    assert "table\nlakehouse.lakehouse.events" in rendered
 
 
 def test_table_own_database_wins_over_target_db() -> None:
@@ -336,7 +341,7 @@ def test_table_own_database_wins_over_target_db() -> None:
         dialect="spark",
     )
 
-    assert "TABLE: other.lakehouse.events" in rendered
+    assert "table\nother.lakehouse.events" in rendered
 
 
 def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
@@ -353,5 +358,5 @@ def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:
         dialect="spark",
     )
 
-    assert "TABLE: lakehouse.lakehouse.clusters" in tables_section
+    assert "lakehouse.lakehouse.clusters" in tables_section
     assert "Table: lakehouse.lakehouse.clusters" in hint

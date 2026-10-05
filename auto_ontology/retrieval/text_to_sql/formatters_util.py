@@ -24,6 +24,33 @@ def _format_sample_values(raw: Any) -> str:
     return ", ".join(values)
 
 
+def _plain_cell(value: Any) -> str:
+    """One pipe-table cell: no newlines, and no ``|`` that would add a column."""
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple)):
+        parts = [_plain_cell(item) for item in value]
+        return ", ".join(part for part in parts if part)
+    return " ".join(str(value).replace("|", "/").split())
+
+
+def _pipe_table(headers: list[str], rows: list[dict[str, str]]) -> str:
+    """Render ``header 1 | header 2`` then one ``|``-separated row per record.
+
+    A header is omitted when every cell under it is empty, so a table with no
+    descriptions does not pay for a description column.
+    """
+    active = [
+        header for header in headers if any(row.get(header, "").strip() for row in rows)
+    ]
+    if not active:
+        return ""
+    lines = [" | ".join(active)]
+    for row in rows:
+        lines.append(" | ".join(row.get(header, "") for header in active))
+    return "\n".join(lines)
+
+
 def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> str:
     """Render one catalog column consistently wherever schema context appears."""
     name = column.get("name", "UNKNOWN")
@@ -272,6 +299,47 @@ def format_important_columns_for_prompt(
     return "\n".join(lines) or "No semantically matched columns."
 
 
+_TABLE_HEADERS = ["table", "label", "description", "primary key"]
+_COLUMN_HEADERS = [
+    "column",
+    "type",
+    "is_nullable",
+    "description",
+    "sample values",
+    "format",
+]
+_JSONB_SAMPLE_NOTE = (
+    "JSONB sample values are keys (dot = nesting level, use as "
+    "->>'key' or ->'container'->>'leaf')."
+)
+
+
+def _column_row(column: Any) -> dict[str, str]:
+    if not isinstance(column, dict):
+        return {"column": _plain_cell(column)}
+    description = _plain_cell(column.get("description"))
+    notation = _plain_cell(column.get("format"))
+    if notation and "format:" in description.lower():
+        notation = ""
+    nullability = column.get("is_nullable")
+    if nullability is True:
+        nullable = "true"
+    elif nullability is False:
+        nullable = "false"
+    else:
+        nullable = "unknown"
+    return {
+        "column": _plain_cell(column.get("name", "UNKNOWN")),
+        "type": _plain_cell(column.get("data_type", "UNKNOWN")),
+        "is_nullable": nullable,
+        "description": description,
+        "sample values": _plain_cell(
+            _format_sample_values(column.get("sample_values"))
+        ),
+        "format": notation,
+    }
+
+
 def format_tables_for_prompt(
     tables: list[dict],
     target_db: str | None = None,
@@ -296,40 +364,37 @@ def format_tables_for_prompt(
 
     formatted_tables = []
     for table in tables:
-        table_parts = []
-
         table_name = table.get("name", "UNKNOWN")
         table_label = table.get("label", "")
-        table_description = table.get("description", "")
         database_name = table.get("database_name") or target_db or ""
         schema_name = table.get("schema_name", "")
-
         full_name = qualify_table(database_name, schema_name, table_name, dialect)
-
-        table_parts.append(f"TABLE: {full_name}")
-        if table_label and table_label != table_name:
-            table_parts.append(f"  Label: {table_label}")
-        if table_description:
-            table_parts.append(f"  Description: {table_description}")
-        if table.get("pk"):
-            table_parts.append(f"  Primary Key: {table['pk']}")
+        blocks = [
+            _pipe_table(
+                _TABLE_HEADERS,
+                [
+                    {
+                        "table": _plain_cell(full_name),
+                        "label": _plain_cell(
+                            table_label if table_label != table_name else ""
+                        ),
+                        "description": _plain_cell(table.get("description")),
+                        "primary key": _plain_cell(table.get("pk")),
+                    }
+                ],
+            )
+        ]
 
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
         if columns:
-            table_parts.append(
-                "  AVAILABLE COLUMNS (only use these columns for this table):"
-            )
-            for col in columns:
-                if isinstance(col, dict):
-                    table_parts.append(_format_column_for_prompt(col, indent="    "))
-                elif isinstance(col, str):
-                    table_parts.append(f"    - {col}")
-                else:
-                    table_parts.append(f"    - {str(col)}")
+            column_rows = [_column_row(column) for column in columns]
+            blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))
+            if any("json" in row["type"].lower() for row in column_rows):
+                blocks.append(_JSONB_SAMPLE_NOTE)
 
-        formatted_tables.append("\n".join(table_parts))
+        formatted_tables.append("\n".join(block for block in blocks if block))
 
     return "\n\n".join(formatted_tables)
 

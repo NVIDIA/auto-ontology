@@ -41,7 +41,8 @@ def test_prompt_renders_date_format_when_present() -> None:
             }
         ]
     )
-    assert "format: YYMMDD" in rendered
+    assert "description | format" in rendered
+    assert "YYMMDD" in rendered
 
 
 def test_prompt_omits_format_when_absent() -> None:

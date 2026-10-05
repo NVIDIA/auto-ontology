@@ -58,6 +58,12 @@ logger = logging.getLogger(__name__)
 # right step event and ``NODE_LABELS`` entry.
 _GRAPH_NODE_NAME = "reconstruct_sql"
 
+# Opening of the human message this agent appends for one repair. Earlier
+# attempts must not be resent as their own chat turns — each one repeats the
+# schema — so a transcript that already contains them is stripped back to the
+# constructor messages before the current error prompt is added.
+_REPAIR_TURN_PREFIX = "The following SQL contains an ERROR:"
+
 # ------------------------------------------------------------------
 # Known-column grounding (from the semantic resolution done up front)
 # ------------------------------------------------------------------
@@ -112,6 +118,23 @@ def _collect_known_columns(
             hop_lines.append(f"  {src_table}.{src_col} = {tgt_table}.{tgt_col}")
 
     return column_lines, hop_lines
+
+
+def _without_prior_repair_turns(messages: list) -> list:
+    """Drop error prompts appended by earlier reconstruction attempts.
+
+    The current attempt restates failed SQL once, in a new human message, using
+    ``failed_attempts`` for the history. Leaving the old prompts in the chat
+    repeats the schema on every inner-loop retry.
+    """
+    return [
+        message
+        for message in messages
+        if not (
+            isinstance(message, HumanMessage)
+            and str(message.content).startswith(_REPAIR_TURN_PREFIX)
+        )
+    ]
 
 
 def _format_known_columns(
@@ -476,7 +499,6 @@ class SQLReconstructionAgent(BaseAgent):
             sanitized_question,
         )
 
-        messages = state["messages"]
         relevant_tables = list(path_state.get("relevant_tables") or [])
 
         sql_code = getattr(incorrect_response, "sql_code", "") or ""
@@ -631,7 +653,7 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         error_prompt = (
-            "The following SQL contains an ERROR:\n\n"
+            f"{_REPAIR_TURN_PREFIX}\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
             f"{history_section}"
@@ -654,14 +676,19 @@ class SQLReconstructionAgent(BaseAgent):
             "writing the final answer."
         )
 
-        messages = list(messages)
+        # Local copy only. Returning it would make the next inner-loop attempt
+        # send every earlier error prompt again. ``failed_attempts`` already
+        # carries that history inside this one prompt.
+        prompt_messages = _without_prior_repair_turns(list(state["messages"]))
         if evidence:
-            messages.append(
+            prompt_messages.append(
                 SystemMessage(content=format_authoritative_evidence(evidence))
             )
-        messages.append(HumanMessage(content=error_prompt))
+        prompt_messages.append(HumanMessage(content=error_prompt))
 
-        response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
+        response = invoke_with_structured_output(
+            llm, prompt_messages, SQLGenerationModel
+        )
 
         if response is None:
             self.logger.warning(
@@ -691,7 +718,6 @@ class SQLReconstructionAgent(BaseAgent):
             )
 
         return {
-            "messages": messages,
             "path_state": {
                 **path_state,
                 "sql_generation_result": response,
