@@ -143,7 +143,7 @@ backend:
   # frontend. dev_tools/release_helm_chart.py refuses a release otherwise.
   image:
     repository: nvcr.io/nvidia/auto-ontology
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3001
@@ -160,7 +160,7 @@ ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
     repository: nvcr.io/nvidia/auto-ontology
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3002
@@ -176,7 +176,7 @@ ingestion:
 frontend:
   image:
     repository: nvcr.io/nvidia/auto-ontology-frontend
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3000
