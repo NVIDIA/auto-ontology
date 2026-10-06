@@ -151,7 +151,7 @@ def test_without_settings_the_default_is_30_seconds(
 
 
 def test_connectors_without_timeout_support_are_called_unchanged() -> None:
-    """Postgres et al. have no statement cap — don't pass an argument they reject."""
+    """A connector without a cap must not get an argument it would reject."""
     connector = _Recorder(supports_timeout=False)
 
     execute_chat_sql(connector, "SELECT 1")

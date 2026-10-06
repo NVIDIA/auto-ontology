@@ -192,6 +192,19 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     }
 
 
+def _run(cursor: Any, sql: str, parameters: Optional[list]) -> pd.DataFrame:
+    """Execute *sql* on *cursor* and collect the result as a DataFrame."""
+    if parameters:
+        cursor.execute(sql, parameters)
+    else:
+        cursor.execute(sql)
+    rows = cursor.fetchall()
+    if cursor.description is None:
+        return pd.DataFrame()
+    columns = [str(desc[0]) for desc in cursor.description]
+    return pd.DataFrame(rows, columns=columns)
+
+
 class TrinoDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by Trino over its HTTP protocol.
 
@@ -205,6 +218,8 @@ class TrinoDatabase(SQLDatabase):
         the same allowlist, so a connection pinned to one schema needs no
         separate filter.
     """
+
+    supports_statement_timeout = True
 
     def __init__(
         self,
@@ -341,22 +356,44 @@ class TrinoDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
         """Run *sql* and return the result as a DataFrame.
 
         A statement that returns no rows (DDL, ``SET SESSION``) yields an empty
         frame rather than raising.
+
+        With *timeout_s*, the coordinator fails the query once it has run that
+        long, queueing included (``query_max_run_time``). The connection is
+        shared, so the property is reset afterwards while the lock is still
+        held, and no other statement ever runs under it.
         """
         with self._cursor() as cursor:
-            if parameters:
-                cursor.execute(sql, parameters)
-            else:
-                cursor.execute(sql)
-            rows = cursor.fetchall()
-            if cursor.description is None:
-                return pd.DataFrame()
-            columns = [str(desc[0]) for desc in cursor.description]
-            return pd.DataFrame(rows, columns=columns)
+            if timeout_s is None:
+                return _run(cursor, sql, parameters)
+            _run(
+                cursor,
+                f"SET SESSION query_max_run_time = '{max(1, int(timeout_s))}s'",
+                None,
+            )
+            try:
+                return _run(cursor, sql, parameters)
+            finally:
+                try:
+                    _run(cursor, "RESET SESSION query_max_run_time", None)
+                except Exception:
+                    # Drop the connection rather than let the cap leak onto
+                    # ingestion's metadata scans; the next call reopens it.
+                    logger.warning(
+                        "Failed to reset Trino query_max_run_time; reconnecting",
+                        exc_info=True,
+                    )
+                    self._reset_connection()
 
     # ------------------------------------------------------------------
     # Schema introspection

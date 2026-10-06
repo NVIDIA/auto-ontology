@@ -40,7 +40,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 import heavydb
 import pandas as pd
 from heavydb.common.ttypes import TDatumType
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 if TYPE_CHECKING:
     from heavydb.connection import Connection
@@ -93,6 +93,17 @@ def _connect_with_timeout(
     if "error" in result:
         raise result["error"]
     return result["conn"]
+
+
+def _fetch_frame(
+    conn: "Connection", sql: str, parameters: Optional[list]
+) -> pd.DataFrame:
+    with conn.cursor() as cur:
+        cur.execute(sql, parameters)
+        if cur.description is None:
+            return pd.DataFrame()
+        columns = [desc[0] for desc in cur.description]
+        return pd.DataFrame(cur.fetchall(), columns=columns)
 
 
 _COLUMN_SCHEMA = [
@@ -223,6 +234,8 @@ class HeavyDBDatabase(SQLDatabase):
         ``heavydb://user:password@host:6274/dbname?protocol=binary``
     """
 
+    supports_statement_timeout = True
+
     def __init__(self, connection_string: str) -> None:
         self._connect_kwargs = _parse_connection_string(connection_string)
         self._database_name: str = self._connect_kwargs["dbname"]
@@ -265,20 +278,61 @@ class HeavyDBDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
         """Execute a SQL statement and return the result as a DataFrame.
 
         Note: HeavyDB uses *named* parameter style (``:name``), so
         ``parameters`` should be a mapping when supplied.
+
+        HeavyDB has no per-statement timeout, so with *timeout_s* the statement
+        runs on a worker thread and the caller stops waiting after that long,
+        raising :class:`StatementTimeout`. The running query is then interrupted
+        from a second session -- best effort, since the server only honours it
+        when started with ``enable-runtime-query-interrupt``.
         """
         sql = _strip_schema_qualifiers(sql, self._schema_qualifier_re)
-        with self._connect() as conn:
-            with conn.cursor() as cur:
-                cur.execute(sql, parameters)
-                if cur.description is None:
-                    return pd.DataFrame()
-                columns = [desc[0] for desc in cur.description]
-                return pd.DataFrame(cur.fetchall(), columns=columns)
+        if timeout_s is None:
+            with self._connect() as conn:
+                return _fetch_frame(conn, sql, parameters)
+
+        result: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                with self._connect() as conn:
+                    result["session"] = conn._session
+                    result["frame"] = _fetch_frame(conn, sql, parameters)
+            except BaseException as exc:  # noqa: BLE001 - re-raised on the caller thread
+                result["error"] = exc
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        thread.join(timeout_s)
+
+        if thread.is_alive():
+            self._interrupt(result.get("session"))
+            raise StatementTimeout(timeout_s)
+        if "error" in result:
+            raise result["error"]
+        return result["frame"]
+
+    def _interrupt(self, query_session: str | None) -> None:
+        """Ask the server to stop the query running on *query_session*."""
+        if query_session is None:
+            return
+        try:
+            with self._connect() as conn:
+                conn._client.interrupt(query_session, conn._session)
+        except Exception:
+            logger.warning(
+                "Failed to interrupt a timed-out HeavyDB query", exc_info=True
+            )
 
     # ------------------------------------------------------------------
     # Schema introspection (via Thrift metadata RPCs)

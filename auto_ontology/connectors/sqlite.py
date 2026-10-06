@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import unquote, urlparse
@@ -16,9 +17,13 @@ from urllib.parse import unquote, urlparse
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
+
+# VM instructions between deadline checks while a capped statement runs: often
+# enough to stop within milliseconds, rare enough to cost nothing measurable.
+_PROGRESS_INTERVAL = 10_000
 
 
 def _sqlite_path_from_connection_string(connection_string: str) -> Path:
@@ -43,6 +48,8 @@ class SQLiteDatabase(SQLDatabase):
             sqlite:////absolute/path/to/db.sqlite
             /absolute/path/to/db.sqlite
     """
+
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str) -> None:
         db_path = _sqlite_path_from_connection_string(connection_string)
@@ -89,7 +96,37 @@ class SQLiteDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, abort it and raise :class:`StatementTimeout`.
+
+        SQLite has no statement timeout, so a progress handler checks the clock
+        every few thousand VM instructions and aborts once the deadline passes.
+        Connections are per thread, so the handler only ever sees this call.
+        """
+        if timeout_s is None:
+            return self._execute(sql, parameters)
+
+        conn = self._conn
+        deadline = time.monotonic() + timeout_s
+        conn.set_progress_handler(
+            lambda: int(time.monotonic() > deadline), _PROGRESS_INTERVAL
+        )
+        try:
+            return self._execute(sql, parameters)
+        except sqlite3.OperationalError as exc:
+            if time.monotonic() > deadline and "interrupted" in str(exc):
+                raise StatementTimeout(timeout_s) from exc
+            raise
+        finally:
+            conn.set_progress_handler(None, 0)
+
+    def _execute(self, sql: str, parameters: Optional[list]) -> pd.DataFrame:
         cur = self._conn.execute(sql, parameters or [])
         if cur.description is None:
             return pd.DataFrame()

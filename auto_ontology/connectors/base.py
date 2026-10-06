@@ -44,6 +44,21 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from auto_ontology.catalog.table_filter import TableFilter
 
 
+class StatementTimeout(TimeoutError):
+    """A statement outlived the caller's ``timeout_s`` and was stopped.
+
+    Raised by connectors that enforce the cap on the client side. Engines that
+    enforce it on the server raise their driver's own cancellation error.
+    """
+
+    def __init__(self, timeout_s: float) -> None:
+        super().__init__(
+            f"Query cancelled: it ran longer than the {timeout_s:g}s statement "
+            "timeout. Simplify the query or raise the timeout in Agent Settings."
+        )
+        self.timeout_s = timeout_s
+
+
 class SQLDatabase(ABC):
     """Abstract SQL database connector.
 

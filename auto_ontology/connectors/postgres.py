@@ -18,6 +18,17 @@ from auto_ontology.catalog.constants import TableTypes
 from auto_ontology.connectors.base import SQLDatabase
 
 
+def _fetch_frame(
+    conn: psycopg.Connection, sql: str, parameters: Optional[list]
+) -> pd.DataFrame:
+    with conn.cursor(row_factory=dict_row) as cur:
+        cur.execute(sql, parameters)
+        if cur.description is None:
+            return pd.DataFrame()
+        rows = cur.fetchall()
+    return pd.DataFrame(rows)
+
+
 class PostgresDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by ``psycopg`` (v3).
 
@@ -30,6 +41,8 @@ class PostgresDatabase(SQLDatabase):
 
             postgresql://USER:PASSWORD@HOST:5432/DBNAME
     """
+
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
@@ -73,14 +86,27 @@ class PostgresDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, the server cancels it after that long.
+
+        The cap is ``SET LOCAL statement_timeout`` inside a transaction, so it
+        ends with the statement and never leaks onto the pooled connection.
+        """
         with self._pool.connection() as conn:
-            with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute(sql, parameters)
-                if cur.description is None:
-                    return pd.DataFrame()
-                rows = cur.fetchall()
-            return pd.DataFrame(rows)
+            if timeout_s is None:
+                return _fetch_frame(conn, sql, parameters)
+            with conn.transaction():
+                conn.execute(
+                    "SELECT set_config('statement_timeout', %s, true)",
+                    (f"{max(1, int(timeout_s * 1000))}ms",),
+                )
+                return _fetch_frame(conn, sql, parameters)
 
     # ------------------------------------------------------------------
     # Schema introspection

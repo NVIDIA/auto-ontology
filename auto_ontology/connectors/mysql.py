@@ -36,8 +36,25 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     }
 
 
+def _set_statement_timeout(cursor: Any, timeout_s: float) -> None:
+    """Cap statements on *cursor*'s session at *timeout_s* seconds.
+
+    MySQL spells the variable ``max_execution_time`` (milliseconds); MariaDB,
+    which this connector also reaches, rejects that name and uses
+    ``max_statement_time`` (seconds) instead.
+    """
+    try:
+        cursor.execute(
+            "SET SESSION max_execution_time = %s", (max(1, int(timeout_s * 1000)),)
+        )
+    except mysql.connector.Error:
+        cursor.execute("SET SESSION max_statement_time = %s", (float(timeout_s),))
+
+
 class MySQLDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by ``mysql-connector-python``."""
+
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
@@ -58,11 +75,25 @@ class MySQLDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, the server stops it after that long.
+
+        The cap is a session variable, and each call owns its connection, so it
+        never outlives the statement. MySQL applies ``max_execution_time`` to
+        read-only ``SELECT`` only, which is all the agent issues.
+        """
         connection = mysql.connector.connect(**self._connect_kwargs)
         try:
             cursor = connection.cursor(dictionary=True)
             try:
+                if timeout_s is not None:
+                    _set_statement_timeout(cursor, timeout_s)
                 cursor.execute(sql, parameters)
                 if cursor.description is None:
                     return pd.DataFrame()

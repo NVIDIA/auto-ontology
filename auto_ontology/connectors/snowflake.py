@@ -169,6 +169,8 @@ class SnowflakeDatabase(SQLDatabase):
         ``snowflake://user:password@account?warehouse=COMPUTE_WH&database=MY_DB``
     """
 
+    supports_statement_timeout = True
+
     def __init__(
         self,
         connection_string: str,
@@ -226,8 +228,28 @@ class SnowflakeDatabase(SQLDatabase):
     # Execution
     # ------------------------------------------------------------------
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
-        with snowflake.connector.connect(**self._connect_kwargs) as conn:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, Snowflake cancels it after that long.
+
+        The cap is the ``STATEMENT_TIMEOUT_IN_SECONDS`` session parameter on the
+        per-call connection, so it never outlives the statement.
+        """
+        connect_kwargs = self._connect_kwargs
+        if timeout_s is not None:
+            connect_kwargs = {
+                **connect_kwargs,
+                "session_parameters": {
+                    **connect_kwargs.get("session_parameters", {}),
+                    "STATEMENT_TIMEOUT_IN_SECONDS": max(1, int(timeout_s)),
+                },
+            }
+        with snowflake.connector.connect(**connect_kwargs) as conn:
             with conn.cursor() as cur:
                 cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")
                 if parameters:

@@ -29,9 +29,11 @@ from auto_ontology.infra.feature_flags import (
 logger = logging.getLogger(__name__)
 
 # A user is waiting on a chat answer and the pipeline allows one stream at a
-# time, so a runaway query would pin the slot. Databricks enforces this server
-# side and cancels the statement; connect and warehouse scheduling sit outside
-# the cap, so expect roughly this plus a couple of seconds of wall clock.
+# time, so a runaway query would pin the slot. Every built-in connector honours
+# the cap -- server side where the engine has a statement timeout, client side
+# (interrupt / progress handler / watchdog) for DuckDB, SQLite and HeavyDB.
+# Connecting and warehouse scheduling may sit outside it, so expect roughly
+# this plus a couple of seconds of wall clock.
 # Admins can change it on Settings > Agent Settings; this is the default when
 # they haven't, or when Auto Ontology runs without the frontend.
 CHAT_STATEMENT_TIMEOUT_S = DEFAULT_SQL_QUERY_TIMEOUT_SECONDS
