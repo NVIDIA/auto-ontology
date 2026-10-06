@@ -711,3 +711,21 @@ def test_databricks_timeout_becomes_statement_timeout(
 
     with pytest.raises(StatementTimeout):
         database.execute("SELECT 1", timeout_s=30)
+
+
+@pytest.mark.parametrize(
+    ("message", "expected"),
+    [
+        ("[QUERY_EXECUTION_TIMEOUT_EXCEEDED] cancelled after 30s", True),
+        ("Query cancelled. SQLSTATE: 57KD0", True),
+        ("Query cancelled (sqlState=57KD0)", True),
+        # The code inside the statement the warehouse echoed is not a diagnosis.
+        ("[UNRESOLVED_COLUMN] `x` in: SELECT * FROM t WHERE c = '57KD0'", False),
+    ],
+)
+def test_databricks_matches_the_timeout_sqlstate_only_as_a_sqlstate(
+    message: str, expected: bool
+) -> None:
+    from auto_ontology.connectors.databricks import _is_statement_timeout
+
+    assert _is_statement_timeout(RuntimeError(message)) is expected

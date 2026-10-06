@@ -63,6 +63,11 @@ def _is_scope_permission_error(error: BaseException) -> bool:
     return bool(_SCOPE_PERMISSION_ERROR_RE.search(str(error)))
 
 
+# Only as the reported SQLSTATE: a bare ``57KD0`` could be part of an echoed
+# statement or literal.
+_TIMEOUT_SQLSTATE_RE = re.compile(r"\bSQLSTATE\W{0,3}57KD0\b", re.IGNORECASE)
+
+
 def _is_statement_timeout(error: BaseException) -> bool:
     """Whether the warehouse cancelled a statement at its ``statement_timeout``.
 
@@ -70,7 +75,10 @@ def _is_statement_timeout(error: BaseException) -> bool:
     (SQLSTATE ``57KD0``) inside an ordinary ``ServerOperationError``.
     """
     text = str(error)
-    return "QUERY_EXECUTION_TIMEOUT_EXCEEDED" in text or "57KD0" in text
+    return (
+        "QUERY_EXECUTION_TIMEOUT_EXCEEDED" in text
+        or _TIMEOUT_SQLSTATE_RE.search(text) is not None
+    )
 
 
 def _identifier_list(raw: str) -> list[str]:
