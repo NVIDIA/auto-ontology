@@ -16,9 +16,13 @@ import pandas as pd
 import snowflake.connector
 from cryptography.hazmat.primitives import serialization
 
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
+
+# 000630: "Statement reached its statement or warehouse timeout ... and was
+# canceled" -- the STATEMENT_TIMEOUT_IN_SECONDS cap firing.
+_STATEMENT_TIMEOUT_ERRNO = 630
 
 
 def _quoted_identifier(name: str) -> str:
@@ -249,6 +253,19 @@ class SnowflakeDatabase(SQLDatabase):
                     "STATEMENT_TIMEOUT_IN_SECONDS": max(1, int(timeout_s)),
                 },
             }
+        try:
+            return self._execute(connect_kwargs, sql, parameters)
+        except snowflake.connector.errors.Error as exc:
+            if timeout_s is not None and exc.errno == _STATEMENT_TIMEOUT_ERRNO:
+                raise StatementTimeout(timeout_s) from exc
+            raise
+
+    def _execute(
+        self,
+        connect_kwargs: dict[str, Any],
+        sql: str,
+        parameters: Optional[list],
+    ) -> pd.DataFrame:
         with snowflake.connector.connect(**connect_kwargs) as conn:
             with conn.cursor() as cur:
                 cur.execute(f"USE WAREHOUSE {_quoted_identifier(self._warehouse)}")

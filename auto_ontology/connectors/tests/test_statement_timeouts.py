@@ -19,15 +19,22 @@ import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterator
 
+import httpx
+import mysql.connector
 import pandas as pd
+import psycopg
 import pytest
+import snowflake.connector
 from pytest import MonkeyPatch
 
 from auto_ontology.connectors import heavydb as heavydb_module
 from auto_ontology.connectors.base import StatementTimeout
+from auto_ontology.connectors.clickhouse import ClickHouseDatabase, ClickHouseError
 from auto_ontology.connectors.connection_string_factory import build_connection_string
+from auto_ontology.connectors.databricks import DatabricksDatabase
 from auto_ontology.connectors.duckdb import DuckDBDatabase
 from auto_ontology.connectors.heavydb import HeavyDBDatabase
 from auto_ontology.connectors.mysql import MySQLDatabase
@@ -221,7 +228,7 @@ def test_live_postgres_cancels_and_does_not_leak_the_cap() -> None:
     except Exception as exc:  # noqa: BLE001 — any failure means "no fixture DB"
         pytest.skip(f"postgres not reachable: {exc}")
     try:
-        with pytest.raises(Exception, match="statement timeout"):
+        with pytest.raises(StatementTimeout):
             database.execute("SELECT pg_sleep(5)", timeout_s=0.3)
         # The pool holds one idle connection; the cap must not have stuck to it.
         setting = database.execute("SHOW statement_timeout").iloc[0, 0]
@@ -517,3 +524,190 @@ def test_heavydb_fast_query_returns_normally(monkeypatch: MonkeyPatch) -> None:
 
     assert result.equals(pd.DataFrame([(1,)], columns=["v"]))
     assert client.interrupts == []
+
+
+# ----------------------------------------------------------------------
+# Every engine's cancellation surfaces as StatementTimeout
+# ----------------------------------------------------------------------
+#
+# Callers recognise a timeout by type: semantic compilation's sampling circuit
+# breaker counts ``TimeoutError`` and no server-reported cancellation message,
+# so an engine whose cancellation stayed a driver error would never trip it.
+
+
+def _raise(error: BaseException) -> Any:
+    raise error
+
+
+def test_sampling_breaker_counts_a_statement_timeout() -> None:
+    from auto_ontology.semantic.visit_enter import _SamplingCircuitBreaker
+
+    breaker = _SamplingCircuitBreaker()
+    connector = SimpleNamespace(database_name="warehouse")
+
+    assert breaker.record_failure(connector, StatementTimeout(120)) is True
+
+
+def _raising_postgres(error: BaseException) -> PostgresDatabase:
+    database, conn = _fake_postgres()
+
+    class _Cursor(_PgCursor):
+        def execute(self, sql: str, params: Any = None) -> None:
+            raise error
+
+    conn.cursor = lambda **kwargs: _Cursor(conn)  # type: ignore[method-assign]
+    return database
+
+
+def test_postgres_statement_timeout_becomes_statement_timeout() -> None:
+    database = _raising_postgres(
+        psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+    )
+
+    with pytest.raises(StatementTimeout) as caught:
+        database.execute("SELECT 1", timeout_s=30)
+    assert caught.value.timeout_s == 30
+
+
+def test_postgres_other_cancellation_is_left_alone() -> None:
+    """pg_cancel_backend() is an operator's decision, not our cap."""
+    database = _raising_postgres(
+        psycopg.errors.QueryCanceled("canceling statement due to user request")
+    )
+
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def _mysql_failing_with(monkeypatch: MonkeyPatch, errno: int) -> MySQLDatabase:
+    database, cursor = _fake_mysql(monkeypatch)
+    error = mysql.connector.Error(msg="statement failed", errno=errno)
+    monkeypatch.setattr(
+        cursor,
+        "execute",
+        lambda sql, params=None: _raise(error) if sql.startswith("SELECT") else None,
+    )
+    return database
+
+
+@pytest.mark.parametrize("errno", [3024, 1969])
+def test_mysql_and_mariadb_timeouts_become_statement_timeout(
+    monkeypatch: MonkeyPatch, errno: int
+) -> None:
+    database = _mysql_failing_with(monkeypatch, errno)
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def test_mysql_other_errors_are_left_alone(monkeypatch: MonkeyPatch) -> None:
+    database = _mysql_failing_with(monkeypatch, 1054)
+
+    with pytest.raises(mysql.connector.Error):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+@pytest.mark.parametrize(("errno", "expected"), [(630, StatementTimeout), (2003, None)])
+def test_snowflake_only_its_timeout_becomes_statement_timeout(
+    monkeypatch: MonkeyPatch, errno: int, expected: type | None
+) -> None:
+    database = SnowflakeDatabase("snowflake://u:p@acct?warehouse=WH&database=DB")
+    error = snowflake.connector.errors.ProgrammingError(msg="failed", errno=errno)
+    monkeypatch.setattr(database, "_execute", lambda *args: _raise(error))
+
+    with pytest.raises(expected or snowflake.connector.errors.ProgrammingError):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def test_trino_time_limit_becomes_statement_timeout() -> None:
+    class _TimeLimit(Exception):
+        error_name = "EXCEEDED_TIME_LIMIT"
+
+    class _Cursor(_TrinoCursor):
+        def execute(self, sql: str, parameters: Any = None) -> None:
+            super().execute(sql, parameters)
+            if sql == "SELECT slow":
+                raise _TimeLimit("Query exceeded maximum time limit of 30.00s")
+
+    fake = _TrinoConnection()
+    fake.cursor = lambda: _Cursor(fake)  # type: ignore[method-assign]
+    database = _trino(fake)
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT slow", timeout_s=30)
+    assert fake.statements[-1] == "RESET SESSION query_max_run_time"
+
+
+def _clickhouse_answering(response: httpx.Response) -> ClickHouseDatabase:
+    database = ClickHouseDatabase("clickhouse://u@ch.example.com:8123/db")
+    database._client = httpx.Client(  # noqa: SLF001 - test double for the server
+        base_url="http://test",
+        transport=httpx.MockTransport(lambda request: response),
+    )
+    return database
+
+
+@pytest.mark.parametrize(
+    ("headers", "body"),
+    [
+        ({"X-ClickHouse-Exception-Code": "159"}, "Code: 159. DB::Exception: x"),
+        ({}, "Code: 159. DB::Exception: Timeout exceeded. (TIMEOUT_EXCEEDED)"),
+    ],
+)
+def test_clickhouse_timeout_becomes_statement_timeout(
+    headers: dict[str, str], body: str
+) -> None:
+    database = _clickhouse_answering(httpx.Response(500, headers=headers, text=body))
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def test_clickhouse_other_errors_stay_clickhouse_errors() -> None:
+    database = _clickhouse_answering(
+        httpx.Response(
+            404,
+            headers={"X-ClickHouse-Exception-Code": "60"},
+            text="Code: 60. DB::Exception: Table does not exist. (UNKNOWN_TABLE)",
+        )
+    )
+
+    with pytest.raises(ClickHouseError):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def test_databricks_timeout_becomes_statement_timeout(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    error = RuntimeError(
+        "[QUERY_EXECUTION_TIMEOUT_EXCEEDED] Query execution was cancelled due to "
+        "exceeding the timeout (30s). SQLSTATE: 57KD0"
+    )
+
+    class _Cursor:
+        def __enter__(self) -> "_Cursor":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def execute(self, sql: str, params: Any = None) -> None:
+            raise error
+
+    class _Conn:
+        def cursor(self) -> _Cursor:
+            return _Cursor()
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(
+        "auto_ontology.connectors.databricks.sql.connect", lambda **kwargs: _Conn()
+    )
+    database = DatabricksDatabase(
+        "databricks://token:t@example.databricks.com/main"
+        "?http_path=%2Fsql%2F1.0%2Fwarehouses%2Fw"
+    )
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT 1", timeout_s=30)

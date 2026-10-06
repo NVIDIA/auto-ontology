@@ -13,7 +13,12 @@ import mysql.connector
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
+
+# The server stopping a statement at the session cap: MySQL's
+# ER_QUERY_TIMEOUT (``max_execution_time``) and MariaDB's ER_STATEMENT_TIMEOUT
+# (``max_statement_time``).
+_TIMEOUT_ERRNOS = frozenset({3024, 1969})
 
 
 def _parse_connection_string(connection_string: str) -> dict[str, Any]:
@@ -87,6 +92,9 @@ class MySQLDatabase(SQLDatabase):
         The cap is a session variable, and each call owns its connection, so it
         never outlives the statement. MySQL applies ``max_execution_time`` to
         read-only ``SELECT`` only, which is all the agent issues.
+
+        Raises:
+            StatementTimeout: the server stopped the statement at the cap.
         """
         connection = mysql.connector.connect(**self._connect_kwargs)
         try:
@@ -100,6 +108,10 @@ class MySQLDatabase(SQLDatabase):
                 rows = cursor.fetchall()
                 columns = [description[0] for description in cursor.description]
                 return pd.DataFrame(rows, columns=columns)
+            except mysql.connector.Error as exc:
+                if timeout_s is not None and exc.errno in _TIMEOUT_ERRNOS:
+                    raise StatementTimeout(timeout_s) from exc
+                raise
             finally:
                 cursor.close()
         finally:

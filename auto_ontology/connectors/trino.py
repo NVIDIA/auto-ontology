@@ -54,7 +54,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 if TYPE_CHECKING:
     from trino.dbapi import Connection
@@ -383,6 +383,12 @@ class TrinoDatabase(SQLDatabase):
             )
             try:
                 return _run(cursor, sql, parameters)
+            except Exception as exc:
+                # ``TrinoQueryError.error_name``; read by attribute so the
+                # driver stays a lazy import.
+                if getattr(exc, "error_name", None) == "EXCEEDED_TIME_LIMIT":
+                    raise StatementTimeout(timeout_s) from exc
+                raise
             finally:
                 try:
                     _run(cursor, "RESET SESSION query_max_run_time", None)

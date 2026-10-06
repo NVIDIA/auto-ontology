@@ -18,7 +18,7 @@ from databricks import sql
 from databricks.sql.client import Connection
 from databricks.sql.exc import Error
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 from auto_ontology.connectors.db_errors import is_session_lost
 
@@ -61,6 +61,16 @@ _SCOPE_PERMISSION_ERROR_RE = re.compile(
 def _is_scope_permission_error(error: BaseException) -> bool:
     """Whether one metadata failure proves the whole catalog/schema is unreadable."""
     return bool(_SCOPE_PERMISSION_ERROR_RE.search(str(error)))
+
+
+def _is_statement_timeout(error: BaseException) -> bool:
+    """Whether the warehouse cancelled a statement at its ``statement_timeout``.
+
+    Databricks reports it as error class ``QUERY_EXECUTION_TIMEOUT_EXCEEDED``
+    (SQLSTATE ``57KD0``) inside an ordinary ``ServerOperationError``.
+    """
+    text = str(error)
+    return "QUERY_EXECUTION_TIMEOUT_EXCEEDED" in text or "57KD0" in text
 
 
 def _identifier_list(raw: str) -> list[str]:
@@ -429,6 +439,8 @@ class DatabricksDatabase(SQLDatabase):
                     connection, sql_text, parameters, connect_seconds=connect_seconds
                 )
             except Exception as exc:
+                if timeout_s is not None and _is_statement_timeout(exc):
+                    raise StatementTimeout(timeout_s) from exc
                 # Only a shared connection outlives its statement, so only it can
                 # be holding a session the warehouse has since dropped. A
                 # per-statement connection was opened moments ago, and reopening

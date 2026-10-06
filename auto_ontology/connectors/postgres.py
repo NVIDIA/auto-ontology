@@ -15,7 +15,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 
 def _fetch_frame(
@@ -97,16 +97,26 @@ class PostgresDatabase(SQLDatabase):
 
         The cap is ``SET LOCAL statement_timeout`` inside a transaction, so it
         ends with the statement and never leaks onto the pooled connection.
+
+        Raises:
+            StatementTimeout: the server cancelled the statement at the cap.
         """
         with self._pool.connection() as conn:
             if timeout_s is None:
                 return _fetch_frame(conn, sql, parameters)
-            with conn.transaction():
-                conn.execute(
-                    "SELECT set_config('statement_timeout', %s, true)",
-                    (f"{max(1, int(timeout_s * 1000))}ms",),
-                )
-                return _fetch_frame(conn, sql, parameters)
+            try:
+                with conn.transaction():
+                    conn.execute(
+                        "SELECT set_config('statement_timeout', %s, true)",
+                        (f"{max(1, int(timeout_s * 1000))}ms",),
+                    )
+                    return _fetch_frame(conn, sql, parameters)
+            except psycopg.errors.QueryCanceled as exc:
+                # QueryCanceled also covers pg_cancel_backend(); only the
+                # timeout we set is ours to relabel.
+                if "statement timeout" not in str(exc):
+                    raise
+                raise StatementTimeout(timeout_s) from exc
 
     # ------------------------------------------------------------------
     # Schema introspection

@@ -71,7 +71,7 @@ import httpx
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +103,9 @@ _SYSTEM_DATABASES = frozenset({"system", "information_schema", "INFORMATION_SCHE
 # its own data.
 _VIEW_ENGINES = frozenset({"View", "LiveView", "WindowView"})
 _MATERIALIZED_VIEW_ENGINE = "MaterializedView"
+
+
+_TIMEOUT_EXCEEDED_CODE = "159"
 
 
 class ClickHouseError(RuntimeError):
@@ -221,6 +224,18 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
         "verify_ssl": _is_true(_first(query, "verify_ssl"), default=True),
         "max_rows": _positive_int(_first(query, "max_rows"), DEFAULT_MAX_ROWS),
     }
+
+
+def _is_timeout_exceeded(response: httpx.Response, message: str) -> bool:
+    """Whether the server stopped the statement at ``max_execution_time``.
+
+    That is error code 159, ``TIMEOUT_EXCEEDED``. The code arrives in a header
+    on every modern server; the message check covers proxies that strip it.
+    """
+    code = response.headers.get("X-ClickHouse-Exception-Code")
+    if code is not None:
+        return code.strip() == _TIMEOUT_EXCEEDED_CODE
+    return "(TIMEOUT_EXCEEDED)" in message
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -420,7 +435,10 @@ class ClickHouseDatabase(SQLDatabase):
                 f"Could not connect to ClickHouse at {self._base_url}: {error!r}"
             ) from error
         if response.status_code >= 400:
-            raise ClickHouseError(_error_message(response))
+            message = _error_message(response)
+            if timeout_s is not None and _is_timeout_exceeded(response, message):
+                raise StatementTimeout(timeout_s) from ClickHouseError(message)
+            raise ClickHouseError(message)
 
         body = response.text.strip()
         if not body:
