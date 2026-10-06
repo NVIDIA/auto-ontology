@@ -2,11 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Read instance-wide feature flags from the frontend's ``configurations`` table.
+"""Read instance-wide settings from the frontend's ``configurations`` table.
 
 The frontend owns that key/value table through Prisma; the Python services read
 it directly with psycopg so they can gate behaviour without a frontend
-round-trip. Values are the strings ``"true"`` / ``"false"``.
+round-trip. Flag values are the strings ``"true"`` / ``"false"``; numeric
+settings are stored as decimal integer strings.
 
 Each flag carries its own default for the "row absent or unreadable" case, and
 the defaults genuinely differ: semantic compilation is opt-in (absent means
@@ -29,6 +30,27 @@ logger = logging.getLogger(__name__)
 # predating the toggle did.
 DISTINCT_VALUE_PROBING_ENABLED_KEY = "distinct_value_probing_enabled"
 
+# Written by the SQL Query Timeout field on Settings > Agent Settings: how long
+# a statement the text-to-SQL agent issues may run before it is cancelled. An
+# instance without the frontend never writes the row and gets the default.
+SQL_QUERY_TIMEOUT_SECONDS_KEY = "sql_query_timeout_seconds"
+DEFAULT_SQL_QUERY_TIMEOUT_SECONDS = 30
+# Mirrored by the frontend's input bounds; a stored value outside them is
+# treated like junk rather than clamped, so both sides agree on what it means.
+MIN_SQL_QUERY_TIMEOUT_SECONDS = 1
+MAX_SQL_QUERY_TIMEOUT_SECONDS = 3600
+
+
+def _read_configuration_row(key: str) -> tuple[object, ...] | None:
+    """Return the ``(value,)`` row for *key*, or ``None`` if it is absent."""
+    with psycopg.connect(get_postgres_connection_string(), connect_timeout=3) as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT value FROM {FRONTEND_SCHEMA}.configurations WHERE key = %s",
+                (key,),
+            )
+            return cur.fetchone()
+
 
 def read_configuration_flag(key: str, *, default: bool) -> bool:
     """Return the boolean value of *key*, or *default* when it cannot be read.
@@ -39,15 +61,7 @@ def read_configuration_flag(key: str, *, default: bool) -> bool:
     crashes a service at startup.
     """
     try:
-        with psycopg.connect(
-            get_postgres_connection_string(), connect_timeout=3
-        ) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT value FROM {FRONTEND_SCHEMA}.configurations WHERE key = %s",
-                    (key,),
-                )
-                row = cur.fetchone()
+        row = _read_configuration_row(key)
     except Exception:
         logger.exception("Failed to read %s; falling back to %s", key, default)
         return default
@@ -84,3 +98,51 @@ def is_distinct_value_probing_enabled() -> bool:
     metered warehouse.
     """
     return read_configuration_flag(DISTINCT_VALUE_PROBING_ENABLED_KEY, default=True)
+
+
+def read_configuration_int(
+    key: str, *, default: int, minimum: int, maximum: int
+) -> int:
+    """Return the integer value of *key*, or *default* when it cannot be used.
+
+    Best-effort in the same way as :func:`read_configuration_flag`: a DB error,
+    a missing row, a non-integer value or one outside ``[minimum, maximum]``
+    all fall back to *default*.
+    """
+    try:
+        row = _read_configuration_row(key)
+    except Exception:
+        logger.exception("Failed to read %s; falling back to %s", key, default)
+        return default
+
+    if not row:
+        return default
+    try:
+        value = int(str(row[0]).strip())
+    except ValueError:
+        value = None
+    if value is not None and minimum <= value <= maximum:
+        return value
+    logger.warning(
+        "Configuration %s holds unusable value %r; using default %s",
+        key,
+        row[0],
+        default,
+    )
+    return default
+
+
+def get_sql_query_timeout_seconds() -> int:
+    """How long one agent-issued SQL statement may run, in seconds.
+
+    Read per statement, so a change on Settings > Agent Settings applies to the
+    next query without a restart. Defaults to
+    :data:`DEFAULT_SQL_QUERY_TIMEOUT_SECONDS` when the frontend has never
+    written the setting, including deployments that run without it.
+    """
+    return read_configuration_int(
+        SQL_QUERY_TIMEOUT_SECONDS_KEY,
+        default=DEFAULT_SQL_QUERY_TIMEOUT_SECONDS,
+        minimum=MIN_SQL_QUERY_TIMEOUT_SECONDS,
+        maximum=MAX_SQL_QUERY_TIMEOUT_SECONDS,
+    )

@@ -7,6 +7,13 @@ import { getPrisma } from '@/lib/prisma';
 /** Key in the `configurations` table written by Settings > Agent Settings. */
 export const VISUALIZATION_ENABLED_KEY = 'visualization_enabled';
 
+/**
+ * Key written by the SQL Query Timeout field on Settings > Agent Settings. Its
+ * default, bounds and parser live in `@/lib/sqlQueryTimeout`, which is free of
+ * Prisma so the settings page and the OpenAPI generator can import them.
+ */
+export const SQL_QUERY_TIMEOUT_SECONDS_KEY = 'sql_query_timeout_seconds';
+
 /** Key written by the Distinct Value Scanning toggle on Settings > Semantic Compilation. */
 export const DISTINCT_VALUE_PROBING_ENABLED_KEY = 'distinct_value_probing_enabled';
 

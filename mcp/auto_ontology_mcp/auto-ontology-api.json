@@ -1433,6 +1433,118 @@
         "x-auto-ontology-proxied": false
       }
     },
+    "/api/configurations/sql-query-timeout": {
+      "get": {
+        "tags": ["configurations"],
+        "summary": "Key/value stored in the `configurations` table.",
+        "description": "Key/value stored in the `configurations` table. The text-to-SQL pipeline\nreads this same key (see auto_ontology/infra/feature_flags.py) before each\nstatement it issues, and cancels the statement once it runs this long. An\nabsent row means 30 seconds, which is also what a backend running without\nthis frontend uses.\nReport the instance-wide SQL query timeout, in seconds.",
+        "operationId": "get_api_configurations_sql_query_timeout",
+        "responses": {
+          "200": {
+            "description": "How long a SQL statement issued by the text-to-SQL agent may run before it is cancelled. 30 when unset.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seconds": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Statement timeout in seconds."
+                    }
+                  },
+                  "required": ["seconds"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/sql-query-timeout/route.ts",
+        "x-auto-ontology-permissions": {
+          "visualization": ["read"]
+        },
+        "x-auto-ontology-proxied": false
+      },
+      "put": {
+        "tags": ["configurations"],
+        "summary": "Set the instance-wide SQL query timeout (admin-only).",
+        "description": "Set the instance-wide SQL query timeout (admin-only).\n\nRejects anything but an in-range integer rather than coercing it: the backend\ntreats an unusable stored value as the default, so a coerced value would be\nsilently ignored while the page showed it as saved.",
+        "operationId": "put_api_configurations_sql_query_timeout",
+        "requestBody": {
+          "required": true,
+          "description": "`seconds` must be an integer from 1 to 3600.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seconds": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600
+                  }
+                },
+                "required": ["seconds"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored timeout. Applies from the next statement.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "seconds": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Statement timeout in seconds."
+                    }
+                  },
+                  "required": ["seconds"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not JSON, or `seconds` is not an in-range integer."
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/sql-query-timeout/route.ts",
+        "x-auto-ontology-permissions": {
+          "visualization": ["manage"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
     "/api/configurations/visualization": {
       "get": {
         "tags": ["configurations"],

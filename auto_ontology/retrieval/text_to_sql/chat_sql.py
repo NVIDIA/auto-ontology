@@ -21,13 +21,23 @@ from typing import Any
 
 import pandas as pd
 
+from auto_ontology.infra.feature_flags import (
+    DEFAULT_SQL_QUERY_TIMEOUT_SECONDS,
+    get_sql_query_timeout_seconds,
+)
+
 logger = logging.getLogger(__name__)
 
 # A user is waiting on a chat answer and the pipeline allows one stream at a
 # time, so a runaway query would pin the slot. Databricks enforces this server
 # side and cancels the statement; connect and warehouse scheduling sit outside
 # the cap, so expect roughly this plus a couple of seconds of wall clock.
-CHAT_STATEMENT_TIMEOUT_S = 30
+# Admins can change it on Settings > Agent Settings; this is the default when
+# they haven't, or when Auto Ontology runs without the frontend.
+CHAT_STATEMENT_TIMEOUT_S = DEFAULT_SQL_QUERY_TIMEOUT_SECONDS
+
+# Distinguishes "use the configured timeout" from an explicit ``None`` (no cap).
+_CONFIGURED: Any = object()
 
 # Generated SQL is normally short, but a pathological statement shouldn't flood
 # the log; keep enough to be recognisable and say how much was cut.
@@ -65,18 +75,21 @@ def execute_chat_sql(
     sql: str,
     *,
     kind: str = "chat SQL",
-    timeout_s: int | None = CHAT_STATEMENT_TIMEOUT_S,
+    timeout_s: int | None = _CONFIGURED,
 ) -> pd.DataFrame:
     """Log and run one agent-issued statement, capped in time where supported.
 
-    Connectors that don't advertise ``supports_statement_timeout`` are called
-    unchanged, so adding a cap here never breaks a connector that has no way to
-    honour it.
+    *timeout_s* defaults to the instance's configured SQL query timeout; pass
+    ``None`` to run uncapped. Connectors that don't advertise
+    ``supports_statement_timeout`` are called unchanged, so adding a cap here
+    never breaks a connector that has no way to honour it.
     """
     log_chat_sql(connector, sql, kind=kind)
 
-    if timeout_s is not None and getattr(
-        connector, "supports_statement_timeout", False
-    ):
-        return connector.execute(sql, timeout_s=timeout_s)
-    return connector.execute(sql)
+    if not getattr(connector, "supports_statement_timeout", False):
+        return connector.execute(sql)
+    if timeout_s is _CONFIGURED:
+        timeout_s = get_sql_query_timeout_seconds()
+    if timeout_s is None:
+        return connector.execute(sql)
+    return connector.execute(sql, timeout_s=timeout_s)

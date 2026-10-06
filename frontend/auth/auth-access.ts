@@ -40,9 +40,9 @@ const statement = {
 	tag: ['read', 'manage'],
 	// Semantic compilation (settings): admin-only toggle + manual trigger.
 	semanticCompilation: ['read', 'manage'],
-	// Agent settings: instance-wide visualization toggle, admin-only like the
-	// other settings flags. The chat pipeline resolves it server-side, so
-	// viewers never need to read it.
+	// Agent settings: the instance-wide visualization toggle and SQL query
+	// timeout, admin-only like the other settings flags. The chat pipeline
+	// resolves both server-side, so viewers never need to read them.
 	visualization: ['read', 'manage'],
 	// Model import/export (settings): admin-only YAML backup/restore of the
 	// catalog + semantic layer.

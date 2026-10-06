@@ -13,8 +13,10 @@ import pytest
 
 from auto_ontology.infra import feature_flags
 from auto_ontology.infra.feature_flags import (
+    get_sql_query_timeout_seconds,
     is_distinct_value_probing_enabled,
     read_configuration_flag,
+    read_configuration_int,
 )
 
 
@@ -140,3 +142,31 @@ def test_distinct_probing_honours_an_explicit_false(
 ) -> None:
     with _patched(monkeypatch, ("false",)):
         assert is_distinct_value_probing_enabled() is False
+
+
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [("45", 45), (" 45 ", 45), ("1", 1), ("3600", 3600)],
+)
+def test_sql_query_timeout_honours_a_stored_value(
+    monkeypatch: pytest.MonkeyPatch, stored: str, expected: int
+) -> None:
+    with _patched(monkeypatch, (stored,)) as cursor:
+        assert get_sql_query_timeout_seconds() == expected
+    assert cursor.executed[0][1] == ("sql_query_timeout_seconds",)
+
+
+@pytest.mark.parametrize("stored", ["", "abc", "1.5", "0", "-5", "3601"])
+def test_unusable_int_falls_back_to_the_default(
+    monkeypatch: pytest.MonkeyPatch, stored: str
+) -> None:
+    with _patched(monkeypatch, (stored,)):
+        assert read_configuration_int("k", default=30, minimum=1, maximum=3600) == 30
+
+
+def test_sql_query_timeout_defaults_to_30_seconds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An instance running without the frontend never writes the row."""
+    with _patched(monkeypatch, None):
+        assert get_sql_query_timeout_seconds() == 30

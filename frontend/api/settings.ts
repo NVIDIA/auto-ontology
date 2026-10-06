@@ -106,3 +106,12 @@ export const visualizationApi = {
 	setEnabled: (enabled: boolean): Promise<ResponseWithError<{ enabled: boolean }>> =>
 		requests.put('configurations/visualization', { enabled }),
 };
+
+// Instance-wide timeout for SQL the text-to-SQL agent runs (Settings > Agent Settings).
+export const sqlQueryTimeoutApi = {
+	get: (): Promise<ResponseWithError<{ seconds: number }>> =>
+		requests.get('configurations/sql-query-timeout'),
+
+	set: (seconds: number): Promise<ResponseWithError<{ seconds: number }>> =>
+		requests.put('configurations/sql-query-timeout', { seconds }),
+};
