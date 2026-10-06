@@ -123,7 +123,10 @@ class DuckDBDatabase(SQLDatabase):
                 raise StatementTimeout(timeout_s) from exc
             raise
         finally:
+            # cancel() cannot stop a callback that has already started; join so
+            # a late interrupt lands before we return, not on the next query.
             timer.cancel()
+            timer.join()
 
     def _execute(self, sql: str, parameters: Optional[list]) -> pd.DataFrame:
         if parameters:
