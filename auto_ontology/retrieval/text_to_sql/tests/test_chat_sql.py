@@ -13,9 +13,9 @@ import pytest
 from pytest import LogCaptureFixture
 
 from auto_ontology.connectors.databricks import AUTH_SSO_FEDERATION, AUTH_STORED_TOKEN
+from auto_ontology.infra.feature_flags import DEFAULT_SQL_QUERY_TIMEOUT_SECONDS
 from auto_ontology.retrieval.text_to_sql import chat_sql
 from auto_ontology.retrieval.text_to_sql.chat_sql import (
-    CHAT_STATEMENT_TIMEOUT_S,
     _MAX_LOGGED_SQL_CHARS,
     execute_chat_sql,
     log_chat_sql,
@@ -28,7 +28,7 @@ _LOGGER = "auto_ontology.retrieval.text_to_sql.chat_sql"
 @pytest.fixture
 def configured_timeout(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     """Stub the settings read; append to the list to change the stored value."""
-    stored = [CHAT_STATEMENT_TIMEOUT_S]
+    stored = [DEFAULT_SQL_QUERY_TIMEOUT_SECONDS]
     monkeypatch.setattr(chat_sql, "get_sql_query_timeout_seconds", lambda: stored[-1])
     return stored
 
@@ -113,8 +113,10 @@ def test_chat_sql_is_capped_at_30_seconds(configured_timeout: list[int]) -> None
     connector = _Recorder(supports_timeout=True)
 
     assert execute_chat_sql(connector, "SELECT 1") == "df"
-    assert connector.calls == [("SELECT 1", {"timeout_s": CHAT_STATEMENT_TIMEOUT_S})]
-    assert CHAT_STATEMENT_TIMEOUT_S == 30
+    assert connector.calls == [
+        ("SELECT 1", {"timeout_s": DEFAULT_SQL_QUERY_TIMEOUT_SECONDS})
+    ]
+    assert DEFAULT_SQL_QUERY_TIMEOUT_SECONDS == 30
 
 
 def test_chat_sql_uses_the_configured_timeout(configured_timeout: list[int]) -> None:
@@ -164,12 +166,14 @@ def test_probe_sql_is_also_capped(configured_timeout: list[int]) -> None:
 
     execute_chat_sql(connector, "SELECT 1", kind="probe SQL")
 
-    assert connector.calls[0][1] == {"timeout_s": CHAT_STATEMENT_TIMEOUT_S}
+    assert connector.calls[0][1] == {"timeout_s": DEFAULT_SQL_QUERY_TIMEOUT_SECONDS}
 
 
-def test_timeout_can_be_disabled_explicitly() -> None:
+def test_an_explicit_timeout_overrides_the_configured_one(
+    configured_timeout: list[int],
+) -> None:
     connector = _Recorder(supports_timeout=True)
 
-    execute_chat_sql(connector, "SELECT 1", timeout_s=None)
+    execute_chat_sql(connector, "SELECT 1", timeout_s=7)
 
-    assert connector.calls == [("SELECT 1", {})]
+    assert connector.calls == [("SELECT 1", {"timeout_s": 7})]
