@@ -136,6 +136,62 @@ def test_duckdb_connection_is_usable_after_a_timeout(
     assert duckdb_db.execute("SELECT 42 AS v", timeout_s=5)["v"].iloc[0] == 42
 
 
+def test_duckdb_timeout_only_stops_its_own_statement(
+    duckdb_db: DuckDBDatabase,
+) -> None:
+    """Profiling runs tables in parallel on one connector.
+
+    One table's timer firing must not interrupt another table's query.
+    """
+    outcome: dict[str, Any] = {}
+
+    def _long_but_within_cap() -> None:
+        try:
+            outcome["frame"] = duckdb_db.execute(
+                "SELECT sum(hash(i)) AS s FROM range(300000000) t(i)", timeout_s=60
+            )
+        except BaseException as exc:  # noqa: BLE001 - asserted below
+            outcome["error"] = exc
+
+    neighbour = threading.Thread(target=_long_but_within_cap)
+    neighbour.start()
+    time.sleep(0.1)
+    with pytest.raises(StatementTimeout):
+        duckdb_db.execute(_ENDLESS_SQL, timeout_s=0.2)
+    neighbour.join(30)
+
+    assert "error" not in outcome, outcome.get("error")
+    assert len(outcome["frame"]) == 1
+
+
+def test_kyuubi_timeouts_are_statement_timeouts() -> None:
+    from auto_ontology.connectors.kyuubi import KyuubiQueryTimeout
+
+    error = KyuubiQueryTimeout(30, "Kyuubi statement exceeded 30s")
+    assert isinstance(error, StatementTimeout)
+    assert error.timeout_s == 30
+    assert str(error) == "Kyuubi statement exceeded 30s"
+
+
+@pytest.mark.parametrize(
+    ("elapsed_s", "points_at"),
+    [
+        (None, "Agent Settings"),
+        (300.4, "Agent Settings"),
+        # Cancelled at 10s under a 300s cap: the warehouse's own limit fired.
+        (10.0, "database or warehouse"),
+    ],
+)
+def test_timeout_message_names_the_limit_that_fired(
+    elapsed_s: float | None, points_at: str
+) -> None:
+    message = str(StatementTimeout(300, elapsed_s=elapsed_s))
+
+    assert points_at in message
+    if points_at != "Agent Settings":
+        assert "will not help" in message
+
+
 # ----------------------------------------------------------------------
 # Postgres
 # ----------------------------------------------------------------------
@@ -243,17 +299,22 @@ def test_live_postgres_cancels_and_does_not_leak_the_cap() -> None:
 
 
 class _MySQLCursor:
+    """Records statements; rejects SETs of *reject* the way the server does."""
+
     description = [("v",)]
 
-    def __init__(self, reject: str | None) -> None:
+    def __init__(self, reject: tuple[str, ...]) -> None:
         self.executed: list[tuple[str, Any]] = []
+        self.attempted: list[str] = []
         self._reject = reject
 
     def execute(self, sql: str, params: Any = None) -> None:
-        if self._reject and self._reject in sql:
-            import mysql.connector
-
-            raise mysql.connector.Error(msg=f"Unknown system variable '{self._reject}'")
+        self.attempted.append(sql)
+        for variable in self._reject:
+            if variable in sql:
+                raise mysql.connector.Error(
+                    msg=f"Unknown system variable '{variable}'", errno=1193
+                )
         self.executed.append((sql, params))
 
     def fetchall(self) -> list[dict[str, int]]:
@@ -264,7 +325,7 @@ class _MySQLCursor:
 
 
 def _fake_mysql(
-    monkeypatch: MonkeyPatch, reject: str | None = None
+    monkeypatch: MonkeyPatch, reject: tuple[str, ...] = ()
 ) -> tuple[MySQLDatabase, _MySQLCursor]:
     cursor = _MySQLCursor(reject)
 
@@ -297,14 +358,46 @@ def test_mysql_sets_max_execution_time(monkeypatch: MonkeyPatch) -> None:
 
 
 def test_mariadb_falls_back_to_max_statement_time(monkeypatch: MonkeyPatch) -> None:
-    database, cursor = _fake_mysql(monkeypatch, reject="max_execution_time")
+    database, cursor = _fake_mysql(monkeypatch, reject=("max_execution_time",))
 
     database.execute("SELECT 1", timeout_s=30)
+    database.execute("SELECT 2", timeout_s=30)
 
     assert cursor.executed == [
         ("SET SESSION max_statement_time = %s", (30.0,)),
         ("SELECT 1", None),
+        ("SET SESSION max_statement_time = %s", (30.0,)),
+        ("SELECT 2", None),
     ]
+    # Learned once: the second statement does not retry the MySQL spelling.
+    assert cursor.attempted.count("SET SESSION max_execution_time = %s") == 1
+
+
+def test_mysql_without_either_variable_runs_uncapped(
+    monkeypatch: MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Old MySQL / MariaDB: run as before the cap existed, never fail."""
+    database, cursor = _fake_mysql(
+        monkeypatch, reject=("max_execution_time", "max_statement_time")
+    )
+
+    with caplog.at_level("WARNING"):
+        database.execute("SELECT 1", timeout_s=30)
+        database.execute("SELECT 2", timeout_s=30)
+
+    assert cursor.executed == [("SELECT 1", None), ("SELECT 2", None)]
+    # Probed once, warned once.
+    assert len(cursor.attempted) == 4
+    assert sum("run uncapped" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_mysql_other_set_errors_are_not_swallowed(monkeypatch: MonkeyPatch) -> None:
+    database, cursor = _fake_mysql(monkeypatch)
+    error = mysql.connector.Error(msg="Lost connection", errno=2013)
+    monkeypatch.setattr(cursor, "execute", lambda sql, params=None: _raise(error))
+
+    with pytest.raises(mysql.connector.Error):
+        database.execute("SELECT 1", timeout_s=30)
 
 
 def test_mysql_without_timeout_sends_no_setting(monkeypatch: MonkeyPatch) -> None:
@@ -377,16 +470,28 @@ def test_snowflake_sets_statement_timeout_session_parameter(
 # ----------------------------------------------------------------------
 
 
+class _TrinoError(Exception):
+    """Stands in for ``TrinoQueryError``, which the connector reads by attribute."""
+
+    def __init__(self, error_name: str, message: str) -> None:
+        super().__init__(message)
+        self.error_name = error_name
+
+
 class _TrinoCursor:
+    """Records each statement with the session properties it was sent under."""
+
     def __init__(self, conn: "_TrinoConnection") -> None:
         self._conn = conn
         self.description: list[tuple[str, str]] | None = None
 
     def execute(self, sql: str, parameters: Any = None) -> None:
-        self._conn.statements.append(sql)
-        if sql in self._conn.fail_on:
-            raise RuntimeError(f"failed: {sql}")
-        self.description = None if sql.startswith(("SET", "RESET")) else [("v", "")]
+        properties = dict(self._conn._client_session.properties)
+        self._conn.sent.append((sql, properties))
+        error = self._conn.fail(sql, properties)
+        if error is not None:
+            raise error
+        self.description = [("v", "")]
 
     def fetchall(self) -> list[list[int]]:
         return [[1]]
@@ -396,16 +501,16 @@ class _TrinoCursor:
 
 
 class _TrinoConnection:
-    def __init__(self, fail_on: tuple[str, ...] = ()) -> None:
-        self.statements: list[str] = []
-        self.fail_on = fail_on
-        self.closed = False
+    def __init__(self, fail: Any = lambda sql, properties: None) -> None:
+        self.sent: list[tuple[str, dict[str, str]]] = []
+        self.fail = fail
+        self._client_session = SimpleNamespace(properties={"existing": "kept"})
 
     def cursor(self) -> _TrinoCursor:
         return _TrinoCursor(self)
 
     def close(self) -> None:
-        self.closed = True
+        return None
 
 
 def _trino(fake: _TrinoConnection) -> TrinoDatabase:
@@ -418,39 +523,70 @@ def _trino(fake: _TrinoConnection) -> TrinoDatabase:
     return database
 
 
-def test_trino_sets_and_resets_query_max_run_time() -> None:
+def test_trino_sends_the_cap_with_that_request_only() -> None:
     fake = _TrinoConnection()
     database = _trino(fake)
 
     result = database.execute("SELECT 1", timeout_s=30)
+    database.execute("SELECT 2")
 
     assert result["v"].tolist() == [1]
-    assert fake.statements == [
-        "SET SESSION query_max_run_time = '30s'",
-        "SELECT 1",
-        "RESET SESSION query_max_run_time",
+    # No SET/RESET round trips: one request each, the cap on the first only.
+    assert fake.sent == [
+        ("SELECT 1", {"existing": "kept", "query_max_run_time": "30s"}),
+        ("SELECT 2", {"existing": "kept"}),
     ]
 
 
-def test_trino_resets_even_when_the_query_fails() -> None:
-    fake = _TrinoConnection(fail_on=("SELECT boom",))
+def test_trino_restores_session_properties_when_the_query_fails() -> None:
+    fake = _TrinoConnection(
+        fail=lambda sql, properties: RuntimeError("boom") if sql == "SELECT 1" else None
+    )
     database = _trino(fake)
 
-    with pytest.raises(RuntimeError, match="SELECT boom"):
-        database.execute("SELECT boom", timeout_s=30)
+    with pytest.raises(RuntimeError, match="boom"):
+        database.execute("SELECT 1", timeout_s=30)
 
-    assert fake.statements[-1] == "RESET SESSION query_max_run_time"
+    assert fake._client_session.properties == {"existing": "kept"}
 
 
-def test_trino_drops_the_connection_if_the_reset_fails() -> None:
-    """Otherwise the cap would leak onto later, uncapped metadata scans."""
-    fake = _TrinoConnection(fail_on=("RESET SESSION query_max_run_time",))
+def test_trino_runs_uncapped_where_the_property_is_denied(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Access control refusing the property must not fail every query."""
+    denied = _TrinoError(
+        "PERMISSION_DENIED",
+        "Access Denied: Cannot set system session property query_max_run_time",
+    )
+    fake = _TrinoConnection(
+        fail=lambda sql, properties: (
+            denied if "query_max_run_time" in properties else None
+        )
+    )
     database = _trino(fake)
 
-    database.execute("SELECT 1", timeout_s=30)
+    with caplog.at_level("WARNING"):
+        first = database.execute("SELECT 1", timeout_s=30)
+        database.execute("SELECT 2", timeout_s=30)
 
-    assert fake.closed
-    assert database._connection is None  # noqa: SLF001
+    assert first["v"].tolist() == [1]
+    assert [properties for _, properties in fake.sent] == [
+        {"existing": "kept", "query_max_run_time": "30s"},
+        {"existing": "kept"},
+        # Remembered: no second attempt with the property.
+        {"existing": "kept"},
+    ]
+    assert sum("run uncapped" in r.getMessage() for r in caplog.records) == 1
+
+
+def test_trino_other_permission_errors_are_not_retried() -> None:
+    denied = _TrinoError("PERMISSION_DENIED", "Access Denied: Cannot select from t")
+    fake = _TrinoConnection(fail=lambda sql, properties: denied)
+    database = _trino(fake)
+
+    with pytest.raises(_TrinoError):
+        database.execute("SELECT * FROM t", timeout_s=30)
+    assert len(fake.sent) == 1
 
 
 # ----------------------------------------------------------------------
@@ -620,22 +756,43 @@ def test_snowflake_only_its_timeout_becomes_statement_timeout(
 
 
 def test_trino_time_limit_becomes_statement_timeout() -> None:
-    class _TimeLimit(Exception):
-        error_name = "EXCEEDED_TIME_LIMIT"
-
-    class _Cursor(_TrinoCursor):
-        def execute(self, sql: str, parameters: Any = None) -> None:
-            super().execute(sql, parameters)
-            if sql == "SELECT slow":
-                raise _TimeLimit("Query exceeded maximum time limit of 30.00s")
-
-    fake = _TrinoConnection()
-    fake.cursor = lambda: _Cursor(fake)  # type: ignore[method-assign]
+    limit = _TrinoError(
+        "EXCEEDED_TIME_LIMIT", "Query exceeded maximum time limit of 30.00s"
+    )
+    fake = _TrinoConnection(fail=lambda sql, properties: limit)
     database = _trino(fake)
 
     with pytest.raises(StatementTimeout):
         database.execute("SELECT slow", timeout_s=30)
-    assert fake.statements[-1] == "RESET SESSION query_max_run_time"
+    assert fake._client_session.properties == {"existing": "kept"}
+
+
+def test_clickhouse_client_side_read_timeout_is_a_statement_timeout() -> None:
+    """The server answered nothing within cap + grace: a slow query, not a dead host."""
+
+    def _slow(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    database = ClickHouseDatabase("clickhouse://u@ch.example.com:8123/db")
+    database._client = httpx.Client(  # noqa: SLF001 - test double for the server
+        base_url="http://test", transport=httpx.MockTransport(_slow)
+    )
+
+    with pytest.raises(StatementTimeout):
+        database.execute("SELECT 1", timeout_s=30)
+
+
+def test_clickhouse_connect_timeout_is_still_unreachable() -> None:
+    def _unreachable(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("timed out", request=request)
+
+    database = ClickHouseDatabase("clickhouse://u@ch.example.com:8123/db")
+    database._client = httpx.Client(  # noqa: SLF001 - test double for the server
+        base_url="http://test", transport=httpx.MockTransport(_unreachable)
+    )
+
+    with pytest.raises(ClickHouseError, match="Could not connect"):
+        database.execute("SELECT 1", timeout_s=30)
 
 
 def _clickhouse_answering(response: httpx.Response) -> ClickHouseDatabase:

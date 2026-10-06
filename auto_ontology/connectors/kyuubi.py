@@ -58,7 +58,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import pandas as pd
 from auto_ontology.catalog.extract import IncompleteCatalogExtractionError
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 from auto_ontology.connectors.db_errors import is_session_lost
 
@@ -91,7 +91,7 @@ _SLOW_QUERY_SECONDS = 5.0
 _PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 
-class KyuubiQueryTimeout(TimeoutError):
+class KyuubiQueryTimeout(StatementTimeout):
     """A statement outlived the caller's ``timeout_s`` and was cancelled.
 
     Deliberately not a transport error: the socket is fine and the server is
@@ -648,8 +648,9 @@ class KyuubiDatabase(SQLDatabase):
             if elapsed >= ceiling:
                 self._cancel(cursor)
                 raise KyuubiQueryTimeout(
+                    ceiling,
                     f"Kyuubi statement exceeded {ceiling}s in state "
-                    f"{names.get(state, state)} and was cancelled: {label}"
+                    f"{names.get(state, state)} and was cancelled: {label}",
                 )
             interval = min(interval, max(ceiling - elapsed, 0.0))
             time.sleep(interval)

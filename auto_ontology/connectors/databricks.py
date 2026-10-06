@@ -448,7 +448,11 @@ class DatabricksDatabase(SQLDatabase):
                 )
             except Exception as exc:
                 if timeout_s is not None and _is_statement_timeout(exc):
-                    raise StatementTimeout(timeout_s) from exc
+                    # Also fires for a lower workspace-level timeout; elapsed
+                    # time is what tells the user which limit to raise.
+                    raise StatementTimeout(
+                        timeout_s, elapsed_s=time.perf_counter() - started
+                    ) from exc
                 # Only a shared connection outlives its statement, so only it can
                 # be holding a session the warehouse has since dropped. A
                 # per-statement connection was opened moments ago, and reopening

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -419,10 +420,21 @@ class ClickHouseDatabase(SQLDatabase):
             if timeout_s is None
             else timeout_s + _TIMEOUT_GRACE_S
         )
+        started = time.monotonic()
         try:
             response = client.post(
                 "/", content=sql.encode("utf-8"), params=params, timeout=timeout
             )
+        except httpx.ReadTimeout as error:
+            # Connected and sent, then no answer within the cap plus grace: the
+            # server checks max_execution_time only between blocks, so a slow
+            # block (or a buffering proxy) can outlast it. That is a slow
+            # statement, not an unreachable server.
+            if timeout_s is None:
+                raise ClickHouseError(
+                    f"Could not connect to ClickHouse at {self._base_url}: {error!r}"
+                ) from error
+            raise StatementTimeout.since(timeout_s, started) from error
         except httpx.HTTPError as error:
             # The wording matters: ``auto_ontology.connectors.db_errors`` classifies by
             # message text, and "could not connect" is one of the phrases it
@@ -437,7 +449,9 @@ class ClickHouseDatabase(SQLDatabase):
         if response.status_code >= 400:
             message = _error_message(response)
             if timeout_s is not None and _is_timeout_exceeded(response, message):
-                raise StatementTimeout(timeout_s) from ClickHouseError(message)
+                raise StatementTimeout.since(timeout_s, started) from ClickHouseError(
+                    message
+                )
             raise ClickHouseError(message)
 
         body = response.text.strip()

@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import binascii
 import logging
+import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -253,11 +254,14 @@ class SnowflakeDatabase(SQLDatabase):
                     "STATEMENT_TIMEOUT_IN_SECONDS": max(1, int(timeout_s)),
                 },
             }
+        started = time.monotonic()
         try:
             return self._execute(connect_kwargs, sql, parameters)
         except snowflake.connector.errors.Error as exc:
+            # 630 also fires for a lower warehouse/account timeout; ``since``
+            # tells the two apart by how long the statement actually ran.
             if timeout_s is not None and exc.errno == _STATEMENT_TIMEOUT_ERRNO:
-                raise StatementTimeout(timeout_s) from exc
+                raise StatementTimeout.since(timeout_s, started) from exc
             raise
 
     def _execute(

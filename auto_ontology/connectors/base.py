@@ -33,6 +33,7 @@ Example
 
 from __future__ import annotations
 
+import time
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING, Optional
 
@@ -44,19 +45,55 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from auto_ontology.catalog.table_filter import TableFilter
 
 
-class StatementTimeout(TimeoutError):
-    """A statement outlived the caller's ``timeout_s`` and was stopped.
+# A cancellation this far short of the caller's cap was not the caller's cap:
+# the engine has a lower limit of its own (a warehouse- or account-level
+# statement timeout). Generous, because connect time is inside the measurement.
+_OWN_CAP_FRACTION = 0.9
 
-    Raised by connectors that enforce the cap on the client side. Engines that
-    enforce it on the server raise their driver's own cancellation error.
+
+class StatementTimeout(TimeoutError):
+    """A statement outlived a time limit and was stopped.
+
+    Every connector raises this when the cap passed as ``execute(...,
+    timeout_s=...)`` fires, whether the engine or the client enforces it, so
+    callers can recognise a timeout by type alone.
     """
 
-    def __init__(self, timeout_s: float) -> None:
-        super().__init__(
-            f"Query cancelled: it ran longer than the {timeout_s:g}s statement "
-            "timeout. Simplify the query or raise the timeout in Agent Settings."
-        )
+    def __init__(
+        self,
+        timeout_s: float,
+        message: str | None = None,
+        *,
+        elapsed_s: float | None = None,
+    ) -> None:
+        if message is None:
+            message = _timeout_message(timeout_s, elapsed_s)
+        super().__init__(message)
         self.timeout_s = timeout_s
+        self.elapsed_s = elapsed_s
+
+    @classmethod
+    def since(cls, timeout_s: float, started: float) -> "StatementTimeout":
+        """Build the error for a statement started at ``time.monotonic()`` *started*.
+
+        For server-reported cancellations, where the engine may have stopped
+        the statement at a lower limit of its own rather than at *timeout_s*.
+        """
+        return cls(timeout_s, elapsed_s=time.monotonic() - started)
+
+
+def _timeout_message(timeout_s: float, elapsed_s: float | None) -> str:
+    if elapsed_s is not None and elapsed_s < timeout_s * _OWN_CAP_FRACTION:
+        return (
+            f"Query cancelled by the database's own statement timeout after "
+            f"{elapsed_s:.0f}s, before the {timeout_s:g}s limit in Agent "
+            "Settings. Simplify the query, or raise the limit configured on the "
+            "database or warehouse; raising it in Agent Settings will not help."
+        )
+    return (
+        f"Query cancelled: it ran longer than the {timeout_s:g}s statement "
+        "timeout. Simplify the query or raise the timeout in Agent Settings."
+    )
 
 
 class SQLDatabase(ABC):

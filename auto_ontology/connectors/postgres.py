@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import time
 import weakref
 from typing import Optional
 
@@ -104,6 +105,7 @@ class PostgresDatabase(SQLDatabase):
         with self._pool.connection() as conn:
             if timeout_s is None:
                 return _fetch_frame(conn, sql, parameters)
+            started = time.monotonic()
             try:
                 with conn.transaction():
                     conn.execute(
@@ -116,7 +118,7 @@ class PostgresDatabase(SQLDatabase):
                 # timeout we set is ours to relabel.
                 if "statement timeout" not in str(exc):
                     raise
-                raise StatementTimeout(timeout_s) from exc
+                raise StatementTimeout.since(timeout_s, started) from exc
 
     # ------------------------------------------------------------------
     # Schema introspection

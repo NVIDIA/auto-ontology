@@ -38,6 +38,16 @@ from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 logger = logging.getLogger(__name__)
 
 
+def _execute(
+    conn: duckdb.DuckDBPyConnection, sql: str, parameters: Optional[list]
+) -> pd.DataFrame:
+    if parameters:
+        rel = conn.execute(sql, parameters)
+    else:
+        rel = conn.execute(sql)
+    return rel.df()
+
+
 class DuckDBDatabase(SQLDatabase):
     """In-process DuckDB connection with convenience helpers.
 
@@ -101,39 +111,36 @@ class DuckDBDatabase(SQLDatabase):
         timeout_s:
             Interrupt the statement after this many seconds and raise
             :class:`StatementTimeout`. DuckDB has no server-side cap, so a
-            timer thread calls ``interrupt()`` on the connection.
+            timer thread calls ``interrupt()``.
         """
         logger.debug("DuckDB executing (→ DataFrame): %s", sql[:200])
         if timeout_s is None:
-            return self._execute(sql, parameters)
+            return _execute(self.conn, sql, parameters)
 
+        # ``interrupt()`` stops whatever is running on the connection it is
+        # called on, and profiling runs tables in parallel. A cursor of its own
+        # (same database, separate client context) means the timer can only
+        # ever stop this statement.
+        cursor = self.conn.cursor()
         fired = threading.Event()
 
         def _interrupt() -> None:
             fired.set()
-            self.conn.interrupt()
+            cursor.interrupt()
 
         timer = threading.Timer(timeout_s, _interrupt)
         timer.daemon = True
         timer.start()
         try:
-            return self._execute(sql, parameters)
+            return _execute(cursor, sql, parameters)
         except duckdb.InterruptException as exc:
             if fired.is_set():
                 raise StatementTimeout(timeout_s) from exc
             raise
         finally:
-            # cancel() cannot stop a callback that has already started; join so
-            # a late interrupt lands before we return, not on the next query.
             timer.cancel()
             timer.join()
-
-    def _execute(self, sql: str, parameters: Optional[list]) -> pd.DataFrame:
-        if parameters:
-            rel = self.conn.execute(sql, parameters)
-        else:
-            rel = self.conn.execute(sql)
-        return rel.df()
+            cursor.close()
 
     # ------------------------------------------------------------------
     # Helpers
