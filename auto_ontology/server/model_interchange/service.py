@@ -37,9 +37,24 @@ _AUTO_ONTOLOGY_ROOT_KEYS = frozenset(AutoOntologyModelDocument.model_fields)
 
 
 def _dialect_by_database_name() -> dict[str, str]:
-    """Resolve SQL dialect strings keyed by catalog database name."""
+    """Resolve SQL dialect strings keyed by catalog database name.
+
+    Live connectors give the most precise dialect, but building them connects
+    to every database, and one that cannot be reached would otherwise fail the
+    whole export. The dialect is informational in an export, so when that
+    happens the saved connection settings are used for every database instead.
+    """
     dialects: dict[str, str] = {}
-    for connector in get_connectors():
+    try:
+        connectors = get_connectors()
+    except Exception as exc:
+        logger.warning(
+            "Could not connect to every configured database (%s); exporting "
+            "dialects from the saved connection settings instead",
+            exc,
+        )
+        connectors = []
+    for connector in connectors:
         database_name = getattr(connector, "database_name", None)
         dialect = getattr(connector, "dialect", None)
         if database_name and dialect:

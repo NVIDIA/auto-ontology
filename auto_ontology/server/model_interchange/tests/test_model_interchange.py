@@ -582,6 +582,54 @@ def test_export_model_auto_ontology_keeps_every_represented_table(
     assert len(term["columns_attributes"]) == 3
 
 
+def test_dialects_fall_back_to_saved_settings_when_a_database_is_unreachable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One unreachable database must not fail the whole export."""
+    with (
+        patch(
+            "auto_ontology.server.model_interchange.service.get_connectors",
+            side_effect=ConnectionError("Can't connect to MySQL server"),
+        ),
+        patch(
+            "auto_ontology.server.model_interchange.service.list_connections",
+            return_value=[
+                {"name": "dw", "type": "mysql"},
+                {"name": "wwi", "type": "postgresql"},
+            ],
+        ),
+    ):
+        dialects = service._dialect_by_database_name()
+
+    assert dialects == {"dw": "mysql", "wwi": "postgresql"}
+    assert "Can't connect to MySQL server" in caplog.text
+
+
+@patch(
+    "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.fetch_export_rows")
+@patch("auto_ontology.server.model_interchange.service.dal.validate_database_ids")
+@patch(
+    "auto_ontology.server.model_interchange.service.get_connectors",
+    side_effect=ConnectionError("Can't connect to MySQL server"),
+)
+@pytest.mark.parametrize("model_format", list(ModelFormat))
+def test_export_model_succeeds_with_an_unreachable_database(
+    _mock_connectors: MagicMock,
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+    model_format: ModelFormat,
+) -> None:
+    mock_fetch.return_value = _export_rows()
+
+    yaml_text = service.export_model(ExportRequest(databases=[], format=model_format))
+
+    assert yaml.safe_load(yaml_text)
+
+
 def test_detect_model_format_tells_the_vocabularies_apart() -> None:
     assert service.detect_model_format({"data_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
     assert (
