@@ -14,6 +14,7 @@ constraints = [
     { name = "virtualenv", specifier = ">=21.14.2" },
 ]
 overrides = [{ name = "urllib3", specifier = ">=2.8.0,<3" }]
+excludes = ["ray-haproxy"]
 
 [[package]]
 name = "aiobotocore"
@@ -3288,22 +3289,12 @@ serve = [
     { name = "prometheus-client" },
     { name = "py-spy" },
     { name = "pydantic" },
-    { name = "ray-haproxy", marker = "sys_platform == 'linux'" },
     { name = "requests" },
     { name = "smart-open" },
     { name = "starlette" },
     { name = "uvicorn", extra = ["standard"] },
     { name = "virtualenv" },
     { name = "watchfiles" },
-]
-
-[[package]]
-name = "ray-haproxy"
-version = "2.8.25"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/31/78/4cdca49514f94ced71525c5662e0b62fc64d625f4536910304dc71c680e9/ray_haproxy-2.8.25-py3-none-manylinux_2_17_aarch64.whl", hash = "sha256:a63902c2fe7eb51fbcb502980228d743b79da6cecab230c4c24674517b1ac3ac", size = 3962434, upload-time = "2026-06-29T21:49:54.611Z" },
-    { url = "https://files.pythonhosted.org/packages/b7/48/bef71a3bd4fa4b467299a9b859fac0a7660eefbc56d47b4b0f2b7c34491a/ray_haproxy-2.8.25-py3-none-manylinux_2_17_x86_64.whl", hash = "sha256:51671f11afb571ed5b37042f9287daf48de235f2d32ad18b732ee9587e9ad076", size = 4115278, upload-time = "2026-06-29T21:49:56.244Z" },
 ]
 
 [[package]]
