@@ -3,13 +3,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Role } from '@/enums/auth';
-import type { InvitationStatus } from '@/enums/invitation';
+import type { InvitationKind, InvitationStatus } from '@/enums/invitation';
 
 export type Invitation = {
 	id: string;
 	email: string;
 	name: string;
 	role: Role;
+	kind: InvitationKind;
 	status: InvitationStatus;
 	expires_at: string;
 	created_at: string;

@@ -11,6 +11,7 @@ import { authApi } from '@/api/auth';
 import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
 import { Size, ButtonTheme } from '@/enums/button';
+import { InvitationKind } from '@/enums/invitation';
 
 const inputClass =
 	'w-full rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300';
@@ -21,9 +22,10 @@ const MAX_PASSWORD_LENGTH = 128;
 type InviteSetPasswordProps = {
 	token: string;
 	email: string;
+	kind: InvitationKind;
 };
 
-export const InviteSetPassword = ({ token, email }: InviteSetPasswordProps) => {
+export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps) => {
 	const router = useRouter();
 	const [password, setPassword] = useState('');
 	const [confirm, setConfirm] = useState('');
@@ -56,7 +58,11 @@ export const InviteSetPassword = ({ token, email }: InviteSetPasswordProps) => {
 
 		const signedIn = await authApi.signInWithPassword(email, password);
 		if (signedIn.error) {
-			setError('Account created. Sign in from the login page.');
+			setError(
+				kind === InvitationKind.Reset
+					? 'Password updated. Sign in from the login page.'
+					: 'Account created. Sign in from the login page.',
+			);
 			setSubmitting(false);
 			router.push('/login');
 			return;
@@ -80,8 +86,11 @@ export const InviteSetPassword = ({ token, email }: InviteSetPasswordProps) => {
 					className="flex w-full flex-col gap-4"
 				>
 					<p className="text-xs text-secondary dark:text-zinc-400">
-						Set a password for <span className="font-medium text-body">{email}</span> to
-						finish joining.
+						{kind === InvitationKind.Reset
+							? 'Set a new password for '
+							: 'Set a password for '}
+						<span className="font-medium text-body">{email}</span>
+						{kind === InvitationKind.Reset ? '.' : ' to finish joining.'}
 					</p>
 					<div className="flex flex-col gap-1.5">
 						<label
@@ -143,7 +152,11 @@ export const InviteSetPassword = ({ token, email }: InviteSetPasswordProps) => {
 						type="submit"
 						disabled={submitting}
 					>
-						{submitting ? 'Saving…' : 'Create password'}
+						{submitting
+							? 'Saving…'
+							: kind === InvitationKind.Reset
+								? 'Save password'
+								: 'Create password'}
 					</Button>
 				</form>
 			</div>

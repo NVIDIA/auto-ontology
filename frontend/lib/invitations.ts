@@ -4,8 +4,9 @@
 
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from 'better-auth/crypto';
+import type { Prisma } from '@/generated/prisma/client';
 import { Role } from '@/enums/auth';
-import { InvitationStatus } from '@/enums/invitation';
+import { InvitationKind, InvitationStatus } from '@/enums/invitation';
 import { getPrisma } from '@/lib/prisma';
 import type { Invitation } from '@/types/invitation';
 
@@ -16,6 +17,7 @@ export const MAX_PASSWORD_LENGTH = 128;
 export type OpenInvitation = {
 	email: string;
 	name: string;
+	kind: InvitationKind;
 	expires_at: Date;
 };
 
@@ -28,6 +30,35 @@ const inviteUrl = (appUrl: string, token: string): string =>
 
 const isLiveInvitation = (row: { expires_at: Date }): boolean =>
 	row.expires_at.getTime() > Date.now();
+
+const invitationKind = (userId: string | null): InvitationKind =>
+	userId ? InvitationKind.Reset : InvitationKind.Invite;
+
+const writeCredentialPassword = async (
+	tx: Prisma.TransactionClient,
+	userId: string,
+	hashedPassword: string,
+): Promise<void> => {
+	const credential = await tx.account.findFirst({
+		where: { userId, providerId: 'credential' },
+	});
+	if (credential) {
+		await tx.account.update({
+			where: { id: credential.id },
+			data: { password: hashedPassword },
+		});
+		return;
+	}
+	await tx.account.create({
+		data: {
+			id: randomUUID(),
+			accountId: userId,
+			providerId: 'credential',
+			userId,
+			password: hashedPassword,
+		},
+	});
+};
 
 export const invitationStatus = (row: { expires_at: Date }): InvitationStatus => {
 	if (row.expires_at.getTime() <= Date.now()) return InvitationStatus.Expired;
@@ -43,10 +74,15 @@ export const getOpenInvitation = async (token: string): Promise<OpenInvitation |
 	if (!token) return null;
 	const row = await getPrisma().invitation.findUnique({
 		where: { token_hash: hashInviteToken(token) },
-		select: { email: true, name: true, expires_at: true },
+		select: { email: true, name: true, expires_at: true, user_id: true },
 	});
 	if (!row || !isLiveInvitation(row)) return null;
-	return { email: row.email, name: row.name, expires_at: row.expires_at };
+	return {
+		email: row.email,
+		name: row.name,
+		kind: invitationKind(row.user_id),
+		expires_at: row.expires_at,
+	};
 };
 
 export const listInvitations = async (appUrl: string): Promise<Invitation[]> => {
@@ -61,6 +97,7 @@ export const listInvitations = async (appUrl: string): Promise<Invitation[]> => 
 			email: row.email,
 			name: row.name,
 			role: row.role === Role.Admin ? Role.Admin : Role.Viewer,
+			kind: invitationKind(row.user_id),
 			status,
 			expires_at: row.expires_at.toISOString(),
 			created_at: row.created_at.toISOString(),
@@ -110,6 +147,51 @@ export const createInvitation = async ({
 	return { url: inviteUrl(appUrl, token), email, expires_at: expiresAt };
 };
 
+export const createPasswordResetInvitation = async ({
+	userId,
+	createdById,
+	appUrl,
+}: {
+	userId: string;
+	createdById: string;
+	appUrl: string;
+}): Promise<{ url: string; email: string; expires_at: Date }> => {
+	if (userId === createdById) {
+		throw new CannotResetSelfError();
+	}
+
+	const prisma = getPrisma();
+	const user = await prisma.user.findUnique({ where: { id: userId } });
+	if (!user) {
+		throw new ResetUserNotFoundError();
+	}
+
+	const email = user.email.trim().toLowerCase();
+	const name = user.name.trim();
+	const role = user.role === Role.Admin ? Role.Admin : Role.Viewer;
+	const token = generateInviteToken();
+	const expiresAt = new Date(Date.now() + INVITE_TTL_MS);
+
+	await prisma.$transaction([
+		prisma.invitation.deleteMany({ where: { email } }),
+		prisma.invitation.create({
+			data: {
+				id: randomUUID(),
+				email,
+				name,
+				role,
+				token,
+				token_hash: hashInviteToken(token),
+				expires_at: expiresAt,
+				user_id: user.id,
+				created_by_id: createdById,
+			},
+		}),
+	]);
+
+	return { url: inviteUrl(appUrl, token), email, expires_at: expiresAt };
+};
+
 export const deleteInvitation = async (id: string): Promise<void> => {
 	const prisma = getPrisma();
 	const existing = await prisma.invitation.findUnique({ where: { id } });
@@ -149,6 +231,17 @@ export const acceptInvitation = async (
 				throw new InviteNotFoundError();
 			}
 
+			if (invitation.user_id) {
+				const user = await tx.user.findUnique({ where: { id: invitation.user_id } });
+				if (!user) {
+					throw new InviteNotFoundError();
+				}
+				await writeCredentialPassword(tx, user.id, hashedPassword);
+				await tx.session.deleteMany({ where: { userId: user.id } });
+				await tx.invitation.delete({ where: { id: invitation.id } });
+				return user.email;
+			}
+
 			const existingUser = await tx.user.findFirst({
 				where: { email: invitation.email },
 			});
@@ -166,15 +259,7 @@ export const acceptInvitation = async (
 					role: invitation.role,
 				},
 			});
-			await tx.account.create({
-				data: {
-					id: randomUUID(),
-					accountId: userId,
-					providerId: 'credential',
-					userId,
-					password: hashedPassword,
-				},
-			});
+			await writeCredentialPassword(tx, userId, hashedPassword);
 			await tx.invitation.delete({
 				where: { id: invitation.id },
 			});
@@ -203,5 +288,19 @@ export class InviteNotFoundError extends Error {
 	constructor() {
 		super('Invitation not found');
 		this.name = 'InviteNotFoundError';
+	}
+}
+
+export class ResetUserNotFoundError extends Error {
+	constructor() {
+		super('User not found.');
+		this.name = 'ResetUserNotFoundError';
+	}
+}
+
+export class CannotResetSelfError extends Error {
+	constructor() {
+		super('You cannot reset your own password this way.');
+		this.name = 'CannotResetSelfError';
 	}
 }

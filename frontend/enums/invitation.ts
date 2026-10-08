@@ -7,3 +7,9 @@ export enum InvitationStatus {
 	Active = 'active',
 	Expired = 'expired',
 }
+
+/** Join creates an account; reset updates the password on an existing user. */
+export enum InvitationKind {
+	Invite = 'invite',
+	Reset = 'reset',
+}

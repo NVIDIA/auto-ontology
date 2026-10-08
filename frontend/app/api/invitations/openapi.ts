@@ -10,6 +10,7 @@ const invitationSchema = z.object({
 	email: z.string(),
 	name: z.string(),
 	role: z.enum(['admin', 'viewer']),
+	kind: z.enum(['invite', 'reset']),
 	status: z.enum(['active', 'expired']),
 	expires_at: z.string(),
 	created_at: z.string(),

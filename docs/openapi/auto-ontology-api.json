@@ -4400,6 +4400,10 @@
                             "type": "string",
                             "enum": ["admin", "viewer"]
                           },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["invite", "reset"]
+                          },
                           "status": {
                             "type": "string",
                             "enum": ["active", "expired"]
@@ -4426,6 +4430,7 @@
                           "email",
                           "name",
                           "role",
+                          "kind",
                           "status",
                           "expires_at",
                           "created_at",
@@ -4597,12 +4602,12 @@
     "/api/invitations/{token}/accept": {
       "post": {
         "tags": ["invitations"],
-        "summary": "Redeem an invite: set a password on the invited email and create the account.",
-        "description": "Redeem an invite: set a password on the invited email and create the account.\nPublic — the unguessable token is the credential. The link is one-shot.",
+        "summary": "Redeem an invite: join creates the account, reset updates the existing password.",
+        "description": "Redeem an invite: join creates the account, reset updates the existing\npassword. Public — the unguessable token is the credential. One-shot.",
         "operationId": "post_api_invitations_token_accept",
         "requestBody": {
           "required": true,
-          "description": "Password for the invited email. The account is created on success.",
+          "description": "Password for the invited email. A join invite creates the account; a reset invite updates the existing password.",
           "content": {
             "application/json": {
               "schema": {
@@ -4631,7 +4636,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Account created and the invitation is deleted. The caller should then sign in with this email.",
+            "description": "Password saved and the invitation is deleted. The caller should then sign in with this email.",
             "content": {
               "application/json": {
                 "schema": {
@@ -4660,6 +4665,78 @@
         "security": [],
         "x-auto-ontology-source": "frontend/app/api/invitations/[token]/accept/route.ts",
         "x-auto-ontology-permissions": "public",
+        "x-auto-ontology-proxied": false
+      }
+    },
+    "/api/invitations/reset": {
+      "post": {
+        "tags": ["invitations"],
+        "summary": "Password reset for an existing user: mint an invite bound to that account.",
+        "description": "Password reset for an existing user: mint an invite bound to that account.\nThe user row stays; redeeming the link updates the credential password.",
+        "operationId": "post_api_invitations_reset",
+        "requestBody": {
+          "required": true,
+          "description": "Id of the existing user who should set a new password via invite link.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  }
+                },
+                "required": ["userId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A reset invite for that user. The account is unchanged until they redeem `url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["url", "email", "expires_at"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`userId` is missing, or the caller is resetting themselves."
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "404": {
+            "description": "No user with that id."
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/invitations/reset/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["set-password"]
+        },
         "x-auto-ontology-proxied": false
       }
     },

@@ -8,8 +8,8 @@ import { acceptInvitation } from '@/lib/invitations';
 
 type RouteContext = { params: Promise<{ token: string }> };
 
-// Redeem an invite: set a password on the invited email and create the account.
-// Public — the unguessable token is the credential. The link is one-shot.
+// Redeem an invite: join creates the account, reset updates the existing
+// password. Public — the unguessable token is the credential. One-shot.
 export const POST = withPublic<RouteContext>(async (request, { params }) => {
 	const { token } = await params;
 	if (!token) {

@@ -8,7 +8,8 @@ import type { OpenApiRoute } from '@/types/openapi';
 export const openapi: OpenApiRoute = {
 	post: {
 		body: {
-			description: 'Password for the invited email. The account is created on success.',
+			description:
+				'Password for the invited email. A join invite creates the account; a reset invite updates the existing password.',
 			schema: z.object({
 				password: z.string().min(8).max(128),
 			}),
@@ -16,7 +17,7 @@ export const openapi: OpenApiRoute = {
 		responses: {
 			200: {
 				description:
-					'Account created and the invitation is deleted. The caller should then sign in with this email.',
+					'Password saved and the invitation is deleted. The caller should then sign in with this email.',
 				schema: z.object({ email: z.string() }),
 			},
 			400: { description: 'Password is missing or outside 8–128 characters.' },

@@ -26,7 +26,7 @@ const InvitePage = async ({ params }: { params: Promise<{ token: string }> }) =>
 	const { token } = await params;
 	const invitation = await getOpenInvitation(token);
 	if (!invitation) return <InviteInvalid />;
-	return <InviteSetPassword token={token} email={invitation.email} />;
+	return <InviteSetPassword token={token} email={invitation.email} kind={invitation.kind} />;
 };
 
 export default InvitePage;

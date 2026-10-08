@@ -18,6 +18,9 @@ export const invitationsApi = {
 	create: (input: { email: string; name?: string; role: Role }) =>
 		requests.post<CreatedInvitation>('invitations', input),
 
+	resetPassword: (userId: string) =>
+		requests.post<CreatedInvitation>('invitations/reset', { userId }),
+
 	accept: (token: string, password: string) =>
 		requests.post<{ email: string }>(`invitations/${encodeURIComponent(token)}/accept`, {
 			password,
