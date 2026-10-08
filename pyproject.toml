@@ -46,7 +46,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-kumo = ["nvidia-sdfm[kumorfm]>=0.2.1"]
+kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
 
 [build-system]
 requires = ["hatchling"]
@@ -82,7 +82,7 @@ exclude-dependencies = [
 ]
 
 [[tool.uv.index]]
-name = "vendored-sdfm"
+name = "vendored-engine"
 url = "vendor/wheels"
 format = "flat"
 

@@ -136,8 +136,9 @@ jobs:
           cache-dependency-glob: uv.lock
 
       # `--extra kumo` so the real-SDK Kumo tests run rather than skip. The
-      # wheels are vendored in `vendor/wheels` (flat index, cp312 manylinux
-      # x86_64 included) and every other dependency of kumorfm is already in
+      # wheels are vendored in `vendor/wheels` (flat index, cp312 and cp313
+      # manylinux x86_64 included) and every other dependency of
+      # kumo-relational-engine is already in
       # the base tree, so this costs a few seconds and needs no index access.
       - name: Install dependencies
         run: uv sync --locked --extra kumo

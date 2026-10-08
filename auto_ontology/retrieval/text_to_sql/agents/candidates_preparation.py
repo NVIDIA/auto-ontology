@@ -899,8 +899,10 @@ class CandidatePreparationAgent(BaseAgent):
             futures = {
                 pool.submit(_fetch_tables_for_query, q): q for q in search_queries
             }
-            for future in as_completed(futures):
-                query = futures[future]
+            # Collected in submission order, not completion order, so the rows
+            # merged for a table that several searches return are merged in the
+            # same order every time, whichever search happened to return first.
+            for future, query in futures.items():
                 try:
                     additional_tables.extend(future.result())
                 except Exception:
