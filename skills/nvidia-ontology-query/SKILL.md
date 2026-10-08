@@ -1,12 +1,12 @@
 ---
 name: nvidia-ontology-query
-version: "0.2.1"
 description: >-
   Query Auto Ontology and validate generated SQL, rows, and
   answers. Use for MCP or REST access, readiness, authentication, conversations,
   and grounded questions.
 license: Apache-2.0
 metadata:
+  version: "0.2.1"
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
@@ -88,7 +88,7 @@ Auth (any of these; resolved in one place):
 - Browser session cookie
 - API token: `x-api-key: $AUTO_ONTOLOGY_API_TOKEN` (`Authorization: Bearer` works for
   `auto_ontology_…` tokens too). Token acts as its owner.
-- Auto Ontology-issued OAuth access token (MCP sign-in)
+- OAuth bearer issued by Auto Ontology (MCP sign-in)
 - SSO id token (`Authorization: Bearer <jwt>`), e.g. AI-Q — see
   [stack.md](references/stack.md)
 
