@@ -17,8 +17,8 @@ import { Role } from '@/enums/auth';
  * - If it already exists, its password is reset to the configured value and
  *   its admin role + verified status are re-asserted.
  *
- * Self-service sign-up is disabled, so this is the only way a credential
- * account is created. No-op unless BOTH env vars are set.
+ * Self-service sign-up is disabled. Other credential accounts are created
+ * when an invite is accepted. No-op unless BOTH env vars are set.
  *
  * The password is hashed with Better Auth's own `hashPassword`, so the stored
  * value verifies against the normal email/password sign-in flow.

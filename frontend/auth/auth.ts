@@ -68,10 +68,9 @@ export const auth = betterAuth({
 			'/sign-in/*': { window: 10, max: 20 },
 		},
 	},
-	// Email/password sign-IN is enabled, but self-service sign-UP is disabled:
-	// the only credential account is the bootstrap admin seeded from
-	// AUTO_ONTOLOGY_ADMIN_EMAIL / AUTO_ONTOLOGY_ADMIN_PASSWORD (see lib/seed-admin.ts). Further users
-	// are added by an admin or provisioned via SSO.
+	// Email/password sign-IN is enabled, but self-service sign-UP is disabled.
+	// Credential accounts come from the bootstrap admin (see seed-admin.ts) or
+	// from an admin invite link. Further users can also be provisioned via SSO.
 	emailAndPassword: { enabled: true, disableSignUp: true },
 	// MCP clients (Cursor, the Python SDK) register loopback HTTP and
 	// `cursor://` redirect URIs. Better Auth 1.7 defaults an omitted
@@ -171,18 +170,25 @@ export const auth = betterAuth({
 	databaseHooks: {
 		user: {
 			create: {
-				// First account ever created becomes the admin and is marked
-				// email-verified (so it can later link an SSO identity to the same
-				// account); everyone else is a viewer. The unique email constraint
-				// guards against a duplicate-account race; the count check assigns
-				// the role.
+				// Runs on Better Auth user.create (SSO JIT, not invite accept —
+				// invites insert via Prisma). First account becomes admin and is
+				// marked email-verified so it can later link an SSO identity.
+				// Later SSO logins default to viewer unless the payload already
+				// carries admin.
 				before: async (user) => {
 					const isFirstUser = (await prisma.user.count()) === 0;
 					const name = user.name || user.email;
+					if (isFirstUser) {
+						return {
+							data: { ...user, name, role: Role.Admin, emailVerified: true },
+						};
+					}
 					return {
-						data: isFirstUser
-							? { ...user, name, role: Role.Admin, emailVerified: true }
-							: { ...user, name, role: Role.Viewer },
+						data: {
+							...user,
+							name,
+							role: user.role === Role.Admin ? Role.Admin : Role.Viewer,
+						},
 					};
 				},
 			},

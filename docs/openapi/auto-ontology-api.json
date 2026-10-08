@@ -4368,6 +4368,378 @@
         "x-auto-ontology-proxied": false
       }
     },
+    "/api/invitations": {
+      "get": {
+        "tags": ["invitations"],
+        "summary": "List unused invites (active or expired).",
+        "description": "List unused invites (active or expired). Accepted rows are deleted on\nredeem, so they never appear here. Active rows include `url`.",
+        "operationId": "get_api_invitations",
+        "responses": {
+          "200": {
+            "description": "Unused invites (active or expired). Accepted invites are deleted. `url` is set only while active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "invitations": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "email": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "role": {
+                            "type": "string",
+                            "enum": ["admin", "viewer"]
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": ["invite", "reset"]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": ["active", "expired"]
+                          },
+                          "expires_at": {
+                            "type": "string"
+                          },
+                          "created_at": {
+                            "type": "string"
+                          },
+                          "url": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "email",
+                          "name",
+                          "role",
+                          "kind",
+                          "status",
+                          "expires_at",
+                          "created_at",
+                          "url"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": ["invitations"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/invitations/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["list"]
+        },
+        "x-auto-ontology-proxied": false
+      },
+      "post": {
+        "tags": ["invitations"],
+        "summary": "Create an email-bound invite link.",
+        "description": "Create an email-bound invite link. The token is returned in `url` and kept\nwhile the invite is active so the list can copy it later. No email is sent.\nReplaces any unused invite for the same address.",
+        "operationId": "post_api_invitations",
+        "requestBody": {
+          "required": true,
+          "description": "Email-bound invite. No mail is sent; copy `url` and share it.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "role": {
+                    "type": "string",
+                    "enum": ["admin", "viewer"]
+                  }
+                },
+                "required": ["email", "role"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The invite link. Active invites also expose `url` on GET.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["url", "email", "expires_at"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`email` or `role` is missing or invalid."
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "409": {
+            "description": "A user with this email already exists."
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/invitations/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["create"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
+    "/api/invitations/{token}": {
+      "delete": {
+        "tags": ["invitations"],
+        "summary": "Permanently remove an unused invitation by id.",
+        "description": "Permanently remove an unused invitation by id. An active link stops\nredeeming. Accept already deletes the invite; the user account stays.",
+        "operationId": "delete_api_invitations_token_",
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "token",
+            "in": "path",
+            "required": true,
+            "description": "Invitation id."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The invitation is gone. An unused link stops redeeming; the user account is not deleted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["id"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "404": {
+            "description": "No invitation with that id."
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/invitations/[token]/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["delete"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
+    "/api/invitations/{token}/accept": {
+      "post": {
+        "tags": ["invitations"],
+        "summary": "Redeem an invite: join creates the account, reset updates the existing password.",
+        "description": "Redeem an invite: join creates the account, reset updates the existing\npassword. Public — the unguessable token is the credential. One-shot.",
+        "operationId": "post_api_invitations_token_accept",
+        "requestBody": {
+          "required": true,
+          "description": "Password for the invited email. A join invite creates the account; a reset invite updates the existing password.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "password": {
+                    "type": "string",
+                    "minLength": 8,
+                    "maxLength": 128
+                  }
+                },
+                "required": ["password"]
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "token",
+            "in": "path",
+            "required": true
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Password saved and the invitation is deleted. The caller should then sign in with this email.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "email": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["email"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Password is missing or outside 8–128 characters."
+          },
+          "404": {
+            "description": "The invitation is invalid, expired, or already used."
+          },
+          "409": {
+            "description": "A user with this email already exists."
+          }
+        },
+        "security": [],
+        "x-auto-ontology-source": "frontend/app/api/invitations/[token]/accept/route.ts",
+        "x-auto-ontology-permissions": "public",
+        "x-auto-ontology-proxied": false
+      }
+    },
+    "/api/invitations/reset": {
+      "post": {
+        "tags": ["invitations"],
+        "summary": "Password reset for an existing user: mint an invite bound to that account.",
+        "description": "Password reset for an existing user: mint an invite bound to that account.\nThe user row stays; redeeming the link updates the credential password.",
+        "operationId": "post_api_invitations_reset",
+        "requestBody": {
+          "required": true,
+          "description": "Id of the existing user who should set a new password via invite link.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string"
+                  }
+                },
+                "required": ["userId"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A reset invite for that user. The account is unchanged until they redeem `url`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "email": {
+                      "type": "string"
+                    },
+                    "expires_at": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["url", "email", "expires_at"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`userId` is missing, or the caller is resetting themselves."
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "404": {
+            "description": "No user with that id."
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/invitations/reset/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["set-password"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
     "/api/model/export": {
       "post": {
         "description": "modelInterchangeApi.exportModel — download the catalog + semantic layer as a\nYAML file. Admin-only: it can include every connection's schema.",

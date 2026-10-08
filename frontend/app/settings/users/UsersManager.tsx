@@ -5,29 +5,61 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
+import { invitationsApi } from '@/api/invitations';
 import { usersApi } from '@/api/users';
-import { Button } from '@/common/Button';
+import { Button, CopyButton } from '@/common/Button';
+import { formatDate } from '@/common/date';
+import { Icon, IconName } from '@/common/icons';
 import { Size, ButtonTheme } from '@/enums/button';
+import { InvitationKind, InvitationStatus } from '@/enums/invitation';
 import { ToastVariant } from '@/enums/toast';
 import { Table } from '@/common/Table';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import type { TableColumn } from '@/types/table';
 import type { User } from '@/types/auth';
+import type { Invitation } from '@/types/invitation';
+import { InviteUserModal, type InviteUserInput } from './InviteUserModal';
+
+const invitationStatusLabel: Record<InvitationStatus, string> = {
+	[InvitationStatus.Active]: 'Active',
+	[InvitationStatus.Expired]: 'Expired',
+};
+
+const invitationKindLabel: Record<InvitationKind, string> = {
+	[InvitationKind.Invite]: 'Invite',
+	[InvitationKind.Reset]: 'Reset password',
+};
+
+const actionErrorMessage = (error: unknown, fallback: string): string => {
+	if (typeof error === 'object' && error && 'message' in error) {
+		const message = (error as { message?: string }).message;
+		if (message) return message;
+	}
+	return fallback;
+};
 
 export const UsersManager = () => {
+	const { data: session } = useSession();
 	const [users, setUsers] = useState<User[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [inviteOpen, setInviteOpen] = useState(false);
+	const [inviting, setInviting] = useState(false);
+	const [inviteError, setInviteError] = useState<string | null>(null);
+	const [invitations, setInvitations] = useState<Invitation[]>([]);
 
+	const currentUserId = session?.user.id;
 	const adminCount = users.filter((user) => user.role === Role.Admin).length;
 
 	useEffect(() => {
-		usersApi.list().then((result) => {
-			setUsers(result.users);
-			setError(result.error);
+		void Promise.all([usersApi.list(), invitationsApi.list()]).then(([listed, invited]) => {
+			setUsers(listed.users);
+			setError(listed.error ?? (invited.error ? (invited.message ?? null) : null));
+			if (!invited.error) setInvitations(invited.invitations);
 			setLoading(false);
 		});
 	}, []);
@@ -37,13 +69,7 @@ export const UsersManager = () => {
 		setError(null);
 		const actionResult = await action();
 		if (actionResult.error) {
-			const message =
-				typeof actionResult.error === 'object' &&
-				actionResult.error &&
-				'message' in actionResult.error
-					? String((actionResult.error as { message?: string }).message)
-					: 'Action failed.';
-			setError(message);
+			setError(actionErrorMessage(actionResult.error, 'Action failed.'));
 		}
 		const listed = await usersApi.list();
 		setUsers(listed.users);
@@ -56,6 +82,24 @@ export const UsersManager = () => {
 		return runAction(user.id, () => usersApi.setRole(user.id, nextRole));
 	};
 
+	const inviteUser = async ({ email, name, role }: InviteUserInput) => {
+		setInviting(true);
+		setInviteError(null);
+		const result = await invitationsApi.create({ email, name, role });
+		if (result.error) {
+			setInviteError(result.message ?? 'Failed to invite the user.');
+			setInviting(false);
+			return;
+		}
+		setInviteOpen(false);
+		setInviting(false);
+		const [listed, invited] = await Promise.all([usersApi.list(), invitationsApi.list()]);
+		setUsers(listed.users);
+		if (listed.error) setError(listed.error);
+		if (invited.error) setError(invited.message ?? 'Failed to load invitations.');
+		else setInvitations(invited.invitations);
+	};
+
 	const deleteUser = (user: User) => {
 		if (
 			!window.confirm(
@@ -65,6 +109,40 @@ export const UsersManager = () => {
 			return;
 		}
 		return runAction(user.id, () => usersApi.remove(user.id));
+	};
+
+	const resetPassword = (user: User) => {
+		void (async () => {
+			setBusyId(user.id);
+			setError(null);
+			const result = await invitationsApi.resetPassword(user.id);
+			if (result.error) {
+				setError(result.message ?? 'Failed to reset the password.');
+				setBusyId(null);
+				return;
+			}
+			const [listed, invited] = await Promise.all([usersApi.list(), invitationsApi.list()]);
+			setUsers(listed.users);
+			if (listed.error) setError(listed.error);
+			if (invited.error) setError(invited.message ?? 'Failed to load invitations.');
+			else setInvitations(invited.invitations);
+			setBusyId(null);
+		})();
+	};
+
+	const deleteInvitation = (invitation: Invitation) => {
+		void (async () => {
+			setBusyId(invitation.id);
+			setError(null);
+			const result = await invitationsApi.remove(invitation.id);
+			if (result.error) {
+				setError(result.message ?? 'Failed to delete the invitation.');
+				setBusyId(null);
+				return;
+			}
+			setInvitations((rows) => rows.filter((row) => row.id !== invitation.id));
+			setBusyId(null);
+		})();
 	};
 
 	const columns: TableColumn<User>[] = [
@@ -88,13 +166,14 @@ export const UsersManager = () => {
 		{
 			key: 'actions',
 			header: 'Actions',
-			width: 'w-56',
+			width: 'w-80',
 			nowrap: true,
 			headerClassName: 'text-right',
 			cell: (user) => {
 				const isAdmin = user.role === Role.Admin;
 				// Never let the last admin be demoted or deleted.
 				const isLastAdmin = isAdmin && adminCount <= 1;
+				const isSelf = currentUserId != null && user.id === currentUserId;
 				const busy = busyId === user.id;
 				return (
 					<div className="flex justify-end gap-2">
@@ -106,6 +185,15 @@ export const UsersManager = () => {
 							onClick={() => toggleRole(user)}
 						>
 							{isAdmin ? 'Make viewer' : 'Make admin'}
+						</Button>
+						<Button
+							theme={ButtonTheme.Secondary}
+							size={Size.SMALL}
+							type="button"
+							disabled={busy || isSelf}
+							onClick={() => resetPassword(user)}
+						>
+							Reset Password
 						</Button>
 						<Button
 							theme={ButtonTheme.DangerOutline}
@@ -122,16 +210,94 @@ export const UsersManager = () => {
 		},
 	];
 
+	const invitationColumns: TableColumn<Invitation>[] = [
+		{
+			key: 'email',
+			header: 'Email',
+			cell: (invitation) => invitation.email,
+		},
+		{
+			key: 'kind',
+			header: 'Type',
+			width: 'w-36',
+			nowrap: true,
+			cell: (invitation) => invitationKindLabel[invitation.kind],
+		},
+		{
+			key: 'role',
+			header: 'Role',
+			width: 'w-28',
+			nowrap: true,
+			cell: (invitation) => (invitation.role === Role.Admin ? 'Admin' : 'Viewer'),
+		},
+		{
+			key: 'status',
+			header: 'Status',
+			width: 'w-28',
+			nowrap: true,
+			cell: (invitation) => invitationStatusLabel[invitation.status],
+		},
+		{
+			key: 'expires',
+			header: 'Expires',
+			width: 'w-40',
+			nowrap: true,
+			cell: (invitation) => formatDate(invitation.expires_at, 'MMM DD YYYY HH:mm'),
+		},
+		{
+			key: 'link',
+			header: 'Link',
+			truncate: true,
+			maxWidthClass: 'max-w-md',
+			title: (invitation) => invitation.url ?? '',
+			cell: (invitation) =>
+				invitation.url ? (
+					<div className="group flex min-w-0 items-center gap-1">
+						<code
+							className="min-w-0 truncate font-mono text-xs text-body dark:text-zinc-300"
+							title={invitation.url}
+						>
+							{invitation.url}
+						</code>
+						<CopyButton text={invitation.url} className="shrink-0 opacity-100" />
+					</div>
+				) : (
+					<span className="text-secondary">—</span>
+				),
+		},
+		{
+			key: 'actions',
+			header: 'Actions',
+			width: 'w-28',
+			nowrap: true,
+			headerClassName: 'text-right',
+			cell: (invitation) => (
+				<div className="flex justify-end">
+					<Button
+						theme={ButtonTheme.DangerOutline}
+						size={Size.SMALL}
+						type="button"
+						disabled={busyId === invitation.id}
+						onClick={() => deleteInvitation(invitation)}
+					>
+						Delete
+					</Button>
+				</div>
+			),
+		},
+	];
+
 	return (
 		<div className="h-full overflow-auto p-6">
-			<div className="mx-auto max-w-3xl">
-				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
-					Users
-				</h1>
-				<p className="mb-4 text-xs text-secondary">
-					Manage roles and access. Admins manage users; viewers can access all other
-					pages.
-				</p>
+			<div className="mx-auto max-w-6xl">
+				<div className="mb-4">
+					<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
+						Users
+					</h1>
+					<p className="text-xs text-secondary">
+						Admins manage users; viewers can access all other pages.
+					</p>
+				</div>
 
 				{loading ? (
 					<div role="status" aria-label="Loading users">
@@ -146,7 +312,58 @@ export const UsersManager = () => {
 						emptyMessage="No Users Found"
 					/>
 				)}
+
+				<div className="mt-8">
+					<div className="mb-3 flex items-start justify-between gap-4">
+						<div className="min-w-0">
+							<h2 className="mb-1 text-sm font-semibold text-heading dark:text-zinc-100">
+								Invitations
+							</h2>
+							<p className="text-xs text-secondary">
+								Invite by email. Copy the link and send it yourself — they set a
+								password on it. A join invite creates the account; a reset invite
+								only changes the password.
+							</p>
+						</div>
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.SMALL}
+							type="button"
+							onClick={() => {
+								setInviteError(null);
+								setInviteOpen(true);
+							}}
+						>
+							<Icon name={IconName.Plus} className="mr-1.5 h-4 w-4" />
+							Invite
+						</Button>
+					</div>
+					{loading ? (
+						<div role="status" aria-label="Loading invitations">
+							<SkeletonTable columns={5} rows={4} />
+						</div>
+					) : (
+						<Table
+							columns={invitationColumns}
+							rows={invitations}
+							rowKey={(invitation) => invitation.id}
+							layout="auto"
+							emptyMessage="No Invitations"
+						/>
+					)}
+				</div>
 			</div>
+
+			{inviteOpen ? (
+				<InviteUserModal
+					submitting={inviting}
+					error={inviteError}
+					onClose={() => setInviteOpen(false)}
+					onInvite={(input) => {
+						void inviteUser(input);
+					}}
+				/>
+			) : null}
 
 			<Toast
 				open={error !== null}
