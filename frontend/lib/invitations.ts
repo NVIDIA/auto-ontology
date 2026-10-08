@@ -2,7 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { hashPassword } from 'better-auth/crypto';
 import type { Prisma } from '@/generated/prisma/client';
 import { Role } from '@/enums/auth';
@@ -20,8 +20,6 @@ export type OpenInvitation = {
 	kind: InvitationKind;
 	expires_at: Date;
 };
-
-const hashInviteToken = (token: string): string => createHash('sha256').update(token).digest('hex');
 
 const generateInviteToken = (): string => randomBytes(32).toString('base64url');
 
@@ -73,7 +71,7 @@ export const parseInviteRole = (value: unknown): Role | null => {
 export const getOpenInvitation = async (token: string): Promise<OpenInvitation | null> => {
 	if (!token) return null;
 	const row = await getPrisma().invitation.findUnique({
-		where: { token_hash: hashInviteToken(token) },
+		where: { token },
 		select: { email: true, name: true, expires_at: true, user_id: true },
 	});
 	if (!row || !isLiveInvitation(row)) return null;
@@ -137,7 +135,6 @@ export const createInvitation = async ({
 				name,
 				role,
 				token,
-				token_hash: hashInviteToken(token),
 				expires_at: expiresAt,
 				created_by_id: createdById,
 			},
@@ -181,7 +178,6 @@ export const createPasswordResetInvitation = async ({
 				name,
 				role,
 				token,
-				token_hash: hashInviteToken(token),
 				expires_at: expiresAt,
 				user_id: user.id,
 				created_by_id: createdById,
@@ -219,13 +215,12 @@ export const acceptInvitation = async (
 	}
 
 	const prisma = getPrisma();
-	const tokenHash = hashInviteToken(token);
 	const hashedPassword = await hashPassword(password);
 
 	try {
 		const email = await prisma.$transaction(async (tx) => {
 			const invitation = await tx.invitation.findUnique({
-				where: { token_hash: tokenHash },
+				where: { token },
 			});
 			if (!invitation || !isLiveInvitation(invitation)) {
 				throw new InviteNotFoundError();

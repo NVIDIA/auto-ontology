@@ -447,17 +447,16 @@ model OauthClientAssertion {
 }
 
 // Email-bound invite links. `token` is the path secret while the invite is
-// still redeemable so the admin list can copy every active URL. On accept the
-// row is deleted. `user_id` is set for password-reset invites (the existing
-// account is updated); join invites leave it null and create the user.
-// `token_hash` is SHA-256 of the token and is what redemption looks up.
+// still redeemable so the admin list can copy every active URL, and what
+// redemption looks up. On accept the row is deleted. `user_id` is set for
+// password-reset invites (the existing account is updated); join invites
+// leave it null and create the user.
 model Invitation {
   id            String    @id
   email         String
   name          String    @default("")
   role          String
-  token         String
-  token_hash    String    @unique
+  token         String    @unique
   expires_at    DateTime
   created_at    DateTime  @default(now())
   user_id       String?
