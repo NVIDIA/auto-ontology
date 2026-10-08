@@ -239,6 +239,10 @@ catalog_column = Table(
     # A genuine integer, despite the parser handing the write path a string --
     # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
+    # Set only after automatic PII classification completes. Tag edits are
+    # deliberately independent: removing an automatically assigned PII tag is
+    # a user override and must not make the next ingest add it back.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
 )
@@ -446,6 +450,13 @@ column_attribute = Table(
     Column("table_id", Text, nullable=False),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
     Column("description_suggestion", Text, nullable=True),
+    # Set once PII propagation from the attribute's columns has handled it.
+    # Like `catalog_column.pii_processed`, tag edits are independent of it:
+    # removing an automatically assigned PII tag is a user override and must not
+    # make the next pass add it back. Taking PII off the owning column (or an
+    # expression rewrite that leaves every tagged column) clears this so a
+    # later tag can still propagate.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     # The 5-part merge key, exactly as merge_column_attribute matches on.
     UniqueConstraint(
@@ -537,6 +548,13 @@ sql_attribute = Table(
     Column("source", Text, nullable=True),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
     Column("description_suggestion", Text, nullable=True),
+    # Set once PII propagation from the attribute's columns has handled it.
+    # Like `catalog_column.pii_processed`, tag edits are independent of it:
+    # removing an automatically assigned PII tag is a user override and must not
+    # make the next pass add it back. An expression rewrite that no longer
+    # reads a tagged column is the exception: the tag is taken off and this
+    # flag cleared so a later tag on one of the new columns can still propagate.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     CheckConstraint(
         "source IS NULL OR source IN ('manual', 'sql', 'table', 'bridgeTable')",

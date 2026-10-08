@@ -15,6 +15,7 @@ from auto_ontology.infra import feature_flags
 from auto_ontology.infra.feature_flags import (
     get_sql_query_timeout_seconds,
     is_distinct_value_probing_enabled,
+    is_pii_detection_enabled,
     read_configuration_flag,
     read_configuration_int,
 )
@@ -142,6 +143,34 @@ def test_distinct_probing_honours_an_explicit_false(
 ) -> None:
     with _patched(monkeypatch, ("false",)):
         assert is_distinct_value_probing_enabled() is False
+
+
+def test_pii_detection_defaults_to_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Opt-in: an instance that has never touched the toggle does not classify."""
+    with _patched(monkeypatch, None) as cursor:
+        assert is_pii_detection_enabled() is False
+    assert cursor.executed[0][1] == ("pii_detection_enabled",)
+
+
+def test_pii_detection_honours_an_explicit_true(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _patched(monkeypatch, ("true",)):
+        assert is_pii_detection_enabled() is True
+
+
+def test_pii_detection_honours_an_explicit_false(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with _patched(monkeypatch, ("false",)):
+        assert is_pii_detection_enabled() is False
+
+
+def test_pii_detection_survives_a_junk_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    with _patched(monkeypatch, ("",)):
+        assert is_pii_detection_enabled() is False
 
 
 @pytest.mark.parametrize(

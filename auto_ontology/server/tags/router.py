@@ -10,6 +10,8 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from auto_ontology.dal import tags as dal
+from auto_ontology.dal.pii import untag_attributes_of_column
+from auto_ontology.dal.session import write_transaction
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.models import TagTargetType
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
@@ -145,6 +147,19 @@ def _validated_name(raw: str) -> str:
     return name
 
 
+def _modifiable_tag(tag_id: str, action: str) -> None:
+    """404 for an unknown tag, 403 for a system-managed one."""
+    tag = dal.get_tag(tag_id)
+    if tag is None:
+        raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
+    if dal.is_protected_tag(tag):
+        raise HTTPException(
+            status_code=403,
+            detail=f"The {tag['name']} tag is managed by the system and cannot "
+            f"be {action}",
+        )
+
+
 @router.post("/tags", status_code=201, response_model=TagResponse)
 def create_tag(request: Request, body: TagCreate) -> dict:
     """Create a tag.
@@ -187,7 +202,10 @@ def update_tag(request: Request, tag_id: str, body: TagUpdate) -> dict:
     A rename to the tag's own name is not a 409 — see ``update_tag`` in the DAL
     — and neither is one that only changes case, which is the ordinary way to
     fix a tag that was created shouting.
+
+    403 for the system-managed ``PII`` tag, which PII detection finds by name.
     """
+    _modifiable_tag(tag_id, "renamed")
     try:
         row = dal.update_tag(
             tag_id=tag_id,
@@ -209,7 +227,10 @@ def delete_tag(tag_id: str) -> dict:
     from a list it has already read, so a missing tag means its list is stale,
     and answering "done" would leave the row on screen with nothing to explain
     it.
+
+    403 for the system-managed ``PII`` tag: no caller may delete it.
     """
+    _modifiable_tag(tag_id, "deleted")
     if not dal.delete_tag(tag_id):
         raise HTTPException(status_code=404, detail=f"Tag {tag_id!r} not found")
     return {"data": {"id": tag_id}}
@@ -291,11 +312,32 @@ def attach_tag(request: Request, tag_id: str, body: TagTarget) -> dict:
 def detach_tag(tag_id: str, target_type: TagTargetType, item_id: str) -> dict:
     """Take this tag off one object.
 
+    Taking ``PII`` off a column also takes it off that column's
+    ColumnAttributes, and off any SqlAttribute whose SQL no longer reads a
+    tagged column. A SqlAttribute that still reads another PII column keeps
+    the label. The column detach and that cleanup share one transaction.
+
     404 when the object was not carrying it — including when either side no
     longer exists. The page removed a chip it had just rendered, so all three
     mean its view is stale, and answering "done" would leave the chip gone from
     the screen and still on the object.
     """
+    cascade = False
+    if target_type is TagTargetType.COLUMN:
+        tag = dal.get_tag(tag_id)
+        cascade = tag is not None and dal.is_protected_tag(tag)
+
+    if cascade:
+        with write_transaction():
+            tags = dal.detach_tag(tag_id=tag_id, kind=target_type, item_id=item_id)
+            if tags is None:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Tag {tag_id!r} is not on {target_type.value} {item_id!r}",
+                )
+            untag_attributes_of_column(item_id, tag_id)
+        return _chips(tags)
+
     tags = dal.detach_tag(tag_id=tag_id, kind=target_type, item_id=item_id)
     if tags is None:
         raise HTTPException(

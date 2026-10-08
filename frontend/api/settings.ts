@@ -98,6 +98,17 @@ export const distinctValueProbingApi = {
 		}),
 };
 
+export const piiDetectionApi = {
+	get: () => json<{ enabled: boolean }>('/api/configurations/pii-detection'),
+
+	setEnabled: (enabled: boolean) =>
+		json<{ enabled: boolean }>('/api/configurations/pii-detection', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		}),
+};
+
 // Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
 export const visualizationApi = {
 	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>

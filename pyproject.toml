@@ -72,6 +72,14 @@ constraint-dependencies = [
 override-dependencies = [
     "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
 ]
+# Excluded to fix a critical vulnerability (CVE-2026-55203) in the HAProxy binary
+# bundled with ray-haproxy. We don't depend on it directly: nemo-retriever pulls
+# it in through ray[serve] (nemo-retriever -> ray[data,serve] -> ray-haproxy).
+# No patched ray-haproxy release exists yet, so it is removed instead of upgraded.
+# Nothing in this project starts Ray Serve, so the binary is never used.
+exclude-dependencies = [
+    "ray-haproxy",
+]
 
 [[tool.uv.index]]
 name = "vendored-sdfm"

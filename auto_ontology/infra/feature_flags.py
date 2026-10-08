@@ -10,9 +10,9 @@ round-trip. Flag values are the strings ``"true"`` / ``"false"``; numeric
 settings are stored as decimal integer strings.
 
 Each flag carries its own default for the "row absent or unreadable" case, and
-the defaults genuinely differ: semantic compilation is opt-in (absent means
-off), while column profiling is opt-out (absent means on, so existing instances
-keep profiling after an upgrade that adds the toggle).
+the defaults genuinely differ: semantic compilation and PII detection are
+opt-in (absent means off), while column profiling is opt-out (absent means on,
+so existing instances keep profiling after an upgrade that adds the toggle).
 """
 
 from __future__ import annotations
@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 # has never touched the toggle still probes, which is what every deployment
 # predating the toggle did.
 DISTINCT_VALUE_PROBING_ENABLED_KEY = "distinct_value_probing_enabled"
+
+# Written by the PII Settings tab. Opt-in: ingest does not classify columns
+# until an admin turns the toggle on.
+PII_DETECTION_ENABLED_KEY = "pii_detection_enabled"
 
 # Written by the SQL Query Timeout field on Settings > Agent Settings: how long
 # a statement the text-to-SQL agent issues may run before it is cancelled. An
@@ -98,6 +102,17 @@ def is_distinct_value_probing_enabled() -> bool:
     metered warehouse.
     """
     return read_configuration_flag(DISTINCT_VALUE_PROBING_ENABLED_KEY, default=True)
+
+
+def is_pii_detection_enabled() -> bool:
+    """Whether ingest may classify catalog columns and attach the ``PII`` tag.
+
+    Opt-in: a missing row (or any DB error) is treated as disabled, so an
+    instance that has never touched Settings > PII Settings never classifies
+    on its own. Read per ingest, so a change applies to the next database
+    without a restart.
+    """
+    return read_configuration_flag(PII_DETECTION_ENABLED_KEY, default=False)
 
 
 def read_configuration_int(

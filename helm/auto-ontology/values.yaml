@@ -134,7 +134,7 @@ backend:
   # wait-for-catalog-schema init container blocks until public.alembic_version
   # matches it, so new Pods never serve against a schema the migration Job has
   # not finished applying. Bump this with the migration, in the same commit.
-  alembicRevision: 47ffb7499dfa
+  alembicRevision: b3aed65e49b7
   # The images' published paths, not where the release pushes them. Releases
   # are staged in nvcr.io/nvstaging/gsf and NGC Catalog publishing copies this
   # chart to nvidia unmodified, so it has to name the registry customers
