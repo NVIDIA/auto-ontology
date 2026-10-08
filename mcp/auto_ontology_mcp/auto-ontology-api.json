@@ -1332,6 +1332,110 @@
         "x-auto-ontology-proxied": false
       }
     },
+    "/api/configurations/pii-detection": {
+      "get": {
+        "tags": ["configurations"],
+        "summary": "Report whether ingest classifies catalog columns as PII.",
+        "description": "Report whether ingest classifies catalog columns as PII.",
+        "operationId": "get_api_configurations_pii_detection",
+        "responses": {
+          "200": {
+            "description": "Whether ingest classifies catalog columns as PII. Off when unset, so a fresh instance reports `false`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/pii-detection/route.ts",
+        "x-auto-ontology-permissions": {
+          "pii": ["read"]
+        },
+        "x-auto-ontology-proxied": false
+      },
+      "put": {
+        "tags": ["configurations"],
+        "summary": "Turn PII detection on or off instance-wide (admin-only).",
+        "description": "Turn PII detection on or off instance-wide (admin-only).\n\nDeliberately does NOT trigger an ingest. The flag is read at the start of\neach ingest's PII step, so it applies from the next one onward — flipping it\nis a change of policy, not a request to re-scan. Existing PII tags are left\nin place.\n\nRejects a non-boolean `enabled` rather than coercing it, so\n`{\"enabled\": \"true\"}` from a shell client cannot silently disagree with\nwhat the page would show after a save.",
+        "operationId": "put_api_configurations_pii_detection",
+        "requestBody": {
+          "required": true,
+          "description": "`enabled` must be a boolean. A malformed value is rejected rather than coerced.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": ["enabled"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The stored flag. Takes effect from the next ingest; this does not trigger one.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": ["enabled"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body is not JSON, or `enabled` is not a boolean."
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/configurations/pii-detection/route.ts",
+        "x-auto-ontology-permissions": {
+          "pii": ["manage"]
+        },
+        "x-auto-ontology-proxied": false
+      }
+    },
     "/api/configurations/semantic-compilation": {
       "get": {
         "tags": ["configurations"],

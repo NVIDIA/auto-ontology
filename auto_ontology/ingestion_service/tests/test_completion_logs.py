@@ -69,6 +69,7 @@ def _stub_ingest(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(mod, "get_embed_params", lambda: {})
     monkeypatch.setattr(mod, "ingest_catalog", lambda c: ([1, 2, 3], [1, 2]))
+    monkeypatch.setattr(mod, "is_pii_detection_enabled", lambda: True)
     monkeypatch.setattr(mod, "detect_and_tag_pii", lambda columns: None)
     monkeypatch.setattr(mod, "run_pii_propagation", lambda label: None)
     monkeypatch.setattr(mod, "CatalogEmbeddingRowsOp", lambda **kw: lambda pair: pair)
@@ -188,6 +189,32 @@ def test_propagation_failure_is_contained(
         pii_mod.run_pii_propagation("ingest")
 
     assert "could not propagate PII tags to attributes" in _messages(caplog)
+
+
+def test_run_ingest_skips_pii_when_disabled(
+    _stub_ingest: None,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import auto_ontology.ingestion_service.ingest as mod
+
+    pii_runs: list[str] = []
+    monkeypatch.setattr(mod, "is_pii_detection_enabled", lambda: False)
+    monkeypatch.setattr(
+        mod, "detect_and_tag_pii", lambda _columns: pii_runs.append("detect")
+    )
+    monkeypatch.setattr(
+        mod, "run_pii_propagation", lambda _label: pii_runs.append("propagate")
+    )
+
+    with caplog.at_level(logging.INFO):
+        mod.run_ingest(_Connector("pagila"))
+
+    assert pii_runs == []
+    assert "PII detection skipped for database pagila" in _messages(caplog)
+    assert "Data ingestion finished successfully for database pagila" in _messages(
+        caplog
+    )
 
 
 def test_pii_failure_does_not_fail_catalog_ingestion(
