@@ -456,9 +456,11 @@ def delete_rule(
     says otherwise. The labels it wrote cascade with it -- see
     ``rules_dal.delete_rule`` -- while labels people applied by hand stay,
     including on an object the rule had also matched, because those rows record
-    no rule to cascade from. A rule goes on labelling the catalog as the catalog
-    grows, so by default its labels are not left behind for nothing on screen to
-    explain and nothing to re-apply.
+    no rule to cascade from. Taking ``PII`` off a column this way also takes it
+    off that column's attributes, the same cascade as detaching the tag or a
+    replay that no longer matches. A rule goes on labelling the catalog as the
+    catalog grows, so by default its labels are not left behind for nothing on
+    screen to explain and nothing to re-apply.
 
     **And a tag left labelling nothing is deleted**, unless another rule applies
     it: emptying it is what this request just did, and a tag that describes no

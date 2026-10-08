@@ -20,6 +20,7 @@ from auto_ontology.catalog.constants import Props
 
 from auto_ontology.connectors import get_connectors
 from auto_ontology.dal import sql_attributes as sql_attr_dal
+from auto_ontology.dal.pii import realign_sql_attribute_pii
 from auto_ontology.dal.sql_attributes import (
     SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
@@ -35,6 +36,7 @@ from auto_ontology.dal.sql_attributes import (
     link_to_term,
     list_sql_attributes,
 )
+from auto_ontology.dal.tags import PII_TAG_NAME, get_tag_by_name
 from auto_ontology.dal.terms import get_slim_term_by_id
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 from auto_ontology.server.sql_attributes.description_suggester import (
@@ -372,6 +374,12 @@ def update_sql_attribute(
 
         _persist_attr_with_sql(attr_node, expression, query_obj)
         link_to_term(attr_id, term_id)
+        if expression_changed:
+            pii_tag = get_tag_by_name(PII_TAG_NAME)
+            realign_sql_attribute_pii(
+                attr_id,
+                str(pii_tag["id"]) if pii_tag else None,
+            )
         _reembed_sql_attribute(attr_id, database_name)
 
         return {

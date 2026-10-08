@@ -42,7 +42,8 @@ covered in ``test_tags.py``, where the tagged objects are. A tag those labels
 were the whole of goes too, so the tests here draw the line around that. It is
 not taken when something else still labels it, when another rule still applies
 it -- deleting it would leave that rule tagless -- or when the caller asked to
-keep the labels, which empties nothing in the first place.
+keep the labels, which empties nothing in the first place. The system ``PII``
+tag is never taken, even emptied: ingest looks it up by name.
 
 Needs a migrated database and skips without one.
 """
@@ -68,10 +69,12 @@ from auto_ontology.dal.rules import (  # noqa: E402
 )
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.tags import (  # noqa: E402
+    PII_TAG_NAME,
     TARGET_TERM,
     attach_tag,
     attach_tags_by_rule,
     create_tag,
+    get_or_create_tag,
 )
 
 FILTERS = {"description": False, "synonyms": True, "objects": None}
@@ -437,6 +440,15 @@ def test_deleting_a_rule_takes_a_tag_it_leaves_labelling_nothing(prefix) -> None
     delete_rule(_saved(prefix, tags=[tag["id"]]))
 
     assert store().query_read(s.tag.select().where(s.tag.c.id == tag["id"])) == []
+
+
+def test_deleting_a_rule_leaves_the_system_pii_tag(prefix) -> None:
+    """Ingestion finds it by name; a new id would fork later labels."""
+    pii = get_or_create_tag(name=PII_TAG_NAME)
+
+    delete_rule(_saved(prefix, tags=[pii["id"]]))
+
+    assert store().query_read(s.tag.select().where(s.tag.c.id == pii["id"]))
 
 
 def test_deleting_a_rule_takes_the_tag_it_had_labelled_with(prefix) -> None:

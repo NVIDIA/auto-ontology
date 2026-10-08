@@ -26,7 +26,10 @@ from auto_ontology.connectors.registry import (
     invalidate_connectors_cache,
 )
 from auto_ontology.dal.reset import delete_all_data, delete_semantic_layer
+from auto_ontology.infra.feature_flags import is_pii_detection_enabled
 from auto_ontology.ingestion_service.rules import replay_rules
+from auto_ontology.ingestion_service.pii import run_pii_propagation
+from auto_ontology.pii_detection.service import detect_and_tag_pii
 
 logger = logging.getLogger("ingestion_service.ingest")
 
@@ -62,6 +65,20 @@ def _row_count(frame: Any) -> int:
         return 0
 
 
+def _run_pii_detection(columns_df: Any, database_name: str) -> None:
+    """Enrich persisted columns without making catalog ingestion depend on it."""
+
+    try:
+        detect_and_tag_pii(columns_df)
+    except Exception:
+        logger.exception(
+            "PII detection failed for database %s; catalog ingestion will "
+            "continue. Unprocessed columns will be retried on the next ingest",
+            database_name,
+        )
+    run_pii_propagation(database_name)
+
+
 def run_ingest(connector: SQLDatabase) -> None:
     """Extract, embed, and persist a connector's tabular catalog.
 
@@ -91,6 +108,14 @@ def run_ingest(connector: SQLDatabase) -> None:
 
     with _shared_connection(connector):
         tables_df, columns_df = ingest_catalog(connector)
+
+    if is_pii_detection_enabled():
+        _run_pii_detection(columns_df, database_name)
+    else:
+        logger.info(
+            "PII detection skipped for database %s (disabled in settings)",
+            database_name,
+        )
 
     embed_rows = CatalogEmbeddingRowsOp(database_name=database_name)(
         (tables_df, columns_df)

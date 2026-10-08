@@ -44,6 +44,10 @@ const statement = {
 	// timeout, admin-only like the other settings flags. The chat pipeline
 	// resolves both server-side, so viewers never need to read them.
 	visualization: ['read', 'manage'],
+	// PII detection (settings): admin-only toggle that gates ingest-time
+	// column classification. The ingestion service reads the stored flag
+	// directly, so viewers never need to read it.
+	pii: ['read', 'manage'],
 	// Model import/export (settings): admin-only YAML backup/restore of the
 	// catalog + semantic layer.
 	modelInterchange: ['export', 'import'],
@@ -72,6 +76,7 @@ export const roles = {
 		tag: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
 		visualization: ['read', 'manage'],
+		pii: ['read', 'manage'],
 		modelInterchange: ['export', 'import'],
 		apiToken: ['manage'],
 	}),
