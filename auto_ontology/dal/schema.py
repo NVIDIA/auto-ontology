@@ -1006,6 +1006,102 @@ rule__tag = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Unstructured document tier
+# ---------------------------------------------------------------------------
+
+#: One row per ingested file (PDF, DOCX, PPTX, …).
+unstructured_document = Table(
+    "unstructured_document",
+    METADATA,
+    _id(),
+    Column("name", Text, nullable=False),
+    Column("path", Text, nullable=False),
+    Column("file_type", Text, nullable=False),
+    Column("summary", Text, nullable=True),
+    Column("publication_date", Text, nullable=True),
+    Column(
+        "ingested_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint("path", name="uq_unstructured_document_path"),
+)
+
+#: One row per extracted chunk from a document.  Embeddings live in the
+#: langchain_pg_embedding table keyed by the same ``id`` value.
+unstructured_chunk = Table(
+    "unstructured_chunk",
+    METADATA,
+    _id(),
+    Column(
+        "document_id",
+        Text,
+        ForeignKey(unstructured_document.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("content", Text, nullable=False),
+    Column("content_type", Text, nullable=False),  # text / table / chart / infographic
+    Column("page_number", Integer, nullable=True),
+    Column("chunk_index", Integer, nullable=False),
+    Column("source_metadata", JSONB, nullable=True),
+)
+
+#: Exactly one term per document — the document's core concept / topic.
+unstructured_term = Table(
+    "unstructured_term",
+    METADATA,
+    _id(),
+    Column(
+        "document_id",
+        Text,
+        ForeignKey(unstructured_document.c.id, ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+)
+
+#: Attributes extracted per term.  ``sql`` attributes are reusable
+#: calculations; ``ref`` attributes are enumerated literal facts.
+unstructured_attribute = Table(
+    "unstructured_attribute",
+    METADATA,
+    _id(),
+    Column(
+        "term_id",
+        Text,
+        ForeignKey(unstructured_term.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("attribute_type", Text, nullable=False),
+    CheckConstraint("attribute_type IN ('sql', 'ref')", name="attribute_type_value"),
+)
+
+#: Pointer table: each attribute points to the chunks that support it,
+#: with a cosine similarity score from the vector search that built the link.
+unstructured_attribute__chunk = Table(
+    "unstructured_attribute__chunk",
+    METADATA,
+    Column(
+        "attribute_id",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "chunk_id",
+        Text,
+        ForeignKey(unstructured_chunk.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("score", Text, nullable=True),
+)
+
+# ---------------------------------------------------------------------------
 # Service bookkeeping
 # ---------------------------------------------------------------------------
 
@@ -1040,6 +1136,14 @@ semantic_compilation_history = Table(
 # ---------------------------------------------------------------------------
 # Indexes for the read paths
 # ---------------------------------------------------------------------------
+
+Index("ix_unstructured_chunk_document_id", unstructured_chunk.c.document_id)
+Index("ix_unstructured_term_document_id", unstructured_term.c.document_id)
+Index("ix_unstructured_attribute_term_id", unstructured_attribute.c.term_id)
+Index(
+    "ix_unstructured_attribute__chunk_chunk_id",
+    unstructured_attribute__chunk.c.chunk_id,
+)
 
 Index("ix_catalog_schema_database_id", catalog_schema.c.database_id)
 Index("ix_catalog_table_schema_id", catalog_table.c.schema_id)
@@ -1248,4 +1352,9 @@ __all__ = [
     "text_attribute",
     "zone",
     "zone_target",
+    "unstructured_document",
+    "unstructured_chunk",
+    "unstructured_term",
+    "unstructured_attribute",
+    "unstructured_attribute__chunk",
 ]
