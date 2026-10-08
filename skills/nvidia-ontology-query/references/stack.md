@@ -29,7 +29,7 @@ Credential order on every `/api` route (`frontend/auth/resolve-user.ts`):
 
 1. Session cookie
 2. Auto Ontology API token (`auto_ontology_…`, `x-api-key` or Bearer)
-3. Auto Ontology-issued OAuth access token (MCP)
+3. OAuth bearer issued by Auto Ontology (MCP)
 4. SSO id token (AI-Q)
 
 A revoked API token is a 401; it is not retried as an SSO JWT.

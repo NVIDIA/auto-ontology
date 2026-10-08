@@ -1,11 +1,11 @@
 ---
 name: nvidia-ontology-management
-version: "0.2.0"
 description: >-
   Model and publish semantic definitions in Auto Ontology. Use for terms, relationships,
   measures, imports, and governed results—not deployment or querying.
 license: Apache-2.0
 metadata:
+  version: "0.2.1"
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology

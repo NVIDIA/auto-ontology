@@ -1,99 +1,85 @@
-<!--
-SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
-All rights reserved.
-SPDX-License-Identifier: Apache-2.0
--->
+## Description: <br>
+Model and publish semantic definitions in Auto Ontology, covering terms, relationships, measures, imports, and governed results (not deployment or querying). <br>
 
-# Skill Card
-
-## Description
-
-nvidia-ontology-management inspects, models, manages, and safely publishes through the current Auto Ontology semantic layer, including source-grounded concepts, relationships, measures, model import/export, governed result definitions, exact readback, and rollback boundaries.
-
-This skill is for research and development. The representative pilot below is not full catalog certification.
+This skill is ready for commercial/non-commercial use. <br>
 
 ## Owner
+NVIDIA <br>
 
-Auto Ontology Team
+### License/Terms of Use: <br>
+Apache 2.0 <br>
+## Use Case: <br>
+Developers and data engineers use this skill to have an agent inspect and change the Auto Ontology semantic layer: editing terms and SQL attributes, defining source-grounded concepts, relationships, and measures, importing or exporting models with exact readback, and publishing governed definitions or results. <br>
 
-## License/Terms of Use
+### Deployment Geography for Use: <br>
+Global <br>
 
-Apache 2.0
+## Requirements / Dependencies: <br>
+**Requires API Key or External Credential:** [Yes] <br>
+**Credential Type(s):** [API key] <br>
 
-## Use Case
+Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate. <br>
 
-Agents that must understand or change ontology meaning, define reusable measures and relationships, import/export a model safely, or publish a supported governed definition or result handoff without confusing request success with certification.
+## Known Risks and Mitigations: <br>
+Risk: Review before execution as proposals could introduce incorrect or misleading guidance into skills. <br>
+Mitigation: Review and scan skill before deployment. <br>
 
-## Deployment Geography for Use
+## Reference(s): <br>
+- [Ontology write API (index)](references/write-api.md) <br>
+- [Source-grounded ontology modeling](references/modeling.md) <br>
+- [Governed publication, readback, and rollback](references/publication.md) <br>
+- [Runtime contract](assets/runtime-contract.yaml) <br>
 
-Global
 
-### Requirements / Dependencies
+## Skill Output: <br>
+**Output Type(s):** [API Calls, Analysis, Configuration instructions] <br>
+**Output Format:** [Markdown with inline HTTP request examples against the Next.js /api gateway] <br>
+**Output Parameters:** [1D] <br>
+**Other Properties Related to Output:** [MCP access is read-only; writes need the token owner's permissions, and unsupported publication stops at an explicit receipt] <br>
 
-Requires API Key or External Credential: Yes
-Credential Type(s): Auto Ontology API token (`x-api-key`) or signed-in session / SSO bearer with `catalog:edit` (and `modelInterchange:*` / `semanticCompilation:manage` for those operations)
+## Evaluation Agents Used: <br>
+- Claude Code (`aws/anthropic/bedrock-claude-opus-4-8`) <br>
+- Codex (`openai/openai/gpt-5.5`) <br>
 
-Do not include secrets in prompts/logs/output; use least-privilege credentials; rotate keys as appropriate.
 
-## Known Risks and Mitigations
 
-Risk: The skill may apply catalog writes or a compile reset that destroys the compiled semantic layer or replaces a model on import (`replace` defaults to true).
-Mitigation: MCP is read-only; confirm writes with the user; never treat `POST /api/semantic-compilation/reset` as cleanup; confirm before import with `replace=true`.
+## Evaluation Tasks: <br>
+13 positive evaluation tasks, one attempt per task, each run in an isolated k8s sandbox pod and compared against a no-skill baseline. <br>
 
-Risk: An API token acts as its owner; a leaked admin token can edit the catalog.
-Mitigation: State that tokens inherit the owner's role; prefer least-privilege owners; revocation is immediate in the UI.
+## Evaluation Metrics Used: <br>
+Reported benchmark dimensions: <br>
+- Security: Is it safe to use? (scored from `security`) <br>
+- Correctness: Is the answer correct? (scored from `accuracy`) <br>
+- Discoverability: Was the right skill loaded when needed? (scored from `skill_execution`) <br>
+- Effectiveness: Did the skill help complete the task? (50% `goal_accuracy` + 50% `behavior_check`) <br>
+- Efficiency: Did it avoid wasted tool calls and token usage? (50% `skill_efficiency` + 50% `token_efficiency`) <br>
 
-Risk: A successful import or non-empty query may conceal stale properties, retained relationships, wrong grain, or an unsupported publication claim.
-Mitigation: Require a scoped backup, isolated application, exact re-export comparison, positive and negative query probes, and receipt-only behavior when no approved writer exists.
+Underlying evaluation signals used in this run: <br>
+- `security`: Unsafe operations, secret leakage, and unauthorized access. <br>
+- `skill_execution`: Whether the expected skill was selected, decoys were avoided, and the workflow executed. <br>
+- `skill_efficiency`: Tool-call productivity. <br>
+- `accuracy`: Final-answer correctness against the reference answer. <br>
+- `goal_accuracy`: Whether the user's goal was achieved. <br>
+- `behavior_check`: Whether the expected workflow behavior was followed. <br>
+- `token_efficiency`: Actual uncached prompt plus completion usage. <br>
 
-## References
 
-- `docs/openapi/auto-ontology-api.json` (operation ids and `x-auto-ontology-permissions`)
-- `mcp/auto_ontology_mcp/tools.py` (read-only MCP allow-list)
-- [assets/runtime-contract.yaml](assets/runtime-contract.yaml)
-- [references/write-api.md](references/write-api.md)
-- [references/modeling.md](references/modeling.md)
-- [references/publication.md](references/publication.md)
-- [evals/evals.json](evals/evals.json) — candidate dataset; representative Tier-3 result below
 
-## Skill Output
+## Evaluation Results: <br>
+| Measure | Claude Code (Baseline → Skill Uplift) | Codex (Baseline → Skill Uplift) |
+|---|---:|---:|
+| Overall | 94.9% (no comparable baseline; uplift unavailable) | 85.3% (no comparable baseline; uplift unavailable) |
+| Security | 100.0% → 100.0% (±0.0 points) | 84.6% → 76.9% (-7.7 points) |
+| Correctness | 29.2% → 100.0% (+70.8 points) | 47.7% → 89.2% (+41.5 points) |
+| Discoverability | 93.7% (no comparable baseline; uplift unavailable) | 85.8% (no comparable baseline; uplift unavailable) |
+| Effectiveness | 42.4% → 89.3% (+46.9 points) | 33.9% → 81.1% (+47.2 points) |
+| Efficiency | 91.4% (no comparable baseline; uplift unavailable) | 93.3% (no comparable baseline; uplift unavailable) |
 
-Output type(s): Semantic specifications, API calls, proposed catalog edits, publication and rollback receipts, verification questions
-Output format: HTTP against the Next.js `/api` gateway; approved source-writer handoffs; Markdown explanations
-Output parameters: Permission tags as in OpenAPI; source and semantic IDs; no credential or raw-data dumps
-Other properties: Does not modify MCP; unsupported writes stop at an explicit receipt
+## Skill Version(s): <br>
+0.2.1 (source: frontmatter) <br>
 
-## Skill Version
+## Ethical Considerations: <br>
+NVIDIA believes Trustworthy AI is a shared responsibility and we have established policies and practices to enable development for a wide array of AI applications. When downloaded or used in accordance with our terms of service, developers should work with their internal team to ensure this skill meets requirements for the relevant industry and use case and addresses unforeseen product misuse. <br>
 
-0.2.0 (source: frontmatter)
-
-## Evaluation Agents Used
-
-SkillEvaluator 0.2.1 with OpenCode and `switchyard/openai/gpt-5.6-sol` in Docker isolation. One attempt per case and condition used the same prompt, model, grader, and environment. The agent route used OpenAI-compatible chat completions because the endpoint's Responses route failed encrypted-content affinity.
-
-## Evaluation Tasks
-
-All 13 cases in `evals/evals.json`.
-
-## Evaluation Results
-
-Full one-attempt Tier-3 matrix:
-
-| Metric | With skill | Baseline | Delta |
-| --- | ---: | ---: | ---: |
-| Pass@1 | 1.000 | 0.462 | +0.538 |
-| Security | 0.923 | 1.000 | -0.077 |
-| Skill execution | 0.962 | 0.481 | +0.481 |
-| Skill efficiency | 0.817 | 0.117 | +0.700 |
-| Accuracy | 0.831 | 0.508 | +0.323 |
-| Goal accuracy | 0.656 | 0.389 | +0.268 |
-| Behavior adherence | 0.750 | 0.397 | +0.353 |
-| Overall | 0.823 | 0.482 | **+0.341** |
-
-Provider and container failures initially left trials unscored. Those case-condition pairs were rerun with the same configuration at lower concurrency and combined with the successful attempts. Localhost read-only probes account for the small security delta. The matrix demonstrates broad positive lift, but repeated attempts and a fixture-backed live lifecycle remain pending.
-
-## Ethical Considerations
-
-Ontology edits change how questions resolve to SQL. Human review is expected before applying import/replace or compile reset. Report quality, risk, or security concerns through NVIDIA's published vulnerability process.
-
-Do not fabricate `skill.oms.sig`. Catalog signing is a follow-up with the nvidia/skills pipeline.
+(For Release on NVIDIA Platforms Only) <br>
+Please report quality, risk, security vulnerabilities or NVIDIA AI Concerns [here](https://app.intigriti.com/programs/nvidia/nvidiavdp/detail). <br>
