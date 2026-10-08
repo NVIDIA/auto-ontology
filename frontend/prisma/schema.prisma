@@ -124,6 +124,7 @@ model User {
   oauthTokens        OauthAccessToken[]
   oauthRefreshTokens OauthRefreshToken[]
   oauthConsents      OauthConsent[]
+  invitations        Invitation[]
 
   @@unique([email])
   @@map("user")
@@ -441,5 +442,26 @@ model OauthClientAssertion {
   expiresAt DateTime
 
   @@map("oauthClientAssertion")
+  @@schema("frontend")
+}
+
+// Email-bound invite links. `token` is the path secret while the invite is
+// still redeemable so the admin list can copy every active URL. On accept the
+// row is deleted. `token_hash` is SHA-256 of that value and is what redemption
+// looks up. No mailer: the admin copies the link.
+model Invitation {
+  id            String    @id
+  email         String
+  name          String    @default("")
+  role          String
+  token         String
+  token_hash    String    @unique
+  expires_at    DateTime
+  created_at    DateTime  @default(now())
+  created_by_id String
+  created_by    User      @relation(fields: [created_by_id], references: [id], onDelete: Cascade)
+
+  @@index([email])
+  @@map("invitations")
   @@schema("frontend")
 }
