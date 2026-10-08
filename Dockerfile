@@ -65,8 +65,12 @@ COPY pyproject.toml uv.lock .python-version ./
 COPY vendor/ vendor/
 
 # Resolve and install the dependency closure into /opt/venv.
+# Ray (pulled in by nemo-retriever) bundles a jar for its Java workers. The
+# image has no JVM and nothing starts a Java worker, so the jar only carries
+# vulnerabilities of its own (httpcore5, GHSA-hf6x-8p5f-cgmf).
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project
+    uv sync --no-dev --no-install-project \
+ && rm -rf /opt/venv/lib/python3.*/site-packages/ray/jars
 
 ############################
 # Stage 2: runtime
@@ -78,7 +82,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}" \
     PORT=3001
 
+# The pinned base image predates later Ubuntu security fixes (libssl3, gpgv,
+# ...), so apply them before installing anything on top.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         libpq5 \
