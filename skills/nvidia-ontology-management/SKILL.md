@@ -1,6 +1,6 @@
 ---
 name: nvidia-ontology-management
-version: "0.2.0"
+version: "0.2.1"
 description: >-
   Model and publish semantic definitions in Auto Ontology. Use for terms, relationships,
   measures, imports, and governed results—not deployment or querying.

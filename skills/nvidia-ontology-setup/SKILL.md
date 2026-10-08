@@ -1,6 +1,6 @@
 ---
 name: nvidia-ontology-setup
-version: "0.3.0"
+version: "0.3.1"
 description: >-
   Set up or troubleshoot the Auto Ontology runtime. Use for Helm (the official
   install), Docker Compose, developer setup, and MCP connection to an existing

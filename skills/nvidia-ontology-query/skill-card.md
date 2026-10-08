@@ -65,7 +65,7 @@ Other properties: Unopinionated scaffolding; MCP tool lists are not copied; exec
 
 ## Skill Version
 
-0.2.0 (source: frontmatter)
+0.2.1 (source: frontmatter)
 
 ## Evaluation Agents Used
 

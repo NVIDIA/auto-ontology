@@ -59,7 +59,7 @@ Other properties: Never ask users to paste secrets; they set chart values or `.e
 
 ## Skill Version
 
-0.3.0 (source: frontmatter)
+0.3.1 (source: frontmatter)
 
 ## Evaluation Agents Used
 

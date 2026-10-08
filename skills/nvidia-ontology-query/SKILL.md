@@ -1,6 +1,6 @@
 ---
 name: nvidia-ontology-query
-version: "0.2.0"
+version: "0.2.1"
 description: >-
   Query Auto Ontology and validate generated SQL, rows, and
   answers. Use for MCP or REST access, readiness, authentication, conversations,

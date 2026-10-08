@@ -65,7 +65,7 @@ Other properties: Does not modify MCP; unsupported writes stop at an explicit re
 
 ## Skill Version
 
-0.2.0 (source: frontmatter)
+0.2.1 (source: frontmatter)
 
 ## Evaluation Agents Used
 
