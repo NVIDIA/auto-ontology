@@ -66,7 +66,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     AUTO_ONTOLOGY_MCP_HOST=0.0.0.0 \
     AUTO_ONTOLOGY_MCP_PORT=3003
 
+# The pinned base image predates later Ubuntu security fixes (libssl3, gpgv,
+# ...), so apply them before installing anything on top.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         tini \
