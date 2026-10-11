@@ -31,6 +31,7 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 	const [confirm, setConfirm] = useState('');
 	const [error, setError] = useState<string | null>(null);
 	const [submitting, setSubmitting] = useState(false);
+	const [savedWithoutSession, setSavedWithoutSession] = useState(false);
 
 	const handleSubmit = async (event: React.FormEvent) => {
 		event.preventDefault();
@@ -58,13 +59,8 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 
 		const signedIn = await authApi.signInWithPassword(email, password);
 		if (signedIn.error) {
-			setError(
-				kind === InvitationKind.Reset
-					? 'Password updated. Sign in from the login page.'
-					: 'Account created. Sign in from the login page.',
-			);
+			setSavedWithoutSession(true);
 			setSubmitting(false);
-			router.push('/login');
 			return;
 		}
 
@@ -81,84 +77,102 @@ export const InviteSetPassword = ({ token, email, kind }: InviteSetPasswordProps
 						Auto Ontology
 					</span>
 				</div>
-				<form
-					onSubmit={(event) => void handleSubmit(event)}
-					className="flex w-full flex-col gap-4"
-				>
-					<p className="text-xs text-secondary dark:text-zinc-400">
-						{kind === InvitationKind.Reset
-							? 'Set a new password for '
-							: 'Set a password for '}
-						<span className="font-medium text-body">{email}</span>
-						{kind === InvitationKind.Reset ? '.' : ' to finish joining.'}
-					</p>
-					<div className="flex flex-col gap-1.5">
-						<label
-							htmlFor="invite-email"
-							className="text-xs font-medium text-body dark:text-zinc-400"
+				{savedWithoutSession ? (
+					<div className="flex w-full flex-col gap-4">
+						<p className="text-sm text-body dark:text-zinc-300">
+							{kind === InvitationKind.Reset
+								? 'Password updated. Sign in to continue.'
+								: 'Account created. Sign in to continue.'}
+						</p>
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							type="button"
+							onClick={() => router.push('/login')}
 						>
-							Email
-						</label>
-						<input
-							id="invite-email"
-							type="email"
-							readOnly
-							value={email}
-							className={`${inputClass} cursor-not-allowed bg-zinc-50 dark:bg-zinc-800/60`}
-						/>
+							Sign in
+						</Button>
 					</div>
-					<div className="flex flex-col gap-1.5">
-						<label
-							htmlFor="invite-password"
-							className="text-xs font-medium text-body dark:text-zinc-400"
-						>
-							Password
-						</label>
-						<input
-							id="invite-password"
-							type="password"
-							required
-							minLength={MIN_PASSWORD_LENGTH}
-							maxLength={MAX_PASSWORD_LENGTH}
-							autoComplete="new-password"
-							value={password}
-							onChange={(event) => setPassword(event.target.value)}
-							className={inputClass}
-						/>
-					</div>
-					<div className="flex flex-col gap-1.5">
-						<label
-							htmlFor="invite-password-confirm"
-							className="text-xs font-medium text-body dark:text-zinc-400"
-						>
-							Confirm password
-						</label>
-						<input
-							id="invite-password-confirm"
-							type="password"
-							required
-							minLength={MIN_PASSWORD_LENGTH}
-							maxLength={MAX_PASSWORD_LENGTH}
-							autoComplete="new-password"
-							value={confirm}
-							onChange={(event) => setConfirm(event.target.value)}
-							className={inputClass}
-						/>
-					</div>
-					{error ? <p className="text-xs text-red-500">{error}</p> : null}
-					<Button
-						theme={ButtonTheme.Primary}
-						size={Size.REGULAR}
-						type="submit"
-						disabled={submitting}
+				) : (
+					<form
+						onSubmit={(event) => void handleSubmit(event)}
+						className="flex w-full flex-col gap-4"
 					>
-						{submitting
-							? 'Saving…'
-							: kind === InvitationKind.Reset
-								? 'Save password'
-								: 'Create password'}
-					</Button>
-				</form>
+						<p className="text-xs text-secondary dark:text-zinc-400">
+							{kind === InvitationKind.Reset
+								? 'Set a new password for '
+								: 'Set a password for '}
+							<span className="font-medium text-body">{email}</span>
+							{kind === InvitationKind.Reset ? '.' : ' to finish joining.'}
+						</p>
+						<div className="flex flex-col gap-1.5">
+							<label
+								htmlFor="invite-email"
+								className="text-xs font-medium text-body dark:text-zinc-400"
+							>
+								Email
+							</label>
+							<input
+								id="invite-email"
+								type="email"
+								readOnly
+								value={email}
+								className={`${inputClass} cursor-not-allowed bg-zinc-50 dark:bg-zinc-800/60`}
+							/>
+						</div>
+						<div className="flex flex-col gap-1.5">
+							<label
+								htmlFor="invite-password"
+								className="text-xs font-medium text-body dark:text-zinc-400"
+							>
+								Password
+							</label>
+							<input
+								id="invite-password"
+								type="password"
+								required
+								minLength={MIN_PASSWORD_LENGTH}
+								maxLength={MAX_PASSWORD_LENGTH}
+								autoComplete="new-password"
+								value={password}
+								onChange={(event) => setPassword(event.target.value)}
+								className={inputClass}
+							/>
+						</div>
+						<div className="flex flex-col gap-1.5">
+							<label
+								htmlFor="invite-password-confirm"
+								className="text-xs font-medium text-body dark:text-zinc-400"
+							>
+								Confirm password
+							</label>
+							<input
+								id="invite-password-confirm"
+								type="password"
+								required
+								minLength={MIN_PASSWORD_LENGTH}
+								maxLength={MAX_PASSWORD_LENGTH}
+								autoComplete="new-password"
+								value={confirm}
+								onChange={(event) => setConfirm(event.target.value)}
+								className={inputClass}
+							/>
+						</div>
+						{error ? <p className="text-xs text-red-500">{error}</p> : null}
+						<Button
+							theme={ButtonTheme.Primary}
+							size={Size.REGULAR}
+							type="submit"
+							disabled={submitting}
+						>
+							{submitting
+								? 'Saving…'
+								: kind === InvitationKind.Reset
+									? 'Save password'
+									: 'Create password'}
+						</Button>
+					</form>
+				)}
 			</div>
 		</div>
 	);

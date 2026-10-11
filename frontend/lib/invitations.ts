@@ -215,6 +215,11 @@ export const acceptInvitation = async (
 	}
 
 	const prisma = getPrisma();
+	const existing = await prisma.invitation.findUnique({ where: { token } });
+	if (!existing || !isLiveInvitation(existing)) {
+		return { error: 'This invitation is invalid or has expired.', status: 404 };
+	}
+
 	const hashedPassword = await hashPassword(password);
 
 	try {

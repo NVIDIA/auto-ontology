@@ -21,7 +21,11 @@ export const POST = withPublic<RouteContext>(async (request, { params }) => {
 
 	let body: { password?: unknown };
 	try {
-		body = (await request.json()) as { password?: unknown };
+		const parsed: unknown = await request.json();
+		if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+			return NextResponse.json({ error: 'A JSON body is required.' }, { status: 400 });
+		}
+		body = parsed as { password?: unknown };
 	} catch {
 		return NextResponse.json({ error: 'A JSON body is required.' }, { status: 400 });
 	}
