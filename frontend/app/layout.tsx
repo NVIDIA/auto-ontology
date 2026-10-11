@@ -27,6 +27,8 @@ import './globals.css';
 const isLoginOrOauthPath = (pathname: string): boolean =>
 	pathname === '/login' ||
 	pathname.startsWith('/login/') ||
+	pathname === '/invite' ||
+	pathname.startsWith('/invite/') ||
 	pathname === '/oauth' ||
 	pathname.startsWith('/oauth/');
 
