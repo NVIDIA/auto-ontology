@@ -4,8 +4,9 @@
 
 """Groups, membership, and the accounts they point at.
 
-Needs a migrated database and the Prisma ``frontend."user"`` table. Skips
-without them.
+Needs a migrated database. The account table is Prisma's, so CI's Alembic
+database does not have it; the fixture creates the columns this DAL reads
+when that table is absent and leaves a real one untouched.
 """
 
 from __future__ import annotations
@@ -28,11 +29,24 @@ from auto_ontology.infra.postgres import FRONTEND_SCHEMA  # noqa: E402
 def require_schema():
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
-    try:
-        store().query_read(text("SELECT 1 FROM user_group LIMIT 1"))
-        store().query_read(text(f'SELECT 1 FROM {FRONTEND_SCHEMA}."user" LIMIT 1'))
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"group schema unavailable: {exc}")
+    store().query_read(text("SELECT 1 FROM user_group LIMIT 1"))
+    store().query_write(text(f"CREATE SCHEMA IF NOT EXISTS {FRONTEND_SCHEMA}"))
+    store().query_write(
+        text(
+            f"""
+            CREATE TABLE IF NOT EXISTS {FRONTEND_SCHEMA}."user" (
+                id text PRIMARY KEY,
+                name text NOT NULL,
+                email text NOT NULL,
+                "emailVerified" boolean NOT NULL DEFAULT false,
+                "createdAt" timestamptz NOT NULL DEFAULT now(),
+                "updatedAt" timestamptz NOT NULL DEFAULT now(),
+                role text,
+                banned boolean NOT NULL DEFAULT false
+            )
+            """
+        )
+    )
 
 
 @pytest.fixture
