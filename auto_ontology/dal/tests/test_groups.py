@@ -188,6 +188,19 @@ def test_directory_lists_accounts_with_their_group_ids(accounts) -> None:
     assert by_id[second]["groups"] == [legal["id"]]
 
 
+def test_updating_a_missing_group_does_not_write_members(accounts) -> None:
+    user_id = accounts()
+    assert (
+        dal.update_group(
+            group_id="missing-group",
+            updates={"color": "#fff"},
+            user_ids=[user_id],
+        )
+        is None
+    )
+    assert dal.get_group("missing-group") is None
+
+
 def test_a_deleted_account_stays_visible_on_the_group(accounts) -> None:
     user_id = accounts(name="Ada")
     prefix = user_id.rsplit("-", 1)[0]

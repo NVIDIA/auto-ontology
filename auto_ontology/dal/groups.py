@@ -275,16 +275,16 @@ def update_group(
     ``None`` when no group has that id. *user_ids* ``None`` leaves membership
     alone; a list replaces it, including the empty list.
 
+    The group row is locked for the write. A delete that lands first comes
+    back as ``None`` instead of a foreign-key error, and two membership
+    replacements of the same group run one after the other.
+
     Raises :class:`GroupNameTaken` and :class:`UnknownGroupMembers` for the
     same reasons as :func:`create_group`. A group's own name is not a
     collision.
     """
-    if get_group(group_id) is None:
-        return None
     if "role" in updates:
         _require_role(updates["role"])
-    if "name" in updates and _name_taken(updates["name"], exclude_id=group_id):
-        raise GroupNameTaken(updates["name"])
     if user_ids is not None:
         missing = _missing_user_ids(user_ids)
         if missing:
@@ -292,6 +292,15 @@ def update_group(
 
     try:
         with write_transaction():
+            locked = store().query_read(
+                select(s.user_group.c.id)
+                .where(s.user_group.c.id == group_id)
+                .with_for_update()
+            )
+            if not locked:
+                return None
+            if "name" in updates and _name_taken(updates["name"], exclude_id=group_id):
+                raise GroupNameTaken(updates["name"])
             if updates:
                 store().query_write(
                     s.user_group.update()
