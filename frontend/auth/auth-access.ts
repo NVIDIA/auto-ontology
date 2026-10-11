@@ -32,6 +32,9 @@ const statement = {
 	connection: ['read', 'manage'],
 	// Zones (settings): everyone may view; only admins may add/edit/delete.
 	zone: ['read', 'manage'],
+	// Groups of accounts. A group lists its members' names and emails, so both
+	// reading and changing groups stay with admins.
+	group: ['read', 'manage'],
 	// Tags: `manage` is the vocabulary — creating and deleting tags on the
 	// settings page — and stays admin-only. `read` goes to viewers too, because
 	// the term page offers every existing tag in its picker, and applying one is
@@ -73,6 +76,7 @@ export const roles = {
 		catalog: ['read', 'edit'],
 		connection: ['read', 'manage'],
 		zone: ['read', 'manage'],
+		group: ['read', 'manage'],
 		tag: ['read', 'manage'],
 		semanticCompilation: ['read', 'manage'],
 		visualization: ['read', 'manage'],

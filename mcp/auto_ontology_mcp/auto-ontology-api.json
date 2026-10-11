@@ -4258,6 +4258,273 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/groups": {
+      "get": {
+        "description": "groupsApi.getAll — list groups. Admin only: each group names its members.",
+        "operationId": "get_api_groups",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "summary": "groupsApi.getAll — list groups.",
+        "tags": ["groups"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/groups/route.ts",
+        "x-auto-ontology-permissions": {
+          "group": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      },
+      "post": {
+        "description": "groupsApi.create — add a group. The identity header is what the backend\nchecks for the admin role, so it has to be the caller this gate just resolved.",
+        "operationId": "post_api_groups",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "groupsApi.create — add a group.",
+        "tags": ["groups"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/groups/route.ts",
+        "x-auto-ontology-permissions": {
+          "group": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/groups/{group_id}": {
+      "delete": {
+        "description": "groupsApi.delete — remove a group and its membership.",
+        "operationId": "delete_api_groups_group_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group",
+        "tags": ["groups"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/groups/[group_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "group": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      },
+      "get": {
+        "description": "groupsApi — one group. The path is forwarded as-is, so the id stays in the URL.",
+        "operationId": "get_api_groups_group_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "groupsApi — one group.",
+        "tags": ["groups"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/groups/[group_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "group": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      },
+      "patch": {
+        "description": "groupsApi.update — edit a group or replace its members.",
+        "operationId": "patch_api_groups_group_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Group",
+        "tags": ["groups"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/groups/[group_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "group": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/health": {
       "get": {
         "tags": ["health"],
@@ -8789,6 +9056,17 @@
         "title": "DataResponse[ExplorationRelatedNodes]",
         "type": "object"
       },
+      "DataResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Group"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[Group]",
+        "type": "object"
+      },
       "DataResponse_IdRef_": {
         "additionalProperties": true,
         "properties": {
@@ -9663,6 +9941,222 @@
         "title": "GraphLink",
         "type": "object"
       },
+      "Group": {
+        "additionalProperties": true,
+        "description": "A group, its members, its role, and the permissions that role grants.\n\n``role`` is the stored value. ``roles`` is that same role as a one-element\nlist, and ``permissions`` is ``resource:action`` strings expanded from it.\nMembership does not change an account's own role.",
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GroupRole"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/GroupUser"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "color",
+          "role",
+          "roles",
+          "users",
+          "permissions",
+          "created"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "user_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "User Ids",
+            "type": "array"
+          }
+        },
+        "required": ["name", "color", "role"],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupRole": {
+        "additionalProperties": true,
+        "description": "One role on a group.\n\nA group carries a single role, ``admin`` or ``viewer``. ``id`` and\n``name`` are that same value: there is no separate role catalog.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": ["id", "name"],
+        "title": "GroupRole",
+        "type": "object"
+      },
+      "GroupUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Ids"
+          }
+        },
+        "title": "GroupUpdate",
+        "type": "object"
+      },
+      "GroupUser": {
+        "additionalProperties": true,
+        "description": "An account as a member of a group.\n\n``name`` and ``email`` are empty when the account has been deleted and\nthe membership remains. ``role`` is the account's own role, not the\ngroup's.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": ["id", "name", "email"],
+        "title": "GroupUser",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -9744,6 +10238,25 @@
         },
         "required": ["data", "count"],
         "title": "ListResponse[GlobalSearchItem]",
+        "type": "object"
+      },
+      "ListResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[Group]",
         "type": "object"
       },
       "ListResponse_PublicConnection_": {

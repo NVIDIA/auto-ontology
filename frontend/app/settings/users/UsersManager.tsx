@@ -15,12 +15,14 @@ import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import type { TableColumn } from '@/types/table';
 import type { User } from '@/types/auth';
+import { GroupsSection } from './GroupsSection';
 
 export const UsersManager = () => {
 	const [users, setUsers] = useState<User[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [groupsRefresh, setGroupsRefresh] = useState(0);
 
 	const adminCount = users.filter((user) => user.role === Role.Admin).length;
 
@@ -48,6 +50,7 @@ export const UsersManager = () => {
 		const listed = await usersApi.list();
 		setUsers(listed.users);
 		if (listed.error) setError(listed.error);
+		setGroupsRefresh((current) => current + 1);
 		setBusyId(null);
 	};
 
@@ -124,7 +127,7 @@ export const UsersManager = () => {
 
 	return (
 		<div className="h-full overflow-auto p-6">
-			<div className="mx-auto max-w-3xl">
+			<div className="mx-auto max-w-4xl">
 				<h1 className="mb-1 text-lg font-semibold text-heading dark:text-zinc-100">
 					Users
 				</h1>
@@ -146,6 +149,8 @@ export const UsersManager = () => {
 						emptyMessage="No Users Found"
 					/>
 				)}
+
+				<GroupsSection users={users} usersLoading={loading} refreshToken={groupsRefresh} />
 			</div>
 
 			<Toast

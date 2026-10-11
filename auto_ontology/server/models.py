@@ -79,6 +79,11 @@ __all__ = [
     "TermListItem",
     "TermSummary",
     "TermTable",
+    "DirectoryUser",
+    "Group",
+    "GroupRole",
+    "GroupUser",
+    "UsersAndGroups",
     "Zone",
     "ZoneChip",
     "ZoneItem",
@@ -207,6 +212,72 @@ class Zone(ApiModel):
     label: str | None = None
     enabled: bool | None = None
     items: list[ZoneItem | str] | None = None
+
+
+# ---------------------------------------------------------------------------
+# Users and groups
+# ---------------------------------------------------------------------------
+
+
+class GroupRole(ApiModel):
+    """One role on a group.
+
+    A group carries a single role, ``admin`` or ``viewer``. ``id`` and
+    ``name`` are that same value: there is no separate role catalog.
+    """
+
+    id: str
+    name: str
+
+
+class GroupUser(ApiModel):
+    """An account as a member of a group.
+
+    ``name`` and ``email`` are empty when the account has been deleted and
+    the membership remains. ``role`` is the account's own role, not the
+    group's.
+    """
+
+    id: str
+    name: str
+    email: str
+    role: str | None = None
+
+
+class Group(ApiModel):
+    """A group, its members, its role, and the permissions that role grants.
+
+    ``role`` is the stored value. ``roles`` is that same role as a one-element
+    list, and ``permissions`` is ``resource:action`` strings expanded from it.
+    Membership does not change an account's own role.
+    """
+
+    id: str
+    name: str
+    description: str
+    color: str
+    role: str
+    roles: list[GroupRole]
+    users: list[GroupUser]
+    permissions: list[str]
+    created: datetime
+
+
+class DirectoryUser(ApiModel):
+    """An account, plus the ids of the groups it belongs to."""
+
+    id: str
+    name: str
+    email: str
+    role: str | None = None
+    groups: list[str]
+
+
+class UsersAndGroups(ApiModel):
+    """Every account and every group, as one answer."""
+
+    users: list[DirectoryUser]
+    groups: list[Group]
 
 
 # ---------------------------------------------------------------------------

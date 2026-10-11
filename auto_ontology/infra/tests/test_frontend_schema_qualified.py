@@ -38,6 +38,9 @@ PRISMA_TABLES = (
     "configurations",
     "acronyms",
     "conversation_analytics",
+    # Better Auth accounts. The role lookup reads this; an unqualified name
+    # fails closed and reports every caller as not an admin.
+    "user",
 )
 
 _AUTO_ONTOLOGY_ROOT = Path(__file__).resolve().parents[2]
@@ -45,8 +48,10 @@ _AUTO_ONTOLOGY_ROOT = Path(__file__).resolve().parents[2]
 #: `FROM foo`, `INTO foo`, `UPDATE foo`, `JOIN foo` — the places a bare table
 #: name can appear. A qualified reference has a `.` before the name and so does
 #: not match.
+# Optional quotes: Better Auth maps the account model to `"user"`, and the
+# SQL quotes that name. A qualified reference still has a `.` before it.
 _UNQUALIFIED = re.compile(
-    r"\b(?:FROM|INTO|UPDATE|JOIN)\s+(" + "|".join(PRISMA_TABLES) + r")\b"
+    r'\b(?:FROM|INTO|UPDATE|JOIN)\s+"?(' + "|".join(PRISMA_TABLES) + r')"?\b'
 )
 
 
@@ -121,8 +126,8 @@ def test_prisma_table_list_matches_the_prisma_schema() -> None:
         pytest.skip("frontend/prisma/schema.prisma not present")
 
     mapped = set(re.findall(r'@@map\("([^"]+)"\)', schema_file.read_text()))
-    # Auth tables (user/session/account/...) are Better Auth's and the backend
-    # does not read them, so only assert the ones we claim to cover exist.
+    # session/account/apikey stay out of this list: the backend does not query
+    # them. `user` is included because the role lookup does.
     missing = set(PRISMA_TABLES) - mapped
     assert not missing, (
         f"PRISMA_TABLES names tables absent from schema.prisma: {sorted(missing)}"
