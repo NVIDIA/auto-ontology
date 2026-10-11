@@ -6,10 +6,10 @@
 
 End-to-end pipeline for a single document
 ------------------------------------------
-    import unstructured.config  # Ray override — import before nemo_retriever
-    from unstructured.ingest import ingest_file
-    from unstructured.extract import run_extraction
-    from unstructured.retrieve import link_document_attributes
+    import unstructured_ao.config  # Ray override — import before nemo_retriever
+    from unstructured_ao.ingest import ingest_file
+    from unstructured_ao.extract import run_extraction
+    from unstructured_ao.retrieve import link_document_attributes
     from auto_ontology.dal.session import get_engine
 
     engine = get_engine()

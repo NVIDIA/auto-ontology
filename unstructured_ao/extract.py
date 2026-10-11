@@ -176,7 +176,7 @@ def run_extraction(
     retrieve step (``retrieve.link_attributes_to_chunks``) runs afterwards to
     build the attribute → chunk pointer table.
     """
-    from unstructured.dal import insert_attribute, insert_term
+    from unstructured_ao.dal import insert_attribute, insert_term
 
     term_extraction = extract_term(full_text)
     if term_extraction is None:

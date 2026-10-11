@@ -17,7 +17,7 @@ without re-extracting text).
 
 Usage
 -----
-    from unstructured.retrieve import link_document_attributes
+    from unstructured_ao.retrieve import link_document_attributes
 
     with engine.begin() as conn:
         link_document_attributes(document_id, conn)
@@ -30,9 +30,9 @@ from typing import Any
 
 from sqlalchemy import Connection
 
-import unstructured.config as config  # noqa: F401  — Ray override
+import unstructured_ao.config as config  # noqa: F401  — Ray override
 from auto_ontology.dal.schema import unstructured_attribute__chunk
-from unstructured.dal import (
+from unstructured_ao.dal import (
     get_document_attributes,
     get_document_chunks,
     insert_attribute_chunk_link,

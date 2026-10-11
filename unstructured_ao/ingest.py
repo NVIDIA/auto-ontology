@@ -18,8 +18,8 @@ Pipeline per file
 
 Usage
 -----
-    from unstructured import config  # must be imported first (Ray override)
-    from unstructured.ingest import ingest_directory
+    from unstructured_ao import config  # must be imported first (Ray override)
+    from unstructured_ao.ingest import ingest_directory
 
     with engine.begin() as conn:
         for doc_id in ingest_directory(config.DATA_DIR, conn):
@@ -35,8 +35,8 @@ from typing import Any
 
 from sqlalchemy import Connection
 
-import unstructured.config as config  # noqa: F401  — Ray override must run first
-from unstructured.dal import (
+import unstructured_ao.config as config  # noqa: F401  — Ray override must run first
+from unstructured_ao.dal import (
     get_document_by_path,
     insert_chunk,
     insert_document,
@@ -227,7 +227,7 @@ def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
         )
 
     # --- LLM extraction of term + attributes ---
-    from unstructured.extract import run_extraction
+    from unstructured_ao.extract import run_extraction
 
     full_text = _chunk_text(raw_chunks)
     run_extraction(document_id, full_text, conn)
