@@ -2,12 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""API route handlers for accounts and groups.
+"""API route handlers for groups.
 
-Groups are stored here. Accounts are not: they stay in Better Auth's
-``frontend."user"`` table, which this service only reads. There is no
-Frontegg. A group's role is ``admin`` or ``viewer``, and ``permissions`` on
-the response is that role expanded — see ``permissions.py``.
+Groups are stored here. Accounts stay in Better Auth and are not listed by
+this service. There is no Frontegg. A group's role is ``admin`` or
+``viewer``, and ``permissions`` on the response is that role expanded — see
+``permissions.py``.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ from auto_ontology.server.responses import (
     GroupListResponse,
     GroupResponse,
     IdResponse,
-    UsersAndGroupsResponse,
 )
 from auto_ontology.server.users import postgres_dal
 from auto_ontology.server.users.permissions import permissions_for_role
@@ -133,38 +132,6 @@ def _translate(exc: Exception) -> HTTPException:
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
     raise exc
-
-
-@router.get("/users", response_model=UsersAndGroupsResponse)
-def list_users_and_groups() -> dict:
-    """Return every account and every group.
-
-    Each account lists the ids of the groups it belongs to. Each group lists
-    its members, its role, and the permissions that role grants. A membership
-    whose account has been deleted stays on the group, with an empty name,
-    and is absent from ``users``.
-    """
-    directory = dal.list_users_and_groups()
-    return {
-        "data": {
-            "users": directory["users"],
-            "groups": [_present(group) for group in directory["groups"]],
-        }
-    }
-
-
-@router.get("/users/{user_id}/groups", response_model=GroupListResponse)
-def list_groups_for_user(user_id: str) -> dict:
-    """Return the groups one account belongs to.
-
-    404 when the account does not exist. An account that exists and belongs
-    to nothing answers 200 with an empty list — that is the empty state, not
-    a missing account.
-    """
-    if dal.get_account(user_id) is None:
-        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
-    rows = [_present(group) for group in dal.groups_for_user(user_id)]
-    return {"data": rows, "count": len(rows)}
 
 
 @router.get("/groups", response_model=GroupListResponse)

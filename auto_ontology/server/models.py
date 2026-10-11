@@ -79,11 +79,9 @@ __all__ = [
     "TermListItem",
     "TermSummary",
     "TermTable",
-    "DirectoryUser",
     "Group",
     "GroupRole",
     "GroupUser",
-    "UsersAndGroups",
     "Zone",
     "ZoneChip",
     "ZoneItem",
@@ -261,23 +259,6 @@ class Group(ApiModel):
     users: list[GroupUser]
     permissions: list[str]
     created: datetime
-
-
-class DirectoryUser(ApiModel):
-    """An account, plus the ids of the groups it belongs to."""
-
-    id: str
-    name: str
-    email: str
-    role: str | None = None
-    groups: list[str]
-
-
-class UsersAndGroups(ApiModel):
-    """Every account and every group, as one answer."""
-
-    users: list[DirectoryUser]
-    groups: list[Group]
 
 
 # ---------------------------------------------------------------------------

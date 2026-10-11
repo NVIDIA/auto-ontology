@@ -2,11 +2,12 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""A group's permissions are its role, expanded.
+"""A group's permissions are its role, expanded from the shared access file.
 
-The lists mirror ``frontend/auth/auth-access.ts``. These tests pin the
-differences that matter: an admin group can manage zones, a viewer group
-cannot, and a viewer group's permissions are a subset of an admin's.
+``frontend/auth/access.json`` is also what the Next.js auth layer imports, so
+these tests only have to pin the differences that matter: an admin group can
+manage groups and zones, a viewer group cannot, and a viewer group's
+permissions are a subset of an admin's.
 """
 
 from __future__ import annotations
@@ -40,3 +41,10 @@ def test_viewer_permissions_are_a_subset_of_admin() -> None:
 
 def test_an_unknown_role_grants_nothing() -> None:
     assert permissions_for_role("owner") == []
+
+
+def test_builtin_account_permissions_are_not_on_a_group() -> None:
+    granted = set(permissions_for_role("admin"))
+    assert not any(
+        item.startswith("user:") or item.startswith("session:") for item in granted
+    )

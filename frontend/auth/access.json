@@ -1,0 +1,33 @@
+{
+	"admin": {
+		"analytics": ["read"],
+		"acronym": ["read", "create", "update", "delete"],
+		"prompt": ["read", "create", "update", "delete"],
+		"sso": ["read", "manage"],
+		"conversation": ["read", "write", "delete"],
+		"chat": ["use"],
+		"analysis": ["read", "manage"],
+		"catalog": ["read", "edit"],
+		"connection": ["read", "manage"],
+		"zone": ["read", "manage"],
+		"group": ["read", "manage"],
+		"tag": ["read", "manage"],
+		"semanticCompilation": ["read", "manage"],
+		"visualization": ["read", "manage"],
+		"pii": ["read", "manage"],
+		"modelInterchange": ["export", "import"],
+		"apiToken": ["manage"]
+	},
+	"viewer": {
+		"acronym": ["read", "create", "update", "delete"],
+		"prompt": ["read", "create", "update", "delete"],
+		"analysis": ["read", "manage"],
+		"conversation": ["read", "write", "delete"],
+		"chat": ["use"],
+		"catalog": ["read", "edit"],
+		"connection": ["read"],
+		"zone": ["read"],
+		"tag": ["read"],
+		"apiToken": ["manage"]
+	}
+}

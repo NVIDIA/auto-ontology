@@ -87,8 +87,9 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 
-	const load = useCallback(async () => {
+	const load = useCallback(async (isCurrent: () => boolean = () => true) => {
 		const result = await groupsApi.getAll();
+		if (!isCurrent()) return;
 		if (result.error) {
 			setLoadError(messageOf(result, 'Failed to load groups.'));
 			setGroups([]);
@@ -101,21 +102,14 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 
 	useEffect(() => {
 		let cancelled = false;
-		groupsApi.getAll().then((result) => {
-			if (cancelled) return;
-			if (result.error) {
-				setLoadError(messageOf(result, 'Failed to load groups.'));
-				setGroups([]);
-			} else {
-				setLoadError(null);
-				setGroups(result.data ?? []);
-			}
-			setLoading(false);
-		});
+		// `load` writes state only after the request resolves. The rule sees the
+		// call itself, which returns a promise, as a synchronous setState.
+		// eslint-disable-next-line react-hooks/set-state-in-effect -- awaited inside load
+		void load(() => !cancelled);
 		return () => {
 			cancelled = true;
 		};
-	}, [refreshToken]);
+	}, [load, refreshToken]);
 
 	const sortedUsers = useMemo(
 		() =>

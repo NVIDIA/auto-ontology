@@ -2,8 +2,8 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Accounts and groups.
+"""Groups.
 
-Accounts are Better Auth rows this package only reads. Groups are stored in
-the catalog schema — see ``auto_ontology.dal.groups``.
+Accounts stay in Better Auth. Groups are stored in the catalog schema — see
+``auto_ontology.dal.groups``.
 """

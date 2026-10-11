@@ -100,6 +100,9 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
 COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
+# Same file the Next.js auth layer imports. The API expands a group's role
+# from it, and the rest of frontend/ stays out of this image.
+COPY --chown=auto_ontology:auto_ontology frontend/auth/access.json ./frontend/auth/access.json
 # Schema migrations for the `public` schema, run by the `migrate` mode below.
 COPY --chown=auto_ontology:auto_ontology alembic/ ./alembic/
 COPY --chown=auto_ontology:auto_ontology alembic.ini ./

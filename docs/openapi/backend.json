@@ -1476,19 +1476,6 @@
         "title": "DataResponse[Term]",
         "type": "object"
       },
-      "DataResponse_UsersAndGroups_": {
-        "additionalProperties": true,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/UsersAndGroups"
-          }
-        },
-        "required": [
-          "data"
-        ],
-        "title": "DataResponse[UsersAndGroups]",
-        "type": "object"
-      },
       "DataResponse_Zone_": {
         "additionalProperties": true,
         "properties": {
@@ -1614,50 +1601,6 @@
           "data"
         ],
         "title": "DescriptionSuggestionResponse",
-        "type": "object"
-      },
-      "DirectoryUser": {
-        "additionalProperties": true,
-        "description": "An account, plus the ids of the groups it belongs to.",
-        "properties": {
-          "email": {
-            "title": "Email",
-            "type": "string"
-          },
-          "groups": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Groups",
-            "type": "array"
-          },
-          "id": {
-            "title": "Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "role": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Role"
-          }
-        },
-        "required": [
-          "id",
-          "name",
-          "email",
-          "groups"
-        ],
-        "title": "DirectoryUser",
         "type": "object"
       },
       "EntityCoverageCandidate": {
@@ -5636,32 +5579,6 @@
           "related_counts"
         ],
         "title": "TermsPageResponse",
-        "type": "object"
-      },
-      "UsersAndGroups": {
-        "additionalProperties": true,
-        "description": "Every account and every group, as one answer.",
-        "properties": {
-          "groups": {
-            "items": {
-              "$ref": "#/components/schemas/Group"
-            },
-            "title": "Groups",
-            "type": "array"
-          },
-          "users": {
-            "items": {
-              "$ref": "#/components/schemas/DirectoryUser"
-            },
-            "title": "Users",
-            "type": "array"
-          }
-        },
-        "required": [
-          "users",
-          "groups"
-        ],
-        "title": "UsersAndGroups",
         "type": "object"
       },
       "ValidationError": {
@@ -9746,71 +9663,6 @@
         "summary": "List Term Sql Attributes By Id",
         "tags": [
           "terms"
-        ]
-      }
-    },
-    "/api/users": {
-      "get": {
-        "description": "Return every account and every group.\n\nEach account lists the ids of the groups it belongs to. Each group lists\nits members, its role, and the permissions that role grants. A membership\nwhose account has been deleted stays on the group, with an empty name,\nand is absent from ``users``.",
-        "operationId": "list_users_and_groups_api_users_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DataResponse_UsersAndGroups_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "List Users And Groups",
-        "tags": [
-          "users"
-        ]
-      }
-    },
-    "/api/users/{user_id}/groups": {
-      "get": {
-        "description": "Return the groups one account belongs to.\n\n404 when the account does not exist. An account that exists and belongs\nto nothing answers 200 with an empty list \u2014 that is the empty state, not\na missing account.",
-        "operationId": "list_groups_for_user_api_users__user_id__groups_get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "user_id",
-            "required": true,
-            "schema": {
-              "title": "User Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ListResponse_Group_"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "List Groups For User",
-        "tags": [
-          "users"
         ]
       }
     },
