@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 ## Description: <br>
 Set up or troubleshoot the Auto Ontology runtime, covering Helm (the official install), Docker Compose, developer setup, and MCP connection to an existing deployment. <br>
 
