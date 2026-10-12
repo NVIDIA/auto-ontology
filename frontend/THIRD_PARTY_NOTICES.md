@@ -30,12 +30,12 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | HTTPX | >=0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
 | hvac | >=2.4.0 | Apache-2.0 | https://github.com/hvac/hvac |
 | importlib-metadata | >=8.7.1 | Apache-2.0 | https://github.com/python/importlib_metadata |
+| kumo-relational-client (`kumo-relational-client[relational]`) | >=1.0.0,<2 | Apache-2.0 — see note below | https://github.com/NVIDIA/kumo-relational-client |
 | langchain-openai | >=1.6.0 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
 | LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
 | NeMo Retriever | >=26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
-| nvidia-sdfm (`nvidia-sdfm[kumorfm]`) | >=0.2.1 | Apache-2.0 — see note below | https://github.com/NVIDIA/nvidia-sdfm-sdk |
 | pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg (`psycopg[binary]`) | >=3.3.4 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
 | psycopg-pool | >=3.3.1 | LGPL-3.0-only | https://github.com/psycopg/psycopg |
@@ -65,10 +65,11 @@ them.
 FOSS Exception, which lets it be combined with software under OSI-approved
 licenses such as Apache-2.0. It is used unmodified.
 
-`nvidia-sdfm[kumorfm]` resolves to NVIDIA wheels vendored under
-`vendor/wheels/`: `nvidia-sdfm` 0.2.1, `sdfm-connectors` 0.3.0 and `kumorfm`
-2.29.0, all Apache-2.0. `kumorfm` bundles Mermaid (MIT); its license text
-ships in the wheel as `kumorfm/rfm/assets/MERMAID_LICENSE`.
+`kumo-relational-client[relational]` resolves to NVIDIA wheels vendored under
+`vendor/wheels/`: `kumo-relational-client` 1.0.0, `kumo-connectors` 1.0.0 and
+`kumo-relational-engine` 1.0.0, all Apache-2.0. `kumo-relational-engine`
+bundles Mermaid (MIT); its license text ships in the wheel as
+`kumo_relational_engine/rfm/assets/MERMAID_LICENSE`.
 
 ### Backend development dependencies (not redistributed)
 
