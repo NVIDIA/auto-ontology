@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 import { invitationsApi } from '@/api/invitations';
@@ -21,6 +22,7 @@ import { Toast } from '@/common/Toast';
 import type { TableColumn } from '@/types/table';
 import type { User } from '@/types/auth';
 import type { Invitation } from '@/types/invitation';
+import { invalidateOwners } from '@/lib/queries/owners';
 import { GroupsSection } from './GroupsSection';
 import { InviteUserModal, type InviteUserInput } from './InviteUserModal';
 
@@ -43,6 +45,7 @@ const actionErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 export const UsersManager = () => {
+	const queryClient = useQueryClient();
 	const { data: session } = useSession();
 	const [users, setUsers] = useState<User[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -72,6 +75,8 @@ export const UsersManager = () => {
 		const actionResult = await action();
 		if (actionResult.error) {
 			setError(actionErrorMessage(actionResult.error, 'Action failed.'));
+		} else {
+			await invalidateOwners(queryClient);
 		}
 		const listed = await usersApi.list();
 		setUsers(listed.users);

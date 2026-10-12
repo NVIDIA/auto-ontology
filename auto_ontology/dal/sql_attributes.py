@@ -141,6 +141,7 @@ def _attribute_select():
             s.sql_attribute.c.source,
             _SQL_TEXT.label("sql"),
             s.sql_attribute.c.certified,
+            s.sql_attribute.c.owner_id,
             s.term.c.id.label("term_id"),
             s.term.c.name.label("term_name"),
         )
@@ -474,6 +475,8 @@ def update_sql_attribute(
     expression: str | None = None,
     source: str | None = None,
     certified: bool | None = None,
+    owner_id: str | None = None,
+    set_owner: bool = False,
 ) -> None:
     """Set properties on an existing attribute; omitted fields are untouched."""
     store().query_write(
@@ -489,6 +492,9 @@ def update_sql_attribute(
             # column is nullable with no default.
             source=func.coalesce(literal(source, String), s.sql_attribute.c.source),
             certified=func.coalesce(certified, s.sql_attribute.c.certified),
+            owner_id=(
+                literal(owner_id, String) if set_owner else s.sql_attribute.c.owner_id
+            ),
         )
     )
 

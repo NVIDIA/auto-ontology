@@ -5,6 +5,7 @@
 'use client';
 
 import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
@@ -13,6 +14,8 @@ import {
 	isComposerSection,
 	type ComposerSection,
 	type ComposerEntityTagsSection,
+	type ComposerOwnerOption,
+	type ComposerOwnerSection,
 	type ComposerTagChip,
 	type ComposerZonesSection,
 	type ComposerCertification,
@@ -31,6 +34,11 @@ import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
+import { OwnerLabel } from '@/common/OwnerLabel';
+import { OwnersSelect } from '@/common/OwnersSelect';
+import { ownerChoices } from '@/lib/owners';
+import { ownerQueries } from '@/lib/queries/owners';
+import type { Owner } from '@/types/owners';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -121,15 +129,23 @@ export type SinglePageComposerProps = {
 	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
 	/**
 	 * Called when a certification dropdown inside a DATA_TABLE row changes.
-	 * When provided (and in edit mode), the certification cell renders an
-	 * editable dropdown instead of a read-only badge. `rowId` is the row's
-	 * `rowIdKey` value. A returned promise drives the dropdown's saving spinner.
+	 * `rowId` is the row's `rowIdKey` value. A returned promise drives the
+	 * dropdown's saving spinner.
+	 *
+	 * Without `canCertifyDataTableRow`, the dropdown is shown in edit mode.
+	 * With it, the row's own owner decides, including while the page is not
+	 * being edited.
 	 */
 	onDataTableCertificationChange?: (
 		sectionId: string,
 		rowId: string,
 		certified: boolean,
 	) => void | Promise<void>;
+	/**
+	 * Whether this row's certification dropdown is offered. `ownerId` is the
+	 * row's `owner_id`, or null when that cell is empty.
+	 */
+	canCertifyDataTableRow?: (sectionId: string, rowId: string, ownerId: string | null) => boolean;
 	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
@@ -147,6 +163,8 @@ function composerSectionHeading(section: ComposerSection): string {
 			return `${section.title} (${section.terms.length})`;
 		case ComposerSectionKind.ENTITY_TAGS:
 			return `${section.title} (${section.tags.length})`;
+		case ComposerSectionKind.OWNER:
+			return section.title;
 		default:
 			return section.title;
 	}
@@ -469,6 +487,69 @@ const EditableEntityTagsCard = ({
 	);
 };
 
+const ownerOption = (owner: Owner): ComposerOwnerOption => ({
+	id: owner.id,
+	name: owner.name,
+	kind: owner.kind,
+	color: owner.color,
+});
+
+/**
+ * The directory the card was built with, replaced by a live read once it
+ * arrives. Creating a group invalidates that read, so an open page picks the
+ * group up without being rebuilt.
+ */
+const useLiveOwnerOptions = (section: ComposerOwnerSection): ComposerOwnerOption[] => {
+	const { data } = useQuery(ownerQueries.all());
+	if (data == null) return section.options;
+	const source =
+		section.editable === false ? data : ownerChoices(data, section.permission, section.ownerId);
+	return source.map(ownerOption);
+};
+
+const OwnerSection = ({ section }: { section: ComposerOwnerSection }) => {
+	const options = useLiveOwnerOptions(section);
+	const owner = options.find((option) => option.id === section.ownerId);
+	return (
+		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<OwnerLabel owner={owner} />
+			</div>
+		</div>
+	);
+};
+
+const EditableOwnerCard = ({
+	section,
+	onChange,
+}: {
+	section: ComposerOwnerSection;
+	onChange: (sectionId: string, value: string) => void;
+}) => {
+	const options = useLiveOwnerOptions(section);
+	const [ownerId, setOwnerId] = useState(section.ownerId ?? '');
+	return (
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<OwnersSelect
+					owners={options}
+					value={ownerId}
+					onChange={(next) => {
+						setOwnerId(next);
+						onChange(section.id, next);
+					}}
+				/>
+			</div>
+		</div>
+	);
+};
+
 const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) => (
 	<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
 		<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
@@ -523,6 +604,7 @@ function renderComposerSection(
 		rowId: string,
 		certified: boolean,
 	) => void | Promise<void>,
+	canCertifyDataTableRow?: (sectionId: string, rowId: string, ownerId: string | null) => boolean,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -629,11 +711,23 @@ function renderComposerSection(
 										const rowId = section.rowIdKey
 											? row[section.rowIdKey]
 											: undefined;
+										const storedOwnerId =
+											typeof row.owner_id === 'string' && row.owner_id !== ''
+												? row.owner_id
+												: null;
+										const rowIdText = typeof rowId === 'string' ? rowId : '';
+										const mayCertify =
+											canCertifyDataTableRow != null
+												? canCertifyDataTableRow(
+														section.id,
+														rowIdText,
+														storedOwnerId,
+													)
+												: isEditingActive;
 										const control =
-											isEditingActive &&
+											mayCertify &&
 											onDataTableCertificationChange != null &&
-											typeof rowId === 'string' &&
-											rowId !== '' ? (
+											rowIdText !== '' ? (
 												// Stop propagation so toggling certification
 												// never triggers the row's navigation click.
 												<span
@@ -647,7 +741,7 @@ function renderComposerSection(
 														onChange={(next) =>
 															onDataTableCertificationChange(
 																section.id,
-																rowId,
+																rowIdText,
 																next,
 															)
 														}
@@ -710,6 +804,8 @@ function renderComposerSection(
 			return <ZonesSection section={section} />;
 		case ComposerSectionKind.ENTITY_TAGS:
 			return <EntityTagsSection section={section} />;
+		case ComposerSectionKind.OWNER:
+			return <OwnerSection section={section} />;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
@@ -825,6 +921,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onSuggestDescription,
 			onCertificationChange,
 			onDataTableCertificationChange,
+			canCertifyDataTableRow,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 			headerActions,
@@ -874,8 +971,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			sections.some(
 				(s) =>
 					isComposerSection(s) &&
-					s.type === ComposerSectionKind.ENTITY_TAGS &&
-					s.editable === true,
+					((s.type === ComposerSectionKind.ENTITY_TAGS && s.editable === true) ||
+						(s.type === ComposerSectionKind.OWNER && s.editable === true)),
 			);
 		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
@@ -1232,6 +1329,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 										isEditingActive &&
 										section.type === ComposerSectionKind.ENTITY_TAGS &&
 										section.editable === true;
+									const isEditableOwner =
+										isEditingActive &&
+										section.type === ComposerSectionKind.OWNER &&
+										section.editable === true;
 									return (
 										<div key={section.id}>
 											{isEditableTextCard ? (
@@ -1285,6 +1386,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 														pendingEditsRef.current[id] = val;
 													}}
 												/>
+											) : isEditableOwner ? (
+												<EditableOwnerCard
+													section={section}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
+												/>
 											) : (
 												renderComposerSection(
 													section,
@@ -1294,6 +1402,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onEditSql,
 													handleEntityClick,
 													onDataTableCertificationChange,
+													canCertifyDataTableRow,
 												)
 											)}
 										</div>

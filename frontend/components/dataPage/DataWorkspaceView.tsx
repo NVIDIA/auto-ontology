@@ -27,6 +27,9 @@ import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded'
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
 import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
+import { canEditEntity } from '@/lib/owners';
+import { ownerQueries } from '@/lib/queries/owners';
+import { useSession } from '@/auth/auth-client';
 import {
 	mergeColumnsIntoTable,
 	mergeSchemasIntoDatabase,
@@ -100,6 +103,7 @@ export function DataWorkspaceView() {
 	// page that offers them, so walking the tree doesn't re-read the
 	// vocabulary at each table and column.
 	const queryClient = useQueryClient();
+	const { data: session } = useSession();
 	const searchParams = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const treeFocusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
@@ -228,11 +232,17 @@ export function DataWorkspaceView() {
 		async (_dataId: string, treeFocus: string | null): Promise<SinglePageFormat> => {
 			// The picker's options are read only for the kinds that have a tags
 			// section, and beside the hydration rather than after it.
-			const [, tagOptions] = await Promise.all([
+			const [, tagOptions, ownerDirectory] = await Promise.all([
 				hydrateBranchForFocus(treeFocus),
 				focusedTagType(treeFocus) == null ? [] : fetchTagOptions(queryClient),
+				queryClient.fetchQuery(ownerQueries.all()),
 			]);
-			return buildTreeFocusPageFormat(treeFocus, databasesRef.current, tagOptions);
+			return buildTreeFocusPageFormat(
+				treeFocus,
+				databasesRef.current,
+				tagOptions,
+				ownerDirectory,
+			);
 		},
 		[hydrateBranchForFocus, queryClient],
 	);
@@ -279,11 +289,13 @@ export function DataWorkspaceView() {
 			const { [TAGS_SECTION_ID]: tagEdit, ...nodeEdits } = edits;
 
 			if (Object.keys(nodeEdits).length > 0) {
-				const res = await datasources.updateNode(focusedEntityId, nodeEdits as NodePatch);
+				const nodePatch = { ...nodeEdits } as NodePatch;
+				if (nodePatch.owner_id === '') nodePatch.owner_id = null;
+				const res = await datasources.updateNode(focusedEntityId, nodePatch);
 				if (res.error) {
 					return { error: true, message: res.message ?? 'Failed to save changes' };
 				}
-				applyNodePatch(focusedEntityId, nodeEdits as CatalogNodePatch);
+				applyNodePatch(focusedEntityId, nodePatch as CatalogNodePatch);
 			}
 
 			const nextTagIds = stagedTagIds(tagEdit);
@@ -348,6 +360,11 @@ export function DataWorkspaceView() {
 		},
 		[applyNodePatch],
 	);
+
+	const hideCatalogEdit = !canEditEntity({
+		user: session?.user ? { id: session.user.id, role: session.user.role ?? null } : null,
+		permission: { catalog: ['edit'] },
+	});
 
 	if (loadError) {
 		return (
@@ -419,6 +436,15 @@ export function DataWorkspaceView() {
 					onPatchEdits={handleSave}
 					onCertificationChange={handleCertificationChange}
 					onDataTableCertificationChange={handleChildCertificationChange}
+					canCertifyDataTableRow={() =>
+						canEditEntity({
+							user: session?.user
+								? { id: session.user.id, role: session.user.role ?? null }
+								: null,
+							permission: { catalog: ['edit'] },
+						})
+					}
+					hideEditToolbar={hideCatalogEdit}
 				/>
 			</main>
 			<Toast

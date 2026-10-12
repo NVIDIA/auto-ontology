@@ -141,6 +141,7 @@ class NodeUpdateResult(ApiModel):
     description: str | None = None
     sample_values: list[str] | None = None
     description_certified: bool | None = None
+    owner_id: str | None = None
 
 
 class GlobalSearchBreadcrumb(ApiModel):
@@ -261,6 +262,22 @@ class Group(ApiModel):
     created: datetime
 
 
+class Owner(ApiModel):
+    """A user or a group that can be chosen as an owner.
+
+    ``permissions`` is the ``resource:action`` list the account's role, or the
+    group's role, grants. ``member_ids`` is empty for a user and the accounts
+    in a group. ``color`` is only set for a group.
+    """
+
+    id: str
+    name: str
+    kind: str
+    color: str | None = None
+    permissions: list[str]
+    member_ids: list[str] = Field(default_factory=list)
+
+
 # ---------------------------------------------------------------------------
 # Catalog (databases / schemas / tables / columns)
 # ---------------------------------------------------------------------------
@@ -273,6 +290,7 @@ class SchemaSummary(ApiModel):
     schema_name: str | None = None
     description: str | None = None
     tables_count: int | None = None
+    owner_id: str | None = None
 
 
 class DatabaseSummary(ApiModel):
@@ -282,6 +300,7 @@ class DatabaseSummary(ApiModel):
     name: str | None = None
     description: str | None = None
     num_of_schemas: int | None = None
+    owner_id: str | None = None
     schemas: list[SchemaSummary] = Field(default_factory=list)
 
 
@@ -298,6 +317,7 @@ class TableSummary(ApiModel):
     columns_count: int | None = None
     sql_count: int | None = None
     terms_count: int | None = None
+    owner_id: str | None = None
     #: The catalog has no table detail read -- a table's page is built from the
     #: schema's list -- so its chips travel with the row.
     tags: list[TagChip] = Field(default_factory=list)
@@ -530,6 +550,7 @@ class Term(TermSummary):
     name_certified: bool | None = None
     description_certified: bool | None = None
     certification: str | None = None
+    owner_id: str | None = None
     zones: list[ZoneChip] | None = None
 
 
@@ -545,9 +566,8 @@ class TermTable(ApiModel):
 class TermDetail(Term):
     """One Term with the tables that represent it and its related terms.
 
-    ``tags`` is on the detail rather than on :class:`Term` because only this
-    read resolves it: the paged list would need a second query per page to fill
-    it, and its cards do not render chips.
+    ``tags`` is resolved here and on the paged list. The list reads them once
+    for the page, which is what its cards draw.
     """
 
     table_count: int | None = None
@@ -557,9 +577,14 @@ class TermDetail(Term):
 
 
 class TermListItem(Term):
-    """A Term as it appears in the paged ``/terms`` list."""
+    """A Term as it appears in the paged ``/terms`` list.
+
+    ``tags`` travels with the page so a card can show its chips without a
+    second read. An untagged term is an empty list, not a missing field.
+    """
 
     schema_names: list[str] | None = None
+    tags: list[TagChip] = Field(default_factory=list)
 
 
 class TermCountEntry(ApiModel):
@@ -622,6 +647,7 @@ class SqlAttribute(ApiModel):
     term_id: str | None = None
     term_name: str | None = None
     database_name: str | None = None
+    owner_id: str | None = None
     zones: list[ZoneChip] | None = None
     tags: list[TagChip] | None = None
 

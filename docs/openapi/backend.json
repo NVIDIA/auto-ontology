@@ -1567,6 +1567,17 @@
             ],
             "title": "Num Of Schemas"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schemas": {
             "items": {
               "$ref": "#/components/schemas/SchemaSummary"
@@ -2640,6 +2651,28 @@
         "title": "ListResponse[Group]",
         "type": "object"
       },
+      "ListResponse_Owner_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Owner"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Owner]",
+        "type": "object"
+      },
       "ListResponse_PublicConnection_": {
         "additionalProperties": true,
         "properties": {
@@ -2803,6 +2836,17 @@
             ],
             "title": "Description Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -2851,6 +2895,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -2893,6 +2948,57 @@
           "total"
         ],
         "title": "ObjectPageResponse[TableColumns]",
+        "type": "object"
+      },
+      "Owner": {
+        "additionalProperties": true,
+        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user and the accounts\nin a group. ``color`` is only set for a group.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "permissions"
+        ],
+        "title": "Owner",
         "type": "object"
       },
       "PagedListResponse_ColumnAttribute_": {
@@ -3367,6 +3473,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -3642,6 +3759,17 @@
             ],
             "title": "Name"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "source": {
             "anyOf": [
               {
@@ -3747,6 +3875,17 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "source": {
             "default": "manual",
@@ -3856,6 +3995,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "SqlAttributeMetadataPatch",
@@ -4609,6 +4759,17 @@
             ],
             "title": "Name"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -4987,6 +5148,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "synonyms": {
             "anyOf": [
               {
@@ -5044,7 +5216,7 @@
       },
       "TermDetail": {
         "additionalProperties": true,
-        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is on the detail rather than on :class:`Term` because only this\nread resolves it: the paged list would need a second query per page to fill\nit, and its cards do not render chips.",
+        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is resolved here and on the paged list. The list reads them once\nfor the page, which is what its cards draw.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -5104,6 +5276,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "related_terms": {
             "items": {
@@ -5288,7 +5471,7 @@
       },
       "TermListItem": {
         "additionalProperties": true,
-        "description": "A Term as it appears in the paged ``/terms`` list.",
+        "description": "A Term as it appears in the paged ``/terms`` list.\n\n``tags`` travels with the page so a card can show its chips without a\nsecond read. An untagged term is an empty list, not a missing field.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -5349,6 +5532,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_names": {
             "anyOf": [
               {
@@ -5376,6 +5570,13 @@
               }
             ],
             "title": "Synonyms"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "zones": {
             "anyOf": [
@@ -5529,6 +5730,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "TermUpdate",
@@ -7731,6 +7943,28 @@
         ]
       }
     },
+    "/api/owners": {
+      "get": {
+        "description": "Return every account and every group that can be shown as an owner.\n\nEach row carries the permissions of its role, which is what a picker uses\nto offer only the people who may own that kind of object. A group's\n``member_ids`` are the accounts in it.",
+        "operationId": "list_owners_api_owners_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Owner_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Owners",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/pql-analyses": {
       "get": {
         "description": "PqlAnalysis nodes ``{id, name, description, pql}``.\n\n*query*, ``skip`` and ``limit`` behave as they do on ``/custom-analyses``:\na name filter over a page of the name order, with ``total`` counting\nevery match rather than the rows on this page.",
@@ -8451,7 +8685,7 @@
         ]
       },
       "post": {
-        "description": "Create a SqlAttribute with its Sql node, linked to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 409 when the name is\nalready taken, 422 when the target Term does not exist or the SQL\ncan't be parsed.",
+        "description": "Create a SqlAttribute with its Sql node, linked to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). ``owner_id``, when set,\nnames a user or a group that can edit the catalog; omit it to leave the\nattribute unassigned. Returns 400 when that id cannot be assigned, 409\nwhen the name is already taken, 422 when the target Term does not exist\nor the SQL can't be parsed.",
         "operationId": "create_sql_attribute_api_sql_attributes_post",
         "requestBody": {
           "content": {
@@ -8668,7 +8902,7 @@
         ]
       },
       "put": {
-        "description": "Replace a SqlAttribute, re-parse SQL, and re-link to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 404 when no SqlAttribute\nwith that id exists, 409 on name conflict, 422 when the Term doesn't\nexist or SQL can't be parsed.",
+        "description": "Replace a SqlAttribute, re-parse SQL, and re-link to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 404 when no SqlAttribute\nwith that id exists, 409 on name conflict, 422 when the Term doesn't\nexist or SQL can't be parsed. Returns 403 when the caller may not edit\nthis attribute, the same check as the metadata patch.",
         "operationId": "update_sql_attribute_api_sql_attributes__attr_id__put",
         "parameters": [
           {

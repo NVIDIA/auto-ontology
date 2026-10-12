@@ -126,6 +126,20 @@ def _certified(name: str) -> Column:
     return Column(name, Boolean, nullable=False, server_default=text("false"))
 
 
+def _owner_id() -> Column:
+    """The account or group that owns the row, or null when nobody does.
+
+    Stored on a database, a schema, a table, a term, and a sql attribute. A
+    column shows its table's owner and a column attribute shows its term's
+    owner; neither stores one of its own. One column holds either id. An
+    account id is ``frontend."user".id`` and a group id is ``user_group.id``;
+    neither can be a foreign key, because the account table is outside this
+    schema and one reference cannot name both. An empty write clears it. A
+    deleted account or group leaves the id behind, which reads as unassigned.
+    """
+    return Column("owner_id", Text, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Catalog tier — Database -> Schema -> Table -> Column
 # ---------------------------------------------------------------------------
@@ -147,6 +161,7 @@ catalog_database = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     Column("created", DateTime(timezone=True), server_default=func.now()),
     Column("pulled", DateTime(timezone=True), nullable=True),
 )
@@ -165,6 +180,7 @@ catalog_schema = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     UniqueConstraint("database_id", "name", name="uq_catalog_schema_database_name"),
 )
 
@@ -187,6 +203,7 @@ catalog_table = Table(
     # column the PATCH still returns 200 and the checkbox still ticks; the flag
     # is simply dropped on the way in and reads back false forever.
     _certified("description_certified"),
+    _owner_id(),
     # Primary key column names. A list on the node today, so a text[] here
     # rather than a join table -- nothing ever queries "which tables have this
     # pk column", and a join table would make every read a second query.
@@ -414,6 +431,7 @@ term = Table(
     Column("synonyms", ARRAY(Text), nullable=True),
     _certified("name_certified"),
     _certified("description_certified"),
+    _owner_id(),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
 )
@@ -547,6 +565,7 @@ sql_attribute = Table(
     Column("expression", Text, nullable=True),
     Column("source", Text, nullable=True),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
+    _owner_id(),
     Column("description_suggestion", Text, nullable=True),
     # Set once PII propagation from the attribute's columns has handled it.
     # Like `catalog_column.pii_processed`, tag edits are independent of it:

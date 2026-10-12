@@ -9,11 +9,17 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
 
 // Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.
-export const PUT = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+export const PUT = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 
 // Patching name/description does not touch SQL expression.
-export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 
 // Deleting a SqlAttribute mutates catalog data and the backend handles graph
 // cleanup plus VDB embedding deletion.
-export const DELETE = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+export const DELETE = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

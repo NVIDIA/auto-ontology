@@ -24,6 +24,7 @@ from auto_ontology.server.responses import (
     GroupListResponse,
     GroupResponse,
     IdResponse,
+    OwnerListResponse,
 )
 from auto_ontology.server.users import postgres_dal
 from auto_ontology.server.users.permissions import permissions_for_role
@@ -132,6 +133,43 @@ def _translate(exc: Exception) -> HTTPException:
     if isinstance(exc, ValueError):
         return HTTPException(status_code=400, detail=str(exc))
     raise exc
+
+
+@router.get("/owners", response_model=OwnerListResponse)
+def list_owners() -> dict:
+    """Return every account and every group that can be shown as an owner.
+
+    Each row carries the permissions of its role, which is what a picker uses
+    to offer only the people who may own that kind of object. A group's
+    ``member_ids`` are the accounts in it.
+    """
+    directory = dal.list_users_and_groups()
+    owners: list[dict[str, Any]] = []
+    for user in directory["users"]:
+        role = user["role"] or "viewer"
+        owners.append(
+            {
+                "id": user["id"],
+                "name": user["name"] or user["email"] or user["id"],
+                "kind": "user",
+                "color": None,
+                "permissions": permissions_for_role(role),
+                "member_ids": [],
+            }
+        )
+    for group in directory["groups"]:
+        owners.append(
+            {
+                "id": group["id"],
+                "name": group["name"],
+                "kind": "group",
+                "color": group["color"],
+                "permissions": permissions_for_role(group["role"]),
+                "member_ids": [member["id"] for member in group["users"]],
+            }
+        )
+    owners.sort(key=lambda owner: (owner["kind"] != "user", owner["name"].lower()))
+    return {"data": owners, "count": len(owners)}
 
 
 @router.get("/groups", response_model=GroupListResponse)

@@ -16,6 +16,8 @@ export type SqlAttributeCreatePayload = {
 	expression: string;
 	term_id: string;
 	source?: string;
+	/** A user id or a group id. Null leaves the attribute unassigned. */
+	owner_id?: string | null;
 };
 
 export type SqlAttributeValidatePayload = {
@@ -28,6 +30,8 @@ export type SqlAttributePatchPayload = {
 	name?: string;
 	description?: string | null;
 	certified?: boolean;
+	/** A user id or a group id. Null clears the owner. */
+	owner_id?: string | null;
 };
 
 type PatchResult = SingleResult & {

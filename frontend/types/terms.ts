@@ -29,6 +29,14 @@ export type Term = {
 	 * returns the recomputed value — never derive it on the client.
 	 */
 	certification: CertificationStatus;
+	/** A user id or a group id. Null when the term is unassigned. */
+	owner_id?: string | null;
+	/**
+	 * Chips on the list card. The paged list resolves them with the page.
+	 * Absent only on a response that predates that, which the card treats as
+	 * no tags.
+	 */
+	tags?: TagChip[];
 };
 
 export type TermTable = {
@@ -38,10 +46,7 @@ export type TermTable = {
 	db_id: string;
 };
 
-/**
- * `tags` is on the detail rather than on `Term` because only `/terms/{id}`
- * resolves it — the paged list returns cards, which render no chips.
- */
+/** The detail read adds the tables and related terms the list card does not. */
 export type TermDetail = Term & {
 	table_count: number;
 	tables: TermTable[];
@@ -90,6 +95,8 @@ export type SqlAttribute = {
 	zones?: TermZone[];
 	tags?: TagChip[];
 	certified: boolean;
+	/** A user id or a group id. Null when the attribute is unassigned. */
+	owner_id?: string | null;
 };
 
 export type RelatedTerm = {

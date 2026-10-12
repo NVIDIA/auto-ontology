@@ -7,4 +7,6 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 
 // datasources.updateNode — edit mutable properties of a catalog node
 // (table/column descriptions, etc.). Allowed for viewers and admins.
-export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

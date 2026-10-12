@@ -5,6 +5,7 @@
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import {
 	ComposerColumnType,
 	ComposerSectionKind,
@@ -16,7 +17,9 @@ import type { ComposerCertification, ComposerSection } from '@/types/composer-se
 import type { TagChip } from '@/types/tags';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
+import { entityOwnerSection } from '@/lib/owners';
 import { entityTagsSection } from '@/lib/tags';
+import { OwnerPermission, type Owner } from '@/types/owners';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 
 export type TreeResolved =
@@ -116,6 +119,7 @@ export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
 	tagOptions: TagChip[] = [],
+	owners: Owner[] = [],
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -176,6 +180,7 @@ export function buildTreeFocusPageFormat(
 					{ label: 'Schemas', value: String(database.schemas.length) },
 				]),
 			);
+			sections.push(entityOwnerSection(database.owner_id, owners, OwnerPermission.catalog));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
@@ -209,6 +214,7 @@ export function buildTreeFocusPageFormat(
 					{ label: 'Tables', value: String(schema.tables_count) },
 				]),
 			);
+			sections.push(entityOwnerSection(schema.owner_id, owners, OwnerPermission.catalog));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-tables',
@@ -229,6 +235,7 @@ export function buildTreeFocusPageFormat(
 					name: table.name,
 					columns: String(table.columns_count),
 					certification: fieldStatus(table.description_certified === true),
+					owner_id: table.owner_id ?? '',
 				})),
 			});
 			return {
@@ -244,7 +251,8 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { table } = resolvedFocus;
-			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
+			const tableInfo = catalogNodeInfo[getTableType(table.table_type)];
+			const tableTypeLabel = tableInfo.title;
 			sections.push(
 				...baseCardsForEntity(
 					table.description ?? '',
@@ -258,6 +266,7 @@ export function buildTreeFocusPageFormat(
 					{ certified: table.description_certified === true },
 				),
 			);
+			sections.push(entityOwnerSection(table.owner_id, owners, OwnerPermission.catalog));
 			sections.push(entityTagsSection(table.tags, tagOptions));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
@@ -279,7 +288,7 @@ export function buildTreeFocusPageFormat(
 					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
-					data_type: column.data_type,
+					data_type: column.data_type?.trim() ? column.data_type : '—',
 					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
@@ -288,14 +297,14 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						icon: catalogNodeInfo[table.table_type].icon,
+						icon: tableInfo.icon,
 						entityId: table.id,
 					},
 				},
 			};
 		}
 		case DataModels.COLUMN: {
-			const { column } = resolvedFocus;
+			const { column, table } = resolvedFocus;
 			const samplesEditable = sampleValuesEditable(column.data_type);
 			sections.push(
 				{
@@ -315,6 +324,13 @@ export function buildTreeFocusPageFormat(
 					hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(column.data_type),
 				},
 				entityTagsSection(column.tags, tagOptions),
+				entityOwnerSection(
+					table.owner_id,
+					owners,
+					OwnerPermission.catalog,
+					false,
+					'Table Owner',
+				),
 				{
 					type: ComposerSectionKind.INFO_GRID,
 					id: 'information',
@@ -323,7 +339,7 @@ export function buildTreeFocusPageFormat(
 						{ label: 'Column', value: column.column_name },
 						{
 							label: 'Data Type',
-							value: column.data_type.trim() ? column.data_type : '—',
+							value: column.data_type?.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
 						{ label: 'Position', value: String(column.ordinal_position) },

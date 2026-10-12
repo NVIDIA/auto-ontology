@@ -2824,14 +2824,16 @@
         "id": "<db:chinook>",
         "name": "chinook",
         "num_of_schemas": 1,
-        "schemas": []
+        "schemas": [],
+        "owner_id": null
       },
       {
         "description": null,
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 2,
-        "schemas": []
+        "schemas": [],
+        "owner_id": null
       }
     ],
     "datasources.fetch_databases[none]": [],
@@ -2841,7 +2843,8 @@
         "id": "<db:pagila>",
         "name": "pagila",
         "num_of_schemas": 1,
-        "schemas": []
+        "schemas": [],
+        "owner_id": null
       }
     ],
     "datasources.fetch_item_by_id": {
@@ -2885,13 +2888,15 @@
           "description": null,
           "id": "<schema:pagila.analytics>",
           "schema_name": "analytics",
-          "tables_count": 3
+          "tables_count": 3,
+          "owner_id": null
         },
         {
           "description": null,
           "id": "<schema:pagila.public>",
           "schema_name": "public",
-          "tables_count": 23
+          "tables_count": 23,
+          "owner_id": null
         }
       ],
       "schemas_count": 2
@@ -3794,7 +3799,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1
+        "terms_count": 1,
+        "owner_id": null
       },
       {
         "columns_count": 11,
@@ -3807,7 +3813,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 14,
@@ -3820,7 +3827,8 @@
         "sql_count": 2,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1
+        "terms_count": 1,
+        "owner_id": null
       },
       {
         "columns_count": 2,
@@ -3833,7 +3841,8 @@
         "sql_count": 0,
         "table_type": "materialized view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 2,
@@ -3846,7 +3855,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3859,7 +3869,8 @@
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3872,7 +3883,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3885,7 +3897,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3898,7 +3911,8 @@
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3911,7 +3925,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 3,
@@ -3924,7 +3939,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 4,
@@ -3937,7 +3953,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 4,
@@ -3950,7 +3967,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 4,
@@ -3963,7 +3981,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 4,
@@ -3976,7 +3995,8 @@
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 1
+        "terms_count": 1,
+        "owner_id": null
       },
       {
         "columns_count": 4,
@@ -3989,7 +4009,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 6,
@@ -4002,7 +4023,8 @@
         "sql_count": 3,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 2
+        "terms_count": 2,
+        "owner_id": null
       },
       {
         "columns_count": 7,
@@ -4015,7 +4037,8 @@
         "sql_count": 1,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 2
+        "terms_count": 2,
+        "owner_id": null
       },
       {
         "columns_count": 8,
@@ -4028,7 +4051,8 @@
         "sql_count": 0,
         "table_type": "base table",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 8,
@@ -4041,7 +4065,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 8,
@@ -4054,7 +4079,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 8,
@@ -4067,7 +4093,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       },
       {
         "columns_count": 9,
@@ -4080,7 +4107,8 @@
         "sql_count": 0,
         "table_type": "view",
         "tags": [],
-        "terms_count": 0
+        "terms_count": 0,
+        "owner_id": null
       }
     ],
     "exploration.fetch_data_exploration_edges[admin]": [
@@ -6155,7 +6183,8 @@
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "tags": [],
         "term_id": "<term:Film>",
-        "term_name": "Film"
+        "term_name": "Film",
+        "owner_id": null
       },
       {
         "certified": false,
@@ -6168,7 +6197,8 @@
         "sql": "SELECT count(film_id) FROM film",
         "tags": [],
         "term_id": "<term:Film>",
-        "term_name": "Film"
+        "term_name": "Film",
+        "owner_id": null
       }
     ],
     "sql_attributes.fetch_sql_attributes_with_sql": [
@@ -6244,7 +6274,8 @@
       "tags": [],
       "term_id": "<term:Payment>",
       "term_name": "Payment",
-      "zones": []
+      "zones": [],
+      "owner_id": null
     },
     "sql_attributes.get_sql_attribute_by_id": "<sqlattr:total revenue>",
     "sql_attributes.list_sql_attributes": [
@@ -6258,7 +6289,8 @@
         "source": "bridgeTable",
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "term_id": "<term:Film>",
-        "term_name": "Film"
+        "term_name": "Film",
+        "owner_id": null
       },
       {
         "certified": false,
@@ -6270,7 +6302,8 @@
         "source": "sql",
         "sql": "SELECT count(film_id) FROM film",
         "term_id": "<term:Film>",
-        "term_name": "Film"
+        "term_name": "Film",
+        "owner_id": null
       },
       {
         "certified": false,
@@ -6282,7 +6315,8 @@
         "source": "manual",
         "sql": "SELECT sum(amount) FROM payment",
         "term_id": "<term:Payment>",
-        "term_name": "Payment"
+        "term_name": "Payment",
+        "owner_id": null
       },
       {
         "certified": false,
@@ -6294,7 +6328,8 @@
         "source": "table",
         "sql": "SELECT customer_id, sum(amount) FROM payment GROUP BY customer_id",
         "term_id": "<term:Customer>",
-        "term_name": "Customer"
+        "term_name": "Customer",
+        "owner_id": null
       }
     ],
     "terms.count_column_attributes_by_term_id": 3,
@@ -6324,7 +6359,9 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ]
+        ],
+        "owner_id": null,
+        "tags": []
       },
       {
         "certification": "partial",
@@ -6340,7 +6377,9 @@
           "patron",
           "renter"
         ],
-        "zones": []
+        "zones": [],
+        "owner_id": null,
+        "tags": []
       },
       {
         "certification": "partial",
@@ -6356,7 +6395,9 @@
           "hire",
           "loan"
         ],
-        "zones": []
+        "zones": [],
+        "owner_id": null,
+        "tags": []
       },
       {
         "certification": "pending",
@@ -6378,7 +6419,9 @@
             "id": "<zone:Cross database>",
             "name": "Cross database"
           }
-        ]
+        ],
+        "owner_id": null,
+        "tags": []
       },
       {
         "certification": "pending",
@@ -6393,7 +6436,9 @@
         "synonyms": [
           "transaction"
         ],
-        "zones": []
+        "zones": [],
+        "owner_id": null,
+        "tags": []
       }
     ],
     "terms.fetch_all_terms[none]": [],
@@ -6420,7 +6465,9 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ]
+        ],
+        "owner_id": null,
+        "tags": []
       }
     ],
     "terms.fetch_all_terms_and_attributes[admin]": [
@@ -7188,7 +7235,8 @@
           "id": "<zone:Film domain>",
           "name": "Film domain"
         }
-      ]
+      ],
+      "owner_id": null
     },
     "terms.get_full_term_by_id__unknown": null,
     "terms.get_slim_term_by_id": {

@@ -5217,6 +5217,42 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/owners": {
+      "get": {
+        "description": "ownersApi.list — users and groups a picker can offer as an owner.\nReadable by anyone who can open the catalog: a viewer has to see who owns\na table, and the names are not an admin-only directory.",
+        "operationId": "get_api_owners",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Owner_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          }
+        },
+        "summary": "ownersApi.list — users and groups a picker can offer as an owner.",
+        "tags": ["owners"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/owners/route.ts",
+        "x-auto-ontology-permissions": {
+          "catalog": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/pql-analyses": {
       "get": {
         "description": "Anyone may list PQL analyses; only admins (analysis:manage) may add one.",
@@ -9143,6 +9179,17 @@
             ],
             "title": "Num Of Schemas"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schemas": {
             "items": {
               "$ref": "#/components/schemas/SchemaSummary"
@@ -10631,6 +10678,25 @@
         "title": "ListResponse[Group]",
         "type": "object"
       },
+      "ListResponse_Owner_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Owner"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": ["data", "count"],
+        "title": "ListResponse[Owner]",
+        "type": "object"
+      },
       "ListResponse_PublicConnection_": {
         "additionalProperties": true,
         "properties": {
@@ -10754,6 +10820,17 @@
             ],
             "title": "Description Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -10802,6 +10879,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -10838,6 +10926,52 @@
         },
         "required": ["data", "count", "total"],
         "title": "ObjectPageResponse[TableColumns]",
+        "type": "object"
+      },
+      "Owner": {
+        "additionalProperties": true,
+        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user and the accounts\nin a group. ``color`` is only set for a group.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          }
+        },
+        "required": ["id", "name", "kind", "permissions"],
+        "title": "Owner",
         "type": "object"
       },
       "PagedListResponse_ColumnAttribute_": {
@@ -11288,6 +11422,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -11536,6 +11681,17 @@
             ],
             "title": "Name"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "source": {
             "anyOf": [
               {
@@ -11640,6 +11796,17 @@
             "title": "Name",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "source": {
             "default": "manual",
             "title": "Source",
@@ -11741,6 +11908,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "SqlAttributeMetadataPatch",
@@ -12459,6 +12637,17 @@
             ],
             "title": "Name"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -12812,6 +13001,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "synonyms": {
             "anyOf": [
               {
@@ -12864,7 +13064,7 @@
       },
       "TermDetail": {
         "additionalProperties": true,
-        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is on the detail rather than on :class:`Term` because only this\nread resolves it: the paged list would need a second query per page to fill\nit, and its cards do not render chips.",
+        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is resolved here and on the paged list. The list reads them once\nfor the page, which is what its cards draw.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -12924,6 +13124,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "related_terms": {
             "items": {
@@ -13104,7 +13315,7 @@
       },
       "TermListItem": {
         "additionalProperties": true,
-        "description": "A Term as it appears in the paged ``/terms`` list.",
+        "description": "A Term as it appears in the paged ``/terms`` list.\n\n``tags`` travels with the page so a card can show its chips without a\nsecond read. An untagged term is an empty list, not a missing field.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -13165,6 +13376,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_names": {
             "anyOf": [
               {
@@ -13192,6 +13414,13 @@
               }
             ],
             "title": "Synonyms"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "zones": {
             "anyOf": [
@@ -13386,6 +13615,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "TermUpdate",

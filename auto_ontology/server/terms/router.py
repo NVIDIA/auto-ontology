@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi import APIRouter, HTTPException, Path, Query, Request
 from pydantic import BaseModel, Field
 
 from auto_ontology.dal import sql_attributes as sql_attr_dal
 from auto_ontology.dal import terms as terms_dal
+from auto_ontology.dal.owners import CATALOG_EDIT, edit_subject
+from auto_ontology.server.owners import enforce_edit, owner_from_body
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.terms import service as term_service
 from auto_ontology.server.responses import (
@@ -33,6 +35,7 @@ class TermUpdate(BaseModel):
     description: str | None = None
     name_certified: bool | None = None
     description_certified: bool | None = None
+    owner_id: str | None = None
 
 
 class ColumnAttributeUpdate(BaseModel):
@@ -114,6 +117,7 @@ def list_term_column_attributes_by_id(
     response_model=ColumnAttributePatchResponse,
 )
 def update_column_attribute(
+    request: Request,
     term_id: str,
     body: ColumnAttributeUpdate,
     attr_id: str = Path(description="ColumnAttribute id, not a SqlAttribute id."),
@@ -124,6 +128,9 @@ def update_column_attribute(
     Column's data-VDB embedding (same behaviour as catalog column edit).
     """
     patch = body.model_dump(exclude_unset=True)
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     if not patch:
         raise HTTPException(
             status_code=422, detail="No ColumnAttribute fields to update"
@@ -193,11 +200,19 @@ def list_term_sql_attributes_by_id(
 
 
 @router.patch("/terms/{term_id}", response_model=TermResponse)
-def update_term(term_id: str, body: TermUpdate) -> dict:
+def update_term(request: Request, term_id: str, body: TermUpdate) -> dict:
     """Update a Term and invalidate dependent SqlAttribute suggestions."""
     patch = body.model_dump(exclude_unset=True)
     if not patch:
         raise HTTPException(status_code=422, detail="No Term fields to update")
+
+    subject = edit_subject(term_id)
+    if subject is not None:
+        enforce_edit(request, subject)
+    set_owner = "owner_id" in patch
+    owner_id = (
+        owner_from_body(patch.get("owner_id"), CATALOG_EDIT) if set_owner else None
+    )
 
     name = patch.get("name")
     if isinstance(name, str):
@@ -211,6 +226,8 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
         description=patch.get("description"),
         name_certified=patch.get("name_certified"),
         description_certified=patch.get("description_certified"),
+        owner_id=owner_id,
+        set_owner=set_owner,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Term not found")
@@ -241,6 +258,7 @@ def update_term(term_id: str, body: TermUpdate) -> dict:
             "description": row.get("description"),
             "name_certified": row.get("name_certified", False),
             "description_certified": row.get("description_certified", False),
+            "owner_id": row.get("owner_id"),
             "certification": terms_dal.get_term_certification(term_id),
         }
     }
