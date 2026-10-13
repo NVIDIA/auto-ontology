@@ -12,20 +12,27 @@ Releases are published to the public NGC Catalog under the `nvidia` org:
 
 | Artifact | Location |
 |---|---|
-| Backend + ingestion image | `nvcr.io/nvidia/auto-ontology:1.1.0` |
-| Frontend (Next.js) image | `nvcr.io/nvidia/auto-ontology-frontend:1.1.0` |
-| MCP server image | `nvcr.io/nvidia/auto-ontology-mcp:1.1.0` |
-| Helm chart | `https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.1.0.tgz` (also listed in the NGC Catalog) |
+| Backend + ingestion image | `nvcr.io/nvidia/auto-ontology` |
+| Frontend (Next.js) image | `nvcr.io/nvidia/auto-ontology-frontend` |
+| MCP server image | `nvcr.io/nvidia/auto-ontology-mcp` |
+| Helm chart | `auto-ontology` in the `https://helm.ngc.nvidia.com/nvidia` Helm repo (also listed in the NGC Catalog) |
+
+Each release tags its images with the chart version, and the chart pins its
+own images to that tag.
 
 ## Deploying a Release
 
-To install a published release:
+To install the latest published release:
 
-1. Fetch the chart from NGC:
+1. Add the NGC Helm repo:
 
    ```bash
-   helm fetch https://helm.ngc.nvidia.com/nvidia/charts/auto-ontology-1.1.0.tgz
+   helm repo add nvidia https://helm.ngc.nvidia.com/nvidia
+   helm repo update
    ```
+
+   `helm search repo nvidia/auto-ontology --versions` lists the available
+   releases.
 
 2. Put the secrets in a values file. Create it in an editor rather than on
    the command line, so they stay out of shell history and process arguments,
@@ -43,8 +50,11 @@ To install a published release:
 3. Install the chart:
 
    ```bash
-   helm install auto-ontology auto-ontology-1.1.0.tgz -f auto-ontology-secrets.yaml
+   helm install auto-ontology nvidia/auto-ontology -f auto-ontology-secrets.yaml
    ```
+
+   This installs the latest release; add `--version <version>` to pin one.
+   `helm list` shows which chart version was installed.
 
    `adminEmail` and `adminPassword` are required: self-service sign-up is
    disabled, so they create the first admin, and the install fails without
