@@ -1,5 +1,0 @@
-# Ignore all files in this directory.
-# PDFs are large binary files; add them locally via:
-#   cp /path/to/vidore_v3_hr/pdfs/*.pdf unstructured/data/vidore_v3_hr/
-*
-!.gitignore

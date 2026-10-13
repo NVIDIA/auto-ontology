@@ -2,19 +2,22 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Ingest pipeline for unstructured documents.
+"""Ingest pipeline for unstructured documents: files in, chunks and vectors out.
+
+No LLM runs here.  Everything this stage writes follows mechanically from the
+file, so it can be re-run over a corpus for the cost of the embeddings alone,
+while the semantic pass (``unstructured_ao.semantic``) works from the chunks it
+leaves in Postgres.
 
 Pipeline per file
 -----------------
 1. NeMo Retriever ``create_ingestor`` extracts text / tables / charts /
-   infographics as chunks.
+   infographics as chunks and embeds them in the same graph pass.
 2. Each chunk is written to ``unstructured_chunk`` (relational) with a
-   pre-generated UUID that is also used as the langchain_pg_embedding row key.
-3. Chunk text is embedded in batch via ``batch_embed_chunks`` and uploaded to
-   the ``CHUNK_COLLECTION`` PGVectorStore so attribute → chunk vector search
-   works in the retrieve step.
-4. ``extract.run_extraction`` calls the LLM to extract one term and its
-   attributes, writing to ``unstructured_term`` and ``unstructured_attribute``.
+   pre-generated UUID that is also used as the vector-store row key.
+3. The embeddings the graph produced are uploaded to the chunk vector store
+   under those same ids, so attribute → chunk vector search works in the
+   semantic step.
 
 Usage
 -----
@@ -22,8 +25,11 @@ Usage
     from unstructured_ao.ingest import ingest_directory
 
     with engine.begin() as conn:
-        for doc_id in ingest_directory(config.DATA_DIR, conn):
+        for doc_id in ingest_directory("/path/to/documents", conn):
             print(f"Ingested document {doc_id}")
+
+Terms and attributes come afterwards, from
+``unstructured_ao.semantic.run_document_semantics``.
 """
 
 from __future__ import annotations
@@ -44,59 +50,54 @@ from unstructured_ao.dal import (
 
 logger = logging.getLogger(__name__)
 
-#: NeMo Retriever ingestor content types → our canonical ``content_type`` values.
+#: NeMo Retriever element types → our canonical ``content_type`` values.
 _CONTENT_TYPE_MAP: dict[str, str] = {
     "text": "text",
     "structured": "table",
+    "table": "table",
     "chart": "chart",
     "infographic": "infographic",
     "image": "infographic",
 }
 
 
-def _build_pgvector_store():  # type: ignore[return]
-    """Return a PGVectorStore backed by the auto-ontology Postgres instance.
+def _embed_params():
+    """``EmbedParams`` for the chunk embeddings, in ``text_image`` modality.
 
-    The collection ``config.CHUNK_COLLECTION`` is created on first use.
+    Starts from auto-ontology's shared ``get_embed_params`` so the endpoint,
+    model and key come from the one ``EMBED_*`` triplet the tabular ingest and
+    the retriever also use.  Only the modality differs: that helper is built for
+    catalog rows, which are text, whereas half of what the extract stage yields
+    here is charts, tables and infographics, and ``EMBED_MODEL`` is a
+    vision-language model that can read them as images.
     """
-    from langchain_nvidia_ai_endpoints import NVIDIAEmbeddings
-    from langchain_postgres import PGVectorStore
+    from auto_ontology.utils.embedding import get_embed_params
 
-    from auto_ontology.infra.postgres import get_postgres_connection_string
-    from auto_ontology.utils.model_config import resolve
-
-    embed_model = resolve("EMBED", "MODEL")
-    embed_api_key = resolve("EMBED", "API_KEY")
-    embed_endpoint = resolve("EMBED", "ENDPOINT")
-
-    embeddings = NVIDIAEmbeddings(
-        model=embed_model,
-        api_key=embed_api_key,
-        base_url=embed_endpoint,
-    )
-    return PGVectorStore.from_params(
-        embedding=embeddings,
-        host=None,
-        port=None,
-        database=None,
-        user=None,
-        password=None,
-        collection_name=config.CHUNK_COLLECTION,
-        connection=get_postgres_connection_string(),
-    )
+    return get_embed_params().model_copy(update={"embed_modality": "text_image"})
 
 
 def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
-    """Run NeMo Retriever extraction on *file_path* and return raw chunks.
+    """Extract and embed *file_path* in one NeMo Retriever pass.
 
-    Each returned dict has at least:
-    - ``text`` (str): the chunk text content
-    - ``metadata`` (dict): NeMo Retriever metadata (page_number, content_metadata, …)
+    Each returned dict is one element of a page, in the library's compact
+    result shape: ``text``, ``source_id``, ``element_type``, ``page_number``
+    and — because ``return_embeddings`` is on — ``embedding``.
 
-    The pipeline is configured for text/table/chart/infographic extraction only
-    (no embed, no VDB upload — those happen separately so we control IDs).
+    ``ingest`` itself hands back the full pipeline frame, one row per element
+    and some thirty columns wide, most of which are stage bookkeeping and
+    base64 page images.  ``dataframe_to_transport_records`` is the library's own
+    projection down to the public fields, so the column names the stages happen
+    to use stay the library's business rather than something we read directly.
+
+    Embedding is part of the graph rather than a second pass so each chunk is
+    embedded by the same VL model that read it, and so the retry and batching
+    policy is the library's rather than ours.  ``vdb_upload`` is deliberately
+    not in the chain: the vectors are written separately under ids we choose,
+    which is what lets a search hit resolve back to its ``unstructured_chunk``
+    row.
     """
     from nemo_retriever import create_ingestor
+    from nemo_retriever.ingestor.results import dataframe_to_transport_records
 
     ingestor = (
         create_ingestor(run_mode="batch")
@@ -107,29 +108,30 @@ def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
             extract_charts=True,
             extract_infographics=True,
         )
+        .embed(_embed_params())
     )
-    return ingestor.ingest()
-
-
-def _chunk_text(chunks: list[dict[str, Any]]) -> str:
-    """Concatenate all text chunks into a single string for LLM extraction."""
-    return "\n\n".join(
-        c.get("text", "") or ""
-        for c in chunks
-        if (c.get("metadata", {}) or {}).get("content_metadata", {}).get("type")
-        == "text"
-        or not (c.get("metadata", {}) or {}).get("content_metadata")
-    ).strip()
+    return dataframe_to_transport_records(
+        ingestor.ingest(),
+        result_schema="compact",
+        return_embeddings=True,
+    )
 
 
 def _resolve_content_type(chunk: dict[str, Any]) -> str:
-    raw = (chunk.get("metadata") or {}).get("content_metadata", {}).get("type", "text")
-    return _CONTENT_TYPE_MAP.get(raw, "text")
+    return _CONTENT_TYPE_MAP.get(chunk.get("element_type") or "text", "text")
+
+
+def _source_metadata(chunk: dict[str, Any]) -> dict[str, Any]:
+    """The pipeline's own fields for a chunk, minus the two we store in columns.
+
+    ``text`` and ``embedding`` are dropped: both already have a home, and an
+    embedding in a JSON column would be several times the size of the row.
+    """
+    return {k: v for k, v in chunk.items() if k not in ("text", "embedding")}
 
 
 def _resolve_page_number(chunk: dict[str, Any]) -> int | None:
-    meta = chunk.get("metadata") or {}
-    page = meta.get("page_number")
+    page = chunk.get("page_number")
     if page is not None:
         try:
             return int(page)
@@ -189,57 +191,75 @@ def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
             content_type=_resolve_content_type(chunk),
             page_number=_resolve_page_number(chunk),
             chunk_index=idx,
-            source_metadata=chunk.get("metadata"),
+            source_metadata=_source_metadata(chunk),
             chunk_id=cid,
         )
 
     logger.info("Stored %d chunk(s) for %s.", len(raw_chunks), name)
 
-    # --- Embed chunks and upload to PGVectorStore ---
-    try:
-        from langchain_core.documents import Document
+    # --- Upload the pipeline's embeddings to the vector store ---
+    from unstructured_ao.vectorstore import get_chunk_store
 
-        vdb = _build_pgvector_store()
-        docs = [
-            Document(
-                page_content=c.get("text", ""),
-                metadata={
-                    "document_id": document_id,
-                    "chunk_index": i,
-                    "content_type": _resolve_content_type(c),
-                    "page_number": _resolve_page_number(c),
-                    "source": name,
-                },
-            )
-            for i, c in enumerate(raw_chunks)
-        ]
-        vdb.add_documents(docs, ids=chunk_ids)
-        logger.info(
-            "Uploaded %d embedding(s) to collection %r.",
-            len(docs),
-            config.CHUNK_COLLECTION,
+    # The embed stage never raises: a chunk it could not embed comes back with
+    # an empty ``embedding`` instead, so the only way to tell a working run from
+    # a dead endpoint is to count what arrived.
+    texts: list[str] = []
+    vectors: list[list[float]] = []
+    metadatas: list[dict[str, Any]] = []
+    vector_ids: list[str] = []
+    for i, (chunk, cid) in enumerate(zip(raw_chunks, chunk_ids)):
+        embedding = chunk.get("embedding")
+        if not embedding:
+            continue
+        texts.append(chunk.get("text", "") or "")
+        vectors.append([float(v) for v in embedding])
+        metadatas.append(
+            {
+                "document_id": document_id,
+                "chunk_index": i,
+                "content_type": _resolve_content_type(chunk),
+                "page_number": _resolve_page_number(chunk),
+                "source": name,
+            }
         )
-    except Exception:
-        logger.exception(
-            "Embedding / VDB upload failed for %s — relational rows are intact "
-            "but retrieve step will find no vectors.",
+        vector_ids.append(cid)
+
+    # Raising rolls the chunk rows back with the caller's transaction. A
+    # document whose chunks exist relationally but have no vectors is invisible
+    # to retrieval, which is worse than not having ingested it at all.
+    if not vectors:
+        raise RuntimeError(
+            f"Embed stage returned no embeddings for any of "
+            f"{len(raw_chunks)} chunk(s) in {name} — check the EMBED_* triplet "
+            f"and the endpoint's rate limit."
+        )
+    if len(vectors) < len(raw_chunks):
+        logger.warning(
+            "Only %d/%d chunk(s) of %s came back embedded.",
+            len(vectors),
+            len(raw_chunks),
             name,
         )
 
-    # --- LLM extraction of term + attributes ---
-    from unstructured_ao.extract import run_extraction
-
-    full_text = _chunk_text(raw_chunks)
-    run_extraction(document_id, full_text, conn)
+    store = get_chunk_store(vector_size=len(vectors[0]))
+    store.add_embeddings(
+        texts=texts, embeddings=vectors, metadatas=metadatas, ids=vector_ids
+    )
+    logger.info(
+        "Uploaded %d embedding(s) to %s.%s.",
+        len(vectors),
+        config.CHUNK_SCHEMA,
+        config.CHUNK_TABLE,
+    )
 
     return document_id
 
 
 def ingest_directory(
-    directory: str | Path | None = None,
+    directory: str | Path,
     conn: Connection | None = None,
 ) -> list[str]:
-    """Ingest all supported files in *directory* (default: ``config.DATA_DIR``).
+    """Ingest all supported files in *directory*.
 
     Returns the list of document ids successfully ingested.
 
@@ -248,12 +268,9 @@ def ingest_directory(
     """
     from auto_ontology.dal.session import get_engine
 
-    data_dir = Path(directory or config.DATA_DIR)
+    data_dir = Path(directory)
     if not data_dir.exists():
-        raise FileNotFoundError(
-            f"Data directory not found: {data_dir}. "
-            "Copy PDFs into unstructured/data/vidore_v3_hr/ first."
-        )
+        raise FileNotFoundError(f"Data directory not found: {data_dir}.")
 
     supported = (".pdf", ".docx", ".pptx", ".txt", ".html")
     files = sorted(p for p in data_dir.rglob("*") if p.suffix.lower() in supported)
@@ -278,7 +295,7 @@ def ingest_directory(
 
 
 def main() -> None:
-    """CLI entry point: ingest all files in the default data directory."""
+    """CLI entry point: ingest every supported file in a directory."""
     import argparse
 
     logging.basicConfig(
@@ -288,9 +305,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Ingest unstructured documents into Postgres."
     )
-    parser.add_argument(
-        "directory", nargs="?", help="Override the default data directory."
-    )
+    parser.add_argument("directory", help="Directory of documents to ingest.")
     args = parser.parse_args()
 
     doc_ids = ingest_directory(args.directory)

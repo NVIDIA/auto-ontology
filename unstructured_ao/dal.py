@@ -12,7 +12,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, case, func, literal, or_, select, text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from auto_ontology.dal.schema import (
     unstructured_attribute,
@@ -21,6 +22,7 @@ from auto_ontology.dal.schema import (
     unstructured_document,
     unstructured_term,
 )
+from unstructured_ao import config
 
 
 # ---------------------------------------------------------------------------
@@ -65,6 +67,24 @@ def delete_document(conn: Connection, document_id: str) -> None:
     conn.execute(
         unstructured_document.delete().where(unstructured_document.c.id == document_id)
     )
+
+
+def list_documents(
+    conn: Connection, *, without_term: bool = False
+) -> list[dict[str, Any]]:
+    """All ingested documents, oldest first.
+
+    With *without_term*, only those the semantic stage has not processed —
+    which is what makes a second ``run_semantic`` run resume rather than redo.
+    """
+    query = select(unstructured_document).order_by(unstructured_document.c.ingested_at)
+    if without_term:
+        query = query.where(
+            ~select(unstructured_term.c.id)
+            .where(unstructured_term.c.document_id == unstructured_document.c.id)
+            .exists()
+        )
+    return [dict(r) for r in conn.execute(query).mappings().all()]
 
 
 # ---------------------------------------------------------------------------
@@ -133,6 +153,44 @@ def insert_term(
         {"document_id": document_id, "name": name, "description": description},
     ).scalar_one()
     return row
+
+
+def _vector_table_exists(conn: Connection) -> bool:
+    """Whether the attribute vector table has been created yet.
+
+    It is created lazily by the first indexing write, so a document extracted
+    before then has a term to delete but no vectors.
+    """
+    return bool(
+        conn.execute(
+            text("SELECT to_regclass(:qualified)"),
+            {"qualified": f"{config.ATTRIBUTE_SCHEMA}.{config.ATTRIBUTE_TABLE}"},
+        ).scalar()
+    )
+
+
+def delete_term(conn: Connection, term_id: str) -> None:
+    """Delete a term, cascading to its attributes and their chunk links.
+
+    How the semantic stage re-runs: a document has at most one term, so a
+    second extraction pass has to clear the first one before inserting.
+
+    The attributes' embeddings go too.  The vector table has no foreign key to
+    cascade through, so without this a re-extraction would leave rows pointing
+    at attribute ids that no longer exist — harmless to results, which join
+    back to ``unstructured_attribute``, but they would occupy hits and make a
+    ``k`` of 10 return fewer than 10 live attributes.  Issued on *conn* so it
+    commits or rolls back with the delete it belongs to.
+    """
+    if _vector_table_exists(conn):
+        conn.execute(
+            text(
+                f"DELETE FROM {config.ATTRIBUTE_SCHEMA}.{config.ATTRIBUTE_TABLE} "  # noqa: S608 — identifiers are module constants
+                f"WHERE term_id = :term_id"
+            ),
+            {"term_id": term_id},
+        )
+    conn.execute(unstructured_term.delete().where(unstructured_term.c.id == term_id))
 
 
 def get_document_term(conn: Connection, document_id: str) -> dict[str, Any] | None:
@@ -209,14 +267,43 @@ def insert_attribute_chunk_link(
     attribute_id: str,
     chunk_id: str,
     score: float | None = None,
+    source: str = "vector",
 ) -> None:
+    """Link *attribute_id* to *chunk_id*, upserting on the composite key.
+
+    Extraction and vector search both reach the same chunk routinely, and a
+    plain insert would abort the whole document's transaction on the second
+    one.  When they collide the llm link wins — the model demonstrably read
+    that chunk — while the vector distance is kept for scoring.
+    """
+    if source not in ("llm", "vector"):
+        raise ValueError(f"source must be 'llm' or 'vector', got {source!r}")
+
+    stmt = pg_insert(unstructured_attribute__chunk).values(
+        attribute_id=attribute_id,
+        chunk_id=chunk_id,
+        score=str(score) if score is not None else None,
+        source=source,
+    )
     conn.execute(
-        unstructured_attribute__chunk.insert(),
-        {
-            "attribute_id": attribute_id,
-            "chunk_id": chunk_id,
-            "score": str(score) if score is not None else None,
-        },
+        stmt.on_conflict_do_update(
+            index_elements=["attribute_id", "chunk_id"],
+            set_={
+                "score": func.coalesce(
+                    stmt.excluded.score, unstructured_attribute__chunk.c.score
+                ),
+                "source": case(
+                    (
+                        or_(
+                            stmt.excluded.source == "llm",
+                            unstructured_attribute__chunk.c.source == "llm",
+                        ),
+                        literal("llm"),
+                    ),
+                    else_=stmt.excluded.source,
+                ),
+            },
+        )
     )
 
 

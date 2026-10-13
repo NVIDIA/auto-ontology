@@ -1029,7 +1029,7 @@ unstructured_document = Table(
 )
 
 #: One row per extracted chunk from a document.  Embeddings live in the
-#: langchain_pg_embedding table keyed by the same ``id`` value.
+#: vdb.unstructured_chunks vector table keyed by the same ``id`` value.
 unstructured_chunk = Table(
     "unstructured_chunk",
     METADATA,
@@ -1081,8 +1081,13 @@ unstructured_attribute = Table(
     CheckConstraint("attribute_type IN ('sql', 'ref')", name="attribute_type_value"),
 )
 
-#: Pointer table: each attribute points to the chunks that support it,
-#: with a cosine similarity score from the vector search that built the link.
+#: Pointer table: each attribute points to the chunks that support it.
+#:
+#: A link is built one of two ways, and they are not equivalent evidence:
+#: ``source='llm'`` means the extractor read that chunk and cited it, while
+#: ``source='vector'`` means the chunk merely embeds close to the attribute.
+#: ``score`` is the vector-search distance and is null for llm links, so the
+#: provenance cannot be folded into it.
 unstructured_attribute__chunk = Table(
     "unstructured_attribute__chunk",
     METADATA,
@@ -1099,6 +1104,8 @@ unstructured_attribute__chunk = Table(
         primary_key=True,
     ),
     Column("score", Text, nullable=True),
+    Column("source", Text, nullable=False, server_default="vector"),
+    CheckConstraint("source IN ('llm', 'vector')", name="attribute_chunk_source_value"),
 )
 
 # ---------------------------------------------------------------------------
