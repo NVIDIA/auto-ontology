@@ -17,8 +17,8 @@ def test_admin_can_edit() -> None:
     assert decide_edit(role="admin", permission=_WITHOUT)
 
 
-def test_a_viewer_can_edit_when_the_role_grants_the_permission() -> None:
-    assert decide_edit(role="viewer", permission=CATALOG_EDIT)
+def test_a_viewer_cannot_edit_the_catalog() -> None:
+    assert not decide_edit(role="viewer", permission=CATALOG_EDIT)
     assert not decide_edit(role="viewer", permission=_WITHOUT)
 
 

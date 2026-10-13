@@ -1589,17 +1589,19 @@ export const TermsView = () => {
 										Edit
 									</Button>
 								)}
-								<Button
-									theme={ButtonTheme.Primary}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => setCreateSqlAttrModalOpen(true)}
-									iconPosition="left"
-									shadow
-								>
-									<Icon name={IconName.Plus} className="h-4 w-4" />
-									Create New SQL Attribute
-								</Button>
+								{canEditCatalog ? (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => setCreateSqlAttrModalOpen(true)}
+										iconPosition="left"
+										shadow
+									>
+										<Icon name={IconName.Plus} className="h-4 w-4" />
+										Create New SQL Attribute
+									</Button>
+								) : null}
 							</>
 						}
 						isEditing={termEditing}

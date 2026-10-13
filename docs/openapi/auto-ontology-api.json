@@ -5142,7 +5142,7 @@
     },
     "/api/nodes/{node_id}": {
       "patch": {
-        "description": "datasources.updateNode — edit mutable properties of a catalog node\n(table/column descriptions, etc.). Allowed for viewers and admins.",
+        "description": "datasources.updateNode — edit mutable properties of a catalog node\n(table/column descriptions, etc.). Requires catalog:edit; a viewer cannot.",
         "operationId": "patch_api_nodes_node_id_",
         "parameters": [
           {
@@ -6122,7 +6122,7 @@
     },
     "/api/sql-attributes": {
       "post": {
-        "description": "Creating a SqlAttribute is a catalog-editing action, available to viewers\ntoo (catalog:edit) — same permission PATCH /api/nodes/{node_id} uses.",
+        "description": "Creating a SqlAttribute is a catalog edit and requires catalog:edit, the same\npermission PATCH /api/nodes/{node_id} uses. A viewer does not have it.",
         "operationId": "post_api_sql_attributes",
         "requestBody": {
           "content": {
@@ -6233,7 +6233,7 @@
         "x-auto-ontology-proxied": true
       },
       "get": {
-        "description": "sqlAttributesApi.get — fetch one SqlAttribute node.",
+        "description": "sqlAttributesApi.get — fetch one SqlAttribute node, with the account behind\ncreated_by / modified_by so the side panel can name them.",
         "operationId": "get_api_sql_attributes_attr_id_",
         "parameters": [
           {
@@ -7475,7 +7475,7 @@
     },
     "/api/terms/{term_id}": {
       "get": {
-        "description": "termsApi.getById — fetch one Term node.",
+        "description": "termsApi.getById — fetch one Term node. Authors are resolved here so Last\nModified can name the person who saved it.",
         "operationId": "get_api_terms_term_id_",
         "parameters": [
           {
@@ -7516,7 +7516,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Term",
+        "summary": "termsApi.getById — fetch one Term node.",
         "tags": ["terms"],
         "security": [
           {
@@ -7597,7 +7597,7 @@
     },
     "/api/terms/{term_id}/column-attributes": {
       "get": {
-        "description": "termsApi.getColumnAttributes — ColumnAttribute nodes for one term (with\nprimary/referenced columns).",
+        "description": "termsApi.getColumnAttributes — ColumnAttribute nodes for one term (with\nprimary/referenced columns). Authors ride along so the side panel can name\nwho last edited each attribute.",
         "operationId": "get_api_terms_term_id_column_attributes",
         "parameters": [
           {
@@ -8280,6 +8280,29 @@
             ],
             "title": "Certified"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "datatype": {
             "anyOf": [
               {
@@ -8305,6 +8328,29 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "anyOf": [
@@ -11622,6 +11668,29 @@
             ],
             "title": "Certified"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "database_name": {
             "anyOf": [
               {
@@ -11669,6 +11738,29 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "anyOf": [
@@ -13077,6 +13169,29 @@
             ],
             "title": "Certification"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "description": {
             "anyOf": [
               {
@@ -13102,6 +13217,29 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "anyOf": [

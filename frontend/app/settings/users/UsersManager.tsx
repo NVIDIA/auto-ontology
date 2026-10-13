@@ -303,7 +303,7 @@ export const UsersManager = () => {
 						Users
 					</h1>
 					<p className="text-xs text-secondary">
-						Admins manage users; viewers can access all other pages.
+						Admins manage users; viewers can read the other pages and use chat.
 					</p>
 				</div>
 

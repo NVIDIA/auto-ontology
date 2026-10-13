@@ -9,8 +9,8 @@ page can say who is responsible. It does not decide who may edit. Editing
 is the role's permission.
 
 An admin may always edit: that role holds every write. Anyone else may edit
-when their role grants the permission the row asks for. Both roles grant
-``catalog:edit``, so both may edit a catalog row they can see.
+when their role grants the permission the row asks for. A viewer does not
+grant ``catalog:edit``, so a viewer cannot edit a catalog row.
 
 The gateway is what names the caller. A write that arrives without that
 header is not checked here: FastAPI is only reachable on the private network,
