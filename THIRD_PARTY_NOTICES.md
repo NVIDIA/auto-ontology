@@ -35,7 +35,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
 | LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
-| NeMo Retriever | >=26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
+| NeMo Retriever | ==26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
 | pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg (`psycopg[binary]`) | >=3.3.4 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
 | psycopg-pool | >=3.3.1 | LGPL-3.0-only | https://github.com/psycopg/psycopg |
