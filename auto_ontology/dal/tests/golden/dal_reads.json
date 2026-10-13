@@ -6522,7 +6522,9 @@
               "id": "<zone:Film domain>",
               "name": "Film domain"
             }
-          ]
+          ],
+          "owner_id": null,
+          "tags": []
         },
         {
           "certification": "partial",
@@ -6538,7 +6540,9 @@
             "patron",
             "renter"
           ],
-          "zones": []
+          "zones": [],
+          "owner_id": null,
+          "tags": []
         },
         {
           "certification": "partial",
@@ -6554,7 +6558,9 @@
             "hire",
             "loan"
           ],
-          "zones": []
+          "zones": [],
+          "owner_id": null,
+          "tags": []
         },
         {
           "certification": "pending",
@@ -6576,7 +6582,9 @@
               "id": "<zone:Cross database>",
               "name": "Cross database"
             }
-          ]
+          ],
+          "owner_id": null,
+          "tags": []
         },
         {
           "certification": "pending",
@@ -6591,7 +6599,9 @@
           "synonyms": [
             "transaction"
           ],
-          "zones": []
+          "zones": [],
+          "owner_id": null,
+          "tags": []
         }
       ],
       [
@@ -6737,7 +6747,9 @@
               "id": "<zone:Film domain>",
               "name": "Film domain"
             }
-          ]
+          ],
+          "owner_id": null,
+          "tags": []
         }
       ],
       [
