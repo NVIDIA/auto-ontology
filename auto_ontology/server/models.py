@@ -574,6 +574,12 @@ class TermDetail(Term):
     tables: list[TermTable] = Field(default_factory=list)
     related_terms: list[TermSummary] = Field(default_factory=list)
     tags: list[TagChip] = Field(default_factory=list)
+    # Null until a person saves an edit. ``modified_by`` null with a timestamp
+    # is an edit that carried no identity, shown as Auto Generated.
+    created: datetime | None = None
+    modified: datetime | None = None
+    created_by: str | None = None
+    modified_by: str | None = None
 
 
 class TermListItem(Term):
@@ -626,6 +632,10 @@ class ColumnAttribute(ApiModel):
     tags: list[TagChip] | None = None
     primary_column: ColumnRef | None = None
     referenced_columns: list[ColumnRef] | None = None
+    created: datetime | None = None
+    modified: datetime | None = None
+    created_by: str | None = None
+    modified_by: str | None = None
 
 
 class SqlAttribute(ApiModel):
@@ -650,6 +660,10 @@ class SqlAttribute(ApiModel):
     owner_id: str | None = None
     zones: list[ZoneChip] | None = None
     tags: list[TagChip] | None = None
+    created: datetime | None = None
+    modified: datetime | None = None
+    created_by: str | None = None
+    modified_by: str | None = None
 
 
 class SqlExpressionValidationResult(ApiModel):

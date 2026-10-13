@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from auto_ontology.dal import terms as terms_dal
 from auto_ontology.dal.owners import CATALOG_EDIT, edit_subject
+from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.owners import enforce_edit, owner_from_body
 from auto_ontology.server.sql_attributes import service as dal
 from auto_ontology.server.responses import (
@@ -114,13 +115,14 @@ def validate_sql_attribute(body: SqlAttributeValidate) -> dict:
 
 
 @router.post("/sql-attributes", status_code=201, response_model=SqlAttributeResponse)
-def create_sql_attribute(body: SqlAttributeCreate) -> dict:
+def create_sql_attribute(request: Request, body: SqlAttributeCreate) -> dict:
     """Create a SqlAttribute with its Sql node, linked to a Term.
 
     The connector is resolved server-side (never chosen by the client —
     see ``auto_ontology/connectors/registry.py``). ``owner_id``, when set,
     names a user or a group that can edit the catalog; omit it to leave the
-    attribute unassigned. Returns 400 when that id cannot be assigned, 409
+    attribute unassigned. The caller is stored as ``created_by`` so the side
+    panel can name them. Returns 400 when that id cannot be assigned, 409
     when the name is already taken, 422 when the target Term does not exist
     or the SQL can't be parsed.
     """
@@ -132,6 +134,7 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
             term_id=body.term_id,
             source=body.source,
             owner_id=owner_from_body(body.owner_id, CATALOG_EDIT),
+            created_by=resolve_internal_user(request, required=False),
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -165,6 +168,8 @@ def update_sql_attribute(
             expression=body.expression,
             term_id=body.term_id,
             source=body.source,
+            modified_by=resolve_internal_user(request, required=False),
+            touch=True,
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -211,6 +216,8 @@ def patch_sql_attribute(
             certified=patch.get("certified"),
             owner_id=owner_id,
             set_owner=set_owner,
+            modified_by=resolve_internal_user(request, required=False),
+            touch=True,
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

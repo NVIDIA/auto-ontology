@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from auto_ontology.dal import sql_attributes as sql_attr_dal
 from auto_ontology.dal import terms as terms_dal
 from auto_ontology.dal.owners import CATALOG_EDIT, edit_subject
+from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.owners import enforce_edit, owner_from_body
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.terms import service as term_service
@@ -152,6 +153,8 @@ def update_column_attribute(
             description=patch.get("description"),
             sample_values=patch.get("sample_values"),
             certified=patch.get("certified"),
+            modified_by=resolve_internal_user(request, required=False),
+            touch=True,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -228,6 +231,8 @@ def update_term(request: Request, term_id: str, body: TermUpdate) -> dict:
         description_certified=patch.get("description_certified"),
         owner_id=owner_id,
         set_owner=set_owner,
+        modified_by=resolve_internal_user(request, required=False),
+        touch=True,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="Term not found")

@@ -220,6 +220,7 @@ def create_sql_attribute(
     connector: str | None = None,
     source: str = "manual",
     owner_id: str | None = None,
+    created_by: str | None = None,
 ) -> dict[str, Any]:
     """Create a SqlAttribute, its Sql node, link to a Term, and embed.
 
@@ -227,6 +228,8 @@ def create_sql_attribute(
     :func:`_resolve_database_name`) — callers never need to pass one.
     ``owner_id`` is stored when given; ``None`` leaves the attribute
     unassigned. The caller has already checked that the id may own it.
+    ``created_by`` is the user id from the gateway. Compilation leaves it
+    unset, which the panel shows as Auto Generated.
 
     Raises :class:`SqlAttributeNameConflict` when ``name`` is already used.
     Raises :class:`SqlAttributeSqlError` when the SQL can't be resolved.
@@ -266,6 +269,8 @@ def create_sql_attribute(
     }
     if owner_id is not None:
         props["owner_id"] = owner_id
+    if created_by is not None:
+        props["created_by"] = created_by
     attr_node = CatalogNode(
         name=name,
         label=LABEL_SQL_ATTRIBUTE,
@@ -302,6 +307,8 @@ def update_sql_attribute(
     certified: bool | None = None,
     owner_id: str | None = None,
     set_owner: bool = False,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> dict[str, Any] | None:
     """Update a SqlAttribute.
 
@@ -366,6 +373,8 @@ def update_sql_attribute(
             description=next_description,
             expression=expression,
             source=source,
+            modified_by=modified_by,
+            touch=touch,
         )
 
         attr_node = CatalogNode(
@@ -441,6 +450,8 @@ def update_sql_attribute(
         certified=certified,
         owner_id=owner_id,
         set_owner=set_owner,
+        modified_by=modified_by,
+        touch=touch,
     )
     if name_changed or description_changed:
         _reembed_sql_attribute(attr_id, existing.get("database_name"))

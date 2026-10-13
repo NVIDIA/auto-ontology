@@ -159,6 +159,8 @@ def update_column_attribute(
     name: str | None = None,
     description: str | None = None,
     certified: bool | None = None,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> dict[str, Any] | None:
     """Update an attribute's metadata and return the context an embed needs.
 
@@ -184,14 +186,18 @@ def update_column_attribute(
         )
         .exists()
     )
+    values: dict[str, Any] = {
+        "name": func.coalesce(name, s.column_attribute.c.name),
+        "description": func.coalesce(description, s.column_attribute.c.description),
+        "certified": func.coalesce(certified, s.column_attribute.c.certified),
+    }
+    if touch:
+        values["modified"] = func.now()
+        values["modified_by"] = modified_by
     updated = store().query_write(
         update(s.column_attribute)
         .where(s.column_attribute.c.id == attr_id, owned)
-        .values(
-            name=func.coalesce(name, s.column_attribute.c.name),
-            description=func.coalesce(description, s.column_attribute.c.description),
-            certified=func.coalesce(certified, s.column_attribute.c.certified),
-        )
+        .values(**values)
         .returning(s.column_attribute.c.id)
     )
     if not updated:

@@ -126,16 +126,43 @@ def _certified(name: str) -> Column:
     return Column(name, Boolean, nullable=False, server_default=text("false"))
 
 
+def _edited() -> tuple[Column, Column, Column, Column]:
+    """When the row was inserted and when someone last edited it in the app.
+
+    ``created`` is the database clock on insert. The migration adds the column
+    without backfilling, so a row that already existed stays null rather than
+    claiming it was created the day the column appeared.
+
+    ``modified`` and ``modified_by`` stay null until a person saves an edit.
+    Compilation rewrites descriptions on its own and does not count: the panel's
+    Last Modified is that save. ``modified_by`` is a Better Auth user id, null
+    when the request carried no identity, which the page reads as Auto Generated.
+    """
+    return (
+        Column(
+            "created",
+            DateTime(timezone=True),
+            nullable=True,
+            server_default=func.now(),
+        ),
+        Column("modified", DateTime(timezone=True), nullable=True),
+        Column("created_by", Text, nullable=True),
+        Column("modified_by", Text, nullable=True),
+    )
+
+
 def _owner_id() -> Column:
     """The account or group that owns the row, or null when nobody does.
 
-    Stored on a database, a schema, a table, a term, and a sql attribute. A
-    column shows its table's owner and a column attribute shows its term's
-    owner; neither stores one of its own. One column holds either id. An
-    account id is ``frontend."user".id`` and a group id is ``user_group.id``;
-    neither can be a foreign key, because the account table is outside this
-    schema and one reference cannot name both. An empty write clears it. A
-    deleted account or group leaves the id behind, which reads as unassigned.
+    Stored on a database, a schema, a table, a term, and a sql attribute. The
+    catalog page edits it on a table. A column shows that table's owner and
+    a column attribute shows its term's owner; neither stores one of its
+    own. A database and a schema keep the column, and the page does not edit
+    it there. One column holds either id. An account id is
+    ``frontend."user".id`` and a group id is ``user_group.id``; neither can
+    be a foreign key, because the account table is outside this schema and
+    one reference cannot name both. An empty write clears it. A deleted
+    account or group leaves the id behind, which reads as unassigned.
     """
     return Column("owner_id", Text, nullable=True)
 
@@ -432,6 +459,7 @@ term = Table(
     _certified("name_certified"),
     _certified("description_certified"),
     _owner_id(),
+    *_edited(),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
 )
@@ -475,6 +503,7 @@ column_attribute = Table(
     # expression rewrite that leaves every tagged column) clears this so a
     # later tag can still propagate.
     Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     # The 5-part merge key, exactly as merge_column_attribute matches on.
     UniqueConstraint(
@@ -574,6 +603,7 @@ sql_attribute = Table(
     # reads a tagged column is the exception: the tag is taken off and this
     # flag cleared so a later tag on one of the new columns can still propagate.
     Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     CheckConstraint(
         "source IS NULL OR source IN ('manual', 'sql', 'table', 'bridgeTable')",

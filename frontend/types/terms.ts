@@ -3,7 +3,17 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { CertificationStatus } from '@/enums/certification';
-import type { TagChip } from '@/types/tags';
+import type { TagAuthor, TagChip } from '@/types/tags';
+
+/** Who last saved a glossary row, once the detail read has resolved the account. */
+export type GlossaryActivity = {
+	/** ISO 8601. Null for a row that predates the column. */
+	created?: string | null;
+	/** ISO 8601. Null until someone saves an edit. */
+	modified?: string | null;
+	created_by_user?: TagAuthor | null;
+	modified_by_user?: TagAuthor | null;
+};
 
 export type TermZone = {
 	id: string;
@@ -47,12 +57,13 @@ export type TermTable = {
 };
 
 /** The detail read adds the tables and related terms the list card does not. */
-export type TermDetail = Term & {
-	table_count: number;
-	tables: TermTable[];
-	related_terms: RelatedTerm[];
-	tags: TagChip[];
-};
+export type TermDetail = Term &
+	GlossaryActivity & {
+		table_count: number;
+		tables: TermTable[];
+		related_terms: RelatedTerm[];
+		tags: TagChip[];
+	};
 
 export type AttributeColumnRef = {
 	id: string;
@@ -81,7 +92,7 @@ export type ColumnAttribute = {
 	/** Columns elsewhere that point at this attribute via `SEMANTIC_FK`. */
 	referenced_columns: AttributeColumnRef[];
 	certified: boolean;
-};
+} & GlossaryActivity;
 
 export type SqlAttribute = {
 	id: string;
@@ -97,7 +108,7 @@ export type SqlAttribute = {
 	certified: boolean;
 	/** A user id or a group id. Null when the attribute is unassigned. */
 	owner_id?: string | null;
-};
+} & GlossaryActivity;
 
 export type RelatedTerm = {
 	id: string;

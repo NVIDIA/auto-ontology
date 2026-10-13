@@ -406,6 +406,26 @@ def test_update_of_a_missing_term_is_none(world) -> None:
     assert t.update_term("no-such-term", name="x") is None
 
 
+def test_an_edit_from_the_app_records_who_and_when(world) -> None:
+    """Last Modified is the save, not compilation and not a later untouched write."""
+    term = world.term("Order", description="first")
+    before = t.get_full_term_by_id(term)
+    assert before["modified"] is None
+    assert before["modified_by"] is None
+
+    t.update_term(term, description="edited", touch=True, modified_by="user-1")
+    edited = t.get_full_term_by_id(term)
+    assert edited["description"] == "edited"
+    assert edited["modified"] is not None
+    assert edited["modified_by"] == "user-1"
+    stamped = edited["modified"]
+
+    t.update_term(term, name_certified=True)
+    again = t.get_full_term_by_id(term)
+    assert again["modified"] == stamped
+    assert again["modified_by"] == "user-1"
+
+
 def test_upsert_table_term_is_idempotent_for_one_table(world) -> None:
     world.table("orders")
 

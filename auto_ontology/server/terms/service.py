@@ -96,6 +96,8 @@ def update_column_attribute(
     description: str | None = None,
     sample_values: list[str] | None = None,
     certified: bool | None = None,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> dict[str, Any] | None:
     """Update ColumnAttribute metadata and refresh related VDB rows.
 
@@ -126,6 +128,8 @@ def update_column_attribute(
         name=name,
         description=description,
         certified=certified,
+        modified_by=modified_by,
+        touch=touch,
     )
     if row is None:
         return None

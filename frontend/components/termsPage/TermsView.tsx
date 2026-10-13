@@ -25,6 +25,7 @@ import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
+import { entitySidePanel } from '@/common/SidePanel';
 import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
@@ -41,13 +42,7 @@ import {
 	syncTags,
 } from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
-import {
-	canEditEntity,
-	changedOwnerId,
-	entityOwnerSection,
-	findOwner,
-	ownerChoices,
-} from '@/lib/owners';
+import { canEditEntity, changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
 import { ownerQueries } from '@/lib/queries/owners';
 import { OwnerPermission } from '@/types/owners';
 import { useSession } from '@/auth/auth-client';
@@ -55,7 +50,6 @@ import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
 import { OwnerLabel } from '@/common/OwnerLabel';
-import { OwnersSelect } from '@/common/OwnersSelect';
 import type { Owner } from '@/types/owners';
 import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
 
@@ -335,7 +329,6 @@ export const TermsView = () => {
 	const [columnAttrsEpoch, setColumnAttrsEpoch] = useState(0);
 	const [sqlAttrName, setSqlAttrName] = useState('');
 	const [sqlAttrDescription, setSqlAttrDescription] = useState('');
-	const [sqlAttrOwnerId, setSqlAttrOwnerId] = useState('');
 	const [sqlAttrSql, setSqlAttrSql] = useState('');
 	const [sqlAttrValidating, setSqlAttrValidating] = useState(false);
 	const [sqlAttrValidationMessage, setSqlAttrValidationMessage] = useState<string | null>(null);
@@ -483,7 +476,6 @@ export const TermsView = () => {
 	const resetCreateSqlAttrForm = () => {
 		setSqlAttrName('');
 		setSqlAttrDescription('');
-		setSqlAttrOwnerId('');
 		setSqlAttrSql('');
 		setSqlAttrValidating(false);
 		setSqlAttrValidationMessage(null);
@@ -533,7 +525,6 @@ export const TermsView = () => {
 			expression: trimmedSqlAttrSql,
 			term_id: focusId,
 			source: 'manual',
-			owner_id: sqlAttrOwnerId.trim() === '' ? null : sqlAttrOwnerId,
 		});
 		setSqlAttrSubmitting(false);
 		if (res.error) {
@@ -609,15 +600,13 @@ export const TermsView = () => {
 			return { error: true, message: 'SQL attribute name cannot be blank' };
 		}
 
-		const patch: { name?: string; description?: string; owner_id?: string | null } = {};
+		const patch: { name?: string; description?: string } = {};
 		if (name !== focusedSqlAttr.name.trim()) {
 			patch.name = name;
 		}
 		if (description !== (focusedSqlAttr.description ?? '')) {
 			patch.description = description;
 		}
-		const nextOwner = changedOwnerId(payload.owner_id, focusedSqlAttr.owner_id);
-		if (nextOwner !== undefined) patch.owner_id = nextOwner;
 		const nextTagIds = stagedTagIds(payload[TAGS_SECTION_ID]);
 		if (Object.keys(patch).length === 0 && nextTagIds == null) {
 			return { error: false };
@@ -1069,14 +1058,6 @@ export const TermsView = () => {
 						})),
 						userZoneIds,
 					},
-					entityTagsSection(attr.tags, tagOptions),
-					entityOwnerSection(
-						termRes.error ? null : termRes.data.owner_id,
-						ownerDirectory,
-						OwnerPermission.catalog,
-						false,
-						'Term Owner',
-					),
 					{
 						type: ComposerSectionKind.ENTITY_CHIPS,
 						id: 'primary_column',
@@ -1107,6 +1088,17 @@ export const TermsView = () => {
 						})),
 					},
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						termRes.error ? null : termRes.data.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						false,
+						'Term Owner',
+					),
+					tags: entityTagsSection(attr.tags, tagOptions),
+					activity: attr,
+				}),
 			};
 		},
 		[focusId, queryClient],
@@ -1136,6 +1128,8 @@ export const TermsView = () => {
 				if (!exists) return [...prev, attr];
 				return prev.map((a) => (a.id === attr.id ? attr : a));
 			});
+
+			const termRes = await termsApi.get(attr.term_id);
 
 			return {
 				header: {
@@ -1173,9 +1167,19 @@ export const TermsView = () => {
 							enabled: z.enabled,
 						})),
 					},
-					entityTagsSection(attr.tags, tagOptions),
-					entityOwnerSection(attr.owner_id, ownerDirectory, OwnerPermission.catalog),
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						termRes.error ? null : termRes.data.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						false,
+						'Term Owner',
+					),
+					tags: entityTagsSection(attr.tags, tagOptions),
+					activity: attr,
+					showCreatedBy: true,
+				}),
 			};
 		},
 		[queryClient],
@@ -1249,8 +1253,6 @@ export const TermsView = () => {
 							focusId: [table.db_id, table.schema_id, table.id].join('|'),
 						})),
 					},
-					entityTagsSection(term.tags, tagOptions),
-					entityOwnerSection(term.owner_id, ownerDirectory, OwnerPermission.catalog),
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,
 						id: 'zones',
@@ -1322,6 +1324,17 @@ export const TermsView = () => {
 						emptyMessage: 'SQL Attribute Does Not Exist',
 					},
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						term.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						true,
+						'Term Owner',
+					),
+					tags: entityTagsSection(term.tags, tagOptions),
+					activity: term,
+				}),
 			};
 		},
 		[queryClient],
@@ -1641,21 +1654,6 @@ export const TermsView = () => {
 							placeholder="Add Description"
 							rows={3}
 							className={`resize-y ${FIELD_INPUT_CLASSNAME}`}
-						/>
-					</div>
-
-					<div>
-						<label className={FIELD_LABEL_CLASSNAME}>Owner</label>
-						<OwnersSelect
-							owners={ownerChoices(owners, OwnerPermission.catalog).map((owner) => ({
-								id: owner.id,
-								name: owner.name,
-								kind: owner.kind,
-								color: owner.color,
-							}))}
-							value={sqlAttrOwnerId}
-							onChange={setSqlAttrOwnerId}
-							disabled={sqlAttrSubmitting}
 						/>
 					</div>
 

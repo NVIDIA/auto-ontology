@@ -6184,7 +6184,11 @@
         "tags": [],
         "term_id": "<term:Film>",
         "term_name": "Film",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6198,7 +6202,11 @@
         "tags": [],
         "term_id": "<term:Film>",
         "term_name": "Film",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       }
     ],
     "sql_attributes.fetch_sql_attributes_with_sql": [
@@ -6275,7 +6283,11 @@
       "term_id": "<term:Payment>",
       "term_name": "Payment",
       "zones": [],
-      "owner_id": null
+      "owner_id": null,
+      "created": "<redacted>",
+      "modified": null,
+      "created_by": null,
+      "modified_by": null
     },
     "sql_attributes.get_sql_attribute_by_id": "<sqlattr:total revenue>",
     "sql_attributes.list_sql_attributes": [
@@ -6290,7 +6302,11 @@
         "sql": "SELECT c.name, count(fc.film_id) FROM film_category fc JOIN category c ON c.category_id = fc.category_id GROUP BY c.name",
         "term_id": "<term:Film>",
         "term_name": "Film",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6303,7 +6319,11 @@
         "sql": "SELECT count(film_id) FROM film",
         "term_id": "<term:Film>",
         "term_name": "Film",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6316,7 +6336,11 @@
         "sql": "SELECT sum(amount) FROM payment",
         "term_id": "<term:Payment>",
         "term_name": "Payment",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6329,7 +6353,11 @@
         "sql": "SELECT customer_id, sum(amount) FROM payment GROUP BY customer_id",
         "term_id": "<term:Customer>",
         "term_name": "Customer",
-        "owner_id": null
+        "owner_id": null,
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       }
     ],
     "terms.count_column_attributes_by_term_id": 3,
@@ -6848,7 +6876,11 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ]
+        ],
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6877,7 +6909,11 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ]
+        ],
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       },
       {
         "certified": false,
@@ -6906,7 +6942,11 @@
             "id": "<zone:Film domain>",
             "name": "Film domain"
           }
-        ]
+        ],
+        "created": "<redacted>",
+        "modified": null,
+        "created_by": null,
+        "modified_by": null
       }
     ],
     "terms.fetch_related_term_ids": [],
@@ -7236,7 +7276,11 @@
           "name": "Film domain"
         }
       ],
-      "owner_id": null
+      "owner_id": null,
+      "created": "<redacted>",
+      "modified": null,
+      "created_by": null,
+      "modified_by": null
     },
     "terms.get_full_term_by_id__unknown": null,
     "terms.get_slim_term_by_id": {

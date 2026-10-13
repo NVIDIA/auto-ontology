@@ -2,6 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { entitySidePanel } from '@/common/SidePanel';
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
@@ -180,7 +181,6 @@ export function buildTreeFocusPageFormat(
 					{ label: 'Schemas', value: String(database.schemas.length) },
 				]),
 			);
-			sections.push(entityOwnerSection(database.owner_id, owners, OwnerPermission.catalog));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
@@ -214,7 +214,6 @@ export function buildTreeFocusPageFormat(
 					{ label: 'Tables', value: String(schema.tables_count) },
 				]),
 			);
-			sections.push(entityOwnerSection(schema.owner_id, owners, OwnerPermission.catalog));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-tables',
@@ -266,8 +265,6 @@ export function buildTreeFocusPageFormat(
 					{ certified: table.description_certified === true },
 				),
 			);
-			sections.push(entityOwnerSection(table.owner_id, owners, OwnerPermission.catalog));
-			sections.push(entityTagsSection(table.tags, tagOptions));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
@@ -301,6 +298,10 @@ export function buildTreeFocusPageFormat(
 						entityId: table.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(table.owner_id, owners, OwnerPermission.catalog),
+					tags: entityTagsSection(table.tags, tagOptions),
+				}),
 			};
 		}
 		case DataModels.COLUMN: {
@@ -323,14 +324,6 @@ export function buildTreeFocusPageFormat(
 					editable: samplesEditable,
 					hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(column.data_type),
 				},
-				entityTagsSection(column.tags, tagOptions),
-				entityOwnerSection(
-					table.owner_id,
-					owners,
-					OwnerPermission.catalog,
-					false,
-					'Table Owner',
-				),
 				{
 					type: ComposerSectionKind.INFO_GRID,
 					id: 'information',
@@ -355,6 +348,16 @@ export function buildTreeFocusPageFormat(
 						entityId: column.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						table.owner_id,
+						owners,
+						OwnerPermission.catalog,
+						false,
+						'Table Owner',
+					),
+					tags: entityTagsSection(column.tags, tagOptions),
+				}),
 			};
 		}
 	}

@@ -334,6 +334,8 @@ def update_term(
     description_certified: bool | None = None,
     owner_id: str | None = None,
     set_owner: bool = False,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> dict[str, Any] | None:
     """Update a Term, returning old and new values, or ``None`` when missing.
 
@@ -360,22 +362,26 @@ def update_term(
         )
         old_name = previous[0]["name"] if previous else None
 
+        values: dict[str, Any] = {
+            "name": func.coalesce(literal(name, String), s.term.c.name),
+            "description": func.coalesce(
+                literal(description, String), s.term.c.description
+            ),
+            "name_certified": func.coalesce(name_certified, s.term.c.name_certified),
+            "description_certified": func.coalesce(
+                description_certified, s.term.c.description_certified
+            ),
+            "owner_id": (literal(owner_id, String) if set_owner else s.term.c.owner_id),
+        }
+        # Only an edit from the app. Compilation calls this without ``touch``
+        # and must not look like someone saved the term.
+        if touch:
+            values["modified"] = func.now()
+            values["modified_by"] = modified_by
         rows = store().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
-            .values(
-                name=func.coalesce(literal(name, String), s.term.c.name),
-                description=func.coalesce(
-                    literal(description, String), s.term.c.description
-                ),
-                name_certified=func.coalesce(name_certified, s.term.c.name_certified),
-                description_certified=func.coalesce(
-                    description_certified, s.term.c.description_certified
-                ),
-                owner_id=(
-                    literal(owner_id, String) if set_owner else s.term.c.owner_id
-                ),
-            )
+            .values(**values)
             .returning(
                 s.term.c.id,
                 s.term.c.name,
@@ -709,6 +715,10 @@ def get_full_term_by_id(
         s.term.c.name_certified,
         s.term.c.description_certified,
         s.term.c.owner_id,
+        s.term.c.created,
+        s.term.c.modified,
+        s.term.c.created_by,
+        s.term.c.modified_by,
         _certification(table_ids).label("certification"),
     ).where(s.term.c.id == term_id)
     scope = _in_scope(table_ids)
@@ -1298,6 +1308,10 @@ def fetch_column_attributes_by_term_id(
             s.column_attribute.c.table_id,
             sample_values.label("sample_values"),
             s.column_attribute.c.certified,
+            s.column_attribute.c.created,
+            s.column_attribute.c.modified,
+            s.column_attribute.c.created_by,
+            s.column_attribute.c.modified_by,
         )
         .where(*_column_attribute_scope(term_id, zone_ids))
         .order_by(s.column_attribute.c.name, s.column_attribute.c.id)

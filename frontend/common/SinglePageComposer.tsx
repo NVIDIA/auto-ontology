@@ -39,6 +39,7 @@ import { OwnersSelect } from '@/common/OwnersSelect';
 import { ownerChoices } from '@/lib/owners';
 import { ownerQueries } from '@/lib/queries/owners';
 import type { Owner } from '@/types/owners';
+import { SidePanel, type SidePanelBulk } from '@/common/SidePanel';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -102,8 +103,8 @@ export type SinglePageComposerProps = {
 		header: ComposerPageHeader;
 		errorBanner?: unknown;
 	};
-	leftPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
-	rightPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
+	leftPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
+	rightPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
 	pdfProps?: {
 		isPDFView: boolean;
 		headerProps: Record<string, unknown>;
@@ -1230,56 +1231,41 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				{headerActions != null ? (
-					<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
-						{titleBlock}
-						{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
+				<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
+					{titleBlock}
+					{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
+					{editControls != null || headerActions != null ? (
 						<div className="ml-auto flex shrink-0 items-center gap-2">
 							{editControls}
 							{headerActions}
 						</div>
-					</header>
-				) : (
-					editControls != null && (
-						<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
-							{editControls}
-						</div>
-					)
-				)}
+					) : null}
+				</header>
 
 				<div
 					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
 					style={{ gridTemplateColumns: gridTemplate }}
 				>
 					{leftPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
 							{leftPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
 									{leftPanel.slot}
 								</div>
 							) : (
-								<div className="px-5 py-4 text-sm text-body sm:px-6 dark:text-zinc-400">
-									<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
-										Left panel
-									</p>
-									<p className="text-xs text-secondary">
-										{leftPanel.bulks.length} bulk(s) · width {leftPanel.width}
-									</p>
-								</div>
+								<SidePanel
+									bulks={leftPanel.bulks}
+									isEditing={isEditingActive}
+									onChange={(id, value) => {
+										pendingEditsRef.current[id] = value;
+									}}
+								/>
 							)}
 						</aside>
 					) : null}
 
 					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						<div className="space-y-5">
-							{headerActions == null ? (
-								<div className="flex items-start justify-between gap-3">
-									{titleBlock}
-									{statusBadge ? (
-										<div className="shrink-0 pt-1">{statusBadge}</div>
-									) : null}
-								</div>
-							) : null}
 							{sections.length === 0 ? (
 								<EmptyState
 									illustration={
@@ -1432,20 +1418,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</main>
 
 					{rightPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
 							{rightPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5">
 									{rightPanel.slot}
 								</div>
 							) : (
-								<div className="px-5 py-4 text-sm text-body sm:px-6 dark:text-zinc-400">
-									<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
-										Right panel
-									</p>
-									<p className="text-xs text-secondary">
-										{rightPanel.bulks.length} bulk(s) · width {rightPanel.width}
-									</p>
-								</div>
+								<SidePanel
+									bulks={rightPanel.bulks}
+									isEditing={isEditingActive}
+									onChange={(id, value) => {
+										pendingEditsRef.current[id] = value;
+									}}
+								/>
 							)}
 						</aside>
 					) : null}

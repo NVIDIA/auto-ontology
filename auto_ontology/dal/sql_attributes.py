@@ -142,6 +142,10 @@ def _attribute_select():
             _SQL_TEXT.label("sql"),
             s.sql_attribute.c.certified,
             s.sql_attribute.c.owner_id,
+            s.sql_attribute.c.created,
+            s.sql_attribute.c.modified,
+            s.sql_attribute.c.created_by,
+            s.sql_attribute.c.modified_by,
             s.term.c.id.label("term_id"),
             s.term.c.name.label("term_name"),
         )
@@ -477,15 +481,25 @@ def update_sql_attribute(
     certified: bool | None = None,
     owner_id: str | None = None,
     set_owner: bool = False,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> None:
     """Set properties on an existing attribute; omitted fields are untouched."""
+    values: dict[str, Any] = {
+        "name": func.coalesce(name, s.sql_attribute.c.name),
+        "description": func.coalesce(description, s.sql_attribute.c.description),
+        "expression": func.coalesce(expression, s.sql_attribute.c.expression),
+    }
+    # The rest is filled in below; ``touch`` is applied with them so one
+    # UPDATE both changes the field and records who saved it.
+    if touch:
+        values["modified"] = func.now()
+        values["modified_by"] = modified_by
     store().query_write(
         update(s.sql_attribute)
         .where(s.sql_attribute.c.id == attr_id)
         .values(
-            name=func.coalesce(name, s.sql_attribute.c.name),
-            description=func.coalesce(description, s.sql_attribute.c.description),
-            expression=func.coalesce(expression, s.sql_attribute.c.expression),
+            **values,
             # Typed explicitly: with every argument None, Postgres cannot infer
             # a type for the parameter inside coalesce and rejects the statement
             # outright. `source` is the one that hits it first because the
