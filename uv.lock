@@ -326,7 +326,7 @@ requires-dist = [
     { name = "langchain-postgres", specifier = ">=0.0.17" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "mysql-connector-python", specifier = ">=26.7.0" },
-    { name = "nemo-retriever", specifier = ">=26.8.1" },
+    { name = "nemo-retriever", specifier = "==26.8.1" },
     { name = "openai", specifier = "==2.44.0" },
     { name = "pandas", specifier = ">=2.3.3,<3" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.4" },
