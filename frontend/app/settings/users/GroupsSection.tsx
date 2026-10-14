@@ -88,6 +88,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 	const [deleteError, setDeleteError] = useState<string | null>(null);
 
 	const load = useCallback(async (isCurrent: () => boolean = () => true) => {
+		setLoading(true);
 		const result = await groupsApi.getAll();
 		if (!isCurrent()) return;
 		if (result.error) {

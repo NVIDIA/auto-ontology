@@ -54,9 +54,6 @@ EXEMPT_NAMES = {
     "next-env.d.ts",
 }
 EXEMPT_PREFIXES = ("vendor/",)
-# NVSkills writes these and signs their bytes. A header would change the
-# digest the signature covers, and the signature file itself is JSON.
-EXEMPT_SKILL_FILES = {"BENCHMARK.md", "skill-card.md", "skill.oms.sig"}
 
 
 def _tracked_files() -> list[str]:
@@ -72,7 +69,6 @@ def _needs_header(path: str) -> bool:
         p.suffix.lower() in EXEMPT_SUFFIXES
         or p.name in EXEMPT_NAMES
         or path.startswith(EXEMPT_PREFIXES)
-        or (path.startswith("skills/") and p.name in EXEMPT_SKILL_FILES)
         or (ROOT / f"{path}.license").exists()
     )
 

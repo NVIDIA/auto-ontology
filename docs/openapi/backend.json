@@ -7367,7 +7367,7 @@
     },
     "/api/groups": {
       "get": {
-        "description": "Return every group, ordered by name, with its members.",
+        "description": "Return every group, ordered by name, with its members. Requires admin.",
         "operationId": "list_groups_api_groups_get",
         "responses": {
           "200": {
@@ -7387,7 +7387,7 @@
         ]
       },
       "post": {
-        "description": "Create a group and its members. Requires the admin role.\n\nThe caller is the gateway's identity header. A missing header is 401; a\ncaller who is not an admin is 403.\n\n409 when another group already holds the name, compared\ncase-insensitively on the trimmed value. 400 when a member id is not an\naccount, or when the name, color, or role is missing.",
+        "description": "Create a group and its members. Requires the admin role.\n\nThe caller is the gateway's identity header. A missing header is 401; a\ncaller who is not an admin is 403.\n\n409 when another group already holds the name, compared\ncase-insensitively on the trimmed value. 400 when a member id is not an\naccount, or when the name, color, or role is missing or invalid.",
         "operationId": "create_group_api_groups_post",
         "requestBody": {
           "content": {
@@ -7470,7 +7470,7 @@
         ]
       },
       "get": {
-        "description": "Return one group.\n\n404 for an unknown id rather than an empty group: the caller asked for a\nrow it expects to exist.",
+        "description": "Return one group. Requires admin.\n\n404 for an unknown id rather than an empty group: the caller asked for a\nrow it expects to exist.",
         "operationId": "get_group_api_groups__group_id__get",
         "parameters": [
           {
@@ -7511,7 +7511,7 @@
         ]
       },
       "patch": {
-        "description": "Update a group's fields and, when sent, replace its members.\n\nRequires the admin role, for the same reason create does.\n\nOmitting ``user_ids`` leaves membership alone. Sending a list replaces\nit, and an empty list clears it. A patch that names no field returns the\ngroup unchanged.\n\n404 for an unknown id, 409 for a name another group holds, 400 for a\nmember id that is not an account.",
+        "description": "Update a group's fields and, when sent, replace its members.\n\nRequires the admin role, for the same reason create does.\n\nOmitting ``user_ids`` leaves membership alone. Sending a list replaces\nit, and an empty list clears it. A patch that names no field returns the\ngroup unchanged.\n\n404 for an unknown id, 409 for a name another group holds, 400 for an\ninvalid field or a member id that is not an account.",
         "operationId": "update_group_api_groups__group_id__patch",
         "parameters": [
           {

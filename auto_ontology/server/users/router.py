@@ -34,6 +34,16 @@ router = APIRouter()
 MAX_GROUP_NAME_LENGTH = 100
 
 _ROLES = (GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER)
+_COLORS = frozenset(
+    {
+        "#0ea5e9",
+        "#8b5cf6",
+        "#ec4899",
+        "#f97316",
+        "#14b8a6",
+        "#eab308",
+    }
+)
 
 
 class GroupCreate(BaseModel):
@@ -53,12 +63,7 @@ class GroupUpdate(BaseModel):
 
 
 def _require_admin(request: Request) -> str:
-    """The caller, when the gateway named an admin.
-
-    Writes are refused without that. Reads are not: the gateway in front of
-    this service is the permission gate for listing, the same way it is for
-    zones, and FastAPI is only reachable on the private network.
-    """
+    """Return the caller id when the gateway named an admin."""
     user_id = resolve_internal_user(request, required=False)
     if not user_id:
         raise HTTPException(status_code=401, detail="Authenticated user required")
@@ -82,9 +87,13 @@ def _name(name: str) -> str:
 
 
 def _color(color: str) -> str:
-    normalized = color.strip()
-    if normalized == "":
-        raise HTTPException(status_code=400, detail="Group color is required")
+    normalized = color.strip().lower()
+    if normalized not in _COLORS:
+        allowed = ", ".join(sorted(_COLORS))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Group color must be one of: {allowed}",
+        )
     return normalized
 
 
@@ -124,30 +133,30 @@ def _present(group: dict[str, Any]) -> dict[str, Any]:
     return presented
 
 
-def _translate(exc: Exception) -> HTTPException:
+def _translate(exc: ValueError) -> HTTPException:
     if isinstance(exc, dal.GroupNameTaken):
         return HTTPException(status_code=409, detail=str(exc))
     if isinstance(exc, dal.UnknownGroupMembers):
         return HTTPException(status_code=400, detail=str(exc))
-    if isinstance(exc, ValueError):
-        return HTTPException(status_code=400, detail=str(exc))
-    raise exc
+    return HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/groups", response_model=GroupListResponse)
-def list_groups() -> dict:
-    """Return every group, ordered by name, with its members."""
+def list_groups(request: Request) -> dict:
+    """Return every group, ordered by name, with its members. Requires admin."""
+    _require_admin(request)
     rows = [_present(group) for group in dal.list_groups()]
     return {"data": rows, "count": len(rows)}
 
 
 @router.get("/groups/{group_id}", response_model=GroupResponse)
-def get_group(group_id: str) -> dict:
-    """Return one group.
+def get_group(request: Request, group_id: str) -> dict:
+    """Return one group. Requires admin.
 
     404 for an unknown id rather than an empty group: the caller asked for a
     row it expects to exist.
     """
+    _require_admin(request)
     group = dal.get_group(group_id)
     if group is None:
         raise HTTPException(status_code=404, detail=f"Group {group_id!r} not found")
@@ -163,7 +172,7 @@ def create_group(request: Request, body: GroupCreate) -> dict:
 
     409 when another group already holds the name, compared
     case-insensitively on the trimmed value. 400 when a member id is not an
-    account, or when the name, color, or role is missing.
+    account, or when the name, color, or role is missing or invalid.
     """
     _require_admin(request)
     try:
@@ -189,8 +198,8 @@ def update_group(request: Request, group_id: str, body: GroupUpdate) -> dict:
     it, and an empty list clears it. A patch that names no field returns the
     group unchanged.
 
-    404 for an unknown id, 409 for a name another group holds, 400 for a
-    member id that is not an account.
+    404 for an unknown id, 409 for a name another group holds, 400 for an
+    invalid field or a member id that is not an account.
     """
     _require_admin(request)
     provided = body.model_fields_set
