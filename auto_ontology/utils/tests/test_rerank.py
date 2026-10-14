@@ -13,7 +13,7 @@ back to the first Term without anyone noticing.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 import pytest
@@ -29,7 +29,9 @@ _HITS = [
 
 
 @pytest.fixture
-def server(monkeypatch: pytest.MonkeyPatch):
+def server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> Callable[..., list[httpx.Request]]:
     """Answer the next POST with *body*; returns the requests seen."""
 
     def _install(body: dict[str, Any], status: int = 200) -> list[httpx.Request]:

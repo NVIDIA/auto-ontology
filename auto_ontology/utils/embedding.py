@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Callable, Iterator, Literal
 
 import httpx
-from openai import AuthenticationError, Omit, OpenAI, PermissionDeniedError
+from openai import APIStatusError, Omit, OpenAI
 
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.vdb.records import write_embedded_rows
@@ -50,6 +50,13 @@ _EMBED_API_KEY = resolve("EMBED", "API_KEY")
 # slow one, for a rate limit that needs minutes to clear.
 _REQUEST_RETRIES = 5
 
+# Interactive writes (an edited column, a saved analysis) run inside a
+# request handler, so a dead endpoint has to surface in about a minute: one
+# 60s attempt and one retry for a transient blip, instead of the ingest-sized
+# 600s and five retries.
+_INTERACTIVE_TIMEOUT_S = 60.0
+_INTERACTIVE_RETRIES = 1
+
 # Retry policy for a chunk the endpoint refused. Delays are long on purpose:
 # the failure being retried is a rate limit, and the quota needs wall-clock time
 # to refill — an immediate retry just burns another attempt against a closed
@@ -61,7 +68,8 @@ _RETRY_MAX_SECONDS = 120.0
 
 # Why a chunk came back unembedded, kept on the frame rather than on every row.
 _ERROR_ATTR = "embed_error"
-# Set when retrying cannot help: the key is wrong, not the endpoint busy.
+# Set when retrying cannot help: the request is wrong (bad key, unknown model,
+# wrong path), not the endpoint busy.
 _FATAL_ATTR = "embed_error_fatal"
 
 
@@ -135,12 +143,16 @@ def embed_texts(
     input_type: InputType,
     *,
     timeout: float | None = None,
+    retries: int | None = None,
 ) -> list[list[float] | None]:
     """Embed *texts*, returning one vector per text in the same order.
 
     Blank texts are not sent and come back as ``None``. Raises the client's
     error when a request fails after its retries -- an
     :class:`openai.APIStatusError` carries the HTTP status in its message.
+    *timeout* (seconds per request) and *retries* (per request) default to the
+    ingest-sized ``params.request_timeout_s`` and ``_REQUEST_RETRIES``; a caller
+    with its own retry loop passes ``retries=0`` so the two do not multiply.
     """
     stripped = [text.strip() if isinstance(text, str) else "" for text in texts]
     to_send = [i for i, text in enumerate(stripped) if text]
@@ -149,6 +161,8 @@ def embed_texts(
         return vectors
 
     client = _client(params)
+    if retries is not None:
+        client = client.with_options(max_retries=retries)
     batches = list(itertools.batched(to_send, max(1, params.inference_batch_size)))
 
     def _embed_batch(indices: tuple[int, ...]) -> None:
@@ -182,6 +196,17 @@ def embed_texts(
 # ---------------------------------------------------------------------------
 
 
+def _is_fatal(exc: Exception) -> bool:
+    """Whether *exc* says the request itself is wrong, so waiting cannot help.
+
+    Any 4xx except 408 (timeout), 409 and 429 (rate limit): a bad key, an
+    unknown model id, a wrong path. The client has already retried the rest.
+    """
+    return isinstance(exc, APIStatusError) and (
+        400 <= exc.status_code < 500 and exc.status_code not in (408, 409, 429)
+    )
+
+
 def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":
     """Embed *frame*'s ``text`` column as passages into ``metadata["embedding"]``.
 
@@ -199,9 +224,7 @@ def _embed_frame(frame: "pd.DataFrame", params: EmbedParams) -> "pd.DataFrame":
         vectors = embed_texts(list(out.get("text", [""] * len(out))), params, "passage")
     except Exception as exc:
         out.attrs[_ERROR_ATTR] = f"{type(exc).__name__}: {exc}"
-        out.attrs[_FATAL_ATTR] = isinstance(
-            exc, (AuthenticationError, PermissionDeniedError)
-        )
+        out.attrs[_FATAL_ATTR] = _is_fatal(exc)
         return out
     for metadata, vector in zip(out["metadata"], vectors):
         if vector is not None:
@@ -254,8 +277,9 @@ def _embed_with_retry(
     Retries the whole chunk on top of the client's per-request retries because
     a sustained run exhausts the endpoint's quota for minutes, longer than those
     back off for, and without this the chunk's rows are silently dropped and the
-    catalog ends up missing entries no one notices. An authentication failure is
-    not retried: waiting does not fix a wrong key.
+    catalog ends up missing entries no one notices. A request the endpoint
+    rejects as wrong -- a bad key, an unknown model -- is not retried: waiting
+    does not fix it.
 
     Returns the embedded frame, or the last empty result once attempts run out;
     the caller decides what to do with a chunk that never succeeded.
@@ -414,7 +438,9 @@ def embed_rows(
 
     For the small, interactive writes -- one analysis, one attribute, one
     edited column -- where a failure should reach the caller instead of being
-    retried for minutes the way an ingest chunk is. Returns copies of the rows
+    retried for minutes the way an ingest chunk is: one 60s attempt and one
+    retry, so a dead endpoint fails the request in about two minutes rather
+    than an hour. Returns copies of the rows
     that came back with an embedding, ready for
     :func:`~auto_ontology.vdb.records.write_embedded_rows`. Raises
     ``RuntimeError`` when the endpoint fails or returns no embeddings; *what*
@@ -424,7 +450,11 @@ def embed_rows(
         return []
     try:
         vectors = embed_texts(
-            [row.get("text") or "" for row in rows], params, "passage"
+            [row.get("text") or "" for row in rows],
+            params,
+            "passage",
+            timeout=_INTERACTIVE_TIMEOUT_S,
+            retries=_INTERACTIVE_RETRIES,
         )
     except Exception as exc:
         raise RuntimeError(

@@ -17,7 +17,9 @@ logger = logging.getLogger(__name__)
 
 # A search embeds one short string, so it should answer in seconds; the
 # ingest-sized default would let one stalled request hold a question for ten
-# minutes before ``_query_with_retry`` ever got to see the failure.
+# minutes before ``_query_with_retry`` ever got to see the failure. That loop
+# is the only retry on this path -- the client's own are off -- so a dead
+# endpoint costs three 60s attempts, not three times six.
 _QUERY_TIMEOUT_S = 60.0
 
 
@@ -53,7 +55,11 @@ class Retriever:
         can tell a transient failure from an empty result.
         """
         vector = embed_texts(
-            [text], self.embed_params, "query", timeout=_QUERY_TIMEOUT_S
+            [text],
+            self.embed_params,
+            "query",
+            timeout=_QUERY_TIMEOUT_S,
+            retries=0,
         )[0]
         if vector is None:
             raise ValueError("Cannot search for a blank query.")

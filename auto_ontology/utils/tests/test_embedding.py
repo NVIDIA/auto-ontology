@@ -19,12 +19,13 @@ from typing import Any, Callable
 import httpx
 import pandas as pd
 import pytest
-from openai import AuthenticationError, OpenAI
+from openai import AuthenticationError, OpenAI, RateLimitError
 
 from auto_ontology.utils import embedding
 from auto_ontology.utils.embedding import (
     EmbedParams,
     _embed_frame,
+    _is_fatal,
     _embed_with_retry,
     batch_embed,
     embed_rows,
@@ -171,6 +172,48 @@ def test_a_rate_limit_is_retried_by_the_client(endpoint) -> None:
     assert len(seen) == 2
 
 
+def test_retries_zero_leaves_retrying_to_the_caller(endpoint) -> None:
+    seen = endpoint(
+        lambda request: httpx.Response(
+            429, headers={"retry-after-ms": "1"}, json={"error": "slow"}
+        )
+    )
+    with pytest.raises(RateLimitError):
+        embed_texts(["a"], _params(), "query", retries=0)
+    assert len(seen) == 1
+
+
+def test_the_timeout_reaches_the_request(endpoint) -> None:
+    seen = endpoint(_ok)
+    embed_texts(["a"], _params(), "query", timeout=7.0)
+    assert seen[0].extensions["timeout"]["read"] == 7.0
+
+
+@pytest.mark.parametrize(
+    "status, fatal",
+    [
+        (400, True),
+        (401, True),
+        (403, True),
+        (404, True),
+        (422, True),
+        (408, False),
+        (409, False),
+        (429, False),
+        (500, False),
+        (503, False),
+    ],
+)
+def test_only_a_wrong_request_is_fatal(status: int, fatal: bool) -> None:
+    from openai import APIStatusError
+
+    request = httpx.Request("POST", "https://embed.example/v1/embeddings")
+    exc = APIStatusError(
+        "x", response=httpx.Response(status, request=request), body=None
+    )
+    assert _is_fatal(exc) is fatal
+
+
 def test_a_bad_key_fails_at_once(endpoint) -> None:
     seen = endpoint(lambda request: httpx.Response(401, json={"error": "bad key"}))
     with pytest.raises(AuthenticationError):
@@ -231,6 +274,21 @@ def test_embed_rows_raises_when_the_endpoint_fails(endpoint) -> None:
     endpoint(lambda request: httpx.Response(401, json={"error": "bad key"}))
     with pytest.raises(RuntimeError, match="Thing"):
         embed_rows(_rows("a"), _params(), what="Thing")
+
+
+def test_embed_rows_is_bounded_for_interactive_callers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A save in a request handler must fail in about a minute, not an hour."""
+    seen: list[dict] = []
+
+    def _embed(texts: list[str], params: Any, input_type: str, **kw: Any) -> list:
+        seen.append(kw)
+        return [[0.5] for _ in texts]
+
+    monkeypatch.setattr(embedding, "embed_texts", _embed)
+    embed_rows(_rows("a"), _params(), what="Thing")
+    assert seen == [{"timeout": 60.0, "retries": 1}]
 
 
 def test_embed_rows_raises_when_nothing_embeds(endpoint) -> None:
@@ -310,7 +368,7 @@ def test_retry_gives_up_and_reports_the_endpoint_error(
     assert "429 - Too Many Requests" in text
 
 
-def test_a_bad_key_is_not_retried() -> None:
+def test_a_rejected_request_is_not_retried() -> None:
     """Waiting does not fix a wrong key; four minutes of backoff would only hide it."""
     calls: list[int] = []
     slept: list[float] = []

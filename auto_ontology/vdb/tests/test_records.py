@@ -15,7 +15,7 @@ the embedding endpoint is replaced.
 from __future__ import annotations
 
 import uuid
-from typing import Any
+from typing import Any, Iterator
 
 import psycopg
 import pytest
@@ -23,6 +23,7 @@ import pytest
 from auto_ontology.infra.postgres import get_postgres_connection_string
 from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.embedding_rows import build_embed_row
+from auto_ontology.vdb.postgres import PostgresVDB
 from auto_ontology.vdb.records import to_vdb_records, write_embedded_rows
 
 _DIMENSIONS = 2048
@@ -108,9 +109,7 @@ def _unit(axis: int) -> list[float]:
 
 
 @pytest.fixture
-def vdb():
-    from auto_ontology.vdb.postgres import PostgresVDB
-
+def vdb() -> Iterator["PostgresVDB"]:
     connection_string = get_postgres_connection_string()
     try:
         psycopg.connect(connection_string, connect_timeout=3).close()
@@ -146,10 +145,10 @@ def test_written_rows_come_back_from_a_search(
     )
     assert written == 2
 
-    sent: list[tuple[list[str], str]] = []
+    sent: list[tuple[list[str], str, dict]] = []
 
     def _embed(texts: list[str], params: Any, input_type: str, **kw: Any) -> list:
-        sent.append((texts, input_type))
+        sent.append((texts, input_type, kw))
         return [_unit(1)]
 
     monkeypatch.setattr(retriever_mod, "embed_texts", _embed)
@@ -159,7 +158,9 @@ def test_written_rows_come_back_from_a_search(
         "who buys", top_k=5, vdb_kwargs={"where": {"database_name": "shop"}}
     )
 
-    assert sent == [(["who buys"], "query")]
+    # The caller's _query_with_retry is the only retry on this path, and each
+    # attempt is bounded, so a dead endpoint cannot hold a question for long.
+    assert sent == [(["who buys"], "query", {"timeout": 60.0, "retries": 0})]
     assert [hit["metadata"]["id"] for hit in hits] == ["customers", "orders"]
     best = hits[0]
     assert best["text"] == "customers table"
