@@ -126,8 +126,11 @@ export const UsersManager = () => {
 			return;
 		}
 		const listed = await usersApi.list();
-		setUsers(listed.users);
-		if (listed.error) setError(listed.error);
+		if (listed.error) {
+			setError(listed.error);
+		} else {
+			setUsers(listed.users);
+		}
 		setEditingUser(null);
 		setEditing(false);
 	};
