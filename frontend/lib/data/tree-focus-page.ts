@@ -5,6 +5,7 @@
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import {
 	ComposerColumnType,
 	ComposerSectionKind,
@@ -150,11 +151,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'all-databases',
 				title: `Databases (${databases.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'schemas', label: 'Schemas' },
 				],
 				rows: databases.map((database) => ({
+					id: database.id,
 					name: database.name,
 					schemas: String(database.num_of_schemas),
 				})),
@@ -180,11 +183,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
 				title: `Schemas (${database.schemas.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'tables', label: 'Tables' },
 				],
 				rows: database.schemas.map((schema) => ({
+					id: schema.id,
 					name: schema.schema_name,
 					tables: String(schema.tables_count),
 				})),
@@ -244,7 +249,8 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { table } = resolvedFocus;
-			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
+			const tableType = getTableType(table.table_type);
+			const tableTypeLabel = catalogNodeInfo[tableType].title;
 			sections.push(
 				...baseCardsForEntity(
 					table.description ?? '',
@@ -279,7 +285,7 @@ export function buildTreeFocusPageFormat(
 					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
-					data_type: column.data_type,
+					data_type: column.data_type?.trim() ? column.data_type : '—',
 					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
@@ -288,7 +294,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						icon: catalogNodeInfo[table.table_type].icon,
+						icon: catalogNodeInfo[tableType].icon,
 						entityId: table.id,
 					},
 				},
@@ -323,7 +329,7 @@ export function buildTreeFocusPageFormat(
 						{ label: 'Column', value: column.column_name },
 						{
 							label: 'Data Type',
-							value: column.data_type.trim() ? column.data_type : '—',
+							value: column.data_type?.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
 						{ label: 'Position', value: String(column.ordinal_position) },

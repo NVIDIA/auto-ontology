@@ -18,10 +18,13 @@ import { ToastVariant } from '@/enums/toast';
 import { Table } from '@/common/Table';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
+import { PopoverMenu } from '@/common/PopoverMenu';
+import { ConfirmModal } from '@/common/modal';
 import type { TableColumn } from '@/types/table';
-import type { User } from '@/types/auth';
+import type { UpdateUserInput, User } from '@/types/auth';
 import type { Invitation } from '@/types/invitation';
 import { GroupsSection } from './GroupsSection';
+import { EditUserModal } from './EditUserModal';
 import { InviteUserModal, type InviteUserInput } from './InviteUserModal';
 
 const invitationStatusLabel: Record<InvitationStatus, string> = {
@@ -52,10 +55,20 @@ export const UsersManager = () => {
 	const [inviteOpen, setInviteOpen] = useState(false);
 	const [inviting, setInviting] = useState(false);
 	const [inviteError, setInviteError] = useState<string | null>(null);
+	const [editingUser, setEditingUser] = useState<User | null>(null);
+	const [editing, setEditing] = useState(false);
+	const [editError, setEditError] = useState<string | null>(null);
+	const [pendingDeleteUser, setPendingDeleteUser] = useState<User | null>(null);
 	const [invitations, setInvitations] = useState<Invitation[]>([]);
 
 	const currentUserId = session?.user.id;
 	const adminCount = users.filter((user) => user.role === Role.Admin).length;
+	const editingRoleLockedReason =
+		editingUser?.id === currentUserId
+			? 'You cannot change your own role.'
+			: editingUser?.role === Role.Admin && adminCount <= 1
+				? 'The last admin cannot be made a viewer.'
+				: null;
 
 	useEffect(() => {
 		void Promise.all([usersApi.list(), invitationsApi.list()]).then(([listed, invited]) => {
@@ -80,11 +93,6 @@ export const UsersManager = () => {
 		setBusyId(null);
 	};
 
-	const toggleRole = (user: User) => {
-		const nextRole = user.role === Role.Admin ? Role.Viewer : Role.Admin;
-		return runAction(user.id, () => usersApi.setRole(user.id, nextRole));
-	};
-
 	const inviteUser = async ({ email, name, role }: InviteUserInput) => {
 		setInviting(true);
 		setInviteError(null);
@@ -103,15 +111,41 @@ export const UsersManager = () => {
 		else setInvitations(invited.invitations);
 	};
 
-	const deleteUser = (user: User) => {
-		if (
-			!window.confirm(
-				`Delete user "${user.name || user.email}"? This permanently removes the account and its data.`,
-			)
-		) {
+	const editUser = async (user: User, input: UpdateUserInput) => {
+		if (user.id === currentUserId && input.role !== user.role) {
+			setEditError('You cannot change your own role.');
 			return;
 		}
-		return runAction(user.id, () => usersApi.remove(user.id));
+		if (user.role === Role.Admin && adminCount <= 1 && input.role !== Role.Admin) {
+			setEditError('The last admin cannot be made a viewer.');
+			return;
+		}
+		setEditing(true);
+		setEditError(null);
+		const result = await usersApi.update(user.id, input);
+		if (result.error) {
+			setEditError(actionErrorMessage(result.error, 'Failed to update the user.'));
+			setEditing(false);
+			return;
+		}
+		const listed = await usersApi.list();
+		if (listed.error) {
+			setError(listed.error);
+		} else {
+			setUsers(listed.users);
+		}
+		setEditingUser(null);
+		setEditing(false);
+	};
+
+	const deleteUser = (user: User) => {
+		setPendingDeleteUser(user);
+	};
+
+	const confirmDeleteUser = async () => {
+		if (!pendingDeleteUser) return;
+		await runAction(pendingDeleteUser.id, () => usersApi.remove(pendingDeleteUser.id));
+		setPendingDeleteUser(null);
 	};
 
 	const resetPassword = (user: User) => {
@@ -169,7 +203,7 @@ export const UsersManager = () => {
 		{
 			key: 'actions',
 			header: 'Actions',
-			width: 'w-80',
+			width: 'w-16',
 			nowrap: true,
 			headerClassName: 'text-right',
 			cell: (user) => {
@@ -179,34 +213,45 @@ export const UsersManager = () => {
 				const isSelf = currentUserId != null && user.id === currentUserId;
 				const busy = busyId === user.id;
 				return (
-					<div className="flex justify-end gap-2">
-						<Button
-							theme={ButtonTheme.Secondary}
-							size={Size.SMALL}
-							type="button"
-							disabled={busy || isLastAdmin}
-							onClick={() => toggleRole(user)}
-						>
-							{isAdmin ? 'Make viewer' : 'Make admin'}
-						</Button>
-						<Button
-							theme={ButtonTheme.Secondary}
-							size={Size.SMALL}
-							type="button"
-							disabled={busy || isSelf}
-							onClick={() => resetPassword(user)}
-						>
-							Reset Password
-						</Button>
-						<Button
-							theme={ButtonTheme.DangerOutline}
-							size={Size.SMALL}
-							type="button"
-							disabled={busy || isLastAdmin}
-							onClick={() => deleteUser(user)}
-						>
-							Delete
-						</Button>
+					<div className="flex justify-end">
+						<PopoverMenu
+							items={[
+								{
+									label: 'Edit',
+									icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+									onClick: () => {
+										setEditError(null);
+										setEditingUser(user);
+									},
+								},
+								{
+									label: 'Reset Password',
+									icon: <Icon name={IconName.Key} className="h-3.5 w-3.5" />,
+									onClick: () => resetPassword(user),
+									disabled: isSelf,
+								},
+								{
+									label: 'Delete',
+									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+									onClick: () => void deleteUser(user),
+									disabled: isLastAdmin,
+									danger: true,
+								},
+							]}
+							trigger={({ toggle }) => (
+								<Button
+									theme={ButtonTheme.IconNeutral}
+									size={Size.SMALL}
+									iconOnly
+									type="button"
+									disabled={busy}
+									onClick={toggle}
+									aria-label={`Actions for ${user.name || user.email}`}
+								>
+									<Icon name={IconName.DotsVertical} className="h-4 w-4" />
+								</Button>
+							)}
+						/>
 					</div>
 				);
 			},
@@ -369,6 +414,39 @@ export const UsersManager = () => {
 					}}
 				/>
 			) : null}
+
+			{editingUser ? (
+				<EditUserModal
+					user={editingUser}
+					roleLockedReason={editingRoleLockedReason}
+					submitting={editing}
+					error={editError}
+					onClose={() => {
+						if (!editing) setEditingUser(null);
+					}}
+					onEdit={(input) => {
+						void editUser(editingUser, input);
+					}}
+				/>
+			) : null}
+
+			<ConfirmModal
+				open={pendingDeleteUser !== null}
+				title="Delete User"
+				message={
+					pendingDeleteUser == null
+						? ''
+						: `Delete user "${pendingDeleteUser.name || pendingDeleteUser.email}"? This permanently removes the account and its data.`
+				}
+				confirmLabel="Delete"
+				onConfirm={confirmDeleteUser}
+				onCancel={() => {
+					if (pendingDeleteUser == null || busyId !== pendingDeleteUser.id) {
+						setPendingDeleteUser(null);
+					}
+				}}
+				confirming={pendingDeleteUser != null && busyId === pendingDeleteUser.id}
+			/>
 
 			<Toast
 				open={error !== null}

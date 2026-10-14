@@ -103,15 +103,16 @@ PREDICT <target> [RANK TOP k] FOR <entity_table>.<primary_key>=<value> [ASSUMING
   aggregation. For "orders per APAC customer" write `COUNT(sales_orders.*, 0, 90, days) FOR EACH
   customers.customer_id WHERE customers.region = 'apac'`, NOT
   `COUNT(sales_orders.* WHERE sales_orders.customer_id = customers.customer_id, 0, 90, days)`. Match every
-  filter value to what the question actually names and to the column's sampled values (e.g. "key customers"
-  is account_tier = 'key', not 'strategic'); never swap in a different tier/region/status than was asked.
+  filter value to what the question actually names and, when a Filter values section is given below, to
+  the values listed there for that column (e.g. "key customers" is account_tier = 'key', not 'strategic').
+  A column with no values listed has none supplied: filter on it only using a value the question itself
+  states, and never invent a spelling. Never swap in a different tier/region/status than was asked.
 - For a slip / late / on-time OUTCOME, classify on the status (or flag) column using its exact values from
-  the column table below — e.g. predict order slip with `order_fulfillment.status = 'late'`. (As the
+  the Filter values section when one is given — e.g. predict order slip with `order_fulfillment.status = 'late'`. (As the
   grammar says, compare a categorical column with `=` / `!=`, never `<` / `>`.)
 - For "at risk / will slip / likely in the next N days" questions, scope the entity-selection SQL to
   entities whose due/committed date falls in that future window relative to the latest data — not merely
   `IS NOT NULL`, which ranks stale historical rows."""
-
 
 _REPAIR_BODY = (
     "Correct the PQL to resolve this error (check table/column/link names and the target shape). Change ONLY what\n"

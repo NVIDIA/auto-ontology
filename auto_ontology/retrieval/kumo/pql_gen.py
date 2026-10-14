@@ -37,6 +37,7 @@ from typing import Protocol
 from langchain_core.language_models import BaseChatModel
 from auto_ontology.connectors.base import SQLDatabase
 
+from auto_ontology.retrieval.kumo.budget import RefusedForCapacity
 from auto_ontology.retrieval.kumo.prompts import build_pql_prompt
 from auto_ontology.utils.llm_invoke import invoke_text
 
@@ -316,6 +317,7 @@ class PqlGenerationResult:
     attempts: int = 0
     error: str | None = None
     num_entities: int = 0
+    population: int = 0
     columns: list[str] = field(default_factory=list)
     rows: list[dict[str, Any]] = field(default_factory=list)
     explanation: str | None = None
@@ -326,6 +328,36 @@ class PqlGenerationResult:
     note: str | None = None
     prediction_table: str | None = None
     prediction_table_columns: list[str] = field(default_factory=list)
+
+
+class PqlPopulationTooLargeError(RefusedForCapacity, ValueError):
+    """A whole-population question over more entities than one run can score.
+
+    Distinct from a query the repair loop can fix: no rewriting of the PQL makes
+    the population smaller, so this is surfaced to the asker rather than retried.
+    """
+
+
+def _population_refusal(pql: str, population: int, cap: int) -> str:
+    """Say what was asked for, what it would cost, and what to ask instead.
+
+    Named rather than rounded down: a total over a slice of the population,
+    presented as a total, is wrong in a way the reader cannot see, so this
+    refuses instead of answering.
+    """
+    parsed = parse_entity(pql)
+    entity = f"{parsed[0]}" if parsed else "entities"
+    covered = (
+        "an unknown number of"
+        if population >= _UNCOUNTED_POPULATION
+        else f"{population:,}"
+    )
+    return (
+        f"This question covers {covered} {entity}, and one prediction run scores at "
+        f"most {cap:,}. Answering it from part of them would report a total that "
+        f"reads like the whole. Ask about a narrower group, such as one segment, "
+        f"region or time period, and the answer will cover all of it."
+    )
 
 
 class PqlGroupByError(ValueError):
@@ -528,7 +560,7 @@ _TRANSIENT_EXEC_MARKERS = (
 # neighbourhood is the last resort to salvage *a* prediction when full settings cannot complete.
 #
 # The SDK's per-table row cap ("... contains 32,000 rows, exceeding the 10,000-row limit",
-# kumorfm.rfm.payload.MAX_TABLE_ROWS) is the same kind of DETERMINISTIC rejection: it is raised
+# kumo_relational_engine.rfm.payload.MAX_TABLE_ROWS) is the same kind of DETERMINISTIC rejection: it is raised
 # client-side while serializing the request, before anything is sent, and the row count is a direct
 # product of the neighbourhood (FAST samples 1,000 context anchors x 32 first-hop neighbours = 32,000
 # rows in one related table), so only a smaller neighbourhood clears it. Without this marker the
@@ -1114,6 +1146,27 @@ def prefer_explicit_change_targets(
     return _WINDOWED_AGG_TARGET.sub(repl, pql)
 
 
+def _count_entities(connector: SQLDatabase, source: str, pk: str) -> int:
+    """How many entities the question covers, when a LIMIT query cannot say.
+
+    A count that fails is reported as the cap itself rather than as zero: an
+    unknown population must not read as a small one, since that is what would
+    let an answer over a slice be presented as an answer over everything.
+    """
+    try:
+        df = connector.execute(
+            f"SELECT COUNT(DISTINCT {quote_ident(pk)}) FROM {source} "
+            f"WHERE {quote_ident(pk)} IS NOT NULL"
+        )
+        return int(df.iloc[0, 0]) if not df.empty else 0
+    except Exception:
+        logger.info("Could not count the entities in %s.", source, exc_info=True)
+        return _UNCOUNTED_POPULATION
+
+
+_UNCOUNTED_POPULATION = 1 << 62
+
+
 def _resolve_indices(
     pql: str,
     entity_sql: str | None,
@@ -1121,13 +1174,19 @@ def _resolve_indices(
     max_entities: int,
     table_names: dict[str, str] | None = None,
     available_entity_ids: dict[str, list[Any]] | None = None,
-) -> list[Any]:
-    """Resolve entity IDs, constrained to rows loaded into the Kumo graph.
+) -> tuple[list[Any], int]:
+    """Resolve entity IDs, and how many the question really covers.
 
     An explicit entity-selection query is still executed against the source,
     then intersected with graph IDs. Without a filter, graph IDs are used
     directly instead of issuing a second nondeterministic ``LIMIT`` query whose
     rows may differ from the graph sample.
+
+    The second return value is the size of the population BEFORE any cap, which
+    is what tells an answer over a slice apart from an answer over everything.
+    Where the only way to learn it is a ``LIMIT`` query that cannot report what
+    it left behind, one count is asked for; a count is cheap next to scoring
+    every row it counted.
     """
     entity = parse_entity(pql)
     available = (
@@ -1145,17 +1204,25 @@ def _resolve_indices(
         ids = available
     else:
         if entity is None:
-            return []
+            return [], 0
         table, pk = entity
+        source = _sql_table(table, table_names)
         df = connector.execute(
-            f"SELECT DISTINCT {quote_ident(pk)} FROM {_sql_table(table, table_names)} "
+            f"SELECT DISTINCT {quote_ident(pk)} FROM {source} "
             f"WHERE {quote_ident(pk)} IS NOT NULL LIMIT {int(max_entities)}"
         )
         ids = df.iloc[:, 0].dropna().tolist() if not df.empty else []
-    if len(ids) > max_entities:
-        logger.info("Capping entities from %d to %d.", len(ids), max_entities)
+        if len(ids) >= max_entities:
+            population = _count_entities(connector, source, pk)
+            if population > max_entities:
+                logger.info("Capping entities from %d to %d.", population, max_entities)
+            return ids[:max_entities], population
+        return ids, len(ids)
+    population = len(ids)
+    if population > max_entities:
+        logger.info("Capping entities from %d to %d.", population, max_entities)
         ids = ids[:max_entities]
-    return ids
+    return ids, population
 
 
 def _persist_full_prediction(
@@ -1262,6 +1329,44 @@ def _forecast_anchor(
         else pd.Timestamp(pd.Timestamp.today().date())
     )
     return min(now_ts, safe)
+
+
+_STALE_ANCHOR_DAYS = 31
+
+
+def _join_notes(*notes: str | None) -> str | None:
+    """Keep every note a run has to make, rather than the last one written."""
+    kept = [note for note in notes if note]
+    return "\n\n".join(kept) if kept else None
+
+
+def _stale_anchor_note(anchor: Any, *, now: Any = None) -> str | None:
+    """Say when a forward prediction is not anchored anywhere near today.
+
+    KumoRFM anchors within the data, so a warehouse that stopped being loaded
+    pulls the window back to where the data ends. The prediction is still the
+    best one the data supports, but it answers "the next 30 days" as they looked
+    from that date, and a reader who is not told reads it as the next 30 days
+    from now.
+    """
+    if anchor is None:
+        return None
+    import pandas as pd
+
+    anchored = pd.Timestamp(anchor)
+    today = (
+        pd.Timestamp(now)
+        if now is not None
+        else pd.Timestamp(pd.Timestamp.today().date())
+    )
+    behind = (today - anchored).days
+    if behind <= _STALE_ANCHOR_DAYS:
+        return None
+    return (
+        f"This prediction is anchored at {anchored.date()}, {behind:,} days ago, "
+        f"because that is as far as the data reaches. It is a forecast from that "
+        f"date, not from today."
+    )
 
 
 def _resolve_single_index(
@@ -1377,7 +1482,13 @@ def predict_all(
     runs the same accuracy-first resilient predict path as :func:`generate_pql`.
     """
     scope = entity_sql if entity_sql is not None else extract_entity_sql(pql)
-    indices = _resolve_indices(pql, scope, connector, max_entities, table_names)
+    indices, population = _resolve_indices(
+        pql, scope, connector, max_entities, table_names
+    )
+    if population > max_entities:
+        raise PqlPopulationTooLargeError(
+            _population_refusal(pql, population, max_entities)
+        )
     anchor = _forecast_anchor(pql, connector, time_columns, table_names=table_names)
 
     def _predict_call(idx: list[Any] | None, num_neighbors: list[int] | None) -> Any:
@@ -1529,6 +1640,7 @@ def generate_pql(
                 _anchor = _forecast_anchor(
                     pql, connector, time_columns, table_names=table_names
                 )
+                result.note = _join_notes(result.note, _stale_anchor_note(_anchor))
 
                 def _explain_call(num_neighbors: list[int] | None) -> Any:
                     kw: dict[str, Any] = {"explain": True, "run_mode": "fast"}
@@ -1580,7 +1692,7 @@ def generate_pql(
                             "cover the whole population. Ask without grouping to filter a sub-population."
                         )
                     result.entity_sql = None
-                indices = _resolve_indices(
+                indices, population = _resolve_indices(
                     pql,
                     scope_sql,
                     connector,
@@ -1588,6 +1700,10 @@ def generate_pql(
                     table_names,
                     available_entity_ids,
                 )
+                if whole_population and population > entity_cap:
+                    raise PqlPopulationTooLargeError(
+                        _population_refusal(pql, population, entity_cap)
+                    )
                 if forecast:
                     if len(indices) > 1:
                         parsed = parse_entity(pql)
@@ -1608,6 +1724,7 @@ def generate_pql(
                 _anchor = _forecast_anchor(
                     pql, connector, time_columns, table_names=table_names
                 )
+                result.note = _join_notes(result.note, _stale_anchor_note(_anchor))
 
                 def _predict_call(
                     idx: list[Any] | None, num_neighbors: list[int] | None
@@ -1646,7 +1763,8 @@ def generate_pql(
                     )
                     result.group_by = group_by
                     result.num_entities = len(raw)
-                    result.truncated = len(indices) >= entity_cap
+                    result.population = population
+                    result.truncated = population > entity_cap
                     result.columns = list(grouped.columns)
                     result.rows = grouped.to_dict("records")
                 else:
@@ -1654,7 +1772,8 @@ def generate_pql(
                         _order_forecast(raw) if forecast else _rank_prediction(raw)
                     )
                     result.num_entities = len(indices)
-                    result.truncated = not forecast and len(indices) >= entity_cap
+                    result.population = population
+                    result.truncated = not forecast and population > entity_cap
                     result.columns = list(prediction.columns)
                     result.rows = prediction.head(max_preview_rows).to_dict("records")
                     if (
@@ -1675,6 +1794,10 @@ def generate_pql(
             result.error = None
             # Success-cache omitted with the RAG port (no vector store to write back to).
             return result
+        except PqlPopulationTooLargeError as exc:
+            result.error = str(exc)
+            logger.info("Prediction refused, population too large: %s", str(exc)[:160])
+            break
         except PqlGroupByError as exc:
             # A bad group-by (unknown column / un-aggregatable target) is a usage error, not a query the repair
             # loop can fix — surface it immediately with the actionable message.
