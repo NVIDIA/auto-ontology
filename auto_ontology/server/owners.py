@@ -4,13 +4,11 @@
 
 """Who may be chosen as an owner, and who may edit a row.
 
-An owner is one account or one group. The id is stored on the row so the
-page can say who is responsible. It does not decide who may edit. Editing
-is the role's permission.
-
-An admin may always edit: that role holds every write. Anyone else may edit
-when their role grants the permission the row asks for. A viewer does not
-grant ``catalog:edit``, so a viewer cannot edit a catalog row.
+An owner is one account or one group. An account may edit when its own role
+grants the required permission. Membership in the group that owns the row
+also grants that group's permission for this row only. Thus a viewer in an
+admin owner group may edit the group's row without gaining access to other
+rows.
 
 The gateway is what names the caller. A write that arrives without that
 header is not checked here: FastAPI is only reachable on the private network,
@@ -57,9 +55,20 @@ def decide_edit(*, role: str | None, permission: str) -> bool:
     return permission in permissions_for_role(role or "")
 
 
-def can_edit_entity(*, user_id: str, permission: str) -> bool:
-    """:func:`decide_edit` with the account's role read for it."""
-    return decide_edit(role=postgres_dal.get_user_role(user_id), permission=permission)
+def can_edit_entity(*, user_id: str, subject: EditSubject) -> bool:
+    """Whether the account's role or the row's owner group permits this edit."""
+    if decide_edit(
+        role=postgres_dal.get_user_role(user_id), permission=subject.permission
+    ):
+        return True
+    if subject.owner_id is None:
+        return False
+
+    owner_group = groups_dal.get_group(subject.owner_id)
+    if owner_group is None:
+        return False
+    is_member = any(member["id"] == user_id for member in owner_group["users"])
+    return is_member and subject.permission in permissions_for_role(owner_group["role"])
 
 
 def require_assignable(owner_id: str | None, permission: str) -> str | None:
@@ -83,15 +92,15 @@ def require_assignable(owner_id: str | None, permission: str) -> str | None:
 
 
 def enforce_edit(request: Request, subject: EditSubject) -> None:
-    """403 when the gateway named a caller whose role lacks the permission.
+    """403 when neither the caller's role nor the owner group permits the edit.
 
     No header means no check. See the module docstring. The row's owner is
-    not consulted.
+    consulted only when it names a group containing the caller.
     """
     user_id = resolve_internal_user(request, required=False)
     if not user_id:
         return
-    if can_edit_entity(user_id=user_id, permission=subject.permission):
+    if can_edit_entity(user_id=user_id, subject=subject):
         return
     raise HTTPException(
         status_code=403, detail="You do not have permission to edit this"

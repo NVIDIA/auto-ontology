@@ -12,7 +12,9 @@ export const GET = withPermission({ catalog: ['read'] })(async (req) =>
 	withTagAuthors(await proxyToBackend(req)),
 );
 
-// Updating a Term name invalidates cached SqlAttribute description suggestions in backend.
-export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+// The backend authorizes the write against either the account role or this
+// term's owner group. Requiring read here admits authenticated owner-group
+// viewers without granting them writes to terms owned by anyone else.
+export const PATCH = withPermission({ catalog: ['read'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );

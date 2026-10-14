@@ -74,22 +74,40 @@ export const changedOwnerId = (
 	return next === '' ? null : next;
 };
 
+const ownerGrants = (owner: Owner, permission: PermissionRequest): boolean => {
+	const requested = Object.entries(permission as Record<string, readonly string[]>).flatMap(
+		([resource, actions]) => actions.map((action) => `${resource}:${action}`),
+	);
+	return requested.every((item) => owner.permissions.includes(item));
+};
+
 /**
- * Whether this account may edit. The stored owner does not decide it: an
- * admin always may, and anyone else may when their role grants `permission`.
+ * Whether this account may edit through its own role or the entity's owner
+ * group. Group permissions apply only when that exact group owns the entity.
  * Until the account is known this answers yes, so Edit does not flash off
  * before the session arrives. The write is checked again on the server.
  */
 export const canEditEntity = ({
 	user,
 	permission,
+	ownerId,
+	owners = [],
 }: {
 	user: ResolvedUser | null;
 	permission: PermissionRequest;
+	ownerId?: string | null;
+	owners?: Owner[];
 }): boolean => {
 	if (user == null) return true;
 	if (user.role === Role.Admin) return true;
-	return userCan(user, permission);
+	if (userCan(user, permission)) return true;
+
+	const owner = findOwner(owners, ownerId);
+	return (
+		owner?.kind === 'group' &&
+		owner.member_ids.includes(user.id) &&
+		ownerGrants(owner, permission)
+	);
 };
 
 /** The owner card a detail page puts next to the object's other fields. */

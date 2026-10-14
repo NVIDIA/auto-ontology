@@ -1365,7 +1365,12 @@ export const TermsView = () => {
 		user: actor,
 		permission: { catalog: ['edit'] },
 	});
-	const canEditFocusedTerm = canEditCatalog;
+	const canEditFocusedTerm = canEditEntity({
+		user: actor,
+		permission: { catalog: ['edit'] },
+		ownerId: focusedTerm?.owner_id,
+		owners,
+	});
 	const canEditFocusedSqlAttr = canEditCatalog;
 	const canEditFocusedColAttr = canEditCatalog;
 	const canCertifyAttributeRow = (): boolean => canEditCatalog;
