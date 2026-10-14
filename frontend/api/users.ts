@@ -4,7 +4,7 @@
 
 import { authClient } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
-import type { User } from '@/types/auth';
+import type { UpdateUserInput, User } from '@/types/auth';
 
 type ListResult = { users: User[]; error: string | null };
 
@@ -23,7 +23,8 @@ export const usersApi = {
 		return { users, error: null };
 	},
 
-	setRole: (userId: string, role: Role) => authClient.admin.setRole({ userId, role }),
+	update: (userId: string, data: UpdateUserInput) =>
+		authClient.admin.updateUser({ userId, data }),
 
 	remove: (userId: string) => authClient.admin.removeUser({ userId }),
 };
