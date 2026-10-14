@@ -25,7 +25,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | Alembic | >=1.19.1 | MIT | https://github.com/sqlalchemy/alembic |
 | apache-ossie-nvidia-auto-ontology | git (`converters/nvidia`) | Apache-2.0 | https://github.com/apache/ossie |
 | cryptography | >=50.0.1 | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
-| databricks-sql-connector | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
+| databricks-sql-connector (`databricks-sql-connector[pyarrow]`) | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
 | DuckDB | >=1.5.5 | MIT | https://github.com/duckdb/duckdb-python |
 | FastAPI | >=0.141.1 | MIT | https://github.com/fastapi/fastapi |
 | HTTPX | >=0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
@@ -38,7 +38,6 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
 | LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
-| NeMo Retriever | ==26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
 | NumPy | >=2.5.2 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | https://github.com/numpy/numpy |
 | openai | ==2.44.0 | Apache-2.0 | https://github.com/openai/openai-python |
 | pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
@@ -50,6 +49,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | PyHive (`pyhive[hive-pure-sasl]`) | >=0.7.0 | Apache-2.0 | https://github.com/dropbox/PyHive |
 | pyjks | >=20.0.0 | MIT | https://github.com/kurtbrose/pyjks |
 | python-dotenv | >=1.2.3 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
+| python-multipart | >=0.0.32 | Apache-2.0 | https://github.com/Kludex/python-multipart |
 | PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
 | Requests | >=2.34.2 | Apache-2.0 | https://github.com/psf/requests |
 | snowflake-connector-python | >=4.7.2 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
@@ -68,6 +68,10 @@ repo: libpq (PostgreSQL License), OpenSSL 3 (Apache-2.0), MIT Kerberos
 (MIT-style), and OpenLDAP (OpenLDAP Public License). Building against a
 system libpq instead — `psycopg[c]` or plain `psycopg` — avoids bundling
 them.
+
+The `pyarrow` extra of `databricks-sql-connector` installs Apache Arrow's
+`pyarrow` (Apache-2.0), whose wheel bundles the Arrow C++ libraries and
+their own notices.
 
 `mysql-connector-python` is licensed under GPL-2.0 with Oracle's Universal
 FOSS Exception, which lets it be combined with software under OSI-approved

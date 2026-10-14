@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""HeavyDB connector implementing the NeMo-Retriever SQLDatabase ABC.
+"""HeavyDB connector implementing the :class:`~auto_ontology.connectors.base.SQLDatabase` ABC.
 
 HeavyDB (formerly OmniSciDB / MapD) is a GPU-accelerated, columnar analytics
 database. It speaks a Calcite-based SQL dialect over a Thrift wire protocol.

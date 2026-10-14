@@ -40,7 +40,6 @@ frontend/
 # Local data
 **/*.duckdb
 **/*.duckdb.wal
-lancedb/
 
 # Helm / k8s artefacts
 helm/
