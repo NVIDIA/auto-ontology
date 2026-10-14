@@ -7,7 +7,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { groupsApi } from '@/api/groups';
 import { Button } from '@/common/Button';
+import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal, ModalCreateNewItem } from '@/common/modal';
+import { PopoverMenu } from '@/common/PopoverMenu';
 import { SkeletonTable } from '@/common/Skeleton';
 import { Table } from '@/common/Table';
 import { ColorPicker } from '@/components/settings/ColorPicker';
@@ -245,30 +247,41 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 		{
 			key: 'actions',
 			header: 'Actions',
-			width: 'w-40',
+			width: 'w-16',
 			nowrap: true,
 			headerClassName: 'text-right',
 			cell: (group) => (
-				<div className="flex justify-end gap-2">
-					<Button
-						theme={ButtonTheme.Secondary}
-						size={Size.SMALL}
-						type="button"
-						onClick={() => openEdit(group)}
-					>
-						Edit
-					</Button>
-					<Button
-						theme={ButtonTheme.DangerOutline}
-						size={Size.SMALL}
-						type="button"
-						onClick={() => {
-							setDeleteError(null);
-							setPendingDelete(group);
-						}}
-					>
-						Delete
-					</Button>
+				<div className="flex justify-end">
+					<PopoverMenu
+						items={[
+							{
+								label: 'Edit',
+								icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+								onClick: () => openEdit(group),
+							},
+							{
+								label: 'Delete',
+								icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+								onClick: () => {
+									setDeleteError(null);
+									setPendingDelete(group);
+								},
+								danger: true,
+							},
+						]}
+						trigger={({ toggle }) => (
+							<Button
+								theme={ButtonTheme.IconNeutral}
+								size={Size.SMALL}
+								iconOnly
+								type="button"
+								onClick={toggle}
+								aria-label={`Actions for ${group.name}`}
+							>
+								<Icon name={IconName.DotsVertical} className="h-4 w-4" />
+							</Button>
+						)}
+					/>
 				</div>
 			),
 		},
