@@ -50,6 +50,17 @@ dependencies = [
     # Not imported directly (comes in via langchain-openai). Pinned to the version
     # nemo-gym 0.6.0 declares, so this matches the ontology-sql-eval harness.
     "openai==2.44.0",
+    # Imported directly but previously only installed transitively. Declared so
+    # dropping whatever carried them cannot break an import the way pyheavydb's
+    # importlib-metadata did; langchain-nvidia-ai-endpoints arrived solely via
+    # nemo-retriever.
+    "langchain-nvidia-ai-endpoints>=1.4.3",
+    "langchain-core>=1.6.1",
+    "sqlglot>=30.17.0",
+    "numpy>=2.5.2",
+    "requests>=2.34.2",
+    "tqdm>=4.70.0",
+    "cryptography>=50.0.1",
 ]
 
 [project.optional-dependencies]
@@ -97,6 +108,10 @@ format = "flat"
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.5",
+]
+release = [
+    "ngcsdk>=4.37.0",
+    "pyyaml>=6.0.3",
 ]
 
 # Stated, not inherited. With no `select` at all, the rule set is whatever the

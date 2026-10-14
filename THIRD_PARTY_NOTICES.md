@@ -24,6 +24,7 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | --- | --- | --- | --- |
 | Alembic | >=1.19.1 | MIT | https://github.com/sqlalchemy/alembic |
 | apache-ossie-nvidia-auto-ontology | git (`converters/nvidia`) | Apache-2.0 | https://github.com/apache/ossie |
+| cryptography | >=50.0.1 | Apache-2.0 OR BSD-3-Clause | https://github.com/pyca/cryptography |
 | databricks-sql-connector | >=4.4.0 | Apache-2.0 | https://github.com/databricks/databricks-sql-python |
 | DuckDB | >=1.5.5 | MIT | https://github.com/duckdb/duckdb-python |
 | FastAPI | >=0.141.1 | MIT | https://github.com/fastapi/fastapi |
@@ -31,11 +32,14 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | hvac | >=2.4.0 | Apache-2.0 | https://github.com/hvac/hvac |
 | importlib-metadata | >=8.7.1 | Apache-2.0 | https://github.com/python/importlib_metadata |
 | kumo-relational-client (`kumo-relational-client[relational]`) | >=1.0.0,<2 | Apache-2.0 — see note below | https://github.com/NVIDIA/kumo-relational-client |
+| langchain-core | >=1.6.1 | MIT | https://github.com/langchain-ai/langchain |
+| langchain-nvidia-ai-endpoints | >=1.4.3 | MIT | https://github.com/langchain-ai/langchain-nvidia |
 | langchain-openai | >=1.3.0,<1.3.5 | MIT | https://github.com/langchain-ai/langchain |
 | langchain-postgres | >=0.0.17 | MIT | https://github.com/langchain-ai/langchain-postgres |
 | LangGraph | >=1.2.11 | MIT | https://github.com/langchain-ai/langgraph |
 | mysql-connector-python | >=26.7.0 | GPL-2.0 with Universal FOSS Exception — see note below | https://github.com/mysql/mysql-connector-python |
 | NeMo Retriever | ==26.8.1 | Apache-2.0 | https://github.com/NVIDIA/NeMo-Retriever |
+| NumPy | >=2.5.2 | BSD-3-Clause AND 0BSD AND MIT AND Zlib AND CC0-1.0 | https://github.com/numpy/numpy |
 | openai | ==2.44.0 | Apache-2.0 | https://github.com/openai/openai-python |
 | pandas | >=2.3.3,<3 | BSD-3-Clause | https://github.com/pandas-dev/pandas |
 | psycopg (`psycopg[binary]`) | >=3.3.4 | LGPL-3.0-only — see note below | https://github.com/psycopg/psycopg |
@@ -47,10 +51,13 @@ build artifact — see `pyproject.toml`, `frontend/package.json`, and the
 | pyjks | >=20.0.0 | MIT | https://github.com/kurtbrose/pyjks |
 | python-dotenv | >=1.2.3 | BSD-3-Clause | https://github.com/theskumar/python-dotenv |
 | PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
+| Requests | >=2.34.2 | Apache-2.0 | https://github.com/psf/requests |
 | snowflake-connector-python | >=4.7.2 | Apache-2.0 | https://github.com/snowflakedb/snowflake-connector-python |
 | SQLAlchemy | >=2.0.52 | MIT | https://github.com/sqlalchemy/sqlalchemy |
+| SQLGlot | >=30.17.0 | MIT | https://github.com/tobymao/sqlglot |
 | Thrift | >=0.24.0 | Apache-2.0 | https://github.com/apache/thrift |
 | thrift-sasl | >=0.4.3 | Apache-2.0 | https://github.com/cloudera/thrift_sasl |
+| tqdm | >=4.70.0 | MPL-2.0 AND MIT | https://github.com/tqdm/tqdm |
 | trino | >=0.339.0 | Apache-2.0 | https://github.com/trinodb/trino-python-client |
 | Uvicorn (`uvicorn[standard]`) | >=0.52.4 | BSD-3-Clause | https://github.com/Kludex/uvicorn |
 
@@ -79,6 +86,16 @@ bundles Mermaid (MIT); its license text ships in the wheel as
 | HTTPX | >=0.28.1 | BSD-3-Clause | https://github.com/encode/httpx |
 | pytest | >=9.1.1 | MIT | https://github.com/pytest-dev/pytest |
 | Ruff | >=0.16.5 | MIT | https://github.com/astral-sh/ruff |
+
+### Release tooling (`release` dependency group, not redistributed)
+
+Installed only by the Helm chart release workflow to run
+`dev_tools/release_helm_chart.py`.
+
+| Component | Version | License | Project URL |
+| --- | --- | --- | --- |
+| ngcsdk | >=4.37.0 | Apache-2.0 | https://ngc.nvidia.com/ |
+| PyYAML | >=6.0.3 | MIT | https://github.com/yaml/pyyaml |
 
 ### Sample databases (test fixtures, not redistributed in any build artifact)
 
