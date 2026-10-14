@@ -144,6 +144,20 @@ def test_batches_and_reassembles_in_input_order(endpoint) -> None:
     assert sorted(len(json.loads(r.content)["input"]) for r in seen) == [1, 2, 2]
 
 
+def test_a_short_response_is_an_error_not_a_partial_batch(endpoint) -> None:
+    """Silently leaving the missing rows unembedded would drop them from the store."""
+
+    def _short(request: httpx.Request) -> httpx.Response:
+        full = _ok(request)
+        body = full.json()
+        body["data"] = body["data"][:1]
+        return httpx.Response(200, json=body)
+
+    endpoint(_short)
+    with pytest.raises(RuntimeError, match="1 vector"):
+        embed_texts(["a", "b"], _params(), "passage")
+
+
 def test_blank_texts_are_not_sent(endpoint) -> None:
     seen = endpoint(_ok)
 

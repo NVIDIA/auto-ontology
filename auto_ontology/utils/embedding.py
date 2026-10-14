@@ -178,6 +178,14 @@ def embed_texts(
             timeout=timeout or params.request_timeout_s,
             extra_headers=None if params.api_key else _NO_AUTH,
         )
+        returned = {item.index for item in response.data}
+        if returned != set(range(len(indices))):
+            # Placing what came back and leaving the rest None would let the
+            # caller persist a partial batch without noticing.
+            raise RuntimeError(
+                f"Embedding endpoint returned {len(response.data)} vector(s) "
+                f"for {len(indices)} input(s)."
+            )
         for item in response.data:
             vectors[indices[item.index]] = list(item.embedding)
 

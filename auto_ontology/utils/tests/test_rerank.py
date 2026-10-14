@@ -21,6 +21,8 @@ import pytest
 from auto_ontology.utils import rerank
 from auto_ontology.utils.rerank import rerank_hits
 
+Server = Callable[..., list[httpx.Request]]
+
 _HITS = [
     {"id": "a", "text": "apples"},
     {"id": "b", "text": "bananas"},
@@ -31,7 +33,7 @@ _HITS = [
 @pytest.fixture
 def server(
     monkeypatch: pytest.MonkeyPatch,
-) -> Callable[..., list[httpx.Request]]:
+) -> Server:
     """Answer the next POST with *body*; returns the requests seen."""
 
     def _install(body: dict[str, Any], status: int = 200) -> list[httpx.Request]:
@@ -51,7 +53,7 @@ def server(
     return _install
 
 
-def test_the_inference_api_schema(server) -> None:
+def test_the_inference_api_schema(server: Server) -> None:
     seen = server(
         {
             "results": [
@@ -86,7 +88,7 @@ def test_the_inference_api_schema(server) -> None:
     ]
 
 
-def test_the_nim_schema(server) -> None:
+def test_the_nim_schema(server: Server) -> None:
     seen = server(
         {"rankings": [{"index": 1, "logit": 4.0}, {"index": 0, "logit": -2.0}]}
     )
@@ -110,19 +112,19 @@ def test_the_nim_schema(server) -> None:
     assert [h["id"] for h in ranked] == ["b"]
 
 
-def test_a_base_url_gets_the_nim_ranking_path(server) -> None:
+def test_a_base_url_gets_the_nim_ranking_path(server: Server) -> None:
     seen = server({"rankings": []})
     rerank_hits("q", _HITS, rerank_invoke_url="http://localhost:8015/", model_name="m")
     assert str(seen[0].url) == "http://localhost:8015/v1/ranking"
 
 
-def test_an_endpoint_error_reaches_the_caller(server) -> None:
+def test_an_endpoint_error_reaches_the_caller(server: Server) -> None:
     server({"error": "nope"}, status=500)
     with pytest.raises(httpx.HTTPStatusError):
         rerank_hits("q", _HITS, rerank_invoke_url="http://x/rerank", model_name="m")
 
 
-def test_no_hits_makes_no_request(server) -> None:
+def test_no_hits_makes_no_request(server: Server) -> None:
     seen = server({})
     assert (
         rerank_hits("q", [], rerank_invoke_url="http://x/rerank", model_name="m") == []

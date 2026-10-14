@@ -431,9 +431,13 @@ def _sample_match_sql(
 
 
 def _hit_score(hit: dict[str, Any]) -> float:
-    """Return VDB distance, treating missing or malformed scores as worst."""
+    """Return the hit's vector distance (lower is closer); missing or malformed is worst.
+
+    The retriever reports it as ``_distance``. This used to read ``score``,
+    which no hit ever carried, so every candidate tied and the first one won.
+    """
     try:
-        return float(hit.get("score", float("inf")))
+        return float(hit.get("_distance", float("inf")))
     except (TypeError, ValueError):
         return float("inf")
 

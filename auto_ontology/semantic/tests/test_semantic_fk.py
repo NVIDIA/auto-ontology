@@ -33,7 +33,7 @@ def _hit(
             "source_column": source_column,
             "is_unique": True,
         },
-        "score": score,
+        "_distance": score,
         "text": f"ColumnAttribute {attr_id}",
     }
 
