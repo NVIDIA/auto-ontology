@@ -4,7 +4,10 @@
 
 import { TableType } from '@/enums/datasources';
 
-export function getTableType(tableType: TableType | string | undefined): TableType | string {
-	if (tableType) return tableType;
+const KNOWN_TABLE_TYPES = new Set<string>(Object.values(TableType));
+
+/** A catalog ``table_type`` the data tree can draw. Missing and unknown values are base tables. */
+export function getTableType(tableType: string | null | undefined): TableType {
+	if (tableType && KNOWN_TABLE_TYPES.has(tableType)) return tableType as TableType;
 	return TableType.BASE_TABLE;
 }
