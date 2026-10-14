@@ -5,6 +5,7 @@
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import {
 	ComposerColumnType,
 	ComposerSectionKind,
@@ -244,7 +245,8 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { table } = resolvedFocus;
-			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
+			const tableType = getTableType(table.table_type);
+			const tableTypeLabel = catalogNodeInfo[tableType].title;
 			sections.push(
 				...baseCardsForEntity(
 					table.description ?? '',
@@ -279,7 +281,7 @@ export function buildTreeFocusPageFormat(
 					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
-					data_type: column.data_type,
+					data_type: column.data_type?.trim() ? column.data_type : '—',
 					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
@@ -288,7 +290,7 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						icon: catalogNodeInfo[table.table_type].icon,
+						icon: catalogNodeInfo[tableType].icon,
 						entityId: table.id,
 					},
 				},
@@ -323,7 +325,7 @@ export function buildTreeFocusPageFormat(
 						{ label: 'Column', value: column.column_name },
 						{
 							label: 'Data Type',
-							value: column.data_type.trim() ? column.data_type : '—',
+							value: column.data_type?.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
 						{ label: 'Position', value: String(column.ordinal_position) },

@@ -9,6 +9,7 @@ import type { Database, Schema, Table } from '@/types/datasources';
 import { DataModels, TableType } from '@/enums/datasources';
 import { Icon } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import { Text } from '@/common/Text';
 
 const treeRowClassName =
@@ -374,7 +375,7 @@ export const DataTreeSelect = ({
 					depth,
 					id: table.id,
 					label: table.name,
-					node: table.table_type,
+					node: getTableType(table.table_type),
 					hasChildren: false,
 					isOpen: false,
 					selectionState: tableSelectionState,

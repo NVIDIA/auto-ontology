@@ -8,7 +8,7 @@ import type { TagChip } from '@/types/tags';
 export type Column = {
 	id: string;
 	column_name: string;
-	data_type: string;
+	data_type: string | null;
 	database_name: string;
 	schema_name: string;
 	table_name: string;
@@ -29,7 +29,7 @@ export type Table = {
 	sql_count?: number;
 	terms_count?: number;
 	columns: Column[];
-	table_type: TableType;
+	table_type: TableType | null;
 	description?: string;
 	description_certified?: boolean;
 	/**
