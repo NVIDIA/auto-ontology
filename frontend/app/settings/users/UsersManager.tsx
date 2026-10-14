@@ -416,7 +416,9 @@ export const UsersManager = () => {
 					roleLockedReason={editingRoleLockedReason}
 					submitting={editing}
 					error={editError}
-					onClose={() => setEditingUser(null)}
+					onClose={() => {
+						if (!editing) setEditingUser(null);
+					}}
 					onEdit={(input) => {
 						void editUser(editingUser, input);
 					}}
@@ -433,7 +435,11 @@ export const UsersManager = () => {
 				}
 				confirmLabel="Delete"
 				onConfirm={confirmDeleteUser}
-				onCancel={() => setPendingDeleteUser(null)}
+				onCancel={() => {
+					if (pendingDeleteUser == null || busyId !== pendingDeleteUser.id) {
+						setPendingDeleteUser(null);
+					}
+				}}
 				confirming={pendingDeleteUser != null && busyId === pendingDeleteUser.id}
 			/>
 

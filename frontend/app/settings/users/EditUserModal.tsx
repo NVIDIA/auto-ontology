@@ -85,6 +85,7 @@ export const EditUserModal = ({
 						theme={ButtonTheme.Secondary}
 						size={Size.SMALL}
 						type="button"
+						disabled={submitting}
 						onClick={onClose}
 					>
 						Cancel
