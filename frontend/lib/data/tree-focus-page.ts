@@ -151,11 +151,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'all-databases',
 				title: `Databases (${databases.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'schemas', label: 'Schemas' },
 				],
 				rows: databases.map((database) => ({
+					id: database.id,
 					name: database.name,
 					schemas: String(database.num_of_schemas),
 				})),
@@ -181,11 +183,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
 				title: `Schemas (${database.schemas.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'tables', label: 'Tables' },
 				],
 				rows: database.schemas.map((schema) => ({
+					id: schema.id,
 					name: schema.schema_name,
 					tables: String(schema.tables_count),
 				})),
