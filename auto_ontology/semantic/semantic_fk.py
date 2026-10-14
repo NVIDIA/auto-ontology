@@ -30,22 +30,23 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.graph.retriever import Retriever
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
+from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
 )
 from auto_ontology.utils.model_config import resolve
+from auto_ontology.utils.retriever import Retriever
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.semantic.models import FkHitSelection
 from auto_ontology.vdb import get_semantic_vdb
@@ -222,14 +223,13 @@ def _build_retriever(database_name: str) -> Retriever | None:
     if not _NVIDIA_API_KEY:
         return None
 
-    vdb = get_semantic_vdb(database_name=database_name)
     return Retriever(
-        vdb_kwargs={"vdb": vdb},
-        embed_kwargs={
-            "model_name": _EMBED_MODEL,
-            "embed_invoke_url": _EMBED_ENDPOINT,
-            "api_key": _NVIDIA_API_KEY,
-        },
+        get_semantic_vdb(database_name=database_name),
+        EmbedParams(
+            model_name=_EMBED_MODEL,
+            embed_invoke_url=_EMBED_ENDPOINT,
+            api_key=_NVIDIA_API_KEY,
+        ),
     )
 
 

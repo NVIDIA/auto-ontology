@@ -48,8 +48,8 @@ from auto_ontology.utils.embedding import embed_docs_into_vdb
 from auto_ontology.vdb import get_semantic_vdb
 
 if TYPE_CHECKING:
-    from nemo_retriever.common.params.models import EmbedParams
-    from nemo_retriever.common.vdb.adt_vdb import VDB
+    from auto_ontology.utils.embedding import EmbedParams
+    from auto_ontology.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ def _persist_attr_with_sql(
 
 def _embed_sql_attribute(
     embed_params: "EmbedParams",
-    vdb: "VDB",
+    vdb: "PostgresVDB",
     attr_id: str,
     database_name: str | None = None,
 ) -> None:

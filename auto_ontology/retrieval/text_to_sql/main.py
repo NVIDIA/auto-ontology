@@ -145,7 +145,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     data_retriever = payload.get("data_retriever")
     if data_retriever is None:
         raise ValueError(
-            "TextToSQLPayload is missing required 'data_retriever' (nemo_retriever.retriever.Retriever "
+            "TextToSQLPayload is missing required 'data_retriever' (auto_ontology.utils.retriever.Retriever "
             "instance). Construct a Retriever once at startup and pass it in the payload."
         )
     semantic_retriever = payload.get("semantic_retriever")
