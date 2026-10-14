@@ -178,10 +178,11 @@ def embed_texts(
             timeout=timeout or params.request_timeout_s,
             extra_headers=None if params.api_key else _NO_AUTH,
         )
-        returned = {item.index for item in response.data}
-        if returned != set(range(len(indices))):
-            # Placing what came back and leaving the rest None would let the
-            # caller persist a partial batch without noticing.
+        returned = [item.index for item in response.data]
+        if sorted(returned) != list(range(len(indices))):
+            # Exactly one vector per input. A missing one would leave a row
+            # unembedded, and a duplicate would overwrite another row's
+            # vector; either way the caller would persist it without noticing.
             raise RuntimeError(
                 f"Embedding endpoint returned {len(response.data)} vector(s) "
                 f"for {len(indices)} input(s)."

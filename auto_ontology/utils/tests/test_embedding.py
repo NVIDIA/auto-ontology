@@ -158,6 +158,19 @@ def test_a_short_response_is_an_error_not_a_partial_batch(endpoint) -> None:
         embed_texts(["a", "b"], _params(), "passage")
 
 
+def test_a_duplicated_index_is_an_error(endpoint) -> None:
+    """``[0, 1, 1]`` for two inputs would let one row's vector overwrite another's."""
+
+    def _duplicated(request: httpx.Request) -> httpx.Response:
+        body = _ok(request).json()
+        body["data"].append(dict(body["data"][1]))
+        return httpx.Response(200, json=body)
+
+    endpoint(_duplicated)
+    with pytest.raises(RuntimeError, match="3 vector"):
+        embed_texts(["a", "b"], _params(), "passage")
+
+
 def test_blank_texts_are_not_sent(endpoint) -> None:
     seen = endpoint(_ok)
 
