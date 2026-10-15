@@ -33,15 +33,32 @@ class YamlResponse(Response):
     response_class=YamlResponse,
     responses={
         200: {
-            "content": {"application/x-yaml": {"schema": {"type": "string"}}},
-            "description": "Auto Ontology model YAML, sent as a file attachment",
+            "content": {
+                "application/x-yaml": {"schema": {"type": "string"}},
+                "application/zip": {"schema": {"type": "string", "format": "binary"}},
+            },
+            "description": (
+                "Auto Ontology model YAML, or with include_ontology a zip of the "
+                "Apache Ossie semantic model, ontology and mapping, sent as a file "
+                "attachment"
+            ),
         }
     },
 )
 def export_model(body: ExportRequest) -> Response:
-    """Export the scoped catalog + semantic model as a YAML attachment."""
+    """Export the scoped catalog + semantic model as a YAML attachment.
+
+    With ``include_ontology``, the Apache Ossie export is a zip that also holds
+    the terms as an Ossie ontology and the mapping onto the semantic model.
+    """
     try:
-        yaml_text = service.export_model(body)
+        if body.include_ontology:
+            content: str | bytes = service.export_ossie_documents(body)
+            media_type, filename = "application/zip", "ossie-model.zip"
+        else:
+            content = service.export_model(body)
+            media_type = "application/x-yaml"
+            filename = f"{body.format.value}-model.yaml"
     except UnknownDatabaseIdsError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except AutoOntologyConversionError as exc:
@@ -50,13 +67,9 @@ def export_model(body: ExportRequest) -> Response:
             detail=f"Cannot express this model as Apache Ossie YAML: {exc}",
         ) from exc
     return Response(
-        content=yaml_text,
-        media_type="application/x-yaml",
-        headers={
-            "Content-Disposition": (
-                f'attachment; filename="{body.format.value}-model.yaml"'
-            ),
-        },
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

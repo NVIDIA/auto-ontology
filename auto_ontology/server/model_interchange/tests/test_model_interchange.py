@@ -13,6 +13,8 @@ reads."""
 
 from __future__ import annotations
 
+import io
+import zipfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -22,6 +24,7 @@ from ossie_nvidia_auto_ontology import (
     AutoOntologyConversionError,
     convert_auto_ontology_to_ossie,
 )
+from pydantic import ValidationError
 
 from auto_ontology.dal.model_interchange import (
     assemble_export_document,
@@ -432,6 +435,41 @@ def test_export_model_ossie_format_emits_ossie_document(
 )
 @patch("auto_ontology.server.model_interchange.service.dal.fetch_export_rows")
 @patch("auto_ontology.server.model_interchange.service.dal.validate_database_ids")
+def test_export_ossie_documents_zips_the_model_its_ontology_and_mapping(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    mock_fetch.return_value = _export_rows()
+    request = ExportRequest(
+        databases=[], format=ModelFormat.OSSIE, include_ontology=True
+    )
+
+    with zipfile.ZipFile(io.BytesIO(service.export_ossie_documents(request))) as zf:
+        files = {name: zf.read(name).decode("utf-8") for name in zf.namelist()}
+
+    semantic_model, ontology, mapping = service.OSSIE_EXPORT_FILES
+    assert set(files) == {semantic_model, ontology, mapping}
+    # The zip carries the same semantic model the single-file export returns.
+    assert files[semantic_model] == service.export_model(request)
+    concepts = [item["concept"] for item in yaml.safe_load(files[ontology])["ontology"]]
+    assert concepts == ["Order"]
+    references = yaml.safe_load(files[mapping])
+    assert references["ontology_ref"]["iri"] == f"./{ontology}"
+    assert references["semantic_model_ref"]["iri"] == f"./{semantic_model}"
+
+
+def test_include_ontology_requires_the_ossie_format() -> None:
+    with pytest.raises(ValidationError, match="only to the ossie format"):
+        ExportRequest(databases=[], include_ontology=True)
+
+
+@patch(
+    "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.fetch_export_rows")
+@patch("auto_ontology.server.model_interchange.service.dal.validate_database_ids")
 def test_export_model_ossie_reports_all_duplicate_custom_analysis_names(
     _mock_validate: MagicMock,
     mock_fetch: MagicMock,
@@ -556,9 +594,11 @@ def test_export_model_ossie_keeps_one_table_per_term(
     datasets = payload["datasets"]
     assert [dataset["name"] for dataset in datasets] == ["Category"]
     assert datasets[0]["source"] == "retail.main.categories"
+    # The primary-key column no attribute exposes is exported as a field too.
     assert [field["name"] for field in datasets[0]["fields"]] == [
         "category id",
         "category id again",
+        "id",
     ]
 
 
