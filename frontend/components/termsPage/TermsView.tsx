@@ -1025,7 +1025,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						icon: IconName.Column,
+						icon: IconName.Key,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1135,7 +1135,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						icon: IconName.Link,
+						icon: IconName.ChartLine,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1319,7 +1319,6 @@ export const TermsView = () => {
 							name: attr.name,
 							description: attr.description ?? '',
 							certification: attributeStatus(attr),
-							owner_id: attr.owner_id ?? '',
 						})),
 						emptyMessage: 'SQL Attribute Does Not Exist',
 					},
@@ -1371,26 +1370,12 @@ export const TermsView = () => {
 		ownerId: focusedTerm?.owner_id,
 		owners,
 	});
-	const canEditFocusedSqlAttr = canEditEntity({
-		user: actor,
-		permission: { catalog: ['edit'] },
-		ownerId: focusedSqlAttr?.owner_id,
-		owners,
-	});
+	// A SQL attribute shows the term's owner and does not grant edit through an
+	// owner of its own. The button and the certification dropdown follow the
+	// account role, the same way a column attribute does.
+	const canEditFocusedSqlAttr = canEditCatalog;
 	const canEditFocusedColAttr = canEditCatalog;
-	const canCertifyAttributeRow = (
-		sectionId: string,
-		_rowId: string,
-		ownerId: string | null,
-	): boolean =>
-		sectionId === 'sql_attributes'
-			? canEditEntity({
-					user: actor,
-					permission: { catalog: ['edit'] },
-					ownerId,
-					owners,
-				})
-			: canEditCatalog;
+	const canCertifyAttributeRow = (): boolean => canEditCatalog;
 
 	if (focusId != null && sqlAttrId != null) {
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;

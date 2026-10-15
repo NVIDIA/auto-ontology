@@ -155,9 +155,12 @@ def _owner_id() -> Column:
     """The account or group that owns the row, or null when nobody does.
 
     Stored on a database, a schema, a table, a term, and a sql attribute. The
-    catalog page edits it on a table. A column shows that table's owner and
-    a column attribute shows its term's owner; neither stores one of its
-    own. A database and a schema keep the column, and the page does not edit
+    catalog page edits it on a table, and the glossary page edits it on a
+    term. A column shows that table's owner and a column attribute shows its
+    term's owner; neither stores one of its own. A sql attribute keeps the
+    column, and its page shows the term's owner. The edit check for a column,
+    a column attribute, and a sql attribute does not read an owner on that
+    row. A database and a schema keep the column, and the page does not edit
     it there. One column holds either id. An account id is
     ``frontend."user".id`` and a group id is ``user_group.id``; neither can
     be a foreign key, because the account table is outside this schema and

@@ -12,23 +12,19 @@ export const GET = withPermission({ catalog: ['read'] })(async (req) =>
 	withTagAuthors(await proxyToBackend(req)),
 );
 
-// Replace a SqlAttribute's SQL. The backend authorizes the write against the
-// account role or this attribute's owner group. Requiring read here admits an
-// owner-group viewer without granting writes to any other attribute.
-export const PUT = withPermission({ catalog: ['read'] })((req, { user }) =>
+// Replace a SqlAttribute's SQL. The page shows the term's owner. The account
+// role authorizes the write, the same way a column attribute edit does.
+export const PUT = withPermission({ catalog: ['edit'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );
 
-// Patch name, description, certification, or owner. The backend authorizes
-// the write against the account role or this attribute's owner group.
-// Requiring read here admits an owner-group viewer.
-export const PATCH = withPermission({ catalog: ['read'] })((req, { user }) =>
+// Patch name, description, or certification. The account role authorizes the
+// write. The term owner shown beside the attribute does not grant it.
+export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );
 
-// Delete a SqlAttribute. The backend authorizes the delete against the account
-// role or this attribute's owner group. Requiring read here admits an
-// owner-group viewer.
-export const DELETE = withPermission({ catalog: ['read'] })((req, { user }) =>
+// Delete a SqlAttribute. The account role authorizes the delete.
+export const DELETE = withPermission({ catalog: ['edit'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );

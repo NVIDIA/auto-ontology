@@ -35,7 +35,7 @@ export const OwnerLabel = ({ owner }: { owner?: OwnerLabelOwner | null }) => {
 					<Icon name={IconName.Users} className="h-3.5 w-3.5" />
 				</span>
 			) : (
-				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-200 text-[10px] font-medium text-heading dark:bg-zinc-700 dark:text-zinc-100">
+				<span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#76b900] text-[10px] font-semibold text-white">
 					{initials(owner.name)}
 				</span>
 			)}

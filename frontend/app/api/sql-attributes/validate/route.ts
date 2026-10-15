@@ -5,7 +5,6 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
-// Validate a SQL expression without writing it. Catalog read is enough:
-// creating an attribute still requires catalog:edit, and saving one is
-// authorized on that attribute.
+// Validate a SQL expression without writing it. Catalog read is enough.
+// Creating an attribute and saving one both require catalog:edit.
 export const POST = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));

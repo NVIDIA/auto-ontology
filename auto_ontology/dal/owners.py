@@ -9,9 +9,11 @@ writes that column. Deciding whether the caller may edit, and whether a
 chosen id is allowed to own the row, lives in ``auto_ontology.server.owners``
 because both answers need the role's permissions.
 
-The rows that store an owner are a database, a schema, a table, a term, and
-a sql attribute. A column and a column attribute are still editable, but the
-owner shown for them belongs to the table and the term.
+The rows whose stored owner the edit check reads are a database, a schema,
+a table, and a term. A column, a column attribute, and a sql attribute are
+still editable. The page shows the table's owner for a column and the term's
+owner for either attribute. The edit check does not read an owner on those
+rows, including the owner column a sql attribute still keeps.
 """
 
 from __future__ import annotations
@@ -31,13 +33,15 @@ _OWNED = (
     (s.catalog_schema, CATALOG_EDIT),
     (s.catalog_table, CATALOG_EDIT),
     (s.term, CATALOG_EDIT),
-    (s.sql_attribute, CATALOG_EDIT),
 )
 
-#: Editable, but the owner on the page is the parent's, so none is stored here.
+#: Editable. The page shows the parent's owner. This check does not read one,
+#: so a viewer in that owner's group is not admitted. A sql attribute keeps an
+#: owner column; it is not what this check reads.
 _EDITABLE = (
     (s.catalog_column, CATALOG_EDIT),
     (s.column_attribute, CATALOG_EDIT),
+    (s.sql_attribute, CATALOG_EDIT),
 )
 
 
@@ -75,9 +79,9 @@ def _row_exists(table, entity_id: str) -> bool:
 def edit_subject(entity_id: str) -> EditSubject | None:
     """The row *entity_id* names, or ``None`` when it names none of these.
 
-    A zone and either kind of analysis are not among them. A column and a
-    column attribute are, with no owner of their own: the page shows the
-    table's or the term's.
+    A zone and either kind of analysis are not among them. A column, a column
+    attribute, and a sql attribute are, with no owner consulted here: the page
+    shows the table's or the term's.
     """
     for table, permission in _OWNED:
         stored = _stored_owner(table, entity_id)
