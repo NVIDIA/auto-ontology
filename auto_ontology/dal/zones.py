@@ -387,38 +387,35 @@ def update_zone(
         for key, value in updates.items()
         if key in {"name", "description", "color", "owner_id"}
     }
-    if fields:
-        store().query_write(
-            s.zone.update().where(s.zone.c.id == zone_id).values(**fields)
-        )
-
-    # None leaves membership alone; an empty list clears it. The distinction
-    # is deliberate, and collapsing the two would silently strip a zone's
-    # items on any metadata-only edit.
-    #
-    # A supplied list is the zone's **complete** membership, not a delta: it
-    # replaces every grant, across every database. That is what makes removal
-    # expressible at all, and the UI honours it by hydrating the full item set
-    # before it opens the editor. A client that PUT only the database it happens
-    # to be looking at would silently revoke the rest.
-    if item_ids is not None:
-        # One transaction: split across two autocommits, a failure after the
-        # delete leaves the zone granting nothing, and every user scoped to it
-        # loses catalog access with no error surfaced to the caller.
+    # One transaction for every write this call makes. Split across
+    # autocommits, a failure after the field write — or after a delete and
+    # before its inserts — would leave the owner saved and the participants
+    # unchanged, or the zone granting nothing, and the caller would only see
+    # the error.
+    if fields or item_ids is not None or member_ids is not None:
         with write_transaction():
-            store().query_write(
-                s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)
-            )
-            _link_items(zone_id, item_ids)
+            if fields:
+                store().query_write(
+                    s.zone.update().where(s.zone.c.id == zone_id).values(**fields)
+                )
 
-    # Same rule as items: None is "not editing", [] clears. Replacing and
-    # deleting in one transaction so a failure cannot leave a partial set.
-    if member_ids is not None:
-        with write_transaction():
-            store().query_write(
-                s.zone__member.delete().where(s.zone__member.c.zone_id == zone_id)
-            )
-            _link_members(zone_id, member_ids)
+            # None leaves the catalog grants alone; an empty list clears them.
+            # A supplied list is the zone's **complete** set, not a delta: it
+            # replaces every grant. The UI hydrates the full item set before
+            # it opens the editor. A client that sent only the database it
+            # happens to be looking at would revoke the rest.
+            if item_ids is not None:
+                store().query_write(
+                    s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)
+                )
+                _link_items(zone_id, item_ids)
+
+            # Same rule as items: None is "not editing", [] clears.
+            if member_ids is not None:
+                store().query_write(
+                    s.zone__member.delete().where(s.zone__member.c.zone_id == zone_id)
+                )
+                _link_members(zone_id, member_ids)
 
     return get_zone_by_id(zone_id)
 
