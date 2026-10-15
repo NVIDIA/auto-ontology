@@ -9093,7 +9093,7 @@
     },
     "/api/sql-attributes/{attr_id}/description-suggestion": {
       "get": {
-        "description": "LLM-generated (or cached) description suggestion for a SqlAttribute.\n\nReturns 404 when no SqlAttribute with that id exists. ``data`` is\n``null`` when a suggestion could not be produced (e.g. the LLM call\nfailed) \u2014 that is not treated as an error.",
+        "description": "LLM-generated (or cached) description suggestion for a SqlAttribute.\n\nReturns 404 when no SqlAttribute with that id exists. ``data`` is\n``null`` when a suggestion could not be produced (e.g. the LLM call\nfailed) \u2014 that is not treated as an error. Returns 403 when the caller\nmay not edit this attribute. A suggestion is cached on the attribute,\nso the same edit check as a save applies.",
         "operationId": "get_sql_attribute_description_suggestion_api_sql_attributes__attr_id__description_suggestion_get",
         "parameters": [
           {

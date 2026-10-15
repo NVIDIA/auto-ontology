@@ -79,13 +79,18 @@ def get_sql_attribute(attr_id: str) -> dict:
     "/sql-attributes/{attr_id}/description-suggestion",
     response_model=DescriptionSuggestionResponse,
 )
-def get_sql_attribute_description_suggestion(attr_id: str) -> dict:
+def get_sql_attribute_description_suggestion(request: Request, attr_id: str) -> dict:
     """LLM-generated (or cached) description suggestion for a SqlAttribute.
 
     Returns 404 when no SqlAttribute with that id exists. ``data`` is
     ``null`` when a suggestion could not be produced (e.g. the LLM call
-    failed) — that is not treated as an error.
+    failed) — that is not treated as an error. Returns 403 when the caller
+    may not edit this attribute. A suggestion is cached on the attribute,
+    so the same edit check as a save applies.
     """
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     if dal.get_sql_attribute_by_id(attr_id) is None:
         raise HTTPException(
             status_code=404,

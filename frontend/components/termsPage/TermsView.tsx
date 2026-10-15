@@ -1371,9 +1371,26 @@ export const TermsView = () => {
 		ownerId: focusedTerm?.owner_id,
 		owners,
 	});
-	const canEditFocusedSqlAttr = canEditCatalog;
+	const canEditFocusedSqlAttr = canEditEntity({
+		user: actor,
+		permission: { catalog: ['edit'] },
+		ownerId: focusedSqlAttr?.owner_id,
+		owners,
+	});
 	const canEditFocusedColAttr = canEditCatalog;
-	const canCertifyAttributeRow = (): boolean => canEditCatalog;
+	const canCertifyAttributeRow = (
+		sectionId: string,
+		_rowId: string,
+		ownerId: string | null,
+	): boolean =>
+		sectionId === 'sql_attributes'
+			? canEditEntity({
+					user: actor,
+					permission: { catalog: ['edit'] },
+					ownerId,
+					owners,
+				})
+			: canEditCatalog;
 
 	if (focusId != null && sqlAttrId != null) {
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;

@@ -5142,7 +5142,7 @@
     },
     "/api/nodes/{node_id}": {
       "patch": {
-        "description": "datasources.updateNode — edit mutable properties of a catalog node\n(table/column descriptions, etc.). Requires catalog:edit; a viewer cannot.",
+        "description": "datasources.updateNode — edit mutable properties of a catalog node.\nThe backend authorizes the write against the account role or this node's\nowner group. Requiring read here admits an owner-group viewer. A column\nstores no owner, so that viewer is still rejected there.",
         "operationId": "patch_api_nodes_node_id_",
         "parameters": [
           {
@@ -5203,7 +5203,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Node",
+        "summary": "datasources.updateNode — edit mutable properties of a catalog node.",
         "tags": ["nodes"],
         "security": [
           {
@@ -5212,7 +5212,7 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/nodes/[node_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
@@ -6178,7 +6178,7 @@
     },
     "/api/sql-attributes/{attr_id}": {
       "delete": {
-        "description": "Deleting a SqlAttribute mutates catalog data and the backend handles graph\ncleanup plus VDB embedding deletion.",
+        "description": "Delete a SqlAttribute. The backend authorizes the delete against the account\nrole or this attribute's owner group. Requiring read here admits an\nowner-group viewer.",
         "operationId": "delete_api_sql_attributes_attr_id_",
         "parameters": [
           {
@@ -6219,7 +6219,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Delete Sql Attribute",
+        "summary": "Delete a SqlAttribute.",
         "tags": ["sql-attributes"],
         "security": [
           {
@@ -6228,7 +6228,7 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       },
@@ -6288,7 +6288,7 @@
         "x-auto-ontology-proxied": true
       },
       "patch": {
-        "description": "Patching name/description does not touch SQL expression.",
+        "description": "Patch name, description, certification, or owner. The backend authorizes\nthe write against the account role or this attribute's owner group.\nRequiring read here admits an owner-group viewer.",
         "operationId": "patch_api_sql_attributes_attr_id_",
         "parameters": [
           {
@@ -6339,7 +6339,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Patch Sql Attribute",
+        "summary": "Patch name, description, certification, or owner.",
         "tags": ["sql-attributes"],
         "security": [
           {
@@ -6348,12 +6348,12 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       },
       "put": {
-        "description": "Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.",
+        "description": "Replace a SqlAttribute's SQL. The backend authorizes the write against the\naccount role or this attribute's owner group. Requiring read here admits an\nowner-group viewer without granting writes to any other attribute.",
         "operationId": "put_api_sql_attributes_attr_id_",
         "parameters": [
           {
@@ -6404,7 +6404,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Sql Attribute",
+        "summary": "Replace a SqlAttribute's SQL.",
         "tags": ["sql-attributes"],
         "security": [
           {
@@ -6413,14 +6413,14 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/sql-attributes/[attr_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
     },
     "/api/sql-attributes/{attr_id}/description-suggestion": {
       "get": {
-        "description": "LLM-assisted description suggestion is only ever surfaced in the edit flow\nfor a SqlAttribute, so it shares the same permission as saving one.",
+        "description": "LLM-assisted description suggestion, offered from the SqlAttribute edit\nflow. Catalog read admits an owner-group viewer; the backend allows the\ncall only when that viewer may edit this attribute. The generated text is\ncached on the attribute, so the caller's identity goes with the request.",
         "operationId": "get_api_sql_attributes_attr_id_description_suggestion",
         "parameters": [
           {
@@ -6461,7 +6461,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Get Sql Attribute Description Suggestion",
+        "summary": "LLM-assisted description suggestion, offered from the SqlAttribute edit flow.",
         "tags": ["sql-attributes"],
         "security": [
           {
@@ -6470,14 +6470,14 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/sql-attributes/[attr_id]/description-suggestion/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
     },
     "/api/sql-attributes/validate": {
       "post": {
-        "description": "Validating SQL is part of the create flow, so it shares the same\ncatalog:edit permission as POST /api/sql-attributes.",
+        "description": "Validate a SQL expression without writing it. Catalog read is enough:\ncreating an attribute still requires catalog:edit, and saving one is\nauthorized on that attribute.",
         "operationId": "post_api_sql_attributes_validate",
         "requestBody": {
           "content": {
@@ -6517,7 +6517,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Validate Sql Attribute",
+        "summary": "Validate a SQL expression without writing it.",
         "tags": ["sql-attributes"],
         "security": [
           {
@@ -6526,7 +6526,7 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/sql-attributes/validate/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }

@@ -12,18 +12,23 @@ export const GET = withPermission({ catalog: ['read'] })(async (req) =>
 	withTagAuthors(await proxyToBackend(req)),
 );
 
-// Updating a SqlAttribute re-parses SQL and refreshes its embedding in backend.
-export const PUT = withPermission({ catalog: ['edit'] })((req, { user }) =>
+// Replace a SqlAttribute's SQL. The backend authorizes the write against the
+// account role or this attribute's owner group. Requiring read here admits an
+// owner-group viewer without granting writes to any other attribute.
+export const PUT = withPermission({ catalog: ['read'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );
 
-// Patching name/description does not touch SQL expression.
-export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+// Patch name, description, certification, or owner. The backend authorizes
+// the write against the account role or this attribute's owner group.
+// Requiring read here admits an owner-group viewer.
+export const PATCH = withPermission({ catalog: ['read'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );
 
-// Deleting a SqlAttribute mutates catalog data and the backend handles graph
-// cleanup plus VDB embedding deletion.
-export const DELETE = withPermission({ catalog: ['edit'] })((req, { user }) =>
+// Delete a SqlAttribute. The backend authorizes the delete against the account
+// role or this attribute's owner group. Requiring read here admits an
+// owner-group viewer.
+export const DELETE = withPermission({ catalog: ['read'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );

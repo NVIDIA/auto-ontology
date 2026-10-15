@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
@@ -104,6 +104,7 @@ export function DataWorkspaceView() {
 	// vocabulary at each table and column.
 	const queryClient = useQueryClient();
 	const { data: session } = useSession();
+	const { data: owners = [] } = useQuery(ownerQueries.all());
 	const router = useRouter();
 	const searchParams = useSearchParams();
 	const rawFocus = searchParams.get('focus');
@@ -387,9 +388,21 @@ export function DataWorkspaceView() {
 		[applyNodePatch],
 	);
 
-	const hideCatalogEdit = !canEditEntity({
-		user: session?.user ? { id: session.user.id, role: session.user.role ?? null } : null,
+	const catalogActor = session?.user
+		? { id: session.user.id, role: session.user.role ?? null }
+		: null;
+	const focusedCatalogOwnerId = useMemo(() => {
+		const resolved = resolveTreeNode(treeFocusId, treeDatabases);
+		if (resolved.type === DataModels.DB) return resolved.database.owner_id;
+		if (resolved.type === DataModels.SCHEMA) return resolved.schema.owner_id;
+		if (resolved.type === DataModels.TABLE) return resolved.table.owner_id;
+		return undefined;
+	}, [treeFocusId, treeDatabases]);
+	const canEditFocusedCatalog = canEditEntity({
+		user: catalogActor,
 		permission: { catalog: ['edit'] },
+		ownerId: focusedCatalogOwnerId,
+		owners,
 	});
 
 	if (loadError) {
@@ -463,15 +476,15 @@ export function DataWorkspaceView() {
 					onDataTableRowClick={handleDataTableRowClick}
 					onCertificationChange={handleCertificationChange}
 					onDataTableCertificationChange={handleChildCertificationChange}
-					canCertifyDataTableRow={() =>
+					canCertifyDataTableRow={(_sectionId, _rowId, ownerId) =>
 						canEditEntity({
-							user: session?.user
-								? { id: session.user.id, role: session.user.role ?? null }
-								: null,
+							user: catalogActor,
 							permission: { catalog: ['edit'] },
+							ownerId,
+							owners,
 						})
 					}
-					hideEditToolbar={hideCatalogEdit}
+					hideEditToolbar={!canEditFocusedCatalog}
 				/>
 			</main>
 			<Toast
