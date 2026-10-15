@@ -152,7 +152,9 @@
     "list_rules": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "update_rule": "(*, rule_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
-  "schema": {},
+  "schema": {
+    "GroupRole": "class(StrEnum)"
+  },
   "schema_version": {
     "SchemaOutOfDateError": "class(RuntimeError)",
     "SchemaState": "class(object)",
