@@ -7853,6 +7853,63 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/users/{user_id}/ownership": {
+      "post": {
+        "description": "usersApi.releaseOwnership — after a role change, drop this account from objects it can no longer own.",
+        "operationId": "post_api_users_user_id_ownership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release User Ownership",
+        "tags": ["users"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/users/[user_id]/ownership/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["set-role"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/zones": {
       "get": {
         "description": "zonesApi.getAll — list zones (viewable by all).",
@@ -13807,7 +13864,7 @@
       },
       "Zone": {
         "additionalProperties": true,
-        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
+        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.\n\n``owner_id`` is one user or one group, or null when the zone is unowned.\n``members`` are the users and groups who can see the zone's data. A\nmember is not the owner.",
         "properties": {
           "color": {
             "anyOf": [
@@ -13878,6 +13935,20 @@
             ],
             "title": "Label"
           },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members"
+          },
           "name": {
             "anyOf": [
               {
@@ -13888,6 +13959,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "required": ["id"],
@@ -13968,9 +14050,28 @@
             "title": "Items",
             "type": "array"
           },
+          "members": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "required": ["name", "color", "items", "created_by"],
@@ -14061,6 +14162,20 @@
             ],
             "title": "Items"
           },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members"
+          },
           "name": {
             "anyOf": [
               {
@@ -14071,6 +14186,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "ZoneUpdate",

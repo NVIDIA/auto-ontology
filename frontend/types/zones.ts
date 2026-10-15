@@ -9,6 +9,10 @@ export type Zone = {
 	description: string | null;
 	color: string | null;
 	enabled: boolean;
+	/** One user or one group. Null when the zone is unowned. */
+	owner_id: string | null;
+	/** Users and groups who can see the zone's data. Not the owner. */
+	members: string[];
 };
 
 export type ZoneItem = {
@@ -32,6 +36,8 @@ export type ZoneCreateInput = {
 	color: string;
 	items: string[];
 	created_by: string;
+	owner_id?: string | null;
+	members?: string[];
 };
 
 export type ZoneUpdateInput = {
@@ -39,4 +45,6 @@ export type ZoneUpdateInput = {
 	description?: string | null;
 	color?: string | null;
 	items?: string[];
+	owner_id?: string | null;
+	members?: string[];
 };

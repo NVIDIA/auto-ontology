@@ -4,9 +4,17 @@
 
 """Who may edit a row through an account role or its owner group."""
 
+import pytest
+
 from auto_ontology.dal.owners import CATALOG_EDIT, EditSubject
 from auto_ontology.server import owners
-from auto_ontology.server.owners import can_edit_entity, decide_edit, normalize_owner_id
+from auto_ontology.server.owners import (
+    UnassignableOwner,
+    assignable_member_ids,
+    can_edit_entity,
+    decide_edit,
+    normalize_owner_id,
+)
 
 #: A permission a viewer does not hold, so the tests can tell a granted
 #: permission from a role that simply lacks it.
@@ -77,3 +85,31 @@ def test_blank_owner_id_means_unassigned() -> None:
     assert normalize_owner_id("  ") is None
     assert normalize_owner_id(" user-1 ") == "user-1"
     assert normalize_owner_id(None) is None
+
+
+def test_zone_members_must_be_able_to_manage_zones(monkeypatch) -> None:
+    """The picker and the write both keep only accounts and groups with zone write."""
+    accounts = {"admin-1": "admin", "viewer-1": "viewer"}
+    groups = {"admins": "admin", "viewers": "viewer"}
+    monkeypatch.setattr(
+        owners.groups_dal,
+        "get_account",
+        lambda user_id: {"role": accounts[user_id]} if user_id in accounts else None,
+    )
+    monkeypatch.setattr(
+        owners.groups_dal,
+        "get_group",
+        lambda group_id: {"role": groups[group_id]} if group_id in groups else None,
+    )
+
+    assert assignable_member_ids(
+        [" admin-1 ", "admin-1", "", "admins"],
+        "zone:manage",
+    ) == ["admin-1", "admins"]
+
+    with pytest.raises(UnassignableOwner):
+        assignable_member_ids(["viewer-1"], "zone:manage")
+    with pytest.raises(UnassignableOwner):
+        assignable_member_ids(["viewers"], "zone:manage")
+    with pytest.raises(UnassignableOwner):
+        assignable_member_ids(["missing"], "zone:manage")

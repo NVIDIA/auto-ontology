@@ -23,7 +23,7 @@ from dataclasses import dataclass
 from sqlalchemy import select, update
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.session import store
+from auto_ontology.dal.session import store, write_transaction
 
 #: ``resource:action`` an owner of one of these rows must hold, and the edit must too.
 CATALOG_EDIT = "catalog:edit"
@@ -106,3 +106,40 @@ def assign_owner(table, entity_id: str, owner_id: str | None) -> None:
     store().query_write(
         update(table).where(table.c.id == entity_id).values(owner_id=owner_id)
     )
+
+
+#: Rows whose ``owner_id`` is an account that must hold ``catalog:edit``.
+_CATALOG_OWNED = (
+    s.catalog_database,
+    s.catalog_schema,
+    s.catalog_table,
+    s.term,
+    s.sql_attribute,
+)
+
+
+def _clear_owner(table, account_id: str) -> None:
+    store().query_write(
+        update(table).where(table.c.owner_id == account_id).values(owner_id=None)
+    )
+
+
+def release_account(account_id: str, *, catalog: bool, zone: bool) -> None:
+    """Remove *account_id* from the rows its role can no longer own.
+
+    ``catalog`` clears ``owner_id`` on a database, schema, table, term, and
+    sql attribute. ``zone`` clears ``zone.owner_id`` and deletes the account
+    from ``zone__member``. A group id is never this account id, so a group
+    that owns a row stays. Both flags false does nothing.
+    """
+    if not catalog and not zone:
+        return
+    with write_transaction():
+        if catalog:
+            for table in _CATALOG_OWNED:
+                _clear_owner(table, account_id)
+        if zone:
+            _clear_owner(s.zone, account_id)
+            store().query_write(
+                s.zone__member.delete().where(s.zone__member.c.member_id == account_id)
+            )

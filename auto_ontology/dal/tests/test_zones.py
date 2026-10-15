@@ -26,7 +26,10 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import select  # noqa: E402
+
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.owners import release_account  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.zones import (  # noqa: E402
     create_zone,
@@ -313,3 +316,160 @@ def test_missing_zone_reads_as_none(catalog) -> None:
     assert delete_zone(str(uuid.uuid4())) is False
     assert set_zone_enabled(str(uuid.uuid4()), False) is None
     assert update_zone(zone_id=str(uuid.uuid4()), updates={}, item_ids=None) is None
+
+
+# --------------------------------------------------------------------------
+# Owner and participants
+# --------------------------------------------------------------------------
+
+
+def test_owner_is_stored_apart_from_participants(catalog) -> None:
+    """The owner is one id on the zone. Participants are access, not ownership."""
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        owner_id="owner-1",
+        member_ids=[" member-b ", "member-a", "member-b", ""],
+    )
+    assert zone["owner_id"] == "owner-1"
+    assert zone["members"] == ["member-a", "member-b"]
+    assert "owner-1" not in zone["members"]
+
+    fetched = get_zone_by_id(zone["id"])
+    assert fetched["owner_id"] == "owner-1"
+    assert fetched["members"] == ["member-a", "member-b"]
+
+    listed = next(item for item in list_zones() if item["id"] == zone["id"])
+    assert listed["owner_id"] == "owner-1"
+    assert listed["members"] == ["member-a", "member-b"]
+
+
+def test_a_zone_without_people_is_unowned_and_has_no_participants(catalog) -> None:
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+    )
+    assert zone["owner_id"] is None
+    assert zone["members"] == []
+
+
+def test_update_replaces_owner_and_participants(catalog) -> None:
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        owner_id="owner-1",
+        member_ids=["member-a"],
+    )
+    updated = update_zone(
+        zone_id=zone["id"],
+        updates={"owner_id": None},
+        item_ids=None,
+        member_ids=["member-c", "member-b"],
+    )
+    assert updated["owner_id"] is None
+    assert updated["members"] == ["member-b", "member-c"]
+    assert [item["id"] for item in updated["items"]] == [catalog["db1"]]
+
+
+def test_update_with_none_members_leaves_participants_alone(catalog) -> None:
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        member_ids=["member-a"],
+    )
+    updated = update_zone(
+        zone_id=zone["id"],
+        updates={"description": "just the text"},
+        item_ids=None,
+    )
+    assert updated["members"] == ["member-a"]
+
+
+def test_update_with_empty_members_clears_participants(catalog) -> None:
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        member_ids=["member-a"],
+    )
+    updated = update_zone(zone_id=zone["id"], updates={}, item_ids=None, member_ids=[])
+    assert updated["members"] == []
+
+
+def test_releasing_an_account_clears_its_rows_and_leaves_a_group(catalog) -> None:
+    """A demoted account loses rows it owns. A group id on those rows stays."""
+    account = f"{catalog['prefix']}-user"
+    group = f"{catalog['prefix']}-group"
+    store().query_write(
+        s.catalog_database.update()
+        .where(s.catalog_database.c.id == catalog["db1"])
+        .values(owner_id=account)
+    )
+    store().query_write(
+        s.catalog_schema.update()
+        .where(s.catalog_schema.c.id == catalog["db1.schema"])
+        .values(owner_id=group)
+    )
+    owned = create_zone(
+        name=_name(catalog, "-owned"),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        owner_id=account,
+        member_ids=[account, group],
+    )
+    grouped = create_zone(
+        name=_name(catalog, "-grouped"),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db2"]],
+        owner_id=group,
+        member_ids=[group],
+    )
+
+    release_account(account, catalog=True, zone=True)
+
+    database = store().query_read(
+        select(s.catalog_database.c.owner_id).where(
+            s.catalog_database.c.id == catalog["db1"]
+        )
+    )[0]
+    schema = store().query_read(
+        select(s.catalog_schema.c.owner_id).where(
+            s.catalog_schema.c.id == catalog["db1.schema"]
+        )
+    )[0]
+    assert database["owner_id"] is None
+    assert schema["owner_id"] == group
+    released = get_zone_by_id(owned["id"])
+    assert released["owner_id"] is None
+    assert released["members"] == [group]
+    untouched = get_zone_by_id(grouped["id"])
+    assert untouched["owner_id"] == group
+    assert untouched["members"] == [group]
+
+
+def test_delete_removes_participants(catalog) -> None:
+    zone = create_zone(
+        name=_name(catalog),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        member_ids=["member-a"],
+    )
+    assert delete_zone(zone["id"]) is True
+    assert (
+        store().query_read(
+            s.zone__member.select().where(s.zone__member.c.zone_id == zone["id"])
+        )
+        == []
+    )

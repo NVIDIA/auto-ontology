@@ -5,6 +5,8 @@
 import { authClient } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 import type { UpdateUserInput, User } from '@/types/auth';
+import { requests } from './requests';
+import type { ResponseWithError } from './types';
 
 type ListResult = { users: User[]; error: string | null };
 
@@ -27,4 +29,8 @@ export const usersApi = {
 		authClient.admin.updateUser({ userId, data }),
 
 	remove: (userId: string) => authClient.admin.removeUser({ userId }),
+
+	/** After a role change, drop this account from objects it can no longer own. */
+	releaseOwnership: (userId: string): Promise<ResponseWithError<{ data: { id: string } }>> =>
+		requests.post(`users/${userId}/ownership`),
 };

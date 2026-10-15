@@ -133,6 +133,20 @@ export const UsersManager = () => {
 			setEditing(false);
 			return;
 		}
+		if (input.role !== user.role) {
+			const released = await usersApi.releaseOwnership(user.id);
+			if (released.error) {
+				setEditError(
+					released.message ??
+						'The role was saved, but owned objects could not be updated.',
+				);
+				setEditing(false);
+				await invalidateOwners(queryClient);
+				const listed = await usersApi.list();
+				if (!listed.error) setUsers(listed.users);
+				return;
+			}
+		}
 		await invalidateOwners(queryClient);
 		const listed = await usersApi.list();
 		if (listed.error) {
