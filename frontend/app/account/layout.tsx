@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 	title: 'Account',
 };
 
-// Unlike /settings (admin-only), /account is every signed-in user's own space.
-// Minting an API token still requires apiToken:manage, which a viewer lacks.
+// Unlike /settings (admin-only), /account is every user's own space — API
+// tokens are self-service for viewers too. Any authenticated user passes.
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
 	await requireUser();
 	return children;

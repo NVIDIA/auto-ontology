@@ -27,6 +27,7 @@
 		"catalog": ["read"],
 		"connection": ["read"],
 		"zone": ["read"],
-		"tag": ["read"]
+		"tag": ["read"],
+		"apiToken": ["manage"]
 	}
 }
