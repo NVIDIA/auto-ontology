@@ -12,7 +12,14 @@ permissions are a subset of an admin's.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from auto_ontology.server.users import permissions as permissions_module
 from auto_ontology.server.users.permissions import permissions_for_role
+
+ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_an_admin_group_can_manage_groups() -> None:
@@ -51,3 +58,42 @@ def test_builtin_account_permissions_are_not_on_a_group() -> None:
     assert not any(
         item.startswith("user:") or item.startswith("session:") for item in granted
     )
+
+
+def test_packaged_resource_matches_the_frontend_source() -> None:
+    source = ROOT / "frontend" / "auth" / "access.json"
+    packaged = ROOT / "auto_ontology" / "server" / "users" / "access.json"
+    assert packaged.read_bytes() == source.read_bytes(), (
+        "Regenerate the packaged permission resource with: "
+        "uv run python -m dev_tools.generate_permission_resource"
+    )
+
+
+def test_a_missing_packaged_resource_has_a_clear_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        permissions_module, "_ACCESS_RESOURCE", tmp_path / "missing.json"
+    )
+    with pytest.raises(RuntimeError, match="missing or unreadable"):
+        permissions_module._load()
+
+
+def test_a_malformed_packaged_resource_has_a_clear_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    malformed = tmp_path / "access.json"
+    malformed.write_text('{"admin": ', encoding="utf-8")
+    monkeypatch.setattr(permissions_module, "_ACCESS_RESOURCE", malformed)
+    with pytest.raises(RuntimeError, match="malformed JSON"):
+        permissions_module._load()
+
+
+def test_a_missing_role_has_a_clear_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    incomplete = tmp_path / "access.json"
+    incomplete.write_text('{"admin": {}}', encoding="utf-8")
+    monkeypatch.setattr(permissions_module, "_ACCESS_RESOURCE", incomplete)
+    with pytest.raises(RuntimeError, match="missing object for role 'viewer'"):
+        permissions_module._load()

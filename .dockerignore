@@ -29,12 +29,8 @@
 **/out
 **/build
 **/.pnpm-store
-# The frontend image is built from its own context. This image only needs the
-# shared role file, which the API reads when it expands a group's permissions.
-frontend/*
-!frontend/auth
-frontend/auth/*
-!frontend/auth/access.json
+# The frontend image is built from its own context.
+frontend
 
 # Local env files (never bake secrets into images)
 .env

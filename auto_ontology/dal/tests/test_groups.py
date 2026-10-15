@@ -11,6 +11,7 @@ when that table is absent and leaves a real one untouched.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 import os
 import uuid
 
@@ -26,10 +27,33 @@ from auto_ontology.infra.postgres import FRONTEND_SCHEMA  # noqa: E402
 
 
 @pytest.fixture(scope="module", autouse=True)
-def require_schema():
+def require_schema() -> Iterator[None]:
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     store().query_read(text("SELECT 1 FROM user_group LIMIT 1"))
+
+    schema_existed = bool(
+        store().query_read(
+            text("SELECT 1 FROM pg_namespace WHERE nspname = :schema"),
+            {"schema": FRONTEND_SCHEMA},
+        )
+    )
+    table_existed = bool(
+        store().query_read(
+            text(
+                """
+                SELECT 1
+                  FROM pg_class AS class
+                  JOIN pg_namespace AS namespace
+                    ON namespace.oid = class.relnamespace
+                 WHERE namespace.nspname = :schema
+                   AND class.relname = 'user'
+                """
+            ),
+            {"schema": FRONTEND_SCHEMA},
+        )
+    )
+
     store().query_write(text(f"CREATE SCHEMA IF NOT EXISTS {FRONTEND_SCHEMA}"))
     store().query_write(
         text(
@@ -47,6 +71,27 @@ def require_schema():
             """
         )
     )
+    try:
+        yield
+    finally:
+        if not table_existed:
+            store().query_write(text(f'DROP TABLE IF EXISTS {FRONTEND_SCHEMA}."user"'))
+        if not schema_existed:
+            schema_objects = store().query_read(
+                text(
+                    """
+                    SELECT 1
+                      FROM pg_class AS class
+                      JOIN pg_namespace AS namespace
+                        ON namespace.oid = class.relnamespace
+                     WHERE namespace.nspname = :schema
+                     LIMIT 1
+                    """
+                ),
+                {"schema": FRONTEND_SCHEMA},
+            )
+            if not schema_objects:
+                store().query_write(text(f"DROP SCHEMA IF EXISTS {FRONTEND_SCHEMA}"))
 
 
 @pytest.fixture

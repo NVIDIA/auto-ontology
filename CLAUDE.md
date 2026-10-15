@@ -11,22 +11,7 @@ Full-stack repo: Next.js frontend (`/frontend`) + FastAPI backend (`/auto_ontolo
 This file is for **Auto Ontology maintainers**. User/partner agent skills live in
 `skills/` — start at [`AGENTS.md`](./AGENTS.md).
 
-## Structure
-
-```
-/frontend/ # Next.js 16 app (React 19, TypeScript, Tailwind CSS 4)
-/auto_ontology/      # FastAPI app (Python 3.11+, uv)
-```
-
 ## Dev Commands
-
-Frontend commands run from `/frontend`:
-
-| Command | Description |
-|---|---|
-| `pnpm dev` | Start Next.js on :3000 |
-| `pnpm build` | Build the frontend |
-| `pnpm lint` | ESLint the frontend |
 
 Backend commands run from the repo root:
 
@@ -39,25 +24,14 @@ Backend commands run from the repo root:
 The app factory is `create_app()` in `auto_ontology/server/__main__.py` — there is no
 `auto_ontology/server/main.py`.
 
-To install dependencies:
-- Frontend: `pnpm install` from `/frontend`
-- Backend: `uv sync` from repo root
-
 ## Frontend Rules
 
-- **Next.js 16**: Has breaking changes from prior versions. Read `node_modules/next/dist/docs/` before writing Next.js-specific code. See `frontend/AGENTS.md` for details.
-- **Formatting**: Prettier — tabs, single quotes, semicolons, 100 char width, trailing commas. **After editing ANY frontend file, ALWAYS run `pnpm format` (or `cd frontend && npx prettier --write <file>`) to auto-format it.** Never rely on manual formatting — always let Prettier handle it. CI will reject unformatted code.
-- **Linting**: ESLint (Airbnb config). Fix all lint errors; do not disable rules without a comment explaining why.
-- **Components**: Arrow function components. No class components.
-- **Styling**: Tailwind CSS 4. Do not write inline styles or separate CSS files for component styling.
-- **Types**: TypeScript strict mode. No `any` without a comment. Types go in `/frontend/types`, enums in `/frontend/enums`.
-- **Testing**: Vitest + Playwright.
-- **API layer**: Use the `requests` wrapper from `frontend/api/requests.ts` — do not call axios directly. Base URL and error handling are already centralised there.
+In [`frontend/CLAUDE.md`](./frontend/CLAUDE.md), loaded when working under `frontend/`.
 
 ## Backend Rules
 
 - **The store is Postgres.** `auto_ontology/dal/` queries it with SQLAlchemy Core (no ORM); `auto_ontology/dal/schema.py` is the single source of truth for the schema and `auto_ontology/dal/session.py` owns the pooled engine. Schema changes go through Alembic — `uv run alembic revision --autogenerate -m "..."` — never by hand-editing a migration that has been applied. Several column types and constraints are deliberate and non-obvious — read the comments in `schema.py` before changing a table.
-- **Formatting/Linting**: Ruff (line-length: 88). Run `uv run ruff check auto_ontology/` and `uv run ruff format auto_ontology/` from repo root before committing.
+- **Formatting/Linting**: Run `uv run ruff check auto_ontology/` and `uv run ruff format auto_ontology/` from repo root before committing.
 - **Dependencies**: Managed with `uv`. Add dependencies via `uv add`, not pip. Do not edit `pyproject.toml` manually for deps.
 - **API prefix**: All routes under `/api/`. Routes live in `auto_ontology/server/datasources/router.py`, orchestration in `auto_ontology/server/datasources/service.py`.
 - **Type hints**: Required on all function signatures.
@@ -66,7 +40,7 @@ To install dependencies:
 ## Git
 
 - Commit messages: concise imperative style, no `Co-Authored-By` trailers.
-- Branch from `main`. Current working branch: `fix/architecture`.
+- Branch from `main`.
 
 ### Opening a PR
 

@@ -8,29 +8,71 @@ Illumex asks Frontegg which permissions each of a group's roles grants, then
 returns that set on the group. There is no Frontegg here. A group carries one
 of the two roles an account already has, and this module is the expansion.
 
-The lists are ``frontend/auth/access.json``. The Next.js auth layer imports
-that same file, so a group's ``permissions`` and an account's role describe
-one vocabulary. Better Auth's built-in ``user`` and ``session`` statements
-are not in the file: those govern account administration, which stays on the
-account's own role and is not something a group grants.
+The lists are generated into this package from ``frontend/auth/access.json``,
+which the Next.js auth layer imports directly, so a group's ``permissions``
+and an account's role describe one vocabulary. Better Auth's built-in
+``user`` and ``session`` statements are not in the file: those govern account
+administration, which stays on the account's own role and is not something a
+group grants.
 """
 
 from __future__ import annotations
 
+from importlib import resources
 import json
-from pathlib import Path
+from typing import Any
 
 from auto_ontology.dal.schema import GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER
 
-_ACCESS_FILE = Path(__file__).resolve().parents[3] / "frontend" / "auth" / "access.json"
+_ACCESS_RESOURCE = resources.files(__package__).joinpath("access.json")
 _ROLES = (GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER)
 
 
+def _invalid(message: str) -> RuntimeError:
+    return RuntimeError(f"Invalid packaged permission resource access.json: {message}")
+
+
+def _resources_for_role(raw: Any, role: str) -> dict[str, list[str]]:
+    if not isinstance(raw, dict):
+        raise _invalid("top-level value must be an object")
+    resources_by_role = raw.get(role)
+    if not isinstance(resources_by_role, dict):
+        raise _invalid(f"missing object for role {role!r}")
+
+    validated: dict[str, list[str]] = {}
+    for resource, actions in resources_by_role.items():
+        if not isinstance(resource, str) or not resource:
+            raise _invalid(f"role {role!r} contains an invalid resource name")
+        if (
+            not isinstance(actions, list)
+            or not actions
+            or not all(isinstance(action, str) and action for action in actions)
+        ):
+            raise _invalid(
+                f"actions for role {role!r}, resource {resource!r} "
+                "must be a non-empty string list"
+            )
+        validated[resource] = actions
+    return validated
+
+
 def _load() -> dict[str, list[str]]:
-    raw = json.loads(_ACCESS_FILE.read_text())
+    try:
+        text = _ACCESS_RESOURCE.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(
+            "Packaged permission resource access.json is missing or unreadable"
+        ) from exc
+    except UnicodeError as exc:
+        raise _invalid("content must be UTF-8") from exc
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise _invalid(f"malformed JSON ({exc.msg})") from exc
+
     loaded: dict[str, list[str]] = {}
     for role in _ROLES:
-        resources = raw[role]
+        resources = _resources_for_role(raw, role)
         loaded[role] = [
             f"{resource}:{action}"
             for resource, actions in resources.items()

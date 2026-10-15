@@ -19,6 +19,8 @@ from auto_ontology.server.users.router import (
     GroupUpdate,
     create_group,
     delete_group,
+    get_group,
+    list_groups,
     update_group,
 )
 
@@ -37,7 +39,7 @@ def _stored(**overrides: Any) -> dict[str, Any]:
         "id": "group-1",
         "name": "Finance",
         "description": "",
-        "color": "#76b900",
+        "color": "#0ea5e9",
         "role": "viewer",
         "users": [],
         "created": "2026-10-11T00:00:00+00:00",
@@ -55,7 +57,7 @@ def test_create_without_a_caller_is_refused() -> None:
     with pytest.raises(HTTPException) as refused:
         create_group(
             _request(None),
-            GroupCreate(name="Finance", color="#76b900", role="viewer"),
+            GroupCreate(name="Finance", color="#0ea5e9", role="viewer"),
         )
     assert refused.value.status_code == 401
 
@@ -65,9 +67,31 @@ def test_a_viewer_cannot_create_a_group(monkeypatch: pytest.MonkeyPatch) -> None
     with pytest.raises(HTTPException) as refused:
         create_group(
             _request("user-1"),
-            GroupCreate(name="Finance", color="#76b900", role="viewer"),
+            GroupCreate(name="Finance", color="#0ea5e9", role="viewer"),
         )
     assert refused.value.status_code == 403
+
+
+def test_group_reads_without_a_caller_are_refused() -> None:
+    with pytest.raises(HTTPException) as list_refused:
+        list_groups(_request(None))
+    assert list_refused.value.status_code == 401
+
+    with pytest.raises(HTTPException) as get_refused:
+        get_group(_request(None), "group-1")
+    assert get_refused.value.status_code == 401
+
+
+def test_a_viewer_cannot_read_groups(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(users_router.postgres_dal, "is_admin", lambda user_id: False)
+
+    with pytest.raises(HTTPException) as list_refused:
+        list_groups(_request("viewer-1"))
+    assert list_refused.value.status_code == 403
+
+    with pytest.raises(HTTPException) as get_refused:
+        get_group(_request("viewer-1"), "group-1")
+    assert get_refused.value.status_code == 403
 
 
 def test_an_admin_create_expands_the_role(
@@ -81,12 +105,12 @@ def test_an_admin_create_expands_the_role(
 
     response = create_group(
         _request("admin-1"),
-        GroupCreate(name=" Finance ", color=" #76b900 ", role="admin"),
+        GroupCreate(name=" Finance ", color=" #0EA5E9 ", role="admin"),
     )
 
     group = response["data"]
     assert group["name"] == "Finance"
-    assert group["color"] == "#76b900"
+    assert group["color"] == "#0ea5e9"
     assert group["roles"] == [{"id": "admin", "name": "admin"}]
     assert "zone:manage" in group["permissions"]
 
@@ -101,7 +125,7 @@ def test_a_taken_name_is_a_conflict(
     with pytest.raises(HTTPException) as refused:
         create_group(
             _request("admin-1"),
-            GroupCreate(name="Finance", color="#76b900", role="viewer"),
+            GroupCreate(name="Finance", color="#0ea5e9", role="viewer"),
         )
     assert refused.value.status_code == 409
 
@@ -118,7 +142,7 @@ def test_an_unknown_member_is_rejected(
             _request("admin-1"),
             GroupCreate(
                 name="Finance",
-                color="#76b900",
+                color="#0ea5e9",
                 role="viewer",
                 user_ids=["missing"],
             ),
@@ -130,9 +154,19 @@ def test_a_blank_role_is_rejected(admin: None) -> None:
     with pytest.raises(HTTPException) as refused:
         create_group(
             _request("admin-1"),
-            GroupCreate(name="Finance", color="#76b900", role="owner"),
+            GroupCreate(name="Finance", color="#0ea5e9", role="owner"),
         )
     assert refused.value.status_code == 400
+
+
+def test_an_unknown_color_is_rejected(admin: None) -> None:
+    with pytest.raises(HTTPException) as refused:
+        create_group(
+            _request("admin-1"),
+            GroupCreate(name="Finance", color="not-a-color", role="viewer"),
+        )
+    assert refused.value.status_code == 400
+    assert "Group color must be one of" in refused.value.detail
 
 
 def test_replacing_members_is_passed_through(

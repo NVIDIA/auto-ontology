@@ -65,6 +65,21 @@ def _row_count(frame: Any) -> int:
         return 0
 
 
+def _embedded_records(chunk: Any) -> list[list[dict[str, Any]]]:
+    """VDB records for the rows in *chunk* that actually carry an embedding.
+
+    A request that failed leaves its rows with an empty embedding rather than
+    none, and ``to_client_vdb_records`` keeps those: it only drops a missing
+    one. Counting them as something to write would trigger the catalog reset
+    below for a chunk that then writes nothing, so they are dropped here.
+    """
+    batches = [
+        [r for r in batch if (r.get("metadata") or {}).get("embedding")]
+        for batch in to_client_vdb_records(chunk)
+    ]
+    return [batch for batch in batches if batch]
+
+
 def _run_pii_detection(columns_df: Any, database_name: str) -> None:
     """Enrich persisted columns without making catalog ingestion depend on it."""
 
@@ -124,7 +139,7 @@ def run_ingest(connector: SQLDatabase) -> None:
     data_vdb = None
     rows_written = 0
     for chunk in batch_embed_chunks(embed_rows, embed_params, label=database_name):
-        records = to_client_vdb_records(chunk)
+        records = _embedded_records(chunk)
         if not records:
             # Every row in the chunk came back without an embedding. Already
             # logged as a warning by the embed step; nothing to write.

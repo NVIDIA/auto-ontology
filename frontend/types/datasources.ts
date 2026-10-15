@@ -30,7 +30,7 @@ export type Table = {
 	sql_count?: number;
 	terms_count?: number;
 	columns: Column[];
-	table_type: TableType;
+	table_type: TableType | null;
 	description?: string;
 	description_certified?: boolean;
 	/** A user id or a group id. Null when the table is unassigned. */

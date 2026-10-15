@@ -8,7 +8,9 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 type Ctx = { params: Promise<{ group_id: string }> };
 
 // groupsApi — one group. The path is forwarded as-is, so the id stays in the URL.
-export const GET = withPermission<Ctx>({ group: ['read'] })((req) => proxyToBackend(req));
+export const GET = withPermission<Ctx>({ group: ['read'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
 
 // groupsApi.update — edit a group or replace its members.
 export const PATCH = withPermission<Ctx>({ group: ['manage'] })((req, { user }) =>

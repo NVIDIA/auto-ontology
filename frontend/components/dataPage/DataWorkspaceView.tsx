@@ -5,7 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQueryClient } from '@tanstack/react-query';
 import { BackPanelLayout } from '@/common/BackPanelLayout';
 import type { NodePatch } from '@/api/types';
@@ -104,6 +104,7 @@ export function DataWorkspaceView() {
 	// vocabulary at each table and column.
 	const queryClient = useQueryClient();
 	const { data: session } = useSession();
+	const router = useRouter();
 	const searchParams = useSearchParams();
 	const rawFocus = searchParams.get('focus');
 	const treeFocusId = rawFocus != null && rawFocus.trim() !== '' ? rawFocus.trim() : null;
@@ -215,7 +216,7 @@ export function DataWorkspaceView() {
 			}
 		}
 
-		if (parts.length >= 4 && tableId !== undefined && tableId !== '') {
+		if (parts.length >= 3 && tableId !== undefined && tableId !== '') {
 			const sch2 = next.find((d) => d.id === dbId)?.schemas.find((s) => s.id === schemaId);
 			const tbl = sch2?.tables.find((t) => t.id === tableId);
 			if (tbl && tbl.columns.length === 0 && tbl.columns_count > 0) {
@@ -252,6 +253,31 @@ export function DataWorkspaceView() {
 		const segments = treeFocusId.split('|').filter((s) => s.length > 0);
 		return segments[segments.length - 1] ?? null;
 	}, [treeFocusId]);
+
+	const handleDataTableRowClick = useCallback(
+		(sectionId: string, rowId: string) => {
+			const parentDepthBySection: Record<string, number> = {
+				'all-databases': 0,
+				'child-schemas': 1,
+				'child-tables': 2,
+				'child-columns': 3,
+			};
+			const parentDepth = parentDepthBySection[sectionId];
+			if (parentDepth == null) return;
+
+			const parentSegments =
+				parentDepth === 0
+					? []
+					: (treeFocusId?.split('|').filter((segment) => segment.length > 0) ?? []).slice(
+							0,
+							parentDepth,
+						);
+			if (parentSegments.length !== parentDepth) return;
+
+			router.push(catalogPathFromFocusId([...parentSegments, rowId].join('|')));
+		},
+		[router, treeFocusId],
+	);
 
 	// Breadcrumbs live in the top bar, so the workspace names the catalog node
 	// it has open rather than drawing a second trail of its own.
@@ -434,6 +460,7 @@ export function DataWorkspaceView() {
 					treeDataEpoch={treeDataEpoch}
 					getSinglePage={getSinglePage}
 					onPatchEdits={handleSave}
+					onDataTableRowClick={handleDataTableRowClick}
 					onCertificationChange={handleCertificationChange}
 					onDataTableCertificationChange={handleChildCertificationChange}
 					canCertifyDataTableRow={() =>

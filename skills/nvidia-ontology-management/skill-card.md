@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+-->
+
 ## Description: <br>
 Model and publish semantic definitions in Auto Ontology, covering terms, relationships, measures, imports, and governed results (not deployment or querying). <br>
 

@@ -33,10 +33,6 @@ export function isCatalogBranchLoadedForFocus(databases: Database[], focusId: st
 	const table = schema.tables.find((entry) => entry.id === tableId);
 	if (!table) return false;
 
-	if (segments.length === 3) {
-		return true;
-	}
-
 	const needsColumns = table.columns_count > 0;
 	return !needsColumns || table.columns.length > 0;
 }
