@@ -6,16 +6,28 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
-import { createAuthMiddleware } from 'better-auth/api';
+import { APIError, createAuthMiddleware, getAuthoritativeSessionFromCtx } from 'better-auth/api';
 import { sso } from '@better-auth/sso';
 import { apiKey } from '@better-auth/api-key';
 import { mcp } from '@better-auth/mcp';
 import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/auth/auth-access';
+import { isExactAdmin, removesLastExactAdmin, storedRole } from '@/auth/exact-admin';
 import { Role } from '@/enums/auth';
 
 const isPlainObject = (value: unknown): value is Record<string, unknown> =>
 	typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const roleList = (value: unknown): string[] | null => {
+	if (typeof value === 'string') return [value];
+	if (Array.isArray(value) && value.every((role): role is string => typeof role === 'string')) {
+		return value;
+	}
+	return null;
+};
+
+const sameRoles = (left: string[], right: string[]): boolean =>
+	left.length === right.length && left.every((role) => right.includes(role));
 
 const isHttpRedirectUri = (value: unknown): value is string => {
 	if (typeof value !== 'string') return false;
@@ -28,6 +40,12 @@ const isHttpRedirectUri = (value: unknown): value is string => {
 };
 
 const prisma = getPrisma();
+
+/** Other accounts whose role is exactly `admin`, matching `is_admin`. */
+const otherExactAdminCount = (userId: string): Promise<number> =>
+	prisma.user.count({
+		where: { id: { not: userId }, role: Role.Admin },
+	});
 
 // During `next build` the module is evaluated but no auth request is handled,
 // so a real secret/origin isn't needed. Fall back to a build-only placeholder
@@ -85,20 +103,88 @@ export const auth = betterAuth({
 	// the package.
 	hooks: {
 		before: createAuthMiddleware(async (ctx) => {
-			if (ctx.path !== '/oauth2/register') return;
+			if (ctx.path === '/oauth2/register') {
+				const body = ctx.body;
+				if (!isPlainObject(body)) return;
+				return {
+					context: {
+						body: {
+							...body,
+							application_type: 'native',
+							redirect_uris: Array.isArray(body.redirect_uris)
+								? body.redirect_uris.filter(isHttpRedirectUri)
+								: body.redirect_uris,
+						},
+					},
+				};
+			}
+
 			const body = ctx.body;
 			if (!isPlainObject(body)) return;
-			return {
-				context: {
-					body: {
-						...body,
-						application_type: 'native',
-						redirect_uris: Array.isArray(body.redirect_uris)
-							? body.redirect_uris.filter(isHttpRedirectUri)
-							: body.redirect_uris,
-					},
-				},
-			};
+
+			const removesUser = ctx.path === '/admin/remove-user';
+			const updateData =
+				ctx.path === '/admin/update-user' && isPlainObject(body.data) ? body.data : null;
+			const changesRole = updateData ? Object.hasOwn(updateData, 'role') : false;
+			const roleValue =
+				ctx.path === '/admin/set-role'
+					? body.role
+					: changesRole && updateData
+						? updateData.role
+						: undefined;
+			const requestedRoles = roleList(roleValue);
+			if ((!removesUser && !requestedRoles) || typeof body.userId !== 'string') return;
+
+			// The admin plugin checks permissions and configured role names, but
+			// it does not protect these application invariants. Enforce them on
+			// the role-changing endpoints and on remove-user so a direct request
+			// cannot bypass the matching UsersManager checks.
+			const session = await getAuthoritativeSessionFromCtx(ctx);
+			if (!session) return;
+			const sessionRoles = session.user.role?.split(',') ?? [];
+			if (!sessionRoles.includes(Role.Admin)) return;
+
+			if (removesUser) {
+				const targetUser = await prisma.user.findUnique({
+					where: { id: body.userId },
+					select: { role: true },
+				});
+				const otherExactAdmins = isExactAdmin(targetUser?.role)
+					? await otherExactAdminCount(body.userId)
+					: 0;
+				if (removesLastExactAdmin(targetUser?.role, null, otherExactAdmins)) {
+					throw new APIError('BAD_REQUEST', {
+						message: 'The last admin cannot be deleted.',
+					});
+				}
+				return;
+			}
+
+			if (!requestedRoles) return;
+
+			const targetUser = await prisma.user.findUnique({
+				where: { id: body.userId },
+				select: { role: true },
+			});
+			if (!targetUser?.role) return;
+
+			const currentRoles = targetUser.role.split(',');
+			if (body.userId === session.user.id && !sameRoles(currentRoles, requestedRoles)) {
+				throw new APIError('BAD_REQUEST', {
+					message: 'You cannot change your own role.',
+				});
+			}
+
+			const nextRole = storedRole(requestedRoles);
+			const otherExactAdmins =
+				isExactAdmin(targetUser.role) && !isExactAdmin(nextRole)
+					? await otherExactAdminCount(body.userId)
+					: 0;
+			if (removesLastExactAdmin(targetUser.role, nextRole, otherExactAdmins)) {
+				throw new APIError('BAD_REQUEST', {
+					message: 'The last admin cannot be made a viewer.',
+				});
+			}
 		}),
 	},
 	plugins: [

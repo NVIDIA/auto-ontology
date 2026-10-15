@@ -29,7 +29,8 @@
 **/out
 **/build
 **/.pnpm-store
-frontend/
+# The frontend image is built from its own context.
+frontend
 
 # Local env files (never bake secrets into images)
 .env

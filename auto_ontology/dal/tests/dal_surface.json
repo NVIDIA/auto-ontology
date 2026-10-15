@@ -90,6 +90,18 @@
     "fetch_table_zones_map": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, table_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
     "fetch_term_exploration_details": "(term_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'"
   },
+  "groups": {
+    "GroupNameTaken": "class(ValueError)",
+    "UnknownGroupMembers": "class(ValueError)",
+    "create_group": "(*, name: 'str', description: 'str | None', color: 'str', role: 'str', user_ids: 'list[str]') -> 'dict[str, Any]'",
+    "delete_group": "(group_id: 'str') -> 'bool'",
+    "get_account": "(user_id: 'str') -> 'dict[str, Any] | None'",
+    "get_group": "(group_id: 'str') -> 'dict[str, Any] | None'",
+    "groups_for_user": "(user_id: 'str') -> 'list[dict[str, Any]]'",
+    "list_groups": "() -> 'list[dict[str, Any]]'",
+    "list_users_and_groups": "() -> 'dict[str, Any]'",
+    "update_group": "(*, group_id: 'str', updates: 'dict[str, Any]', user_ids: 'list[str] | None') -> 'dict[str, Any] | None'"
+  },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",
     "ModelInterchangeError": "class(Exception)",

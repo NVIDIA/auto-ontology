@@ -1056,6 +1056,82 @@ semantic_compilation_history = Table(
 
 
 # ---------------------------------------------------------------------------
+# User groups
+# ---------------------------------------------------------------------------
+#
+# A group is a named set of accounts. Illumex loads the same idea from
+# Frontegg (id, name, description, color, roles, users, and the permissions
+# those roles expand to). There is no Frontegg here, so the group is a row
+# this schema owns.
+#
+# The role is one of the two an account already has, ``admin`` or ``viewer``.
+# A group does not carry a list of identity-provider roles, and membership
+# does not change the account's own role: that stays on ``frontend."user"``.
+# The API expands this single role into ``roles`` and ``permissions`` when it
+# answers, which is the shape a caller that learned groups elsewhere expects.
+#
+# ``user_id`` on the membership table is a Better Auth id — the ``id`` of a
+# row in ``frontend."user"``, which Prisma owns. Deliberately not a foreign
+# key, for the same reason ``tag.created_by`` is not one: that table is in a
+# schema Alembic does not manage, so there is nothing here to reference. A
+# deleted account can therefore leave a membership behind. Reads still return
+# that id, with no name, so the membership stays visible instead of vanishing.
+
+#: The only roles a group can carry. The same two Better Auth stores on an
+#: account; a group does not invent a third.
+GROUP_ROLE_ADMIN = "admin"
+GROUP_ROLE_VIEWER = "viewer"
+
+user_group = Table(
+    "user_group",
+    METADATA,
+    _id(),
+    # Unique case-insensitively on the trimmed name, across the deployment.
+    # Unlike ``zone.name`` — whose rule is per database, which no index can
+    # express — a group name is global, so the expression index states it
+    # exactly and closes the window between the DAL's check and its insert.
+    #
+    # Spelled as ``text()`` in Postgres's own deparsed form, and declared on
+    # the table rather than beside the other indexes, for the same two reasons
+    # as ``uq_tag_name_lower``.
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("color", Text, nullable=False),
+    Column("role", Text, nullable=False),
+    CheckConstraint(
+        f"role IN ('{GROUP_ROLE_ADMIN}', '{GROUP_ROLE_VIEWER}')",
+        name="role_value",
+    ),
+    Column(
+        "created",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Index(
+        "uq_user_group_name_lower",
+        text("lower(TRIM(BOTH FROM name))"),
+        unique=True,
+    ),
+)
+
+# Who belongs to a group. The composite primary key leads with ``group_id``,
+# which answers "the members of this group". The reverse — "the groups of this
+# account" — is ``ix_user_group__member_user_id`` below.
+user_group__member = Table(
+    "user_group__member",
+    METADATA,
+    Column(
+        "group_id",
+        Text,
+        ForeignKey(user_group.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("user_id", Text, primary_key=True),
+)
+
+
+# ---------------------------------------------------------------------------
 # Indexes for the read paths
 # ---------------------------------------------------------------------------
 
@@ -1090,6 +1166,10 @@ Index("ix_zone_target_zone_id", zone_target.c.zone_id)
 Index("ix_zone_target_database_id", zone_target.c.database_id)
 Index("ix_zone_target_schema_id", zone_target.c.schema_id)
 Index("ix_zone_target_table_id", zone_target.c.table_id)
+
+# "The groups of this account". The primary key of ``user_group__member`` leads
+# with ``group_id`` and so cannot serve it.
+Index("ix_user_group__member_user_id", user_group__member.c.user_id)
 
 # "The tags on this object", which every detail page asks for its own kind. The
 # unique constraints on tag_target lead with `tag_id` and so cannot serve it.
@@ -1274,6 +1354,10 @@ __all__ = [
     "table__term",
     "term",
     "text_attribute",
+    "user_group",
+    "user_group__member",
+    "GROUP_ROLE_ADMIN",
+    "GROUP_ROLE_VIEWER",
     "zone",
     "zone_target",
 ]

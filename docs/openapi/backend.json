@@ -1255,6 +1255,19 @@
         "title": "DataResponse[ExplorationRelatedNodes]",
         "type": "object"
       },
+      "DataResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Group"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Group]",
+        "type": "object"
+      },
       "DataResponse_IdRef_": {
         "additionalProperties": true,
         "properties": {
@@ -2284,6 +2297,233 @@
         "title": "GraphLink",
         "type": "object"
       },
+      "Group": {
+        "additionalProperties": true,
+        "description": "A group, its members, its role, and the permissions that role grants.\n\n``role`` is the stored value. ``roles`` is that same role as a one-element\nlist, and ``permissions`` is ``resource:action`` strings expanded from it.\nMembership does not change an account's own role.",
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GroupRole"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/GroupUser"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "color",
+          "role",
+          "roles",
+          "users",
+          "permissions",
+          "created"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "user_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "User Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "color",
+          "role"
+        ],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupRole": {
+        "additionalProperties": true,
+        "description": "One role on a group.\n\nA group carries a single role, ``admin`` or ``viewer``. ``id`` and\n``name`` are that same value: there is no separate role catalog.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "GroupRole",
+        "type": "object"
+      },
+      "GroupUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Ids"
+          }
+        },
+        "title": "GroupUpdate",
+        "type": "object"
+      },
+      "GroupUser": {
+        "additionalProperties": true,
+        "description": "An account as a member of a group.\n\n``name`` and ``email`` are empty when the account has been deleted and\nthe membership remains. ``role`` is the account's own role, not the\ngroup's.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email"
+        ],
+        "title": "GroupUser",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2376,6 +2616,28 @@
           "count"
         ],
         "title": "ListResponse[GlobalSearchItem]",
+        "type": "object"
+      },
+      "ListResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Group]",
         "type": "object"
       },
       "ListResponse_PublicConnection_": {
@@ -7100,6 +7362,203 @@
         "summary": "Get Semantic Link Path",
         "tags": [
           "exploration"
+        ]
+      }
+    },
+    "/api/groups": {
+      "get": {
+        "description": "Return every group, ordered by name, with its members. Requires admin.",
+        "operationId": "list_groups_api_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Groups",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Create a group and its members. Requires the admin role.\n\nThe caller is the gateway's identity header. A missing header is 401; a\ncaller who is not an admin is 403.\n\n409 when another group already holds the name, compared\ncase-insensitively on the trimmed value. 400 when a member id is not an\naccount, or when the name, color, or role is missing or invalid.",
+        "operationId": "create_group_api_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Group",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/groups/{group_id}": {
+      "delete": {
+        "description": "Delete one group. Its membership is deleted with it.\n\nRequires the admin role. 404 rather than 204 for an id that is not\nthere: the caller deleted from a list it has already read, so a missing\ngroup means that list is stale.",
+        "operationId": "delete_group_api_groups__group_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "description": "Return one group. Requires admin.\n\n404 for an unknown id rather than an empty group: the caller asked for a\nrow it expects to exist.",
+        "operationId": "get_group_api_groups__group_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Group",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "description": "Update a group's fields and, when sent, replace its members.\n\nRequires the admin role, for the same reason create does.\n\nOmitting ``user_ids`` leaves membership alone. Sending a list replaces\nit, and an empty list clears it. A patch that names no field returns the\ngroup unchanged.\n\n404 for an unknown id, 409 for a name another group holds, 400 for an\ninvalid field or a member id that is not an account.",
+        "operationId": "update_group_api_groups__group_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Group",
+        "tags": [
+          "users"
         ]
       }
     },

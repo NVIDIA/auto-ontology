@@ -23,6 +23,7 @@ import { ConfirmModal } from '@/common/modal';
 import type { TableColumn } from '@/types/table';
 import type { UpdateUserInput, User } from '@/types/auth';
 import type { Invitation } from '@/types/invitation';
+import { GroupsSection } from './GroupsSection';
 import { EditUserModal } from './EditUserModal';
 import { InviteUserModal, type InviteUserInput } from './InviteUserModal';
 
@@ -50,6 +51,7 @@ export const UsersManager = () => {
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
 	const [busyId, setBusyId] = useState<string | null>(null);
+	const [groupsRefresh, setGroupsRefresh] = useState(0);
 	const [inviteOpen, setInviteOpen] = useState(false);
 	const [inviting, setInviting] = useState(false);
 	const [inviteError, setInviteError] = useState<string | null>(null);
@@ -87,6 +89,7 @@ export const UsersManager = () => {
 		const listed = await usersApi.list();
 		setUsers(listed.users);
 		if (listed.error) setError(listed.error);
+		setGroupsRefresh((current) => current + 1);
 		setBusyId(null);
 	};
 
@@ -357,6 +360,8 @@ export const UsersManager = () => {
 						emptyMessage="No Users Found"
 					/>
 				)}
+
+				<GroupsSection users={users} usersLoading={loading} refreshToken={groupsRefresh} />
 
 				<div className="mt-8">
 					<div className="mb-3 flex items-start justify-between gap-4">
