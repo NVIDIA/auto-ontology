@@ -266,8 +266,9 @@ class Owner(ApiModel):
     """A user or a group that can be chosen as an owner.
 
     ``permissions`` is the ``resource:action`` list the account's role, or the
-    group's role, grants. ``member_ids`` is empty for a user and the accounts
-    in a group. ``color`` is only set for a group.
+    group's role, grants. ``member_ids`` is empty for a user. For a group it
+    is the caller when they belong to that group, and empty otherwise.
+    ``color`` is only set for a group.
     """
 
     id: str

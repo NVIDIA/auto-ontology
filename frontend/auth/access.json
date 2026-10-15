@@ -22,7 +22,7 @@
 		"acronym": ["read"],
 		"prompt": ["read"],
 		"analysis": ["read"],
-		"conversation": ["read"],
+		"conversation": ["read", "write"],
 		"chat": ["use"],
 		"catalog": ["read"],
 		"connection": ["read"],

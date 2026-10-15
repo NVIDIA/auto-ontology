@@ -37,19 +37,19 @@ def _resources_for_role(raw: Any, role: str) -> dict[str, list[str]]:
         raise _invalid("top-level value must be an object")
     resources_by_role = raw.get(role)
     if not isinstance(resources_by_role, dict):
-        raise _invalid(f"missing object for role {role!r}")
+        raise _invalid(f"missing object for role {str(role)!r}")
 
     validated: dict[str, list[str]] = {}
     for resource, actions in resources_by_role.items():
         if not isinstance(resource, str) or not resource:
-            raise _invalid(f"role {role!r} contains an invalid resource name")
+            raise _invalid(f"role {str(role)!r} contains an invalid resource name")
         if (
             not isinstance(actions, list)
             or not actions
             or not all(isinstance(action, str) and action for action in actions)
         ):
             raise _invalid(
-                f"actions for role {role!r}, resource {resource!r} "
+                f"actions for role {str(role)!r}, resource {resource!r} "
                 "must be a non-empty string list"
             )
         validated[resource] = actions

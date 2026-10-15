@@ -2998,7 +2998,7 @@
       },
       "Owner": {
         "additionalProperties": true,
-        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user and the accounts\nin a group. ``color`` is only set for a group.",
+        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user. For a group it\nis the caller when they belong to that group, and empty otherwise.\n``color`` is only set for a group.",
         "properties": {
           "color": {
             "anyOf": [
@@ -8083,7 +8083,7 @@
     },
     "/api/owners": {
       "get": {
-        "description": "Return every account and every group that can be shown as an owner.\n\nEach row carries the permissions of its role, which is what a picker uses\nto offer only the people who may own that kind of object. A group's\n``member_ids`` are the accounts in it.",
+        "description": "Return every account and every group that can be shown as an owner.\n\nEach row carries the permissions of its role, which is what a picker uses\nto offer only the people who may own that kind of object. A group's\n``member_ids`` names the caller when they belong to it, and nobody else.\nThe edit button only needs that. The full roster stays on the admin group\nlist.",
         "operationId": "list_owners_api_owners_get",
         "responses": {
           "200": {

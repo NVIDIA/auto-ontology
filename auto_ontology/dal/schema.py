@@ -38,6 +38,8 @@ Four decisions shape everything downstream:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -1129,10 +1131,17 @@ semantic_compilation_history = Table(
 # deleted account can therefore leave a membership behind. Reads still return
 # that id, with no name, so the membership stays visible instead of vanishing.
 
-#: The only roles a group can carry. The same two Better Auth stores on an
-#: account; a group does not invent a third.
-GROUP_ROLE_ADMIN = "admin"
-GROUP_ROLE_VIEWER = "viewer"
+
+class GroupRole(StrEnum):
+    """The two roles an account and a group share. A group does not invent a third."""
+
+    ADMIN = "admin"
+    VIEWER = "viewer"
+
+
+#: The only roles a group can carry. The same two Better Auth stores on an account.
+GROUP_ROLE_ADMIN = GroupRole.ADMIN
+GROUP_ROLE_VIEWER = GroupRole.VIEWER
 
 user_group = Table(
     "user_group",
@@ -1408,6 +1417,7 @@ __all__ = [
     "text_attribute",
     "user_group",
     "user_group__member",
+    "GroupRole",
     "GROUP_ROLE_ADMIN",
     "GROUP_ROLE_VIEWER",
     "zone",

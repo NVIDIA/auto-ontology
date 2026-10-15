@@ -78,8 +78,9 @@ const roleAccess = {
  *
  * Viewer is a subset. Reading and changing groups stay with admins, because a
  * group lists its members' names and emails. A viewer may read the catalog,
- * zones, tags, connections, glossary, prompts, and analyses, and may use chat.
- * Writes stay with admins.
+ * zones, tags, connections, glossary, prompts, and analyses, and may use chat,
+ * including saving a conversation. Other writes, and deleting a conversation,
+ * stay with admins.
  */
 const statement = {
 	...defaultStatements,

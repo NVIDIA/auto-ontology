@@ -5219,7 +5219,7 @@
     },
     "/api/owners": {
       "get": {
-        "description": "ownersApi.list — users and groups a picker can offer as an owner.\nReadable by anyone who can open the catalog: a viewer has to see who owns\na table, and the names are not an admin-only directory.",
+        "description": "ownersApi.list — users and groups a picker can offer as an owner.\nReadable by anyone who can open the catalog: a viewer has to see who owns\na table. The identity goes down so a group's member list is only the\ncaller, when they belong to it.",
         "operationId": "get_api_owners",
         "responses": {
           "200": {
@@ -10976,7 +10976,7 @@
       },
       "Owner": {
         "additionalProperties": true,
-        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user and the accounts\nin a group. ``color`` is only set for a group.",
+        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user. For a group it\nis the caller when they belong to that group, and empty otherwise.\n``color`` is only set for a group.",
         "properties": {
           "color": {
             "anyOf": [

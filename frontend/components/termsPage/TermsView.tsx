@@ -43,7 +43,7 @@ import {
 } from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 import { canEditEntity, changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
-import { ownerQueries } from '@/lib/queries/owners';
+import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
 import { OwnerPermission } from '@/types/owners';
 import { useSession } from '@/auth/auth-client';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
@@ -1001,7 +1001,7 @@ export const TermsView = () => {
 			const [res, tagOptions, ownerDirectory, termRes] = await Promise.all([
 				termsApi.getColumnAttributes(focusId),
 				fetchTagOptions(queryClient),
-				queryClient.fetchQuery(ownerQueries.all()),
+				fetchOwnerDirectory(queryClient),
 				termsApi.get(focusId),
 			]);
 			const attrs = res.error ? [] : (res.data ?? []);
@@ -1109,7 +1109,7 @@ export const TermsView = () => {
 			const [res, tagOptions, ownerDirectory] = await Promise.all([
 				sqlAttributesApi.get(attrId),
 				fetchTagOptions(queryClient),
-				queryClient.fetchQuery(ownerQueries.all()),
+				fetchOwnerDirectory(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {
@@ -1192,7 +1192,7 @@ export const TermsView = () => {
 				termsApi.getColumnAttributes(termId),
 				termsApi.getSqlAttributes(termId),
 				fetchTagOptions(queryClient),
-				queryClient.fetchQuery(ownerQueries.all()),
+				fetchOwnerDirectory(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {

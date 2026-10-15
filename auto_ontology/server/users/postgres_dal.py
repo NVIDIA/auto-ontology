@@ -19,6 +19,7 @@ import logging
 import psycopg
 from psycopg.rows import dict_row
 
+from auto_ontology.dal.schema import GroupRole
 from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
@@ -54,4 +55,4 @@ def get_user_role(user_id: str) -> str | None:
 
 def is_admin(user_id: str) -> bool:
     """Return whether *user_id* currently has the ``admin`` role in Postgres."""
-    return get_user_role(user_id) == "admin"
+    return get_user_role(user_id) == GroupRole.ADMIN

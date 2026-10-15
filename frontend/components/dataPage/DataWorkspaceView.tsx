@@ -28,7 +28,7 @@ import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { buildTreeFocusPageFormat, resolveTreeNode } from '@/lib/data/tree-focus-page';
 import { TAGS_SECTION_ID, fetchTagOptions, stagedTagIds, syncTags } from '@/lib/tags';
 import { canEditEntity } from '@/lib/owners';
-import { ownerQueries } from '@/lib/queries/owners';
+import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
 import { useSession } from '@/auth/auth-client';
 import {
 	mergeColumnsIntoTable,
@@ -237,7 +237,7 @@ export function DataWorkspaceView() {
 			const [, tagOptions, ownerDirectory] = await Promise.all([
 				hydrateBranchForFocus(treeFocus),
 				focusedTagType(treeFocus) == null ? [] : fetchTagOptions(queryClient),
-				queryClient.fetchQuery(ownerQueries.all()),
+				fetchOwnerDirectory(queryClient),
 			]);
 			return buildTreeFocusPageFormat(
 				treeFocus,

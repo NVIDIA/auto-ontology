@@ -13,7 +13,7 @@ export type Owner = {
 	color: string | null;
 	/** `resource:action` strings the account's or the group's role grants. */
 	permissions: string[];
-	/** Accounts in a group. Empty for a user. */
+	/** The signed-in account when it belongs to this group. Empty for a user. */
 	member_ids: string[];
 };
 

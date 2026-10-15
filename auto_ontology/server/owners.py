@@ -21,6 +21,7 @@ from fastapi import HTTPException, Request
 
 from auto_ontology.dal import groups as groups_dal
 from auto_ontology.dal.owners import EditSubject
+from auto_ontology.dal.schema import GroupRole
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.users import postgres_dal
 from auto_ontology.server.users.permissions import permissions_for_role
@@ -50,7 +51,7 @@ def decide_edit(*, role: str | None, permission: str) -> bool:
     The stored owner is not an argument. An admin always may. Anyone else
     may when *permission* is one their role grants.
     """
-    if role == "admin":
+    if role == GroupRole.ADMIN:
         return True
     return permission in permissions_for_role(role or "")
 
@@ -81,7 +82,7 @@ def require_assignable(owner_id: str | None, permission: str) -> str | None:
         return None
     account = groups_dal.get_account(owner_id)
     if account is not None:
-        role = account["role"] or "viewer"
+        role = account["role"] or GroupRole.VIEWER
         if permission in permissions_for_role(role):
             return owner_id
         raise UnassignableOwner(owner_id)

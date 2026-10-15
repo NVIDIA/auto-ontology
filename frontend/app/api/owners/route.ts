@@ -7,5 +7,8 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 
 // ownersApi.list — users and groups a picker can offer as an owner.
 // Readable by anyone who can open the catalog: a viewer has to see who owns
-// a table, and the names are not an admin-only directory.
-export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
+// a table. The identity goes down so a group's member list is only the
+// caller, when they belong to it.
+export const GET = withPermission({ catalog: ['read'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);
