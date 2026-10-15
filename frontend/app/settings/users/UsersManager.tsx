@@ -133,6 +133,7 @@ export const UsersManager = () => {
 			setEditing(false);
 			return;
 		}
+		await invalidateOwners(queryClient);
 		const listed = await usersApi.list();
 		if (listed.error) {
 			setError(listed.error);
