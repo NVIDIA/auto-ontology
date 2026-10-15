@@ -7235,7 +7235,7 @@
         "x-auto-ontology-proxied": true
       },
       "post": {
-        "description": "tagsApi.attach — label an object with an existing tag.\n\n`catalog: ['edit']` rather than `tag: ['manage']`, which is what guards the\ntag list itself: curating the vocabulary is an admin's job, but applying a\ntag that already exists is an edit of the object, no different from editing\nits description. Viewers hold that permission and edit terms with it.\n\nThe identity goes down for the backend's `tagged_by`, which the tag's page\nshows in its \"Tagged By\" column — the one thing distinguishing a label a\nperson applied from one a rule matched.",
+        "description": "tagsApi.attach — label an object with an existing tag.\n\nThe backend checks edit permission against the target's account role or\nowner group. Catalog read admits an authenticated owner-group viewer to that\ncheck without granting writes to targets owned by another user or group.\n\nThe identity goes down for the backend's `tagged_by`, which the tag's page\nshows in its \"Tagged By\" column — the one thing distinguishing a label a\nperson applied from one a rule matched.",
         "operationId": "post_api_tags_tag_id_targets",
         "parameters": [
           {
@@ -7295,14 +7295,14 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/tags/[tag_id]/targets/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
     },
     "/api/tags/{tag_id}/targets/{target_type}/{item_id}": {
       "delete": {
-        "description": "tagsApi.detach — take a tag off one object. Guarded as the attach route is:\nremoving a label edits the object, not the tag.",
+        "description": "tagsApi.detach — the backend applies the same account-role/owner-group check\nas attach, so an owner-group viewer may reach it with catalog read access.",
         "operationId": "delete_api_tags_tag_id_targets_target_type_item_id_",
         "parameters": [
           {
@@ -7360,7 +7360,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "tagsApi.detach — take a tag off one object.",
+        "summary": "Detach Tag",
         "tags": ["tags"],
         "security": [
           {
@@ -7369,7 +7369,7 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/tags/[tag_id]/targets/[target_type]/[item_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
@@ -7530,7 +7530,7 @@
         "x-auto-ontology-proxied": true
       },
       "patch": {
-        "description": "Updating a Term name invalidates cached SqlAttribute description suggestions in backend.",
+        "description": "The backend authorizes the write against either the account role or this\nterm's owner group. Requiring read here admits authenticated owner-group\nviewers without granting them writes to terms owned by anyone else.",
         "operationId": "patch_api_terms_term_id_",
         "parameters": [
           {
@@ -7590,7 +7590,7 @@
         ],
         "x-auto-ontology-source": "frontend/app/api/terms/[term_id]/route.ts",
         "x-auto-ontology-permissions": {
-          "catalog": ["edit"]
+          "catalog": ["read"]
         },
         "x-auto-ontology-proxied": true
       }
