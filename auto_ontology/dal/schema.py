@@ -156,14 +156,15 @@ def _edited() -> tuple[Column, Column, Column, Column]:
 def _owner_id() -> Column:
     """The account or group that owns the row, or null when nobody does.
 
-    Stored on a database, a schema, a table, a term, and a sql attribute. The
-    catalog page edits it on a table, and the glossary page edits it on a
-    term. A column shows that table's owner and a column attribute shows its
-    term's owner; neither stores one of its own. A sql attribute keeps the
-    column, and its page shows the term's owner. The edit check for a column,
-    a column attribute, and a sql attribute does not read an owner on that
-    row. A database and a schema keep the column, and the page does not edit
-    it there. One column holds either id. An account id is
+    Stored on a database, a schema, a table, a term, a sql attribute, and a
+    zone. The catalog page edits it on a table, the glossary page edits it on
+    a term, and the zones page edits it when a zone is created or updated. A
+    column shows that table's owner and a column attribute shows its term's
+    owner; neither stores one of its own. A sql attribute keeps the column,
+    and its page shows the term's owner. The edit check for a column, a
+    column attribute, and a sql attribute does not read an owner on that row.
+    A database and a schema keep the column, and the page does not edit it
+    there. One column holds either id. An account id is
     ``frontend."user".id`` and a group id is ``user_group.id``; neither can
     be a foreign key, because the account table is outside this schema and
     one reference cannot name both. An empty write clears it. A deleted
@@ -745,6 +746,9 @@ zone = Table(
     # nothing. A boolean rather than a separate table so every read says
     # `enabled` once instead of unioning two sources.
     Column("enabled", Boolean, nullable=False, server_default=text("true")),
+    # One account or one group. Not a participant: seeing the zone's data is
+    # ``zone__member``, and the owner is not added there unless also listed.
+    _owner_id(),
 )
 
 # ZONE_OF is polymorphic: a zone can target a Database, a Schema or a Table.
@@ -779,6 +783,27 @@ zone_target = Table(
         "num_nonnulls(database_id, schema_id, table_id) = 1",
         name="exactly_one_target",
     ),
+)
+
+# PARTICIPANT_OF. A user or a group that may see the zone's data. Distinct
+# from ``zone.owner_id``: the owner is one account or one group stored on the
+# zone, and a participant is access, not ownership. The owner is not a
+# participant unless that same id is also listed here.
+#
+# ``member_id`` is an account id or a group id, and not a foreign key, for
+# the same reason ``owner_id`` is not one. A deleted account or group leaves
+# the id behind. The primary key leads with ``zone_id``, which answers "the
+# participants of this zone". The reverse is ``ix_zone__member_member_id``.
+zone__member = Table(
+    "zone__member",
+    METADATA,
+    Column(
+        "zone_id",
+        Text,
+        ForeignKey(zone.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("member_id", Text, primary_key=True),
 )
 
 # ---------------------------------------------------------------------------
@@ -1227,6 +1252,9 @@ Index("ix_zone_target_zone_id", zone_target.c.zone_id)
 Index("ix_zone_target_database_id", zone_target.c.database_id)
 Index("ix_zone_target_schema_id", zone_target.c.schema_id)
 Index("ix_zone_target_table_id", zone_target.c.table_id)
+# "The zones this account or group participates in". The primary key of
+# ``zone__member`` leads with ``zone_id`` and so cannot serve it.
+Index("ix_zone__member_member_id", zone__member.c.member_id)
 
 # "The groups of this account". The primary key of ``user_group__member`` leads
 # with ``group_id`` and so cannot serve it.
@@ -1422,4 +1450,5 @@ __all__ = [
     "GROUP_ROLE_VIEWER",
     "zone",
     "zone_target",
+    "zone__member",
 ]

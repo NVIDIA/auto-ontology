@@ -5973,7 +5973,7 @@
       },
       "Zone": {
         "additionalProperties": true,
-        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.",
+        "description": "A zone with its catalog data items.\n\n``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the\ndetail/update endpoints, and a plain list of the ids that were linked on\ncreate.\n\n``owner_id`` is one user or one group, or null when the zone is unowned.\n``members`` are the users and groups who can see the zone's data. A\nmember is not the owner.",
         "properties": {
           "color": {
             "anyOf": [
@@ -6044,6 +6044,20 @@
             ],
             "title": "Label"
           },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members"
+          },
           "name": {
             "anyOf": [
               {
@@ -6054,6 +6068,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "required": [
@@ -6138,9 +6163,28 @@
             "title": "Items",
             "type": "array"
           },
+          "members": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Members",
+            "type": "array"
+          },
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "required": [
@@ -6240,6 +6284,20 @@
             ],
             "title": "Items"
           },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members"
+          },
           "name": {
             "anyOf": [
               {
@@ -6250,6 +6308,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "ZoneUpdate",
@@ -10083,7 +10152,7 @@
         ]
       },
       "post": {
-        "description": "Create a zone and attach catalog items.  Requires admin role.",
+        "description": "Create a zone and attach catalog items. Requires admin role.\n\n``owner_id`` is one user or one group that can manage zones, or omitted\nto leave the zone unowned. ``members`` are users and groups with that\nsame permission; each is a participant and can see the zone's data. A\nparticipant is not the owner. Returns 400 when an id cannot be assigned.",
         "operationId": "create_zone_api_zones_post",
         "requestBody": {
           "content": {
@@ -10218,7 +10287,7 @@
         ]
       },
       "patch": {
-        "description": "Update zone fields and optionally replace catalog data items.",
+        "description": "Update zone fields and optionally replace catalog items or participants.\n\n``owner_id`` and ``members``, when sent, follow the same rules as create.\nOmit either to leave it unchanged. An empty ``members`` list clears\nparticipants. Returns 400 when an id cannot be assigned.",
         "operationId": "update_zone_api_zones__zone_id__patch",
         "parameters": [
           {

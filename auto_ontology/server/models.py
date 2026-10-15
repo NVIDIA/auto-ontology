@@ -202,6 +202,10 @@ class Zone(ApiModel):
     ``items`` is absent on the list endpoint, a list of ``ZoneItem`` on the
     detail/update endpoints, and a plain list of the ids that were linked on
     create.
+
+    ``owner_id`` is one user or one group, or null when the zone is unowned.
+    ``members`` are the users and groups who can see the zone's data. A
+    member is not the owner.
     """
 
     id: str
@@ -210,6 +214,8 @@ class Zone(ApiModel):
     color: str | None = None
     label: str | None = None
     enabled: bool | None = None
+    owner_id: str | None = None
+    members: list[str] | None = None
     items: list[ZoneItem | str] | None = None
 
 

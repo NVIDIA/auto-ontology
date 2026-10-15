@@ -114,3 +114,24 @@ def owner_from_body(value: str | None, permission: str) -> str | None:
         return require_assignable(normalize_owner_id(value), permission)
     except UnassignableOwner as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def assignable_member_ids(values: list[str] | None, permission: str) -> list[str]:
+    """User and group ids that may participate, each holding *permission*.
+
+    Blank ids are dropped. Duplicates collapse to the first occurrence.
+    Raises :class:`UnassignableOwner` when an id names nothing, or names an
+    account or group whose role does not grant *permission*.
+    """
+    if not values:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in values:
+        member_id = normalize_owner_id(raw)
+        if member_id is None or member_id in seen:
+            continue
+        require_assignable(member_id, permission)
+        seen.add(member_id)
+        result.append(member_id)
+    return result

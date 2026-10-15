@@ -12,6 +12,7 @@ import { datasources } from '@/api/datasources';
 import { ModalWithSteps, ConfirmModal } from '@/common/modal';
 import { ColorPicker } from '@/components/settings/ColorPicker';
 import type { ColorOption } from '@/components/settings/ColorPicker';
+import { OwnersMultiSelect, OwnersSelect } from '@/common/OwnersSelect';
 import { Button } from '@/common/Button';
 import { EmptyState } from '@/common/EmptyState';
 import { Toggle } from '@/common/Toggle';
@@ -24,8 +25,11 @@ import { Text } from '@/common/Text';
 import { TextVariant } from '@/enums/text';
 import { DataTreeSelect } from '@/common/DataTreeSelect';
 import { mergeSchemasIntoDatabase, mergeTablesIntoSchema } from '@/lib/data/datasource-tree-merge';
+import { ownersIncludingSelected } from '@/lib/owners';
+import { ownerQueries } from '@/lib/queries/owners';
 import { invalidateZoneList, patchZoneList, zoneQueries } from '@/lib/queries/zones';
 import type { Zone, ZoneCreated, ZoneUpdateInput } from '@/types/zones';
+import { OwnerPermission, type Owner } from '@/types/owners';
 import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 
@@ -152,6 +156,69 @@ const expandInitialZoneItemSelection = (
 	return expanded;
 };
 
+const ownerOption = (owner: Owner) => ({
+	id: owner.id,
+	name: owner.name,
+	kind: owner.kind,
+	color: owner.color,
+});
+
+const ZonePeopleFields = ({
+	owners,
+	ownersLoading,
+	ownerId,
+	memberIds,
+	disabled,
+	onOwnerChange,
+	onMembersChange,
+}: {
+	owners: Owner[];
+	ownersLoading: boolean;
+	ownerId: string;
+	memberIds: string[];
+	disabled: boolean;
+	onOwnerChange: (ownerId: string) => void;
+	onMembersChange: (memberIds: string[]) => void;
+}) => {
+	const choices = ownersIncludingSelected(owners, OwnerPermission.zone, [ownerId, ...memberIds]);
+	const options = choices.map(ownerOption);
+	return (
+		<>
+			<div>
+				<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
+					Owner
+				</label>
+				{ownersLoading ? (
+					<p className="text-xs text-secondary">Loading users and groups…</p>
+				) : (
+					<OwnersSelect
+						owners={options}
+						value={ownerId}
+						onChange={onOwnerChange}
+						disabled={disabled}
+					/>
+				)}
+			</div>
+			<div>
+				<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
+					Zone Members
+				</label>
+				{ownersLoading ? (
+					<p className="text-xs text-secondary">Loading users and groups…</p>
+				) : (
+					<OwnersMultiSelect
+						owners={options}
+						value={memberIds}
+						onChange={onMembersChange}
+						disabled={disabled}
+						emptyText="No users or groups can manage zones."
+					/>
+				)}
+			</div>
+		</>
+	);
+};
+
 // ---------------------------------------------------------------------------
 // ZoneCard
 // ---------------------------------------------------------------------------
@@ -270,10 +337,18 @@ export default function ZonesSettingsPage() {
 	);
 
 	const [modalOpen, setModalOpen] = useState(false);
+	const { data: owners = [], isPending: ownersLoading } = useQuery({
+		...ownerQueries.all(),
+		enabled: modalOpen,
+	});
 	const [activeStep, setActiveStep] = useState(0);
 	const [name, setName] = useState('');
 	const [description, setDescription] = useState('');
 	const [color, setColor] = useState<string>(DEFAULT_ZONE_COLOR);
+	const [ownerId, setOwnerId] = useState('');
+	const [memberIds, setMemberIds] = useState<string[]>([]);
+	const [initialEditOwnerId, setInitialEditOwnerId] = useState('');
+	const [initialEditMemberIds, setInitialEditMemberIds] = useState<string[]>([]);
 	const [treeDatabases, setTreeDatabases] = useState<Database[]>([]);
 	const [treeLoading, setTreeLoading] = useState(false);
 	const [treeError, setTreeError] = useState<string | null>(null);
@@ -313,6 +388,8 @@ export default function ZonesSettingsPage() {
 		(normalizedName !== initialEditName ||
 			normalizedDescription !== initialEditDescription ||
 			color !== (initialEditColor ?? DEFAULT_ZONE_COLOR) ||
+			ownerId !== initialEditOwnerId ||
+			!setsAreEqual(new Set(memberIds), new Set(initialEditMemberIds)) ||
 			!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems));
 
 	const reloadZones = useCallback(
@@ -326,6 +403,10 @@ export default function ZonesSettingsPage() {
 		setName('');
 		setDescription('');
 		setColor(DEFAULT_ZONE_COLOR);
+		setOwnerId('');
+		setMemberIds([]);
+		setInitialEditOwnerId('');
+		setInitialEditMemberIds([]);
 		setActiveStep(0);
 		setTreeDatabases([]);
 		setTreeError(null);
@@ -346,6 +427,10 @@ export default function ZonesSettingsPage() {
 		setName(zone.name);
 		setDescription(zone.description ?? '');
 		setColor(zone.color ?? DEFAULT_ZONE_COLOR);
+		setOwnerId(zone.owner_id ?? '');
+		setMemberIds(zone.members ?? []);
+		setInitialEditOwnerId(zone.owner_id ?? '');
+		setInitialEditMemberIds(zone.members ?? []);
 		setActiveStep(0);
 		setTreeDatabases([]);
 		setTreeError(null);
@@ -497,6 +582,8 @@ export default function ZonesSettingsPage() {
 				color,
 				items: Array.from(normalizedSelectedItems),
 				created_by: currentUserId,
+				owner_id: ownerId.trim() === '' ? null : ownerId,
+				members: memberIds,
 			});
 
 			if (response.error) {
@@ -518,6 +605,8 @@ export default function ZonesSettingsPage() {
 							description: d,
 							color: c,
 							enabled: en,
+							owner_id: created.owner_id ?? null,
+							members: created.members ?? [],
 						},
 					];
 					return next.sort((a, b) => a.name.localeCompare(b.name));
@@ -545,6 +634,12 @@ export default function ZonesSettingsPage() {
 		if (color !== (initialEditColor ?? DEFAULT_ZONE_COLOR)) {
 			patch.color = color;
 		}
+		if (ownerId !== initialEditOwnerId) {
+			patch.owner_id = ownerId.trim() === '' ? null : ownerId;
+		}
+		if (!setsAreEqual(new Set(memberIds), new Set(initialEditMemberIds))) {
+			patch.members = memberIds;
+		}
 		if (!setsAreEqual(normalizedSelectedItems, normalizedInitialEditSelectedItems)) {
 			patch.items = Array.from(normalizedSelectedItems);
 		}
@@ -569,6 +664,8 @@ export default function ZonesSettingsPage() {
 								name: updated.name,
 								description: updated.description,
 								color: updated.color,
+								owner_id: updated.owner_id ?? null,
+								members: updated.members ?? [],
 							}
 						: zone,
 				),
@@ -754,7 +851,7 @@ export default function ZonesSettingsPage() {
 				}
 			>
 				{activeStep === 0 ? (
-					<>
+					<div className="space-y-4">
 						<div className="flex items-end gap-3">
 							<div className="flex-1">
 								<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
@@ -780,6 +877,15 @@ export default function ZonesSettingsPage() {
 								fallbackColorClass="bg-sky-500"
 							/>
 						</div>
+						<ZonePeopleFields
+							owners={owners}
+							ownersLoading={ownersLoading}
+							ownerId={ownerId}
+							memberIds={memberIds}
+							disabled={submitting}
+							onOwnerChange={setOwnerId}
+							onMembersChange={setMemberIds}
+						/>
 						<div>
 							<label className="mb-1.5 block text-sm font-medium text-heading dark:text-zinc-100">
 								Description
@@ -792,7 +898,7 @@ export default function ZonesSettingsPage() {
 								className="w-full resize-y rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500"
 							/>
 						</div>
-					</>
+					</div>
 				) : (
 					<div className="space-y-3">
 						<p className="text-sm text-body dark:text-zinc-300">

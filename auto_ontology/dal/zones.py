@@ -166,7 +166,43 @@ def _zone_row(row: dict[str, Any]) -> dict[str, Any]:
         "description": row["description"],
         "color": row["color"],
         "enabled": row["enabled"],
+        "owner_id": row.get("owner_id"),
     }
+
+
+def _normalize_member_ids(member_ids: list[str] | None) -> list[str]:
+    """Drop blanks and duplicates. Sorted so a create and a later read agree."""
+    seen: set[str] = set()
+    for raw in member_ids or []:
+        member_id = raw.strip()
+        if member_id:
+            seen.add(member_id)
+    return sorted(seen)
+
+
+def _link_members(zone_id: str, member_ids: list[str]) -> list[str]:
+    """Record each participant. Returns the ids actually stored."""
+    ordered = _normalize_member_ids(member_ids)
+    for member_id in ordered:
+        store().query_write(
+            s.zone__member.insert().values(zone_id=zone_id, member_id=member_id)
+        )
+    return ordered
+
+
+def _members_by_zone(zone_ids: list[str] | None = None) -> dict[str, list[str]]:
+    """``{zone_id: [member_id, ...]}``. *zone_ids* ``None`` reads every zone."""
+    statement = select(s.zone__member.c.zone_id, s.zone__member.c.member_id).order_by(
+        s.zone__member.c.member_id
+    )
+    if zone_ids is not None:
+        if not zone_ids:
+            return {}
+        statement = statement.where(s.zone__member.c.zone_id.in_(zone_ids))
+    grouped: dict[str, list[str]] = {}
+    for row in store().query_read(statement):
+        grouped.setdefault(row["zone_id"], []).append(row["member_id"])
+    return grouped
 
 
 def list_zones() -> list[dict[str, Any]]:
@@ -178,9 +214,11 @@ def list_zones() -> list[dict[str, Any]]:
             s.zone.c.description,
             s.zone.c.color,
             s.zone.c.enabled,
+            s.zone.c.owner_id,
         ).order_by(s.zone.c.name)
     )
-    return [format_zone(_zone_row(r)) for r in rows]
+    members = _members_by_zone()
+    return [format_zone(_zone_row(r), members=members.get(r["id"], [])) for r in rows]
 
 
 def _zone_items(zone_id: str) -> list[dict[str, Any]]:
@@ -210,11 +248,16 @@ def get_zone_by_id(zone_id: str) -> dict[str, Any] | None:
             s.zone.c.description,
             s.zone.c.color,
             s.zone.c.enabled,
+            s.zone.c.owner_id,
         ).where(s.zone.c.id == zone_id)
     )
     if not rows:
         return None
-    return format_zone(_zone_row(rows[0]), items=_zone_items(zone_id))
+    return format_zone(
+        _zone_row(rows[0]),
+        items=_zone_items(zone_id),
+        members=_members_by_zone([zone_id]).get(zone_id, []),
+    )
 
 
 def _current_item_ids(zone_id: str) -> list[str]:
@@ -271,8 +314,14 @@ def create_zone(
     description: str | None,
     color: str,
     item_ids: list[str],
+    owner_id: str | None = None,
+    member_ids: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a zone and point it at catalog items.
+
+    ``owner_id`` is one account or one group, or null when the zone is
+    unowned. ``member_ids`` are participants: each may see the zone's data,
+    and none of them becomes the owner unless that same id is ``owner_id``.
 
     Raises ``ValueError`` when a zone of the same name already exists in the
     same databases as those items.
@@ -283,19 +332,27 @@ def create_zone(
     with write_transaction():
         rows = store().query_write(
             s.zone.insert()
-            .values(name=name, description=description, color=color)
+            .values(
+                name=name,
+                description=description,
+                color=color,
+                owner_id=owner_id,
+            )
             .returning(
                 s.zone.c.id,
                 s.zone.c.name,
                 s.zone.c.description,
                 s.zone.c.color,
                 s.zone.c.enabled,
+                s.zone.c.owner_id,
             )
         )
-        zone = format_zone(_zone_row(rows[0]), items=[], enabled=True)
+        zone = format_zone(_zone_row(rows[0]), items=[], members=[], enabled=True)
 
         if item_ids:
             zone["items"] = _link_items(zone["id"], item_ids)
+        if member_ids:
+            zone["members"] = _link_members(zone["id"], member_ids)
     return zone
 
 
@@ -304,8 +361,14 @@ def update_zone(
     zone_id: str,
     updates: dict[str, Any],
     item_ids: list[str] | None,
+    member_ids: list[str] | None = None,
 ) -> dict[str, Any] | None:
-    """Update a zone's fields and/or replace its items. ``None`` if absent."""
+    """Update a zone's fields and/or replace its items and participants.
+
+    ``member_ids`` ``None`` leaves participants alone; a list replaces them,
+    and an empty list clears them. The same distinction ``item_ids`` already
+    makes. ``None`` if the zone is absent.
+    """
     existing = store().query_read(select(s.zone.c.id).where(s.zone.c.id == zone_id))
     if not existing:
         return None
@@ -322,7 +385,7 @@ def update_zone(
     fields = {
         key: value
         for key, value in updates.items()
-        if key in {"name", "description", "color"}
+        if key in {"name", "description", "color", "owner_id"}
     }
     if fields:
         store().query_write(
@@ -347,6 +410,15 @@ def update_zone(
                 s.zone_target.delete().where(s.zone_target.c.zone_id == zone_id)
             )
             _link_items(zone_id, item_ids)
+
+    # Same rule as items: None is "not editing", [] clears. Replacing and
+    # deleting in one transaction so a failure cannot leave a partial set.
+    if member_ids is not None:
+        with write_transaction():
+            store().query_write(
+                s.zone__member.delete().where(s.zone__member.c.zone_id == zone_id)
+            )
+            _link_members(zone_id, member_ids)
 
     return get_zone_by_id(zone_id)
 
