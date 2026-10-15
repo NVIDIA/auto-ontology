@@ -7853,6 +7853,63 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/users/{user_id}/ownership": {
+      "post": {
+        "description": "usersApi.releaseOwnership — after a role change, drop this account from objects it can no longer own.",
+        "operationId": "post_api_users_user_id_ownership",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release User Ownership",
+        "tags": ["users"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/users/[user_id]/ownership/route.ts",
+        "x-auto-ontology-permissions": {
+          "user": ["set-role"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/zones": {
       "get": {
         "description": "zonesApi.getAll — list zones (viewable by all).",

@@ -10107,6 +10107,49 @@
         ]
       }
     },
+    "/api/users/{user_id}/ownership": {
+      "post": {
+        "description": "Drop this account from objects its current role can no longer own.\n\nCalled after an admin changes the account's role. The role is read from\nthe account table. A role without ``catalog:edit`` is cleared from\ndatabases, schemas, tables, terms, and sql attributes. A role without\n``zone:manage`` is cleared as a zone owner and removed from zone members.\nA group that owns a row is left in place. Requires the admin role.\nReturns 404 when the account is missing.",
+        "operationId": "release_user_ownership_api_users__user_id__ownership_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Release User Ownership",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/zones": {
       "get": {
         "description": "Return every zone to the requesting user.",

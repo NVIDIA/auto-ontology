@@ -26,7 +26,10 @@ import pytest
 
 pytest.importorskip("sqlalchemy")
 
+from sqlalchemy import select  # noqa: E402
+
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.owners import release_account  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.zones import (  # noqa: E402
     create_zone,
@@ -400,6 +403,59 @@ def test_update_with_empty_members_clears_participants(catalog) -> None:
     )
     updated = update_zone(zone_id=zone["id"], updates={}, item_ids=None, member_ids=[])
     assert updated["members"] == []
+
+
+def test_releasing_an_account_clears_its_rows_and_leaves_a_group(catalog) -> None:
+    """A demoted account loses rows it owns. A group id on those rows stays."""
+    account = f"{catalog['prefix']}-user"
+    group = f"{catalog['prefix']}-group"
+    store().query_write(
+        s.catalog_database.update()
+        .where(s.catalog_database.c.id == catalog["db1"])
+        .values(owner_id=account)
+    )
+    store().query_write(
+        s.catalog_schema.update()
+        .where(s.catalog_schema.c.id == catalog["db1.schema"])
+        .values(owner_id=group)
+    )
+    owned = create_zone(
+        name=_name(catalog, "-owned"),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db1"]],
+        owner_id=account,
+        member_ids=[account, group],
+    )
+    grouped = create_zone(
+        name=_name(catalog, "-grouped"),
+        description=None,
+        color="#fff",
+        item_ids=[catalog["db2"]],
+        owner_id=group,
+        member_ids=[group],
+    )
+
+    release_account(account, catalog=True, zone=True)
+
+    database = store().query_read(
+        select(s.catalog_database.c.owner_id).where(
+            s.catalog_database.c.id == catalog["db1"]
+        )
+    )[0]
+    schema = store().query_read(
+        select(s.catalog_schema.c.owner_id).where(
+            s.catalog_schema.c.id == catalog["db1.schema"]
+        )
+    )[0]
+    assert database["owner_id"] is None
+    assert schema["owner_id"] == group
+    released = get_zone_by_id(owned["id"])
+    assert released["owner_id"] is None
+    assert released["members"] == [group]
+    untouched = get_zone_by_id(grouped["id"])
+    assert untouched["owner_id"] == group
+    assert untouched["members"] == [group]
 
 
 def test_delete_removes_participants(catalog) -> None:

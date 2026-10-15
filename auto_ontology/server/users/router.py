@@ -18,6 +18,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from auto_ontology.dal import groups as dal
+from auto_ontology.server.owners import release_account_for_role
 from auto_ontology.dal.schema import GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER, GroupRole
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.responses import (
@@ -281,6 +282,22 @@ def update_group(request: Request, group_id: str, body: GroupUpdate) -> dict:
     if group is None:
         raise HTTPException(status_code=404, detail=f"Group {group_id!r} not found")
     return {"data": _present(group)}
+
+
+@router.post("/users/{user_id}/ownership", response_model=IdResponse)
+def release_user_ownership(user_id: str, request: Request) -> dict:
+    """Drop this account from objects its current role can no longer own.
+
+    Called after an admin changes the account's role. The role is read from
+    the account table. A role without ``catalog:edit`` is cleared from
+    databases, schemas, tables, terms, and sql attributes. A role without
+    ``zone:manage`` is cleared as a zone owner and removed from zone members.
+    A group that owns a row is left in place. Requires the admin role.
+    Returns 404 when the account is missing.
+    """
+    _require_admin(request)
+    release_account_for_role(user_id)
+    return {"data": {"id": user_id}}
 
 
 @router.delete("/groups/{group_id}", response_model=IdResponse)

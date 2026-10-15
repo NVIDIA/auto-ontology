@@ -117,7 +117,8 @@
     "EditSubject": "class(object)",
     "assign_owner": "(table, entity_id: 'str', owner_id: 'str | None') -> 'None'",
     "current_owner": "(table, entity_id: 'str') -> 'str | None'",
-    "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'"
+    "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'",
+    "release_account": "(account_id: 'str', *, catalog: 'bool', zone: 'bool') -> 'None'"
   },
   "pii": {
     "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
