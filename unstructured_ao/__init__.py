@@ -2,7 +2,21 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Unstructured document ingest pipeline for auto-ontology.
+"""Unstructured documents for auto-ontology: ingest, and answering from them.
+
+Answering a question
+--------------------
+    from unstructured_ao.ask import ask
+
+    result = ask("what was the temporary contract rate in 2023?")
+    print(result.text)
+
+``ask`` is the default route and the measured one: chunk search, then the
+attributes those chunks are readings of, then an answer labelled with them.
+``unstructured_ao.search`` holds the two retrieval directions on their own —
+``chunk_search`` plus ``chunk_ontology`` is what ``ask`` composes, and
+``attribute_search`` is the other direction, which is capped below it and kept
+because it is what the comparison is against.
 
 End-to-end pipeline for a single document
 ------------------------------------------
@@ -18,6 +32,10 @@ End-to-end pipeline for a single document
         if doc_id:
             run_extraction(doc_id, full_text, conn)
             link_document_attributes(doc_id, conn)
+
+Once the corpus is in, ``unstructured_ao.relate`` adjudicates how the extracted
+attributes stand to one another — which of them are rival readings of one
+quantity — which is what ``ask`` labels its passages from.
 
 See each module's docstring for details.
 """
