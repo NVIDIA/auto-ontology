@@ -45,6 +45,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1108,6 +1109,112 @@ unstructured_attribute__chunk = Table(
     CheckConstraint("source IN ('llm', 'vector')", name="attribute_chunk_source_value"),
 )
 
+#: How two attributes relate, for the pairs a model was asked to adjudicate.
+#:
+#: Extraction yields attributes one window at a time, so a corpus that states
+#: an indicator in several reports yields several attributes for it, with no
+#: record that they are the same thing.  Answering from one of them as though
+#: it were the only reading is this pipeline's worst failure: the figures all
+#: look equally authoritative in isolation.
+#:
+#: Candidate pairs come from attribute-vector proximity, which is why the
+#: rejections are stored too.  Proximity alone merges ``Outflow of EU movers``
+#: with ``Inflow of EU movers`` and the employment *rate* with employment
+#: *growth*; ``inverse`` and ``related_but_distinct`` are what stop a later
+#: pass from re-proposing pairs already judged and dismissed.
+#:
+#: ``distance`` records what proposed the pair, not what decided it, and is
+#: kept so the candidate threshold can be re-tuned against its own recall.
+unstructured_attribute__attribute = Table(
+    "unstructured_attribute__attribute",
+    METADATA,
+    Column(
+        "attribute_id_a",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "attribute_id_b",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("relation", Text, nullable=False),
+    #: The shared measure, with whatever distinguishes the two sides removed.
+    Column("canonical", Text, nullable=True),
+    #: One sentence on why the relation holds, from the model that judged it.
+    Column("reason", Text, nullable=True),
+    #: What identifies each side: a country, a period, or a publication.
+    Column("qualifier_a", Text, nullable=True),
+    Column("qualifier_b", Text, nullable=True),
+    #: Which side is the whole.  Only meaningful for ``aggregate_and_part``,
+    #: the one relation here that is not symmetric.
+    Column("aggregate_side", Text, nullable=True),
+    Column("distance", Float, nullable=True),
+    Column("model", Text, nullable=False),
+    CheckConstraint(
+        "relation IN ('same_measure_different_place', "
+        "'same_measure_different_period', 'same_measure_different_source', "
+        "'aggregate_and_part', 'related_but_distinct', 'inverse', 'unrelated')",
+        name="attribute_attribute_relation_value",
+    ),
+    CheckConstraint(
+        "aggregate_side IS NULL OR aggregate_side IN ('a', 'b')",
+        name="attribute_attribute_aggregate_side_value",
+    ),
+    CheckConstraint(
+        "attribute_id_a < attribute_id_b",
+        name="attribute_attribute_ordered",
+    ),
+)
+
+#: A set of attributes judged to measure the same thing, with the label a
+#: reader needs to tell the members apart.
+#:
+#: Derived from the ``same_measure_*`` edges above, but not reducible to them:
+#: ``canonical``, ``note`` and each member's ``value`` are generated once over
+#: the whole family, which is the only point where every rival reading is
+#: visible at the same time.  ``dimension`` says what varies across members.
+unstructured_attribute_family = Table(
+    "unstructured_attribute_family",
+    METADATA,
+    _id(),
+    Column("canonical", Text, nullable=False),
+    Column("dimension", Text, nullable=True),
+    #: What a reader needs so one member's figure is not mistaken for
+    #: another's.  Null when the members do not actually conflict.
+    Column("note", Text, nullable=True),
+    Column("model", Text, nullable=False),
+    CheckConstraint(
+        "dimension IS NULL OR dimension IN ('place', 'period', 'source')",
+        name="attribute_family_dimension_value",
+    ),
+)
+
+#: Family membership, carrying the qualifier that identifies this member.
+unstructured_attribute_family__attribute = Table(
+    "unstructured_attribute_family__attribute",
+    METADATA,
+    Column(
+        "family_id",
+        Text,
+        ForeignKey(unstructured_attribute_family.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "attribute_id",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    #: The country, period or publication this member reports for.
+    Column("qualifier", Text, nullable=True),
+    #: The figure it asserts, as written, units included.  Null when the
+    #: attribute states a definition rather than a measurement.
+    Column("value", Text, nullable=True),
+)
+
 # ---------------------------------------------------------------------------
 # Service bookkeeping
 # ---------------------------------------------------------------------------
@@ -1150,6 +1257,16 @@ Index("ix_unstructured_attribute_term_id", unstructured_attribute.c.term_id)
 Index(
     "ix_unstructured_attribute__chunk_chunk_id",
     unstructured_attribute__chunk.c.chunk_id,
+)
+# The primary key covers lookups from the a side; retrieval arrives holding
+# either id, so the b side needs its own index.
+Index(
+    "ix_unstructured_attribute__attribute_b",
+    unstructured_attribute__attribute.c.attribute_id_b,
+)
+Index(
+    "ix_unstructured_attribute_family__attribute_attribute_id",
+    unstructured_attribute_family__attribute.c.attribute_id,
 )
 
 Index("ix_catalog_schema_database_id", catalog_schema.c.database_id)
@@ -1364,4 +1481,7 @@ __all__ = [
     "unstructured_term",
     "unstructured_attribute",
     "unstructured_attribute__chunk",
+    "unstructured_attribute__attribute",
+    "unstructured_attribute_family",
+    "unstructured_attribute_family__attribute",
 ]
