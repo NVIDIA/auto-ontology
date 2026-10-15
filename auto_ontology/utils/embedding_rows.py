@@ -11,8 +11,9 @@ score poorly against rows ingested under the old one. Re-embed the catalog
 after editing :func:`build_table_text` or :func:`build_column_text`.
 
 The row dicts produced here are consumed by the embed step
-(:func:`auto_ontology.utils.embedding.batch_embed`, or ``embed_text_main_text_embed``)
-and then by ``IngestVdbOperator``.
+(:func:`auto_ontology.utils.embedding.batch_embed_chunks` or
+:func:`~auto_ontology.utils.embedding.embed_rows`) and then written by
+:func:`auto_ontology.vdb.records.write_embedded_rows`.
 """
 
 from __future__ import annotations
@@ -21,8 +22,6 @@ import logging
 from typing import Any, Iterable
 
 import pandas as pd
-from nemo_retriever.operators.abstract_operator import AbstractOperator
-from nemo_retriever.operators.cpu_operator import CPUOperator
 
 from auto_ontology.catalog.constants import Labels
 
@@ -36,7 +35,7 @@ __all__ = [
 ]
 
 
-class CatalogEmbeddingRowsOp(AbstractOperator, CPUOperator):
+class CatalogEmbeddingRowsOp:
     """Build an embedding-ready DataFrame from ``(tables_df, columns_df)``.
 
     Expected input: a 2-tuple ``(tables_df, columns_df)``. Both DataFrames
@@ -48,7 +47,7 @@ class CatalogEmbeddingRowsOp(AbstractOperator, CPUOperator):
     concatenated into the same pair — the ``table_schema`` column on each
     table row keeps them distinguishable.
 
-    Output columns: ``text, _embed_modality, path, page_number, metadata``.
+    Output columns: ``text, path, page_number, metadata``.
     Two row types are produced:
 
     * one ``Table`` row per table, whose ``text`` joins the table description
@@ -56,19 +55,13 @@ class CatalogEmbeddingRowsOp(AbstractOperator, CPUOperator):
     * one ``Column`` row per column.
     """
 
-    def __init__(
-        self,
-        *,
-        database_name: str,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(database_name=database_name, **kwargs)
+    def __init__(self, *, database_name: str) -> None:
         self._database_name = database_name
 
-    def preprocess(self, data: Any, **kwargs: Any) -> Any:
-        return data
+    def __call__(self, data: Any) -> pd.DataFrame:
+        return self.process(data)
 
-    def process(self, data: Any, **kwargs: Any) -> pd.DataFrame:
+    def process(self, data: Any) -> pd.DataFrame:
         if not (isinstance(data, tuple) and len(data) == 2):
             raise TypeError(
                 f"CatalogEmbeddingRowsOp expected a (tables_df, columns_df) tuple for "
@@ -79,12 +72,7 @@ class CatalogEmbeddingRowsOp(AbstractOperator, CPUOperator):
         rows = list(self._build_rows(tables_df, columns_df))
         if rows:
             return pd.DataFrame(rows)
-        return pd.DataFrame(
-            columns=["text", "_embed_modality", "path", "page_number", "metadata"]
-        )
-
-    def postprocess(self, data: Any, **kwargs: Any) -> Any:
-        return data
+        return pd.DataFrame(columns=["text", "path", "page_number", "metadata"])
 
     def _build_rows(
         self, tables_df: pd.DataFrame, columns_df: pd.DataFrame
@@ -245,10 +233,9 @@ def build_embed_row(
 ) -> dict[str, Any]:
     """Wrap embedding *text* in the row shape the embed → VDB path expects."""
     path = f"auto_ontology:{node_id}" if node_id else "auto_ontology:unknown"
-    # Nest the catalog identifiers under content_metadata so they survive the
-    # IngestVdbOperator write path, which only persists content_metadata +
-    # source_metadata into the table's metadata column. Top-level copies are
-    # kept for any in-memory consumer of this DataFrame.
+    # Retrieval reads the top-level copies: the store keeps the whole metadata
+    # dict. The copies under content_metadata are kept so rows written now look
+    # like the ones already stored.
     fields = {
         "id": node_id,
         "label": label,
@@ -259,7 +246,6 @@ def build_embed_row(
     }
     return {
         "text": text.strip(),
-        "_embed_modality": "text",
         "path": path,
         "page_number": -1,
         "metadata": {

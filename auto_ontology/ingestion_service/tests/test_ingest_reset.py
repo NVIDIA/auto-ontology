@@ -7,8 +7,8 @@
 ``run_ingest`` resets the data VDB lazily, on the first chunk with something
 to write, so that a dead endpoint or a bad key leaves the previous run's rows
 in place. A chunk whose every request failed still comes back as rows, each
-carrying an empty embedding and the endpoint's error, and those must count as
-"nothing to write" -- otherwise the reset fires and every row it was meant to
+without an embedding -- or, from older code paths, with an empty one -- and
+those must count as "nothing to write" -- otherwise the reset fires and every row it was meant to
 replace is then skipped on write.
 """
 
@@ -33,7 +33,7 @@ class _RecordingVdb:
         return sum(len(batch) for batch in records)
 
 
-def _row(node_id: str, embedding: list[float] | None, error: str = "") -> dict:
+def _row(node_id: str, embedding: list[float] | None) -> dict:
     metadata: dict[str, Any] = {
         "id": node_id,
         "label": "Table",
@@ -49,8 +49,6 @@ def _row(node_id: str, embedding: list[float] | None, error: str = "") -> dict:
         "path": f"auto_ontology:{node_id}",
         "page_number": -1,
         "metadata": metadata,
-        # The shape the embed step leaves on a chunk whose request failed.
-        "text_embeddings_1b_v2": {"embedding": embedding or [], "error": error},
     }
 
 
@@ -92,7 +90,7 @@ def test_a_chunk_that_failed_to_embed_does_not_reset_the_catalog(
 
     _embed_yielding(
         monkeypatch,
-        [_row("a", None, "HTTP 401"), _row("b", None, "HTTP 401")],
+        [_row("a", None), _row("b", [])],
     )
 
     run_ingest(_Connector())
@@ -107,8 +105,8 @@ def test_the_reset_waits_for_the_first_chunk_that_embedded(
 
     _embed_yielding(
         monkeypatch,
-        [_row("a", None, "HTTP 429")],
-        [_row("b", [0.1, 0.2]), _row("c", None, "HTTP 429")],
+        [_row("a", None)],
+        [_row("b", [0.1, 0.2]), _row("c", [])],
     )
 
     run_ingest(_Connector())

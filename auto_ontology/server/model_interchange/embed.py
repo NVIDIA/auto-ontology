@@ -10,12 +10,6 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-import pandas as pd
-from nemo_retriever.models.inference.main_text_embed import (
-    TextEmbeddingConfig,
-    create_text_embeddings_for_df,
-)
-from nemo_retriever.operators.vdb import IngestVdbOperator
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.utils.embedding_rows import (
     build_column_text,
@@ -26,8 +20,10 @@ from auto_ontology.utils.embedding_rows import (
 from auto_ontology.semantic.constants import LABEL_SQL_ATTRIBUTE
 from auto_ontology.semantic.embed import _build_rows
 from auto_ontology.utils import get_embed_params
+from auto_ontology.utils.embedding import embed_rows
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.vdb import get_data_vdb, get_semantic_vdb
+from auto_ontology.vdb.records import write_embedded_rows
 
 logger = logging.getLogger(__name__)
 
@@ -238,7 +234,6 @@ def _doc_to_embed_row(
     }
     return {
         "text": (item.get("text") or "").strip(),
-        "_embed_modality": "text",
         "path": path,
         "page_number": -1,
         "metadata": {**tabular_fields, "content_metadata": dict(tabular_fields)},
@@ -248,29 +243,9 @@ def _doc_to_embed_row(
 def _embed_and_ingest_rows(rows: list[dict[str, Any]], vdb: Any) -> int:
     if not rows:
         return 0
-    embed_params = get_embed_params()
-    embedded, _ = create_text_embeddings_for_df(
-        pd.DataFrame(rows),
-        task_config={
-            "api_key": embed_params.api_key,
-            "endpoint_url": embed_params.embed_invoke_url,
-            "model_name": embed_params.model_name,
-        },
-        transform_config=TextEmbeddingConfig(
-            embed_modality=embed_params.embed_modality,
-        ),
-    )
-    with_embeddings = [
-        row
-        for row in embedded.to_dict(orient="records")
-        if (row.get("metadata") or {}).get("embedding")
-    ]
-    if not with_embeddings:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} rows with embeddings.",
-        )
-    IngestVdbOperator(vdb=vdb)(with_embeddings)
-    return len(with_embeddings)
+    embedded = embed_rows(rows, get_embed_params(), what="imported")
+    write_embedded_rows(vdb, embedded)
+    return len(embedded)
 
 
 def flush_import_embeddings(buffer: ImportEmbedBuffer) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Postgres + pgvector implementation of the NV-Ingest ``VDB`` operator.
+"""Postgres + pgvector vector store for the data and semantic layers.
 
 Backed by :class:`langchain_postgres.PGVectorStore` (the v2 vector store API).
 Records are carried as :class:`langchain_core.documents.Document` objects
@@ -24,8 +24,6 @@ from psycopg import sql
 from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
-
-from nemo_retriever.common.vdb.adt_vdb import VDB
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +50,7 @@ class _UnusableEmbeddings(Embeddings):
 
 
 def _flatten(records: Iterable) -> Iterable[dict]:
-    """Yield record dicts from possibly-nested NV-Ingest output."""
+    """Yield record dicts from a possibly-nested list of records."""
     for item in records:
         if isinstance(item, dict):
             yield item
@@ -136,10 +134,10 @@ def _pool_status(engine: PGEngine) -> str:
         return "?"
 
 
-class PostgresVDB(VDB):
-    """Concrete :class:`VDB` backed by Postgres + pgvector via LangChain v2.
+class PostgresVDB:
+    """Vector store backed by Postgres + pgvector via LangChain v2.
 
-    Each NV-Ingest record becomes a :class:`Document` whose ``page_content`` is
+    Each record becomes a :class:`Document` whose ``page_content`` is
     the searchable text and whose ``metadata`` carries the original record
     metadata plus ``document_type``. Embeddings produced upstream by the NIM
     pipeline are bulk-loaded into PGVectorStore via ``add_embeddings`` so we
@@ -186,8 +184,6 @@ class PostgresVDB(VDB):
                 len(ids),
                 self.database_name,
             )
-
-        super().__init__(**kwargs)
 
     # ------------------------------------------------------------------
     # Engine / store lifecycle
@@ -353,7 +349,7 @@ class PostgresVDB(VDB):
         batch_size: int = 500,
         **kwargs: Any,
     ) -> int:
-        """Bulk-insert NV-Ingest records, returning the number of rows written."""
+        """Bulk-insert records, returning the number of rows written."""
         documents: list[Document] = []
         embeddings: list[list[float]] = []
         skipped = 0
@@ -641,63 +637,6 @@ class PostgresVDB(VDB):
             # Includes the timeout: the pool outliving the process by a few
             # seconds is not worth blocking a shutdown over.
             logger.debug("PostgresVDB.close: pool dispose did not complete")
-
-    # ------------------------------------------------------------------
-    # Collection management — required by the ABC, unused by Auto Ontology
-    # ------------------------------------------------------------------
-    #
-    # ``VDB`` gained a collection-management API (scopes, collections,
-    # per-document CRUD) that models a multi-tenant document store. Auto Ontology has one
-    # collection per tier, created by ``_ensure_schema``, and reaches the store
-    # through ``run`` / ``write_to_index`` / ``retrieval`` and the three bulk
-    # deletes above — none of these are on any path it takes.
-    #
-    # They are declared abstract, so leaving them out makes ``PostgresVDB``
-    # itself abstract and every ``get_data_vdb()`` raise ``TypeError`` at
-    # construction. They raise rather than returning a plausible empty value:
-    # if Auto Ontology ever grows a caller, it should fail here and get a real
-    # implementation, not silently read an empty collection.
-
-    def _unsupported(self, method: str) -> NotImplementedError:
-        return NotImplementedError(
-            f"PostgresVDB does not implement {method}(): Auto Ontology uses a single "
-            f"collection per tier and never calls the collection-management "
-            f"API. Implement it here if that changes."
-        )
-
-    def create_collection(self, *, scope, request):
-        raise self._unsupported("create_collection")
-
-    def get_collection(self, *, scope, collection_name):
-        raise self._unsupported("get_collection")
-
-    def update_collection(self, *, scope, collection_name, request):
-        raise self._unsupported("update_collection")
-
-    def delete_collection(self, *, scope, collection_name, if_exists):
-        raise self._unsupported("delete_collection")
-
-    def list_collections(self, *, scope, limit, continuation_token):
-        raise self._unsupported("list_collections")
-
-    def retrieve_collection(
-        self, vectors, *, scope, collection_name, query_texts, top_k, **kwargs
-    ):
-        raise self._unsupported("retrieve_collection")
-
-    def write_collection(self, records, *, context):
-        # Reached only when a caller passes `collection_context` to
-        # IngestVdbOperator; Auto Ontology never does, so ingestion takes `run()`.
-        raise self._unsupported("write_collection")
-
-    def get_document(self, *, scope, collection_name, document_id):
-        raise self._unsupported("get_document")
-
-    def list_documents(self, *, scope, collection_name, limit, continuation_token):
-        raise self._unsupported("list_documents")
-
-    def delete_document(self, *, scope, collection_name, document_id, if_exists):
-        raise self._unsupported("delete_document")
 
     def __del__(self) -> None:
         try:

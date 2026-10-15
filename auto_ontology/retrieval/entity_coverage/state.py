@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
-from nemo_retriever.graph.retriever import Retriever
+from auto_ontology.utils.retriever import Retriever
 from auto_ontology.connectors.base import SQLDatabase
 
 DEFAULT_MAX_DISTANCE = 0.75

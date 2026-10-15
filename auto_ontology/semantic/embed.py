@@ -7,17 +7,15 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from nemo_retriever.common.params.models import EmbedParams
-from nemo_retriever.operators.vdb import IngestVdbOperator
-
-from auto_ontology.utils.embedding import batch_embed
+from auto_ontology.utils.embedding import EmbedParams, batch_embed
 from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.vdb import get_semantic_vdb
 from auto_ontology.vdb.postgres import PostgresVDB
+from auto_ontology.vdb.records import write_embedded_rows
 
 logger = logging.getLogger(__name__)
 
@@ -43,10 +41,6 @@ class SemanticEmbedder:
     database_name: str
     embed_params: EmbedParams
     vdb: PostgresVDB
-    ingest_op: IngestVdbOperator = field(init=False)
-
-    def __post_init__(self) -> None:
-        self.ingest_op = IngestVdbOperator(vdb=self.vdb)
 
     def embed_term(
         self,
@@ -86,7 +80,7 @@ class SemanticEmbedder:
             )
             return 0
 
-        self.ingest_op(with_embeddings)
+        write_embedded_rows(self.vdb, with_embeddings)
         return len(with_embeddings)
 
     def embed_column_attributes(self, attrs: list[dict[str, Any]]) -> int:
@@ -112,7 +106,6 @@ def build_semantic_embedder(
         embed_invoke_url=resolve("EMBED", "ENDPOINT"),
         model_name=resolve("EMBED", "MODEL"),
         api_key=api_key,
-        embed_modality="text",
     )
     vdb = get_semantic_vdb(database_name=database_name, reset=reset)
     return SemanticEmbedder(
@@ -185,7 +178,7 @@ def embed_all_semantic_nodes(
         )
         return 0
 
-    embedder.ingest_op(with_embeddings)
+    write_embedded_rows(embedder.vdb, with_embeddings)
     logger.info("embed_all_semantic_nodes: %d VDB row(s) written", len(with_embeddings))
     return len(with_embeddings)
 
@@ -235,7 +228,6 @@ def _build_rows(
         rows.append(
             {
                 "text": text,
-                "_embed_modality": "text",
                 "path": path,
                 "page_number": -1,
                 "metadata": {**fields, "content_metadata": dict(fields)},
@@ -289,7 +281,6 @@ def _build_rows(
         rows.append(
             {
                 "text": text,
-                "_embed_modality": "text",
                 "path": path,
                 "page_number": -1,
                 "metadata": {**fields, "content_metadata": dict(fields)},

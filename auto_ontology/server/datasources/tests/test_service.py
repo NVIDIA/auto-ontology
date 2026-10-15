@@ -9,7 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 import pytest
-from nemo_retriever.tabular_data.ingestion.model.reserved_words import Labels
+from auto_ontology.catalog.constants import Labels
 
 from auto_ontology.server.datasources import service
 

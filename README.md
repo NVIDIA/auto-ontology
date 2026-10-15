@@ -47,8 +47,8 @@ To run a text-to-SQL benchmark such as BIRD, refer to the
 | Component           | Technology                                                             | Role                                       | Default port |
 | ------------------- | ---------------------------------------------------------------------- | ------------------------------------------ | ------------ |
 | Frontend            | Next.js 16 (React 19, TypeScript, Tailwind CSS 4), Better Auth, Prisma | Web UI, authentication, API gateway        | 3000         |
-| Backend             | FastAPI (Python 3.12+), NeMo-Retriever, LangChain                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
-| Ingestion worker    | FastAPI (Python 3.12+), NeMo-Retriever                                 | Ingests tabular data and writes embeddings | 3002         |
+| Backend             | FastAPI (Python 3.12+), LangChain                                      | Chat / NL-to-SQL, catalog, datasource APIs | 3001         |
+| Ingestion worker    | FastAPI (Python 3.12+)                                                 | Ingests tabular data and writes embeddings | 3002         |
 | Postgres + pgvector | Relational Database                                                    | App metadata, the catalog and ontology, vector store | 5432 |
 | HashiCorp Vault     | Optional                                                               | Secure storage of connection credentials   | —            |
 

@@ -16,7 +16,6 @@ retrieved only as few-shot examples for PQL generation.
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import delete, func, select
@@ -28,8 +27,8 @@ from auto_ontology.dal.sql_fragments import name_contains
 from auto_ontology.semantic.constants import LABEL_PQL_ANALYSIS
 
 if TYPE_CHECKING:
-    from nemo_retriever.common.params.models import EmbedParams
-    from nemo_retriever.common.vdb.adt_vdb import VDB
+    from auto_ontology.utils.embedding import EmbedParams
+    from auto_ontology.vdb.postgres import PostgresVDB
 
 logger = logging.getLogger(__name__)
 
@@ -247,14 +246,12 @@ def _pql_analysis_docs(analysis_id: str | None) -> list[dict[str, Any]]:
 
 def embed_pql_analyses(
     embed_params: "EmbedParams",
-    vdb: "VDB",
+    vdb: "PostgresVDB",
     analysis_id: str | None = None,
     database_name: str | None = None,
 ) -> None:
     """Embed PqlAnalysis docs and append them to *vdb*."""
-    import pandas as pd
-    from nemo_retriever.models.inference.runtime import embed_text_main_text_embed
-    from nemo_retriever.operators.vdb import IngestVdbOperator
+    from auto_ontology.utils.embedding import embed_rows_into_vdb
 
     docs = _pql_analysis_docs(analysis_id)
     if not docs:
@@ -285,7 +282,6 @@ def embed_pql_analyses(
         rows.append(
             {
                 "text": (item.get("text") or "").strip(),
-                "_embed_modality": "text",
                 "path": path,
                 "page_number": -1,
                 "metadata": {
@@ -294,34 +290,4 @@ def embed_pql_analyses(
                 },
             }
         )
-    df = pd.DataFrame(rows)
-
-    before = time.time()
-    embedded = embed_text_main_text_embed(
-        df,
-        model_name=embed_params.model_name,
-        embed_invoke_url=embed_params.embed_invoke_url,
-        api_key=embed_params.api_key,
-        embed_modality=embed_params.embed_modality,
-    )
-
-    with_embeddings = [
-        row
-        for row in embedded.to_dict(orient="records")
-        if (row.get("metadata") or {}).get("embedding")
-    ]
-    if not with_embeddings:
-        raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} PqlAnalysis rows with "
-            f"embeddings; check upstream embed errors (often a transient "
-            f"{embed_params.embed_invoke_url} 5xx)."
-        )
-
-    IngestVdbOperator(vdb=vdb)(with_embeddings)
-    logger.info(
-        "Embedded and appended %d/%d PqlAnalysis row(s) via %s in %.2fs.",
-        len(with_embeddings),
-        len(embedded),
-        type(vdb).__name__,
-        time.time() - before,
-    )
+    embed_rows_into_vdb(rows, embed_params, vdb, what="PqlAnalysis")
