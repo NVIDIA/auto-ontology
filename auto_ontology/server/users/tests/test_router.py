@@ -21,6 +21,7 @@ from auto_ontology.server.users.router import (
     delete_group,
     get_group,
     list_groups,
+    list_owners,
     update_group,
 )
 
@@ -70,6 +71,50 @@ def test_a_viewer_cannot_create_a_group(monkeypatch: pytest.MonkeyPatch) -> None
             GroupCreate(name="Finance", color="#0ea5e9", role="viewer"),
         )
     assert refused.value.status_code == 403
+
+
+def test_owner_list_names_only_the_caller_in_a_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        users_router.dal,
+        "list_users_and_groups",
+        lambda: {
+            "users": [
+                {
+                    "id": "viewer-1",
+                    "name": "Ada",
+                    "email": "ada@nvidia.com",
+                    "role": "viewer",
+                },
+                {
+                    "id": "viewer-2",
+                    "name": "",
+                    "email": "bea@nvidia.com",
+                    "role": "viewer",
+                },
+            ],
+            "groups": [
+                {
+                    "id": "group-1",
+                    "name": "Developers",
+                    "color": "#0ea5e9",
+                    "role": "admin",
+                    "users": [{"id": "viewer-1"}, {"id": "viewer-2"}],
+                }
+            ],
+        },
+    )
+
+    owners = {
+        owner["id"]: owner["member_ids"]
+        for owner in list_owners(_request("viewer-1"))["data"]
+    }
+
+    assert owners["viewer-1"] == []
+    assert owners["viewer-2"] == []
+    assert owners["group-1"] == ["viewer-1"]
+    assert list_owners(_request(None))["data"][-1]["member_ids"] == []
 
 
 def test_group_reads_without_a_caller_are_refused() -> None:

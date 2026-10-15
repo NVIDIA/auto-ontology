@@ -19,12 +19,12 @@
 		"apiToken": ["manage"]
 	},
 	"viewer": {
-		"acronym": ["read", "create", "update", "delete"],
-		"prompt": ["read", "create", "update", "delete"],
-		"analysis": ["read", "manage"],
-		"conversation": ["read", "write", "delete"],
+		"acronym": ["read"],
+		"prompt": ["read"],
+		"analysis": ["read"],
+		"conversation": ["read", "write"],
 		"chat": ["use"],
-		"catalog": ["read", "edit"],
+		"catalog": ["read"],
 		"connection": ["read"],
 		"zone": ["read"],
 		"tag": ["read"],

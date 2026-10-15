@@ -2,6 +2,7 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { entitySidePanel } from '@/common/SidePanel';
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
@@ -17,7 +18,9 @@ import type { ComposerCertification, ComposerSection } from '@/types/composer-se
 import type { TagChip } from '@/types/tags';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
+import { entityOwnerSection } from '@/lib/owners';
 import { entityTagsSection } from '@/lib/tags';
+import { OwnerPermission, type Owner } from '@/types/owners';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 
 export type TreeResolved =
@@ -117,6 +120,7 @@ export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
 	tagOptions: TagChip[] = [],
+	owners: Owner[] = [],
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -234,6 +238,7 @@ export function buildTreeFocusPageFormat(
 					name: table.name,
 					columns: String(table.columns_count),
 					certification: fieldStatus(table.description_certified === true),
+					owner_id: table.owner_id ?? '',
 				})),
 			});
 			return {
@@ -249,8 +254,8 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { table } = resolvedFocus;
-			const tableType = getTableType(table.table_type);
-			const tableTypeLabel = catalogNodeInfo[tableType].title;
+			const tableInfo = catalogNodeInfo[getTableType(table.table_type)];
+			const tableTypeLabel = tableInfo.title;
 			sections.push(
 				...baseCardsForEntity(
 					table.description ?? '',
@@ -264,7 +269,6 @@ export function buildTreeFocusPageFormat(
 					{ certified: table.description_certified === true },
 				),
 			);
-			sections.push(entityTagsSection(table.tags, tagOptions));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
@@ -294,14 +298,18 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						icon: catalogNodeInfo[tableType].icon,
+						icon: tableInfo.icon,
 						entityId: table.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(table.owner_id, owners, OwnerPermission.catalog),
+					tags: entityTagsSection(table.tags, tagOptions),
+				}),
 			};
 		}
 		case DataModels.COLUMN: {
-			const { column } = resolvedFocus;
+			const { column, table } = resolvedFocus;
 			const samplesEditable = sampleValuesEditable(column.data_type);
 			sections.push(
 				{
@@ -320,7 +328,6 @@ export function buildTreeFocusPageFormat(
 					editable: samplesEditable,
 					hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(column.data_type),
 				},
-				entityTagsSection(column.tags, tagOptions),
 				{
 					type: ComposerSectionKind.INFO_GRID,
 					id: 'information',
@@ -345,6 +352,16 @@ export function buildTreeFocusPageFormat(
 						entityId: column.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						table.owner_id,
+						owners,
+						OwnerPermission.catalog,
+						false,
+						'Table Owner',
+					),
+					tags: entityTagsSection(column.tags, tagOptions),
+				}),
 			};
 		}
 	}

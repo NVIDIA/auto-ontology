@@ -5,6 +5,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useSession } from '@/auth/auth-client';
 import { Role } from '@/enums/auth';
 import { invitationsApi } from '@/api/invitations';
@@ -23,6 +24,7 @@ import { ConfirmModal } from '@/common/modal';
 import type { TableColumn } from '@/types/table';
 import type { UpdateUserInput, User } from '@/types/auth';
 import type { Invitation } from '@/types/invitation';
+import { invalidateOwners } from '@/lib/queries/owners';
 import { GroupsSection } from './GroupsSection';
 import { EditUserModal } from './EditUserModal';
 import { InviteUserModal, type InviteUserInput } from './InviteUserModal';
@@ -46,6 +48,7 @@ const actionErrorMessage = (error: unknown, fallback: string): string => {
 };
 
 export const UsersManager = () => {
+	const queryClient = useQueryClient();
 	const { data: session } = useSession();
 	const [users, setUsers] = useState<User[]>([]);
 	const [loading, setLoading] = useState(true);
@@ -85,6 +88,8 @@ export const UsersManager = () => {
 		const actionResult = await action();
 		if (actionResult.error) {
 			setError(actionErrorMessage(actionResult.error, 'Action failed.'));
+		} else {
+			await invalidateOwners(queryClient);
 		}
 		const listed = await usersApi.list();
 		setUsers(listed.users);
@@ -128,6 +133,7 @@ export const UsersManager = () => {
 			setEditing(false);
 			return;
 		}
+		await invalidateOwners(queryClient);
 		const listed = await usersApi.list();
 		if (listed.error) {
 			setError(listed.error);
@@ -343,7 +349,7 @@ export const UsersManager = () => {
 						Users
 					</h1>
 					<p className="text-xs text-secondary">
-						Admins manage users; viewers can access all other pages.
+						Admins manage users; viewers can read the other pages and use chat.
 					</p>
 				</div>
 

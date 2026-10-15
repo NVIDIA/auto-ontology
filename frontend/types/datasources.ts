@@ -8,6 +8,7 @@ import type { TagChip } from '@/types/tags';
 export type Column = {
 	id: string;
 	column_name: string;
+	/** Null when the connector could not read a type for the column. */
 	data_type: string | null;
 	database_name: string;
 	schema_name: string;
@@ -32,6 +33,8 @@ export type Table = {
 	table_type: TableType | null;
 	description?: string;
 	description_certified?: boolean;
+	/** A user id or a group id. Null when the table is unassigned. */
+	owner_id?: string | null;
 	/**
 	 * Read with the schema's table list, since the catalog has no table detail
 	 * endpoint of its own. Absent on a table the tree only knows a count for.
@@ -45,6 +48,8 @@ export type Schema = {
 	tables_count: number;
 	tables: Table[];
 	description?: string;
+	/** A user id or a group id. Null when the schema is unassigned. */
+	owner_id?: string | null;
 };
 
 export type Database = {
@@ -53,4 +58,6 @@ export type Database = {
 	num_of_schemas: number;
 	schemas: Schema[];
 	description?: string;
+	/** A user id or a group id. Null when the database is unassigned. */
+	owner_id?: string | null;
 };

@@ -323,7 +323,7 @@ function TableBlock({
 	}, [open, table.columns.length, table.columns_count, tableLoadRef, onLoadColumns]);
 
 	const loading = open && table.columns.length === 0 && table.columns_count > 0;
-	const tableType = getTableType(table.table_type);
+	const tableInfo = catalogNodeInfo[getTableType(table.table_type)];
 
 	return (
 		<div className="flex flex-col gap-y-1">
@@ -334,8 +334,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				icon={catalogNodeInfo[tableType].icon}
-				title={catalogNodeInfo[tableType].title}
+				icon={tableInfo.icon}
+				title={tableInfo.title}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}

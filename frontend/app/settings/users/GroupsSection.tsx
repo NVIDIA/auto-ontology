@@ -5,6 +5,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { groupsApi } from '@/api/groups';
 import { Button } from '@/common/Button';
 import { Icon, IconName } from '@/common/icons';
@@ -19,6 +20,7 @@ import { Role } from '@/enums/auth';
 import type { User } from '@/types/auth';
 import { MAX_GROUP_NAME_LENGTH, type Group } from '@/types/groups';
 import type { TableColumn } from '@/types/table';
+import { invalidateOwners } from '@/lib/queries/owners';
 
 const GROUP_COLORS: readonly ColorOption[] = [
 	{ value: '#0ea5e9', label: 'Sky', colorClass: 'bg-sky-500' },
@@ -79,6 +81,7 @@ type GroupsSectionProps = {
 };
 
 export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSectionProps) => {
+	const queryClient = useQueryClient();
 	const [groups, setGroups] = useState<Group[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [loadError, setLoadError] = useState<string | null>(null);
@@ -191,6 +194,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 		}
 		setDraft(null);
 		await load();
+		await invalidateOwners(queryClient);
 	};
 
 	const confirmDelete = async () => {
@@ -205,6 +209,7 @@ export const GroupsSection = ({ users, usersLoading, refreshToken }: GroupsSecti
 		}
 		setPendingDelete(null);
 		await load();
+		await invalidateOwners(queryClient);
 	};
 
 	const columns: TableColumn<Group>[] = [

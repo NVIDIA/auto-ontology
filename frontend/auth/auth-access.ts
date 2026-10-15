@@ -77,9 +77,10 @@ const roleAccess = {
  * `auth/permissions.ts`).
  *
  * Viewer is a subset. Reading and changing groups stay with admins, because a
- * group lists its members' names and emails. Viewers may read zones, tags, and
- * connections, and may edit the catalog. Glossary, prompts, and custom analyses
- * are fully available to viewers so those pages do not 403.
+ * group lists its members' names and emails. A viewer may read the catalog,
+ * zones, tags, connections, glossary, prompts, and analyses, may use chat,
+ * including saving a conversation, and may manage their own API tokens. Other
+ * writes, and deleting a conversation, stay with admins.
  */
 const statement = {
 	...defaultStatements,

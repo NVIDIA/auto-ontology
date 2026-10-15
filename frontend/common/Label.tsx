@@ -10,7 +10,7 @@ import { Text } from '@/common/Text';
 // grow: one oversized value (a description that ended up in a name field, say)
 // would otherwise take over the whole chip list.
 const LABEL_BASE =
-	'inline-flex max-w-[min(24rem,100%)] items-center rounded-full border px-3 py-1 text-xs font-medium';
+	'inline-flex min-w-0 max-w-[min(24rem,100%)] items-center overflow-hidden rounded-full border px-3 py-1 text-xs font-medium';
 const LABEL_GREEN =
 	'border-[#76b900]/40 bg-[#76b900]/10 text-[#4d7a00] dark:border-[#76b900]/30 dark:bg-[#76b900]/15 dark:text-[#a3d63a]';
 const LABEL_GREEN_HOVER =

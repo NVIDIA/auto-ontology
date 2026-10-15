@@ -34,12 +34,17 @@ def test_an_admin_group_can_manage_zones() -> None:
     assert "zone:read" in permissions_for_role("admin")
 
 
-def test_a_viewer_group_can_read_zones_but_not_manage_them() -> None:
+def test_a_viewer_group_can_read_but_not_write() -> None:
     granted = permissions_for_role("viewer")
     assert "zone:read" in granted
-    assert "catalog:edit" in granted
+    assert "catalog:read" in granted
+    assert "chat:use" in granted
+    assert "catalog:edit" not in granted
     assert "zone:manage" not in granted
     assert "connection:manage" not in granted
+    # A viewer mints tokens for their own account. The token carries this role,
+    # so it cannot edit the catalog.
+    assert "apiToken:manage" in granted
 
 
 def test_viewer_permissions_are_a_subset_of_admin() -> None:

@@ -10,10 +10,12 @@ from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from auto_ontology.dal import tags as dal
+from auto_ontology.dal.owners import edit_subject
 from auto_ontology.dal.pii import untag_attributes_of_column
 from auto_ontology.dal.session import write_transaction
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.models import TagTargetType
+from auto_ontology.server.owners import enforce_edit
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.responses import (
     IdResponse,
@@ -288,6 +290,9 @@ def attach_tag(request: Request, tag_id: str, body: TagTarget) -> dict:
     attributes goes through the term that owns them — and a tag on it could
     never be seen or taken off again.
     """
+    subject = edit_subject(body.id)
+    if subject is not None:
+        enforce_edit(request, subject)
     try:
         tags = dal.attach_tag(
             tag_id=tag_id,
@@ -309,7 +314,9 @@ def attach_tag(request: Request, tag_id: str, body: TagTarget) -> dict:
     "/tags/{tag_id}/targets/{target_type}/{item_id}",
     response_model=TagChipListResponse,
 )
-def detach_tag(tag_id: str, target_type: TagTargetType, item_id: str) -> dict:
+def detach_tag(
+    request: Request, tag_id: str, target_type: TagTargetType, item_id: str
+) -> dict:
     """Take this tag off one object.
 
     Taking ``PII`` off a column also takes it off that column's
@@ -322,6 +329,9 @@ def detach_tag(tag_id: str, target_type: TagTargetType, item_id: str) -> dict:
     mean its view is stale, and answering "done" would leave the chip gone from
     the screen and still on the object.
     """
+    subject = edit_subject(item_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     cascade = False
     if target_type is TagTargetType.COLUMN:
         tag = dal.get_tag(tag_id)

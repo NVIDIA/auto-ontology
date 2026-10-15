@@ -38,6 +38,8 @@ Four decisions shape everything downstream:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -126,6 +128,50 @@ def _certified(name: str) -> Column:
     return Column(name, Boolean, nullable=False, server_default=text("false"))
 
 
+def _edited() -> tuple[Column, Column, Column, Column]:
+    """When the row was inserted and when someone last edited it in the app.
+
+    ``created`` is the database clock on insert. The migration adds the column
+    without backfilling, so a row that already existed stays null rather than
+    claiming it was created the day the column appeared.
+
+    ``modified`` and ``modified_by`` stay null until a person saves an edit.
+    Compilation rewrites descriptions on its own and does not count: the panel's
+    Last Modified is that save. ``modified_by`` is a Better Auth user id, null
+    when the request carried no identity, which the page reads as Auto Generated.
+    """
+    return (
+        Column(
+            "created",
+            DateTime(timezone=True),
+            nullable=True,
+            server_default=func.now(),
+        ),
+        Column("modified", DateTime(timezone=True), nullable=True),
+        Column("created_by", Text, nullable=True),
+        Column("modified_by", Text, nullable=True),
+    )
+
+
+def _owner_id() -> Column:
+    """The account or group that owns the row, or null when nobody does.
+
+    Stored on a database, a schema, a table, a term, and a sql attribute. The
+    catalog page edits it on a table, and the glossary page edits it on a
+    term. A column shows that table's owner and a column attribute shows its
+    term's owner; neither stores one of its own. A sql attribute keeps the
+    column, and its page shows the term's owner. The edit check for a column,
+    a column attribute, and a sql attribute does not read an owner on that
+    row. A database and a schema keep the column, and the page does not edit
+    it there. One column holds either id. An account id is
+    ``frontend."user".id`` and a group id is ``user_group.id``; neither can
+    be a foreign key, because the account table is outside this schema and
+    one reference cannot name both. An empty write clears it. A deleted
+    account or group leaves the id behind, which reads as unassigned.
+    """
+    return Column("owner_id", Text, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Catalog tier — Database -> Schema -> Table -> Column
 # ---------------------------------------------------------------------------
@@ -147,6 +193,7 @@ catalog_database = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     Column("created", DateTime(timezone=True), server_default=func.now()),
     Column("pulled", DateTime(timezone=True), nullable=True),
 )
@@ -165,6 +212,7 @@ catalog_schema = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     UniqueConstraint("database_id", "name", name="uq_catalog_schema_database_name"),
 )
 
@@ -187,6 +235,7 @@ catalog_table = Table(
     # column the PATCH still returns 200 and the checkbox still ticks; the flag
     # is simply dropped on the way in and reads back false forever.
     _certified("description_certified"),
+    _owner_id(),
     # Primary key column names. A list on the node today, so a text[] here
     # rather than a join table -- nothing ever queries "which tables have this
     # pk column", and a join table would make every read a second query.
@@ -414,6 +463,8 @@ term = Table(
     Column("synonyms", ARRAY(Text), nullable=True),
     _certified("name_certified"),
     _certified("description_certified"),
+    _owner_id(),
+    *_edited(),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
 )
@@ -457,6 +508,7 @@ column_attribute = Table(
     # expression rewrite that leaves every tagged column) clears this so a
     # later tag can still propagate.
     Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     # The 5-part merge key, exactly as merge_column_attribute matches on.
     UniqueConstraint(
@@ -547,6 +599,7 @@ sql_attribute = Table(
     Column("expression", Text, nullable=True),
     Column("source", Text, nullable=True),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
+    _owner_id(),
     Column("description_suggestion", Text, nullable=True),
     # Set once PII propagation from the attribute's columns has handled it.
     # Like `catalog_column.pii_processed`, tag edits are independent of it:
@@ -555,6 +608,7 @@ sql_attribute = Table(
     # reads a tagged column is the exception: the tag is taken off and this
     # flag cleared so a later tag on one of the new columns can still propagate.
     Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     CheckConstraint(
         "source IS NULL OR source IN ('manual', 'sql', 'table', 'bridgeTable')",
@@ -1077,10 +1131,17 @@ semantic_compilation_history = Table(
 # deleted account can therefore leave a membership behind. Reads still return
 # that id, with no name, so the membership stays visible instead of vanishing.
 
-#: The only roles a group can carry. The same two Better Auth stores on an
-#: account; a group does not invent a third.
-GROUP_ROLE_ADMIN = "admin"
-GROUP_ROLE_VIEWER = "viewer"
+
+class GroupRole(StrEnum):
+    """The two roles an account and a group share. A group does not invent a third."""
+
+    ADMIN = "admin"
+    VIEWER = "viewer"
+
+
+#: The only roles a group can carry. The same two Better Auth stores on an account.
+GROUP_ROLE_ADMIN = GroupRole.ADMIN
+GROUP_ROLE_VIEWER = GroupRole.VIEWER
 
 user_group = Table(
     "user_group",
@@ -1356,6 +1417,7 @@ __all__ = [
     "text_attribute",
     "user_group",
     "user_group__member",
+    "GroupRole",
     "GROUP_ROLE_ADMIN",
     "GROUP_ROLE_VIEWER",
     "zone",

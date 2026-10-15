@@ -6,8 +6,15 @@ import { TableType } from '@/enums/datasources';
 
 const KNOWN_TABLE_TYPES = new Set<string>(Object.values(TableType));
 
-/** A catalog ``table_type`` the data tree can draw. Missing and unknown values are base tables. */
+/**
+ * A catalog icon key for a stored ``table_type``.
+ *
+ * Connectors leave the column null, or write the Postgres spelling in another
+ * case (``BASE TABLE``, ``VIEW``). Either one is a base table or the matching
+ * known type, so a tree row always has an icon. Unknown values are base tables.
+ */
 export function getTableType(tableType: string | null | undefined): TableType {
-	if (tableType && KNOWN_TABLE_TYPES.has(tableType)) return tableType as TableType;
+	const normalized = tableType?.trim().toLowerCase();
+	if (normalized != null && KNOWN_TABLE_TYPES.has(normalized)) return normalized as TableType;
 	return TableType.BASE_TABLE;
 }

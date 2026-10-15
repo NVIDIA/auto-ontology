@@ -5,6 +5,8 @@
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
 
-// tagsApi.detach — take a tag off one object. Guarded as the attach route is:
-// removing a label edits the object, not the tag.
-export const DELETE = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+// tagsApi.detach — the backend applies the same account-role/owner-group check
+// as attach, so an owner-group viewer may reach it with catalog read access.
+export const DELETE = withPermission({ catalog: ['read'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

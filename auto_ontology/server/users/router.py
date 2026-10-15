@@ -18,12 +18,13 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from auto_ontology.dal import groups as dal
-from auto_ontology.dal.schema import GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER
+from auto_ontology.dal.schema import GROUP_ROLE_ADMIN, GROUP_ROLE_VIEWER, GroupRole
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.responses import (
     GroupListResponse,
     GroupResponse,
     IdResponse,
+    OwnerListResponse,
 )
 from auto_ontology.server.users import postgres_dal
 from auto_ontology.server.users.permissions import permissions_for_role
@@ -139,6 +140,55 @@ def _translate(exc: ValueError) -> HTTPException:
     if isinstance(exc, dal.UnknownGroupMembers):
         return HTTPException(status_code=400, detail=str(exc))
     return HTTPException(status_code=400, detail=str(exc))
+
+
+def _caller_in_group(member_ids: list[str], caller_id: str | None) -> list[str]:
+    """The caller when they belong to the group, and nobody else."""
+    if caller_id is not None and caller_id in member_ids:
+        return [caller_id]
+    return []
+
+
+@router.get("/owners", response_model=OwnerListResponse)
+def list_owners(request: Request) -> dict:
+    """Return every account and every group that can be shown as an owner.
+
+    Each row carries the permissions of its role, which is what a picker uses
+    to offer only the people who may own that kind of object. A group's
+    ``member_ids`` names the caller when they belong to it, and nobody else.
+    The edit button only needs that. The full roster stays on the admin group
+    list.
+    """
+    caller_id = resolve_internal_user(request, required=False)
+    directory = dal.list_users_and_groups()
+    owners: list[dict[str, Any]] = []
+    for user in directory["users"]:
+        role = user["role"] or GroupRole.VIEWER
+        owners.append(
+            {
+                "id": user["id"],
+                "name": user["name"] or user["email"] or user["id"],
+                "kind": "user",
+                "color": None,
+                "permissions": permissions_for_role(role),
+                "member_ids": [],
+            }
+        )
+    for group in directory["groups"]:
+        owners.append(
+            {
+                "id": group["id"],
+                "name": group["name"],
+                "kind": "group",
+                "color": group["color"],
+                "permissions": permissions_for_role(group["role"]),
+                "member_ids": _caller_in_group(
+                    [member["id"] for member in group["users"]], caller_id
+                ),
+            }
+        )
+    owners.sort(key=lambda owner: (owner["kind"] != "user", owner["name"].lower()))
+    return {"data": owners, "count": len(owners)}
 
 
 @router.get("/groups", response_model=GroupListResponse)
