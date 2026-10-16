@@ -74,7 +74,7 @@ from auto_ontology.retrieval.text_to_sql.value_anchors import (
     anchor_tables_missing_from_scope,
     split_schema_named_anchors,
 )
-from auto_ontology.utils.llm_invoke import invoke_with_structured_output
+from auto_ontology.utils.llm_invoke import invoke_with_structured_output, max_tokens_for
 
 
 def _qualified_name(t: dict) -> str:
@@ -1260,7 +1260,10 @@ class CandidatePreparationAgent(BaseAgent):
 
         try:
             result = invoke_with_structured_output(
-                llm.bind(max_tokens=1024), messages, AnchorColumnModel
+                # state["llm"] is the non-reasoning client.
+                llm.bind(max_tokens=max_tokens_for("NON_REASONING", 1024)),
+                messages,
+                AnchorColumnModel,
             )
         except Exception:
             self.logger.warning(

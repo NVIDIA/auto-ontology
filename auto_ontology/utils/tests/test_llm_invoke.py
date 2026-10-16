@@ -9,8 +9,16 @@ import threading
 import time
 from typing import Any
 
+import pytest
+
 from auto_ontology.utils import llm_invoke
-from auto_ontology.utils.llm_invoke import _structured_output_kwargs
+from auto_ontology.utils.llm_invoke import (
+    _build_client,
+    _client_kind,
+    _structured_output_kwargs,
+    _template_kwargs,
+    max_tokens_for,
+)
 
 
 class _Model:
@@ -133,3 +141,152 @@ def test_an_exception_inside_the_block_still_releases_the_bound() -> None:
             assert _bound() == 3
             raise RuntimeError("boom")
     assert _bound() is None
+
+
+# ── Client selection, token caps and thinking ─────────────────────────────────
+
+_ROLE_ENV = [
+    f"{prefix}_{field}"
+    for prefix in ("REASONING", "NON_REASONING", "DEFAULT_MODELS")
+    for field in ("API_KEY", "CLIENT", "MAX_TOKENS", "THINKING")
+] + ["NVIDIA_API_KEY"]
+
+
+@pytest.fixture
+def role_env(monkeypatch: pytest.MonkeyPatch) -> pytest.MonkeyPatch:
+    """An environment with none of the role settings these tests exercise."""
+    for name in _ROLE_ENV:
+        monkeypatch.delenv(name, raising=False)
+    return monkeypatch
+
+
+def test_sk_keys_default_to_the_openai_client(role_env: pytest.MonkeyPatch) -> None:
+    """A Gym model server does not serve /models, which ChatNVIDIA requests first.
+
+    inference-api (``sk-`` keys) is OpenAI-compatible for every model it serves,
+    so an ``nvidia/`` model there goes through ChatOpenAI by default.
+    """
+    role_env.setenv("REASONING_API_KEY", "sk-test")
+
+    assert _client_kind("REASONING", "nvidia/nvidia/nemotron-3.5-lightning") == "openai"
+
+
+def test_nvapi_keys_keep_chat_nvidia(role_env: pytest.MonkeyPatch) -> None:
+    role_env.setenv("REASONING_API_KEY", "nvapi-test")
+
+    assert _client_kind("REASONING", "nvidia/nemotron-3-nano-30b-a3b") == "nvidia"
+
+
+def test_client_is_overridable_per_role(role_env: pytest.MonkeyPatch) -> None:
+    role_env.setenv("DEFAULT_MODELS_API_KEY", "nvapi-test")
+    role_env.setenv("NON_REASONING_CLIENT", "OpenAI")
+
+    assert _client_kind("NON_REASONING", "nvidia/nemotron-3-nano-30b-a3b") == "openai"
+    assert _client_kind("REASONING", "nvidia/nemotron-3-nano-30b-a3b") == "nvidia"
+
+
+def test_openai_family_names_ignore_the_client_setting(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    """Configs that predate <role>_CLIENT relied on the name prefix alone."""
+    role_env.setenv("REASONING_CLIENT", "nvidia")
+
+    for name in ("openai/gpt-5", "azure/openai/gpt-5", "aws/anthropic/claude"):
+        assert _client_kind("REASONING", name) == "openai"
+
+
+def test_an_unknown_client_is_rejected(role_env: pytest.MonkeyPatch) -> None:
+    role_env.setenv("REASONING_CLIENT", "anthropic")
+
+    with pytest.raises(ValueError, match="REASONING_CLIENT"):
+        _client_kind("REASONING", "nvidia/x")
+
+
+def test_per_call_caps_apply_when_no_override_is_set(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    assert max_tokens_for("REASONING", 1024) == 1024
+
+
+def test_max_tokens_replaces_every_cap_for_its_role(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    """Thinking counts against the cap, so a 1024 cap sized for the answer truncates."""
+    role_env.setenv("REASONING_MAX_TOKENS", "32768")
+
+    assert max_tokens_for("REASONING", 1024) == 32768
+    assert max_tokens_for("REASONING", 8192) == 32768
+    assert max_tokens_for("NON_REASONING", 1024) == 1024
+
+
+def test_max_tokens_falls_back_to_the_shared_default(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    role_env.setenv("DEFAULT_MODELS_MAX_TOKENS", "16384")
+
+    assert max_tokens_for("NON_REASONING", 2048) == 16384
+
+
+def test_a_malformed_max_tokens_is_rejected(role_env: pytest.MonkeyPatch) -> None:
+    for value in ("lots", "0", "-1"):
+        role_env.setenv("REASONING_MAX_TOKENS", value)
+        with pytest.raises(ValueError, match="REASONING_MAX_TOKENS"):
+            max_tokens_for("REASONING", 1024)
+
+
+def test_thinking_is_sent_only_when_set(role_env: pytest.MonkeyPatch) -> None:
+    assert _template_kwargs("REASONING") == {}
+
+    role_env.setenv("REASONING_THINKING", "off")
+    assert _template_kwargs("REASONING") == {
+        "chat_template_kwargs": {"enable_thinking": False}
+    }
+
+    role_env.setenv("REASONING_THINKING", "ON")
+    assert _template_kwargs("REASONING") == {
+        "chat_template_kwargs": {"enable_thinking": True}
+    }
+
+
+def test_an_unknown_thinking_value_is_rejected(role_env: pytest.MonkeyPatch) -> None:
+    role_env.setenv("REASONING_THINKING", "low")
+
+    with pytest.raises(ValueError, match="REASONING_THINKING"):
+        _template_kwargs("REASONING")
+
+
+def test_openai_client_carries_the_cap_and_thinking(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    role_env.setenv("NON_REASONING_MAX_TOKENS", "20000")
+    role_env.setenv("NON_REASONING_THINKING", "off")
+
+    client = _build_client(
+        role="NON_REASONING",
+        model="nvidia/nvidia/nemotron-3.5-lightning",
+        api_key="sk-test",
+        base_url="http://127.0.0.1:1/v1",
+        temperature=0.0,
+        max_tokens=1024,
+    )
+
+    assert type(client).__name__ == "ChatOpenAI"
+    assert client.max_tokens == 20000
+    assert client.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+
+
+def test_openai_client_sends_no_extra_body_by_default(
+    role_env: pytest.MonkeyPatch,
+) -> None:
+    """A gateway fronting Claude may reject chat_template_kwargs, so none is sent."""
+    client = _build_client(
+        role="REASONING",
+        model="aws/anthropic/bedrock-claude-opus-4-8",
+        api_key="sk-test",
+        base_url="http://127.0.0.1:1/v1",
+        temperature=0.0,
+        max_tokens=8192,
+    )
+
+    assert client.max_tokens == 8192
+    assert not client.extra_body

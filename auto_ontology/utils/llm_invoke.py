@@ -210,21 +210,75 @@ _NON_REASONING_MODEL_NAME = resolve("NON_REASONING", "MODEL")
 _NON_REASONING_API_KEY = resolve("NON_REASONING", "API_KEY")
 
 
+_CLIENTS = ("openai", "nvidia")
+_THINKING = {"on": True, "off": False}
+
+
+def max_tokens_for(role: str, default: int) -> int:
+    """The completion-token cap for a *role* call that would otherwise use *default*.
+
+    ``<role>_MAX_TOKENS`` (or ``DEFAULT_MODELS_MAX_TOKENS``) replaces every
+    per-call cap for that role. Reasoning models count their thinking against the
+    cap, so caps sized for the answer alone (300 to 8192 across the call sites)
+    cut them off before the answer is written, and the structured parse fails.
+    """
+    value = resolve(role, "MAX_TOKENS")
+    if not value:
+        return default
+    try:
+        cap = int(value)
+    except ValueError:
+        raise ValueError(f"{role}_MAX_TOKENS must be an integer, got {value!r}")
+    if cap <= 0:
+        raise ValueError(f"{role}_MAX_TOKENS must be positive, got {cap}")
+    return cap
+
+
+def _client_kind(role: str, model: str) -> str:
+    """``openai`` or ``nvidia``: which langchain client *role* uses for *model*."""
+    # OpenAI-family names always need ChatOpenAI, whatever the key, so configs that
+    # predate <role>_CLIENT keep working.
+    if model.startswith(("openai/", "azure/", "aws/")):
+        return "openai"
+    kind = resolve(role, "CLIENT").lower()
+    if kind not in _CLIENTS:
+        raise ValueError(f"{role}_CLIENT must be one of {_CLIENTS}, got {kind!r}")
+    return kind
+
+
+def _template_kwargs(role: str) -> dict:
+    """``chat_template_kwargs`` for *role*, from ``<role>_THINKING``; empty if unset."""
+    value = resolve(role, "THINKING").lower()
+    if not value:
+        return {}
+    if value not in _THINKING:
+        raise ValueError(
+            f"{role}_THINKING must be one of {tuple(_THINKING)}, got {value!r}"
+        )
+    return {"chat_template_kwargs": {"enable_thinking": _THINKING[value]}}
+
+
 def _build_client(
     *,
+    role: str,
     model: str,
     api_key: str,
     base_url: str,
     temperature: float,
     max_tokens: int,
 ) -> BaseChatModel:
-    """Build a chat client for the given model/endpoint.
+    """Build a chat client for *role*'s model/endpoint.
 
-    OpenAI-family models (``openai/``, ``azure/``, ``aws/`` prefixes) go through
-    ``ChatOpenAI``, which supports structured output. Everything else uses
-    ``ChatNVIDIA``.
+    ``<role>_CLIENT`` picks ``ChatOpenAI`` or ``ChatNVIDIA`` (see
+    :mod:`auto_ontology.utils.model_config`). ``ChatNVIDIA`` requests
+    ``{base_url}/models`` before structured output, so it fails behind any
+    OpenAI-compatible proxy that serves only chat completions, such as a NeMo Gym
+    model server.
     """
-    if model.startswith(("openai/", "azure/", "aws/")):
+    max_tokens = max_tokens_for(role, max_tokens)
+    template_kwargs = _template_kwargs(role)
+
+    if _client_kind(role, model) == "openai":
         from langchain_openai import ChatOpenAI
 
         return ChatOpenAI(
@@ -238,6 +292,7 @@ def _build_client(
             max_tokens=max_tokens,
             timeout=LLM_INVOKE_TIMEOUT_S,
             max_retries=0,
+            extra_body=template_kwargs or None,
         )
 
     from langchain_nvidia_ai_endpoints import ChatNVIDIA
@@ -248,6 +303,7 @@ def _build_client(
         base_url=base_url,
         temperature=temperature,
         max_tokens=max_tokens,
+        model_kwargs=template_kwargs,
     )
     client._client.get_session_fn = lambda: _TimeoutSession(LLM_INVOKE_TIMEOUT_S)
     return client
@@ -270,6 +326,7 @@ def get_llm_client(
         raise EnvironmentError("REASONING_API_KEY is not set")
 
     return _build_client(
+        role="REASONING",
         model=model or _MODEL_NAME,
         api_key=_API_KEY,
         base_url=_BASE_URL,
@@ -299,6 +356,7 @@ def get_non_reasoning_llm_client(
         raise EnvironmentError("NON_REASONING_API_KEY is not set")
 
     return _build_client(
+        role="NON_REASONING",
         model=model or _NON_REASONING_MODEL_NAME,
         api_key=_NON_REASONING_API_KEY,
         base_url=_NON_REASONING_BASE_URL,

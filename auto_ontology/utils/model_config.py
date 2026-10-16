@@ -16,6 +16,20 @@ When even ``DEFAULT_MODELS_<FIELD>`` is unset, a built-in default is used. There
 are two sets — one for ``sk-`` inference-api keys and one for ``nvapi-``
 integrate/build.nvidia.com keys — and the set is chosen from the API key that
 applies to the same triplet.
+
+The two chat triplets (``REASONING``, ``NON_REASONING``) take three optional
+fields beyond the triplet, resolved the same way:
+
+- ``CLIENT``: ``openai`` (``ChatOpenAI``) or ``nvidia`` (``ChatNVIDIA``). Defaults
+  to ``openai`` for ``sk-`` keys and ``nvidia`` for ``nvapi-`` keys. Model names
+  with an ``openai/``, ``azure/`` or ``aws/`` prefix always use ``openai``.
+- ``MAX_TOKENS``: replaces every call's completion-token cap for that role. A
+  reasoning model's thinking counts against the cap, so the built-in per-call
+  caps (300 to 8192) truncate it before the answer is written.
+- ``THINKING``: ``on`` or ``off``, sent as
+  ``chat_template_kwargs={"enable_thinking": ...}``. Unset sends nothing, so the
+  model's default applies. Set it per role: a gateway fronting Claude may reject
+  the field.
 """
 
 from __future__ import annotations
@@ -37,6 +51,10 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "EMBED_MODEL": "nvidia/nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",
         "RERANK_MODEL": "nvidia/nvidia/llama-nemotron-rerank-vl-1b-v2",
+        # inference-api is OpenAI-compatible for every model it serves, and
+        # ChatNVIDIA cannot sit behind a proxy that does not serve /models.
+        "REASONING_CLIENT": "openai",
+        "NON_REASONING_CLIENT": "openai",
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
@@ -51,6 +69,8 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
             "llama-nemotron-rerank-vl-1b-v2/reranking"
         ),
         "RERANK_MODEL": "nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "REASONING_CLIENT": "nvidia",
+        "NON_REASONING_CLIENT": "nvidia",
     },
 }
 

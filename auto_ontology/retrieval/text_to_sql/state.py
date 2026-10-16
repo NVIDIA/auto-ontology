@@ -13,8 +13,8 @@ from __future__ import annotations
 
 from typing import NotRequired, TypedDict
 
+from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_nvidia_ai_endpoints import ChatNVIDIA
 
 from nemo_retriever.graph.retriever import Retriever
 from auto_ontology.connectors.base import SQLDatabase
@@ -79,8 +79,8 @@ class RetryRestoreState(TypedDict):
 class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
-    llm: ChatNVIDIA
-    reasoning_llm: NotRequired[ChatNVIDIA]
+    llm: BaseChatModel
+    reasoning_llm: NotRequired[BaseChatModel]
     initial_question: str
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]

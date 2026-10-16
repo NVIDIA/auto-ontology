@@ -85,6 +85,15 @@ setup is to fill in `DEFAULT_MODELS_*` and override per-triplet fields only wher
 they differ (e.g. `EMBED_MODEL`, `NON_REASONING_MODEL`). `*_API_KEY` also falls
 back to the legacy `NVIDIA_API_KEY` for backward compatibility.
 
+The two chat triplets (`REASONING`, `NON_REASONING`) take three optional fields
+more, with the same fallback:
+
+| Field        | Values           | Effect                                                                                                                                                                                                   |
+| ------------ | ---------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLIENT`     | `openai`, `nvidia` | LangChain client. Defaults to `openai` for `sk-` keys and `nvidia` for `nvapi-` keys. `openai/`, `azure/` and `aws/` model names always use `openai`. Use `openai` behind a proxy that does not serve `/models`. |
+| `MAX_TOKENS` | integer          | Replaces every call's completion-token cap (300 to 8192 by default). Raise it for reasoning models, whose thinking counts against the cap.                                                                |
+| `THINKING`   | `on`, `off`      | Sent as `chat_template_kwargs={"enable_thinking": ...}`. Unset sends nothing. Set it per triplet: a gateway fronting Claude may reject the field.                                                         |
+
 ## Deployment
 
 ### Prerequisites
