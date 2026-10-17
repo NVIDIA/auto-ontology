@@ -2060,6 +2060,12 @@
           "format": {
             "$ref": "#/components/schemas/ModelFormat",
             "default": "auto_ontology"
+          },
+          "include_ontology": {
+            "default": false,
+            "description": "Apache Ossie only: also export the terms as an Ossie ontology, with a mapping onto the semantic model, as a zip of the three documents.",
+            "title": "Include Ontology",
+            "type": "boolean"
           }
         },
         "title": "ExportRequest",
@@ -7914,7 +7920,7 @@
     },
     "/api/model/export": {
       "post": {
-        "description": "Export the scoped catalog + semantic model as a YAML attachment.",
+        "description": "Export the scoped catalog + semantic model as a YAML attachment.\n\nWith ``include_ontology``, the Apache Ossie export is a zip that also holds\nthe terms as an Ossie ontology and the mapping onto the semantic model.",
         "operationId": "export_model_api_model_export_post",
         "requestBody": {
           "content": {
@@ -7933,9 +7939,15 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Auto Ontology model YAML, sent as a file attachment"
+            "description": "Auto Ontology model YAML, or with include_ontology a zip of the Apache Ossie semantic model, ontology and mapping, sent as a file attachment"
           },
           "422": {
             "content": {

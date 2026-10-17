@@ -5028,9 +5028,15 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Auto Ontology model YAML, sent as a file attachment"
+            "description": "Auto Ontology model YAML, or with include_ontology a zip of the Apache Ossie semantic model, ontology and mapping, sent as a file attachment"
           },
           "401": {
             "description": "No authenticated caller could be resolved"
@@ -10123,6 +10129,12 @@
           "format": {
             "$ref": "#/components/schemas/ModelFormat",
             "default": "auto_ontology"
+          },
+          "include_ontology": {
+            "default": false,
+            "description": "Apache Ossie only: also export the terms as an Ossie ontology, with a mapping onto the semantic model, as a zip of the three documents.",
+            "title": "Include Ontology",
+            "type": "boolean"
           }
         },
         "title": "ExportRequest",
