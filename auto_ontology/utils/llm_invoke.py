@@ -417,12 +417,43 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     "required", and langchain's default of naming the tool) hits that conflict, and only
     omitting it succeeds. The model still calls the tool without being forced to, and
     the caller retries if it ever answers without one.
+
+    Nemotron behind an OpenAI-compatible endpoint uses ``function_calling``, with
+    langchain's forced tool choice, when its thinking is off -- and only then.
+    Either way the failure is the model not stopping once its answer is
+    complete, and which path shows it depends on thinking. Measured with
+    nemotron-3.5-lightning on inference-api, replaying Auto Ontology's own
+    prompts:
+
+    - Thinking off (97 non-reasoning prompts x5): json_schema ran to max_tokens
+      on 12.0% of calls, 56 of 58 emitting only whitespace (which the JSON grammar
+      allows between tokens) after a nearly complete answer. Tool calls ran to
+      the cap on 1.6%, none in whitespace, at half the output tokens.
+    - Thinking on (5 SQL-generation prompts x3): tool calls ran to the cap on
+      15 of 15, generating unseen for ~90s after a complete call, while
+      json_schema did on 1 of 15.
     """
     model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
     lowered = model.lower()
     if "anthropic" in lowered or "claude" in lowered:
         return {"method": "function_calling", "tool_choice": None}
+    if "nemotron" in lowered and _thinking_is_off(llm):
+        return {"method": "function_calling"}
     return {}
+
+
+def _thinking_is_off(llm: BaseChatModel) -> bool:
+    """Whether *llm* is a ChatOpenAI client sending ``enable_thinking: false``.
+
+    Sees through ``llm.bind(...)``. Matched by class name, so ChatNVIDIA (its own
+    structured-output path, not measured) and stand-ins return False without this
+    module importing langchain_openai.
+    """
+    client = getattr(llm, "bound", llm)
+    if type(client).__name__ != "ChatOpenAI":
+        return False
+    template = (getattr(client, "extra_body", None) or {}).get("chat_template_kwargs")
+    return (template or {}).get("enable_thinking") is False
 
 
 def invoke_text(llm: BaseChatModel, prompt: str) -> str:

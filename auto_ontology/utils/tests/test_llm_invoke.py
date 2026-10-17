@@ -65,6 +65,62 @@ def test_other_models_keep_the_langchain_default() -> None:
         assert _structured_output_kwargs(_Model(name)) == {}
 
 
+class ChatOpenAI(_Model):
+    """Stand-in matched by class name, as the real client is."""
+
+    def __init__(self, model_name: str, thinking: bool | None = None) -> None:
+        super().__init__(model_name)
+        self.extra_body = (
+            None
+            if thinking is None
+            else {"chat_template_kwargs": {"enable_thinking": thinking}}
+        )
+
+
+class _Binding:
+    """Stand-in for what ``llm.bind(...)`` returns: the client under ``bound``."""
+
+    def __init__(self, bound: Any) -> None:
+        self.bound = bound
+        self.model_name = bound.model_name
+
+
+_LIGHTNING = "nvidia/nvidia/nemotron-3.5-lightning"
+
+
+def test_nemotron_with_thinking_off_uses_tool_calling() -> None:
+    """Its json_schema answers stall in whitespace until max_tokens.
+
+    Measured on 97 real prompts x5 with thinking off: 12.0% of json_schema calls
+    ran to the cap, against 1.6% with tool calling.
+    """
+    kwargs = _structured_output_kwargs(ChatOpenAI(_LIGHTNING, thinking=False))
+
+    assert kwargs == {"method": "function_calling"}
+
+
+def test_nemotron_with_thinking_on_keeps_json_schema() -> None:
+    """With thinking on, tool calls ran on unseen to the cap 15 times in 15."""
+    assert _structured_output_kwargs(ChatOpenAI(_LIGHTNING, thinking=True)) == {}
+    assert _structured_output_kwargs(ChatOpenAI(_LIGHTNING)) == {}
+
+
+def test_a_bound_client_is_seen_through() -> None:
+    """The anchor-column call sends ``llm.bind(max_tokens=...)``."""
+    bound = _Binding(ChatOpenAI(_LIGHTNING, thinking=False))
+
+    assert _structured_output_kwargs(bound) == {"method": "function_calling"}
+
+
+def test_nemotron_on_chat_nvidia_keeps_the_default() -> None:
+    """ChatNVIDIA has its own structured-output path, which was not measured."""
+    assert _structured_output_kwargs(_Model("nvidia/nemotron-3-nano-30b-a3b")) == {}
+
+
+def test_other_models_with_thinking_off_keep_the_default() -> None:
+    assert _structured_output_kwargs(ChatOpenAI("openai/gpt-5", thinking=False)) == {}
+
+
 def test_a_client_exposing_model_instead_of_model_name_still_matches() -> None:
     """Some langchain clients expose `model` rather than `model_name`."""
 
