@@ -366,6 +366,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         ),  # copy so Auto Ontology doesn't mutate in place
         "acronyms": [],
         "custom_prompts": combined_knowledge,  # full union as low-priority fallback
+        "calculation_only": True,
+        "shorten_answer": True,
+        "validate_sql_values": True,
+        "skip_evidence_refinement": session.skip_evidence_refinement,
     }
     result = get_agent_response_with_state(payload)
 
@@ -421,6 +425,7 @@ def create_session(
     connectors: list,
     max_clarify_turns: int = 5,
     external_kb_children_map: dict | None = None,
+    skip_evidence_refinement: bool = False,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -432,6 +437,7 @@ def create_session(
         working_question=question,
         max_clarify_turns=max_clarify_turns,
         external_kb_children_map=external_kb_children_map or {},
+        skip_evidence_refinement=skip_evidence_refinement,
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,

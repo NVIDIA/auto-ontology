@@ -47,6 +47,7 @@ class TextToSQLPayload(TypedDict):
     calculation_only: NotRequired[bool]
     shorten_answer: NotRequired[bool]
     validate_sql_values: NotRequired[bool]
+    skip_evidence_refinement: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -88,6 +89,7 @@ class AgentState(TypedDict):
     calculation_only: bool
     shorten_answer: bool
     validate_sql_values: bool
+    skip_evidence_refinement: bool
     sql_value_validation_cache: dict
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]

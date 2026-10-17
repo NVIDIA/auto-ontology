@@ -225,6 +225,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "calculation_only": calculation_only,
         "shorten_answer": payload.get("shorten_answer", False),
         "validate_sql_values": payload.get("validate_sql_values", False),
+        "skip_evidence_refinement": payload.get("skip_evidence_refinement", False),
         "sql_value_validation_cache": {},
         "enriched_question": payload.get("enriched_question") or "",
         "connectors": connectors,

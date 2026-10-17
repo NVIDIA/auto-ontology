@@ -239,7 +239,10 @@ def route_reconstructed_sql(state: AgentState) -> str:
 
 def route_evidence_refinement(state: AgentState) -> str:
     """Run schema-aware evidence refinement only when evidence is present."""
-    if (state.get("evidence") or "").strip():
+    if (
+        not state.get("skip_evidence_refinement", False)
+        and (state.get("evidence") or "").strip()
+    ):
         return "refine_evidence"
     return "construct_sql_from_candidates"
 

@@ -671,6 +671,15 @@ def test_evidence_routing_runs_only_on_evidence_bearing_sql_paths() -> None:
         "construct_sql_from_candidates"
     )
     assert (
+        route_evidence_refinement(
+            {
+                "evidence": "status = 'Active'",
+                "skip_evidence_refinement": True,
+            }
+        )
+        == "construct_sql_from_candidates"
+    )
+    assert (
         route_question_type_or_evidence(
             {
                 "path_state": {"question_type": "calculation"},

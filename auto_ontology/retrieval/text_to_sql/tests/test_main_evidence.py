@@ -150,6 +150,28 @@ def test_build_state_propagates_validate_sql_values(
     ("payload_value", "expected"),
     [(None, False), (True, True), (False, False)],
 )
+def test_build_state_propagates_skip_evidence_refinement(
+    main_module: ModuleType,
+    payload_value: bool | None,
+    expected: bool,
+) -> None:
+    payload = {
+        "question": "How many accounts?",
+        "data_retriever": object(),
+        "connectors": [SimpleNamespace(dialect="sqlite", database_name="db_test")],
+    }
+    if payload_value is not None:
+        payload["skip_evidence_refinement"] = payload_value
+
+    state = main_module._build_state(cast(TextToSQLPayload, payload))
+
+    assert state["skip_evidence_refinement"] is expected
+
+
+@pytest.mark.parametrize(
+    ("payload_value", "expected"),
+    [(None, False), (True, True), (False, False)],
+)
 def test_build_state_propagates_calculation_only(
     main_module: ModuleType,
     payload_value: bool | None,

@@ -133,3 +133,189 @@ def test_an_exception_inside_the_block_still_releases_the_bound() -> None:
             assert _bound() == 3
             raise RuntimeError("boom")
     assert _bound() is None
+
+
+class _Schema:
+    """Stand-in schema; the structured-invoke mock never validates it."""
+
+
+class _Binding:
+    """Stand-in for ``llm.bind()``, which wraps the client as ``bound``."""
+
+    def __init__(self, bound: object) -> None:
+        self.bound = bound
+
+
+def test_non_reasoning_client_is_marked(monkeypatch: Any) -> None:
+    sentinel = object()
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "sk-test")
+    monkeypatch.setattr(llm_invoke, "_build_client", lambda **_kwargs: sentinel)
+
+    client = llm_invoke.get_non_reasoning_llm_client()
+
+    assert client is sentinel
+    assert llm_invoke._is_non_reasoning_client(client)
+    assert llm_invoke._is_non_reasoning_client(_Binding(client))
+    assert not llm_invoke._is_non_reasoning_client(object())
+    assert not llm_invoke._is_non_reasoning_client(_Binding(object()))
+
+
+def test_structured_non_reasoning_call_falls_back_to_reasoning(
+    monkeypatch: Any,
+) -> None:
+    primary = object()
+    reasoning = object()
+    llm_invoke._remember_non_reasoning(primary)
+    calls: list[object] = []
+
+    def invoke(llm: object, _messages: object, _schema: object) -> str:
+        calls.append(llm)
+        if llm is primary:
+            raise RuntimeError("429 Too Many Requests")
+        return "from-reasoning"
+
+    monkeypatch.setattr(llm_invoke, "safe_invoke_with_structured_output", invoke)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    result = llm_invoke.invoke_with_structured_output(primary, [], _Schema)
+
+    assert result == "from-reasoning"
+    assert calls == [primary, reasoning]
+
+
+def test_bound_non_reasoning_client_falls_back(monkeypatch: Any) -> None:
+    primary = object()
+    reasoning = object()
+    binding = _Binding(primary)
+    llm_invoke._remember_non_reasoning(primary)
+    calls: list[object] = []
+
+    def invoke(llm: object, _messages: object, _schema: object) -> str:
+        calls.append(llm)
+        if llm is not reasoning:
+            raise RuntimeError("down")
+        return "ok"
+
+    monkeypatch.setattr(llm_invoke, "safe_invoke_with_structured_output", invoke)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    result = llm_invoke.invoke_with_structured_output(binding, [], _Schema)
+
+    assert result == "ok"
+    assert calls == [binding, reasoning]
+
+
+def test_structured_fallback_returns_none_when_reasoning_also_fails(
+    monkeypatch: Any,
+) -> None:
+    primary = object()
+    reasoning = object()
+    llm_invoke._remember_non_reasoning(primary)
+    calls: list[object] = []
+
+    def invoke(llm: object, _messages: object, _schema: object) -> None:
+        calls.append(llm)
+        raise RuntimeError("429")
+
+    monkeypatch.setattr(llm_invoke, "safe_invoke_with_structured_output", invoke)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "sk-test")
+    monkeypatch.setattr(llm_invoke, "_build_client", lambda **_kwargs: primary)
+
+    result = llm_invoke.safe_invoke_structured_nr([], _Schema)
+
+    assert result is None
+    assert calls == [primary, reasoning]
+
+
+def test_reasoning_structured_call_does_not_switch_models(monkeypatch: Any) -> None:
+    reasoning = object()
+
+    def invoke(_llm: object, _messages: object, _schema: object) -> None:
+        raise RuntimeError("429")
+
+    def fail_client(**_kwargs: object) -> object:
+        raise AssertionError("reasoning call must not build a fallback client")
+
+    monkeypatch.setattr(llm_invoke, "safe_invoke_with_structured_output", invoke)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", fail_client)
+
+    assert llm_invoke.invoke_with_structured_output(reasoning, [], _Schema) is None
+
+
+def test_text_non_reasoning_call_falls_back_once(monkeypatch: Any) -> None:
+    primary = object()
+    reasoning = object()
+    llm_invoke._remember_non_reasoning(primary)
+    calls: list[object] = []
+
+    def once(llm: object, _prompt: str) -> str:
+        calls.append(llm)
+        if llm is primary:
+            raise RuntimeError("connection error")
+        return "ok"
+
+    monkeypatch.setattr(llm_invoke, "_safe_invoke_text", once)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    assert llm_invoke.safe_invoke_text(primary, "question") == "ok"
+    assert calls == [primary, reasoning]
+
+
+def test_text_fallback_is_not_attempted_twice(monkeypatch: Any) -> None:
+    primary = object()
+    reasoning = object()
+    calls: list[object] = []
+
+    def once(llm: object, _prompt: str) -> str:
+        calls.append(llm)
+        raise RuntimeError("429")
+
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_API_KEY", "sk-test")
+    monkeypatch.setattr(llm_invoke, "_build_client", lambda **_kwargs: primary)
+    monkeypatch.setattr(llm_invoke, "_safe_invoke_text", once)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    try:
+        llm_invoke.safe_invoke_text_nr("question")
+    except RuntimeError as exc:
+        assert "429" in str(exc)
+    else:
+        raise AssertionError("both models failing must raise")
+
+    assert calls == [primary, reasoning]
+
+
+def test_invoke_text_falls_back_for_a_non_reasoning_client(monkeypatch: Any) -> None:
+    primary = object()
+    reasoning = object()
+    llm_invoke._remember_non_reasoning(primary)
+    calls: list[object] = []
+
+    def once(llm: object, _prompt: str) -> str:
+        calls.append(llm)
+        if llm is primary:
+            raise RuntimeError("down")
+        return "pql"
+
+    monkeypatch.setattr(llm_invoke, "_invoke_text_once", once)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+
+    assert llm_invoke.invoke_text(primary, "predict") == "pql"
+    assert calls == [primary, reasoning]
+
+
+def test_missing_reasoning_client_keeps_the_original_failure(monkeypatch: Any) -> None:
+    primary = object()
+    llm_invoke._remember_non_reasoning(primary)
+
+    def invoke(_llm: object, _messages: object, _schema: object) -> None:
+        raise RuntimeError("429")
+
+    def unavailable(**_kwargs: object) -> object:
+        raise EnvironmentError("REASONING_API_KEY is not set")
+
+    monkeypatch.setattr(llm_invoke, "safe_invoke_with_structured_output", invoke)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
+
+    assert llm_invoke.invoke_with_structured_output(primary, [], _Schema) is None
