@@ -10,14 +10,19 @@ import time
 from typing import Any
 
 import pytest
+from langchain_core.exceptions import OutputParserException
+from langchain_core.messages import HumanMessage
+from pydantic import BaseModel
 
 from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import (
+    RETRY_MAX_ATTEMPTS,
     _build_client,
     _client_kind,
     _structured_output_kwargs,
     _template_kwargs,
     max_tokens_for,
+    safe_invoke_with_structured_output,
 )
 
 
@@ -290,3 +295,70 @@ def test_openai_client_sends_no_extra_body_by_default(
 
     assert client.max_tokens == 8192
     assert not client.extra_body
+
+
+# ── Retrying cut-off and unparseable answers ──────────────────────────────────
+
+
+class LengthFinishReasonError(Exception):
+    """Stand-in for openai's: it is matched by name, and the real one needs a completion."""
+
+
+class _Answer(BaseModel):
+    value: str
+
+
+class _ScriptedLLM:
+    """A client whose structured calls play back *outcomes*: an exception to raise, or a result."""
+
+    model_name = "nvidia/nvidia/nemotron-3.5-lightning"
+
+    def __init__(self, outcomes: list[Any]) -> None:
+        self.outcomes = list(outcomes)
+        self.calls = 0
+
+    def with_structured_output(self, schema: Any, **kwargs: Any) -> "_ScriptedLLM":
+        return self
+
+    def invoke(self, messages: Any) -> Any:
+        self.calls += 1
+        outcome = self.outcomes.pop(0)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+
+_QUESTION = [HumanMessage(content="q")]
+
+
+def test_a_cut_off_answer_is_retried() -> None:
+    """A capped answer is a bad draw: the whitespace runaway rarely repeats."""
+    llm = _ScriptedLLM([LengthFinishReasonError(), _Answer(value="ok")])
+
+    result = safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    assert result == _Answer(value="ok")
+    assert llm.calls == 2
+
+
+def test_an_unparseable_tool_call_is_retried() -> None:
+    llm = _ScriptedLLM([OutputParserException("bad args"), _Answer(value="ok")])
+
+    assert safe_invoke_with_structured_output(llm, _QUESTION, _Answer).value == "ok"  # type: ignore[arg-type]
+    assert llm.calls == 2
+
+
+def test_a_cut_off_answer_every_time_gives_up_after_all_attempts() -> None:
+    llm = _ScriptedLLM([LengthFinishReasonError() for _ in range(RETRY_MAX_ATTEMPTS)])
+
+    with pytest.raises(LengthFinishReasonError):
+        safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+    assert llm.calls == RETRY_MAX_ATTEMPTS
+
+
+def test_a_non_retryable_error_still_stops_at_once() -> None:
+    llm = _ScriptedLLM([KeyError("boom"), _Answer(value="unreached")])
+
+    with pytest.raises(KeyError):
+        safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+    assert llm.calls == 1

@@ -182,6 +182,19 @@ def _is_retryable(e: Exception) -> bool:
     )
 
 
+# The model answered, but nothing usable came back: ChatOpenAI raises
+# LengthFinishReasonError when a json_schema answer hits max_tokens, and
+# OutputParserException when tool-call arguments do not parse (a truncated call
+# among them). Matched by name, like the types above, so ChatNVIDIA-only
+# installs need not import openai.
+_UNUSABLE_OUTPUT_TYPES = frozenset({"LengthFinishReasonError", "OutputParserException"})
+
+
+def _is_unusable_output(e: Exception) -> bool:
+    """Whether *e* is a completed call whose output was cut off or did not parse."""
+    return type(e).__name__ in _UNUSABLE_OUTPUT_TYPES
+
+
 class _TimeoutSession(_requests.Session):
     """requests.Session that enforces a default timeout on every request."""
 
@@ -520,6 +533,26 @@ def safe_invoke_with_structured_output(
                 )
                 raise
         except Exception as e:
+            if _is_unusable_output(e):
+                # Sampled again, the model usually finishes: a cut-off answer is a
+                # bad draw, not a bad request, so this retries at once and fresh.
+                if attempt < RETRY_MAX_ATTEMPTS - 1:
+                    logger.warning(
+                        "Unusable output for %s on attempt %d/%d (%s) — retrying",
+                        schema_name,
+                        attempt + 1,
+                        RETRY_MAX_ATTEMPTS,
+                        type(e).__name__,
+                    )
+                    current_messages = _ensure_non_system_message(messages.copy())
+                    continue
+                logger.error(
+                    "Unusable output for %s on all %d attempts (%s)",
+                    schema_name,
+                    RETRY_MAX_ATTEMPTS,
+                    type(e).__name__,
+                )
+                raise
             is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
@@ -566,8 +599,9 @@ def invoke_with_structured_output(
         schema_name = getattr(schema, "__name__", str(schema))
         return safe_invoke_with_structured_output(llm, messages, schema)
     except Exception as e:
+        # No attempt count: a non-retryable error stops after the first one.
         logger.error(
-            f"invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "
+            f"invoke_with_structured_output failed for {schema_name}: "
             f"{type(e).__name__}: {e}",
             exc_info=True,
         )
@@ -587,8 +621,7 @@ def safe_invoke_text_nr(prompt: str) -> str:
         return safe_invoke_text(llm, prompt)
     except Exception as e:
         logger.warning(
-            "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS,
+            "Non-reasoning LLM failed (%s: %s) — falling back to reasoning LLM",
             type(e).__name__,
             str(e)[:120],
         )
@@ -606,8 +639,7 @@ def safe_invoke_structured_nr(
     except Exception as e:
         schema_name = getattr(schema, "__name__", str(schema))
         logger.warning(
-            "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS,
+            "Non-reasoning LLM failed for %s (%s: %s) — falling back to reasoning LLM",
             schema_name,
             type(e).__name__,
             str(e)[:120],
