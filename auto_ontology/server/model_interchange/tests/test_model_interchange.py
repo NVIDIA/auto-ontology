@@ -425,7 +425,7 @@ def test_export_model_ossie_format_emits_ossie_document(
 
     assert "data_layer" not in payload
     model = payload
-    assert [dataset["name"] for dataset in model["datasets"]] == ["Order"]
+    assert [dataset["name"] for dataset in model["datasets"]] == ["order"]
     assert model["datasets"][0]["source"] == "retail.main.orders"
 
 
@@ -592,12 +592,12 @@ def test_export_model_ossie_keeps_one_table_per_term(
     )
 
     datasets = payload["datasets"]
-    assert [dataset["name"] for dataset in datasets] == ["Category"]
+    assert [dataset["name"] for dataset in datasets] == ["category"]
     assert datasets[0]["source"] == "retail.main.categories"
     # The primary-key column no attribute exposes is exported as a field too.
     assert [field["name"] for field in datasets[0]["fields"]] == [
-        "category id",
-        "category id again",
+        "category_id",
+        "category_id_again",
         "id",
     ]
 
