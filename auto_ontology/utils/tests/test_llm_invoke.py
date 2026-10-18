@@ -17,9 +17,11 @@ from auto_ontology.utils.llm_invoke import _structured_output_kwargs
 
 
 @pytest.fixture(autouse=True)
-def _isolate_non_reasoning_client_ids(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Prevent non-weak-referenceable test client IDs from leaking across tests."""
+def _isolate_fallback_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent client identities and cached fallback clients leaking across tests."""
     monkeypatch.setattr(llm_invoke, "_NON_REASONING_IDS", set())
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_STRONG_REFS", {})
+    monkeypatch.setattr(llm_invoke, "_REASONING_FALLBACK_CLIENT", None)
 
 
 class _Model:
@@ -174,6 +176,21 @@ def test_endless_bound_chain_is_not_followed_forever() -> None:
     assert not llm_invoke._is_non_reasoning_client(MagicMock())
 
 
+def test_non_weakref_client_id_cannot_match_an_unrelated_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = object()
+    registered = object()
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_IDS", {id(candidate)})
+    monkeypatch.setattr(
+        llm_invoke,
+        "_NON_REASONING_STRONG_REFS",
+        {id(candidate): registered},
+    )
+
+    assert not llm_invoke._is_non_reasoning_client(candidate)
+
+
 def test_structured_non_reasoning_call_falls_back_to_reasoning(
     monkeypatch: Any,
 ) -> None:
@@ -219,6 +236,26 @@ def test_bound_non_reasoning_client_falls_back(monkeypatch: Any) -> None:
     assert calls == [binding, reasoning]
 
 
+def test_reasoning_fallback_client_is_reused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = object()
+    second = object()
+    reasoning = object()
+    builds: list[object] = []
+    llm_invoke._remember_non_reasoning(first)
+    llm_invoke._remember_non_reasoning(second)
+    monkeypatch.setattr(
+        llm_invoke,
+        "get_llm_client",
+        lambda **_kwargs: builds.append(reasoning) or reasoning,
+    )
+
+    assert llm_invoke._reasoning_fallback_client(first) is reasoning
+    assert llm_invoke._reasoning_fallback_client(second) is reasoning
+    assert builds == [reasoning]
+
+
 def test_structured_fallback_returns_none_when_reasoning_also_fails(
     monkeypatch: Any,
 ) -> None:
@@ -240,6 +277,40 @@ def test_structured_fallback_returns_none_when_reasoning_also_fails(
 
     assert result is None
     assert calls == [primary, reasoning]
+
+
+def test_structured_nr_uses_reasoning_when_non_reasoning_client_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reasoning = object()
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        llm_invoke,
+        "get_non_reasoning_llm_client",
+        lambda **_kwargs: (_ for _ in ()).throw(EnvironmentError("missing key")),
+    )
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+    monkeypatch.setattr(
+        llm_invoke,
+        "safe_invoke_with_structured_output",
+        lambda llm, _messages, _schema: calls.append(llm) or "ok",
+    )
+
+    assert llm_invoke.safe_invoke_structured_nr([], _Schema) == "ok"
+    assert calls == [reasoning]
+
+
+def test_structured_nr_returns_none_when_neither_client_is_available(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def unavailable(**_kwargs: object) -> object:
+        raise EnvironmentError("missing key")
+
+    monkeypatch.setattr(llm_invoke, "get_non_reasoning_llm_client", unavailable)
+    monkeypatch.setattr(llm_invoke, "get_llm_client", unavailable)
+
+    assert llm_invoke.safe_invoke_structured_nr([], _Schema) is None
 
 
 def test_reasoning_structured_call_does_not_switch_models(monkeypatch: Any) -> None:
@@ -274,6 +345,28 @@ def test_text_non_reasoning_call_falls_back_once(monkeypatch: Any) -> None:
 
     assert llm_invoke.safe_invoke_text(primary, "question") == "ok"
     assert calls == [primary, reasoning]
+
+
+def test_text_nr_uses_reasoning_when_non_reasoning_client_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reasoning = object()
+    calls: list[object] = []
+
+    monkeypatch.setattr(
+        llm_invoke,
+        "get_non_reasoning_llm_client",
+        lambda **_kwargs: (_ for _ in ()).throw(EnvironmentError("missing key")),
+    )
+    monkeypatch.setattr(llm_invoke, "get_llm_client", lambda **_kwargs: reasoning)
+    monkeypatch.setattr(
+        llm_invoke,
+        "_safe_invoke_text",
+        lambda llm, _prompt: calls.append(llm) or "ok",
+    )
+
+    assert llm_invoke.safe_invoke_text_nr("question") == "ok"
+    assert calls == [reasoning]
 
 
 def test_text_fallback_is_not_attempted_twice(monkeypatch: Any) -> None:

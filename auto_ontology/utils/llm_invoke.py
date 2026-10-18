@@ -316,6 +316,9 @@ def get_non_reasoning_llm_client(
 # non-reasoning client that happens to share its configuration. ``.bind()``
 # returns a wrapper whose ``bound`` is the client registered here.
 _NON_REASONING_IDS: set[int] = set()
+_NON_REASONING_STRONG_REFS: dict[int, object] = {}
+_REASONING_FALLBACK_CLIENT: BaseChatModel | None = None
+_REASONING_FALLBACK_LOCK = threading.Lock()
 
 # How many ``bound`` links to follow. Real ``.bind()`` chains are a level or two
 # deep; the cap stops the walk on objects whose ``bound`` never ends — a
@@ -330,8 +333,9 @@ def _remember_non_reasoning(client: object) -> None:
     try:
         weakref.finalize(client, _NON_REASONING_IDS.discard, client_id)
     except TypeError:
-        # No weak-reference support. The id then stays for the process lifetime.
-        return
+        # Keep non-weak-referenceable clients alive so Python cannot reuse their
+        # registered id for an unrelated reasoning client.
+        _NON_REASONING_STRONG_REFS[client_id] = client
 
 
 def _is_non_reasoning_client(llm: object) -> bool:
@@ -339,12 +343,24 @@ def _is_non_reasoning_client(llm: object) -> bool:
     current = llm
     for _ in range(_MAX_BINDING_DEPTH):
         if id(current) in _NON_REASONING_IDS:
-            return True
+            registered = _NON_REASONING_STRONG_REFS.get(id(current))
+            if registered is None or registered is current:
+                return True
         bound = getattr(current, "bound", None)
         if bound is None or isinstance(bound, (str, bytes, int, float, bool)):
             return False
         current = bound
     return False
+
+
+def _get_reasoning_fallback_client() -> BaseChatModel:
+    """Build the default reasoning fallback once and reuse its connection pool."""
+    global _REASONING_FALLBACK_CLIENT
+    if _REASONING_FALLBACK_CLIENT is None:
+        with _REASONING_FALLBACK_LOCK:
+            if _REASONING_FALLBACK_CLIENT is None:
+                _REASONING_FALLBACK_CLIENT = get_llm_client()
+    return _REASONING_FALLBACK_CLIENT
 
 
 def _reasoning_fallback_client(llm: object) -> BaseChatModel | None:
@@ -355,7 +371,7 @@ def _reasoning_fallback_client(llm: object) -> BaseChatModel | None:
     if not _is_non_reasoning_client(llm):
         return None
     try:
-        return get_llm_client()
+        return _get_reasoning_fallback_client()
     except Exception:
         logger.warning(
             "Non-reasoning LLM failed and the reasoning LLM client could not be created",
@@ -642,7 +658,12 @@ def safe_invoke_text_nr(prompt: str) -> str:
     ``safe_invoke_text`` retries, then falls back to the reasoning model for
     that single call when the non-reasoning endpoint stays down.
     """
-    return safe_invoke_text(get_non_reasoning_llm_client(), prompt)
+    try:
+        client = get_non_reasoning_llm_client()
+    except Exception as exc:
+        _log_non_reasoning_fallback(exc)
+        client = _get_reasoning_fallback_client()
+    return safe_invoke_text(client, prompt)
 
 
 def safe_invoke_structured_nr(
@@ -654,6 +675,19 @@ def safe_invoke_structured_nr(
     ``invoke_with_structured_output`` retries, then falls back to the reasoning
     model for that single call. Returns ``None`` when both models fail.
     """
-    return invoke_with_structured_output(
-        get_non_reasoning_llm_client(), messages, schema
-    )
+    try:
+        client = get_non_reasoning_llm_client()
+    except Exception as exc:
+        schema_name = getattr(schema, "__name__", str(schema))
+        _log_non_reasoning_fallback(exc, schema_name)
+        try:
+            client = _get_reasoning_fallback_client()
+        except Exception as fallback_exc:
+            logger.error(
+                "Reasoning LLM also failed for %s: %s: %s",
+                schema_name,
+                type(fallback_exc).__name__,
+                str(fallback_exc)[:120],
+            )
+            return None
+    return invoke_with_structured_output(client, messages, schema)
