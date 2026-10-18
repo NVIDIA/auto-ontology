@@ -246,7 +246,9 @@ def test_demoting_a_user_releases_objects_they_can_no_longer_own(
     admin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(owners.postgres_dal, "get_user_role", lambda user_id: "viewer")
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: "viewer"
+    )
 
     def _release(account_id: str, *, catalog: bool, zone: bool) -> None:
         seen["account_id"] = account_id
@@ -265,7 +267,9 @@ def test_an_admin_role_keeps_ownership(
     admin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seen: dict[str, Any] = {}
-    monkeypatch.setattr(owners.postgres_dal, "get_user_role", lambda user_id: "admin")
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: "admin"
+    )
 
     def _release(account_id: str, *, catalog: bool, zone: bool) -> None:
         seen["catalog"] = catalog
@@ -278,10 +282,31 @@ def test_an_admin_role_keeps_ownership(
     assert seen == {"catalog": False, "zone": False}
 
 
+def test_a_role_lookup_failure_is_not_a_missing_user(
+    admin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _lookup(user_id: str, *, strict: bool = False) -> str | None:
+        if strict:
+            raise RuntimeError("database unavailable")
+        return None
+
+    monkeypatch.setattr(owners.postgres_dal, "get_user_role", _lookup)
+    monkeypatch.setattr(
+        owners.owners_dal,
+        "release_account",
+        lambda *_args, **_kwargs: pytest.fail("an outage must not clear rows"),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        release_user_ownership("alice", _request("admin-1"))
+
+
 def test_releasing_a_missing_user_does_not_clear_rows(
     admin: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(owners.postgres_dal, "get_user_role", lambda user_id: None)
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: None
+    )
     monkeypatch.setattr(
         owners.owners_dal,
         "release_account",

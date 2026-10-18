@@ -7,7 +7,7 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 
 type Ctx = { params: Promise<{ user_id: string }> };
 
-// usersApi.releaseOwnership — after a role change, drop this account from objects it can no longer own.
+// After a role change, drop this account from objects it can no longer own.
 export const POST = withPermission<Ctx>({ user: ['set-role'] })((req, { user }) =>
 	proxyToBackend(req, { userId: user.id }),
 );

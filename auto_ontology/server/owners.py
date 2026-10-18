@@ -145,11 +145,12 @@ ZONE_MANAGE = "zone:manage"
 def release_account_for_role(user_id: str) -> None:
     """Clear rows this account can no longer own under its current role.
 
-    The role is read from the account table. ``None`` — no such account, or
-    the read failed — does not clear anything. A group that owns a row is a
+    The role is read from the account table. A missing account is 404 and
+    nothing is cleared. A failure to read the role propagates, so an outage
+    is not reported as a missing account. A group that owns a row is a
     different id and is left in place.
     """
-    role = postgres_dal.get_user_role(user_id)
+    role = postgres_dal.get_user_role(user_id, strict=True)
     if role is None:
         raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
     granted = set(permissions_for_role(role))

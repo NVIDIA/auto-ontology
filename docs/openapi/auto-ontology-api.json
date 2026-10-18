@@ -7855,7 +7855,7 @@
     },
     "/api/users/{user_id}/ownership": {
       "post": {
-        "description": "usersApi.releaseOwnership — after a role change, drop this account from objects it can no longer own.",
+        "description": "After a role change, drop this account from objects it can no longer own.",
         "operationId": "post_api_users_user_id_ownership",
         "parameters": [
           {

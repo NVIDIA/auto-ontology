@@ -293,7 +293,8 @@ def release_user_ownership(user_id: str, request: Request) -> dict:
     databases, schemas, tables, terms, and sql attributes. A role without
     ``zone:manage`` is cleared as a zone owner and removed from zone members.
     A group that owns a row is left in place. Requires the admin role.
-    Returns 404 when the account is missing.
+    Returns 404 when the account is missing. A failure to read the role is
+    a server error, not a missing account.
     """
     _require_admin(request)
     release_account_for_role(user_id)
