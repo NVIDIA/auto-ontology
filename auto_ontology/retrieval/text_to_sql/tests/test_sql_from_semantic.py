@@ -80,6 +80,25 @@ def test_prompt_filters_nulls_from_nullable_projected_fields() -> None:
     assert "add an `IS NOT NULL` predicate for that field" in create_sql_user_prompt
 
 
+def test_prompt_uses_the_restricted_sql_allowlist() -> None:
+    assert "Use only the SQL keywords" in create_sql_user_prompt
+    for section in (
+        "Main query: SELECT, FROM, WHERE",
+        "Joins: INNER JOIN, LEFT JOIN, ON, AS",
+        "Clauses: BETWEEN, LIKE, LIMIT",
+        "Window operations: OVER, PARTITION BY, RANK(), DENSE_RANK()",
+        "Aggregations: AVG(), COUNT(), MAX(), MIN(), SUM()",
+        "Date and time: DATE(), DATETIME(), JULIANDAY(), STRFTIME(), NOW",
+        "Conversion: CAST(), REAL, FLOAT, INTEGER",
+        "Math: ABS(), ROUND()",
+        "Strings: LENGTH(), SUBSTR(), SUBSTRING(), INSTR()",
+        "Comparisons: =, >, <, >=, <=, !=, <>",
+        "Computing: -, +, *, /, || (string concatenation)",
+    ):
+        assert section in create_sql_user_prompt
+    assert "(INNER / LEFT / RIGHT)" not in create_sql_user_prompt
+
+
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
     combined_aggregate_rule = (

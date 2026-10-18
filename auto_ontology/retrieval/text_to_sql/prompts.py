@@ -93,7 +93,7 @@ create_sql_user_prompt = (
     "**Joins**\n"
     "- When evidence rules map to columns in different tables, include the joins "
     "that connect those tables using the listed paths. Choose the join type "
-    "(INNER / LEFT / RIGHT) from the question's intent and avoid fan-out from "
+    "(INNER / LEFT) from the question's intent and avoid fan-out from "
     "many-to-many joins.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
@@ -114,9 +114,22 @@ create_sql_user_prompt = (
     "- Review example queries for WHERE values that match the question's intent. "
     "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
     "**Dialect & Syntax**\n"
-    "- Never use :: casts, QUALIFY, DISTINCT ON, GROUP BY ALL, PIVOT, UNPIVOT, "
-    "CROSS JOIN LATERAL, LATERAL JOIN, NATURAL JOIN, implicit comma joins, "
-    "or any other vendor-specific or non-standard syntax.\n"
+    "- Use only the SQL keywords, clauses, operators, functions, and type names "
+    "listed below. Schema identifiers and literal values are also allowed.\n"
+    "  - Main query: SELECT, FROM, WHERE, DISTINCT, WITH, AND, OR, NOT, IN, "
+    "EXISTS, IS, NULL, TRUE, FALSE, IIF, CASE, WHEN, THEN, ELSE, END\n"
+    "  - Joins: INNER JOIN, LEFT JOIN, ON, AS\n"
+    "  - Clauses: BETWEEN, LIKE, LIMIT, ORDER BY, ASC, DESC, GROUP BY, HAVING, "
+    "UNION, ALL, EXCEPT\n"
+    "  - Window operations: OVER, PARTITION BY, RANK(), DENSE_RANK()\n"
+    "  - Aggregations: AVG(), COUNT(), MAX(), MIN(), SUM()\n"
+    "  - Date and time: DATE(), DATETIME(), JULIANDAY(), STRFTIME(), NOW, "
+    "CURRENT_TIMESTAMP\n"
+    "  - Conversion: CAST(), REAL, FLOAT, INTEGER\n"
+    "  - Math: ABS(), ROUND()\n"
+    "  - Strings: LENGTH(), SUBSTR(), SUBSTRING(), INSTR()\n"
+    "  - Comparisons: =, >, <, >=, <=, !=, <>\n"
+    "  - Computing: -, +, *, /, || (string concatenation)\n"
     "- Preserve the exact capitalization of values, names, and identifiers "
     "from the user's question.\n\n"
     "{dialect_rules}"
@@ -156,12 +169,11 @@ _SQLITE_DIALECT_RULES = (
     "**SQLite-specific (STRICT — these will error at execution)**\n"
     "- No LEAST / GREATEST. Use scalar MIN(a, b, …) / MAX(a, b, …) instead.\n"
     "- No spatial / PostGIS functions (ST_Distance, ST_X, ST_Y, ST_DWithin, "
-    "POINT, distance(), …). Compute great-circle distance by hand with the "
-    "Haversine formula using sin/cos/acos/radians/sqrt (all available).\n"
+    "POINT, distance(), …) or trigonometric functions.\n"
     "- No statistical aggregates (STDDEV, STDDEV_POP, VARIANCE, VAR_POP, "
     "PERCENTILE_CONT, PERCENTILE_DISC, MEDIAN, CORR, REGR_*). Derive them with "
     "plain arithmetic (AVG, SUM, COUNT, window functions).\n"
-    "- No STRING_AGG / ARRAY_AGG — use GROUP_CONCAT. No generate_series.\n"
+    "- No STRING_AGG / ARRAY_AGG / GROUP_CONCAT or generate_series.\n"
     "- No EXTRACT(...) / DATE_TRUNC / DATE_PART / AGE / NOW() / INTERVAL "
     "literals. Use strftime(), date(), datetime() for all date/time work.\n"
     "- No :: casts and no ILIKE. Use CAST(x AS type); LIKE is case-insensitive "
@@ -169,19 +181,18 @@ _SQLITE_DIALECT_RULES = (
     "- Coordinates and other composite columns are stored as TEXT, not JSON or "
     "arrays. Do NOT use json_extract on non-JSON text — inspect the value shape "
     "and parse with substr()/instr()/CAST as needed.\n"
-    "- Prefer built-in aggregate/math functions and window functions only.\n\n"
+    "- Use only the functions and window operations in the generic allowlist.\n\n"
 )
 
 
 # Snowflake folds unquoted identifiers to UPPERCASE. Datasets loaded from
 # BigQuery/Google-public-data (e.g. Spider2 PATENTS) keep their original
 # lowercase, case-sensitive column names, so an unquoted/upper reference raises
-# "invalid identifier". Nested BigQuery RECORD/REPEATED fields land as VARIANT
-# arrays that need LATERAL FLATTEN to unnest.
+# "invalid identifier". Nested fields cannot be expanded under the restricted
+# SQL syntax allowlist.
 _SNOWFLAKE_DIALECT_RULES = (
-    "**Snowflake-specific (STRICT — these OVERRIDE the generic syntax bans above)**\n"
-    "- The general rule against `::` casts and LATERAL joins does NOT apply here: "
-    "Snowflake REQUIRES `::type` casts and `LATERAL FLATTEN` to read VARIANT data.\n"
+    "**Snowflake-specific (STRICT — the generic syntax allowlist still applies)**\n"
+    "- Do not use `::` casts, LATERAL joins, FLATTEN, or path syntax.\n"
     "- Identifiers are CASE-SENSITIVE when quoted, and Snowflake folds unquoted "
     "names to UPPERCASE. The schema above lists the real stored names. Wrap every "
     "table and column identifier in double quotes using the EXACT case shown, e.g. "
@@ -189,13 +200,9 @@ _SNOWFLAKE_DIALECT_RULES = (
     "Never reference a lowercase column unquoted — it will fail as 'invalid identifier'.\n"
     "- Aliases you define may stay unquoted; only real table/column names need the "
     "exact-case double quotes.\n"
-    "- VARIANT / ARRAY / OBJECT columns hold nested (semi-structured) data. To read "
-    "fields inside them, use LATERAL FLATTEN: "
-    '`FROM "T", LATERAL FLATTEN(input => "T"."assignee_harmonized") f` then '
-    'access `f.value:"name"::string`. Selecting a VARIANT column directly returns '
-    "the whole JSON, not scalar fields.\n"
-    "- Use `:` / `[...]` path syntax for OBJECT fields and `::type` casts on the "
-    'extracted values (e.g. `f.value:"name"::string`).\n'
+    "- VARIANT / ARRAY / OBJECT columns hold nested values that cannot be expanded "
+    "with the allowed syntax. Prefer scalar columns mapped by the schema rather "
+    "than inventing unsupported unnesting or path expressions.\n"
     "- Date columns loaded from BigQuery are often integer epoch/`YYYYMMDD` NUMBERs, "
     "not DATE types — check the sample values and cast/parse accordingly.\n\n"
 )
@@ -275,10 +282,13 @@ def create_sql_from_candidates_prompt(
             "- Use table names exactly as shown in AVAILABLE TABLES "
             "(unqualified — do NOT add a schema or database prefix).\n"
         )
-        join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
+        join_template = (
+            "    INNER JOIN target_table "
+            "ON source_table.source_column = target_table.target_column"
+        )
         example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
 FROM sales AS s
-JOIN customers AS c ON s.customer_id = c.customer_id
+INNER JOIN customers AS c ON s.customer_id = c.customer_id
 WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
@@ -289,15 +299,14 @@ ORDER BY total_sales DESC;"""
             "add a database-name prefix.\n"
         )
         join_template = (
-            "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
+            "    INNER JOIN target_schema.target_table "
+            "ON source_schema.source_table.source_column\n"
             "         = target_schema.target_table.target_column"
         )
         example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
 FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
+INNER JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
+WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
 GROUP BY c.country_name
 ORDER BY total_sales DESC;"""
 
