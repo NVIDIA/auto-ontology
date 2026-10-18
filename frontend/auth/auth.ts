@@ -50,6 +50,7 @@ const prisma = getPrisma();
 const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
 
 const OWNERSHIP_CLEANUP_FAILED = 'The role was saved, but owned objects could not be updated.';
+const OWNERSHIP_CLEANUP_TIMEOUT_MS = 8_000;
 
 /** The account whose role this admin request writes, when it writes one. */
 const roleChangeUserId = (path: string | undefined, body: unknown): string | null => {
@@ -87,6 +88,7 @@ const releaseOwnership = async (userId: string, actorId: string): Promise<void> 
 					Accept: 'application/json',
 					...buildInternalIdentityHeaders(actorId),
 				},
+				signal: AbortSignal.timeout(OWNERSHIP_CLEANUP_TIMEOUT_MS),
 			},
 		);
 	} catch {
