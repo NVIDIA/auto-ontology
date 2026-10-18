@@ -4,7 +4,11 @@
 
 import { withPermission } from '@/auth/with-auth';
 import { proxyToBackend } from '@/auth/proxy-backend';
+import { withTagAuthors } from '@/lib/tagAuthors';
 
 // termsApi.getColumnAttributes — ColumnAttribute nodes for one term (with
-// primary/referenced columns).
-export const GET = withPermission({ catalog: ['read'] })((req) => proxyToBackend(req));
+// primary/referenced columns). Authors ride along so the side panel can name
+// who last edited each attribute.
+export const GET = withPermission({ catalog: ['read'] })(async (req) =>
+	withTagAuthors(await proxyToBackend(req)),
+);

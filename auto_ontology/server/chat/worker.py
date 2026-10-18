@@ -10,7 +10,7 @@ those from another Python thread, so cancellation has to go through the
 OS via process kill — same constraint as before.
 
 What's new vs. spawn-per-request: we keep **one** subprocess alive
-between requests. It imports ``nemo_retriever`` and builds the
+between requests. It imports the agent and builds the
 retriever/connector singletons once, then loops on an input queue:
 ``("ask", question)`` → stream agent events on the output queue → idle
 again. The cold-start cost is paid at server boot and at each cancel

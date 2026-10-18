@@ -576,7 +576,7 @@ export const ExplorationView = () => {
 						schemaName: tableNode.schemaName,
 						tableId: tableNode.id,
 						tableName: tableNode.name,
-						dataType: column.data_type,
+						dataType: column.data_type ?? undefined,
 					});
 				});
 			}

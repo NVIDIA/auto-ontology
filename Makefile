@@ -21,11 +21,6 @@
 #   REGISTRY        Full nvcr.io path, e.g. nvcr.io/nvidian/sw-auto-ontology
 #                   (required for `publish*` targets)
 #   TAG             Image tag. Defaults to `git describe`.
-#   NEMO            Path to a local NeMo-Retriever clone. Defaults to
-#                   ../NeMo-Retriever. Pass NEMO=stub to build with the
-#                   committed nemo-retriever stub instead (image starts and
-#                   serves /api/health but raises NotImplementedError on
-#                   real chat/data calls).
 #   PYTHON_API_URL  Backend URL baked into the frontend's Next.js rewrites
 #                   at build time. Defaults to http://auto-ontology:3001
 #                   (matches the in-cluster service the helm chart creates).
@@ -35,20 +30,11 @@
 
 REGISTRY       ?=
 TAG            ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
-NEMO           ?= ../NeMo-Retriever
 PYTHON_API_URL ?= http://auto-ontology:3001
 PLATFORMS      ?= linux/amd64,linux/arm64
 
 BACKEND_IMAGE  := auto-ontology
 FRONTEND_IMAGE := auto-ontology-frontend
-
-# --build-context for NeMo-Retriever: pass `NEMO=stub` to skip and use the
-# committed vendor/nemo_retriever_stub/ default baked into the Dockerfile.
-ifeq ($(NEMO),stub)
-  NEMO_CTX_ARG :=
-else
-  NEMO_CTX_ARG := --build-context nemo=$(NEMO)
-endif
 
 # --tag prefix. Plain image name when REGISTRY is empty (local builds);
 # fully-qualified when REGISTRY is set (publish builds).
@@ -79,7 +65,7 @@ help:
 	@echo "  make migrate-revision m=\"...\"  Autogenerate a revision from auto_ontology/dal/schema.py"
 	@echo
 	@echo "Required for publish*: REGISTRY=nvcr.io/<org>/<team>"
-	@echo "Current REGISTRY=$(REGISTRY) TAG=$(TAG) NEMO=$(NEMO)"
+	@echo "Current REGISTRY=$(REGISTRY) TAG=$(TAG)"
 
 login:
 	@if [ -z "$(NGC_TOKEN)" ]; then \
@@ -96,7 +82,7 @@ builder:
 	@docker buildx use auto-ontology-builder
 
 build:
-	docker buildx build $(NEMO_CTX_ARG) -t $(BACKEND_REF) --load .
+	docker buildx build -t $(BACKEND_REF) --load .
 
 build-frontend:
 	docker buildx build --build-arg PYTHON_API_URL=$(PYTHON_API_URL) \
@@ -105,7 +91,7 @@ build-frontend:
 build: build build-frontend
 
 publish: require-registry builder
-	docker buildx build --platform $(PLATFORMS) $(NEMO_CTX_ARG) \
+	docker buildx build --platform $(PLATFORMS) \
 	    -t $(BACKEND_REF) --push .
 
 publish-frontend: require-registry builder

@@ -7,4 +7,6 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 
 // Anyone may list PQL analyses; only admins (analysis:manage) may add one.
 export const GET = withPermission({ analysis: ['read'] })((req) => proxyToBackend(req));
-export const POST = withPermission({ analysis: ['manage'] })((req) => proxyToBackend(req));
+export const POST = withPermission({ analysis: ['manage'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

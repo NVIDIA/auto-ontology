@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""SQLite connector implementing the NeMo-Retriever SQLDatabase ABC."""
+"""SQLite connector implementing the :class:`~auto_ontology.connectors.base.SQLDatabase` ABC."""
 
 from __future__ import annotations
 

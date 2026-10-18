@@ -5,8 +5,7 @@
 """Tests for the trusted Next.js-to-FastAPI identity contract."""
 
 import pytest
-from fastapi import HTTPException
-from starlette.requests import Request
+from fastapi import HTTPException, Request
 
 from auto_ontology.server.identity import resolve_internal_user
 

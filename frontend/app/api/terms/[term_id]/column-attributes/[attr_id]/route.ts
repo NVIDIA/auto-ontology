@@ -7,4 +7,6 @@ import { proxyToBackend } from '@/auth/proxy-backend';
 
 // Updating a ColumnAttribute changes only name/description; backend refreshes
 // the corresponding semantic VDB embedding.
-export const PATCH = withPermission({ catalog: ['edit'] })((req) => proxyToBackend(req));
+export const PATCH = withPermission({ catalog: ['edit'] })((req, { user }) =>
+	proxyToBackend(req, { userId: user.id }),
+);

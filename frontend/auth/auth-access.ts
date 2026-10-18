@@ -5,103 +5,97 @@
 import { createAccessControl } from 'better-auth/plugins/access';
 import { adminAc, defaultStatements } from 'better-auth/plugins/admin/access';
 import { Role } from '@/enums/auth';
+import access from './access.json';
 
 /**
- * Access-control statements + roles shared by the Better Auth server and client.
- * `admin` and `viewer` are the only roles. On top of the built-in `user` /
- * `session` resources (`defaultStatements`) we declare Auto Ontology's own resources, then
- * assign actions per role. Every protected API/page authorizes against these
- * (see `auth/permissions.ts`), so authorization is data here rather than scattered
- * `role === 'admin'` checks.
+ * The application's permission vocabulary. Keep the literal tuples here so
+ * Better Auth can reject misspelled actions at compile time; JSON imports widen
+ * their arrays to `string[]`.
  */
-const statement = {
-	...defaultStatements,
+const applicationStatements = {
 	analytics: ['read'],
 	acronym: ['read', 'create', 'update', 'delete'],
 	prompt: ['read', 'create', 'update', 'delete'],
 	sso: ['read', 'manage'],
 	conversation: ['read', 'write', 'delete'],
 	chat: ['use'],
-	// Custom analyses: everyone may view; only admins may add/edit/delete.
 	analysis: ['read', 'manage'],
-	// Data catalog (databases/schemas/tables/columns/nodes): browsing and
-	// editing node metadata. Editing is allowed for viewers too.
 	catalog: ['read', 'edit'],
-	// Database connections (settings): everyone may view; only admins may
-	// add/test/delete (they carry credentials).
 	connection: ['read', 'manage'],
-	// Zones (settings): everyone may view; only admins may add/edit/delete.
 	zone: ['read', 'manage'],
-	// Tags: `manage` is the vocabulary — creating and deleting tags on the
-	// settings page — and stays admin-only. `read` goes to viewers too, because
-	// the term page offers every existing tag in its picker, and applying one is
-	// guarded by `catalog: ['edit']` instead: curating the list of tags and
-	// labelling an object with one already on it are different privileges.
+	group: ['read', 'manage'],
 	tag: ['read', 'manage'],
-	// Semantic compilation (settings): admin-only toggle + manual trigger.
 	semanticCompilation: ['read', 'manage'],
-	// Agent settings: the instance-wide visualization toggle and SQL query
-	// timeout, admin-only like the other settings flags. The chat pipeline
-	// resolves both server-side, so viewers never need to read them.
 	visualization: ['read', 'manage'],
-	// PII detection (settings): admin-only toggle that gates ingest-time
-	// column classification. The ingestion service reads the stored flag
-	// directly, so viewers never need to read it.
 	pii: ['read', 'manage'],
-	// Model import/export (settings): admin-only YAML backup/restore of the
-	// catalog + semantic layer.
 	modelInterchange: ['export', 'import'],
-	// API tokens for scripting. Self-service for every role — the routes scope
-	// each call to the caller's own tokens, and a token can never exceed the
-	// permissions its owner already has.
 	apiToken: ['manage'],
+} as const satisfies Record<string, readonly string[]>;
+
+type ApplicationStatements = typeof applicationStatements;
+type ApplicationRole = {
+	[Resource in keyof ApplicationStatements]?: Array<ApplicationStatements[Resource][number]>;
+};
+
+/**
+ * Check the shared JSON before narrowing its widened `string[]` values back to
+ * the literal permission vocabulary.
+ */
+const validateRoleAccess = (role: Role, roleAccess: Record<string, string[]>): ApplicationRole => {
+	for (const [resource, actions] of Object.entries(roleAccess)) {
+		const allowedActions = applicationStatements[resource as keyof ApplicationStatements];
+		if (!allowedActions) {
+			throw new Error(`Unknown permission resource "${resource}" for role "${role}"`);
+		}
+		for (const action of actions) {
+			if (!(allowedActions as readonly string[]).includes(action)) {
+				throw new Error(
+					`Unknown action "${action}" for resource "${resource}" and role "${role}"`,
+				);
+			}
+		}
+	}
+	return roleAccess as ApplicationRole;
+};
+
+const roleAccess = {
+	[Role.Admin]: validateRoleAccess(Role.Admin, access.admin),
+	[Role.Viewer]: validateRoleAccess(Role.Viewer, access.viewer),
+} satisfies Record<Role, ApplicationRole>;
+
+/**
+ * Access-control statements + roles shared by the Better Auth server and client.
+ * `admin` and `viewer` are the only roles. Their grants live in `access.json`,
+ * which the Python API reads too when it expands a group's role; the matching
+ * permission vocabulary is declared above to retain TypeScript's literal
+ * action types. On top of that vocabulary we keep Better Auth's built-in
+ * `user` / `session` resources (`defaultStatements`, and `adminAc.statements`
+ * for the admin role). Those govern account administration and are not in the
+ * shared file: a group does not grant them.
+ *
+ * Every protected API/page authorizes against these roles (see
+ * `auth/permissions.ts`).
+ *
+ * Viewer is a subset. Reading and changing groups stay with admins, because a
+ * group lists its members' names and emails. A viewer may read the catalog,
+ * zones, tags, connections, glossary, prompts, and analyses, may use chat,
+ * including saving a conversation, and may manage their own API tokens. Other
+ * writes, and deleting a conversation, stay with admins.
+ */
+const statement = {
+	...defaultStatements,
+	...applicationStatements,
 } as const;
 
 export const ac = createAccessControl(statement);
 
 export const roles = {
-	// Admin: full user/session management plus every Auto Ontology resource.
 	[Role.Admin]: ac.newRole({
 		...adminAc.statements,
-		analytics: ['read'],
-		acronym: ['read', 'create', 'update', 'delete'],
-		prompt: ['read', 'create', 'update', 'delete'],
-		sso: ['read', 'manage'],
-		conversation: ['read', 'write', 'delete'],
-		chat: ['use'],
-		analysis: ['read', 'manage'],
-		catalog: ['read', 'edit'],
-		connection: ['read', 'manage'],
-		zone: ['read', 'manage'],
-		tag: ['read', 'manage'],
-		semanticCompilation: ['read', 'manage'],
-		visualization: ['read', 'manage'],
-		pii: ['read', 'manage'],
-		modelInterchange: ['export', 'import'],
-		apiToken: ['manage'],
+		...roleAccess[Role.Admin],
 	}),
-	// Viewer: read-only on glossary/prompts, full control of their own
-	// conversations, may run chat, may view custom analyses (not add/edit them),
-	// and may browse + edit the data catalog. No analytics, SSO, user mgmt, and
-	// no connection/zone management (admin-only). Viewers may read zones and
-	// tags to display them in the term single page, and label objects with an
-	// existing tag under the catalog edit permission they already hold. They may
-	// also read connections to see which databases are wired up — the list route
-	// strips credentials, so only the shape of a connection is exposed.
 	[Role.Viewer]: ac.newRole({
-		// For now viewers may fully manage the glossary, custom prompts, and
-		// custom analyses (create/edit/delete), so the create + edit controls on
-		// those pages work without 403s.
-		acronym: ['read', 'create', 'update', 'delete'],
-		prompt: ['read', 'create', 'update', 'delete'],
-		analysis: ['read', 'manage'],
-		conversation: ['read', 'write', 'delete'],
-		chat: ['use'],
-		catalog: ['read', 'edit'],
-		connection: ['read'],
-		zone: ['read'],
-		tag: ['read'],
-		apiToken: ['manage'],
+		...roleAccess[Role.Viewer],
 	}),
 };
 

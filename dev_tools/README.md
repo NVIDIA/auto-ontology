@@ -141,8 +141,7 @@ docker compose down -v    # stop + wipe volumes (Postgres, pgAdmin data)
 This repo ships Dockerfiles and a Helm chart for running the stack in
 Kubernetes:
 
-- `Dockerfile` — backend (FastAPI / uvicorn). Sources NeMo-Retriever from a
-  BuildKit named context, defaulting to a small committed stub.
+- `Dockerfile` — backend (FastAPI / uvicorn)
 - `frontend/Dockerfile` — frontend (Next.js standalone)
 - `helm/auto-ontology/` — Helm chart with deployments, services, optional Ingress,
   HPA, PDB and a sample Postgres manifest

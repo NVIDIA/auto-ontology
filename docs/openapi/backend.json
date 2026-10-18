@@ -111,6 +111,29 @@
             ],
             "title": "Certified"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "datatype": {
             "anyOf": [
               {
@@ -136,6 +159,29 @@
           "id": {
             "title": "Id",
             "type": "string"
+          },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
           },
           "name": {
             "anyOf": [
@@ -1255,6 +1301,19 @@
         "title": "DataResponse[ExplorationRelatedNodes]",
         "type": "object"
       },
+      "DataResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Group"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[Group]",
+        "type": "object"
+      },
       "DataResponse_IdRef_": {
         "additionalProperties": true,
         "properties": {
@@ -1553,6 +1612,17 @@
               }
             ],
             "title": "Num Of Schemas"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "schemas": {
             "items": {
@@ -1990,6 +2060,12 @@
           "format": {
             "$ref": "#/components/schemas/ModelFormat",
             "default": "auto_ontology"
+          },
+          "include_ontology": {
+            "default": false,
+            "description": "Apache Ossie only: also export the terms as an Ossie ontology, with a mapping onto the semantic model, as a zip of the three documents.",
+            "title": "Include Ontology",
+            "type": "boolean"
           }
         },
         "title": "ExportRequest",
@@ -2284,6 +2360,233 @@
         "title": "GraphLink",
         "type": "object"
       },
+      "Group": {
+        "additionalProperties": true,
+        "description": "A group, its members, its role, and the permissions that role grants.\n\n``role`` is the stored value. ``roles`` is that same role as a one-element\nlist, and ``permissions`` is ``resource:action`` strings expanded from it.\nMembership does not change an account's own role.",
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "created": {
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "roles": {
+            "items": {
+              "$ref": "#/components/schemas/GroupRole"
+            },
+            "title": "Roles",
+            "type": "array"
+          },
+          "users": {
+            "items": {
+              "$ref": "#/components/schemas/GroupUser"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "description",
+          "color",
+          "role",
+          "roles",
+          "users",
+          "permissions",
+          "created"
+        ],
+        "title": "Group",
+        "type": "object"
+      },
+      "GroupCreate": {
+        "properties": {
+          "color": {
+            "title": "Color",
+            "type": "string"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "user_ids": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "User Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "color",
+          "role"
+        ],
+        "title": "GroupCreate",
+        "type": "object"
+      },
+      "GroupRole": {
+        "additionalProperties": true,
+        "description": "One role on a group.\n\nA group carries a single role, ``admin`` or ``viewer``. ``id`` and\n``name`` are that same value: there is no separate role catalog.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "GroupRole",
+        "type": "object"
+      },
+      "GroupUpdate": {
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          },
+          "user_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Ids"
+          }
+        },
+        "title": "GroupUpdate",
+        "type": "object"
+      },
+      "GroupUser": {
+        "additionalProperties": true,
+        "description": "An account as a member of a group.\n\n``name`` and ``email`` are empty when the account has been deleted and\nthe membership remains. ``role`` is the account's own role, not the\ngroup's.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Role"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "email"
+        ],
+        "title": "GroupUser",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2376,6 +2679,50 @@
           "count"
         ],
         "title": "ListResponse[GlobalSearchItem]",
+        "type": "object"
+      },
+      "ListResponse_Group_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Group"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Group]",
+        "type": "object"
+      },
+      "ListResponse_Owner_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Owner"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "ListResponse[Owner]",
         "type": "object"
       },
       "ListResponse_PublicConnection_": {
@@ -2541,6 +2888,17 @@
             ],
             "title": "Description Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -2589,6 +2947,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "sample_values": {
             "anyOf": [
               {
@@ -2631,6 +3000,57 @@
           "total"
         ],
         "title": "ObjectPageResponse[TableColumns]",
+        "type": "object"
+      },
+      "Owner": {
+        "additionalProperties": true,
+        "description": "A user or a group that can be chosen as an owner.\n\n``permissions`` is the ``resource:action`` list the account's role, or the\ngroup's role, grants. ``member_ids`` is empty for a user. For a group it\nis the caller when they belong to that group, and empty otherwise.\n``color`` is only set for a group.",
+        "properties": {
+          "color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Color"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "member_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Member Ids",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "permissions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Permissions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "permissions"
+        ],
+        "title": "Owner",
         "type": "object"
       },
       "PagedListResponse_ColumnAttribute_": {
@@ -3105,6 +3525,17 @@
             "title": "Id",
             "type": "string"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -3321,6 +3752,29 @@
             ],
             "title": "Certified"
           },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
           "database_name": {
             "anyOf": [
               {
@@ -3369,6 +3823,29 @@
             "title": "Id",
             "type": "string"
           },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
+          },
           "name": {
             "anyOf": [
               {
@@ -3379,6 +3856,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "source": {
             "anyOf": [
@@ -3485,6 +3973,17 @@
             "minLength": 1,
             "title": "Name",
             "type": "string"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "source": {
             "default": "manual",
@@ -3594,6 +4093,17 @@
               }
             ],
             "title": "Name"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "SqlAttributeMetadataPatch",
@@ -4347,6 +4857,17 @@
             ],
             "title": "Name"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_name": {
             "anyOf": [
               {
@@ -4725,6 +5246,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "synonyms": {
             "anyOf": [
               {
@@ -4782,7 +5314,7 @@
       },
       "TermDetail": {
         "additionalProperties": true,
-        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is on the detail rather than on :class:`Term` because only this\nread resolves it: the paged list would need a second query per page to fill\nit, and its cards do not render chips.",
+        "description": "One Term with the tables that represent it and its related terms.\n\n``tags`` is resolved here and on the paged list. The list reads them once\nfor the page, which is what its cards draw.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -4794,6 +5326,29 @@
               }
             ],
             "title": "Certification"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
           },
           "description": {
             "anyOf": [
@@ -4821,6 +5376,29 @@
             "title": "Id",
             "type": "string"
           },
+          "modified": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified"
+          },
+          "modified_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified By"
+          },
           "name": {
             "anyOf": [
               {
@@ -4842,6 +5420,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           },
           "related_terms": {
             "items": {
@@ -5026,7 +5615,7 @@
       },
       "TermListItem": {
         "additionalProperties": true,
-        "description": "A Term as it appears in the paged ``/terms`` list.",
+        "description": "A Term as it appears in the paged ``/terms`` list.\n\n``tags`` travels with the page so a card can show its chips without a\nsecond read. An untagged term is an empty list, not a missing field.",
         "properties": {
           "certification": {
             "anyOf": [
@@ -5087,6 +5676,17 @@
             ],
             "title": "Name Certified"
           },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
+          },
           "schema_names": {
             "anyOf": [
               {
@@ -5114,6 +5714,13 @@
               }
             ],
             "title": "Synonyms"
+          },
+          "tags": {
+            "items": {
+              "$ref": "#/components/schemas/TagChip"
+            },
+            "title": "Tags",
+            "type": "array"
           },
           "zones": {
             "anyOf": [
@@ -5267,6 +5874,17 @@
               }
             ],
             "title": "Name Certified"
+          },
+          "owner_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Id"
           }
         },
         "title": "TermUpdate",
@@ -7103,9 +7721,206 @@
         ]
       }
     },
+    "/api/groups": {
+      "get": {
+        "description": "Return every group, ordered by name, with its members. Requires admin.",
+        "operationId": "list_groups_api_groups_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Groups",
+        "tags": [
+          "users"
+        ]
+      },
+      "post": {
+        "description": "Create a group and its members. Requires the admin role.\n\nThe caller is the gateway's identity header. A missing header is 401; a\ncaller who is not an admin is 403.\n\n409 when another group already holds the name, compared\ncase-insensitively on the trimmed value. 400 when a member id is not an\naccount, or when the name, color, or role is missing or invalid.",
+        "operationId": "create_group_api_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Group",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/api/groups/{group_id}": {
+      "delete": {
+        "description": "Delete one group. Its membership is deleted with it.\n\nRequires the admin role. 404 rather than 204 for an id that is not\nthere: the caller deleted from a list it has already read, so a missing\ngroup means that list is stale.",
+        "operationId": "delete_group_api_groups__group_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Group",
+        "tags": [
+          "users"
+        ]
+      },
+      "get": {
+        "description": "Return one group. Requires admin.\n\n404 for an unknown id rather than an empty group: the caller asked for a\nrow it expects to exist.",
+        "operationId": "get_group_api_groups__group_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Group",
+        "tags": [
+          "users"
+        ]
+      },
+      "patch": {
+        "description": "Update a group's fields and, when sent, replace its members.\n\nRequires the admin role, for the same reason create does.\n\nOmitting ``user_ids`` leaves membership alone. Sending a list replaces\nit, and an empty list clears it. A patch that names no field returns the\ngroup unchanged.\n\n404 for an unknown id, 409 for a name another group holds, 400 for an\ninvalid field or a member id that is not an account.",
+        "operationId": "update_group_api_groups__group_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "group_id",
+            "required": true,
+            "schema": {
+              "title": "Group Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GroupUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Group_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Group",
+        "tags": [
+          "users"
+        ]
+      }
+    },
     "/api/model/export": {
       "post": {
-        "description": "Export the scoped catalog + semantic model as a YAML attachment.",
+        "description": "Export the scoped catalog + semantic model as a YAML attachment.\n\nWith ``include_ontology``, the Apache Ossie export is a zip that also holds\nthe terms as an Ossie ontology and the mapping onto the semantic model.",
         "operationId": "export_model_api_model_export_post",
         "requestBody": {
           "content": {
@@ -7124,9 +7939,15 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
               }
             },
-            "description": "Auto Ontology model YAML, sent as a file attachment"
+            "description": "Auto Ontology model YAML, or with include_ontology a zip of the Apache Ossie semantic model, ontology and mapping, sent as a file attachment"
           },
           "422": {
             "content": {
@@ -7269,6 +8090,28 @@
         "tags": [
           "datasources",
           "connectors"
+        ]
+      }
+    },
+    "/api/owners": {
+      "get": {
+        "description": "Return every account and every group that can be shown as an owner.\n\nEach row carries the permissions of its role, which is what a picker uses\nto offer only the people who may own that kind of object. A group's\n``member_ids`` names the caller when they belong to it, and nobody else.\nThe edit button only needs that. The full roster stays on the admin group\nlist.",
+        "operationId": "list_owners_api_owners_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListResponse_Owner_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Owners",
+        "tags": [
+          "users"
         ]
       }
     },
@@ -7992,7 +8835,7 @@
         ]
       },
       "post": {
-        "description": "Create a SqlAttribute with its Sql node, linked to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 409 when the name is\nalready taken, 422 when the target Term does not exist or the SQL\ncan't be parsed.",
+        "description": "Create a SqlAttribute with its Sql node, linked to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). ``owner_id``, when set,\nnames a user or a group that can edit the catalog; omit it to leave the\nattribute unassigned. The caller is stored as ``created_by`` so the side\npanel can name them. Returns 400 when that id cannot be assigned, 409\nwhen the name is already taken, 422 when the target Term does not exist\nor the SQL can't be parsed.",
         "operationId": "create_sql_attribute_api_sql_attributes_post",
         "requestBody": {
           "content": {
@@ -8209,7 +9052,7 @@
         ]
       },
       "put": {
-        "description": "Replace a SqlAttribute, re-parse SQL, and re-link to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 404 when no SqlAttribute\nwith that id exists, 409 on name conflict, 422 when the Term doesn't\nexist or SQL can't be parsed.",
+        "description": "Replace a SqlAttribute, re-parse SQL, and re-link to a Term.\n\nThe connector is resolved server-side (never chosen by the client \u2014\nsee ``auto_ontology/connectors/registry.py``). Returns 404 when no SqlAttribute\nwith that id exists, 409 on name conflict, 422 when the Term doesn't\nexist or SQL can't be parsed. Returns 403 when the caller may not edit\nthis attribute, the same check as the metadata patch.",
         "operationId": "update_sql_attribute_api_sql_attributes__attr_id__put",
         "parameters": [
           {
@@ -8262,7 +9105,7 @@
     },
     "/api/sql-attributes/{attr_id}/description-suggestion": {
       "get": {
-        "description": "LLM-generated (or cached) description suggestion for a SqlAttribute.\n\nReturns 404 when no SqlAttribute with that id exists. ``data`` is\n``null`` when a suggestion could not be produced (e.g. the LLM call\nfailed) \u2014 that is not treated as an error.",
+        "description": "LLM-generated (or cached) description suggestion for a SqlAttribute.\n\nReturns 404 when no SqlAttribute with that id exists. ``data`` is\n``null`` when a suggestion could not be produced (e.g. the LLM call\nfailed) \u2014 that is not treated as an error. Returns 403 when the caller\nmay not edit this attribute. A suggestion is cached on the attribute,\nso the same edit check as a save applies.",
         "operationId": "get_sql_attribute_description_suggestion_api_sql_attributes__attr_id__description_suggestion_get",
         "parameters": [
           {

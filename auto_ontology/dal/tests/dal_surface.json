@@ -14,7 +14,7 @@
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
-    "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None) -> 'dict[str, Any] | None'"
+    "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {
     "expand_info": "(ids_and_labels: 'list | None') -> 'dict'"
@@ -33,7 +33,7 @@
     "custom_analysis_exists": "(database_name: 'str | None' = None) -> 'bool'",
     "delete_custom_analysis_node": "(analysis_id: 'str') -> 'None'",
     "detach_existing_sql_edges": "(analysis_id: 'str') -> 'None'",
-    "embed_custom_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'VDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
+    "embed_custom_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'PostgresVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_custom_analyses": "() -> 'list[dict[str, str]]'",
     "fetch_custom_analyses_with_sql": "(analysis_ids: 'list[str]') -> 'list[dict[str, str]]'",
     "fetch_database_name_for_analysis": "(analysis_id: 'str') -> 'str | None'",
@@ -90,6 +90,18 @@
     "fetch_table_zones_map": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, table_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
     "fetch_term_exploration_details": "(term_id: 'str', zone_ids: 'list[str] | None' = None, *, skip: 'int' = 0, limit: 'int | None' = None) -> 'dict[str, Any]'"
   },
+  "groups": {
+    "GroupNameTaken": "class(ValueError)",
+    "UnknownGroupMembers": "class(ValueError)",
+    "create_group": "(*, name: 'str', description: 'str | None', color: 'str', role: 'str', user_ids: 'list[str]') -> 'dict[str, Any]'",
+    "delete_group": "(group_id: 'str') -> 'bool'",
+    "get_account": "(user_id: 'str') -> 'dict[str, Any] | None'",
+    "get_group": "(group_id: 'str') -> 'dict[str, Any] | None'",
+    "groups_for_user": "(user_id: 'str') -> 'list[dict[str, Any]]'",
+    "list_groups": "() -> 'list[dict[str, Any]]'",
+    "list_users_and_groups": "() -> 'dict[str, Any]'",
+    "update_group": "(*, group_id: 'str', updates: 'dict[str, Any]', user_ids: 'list[str] | None') -> 'dict[str, Any] | None'"
+  },
   "model_interchange": {
     "ModelImportValidationError": "class(ModelInterchangeError)",
     "ModelInterchangeError": "class(Exception)",
@@ -100,6 +112,12 @@
     "make_cached_sql_column_resolver": "() -> 'Callable[[str, str | None], list[str]]'",
     "resolve_sql_column_ids": "(sql: 'str', database_name: 'str | None') -> 'list[str]'",
     "validate_database_ids": "(database_ids: 'list[str]') -> 'None'"
+  },
+  "owners": {
+    "EditSubject": "class(object)",
+    "assign_owner": "(table, entity_id: 'str', owner_id: 'str | None') -> 'None'",
+    "current_owner": "(table, entity_id: 'str') -> 'str | None'",
+    "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'"
   },
   "pii": {
     "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
@@ -113,7 +131,7 @@
     "PqlAnalysisPqlConflict": "class(Exception)",
     "count_pql_analyses": "(*, search: 'str | None' = None) -> 'int'",
     "delete_pql_analysis_node": "(analysis_id: 'str') -> 'None'",
-    "embed_pql_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'VDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
+    "embed_pql_analyses": "(embed_params: \"'EmbedParams'\", vdb: \"'PostgresVDB'\", analysis_id: 'str | None' = None, database_name: 'str | None' = None) -> 'None'",
     "fetch_pql_analyses_by_ids": "(analysis_ids: 'list[str]') -> 'dict[str, dict[str, str]]'",
     "find_pql_analysis_by_name": "(name: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
     "find_pql_analysis_by_pql": "(pql: 'str', exclude_id: 'str | None') -> 'dict[str, str] | None'",
@@ -134,7 +152,9 @@
     "list_rules": "(*, search: 'str | None' = None, skip: 'int' = 0, limit: 'int | None' = None) -> 'list[dict[str, Any]]'",
     "update_rule": "(*, rule_id: 'str', name: 'str', modified_by: 'str | None' = None) -> 'dict[str, Any] | None'"
   },
-  "schema": {},
+  "schema": {
+    "GroupRole": "class(StrEnum)"
+  },
   "schema_version": {
     "SchemaOutOfDateError": "class(RuntimeError)",
     "SchemaState": "class(object)",
@@ -183,12 +203,12 @@
     "link_to_term": "(attr_id: 'str', term_id: 'str') -> 'None'",
     "list_sql_attributes": "() -> 'list[dict[str, Any]]'",
     "set_sql_attribute_description_suggestion": "(attr_id: 'str', description_suggestion: 'str') -> 'None'",
-    "update_sql_attribute": "(attr_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, expression: 'str | None' = None, source: 'str | None' = None, certified: 'bool | None' = None) -> 'None'"
+    "update_sql_attribute": "(attr_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, expression: 'str | None' = None, source: 'str | None' = None, certified: 'bool | None' = None, owner_id: 'str | None' = None, set_owner: 'bool' = False, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'None'"
   },
   "sql_fragments": {
     "column_description_expr": "(column=Table('catalog_column', MetaData(), Column('id', Text(), table=<catalog_column>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('table_id', Text(), ForeignKey('catalog_table.id'), table=<catalog_column>, nullable=False), Column('name', Text(), table=<catalog_column>, nullable=False), Column('description', Text(), table=<catalog_column>), Column('description_certified', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('data_type', Text(), table=<catalog_column>), Column('sample_values', Text(), table=<catalog_column>), Column('format', Text(), table=<catalog_column>), Column('is_unique', Boolean(), table=<catalog_column>), Column('is_nullable', Boolean(), table=<catalog_column>), Column('ordinal_position', Integer(), table=<catalog_column>), Column('pii_processed', Boolean(), table=<catalog_column>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_column>), schema=None)) -> 'ColumnElement'",
     "name_contains": "(column: 'ColumnElement', search: 'str') -> 'ColumnElement'",
-    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
+    "table_description_expr": "(table=Table('catalog_table', MetaData(), Column('id', Text(), table=<catalog_table>, primary_key=True, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('schema_id', Text(), ForeignKey('catalog_schema.id'), table=<catalog_table>, nullable=False), Column('name', Text(), table=<catalog_table>, nullable=False), Column('description', Text(), table=<catalog_table>), Column('description_certified', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('owner_id', Text(), table=<catalog_table>), Column('pk', ARRAY(Text()), table=<catalog_table>), Column('table_type', Text(), table=<catalog_table>), Column('is_junction_table', Boolean(), table=<catalog_table>, nullable=False, server_default=DefaultClause(<sqlalchemy.sql.elements.TextClause object>, for_update=False)), Column('imported_id', Text(), table=<catalog_table>), schema=None)) -> 'ColumnElement'"
   },
   "tags": {
     "apply_labels_now_matched": "(*, rule_id: 'str', tag_ids: 'list[str]', targets: 'dict[str, Select]') -> 'int'",
@@ -238,7 +258,7 @@
     "get_term_record_for_table": "(table_id: 'str') -> 'dict[str, str] | None'",
     "semantic_layer_calculated": "() -> 'bool'",
     "term_is_in_scope": "(term_id: 'str', zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'bool'",
-    "update_term": "(term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, name_certified: 'bool | None' = None, description_certified: 'bool | None' = None) -> 'dict[str, Any] | None'",
+    "update_term": "(term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, name_certified: 'bool | None' = None, description_certified: 'bool | None' = None, owner_id: 'str | None' = None, set_owner: 'bool' = False, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'",
     "upsert_table_term": "(name: 'str', description: 'str', table_id: 'str', synonyms: 'list[str] | None' = None) -> 'tuple[str, str] | None'"
   },
   "users": {

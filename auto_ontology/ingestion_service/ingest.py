@@ -16,11 +16,11 @@ from auto_ontology.utils.embedding import batch_embed_chunks
 from auto_ontology.utils.embedding_rows import (
     CatalogEmbeddingRowsOp,
 )
-from nemo_retriever.common.vdb.records import to_client_vdb_records
 from auto_ontology.connectors.base import SQLDatabase
 
 from auto_ontology.catalog import ingest_catalog
 from auto_ontology.vdb import get_data_vdb
+from auto_ontology.vdb.records import to_vdb_records
 from auto_ontology.connectors.registry import (
     get_connectors,
     invalidate_connectors_cache,
@@ -86,10 +86,10 @@ def run_ingest(connector: SQLDatabase) -> None:
     close it, since scheduled runs reuse cached connectors from
     :func:`auto_ontology.connectors.registry.get_connectors`.
 
-    Three straight-line steps, formerly a ``Graph()`` chain of three operators.
-    Only the middle one is still a library operator; the catalog write is
-    Auto Ontology-owned (:func:`auto_ontology.catalog.ingest_catalog`) and the embed step goes
-    through :func:`auto_ontology.utils.embedding.batch_embed_chunks`.
+    Three straight-line steps: the catalog write
+    (:func:`auto_ontology.catalog.ingest_catalog`), the embedding rows
+    (:class:`~auto_ontology.utils.embedding_rows.CatalogEmbeddingRowsOp`), and
+    the embed step (:func:`auto_ontology.utils.embedding.batch_embed_chunks`).
 
     Embedding is the long pole — minutes of remote round trips against tens of
     seconds for everything else — so its chunks are written to pgvector as they
@@ -124,7 +124,7 @@ def run_ingest(connector: SQLDatabase) -> None:
     data_vdb = None
     rows_written = 0
     for chunk in batch_embed_chunks(embed_rows, embed_params, label=database_name):
-        records = to_client_vdb_records(chunk)
+        records = to_vdb_records(chunk)
         if not records:
             # Every row in the chunk came back without an embedding. Already
             # logged as a warning by the embed step; nothing to write.

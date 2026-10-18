@@ -17,7 +17,6 @@ import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.operators.rerank import rerank_hits
 from pydantic import BaseModel, ConfigDict
 
 from auto_ontology.dal.datasources import (
@@ -36,7 +35,7 @@ from auto_ontology.utils.llm_invoke import (
     get_llm_client,
     invoke_with_structured_output,
 )
-from auto_ontology.utils.rerank import get_rerank_kwargs
+from auto_ontology.utils.rerank import get_rerank_kwargs, rerank_hits
 
 logger = logging.getLogger(__name__)
 

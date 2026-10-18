@@ -241,7 +241,6 @@ export default function ZonesSettingsPage() {
 	const { data: session } = useSession();
 	const currentUserId = session?.user?.id ?? '';
 	const isAdmin = session?.user?.role === Role.Admin;
-
 	const queryClient = useQueryClient();
 
 	const [modalMode, setModalMode] = useState<'create' | 'edit'>('create');
@@ -512,7 +511,14 @@ export default function ZonesSettingsPage() {
 				await patchZones((prev) => {
 					const next = [
 						...prev.filter((z) => z.id !== created.id),
-						{ id, name: n, label, description: d, color: c, enabled: en },
+						{
+							id,
+							name: n,
+							label,
+							description: d,
+							color: c,
+							enabled: en,
+						},
 					];
 					return next.sort((a, b) => a.name.localeCompare(b.name));
 				});

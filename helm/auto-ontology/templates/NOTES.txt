@@ -1,0 +1,10 @@
+{{- /*
+SPDX-FileCopyrightText: Copyright (c) 2026, NVIDIA CORPORATION & AFFILIATES.
+All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+*/ -}}
+Installed {{ .Chart.Name }} {{ .Chart.Version }} (app {{ .Chart.AppVersion }}) as release "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+The app is configured for {{ .Values.appUrl }}. Reach the frontend with either:
+  kubectl port-forward -n {{ .Release.Namespace }} svc/frontend {{ .Values.frontend.service.port }}:{{ .Values.frontend.service.port }}
+  http://<node-ip>:{{ .Values.frontend.service.nodePort }}   (NodePort; set appUrl to this origin)

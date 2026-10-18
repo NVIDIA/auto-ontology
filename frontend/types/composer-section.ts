@@ -163,6 +163,36 @@ export type ComposerEntityTagsSection = {
 	editable?: boolean;
 };
 
+export type ComposerOwnerOption = {
+	id: string;
+	name: string;
+	kind: 'user' | 'group';
+	color: string | null;
+};
+
+export type ComposerOwnerSection = {
+	type: ComposerSectionKind.OWNER;
+	id: string;
+	title: string;
+	/** Null when the object is unassigned. */
+	ownerId: string | null;
+	/**
+	 * `resource:action` the picker uses when it re-reads the live directory.
+	 * The snapshot in `options` is only the first paint.
+	 */
+	permission: string;
+	/**
+	 * Who the select offers. The page filters them to the permission this
+	 * object requires, and passes everyone when the card is only showing a name.
+	 */
+	options: ComposerOwnerOption[];
+	/**
+	 * In edit mode, a select whose value Save sends as this section's id.
+	 * Empty string means unassigned.
+	 */
+	editable?: boolean;
+};
+
 export type ComposerSqlBlockSection = {
 	type: ComposerSectionKind.SQL_BLOCK;
 	id: string;
@@ -181,7 +211,8 @@ export type ComposerSection =
 	| ComposerRelatedTermsSection
 	| ComposerEntitiesSection
 	| ComposerEntityTagsSection
-	| ComposerSqlBlockSection;
+	| ComposerSqlBlockSection
+	| ComposerOwnerSection;
 
 const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.TEXT_CARD,
@@ -194,6 +225,7 @@ const composerSectionTypes: readonly ComposerSectionKind[] = [
 	ComposerSectionKind.ENTITY_CHIPS,
 	ComposerSectionKind.ENTITY_TAGS,
 	ComposerSectionKind.SQL_BLOCK,
+	ComposerSectionKind.OWNER,
 ];
 
 export function isComposerSection(x: unknown): x is ComposerSection {

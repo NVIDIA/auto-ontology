@@ -28,6 +28,7 @@ IMAGE_CONTEXTS = ("frontend", "mcp")
 # data. A `<file>.license` sidecar also satisfies the check.
 EXEMPT_SUFFIXES = {
     ".json",
+    ".sig",
     ".lock",
     ".sql",
     ".csv",
