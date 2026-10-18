@@ -10,10 +10,18 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from auto_ontology.dal import zones as dal
+from auto_ontology.server.owners import (
+    UnassignableOwner,
+    assignable_member_ids,
+    owner_from_body,
+)
 from auto_ontology.server.users import postgres_dal
 from auto_ontology.server.responses import IdResponse, ZoneListResponse, ZoneResponse
 
 router = APIRouter()
+
+#: Illumex names this ``zone.write``. Here the write action is ``manage``.
+ZONE_MANAGE = "zone:manage"
 
 
 class ZoneCreate(BaseModel):
@@ -22,6 +30,8 @@ class ZoneCreate(BaseModel):
     color: str
     items: list[str]
     created_by: str  # user_id of the requesting user (must be admin)
+    owner_id: str | None = None
+    members: list[str] = []
 
 
 class ZoneUpdate(BaseModel):
@@ -29,6 +39,8 @@ class ZoneUpdate(BaseModel):
     description: str | None = None
     color: str | None = None
     items: list[str] | None = None
+    owner_id: str | None = None
+    members: list[str] | None = None
 
 
 class ZoneStatusUpdate(BaseModel):
@@ -41,6 +53,20 @@ def _require_admin(user_id: str) -> None:
         raise HTTPException(
             status_code=403, detail="Only admins can perform this action"
         )
+
+
+def _members(values: list[str] | None) -> list[str]:
+    """Participant ids, each a user or group that can manage zones."""
+    try:
+        return assignable_member_ids(values, ZONE_MANAGE)
+    except UnassignableOwner as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Zone member {exc.owner_id!r} is not a user or group "
+                "that can manage zones"
+            ),
+        ) from exc
 
 
 @router.get("/zones", response_model=ZoneListResponse)
@@ -64,7 +90,13 @@ def get_zone(
 
 @router.post("/zones", status_code=201, response_model=ZoneResponse)
 def create_zone(body: ZoneCreate) -> dict:
-    """Create a zone and attach catalog items.  Requires admin role."""
+    """Create a zone and attach catalog items. Requires admin role.
+
+    ``owner_id`` is one user or one group that can manage zones, or omitted
+    to leave the zone unowned. ``members`` are users and groups with that
+    same permission; each is a participant and can see the zone's data. A
+    participant is not the owner. Returns 400 when an id cannot be assigned.
+    """
     _require_admin(body.created_by)
     normalized_name = body.name.strip()
     if normalized_name == "":
@@ -75,6 +107,8 @@ def create_zone(body: ZoneCreate) -> dict:
             description=body.description,
             color=body.color,
             item_ids=body.items,
+            owner_id=owner_from_body(body.owner_id, ZONE_MANAGE),
+            member_ids=_members(body.members),
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -83,7 +117,12 @@ def create_zone(body: ZoneCreate) -> dict:
 
 @router.patch("/zones/{zone_id}", response_model=ZoneResponse)
 def update_zone(zone_id: str, body: ZoneUpdate) -> dict:
-    """Update zone fields and optionally replace catalog data items."""
+    """Update zone fields and optionally replace catalog items or participants.
+
+    ``owner_id`` and ``members``, when sent, follow the same rules as create.
+    Omit either to leave it unchanged. An empty ``members`` list clears
+    participants. Returns 400 when an id cannot be assigned.
+    """
     field_updates: dict[str, str | None] = {}
     provided_fields = body.model_fields_set
 
@@ -101,11 +140,19 @@ def update_zone(zone_id: str, body: ZoneUpdate) -> dict:
     if "color" in provided_fields:
         field_updates["color"] = body.color
 
+    if "owner_id" in provided_fields:
+        field_updates["owner_id"] = owner_from_body(body.owner_id, ZONE_MANAGE)
+
     try:
         row = dal.update_zone(
             zone_id=zone_id,
             updates=field_updates,
             item_ids=body.items if "items" in provided_fields else None,
+            member_ids=(
+                _members(body.members)
+                if "members" in provided_fields and body.members is not None
+                else None
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc

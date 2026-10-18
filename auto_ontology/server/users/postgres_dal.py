@@ -25,13 +25,13 @@ from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connectio
 logger = logging.getLogger(__name__)
 
 
-def get_user_role(user_id: str) -> str | None:
+def get_user_role(user_id: str, *, strict: bool = False) -> str | None:
     """Return the Postgres ``role`` column for *user_id*.
 
-    Returns ``None`` when the user does not exist or the database is
-    unreachable — callers should treat that as "not an admin" rather than
-    raising, so a transient Postgres hiccup fails closed instead of
-    granting elevated access.
+    ``None`` when the account does not exist. A database failure also
+    returns ``None``, so a permission check fails closed instead of
+    granting access. ``strict`` re-raises that failure: ownership cleanup
+    must not treat an outage as a missing account.
     """
     try:
         with psycopg.connect(
@@ -50,6 +50,8 @@ def get_user_role(user_id: str) -> str | None:
                 return row["role"] if row else None
     except Exception:
         logger.exception("Failed to fetch role for user %r from Postgres", user_id)
+        if strict:
+            raise
         return None
 
 

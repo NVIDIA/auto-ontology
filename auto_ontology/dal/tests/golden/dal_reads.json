@@ -7353,6 +7353,8 @@
       "description": "Disabled; grants no access but stays visible to admins.",
       "enabled": false,
       "id": "<zone:Retired zone>",
+      "members": [],
+      "owner_id": null,
       "items": [
         {
           "id": "<table:pagila.public.staff>",
@@ -7368,6 +7370,8 @@
       "description": "Tables describing films and their inventory.",
       "enabled": true,
       "id": "<zone:Film domain>",
+      "members": [],
+      "owner_id": null,
       "items": [
         {
           "id": "<table:pagila.public.category>",
@@ -7395,7 +7399,9 @@
         "enabled": true,
         "id": "<zone:Cross database>",
         "label": "Zone",
-        "name": "Cross database"
+        "members": [],
+        "name": "Cross database",
+        "owner_id": null
       },
       {
         "color": "#4f46e5",
@@ -7403,7 +7409,9 @@
         "enabled": true,
         "id": "<zone:Film domain>",
         "label": "Zone",
-        "name": "Film domain"
+        "members": [],
+        "name": "Film domain",
+        "owner_id": null
       },
       {
         "color": "#dc2626",
@@ -7411,7 +7419,9 @@
         "enabled": false,
         "id": "<zone:Retired zone>",
         "label": "Zone",
-        "name": "Retired zone"
+        "members": [],
+        "name": "Retired zone",
+        "owner_id": null
       }
     ]
   }

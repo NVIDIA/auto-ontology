@@ -6,10 +6,16 @@ import { betterAuth } from 'better-auth';
 import { prismaAdapter } from 'better-auth/adapters/prisma';
 import { admin } from 'better-auth/plugins/admin';
 import { nextCookies } from 'better-auth/next-js';
-import { APIError, createAuthMiddleware, getAuthoritativeSessionFromCtx } from 'better-auth/api';
+import {
+	APIError,
+	createAuthMiddleware,
+	getAuthoritativeSessionFromCtx,
+	isAPIError,
+} from 'better-auth/api';
 import { sso } from '@better-auth/sso';
 import { apiKey } from '@better-auth/api-key';
 import { mcp } from '@better-auth/mcp';
+import { buildInternalIdentityHeaders } from '@/lib/internalIdentity';
 import { getPrisma } from '@/lib/prisma';
 import { ac, roles } from '@/auth/auth-access';
 import { isExactAdmin, removesLastExactAdmin, storedRole } from '@/auth/exact-admin';
@@ -40,6 +46,58 @@ const isHttpRedirectUri = (value: unknown): value is string => {
 };
 
 const prisma = getPrisma();
+
+const PYTHON_API_URL = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:3001';
+
+const OWNERSHIP_CLEANUP_FAILED = 'The role was saved, but owned objects could not be updated.';
+const OWNERSHIP_CLEANUP_TIMEOUT_MS = 8_000;
+
+/** The account whose role this admin request writes, when it writes one. */
+const roleChangeUserId = (path: string | undefined, body: unknown): string | null => {
+	if (!isPlainObject(body) || typeof body.userId !== 'string') return null;
+	if (path === '/admin/set-role') return body.userId;
+	if (
+		path === '/admin/update-user' &&
+		isPlainObject(body.data) &&
+		Object.hasOwn(body.data, 'role')
+	) {
+		return body.userId;
+	}
+	return null;
+};
+
+const roleChangeSucceeded = (returned: unknown): boolean => {
+	if (returned == null || isAPIError(returned)) return false;
+	if (returned instanceof Response) return returned.ok;
+	return true;
+};
+
+/**
+ * Drop the account from objects its new role can no longer own. The role is
+ * already stored; a failure here must not look like the role change failed
+ * before it was saved.
+ */
+const releaseOwnership = async (userId: string, actorId: string): Promise<void> => {
+	let response: Response;
+	try {
+		response = await fetch(
+			`${PYTHON_API_URL}/api/users/${encodeURIComponent(userId)}/ownership`,
+			{
+				method: 'POST',
+				headers: {
+					Accept: 'application/json',
+					...buildInternalIdentityHeaders(actorId),
+				},
+				signal: AbortSignal.timeout(OWNERSHIP_CLEANUP_TIMEOUT_MS),
+			},
+		);
+	} catch {
+		throw new APIError('INTERNAL_SERVER_ERROR', { message: OWNERSHIP_CLEANUP_FAILED });
+	}
+	if (!response.ok) {
+		throw new APIError('INTERNAL_SERVER_ERROR', { message: OWNERSHIP_CLEANUP_FAILED });
+	}
+};
 
 /** Other accounts whose role is exactly `admin`, matching `is_admin`. */
 const otherExactAdminCount = (userId: string): Promise<number> =>
@@ -185,6 +243,19 @@ export const auth = betterAuth({
 					message: 'The last admin cannot be made a viewer.',
 				});
 			}
+		}),
+		after: createAuthMiddleware(async (ctx) => {
+			const userId = roleChangeUserId(ctx.path, ctx.body);
+			if (userId == null || !roleChangeSucceeded(ctx.context.returned)) return;
+
+			// The admin plugin already required set-role. Cleanup lives here, not
+			// in the settings form, so a direct /admin/set-role or update-user
+			// cannot leave the account owning rows its new role cannot own.
+			const session = await getAuthoritativeSessionFromCtx(ctx);
+			if (!session?.user.id) {
+				throw new APIError('INTERNAL_SERVER_ERROR', { message: OWNERSHIP_CLEANUP_FAILED });
+			}
+			await releaseOwnership(userId, session.user.id);
 		}),
 	},
 	plugins: [

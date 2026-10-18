@@ -117,7 +117,8 @@
     "EditSubject": "class(object)",
     "assign_owner": "(table, entity_id: 'str', owner_id: 'str | None') -> 'None'",
     "current_owner": "(table, entity_id: 'str') -> 'str | None'",
-    "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'"
+    "edit_subject": "(entity_id: 'str') -> 'EditSubject | None'",
+    "release_account": "(account_id: 'str', *, catalog: 'bool', zone: 'bool') -> 'None'"
   },
   "pii": {
     "mark_columns_pii_processed": "(column_ids: 'list[str]') -> 'int'",
@@ -267,13 +268,13 @@
     "resolve_table_filter": "(zone_ids: 'list[str] | None', column_ref: 'Any', *, data_ids_by_zone: 'dict[str, set[str]] | None' = None) -> 'Any'"
   },
   "zones": {
-    "create_zone": "(*, name: 'str', description: 'str | None', color: 'str', item_ids: 'list[str]') -> 'dict[str, Any]'",
+    "create_zone": "(*, name: 'str', description: 'str | None', color: 'str', item_ids: 'list[str]', owner_id: 'str | None' = None, member_ids: 'list[str] | None' = None) -> 'dict[str, Any]'",
     "delete_zone": "(zone_id: 'str') -> 'bool'",
     "fetch_table_zones_map": "(zone_ids: 'list[str] | None' = None, data_ids_by_zone: 'dict[str, set[str]] | None' = None, table_ids: 'list[str] | None' = None) -> 'dict[str, list[dict[str, Any]]]'",
     "get_zone_by_id": "(zone_id: 'str') -> 'dict[str, Any] | None'",
     "list_zones": "() -> 'list[dict[str, Any]]'",
     "set_zone_enabled": "(zone_id: 'str', enabled: 'bool') -> 'dict[str, Any] | None'",
-    "update_zone": "(*, zone_id: 'str', updates: 'dict[str, Any]', item_ids: 'list[str] | None') -> 'dict[str, Any] | None'",
+    "update_zone": "(*, zone_id: 'str', updates: 'dict[str, Any]', item_ids: 'list[str] | None', member_ids: 'list[str] | None' = None) -> 'dict[str, Any] | None'",
     "zone_covers_table": "()"
   }
 }

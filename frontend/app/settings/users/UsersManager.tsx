@@ -131,6 +131,11 @@ export const UsersManager = () => {
 		if (result.error) {
 			setEditError(actionErrorMessage(result.error, 'Failed to update the user.'));
 			setEditing(false);
+			// The role may already be stored. The auth hook clears ownership
+			// after that write, and a failed clear comes back as this error.
+			await invalidateOwners(queryClient);
+			const listed = await usersApi.list();
+			if (!listed.error) setUsers(listed.users);
 			return;
 		}
 		await invalidateOwners(queryClient);

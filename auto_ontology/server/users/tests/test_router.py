@@ -14,6 +14,7 @@ from starlette.requests import Request
 
 from auto_ontology.dal.groups import GroupNameTaken, UnknownGroupMembers
 from auto_ontology.server.users import router as users_router
+from auto_ontology.server import owners
 from auto_ontology.server.users.router import (
     GroupCreate,
     GroupUpdate,
@@ -22,6 +23,7 @@ from auto_ontology.server.users.router import (
     get_group,
     list_groups,
     list_owners,
+    release_user_ownership,
     update_group,
 )
 
@@ -237,4 +239,90 @@ def test_delete_requires_an_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(users_router.postgres_dal, "is_admin", lambda user_id: False)
     with pytest.raises(HTTPException) as refused:
         delete_group(_request("user-1"), "group-1")
+    assert refused.value.status_code == 403
+
+
+def test_demoting_a_user_releases_objects_they_can_no_longer_own(
+    admin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: "viewer"
+    )
+
+    def _release(account_id: str, *, catalog: bool, zone: bool) -> None:
+        seen["account_id"] = account_id
+        seen["catalog"] = catalog
+        seen["zone"] = zone
+
+    monkeypatch.setattr(owners.owners_dal, "release_account", _release)
+
+    assert release_user_ownership("alice", _request("admin-1")) == {
+        "data": {"id": "alice"}
+    }
+    assert seen == {"account_id": "alice", "catalog": True, "zone": True}
+
+
+def test_an_admin_role_keeps_ownership(
+    admin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: dict[str, Any] = {}
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: "admin"
+    )
+
+    def _release(account_id: str, *, catalog: bool, zone: bool) -> None:
+        seen["catalog"] = catalog
+        seen["zone"] = zone
+
+    monkeypatch.setattr(owners.owners_dal, "release_account", _release)
+
+    release_user_ownership("alice", _request("admin-1"))
+
+    assert seen == {"catalog": False, "zone": False}
+
+
+def test_a_role_lookup_failure_is_not_a_missing_user(
+    admin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def _lookup(user_id: str, *, strict: bool = False) -> str | None:
+        if strict:
+            raise RuntimeError("database unavailable")
+        return None
+
+    monkeypatch.setattr(owners.postgres_dal, "get_user_role", _lookup)
+    monkeypatch.setattr(
+        owners.owners_dal,
+        "release_account",
+        lambda *_args, **_kwargs: pytest.fail("an outage must not clear rows"),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        release_user_ownership("alice", _request("admin-1"))
+
+
+def test_releasing_a_missing_user_does_not_clear_rows(
+    admin: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        owners.postgres_dal, "get_user_role", lambda user_id, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        owners.owners_dal,
+        "release_account",
+        lambda *_args, **_kwargs: pytest.fail("a missing account must not be cleared"),
+    )
+
+    with pytest.raises(HTTPException) as refused:
+        release_user_ownership("missing", _request("admin-1"))
+
+    assert refused.value.status_code == 404
+
+
+def test_releasing_ownership_requires_an_admin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(users_router.postgres_dal, "is_admin", lambda user_id: False)
+
+    with pytest.raises(HTTPException) as refused:
+        release_user_ownership("alice", _request("viewer-1"))
+
     assert refused.value.status_code == 403

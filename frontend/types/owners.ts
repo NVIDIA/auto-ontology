@@ -20,4 +20,6 @@ export type Owner = {
 /** The permission a picker uses to decide who may own that kind of object. */
 export const OwnerPermission = {
 	catalog: 'catalog:edit',
+	/** Illumex calls this `zone.write`. Here the write action is `manage`. */
+	zone: 'zone:manage',
 } as const;

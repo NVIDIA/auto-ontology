@@ -20,7 +20,8 @@ from __future__ import annotations
 from fastapi import HTTPException, Request
 
 from auto_ontology.dal import groups as groups_dal
-from auto_ontology.dal.owners import EditSubject
+from auto_ontology.dal import owners as owners_dal
+from auto_ontology.dal.owners import CATALOG_EDIT, EditSubject
 from auto_ontology.dal.schema import GroupRole
 from auto_ontology.server.identity import resolve_internal_user
 from auto_ontology.server.users import postgres_dal
@@ -114,3 +115,47 @@ def owner_from_body(value: str | None, permission: str) -> str | None:
         return require_assignable(normalize_owner_id(value), permission)
     except UnassignableOwner as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+def assignable_member_ids(values: list[str] | None, permission: str) -> list[str]:
+    """User and group ids that may participate, each holding *permission*.
+
+    Blank ids are dropped. Duplicates collapse to the first occurrence.
+    Raises :class:`UnassignableOwner` when an id names nothing, or names an
+    account or group whose role does not grant *permission*.
+    """
+    if not values:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in values:
+        member_id = normalize_owner_id(raw)
+        if member_id is None or member_id in seen:
+            continue
+        require_assignable(member_id, permission)
+        seen.add(member_id)
+        result.append(member_id)
+    return result
+
+
+#: A zone owner or zone member must hold this. It is ``zone.write`` in illumex.
+ZONE_MANAGE = "zone:manage"
+
+
+def release_account_for_role(user_id: str) -> None:
+    """Clear rows this account can no longer own under its current role.
+
+    The role is read from the account table. A missing account is 404 and
+    nothing is cleared. A failure to read the role propagates, so an outage
+    is not reported as a missing account. A group that owns a row is a
+    different id and is left in place.
+    """
+    role = postgres_dal.get_user_role(user_id, strict=True)
+    if role is None:
+        raise HTTPException(status_code=404, detail=f"User {user_id!r} not found")
+    granted = set(permissions_for_role(role))
+    owners_dal.release_account(
+        user_id,
+        catalog=CATALOG_EDIT not in granted,
+        zone=ZONE_MANAGE not in granted,
+    )

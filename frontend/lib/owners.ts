@@ -33,19 +33,34 @@ export const findOwner = (
 	ownerId: string | null | undefined,
 ): Owner | undefined => (ownerId ? owners.find((owner) => owner.id === ownerId) : undefined);
 
+/**
+ * Eligible owners, plus any currently selected ids that no longer qualify.
+ * A save that only listed who still qualifies would drop the rest.
+ */
+export const ownersIncludingSelected = (
+	owners: Owner[],
+	permission: string,
+	selectedIds: readonly (string | null | undefined)[],
+): Owner[] => {
+	const eligible = filterOwnersByPermission(owners, permission);
+	const known = new Set(eligible.map((owner) => owner.id));
+	const extras: Owner[] = [];
+	for (const id of selectedIds) {
+		if (id == null || id === '' || known.has(id)) continue;
+		const current = findOwner(owners, id);
+		if (current == null) continue;
+		extras.push(current);
+		known.add(current.id);
+	}
+	return [...extras, ...eligible];
+};
+
 /** Eligible owners, with the current one kept even when they no longer qualify. */
 export const ownerChoices = (
 	owners: Owner[],
 	permission: string,
 	currentId?: string | null,
-): Owner[] => {
-	const eligible = filterOwnersByPermission(owners, permission);
-	const current = findOwner(owners, currentId);
-	if (current != null && !eligible.some((owner) => owner.id === current.id)) {
-		return [current, ...eligible];
-	}
-	return eligible;
-};
+): Owner[] => ownersIncludingSelected(owners, permission, [currentId]);
 
 /** The signed-in account, when that account is allowed to own this kind of object. */
 export const defaultOwnerId = (
