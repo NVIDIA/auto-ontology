@@ -9,8 +9,16 @@ import threading
 import time
 from typing import Any
 
+import pytest
+
 from auto_ontology.utils import llm_invoke
 from auto_ontology.utils.llm_invoke import _structured_output_kwargs
+
+
+@pytest.fixture(autouse=True)
+def _isolate_non_reasoning_client_ids(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent non-weak-referenceable test client IDs from leaking across tests."""
+    monkeypatch.setattr(llm_invoke, "_NON_REASONING_IDS", set())
 
 
 class _Model:
