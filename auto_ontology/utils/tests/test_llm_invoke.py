@@ -8,6 +8,7 @@ import contextlib
 import threading
 import time
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -166,6 +167,11 @@ def test_non_reasoning_client_is_marked(monkeypatch: Any) -> None:
     assert llm_invoke._is_non_reasoning_client(_Binding(client))
     assert not llm_invoke._is_non_reasoning_client(object())
     assert not llm_invoke._is_non_reasoning_client(_Binding(object()))
+
+
+def test_endless_bound_chain_is_not_followed_forever() -> None:
+    """A ``MagicMock`` has a fresh ``bound`` on every access; the walk must stop."""
+    assert not llm_invoke._is_non_reasoning_client(MagicMock())
 
 
 def test_structured_non_reasoning_call_falls_back_to_reasoning(

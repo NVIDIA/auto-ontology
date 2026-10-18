@@ -317,6 +317,11 @@ def get_non_reasoning_llm_client(
 # returns a wrapper whose ``bound`` is the client registered here.
 _NON_REASONING_IDS: set[int] = set()
 
+# How many ``bound`` links to follow. Real ``.bind()`` chains are a level or two
+# deep; the cap stops the walk on objects whose ``bound`` never ends — a
+# ``MagicMock`` returns a fresh mock for every attribute access.
+_MAX_BINDING_DEPTH = 8
+
 
 def _remember_non_reasoning(client: object) -> None:
     """Record *client* so a failed call on it can fall back to the reasoning model."""
@@ -331,10 +336,8 @@ def _remember_non_reasoning(client: object) -> None:
 
 def _is_non_reasoning_client(llm: object) -> bool:
     """Whether *llm* is a non-reasoning client, including a ``.bind()`` wrapper."""
-    seen: set[int] = set()
-    current: object | None = llm
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
+    current = llm
+    for _ in range(_MAX_BINDING_DEPTH):
         if id(current) in _NON_REASONING_IDS:
             return True
         bound = getattr(current, "bound", None)
