@@ -23,7 +23,7 @@ from auto_ontology.utils.embedding_rows import (
     build_table_text,
 )
 
-_COLS = ["text", "_embed_modality", "path", "page_number", "metadata"]
+_COLS = ["text", "path", "page_number", "metadata"]
 
 
 def _op(database_name: str = "db") -> CatalogEmbeddingRowsOp:
@@ -120,7 +120,6 @@ def test_row_uses_the_auto_ontology_path_prefix() -> None:
     assert row["metadata"]["source_path"] == "auto_ontology:abc"
     assert row["text"] == "t"
     assert row["page_number"] == -1
-    assert row["_embed_modality"] == "text"
 
 
 def test_row_falls_back_when_node_id_is_missing() -> None:
@@ -330,8 +329,6 @@ def test_non_tuple_input_names_the_database() -> None:
         _op("shop").process(pd.DataFrame())
 
 
-def test_preprocess_and_postprocess_are_pass_through() -> None:
-    op = _op()
-    sentinel = object()
-    assert op.preprocess(sentinel) is sentinel
-    assert op.postprocess(sentinel) is sentinel
+def test_calling_the_op_is_process() -> None:
+    pair = (pd.DataFrame(), pd.DataFrame())
+    assert list(_op()(pair).columns) == _COLS

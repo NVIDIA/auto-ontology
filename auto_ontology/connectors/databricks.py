@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Databricks connector implementing the NeMo-Retriever SQLDatabase ABC."""
+"""Databricks connector implementing the :class:`~auto_ontology.connectors.base.SQLDatabase` ABC."""
 
 from __future__ import annotations
 
@@ -613,7 +613,7 @@ class DatabricksDatabase(SQLDatabase):
         Every statement shares ONE connection — opening one costs ~0.9s and has been
         measured stalling for minutes, so a connect per table would dominate the run.
 
-        The result is cached for the run: NeMo-Retriever's extract operator calls
+        The result is cached for the run: catalog extraction calls
         ``get_columns``, ``get_pks`` and ``get_fks`` separately, and re-describing every
         table three times would triple the cost. :meth:`get_tables` clears it, and it
         runs first in every extraction, so each ingest sees fresh metadata.
