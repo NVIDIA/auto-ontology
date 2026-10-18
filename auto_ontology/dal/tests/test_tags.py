@@ -59,14 +59,23 @@ from sqlalchemy import Select, select  # noqa: E402
 from sqlalchemy.exc import IntegrityError  # noqa: E402
 
 from auto_ontology.dal import schema as s  # noqa: E402
+from auto_ontology.dal.pii import (  # noqa: E402
+    mark_columns_pii_processed,
+    realign_sql_attribute_pii,
+    tag_attributes_of_tagged_columns,
+    untag_attributes_of_column,
+    untag_attributes_of_columns_being_deleted,
+)
 from auto_ontology.dal.rules import delete_rule, update_rule  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.dal.tags import (  # noqa: E402
+    PII_TAG_NAME,
     TARGET_COLUMN,
     TARGET_COLUMN_ATTRIBUTE,
     TARGET_SQL_ATTRIBUTE,
     TARGET_TABLE,
     TARGET_TERM,
+    apply_labels_now_matched,
     attach_tag,
     attach_tags_by_rule,
     count_tag_targets,
@@ -76,10 +85,11 @@ from auto_ontology.dal.tags import (  # noqa: E402
     detach_tag,
     existing_tag_ids,
     fetch_tags_map,
+    get_or_create_tag,
     get_tag,
+    get_tag_by_name,
     list_tag_targets,
     list_tags,
-    apply_labels_now_matched,
     remove_labels_no_longer_matched,
     update_tag,
 )
@@ -108,6 +118,23 @@ def test_create_returns_the_stored_tag(prefix) -> None:
 
     assert tag["name"] == f"{prefix}-pii"
     assert tag["id"]
+
+
+def test_get_tag_by_name_ignores_case_and_whitespace(prefix) -> None:
+    tag = create_tag(name=f"{prefix}-PII")
+
+    found = get_tag_by_name(f"  {prefix}-pii  ")
+
+    assert found is not None
+    assert found["id"] == tag["id"]
+
+
+def test_get_or_create_tag_reuses_existing_case_insensitive_name(prefix) -> None:
+    tag = create_tag(name=f"{prefix}-PII")
+
+    ensured = get_or_create_tag(name=f"{prefix}-pii")
+
+    assert ensured["id"] == tag["id"]
 
 
 def test_the_same_name_twice_is_rejected(prefix) -> None:
@@ -885,6 +912,21 @@ def test_the_map_resolves_every_object_in_one_pass(tagged) -> None:
     }
 
 
+def test_the_map_chunks_id_lists_past_the_bind_batch(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A large ingest must not expand one ``IN`` past psycopg's bind cap."""
+    monkeypatch.setattr("auto_ontology.dal.tags.IN_QUERY_BATCH", 2)
+    extras = [_add(s.term, name=f"{tagged.prefix}-T{i}") for i in range(5)]
+    for term_id in extras:
+        tagged.label(term_id=term_id)
+
+    found = fetch_tags_map(TARGET_TERM, extras)
+
+    assert set(found) == set(extras)
+    assert all(found[term_id][0]["id"] == tagged.tag for term_id in extras)
+
+
 def test_the_map_reads_only_the_kind_it_was_asked_for(tagged) -> None:
     """Ids are unique across tables, but the column filtered on is not."""
     tagged.label_one_of_each()
@@ -896,6 +938,29 @@ def test_an_unknown_kind_is_a_programming_error(tagged) -> None:
     """Not a missing object -- a caller naming something the API never had."""
     with pytest.raises(ValueError, match="Unknown tag target"):
         fetch_tags_map("database", [tagged.database])
+
+
+def test_mark_columns_pii_processed_chunks_id_lists_past_the_bind_batch(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Same bind-parameter cap as ``fetch_tags_map``, on the write that stops a re-run."""
+    monkeypatch.setattr("auto_ontology.dal.pii.IN_QUERY_BATCH", 2)
+    extras = [
+        _add(s.catalog_column, table_id=tagged.table, name=f"col{i}") for i in range(5)
+    ]
+
+    assert mark_columns_pii_processed(extras) == 5
+    assert mark_columns_pii_processed(extras) == 0
+    rows = store().query_read(
+        select(s.catalog_column.c.pii_processed).where(
+            s.catalog_column.c.id.in_(extras)
+        )
+    )
+    assert all(row["pii_processed"] for row in rows)
+
+
+def test_mark_columns_pii_processed_is_a_no_op_on_an_empty_list() -> None:
+    assert mark_columns_pii_processed([]) == 0
 
 
 # --------------------------------------------------------------------------
@@ -1352,6 +1417,215 @@ def test_a_rule_takes_back_a_label_it_no_longer_matches(tagged) -> None:
     assert list_tag_targets(tagged.tag) == []
 
 
+def _label_attributes_as_propagated(tagged, tag_id: str) -> None:
+    """Copy *tag_id* onto the fixture's attributes as ingest/compile would.
+
+    Scoped to this fixture so a test that uses the shared ``PII`` tag does not
+    walk every PII column in the database.
+    """
+    attach_tag(
+        tag_id=tag_id, kind=TARGET_COLUMN_ATTRIBUTE, item_id=tagged.column_attribute
+    )
+    attach_tag(tag_id=tag_id, kind=TARGET_SQL_ATTRIBUTE, item_id=tagged.sql_attribute)
+    store().query_write(
+        s.column_attribute.update()
+        .where(s.column_attribute.c.id == tagged.column_attribute)
+        .values(pii_processed=True)
+    )
+    store().query_write(
+        s.sql_attribute.update()
+        .where(s.sql_attribute.c.id == tagged.sql_attribute)
+        .values(pii_processed=True)
+    )
+
+
+def test_a_rule_taking_back_pii_from_a_column_untags_its_attributes(
+    tagged, sql_query_cleanup
+) -> None:
+    """Propagated attribute labels have no rule_id, so the cascade has to."""
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+    _label_attributes_as_propagated(tagged, pii)
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(name="net_proceeds")
+    )
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute not in labelled
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+
+
+def test_a_failed_pii_cascade_does_not_take_the_column_label(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Delete and cascade are one transaction: a failed untag keeps the label."""
+    import auto_ontology.dal.tags as tags_dal
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(name="net_proceeds")
+    )
+
+    def boom(_rows: object) -> None:
+        raise RuntimeError("cascade failed")
+
+    monkeypatch.setattr(tags_dal, "_cascade_pii_off_columns", boom)
+
+    with pytest.raises(RuntimeError, match="cascade failed"):
+        remove_labels_no_longer_matched(rule_id=rule_id, targets=targets)
+
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}
+
+
+def test_a_rule_taking_back_pii_keeps_sql_when_another_tagged_column_remains(
+    tagged, sql_query_cleanup
+) -> None:
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql = _attach_attributes_to_column(tagged)
+    sql_query_cleanup.append(sql)
+    other = _add(s.catalog_column, table_id=tagged.table, name="total_tax")
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=other)
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+    _label_attributes_as_propagated(tagged, pii)
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(name="net_proceeds")
+    )
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert other in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute in labelled
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is True
+
+
+def test_a_rule_taking_back_an_ordinary_tag_does_not_untag_attributes(
+    tagged, sql_query_cleanup
+) -> None:
+    """Only the system PII tag cascades; GDPR-style tags stay on attributes."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    rule_id = tagged.rule("totals")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == tagged.column)
+        .values(name="net_proceeds")
+    )
+    _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets)
+
+    labelled = {row["id"] for row in list_tag_targets(tagged.tag)}
+    assert tagged.column not in labelled
+    assert tagged.column_attribute in labelled
+    assert tagged.sql_attribute in labelled
+
+
+def test_deleting_a_pii_rule_untags_its_attributes(tagged, sql_query_cleanup) -> None:
+    """``rule_id`` cascade takes the column; propagated attributes have none."""
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_rule(rule_id)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute not in labelled
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+    assert get_tag_by_name(PII_TAG_NAME) is not None
+
+
+def test_deleting_a_pii_rule_keeps_sql_when_another_tagged_column_remains(
+    tagged, sql_query_cleanup
+) -> None:
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql = _attach_attributes_to_column(tagged)
+    sql_query_cleanup.append(sql)
+    other = _add(s.catalog_column, table_id=tagged.table, name="also_pii")
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=other)
+    tagged.label(tag_id=pii, column_id=other)
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_rule(rule_id)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert other in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute in labelled
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is True
+
+
+def test_deleting_a_pii_rule_keeping_tags_leaves_attribute_pii(
+    tagged, sql_query_cleanup
+) -> None:
+    """Column still carries PII, so the attributes should too."""
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    rule_id = tagged.rule("pii-columns")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[pii], targets=targets)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_rule(rule_id, keep_tags=True)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column in labelled
+    assert tagged.column_attribute in labelled
+    assert tagged.sql_attribute in labelled
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is True
+
+
+def test_deleting_an_ordinary_tag_rule_does_not_untag_attributes(
+    tagged, sql_query_cleanup
+) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    rule_id = tagged.rule("totals")
+    targets = {TARGET_COLUMN: _columns_named("total%", tagged.table)}
+    _sync(rule_id=rule_id, tag_ids=[tagged.tag], targets=targets)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    delete_rule(rule_id)
+
+    labelled = {row["id"] for row in list_tag_targets(tagged.tag)}
+    assert tagged.column not in labelled
+    assert tagged.column_attribute in labelled
+    assert tagged.sql_attribute in labelled
+
+
 def test_re_applying_an_unchanged_rule_writes_nothing(tagged) -> None:
     """Every night, for every rule: the pass has to cost nothing when nothing
     changed, or a nightly re-apply would rewrite the whole catalog's labels."""
@@ -1595,3 +1869,467 @@ def test_removing_first_lets_the_other_rule_take_the_label(tagged) -> None:
     apply_labels_now_matched(rule_id=other, tag_ids=[tagged.tag], targets=matched)
 
     assert tagged.items()[TARGET_COLUMN]["rule"]["id"] == other
+
+
+# --------------------------------------------------------------------------
+# tag_attributes_of_tagged_columns
+# --------------------------------------------------------------------------
+
+
+def _attach_attributes_to_column(tagged) -> str:
+    """Wire the fixture's two attributes to its column; returns the SQL id."""
+    sql = _add(s.sql_query, sql_full_query=f"SELECT total FROM {tagged.prefix}")
+    tagged.link(
+        s.column__has_attribute,
+        column_id=tagged.column,
+        attribute_id=tagged.column_attribute,
+    )
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=tagged.column)
+    tagged.link(
+        s.sql_attribute__sql, attribute_id=tagged.sql_attribute, sql_query_id=sql
+    )
+    return sql
+
+
+@pytest.fixture
+def sql_query_cleanup():
+    ids: list[str] = []
+    yield ids
+    for sql_id in ids:
+        store().query_write(s.sql_query.delete().where(s.sql_query.c.id == sql_id))
+
+
+def test_pii_column_tags_its_column_and_sql_attributes(
+    tagged, sql_query_cleanup
+) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (1, 1)
+
+    items = tagged.items()
+    assert items[TARGET_COLUMN_ATTRIBUTE]["id"] == tagged.column_attribute
+    assert items[TARGET_SQL_ATTRIBUTE]["id"] == tagged.sql_attribute
+    # No account and no rule: the "Auto Generated" source.
+    assert items[TARGET_SQL_ATTRIBUTE]["tagged_by"] is None
+    assert items[TARGET_SQL_ATTRIBUTE]["rule"] is None
+
+
+def test_propagation_is_idempotent(tagged, sql_query_cleanup) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+    assert count_tag_targets(tagged.tag) == 3
+
+
+def test_an_untagged_column_propagates_nothing(tagged, sql_query_cleanup) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+    assert list_tag_targets(tagged.tag) == []
+
+
+def test_an_attribute_without_a_term_is_not_tagged(tagged, sql_query_cleanup) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    store().query_write(
+        s.sql_attribute__term.delete().where(
+            s.sql_attribute__term.c.attribute_id == tagged.sql_attribute
+        )
+    )
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (1, 0)
+
+
+def test_a_semantic_fk_alone_does_not_propagate(tagged) -> None:
+    """The column only references the attribute; it is not an instance of it."""
+    tagged.link(
+        s.column__semantic_fk,
+        column_id=tagged.column,
+        attribute_id=tagged.column_attribute,
+    )
+    tagged.label(column_id=tagged.column)
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+
+
+def test_an_existing_label_keeps_its_source(tagged, sql_query_cleanup) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    attach_tag(
+        tag_id=tagged.tag,
+        kind=TARGET_COLUMN_ATTRIBUTE,
+        item_id=tagged.column_attribute,
+        tagged_by="user-1",
+    )
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 1)
+    assert tagged.items()[TARGET_COLUMN_ATTRIBUTE]["tagged_by"] == "user-1"
+
+
+def test_a_label_a_person_removed_does_not_come_back(tagged, sql_query_cleanup) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    detach_tag(
+        tag_id=tagged.tag,
+        kind=TARGET_COLUMN_ATTRIBUTE,
+        item_id=tagged.column_attribute,
+    )
+    detach_tag(
+        tag_id=tagged.tag, kind=TARGET_SQL_ATTRIBUTE, item_id=tagged.sql_attribute
+    )
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+    assert list(tagged.items()) == [TARGET_COLUMN]
+
+
+def test_propagation_marks_handled_attributes_processed(
+    tagged, sql_query_cleanup
+) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    for table, attribute_id in (
+        (s.column_attribute, tagged.column_attribute),
+        (s.sql_attribute, tagged.sql_attribute),
+    ):
+        row = store().query_read(
+            select(table.c.pii_processed).where(table.c.id == attribute_id)
+        )[0]
+        assert row["pii_processed"] is True
+
+
+def test_an_attribute_of_no_pii_column_stays_unprocessed_and_is_picked_up_later(
+    tagged, sql_query_cleanup
+) -> None:
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+    row = store().query_read(
+        select(s.column_attribute.c.pii_processed).where(
+            s.column_attribute.c.id == tagged.column_attribute
+        )
+    )[0]
+    assert row["pii_processed"] is False
+
+    # The column is classified PII only afterwards.
+    tagged.label(column_id=tagged.column)
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (1, 1)
+
+
+def test_an_attribute_already_labelled_by_hand_is_still_marked_processed(
+    tagged, sql_query_cleanup
+) -> None:
+    """So that removing that hand-applied label later sticks as well."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    attach_tag(
+        tag_id=tagged.tag,
+        kind=TARGET_COLUMN_ATTRIBUTE,
+        item_id=tagged.column_attribute,
+        tagged_by="user-1",
+    )
+
+    tag_attributes_of_tagged_columns(tagged.tag)
+    detach_tag(
+        tag_id=tagged.tag,
+        kind=TARGET_COLUMN_ATTRIBUTE,
+        item_id=tagged.column_attribute,
+    )
+
+    assert tag_attributes_of_tagged_columns(tagged.tag) == (0, 0)
+
+
+def _rewire_sql_attribute(tagged, sql_query_cleanup, column_id: str) -> None:
+    """Replace the SQL attribute's query so it reads *column_id* instead."""
+    store().query_write(
+        s.sql_attribute__sql.delete().where(
+            s.sql_attribute__sql.c.attribute_id == tagged.sql_attribute
+        )
+    )
+    sql = _add(s.sql_query, sql_full_query=f"SELECT x FROM {tagged.prefix}")
+    sql_query_cleanup.append(sql)
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=column_id)
+    tagged.link(
+        s.sql_attribute__sql,
+        attribute_id=tagged.sql_attribute,
+        sql_query_id=sql,
+    )
+
+
+def test_realign_drops_pii_when_sql_no_longer_reads_tagged_column(
+    tagged, sql_query_cleanup
+) -> None:
+    """Rewritten SQL that leaves PII columns loses the tag and processed flag."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    other = _add(s.catalog_column, table_id=tagged.table, name="plain")
+    _rewire_sql_attribute(tagged, sql_query_cleanup, other)
+
+    assert realign_sql_attribute_pii(tagged.sql_attribute, tagged.tag) is True
+    assert TARGET_SQL_ATTRIBUTE not in tagged.items()
+    row = store().query_read(
+        select(s.sql_attribute.c.pii_processed).where(
+            s.sql_attribute.c.id == tagged.sql_attribute
+        )
+    )[0]
+    assert row["pii_processed"] is False
+    assert tagged.items()[TARGET_COLUMN_ATTRIBUTE]["id"] == tagged.column_attribute
+
+
+def test_realign_keeps_pii_when_sql_still_reads_tagged_column(
+    tagged, sql_query_cleanup
+) -> None:
+    """Rewritten SQL that still reads a tagged column keeps tag and processed."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(column_id=tagged.column)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    other = _add(s.catalog_column, table_id=tagged.table, name="also_pii")
+    tagged.label(column_id=other)
+    _rewire_sql_attribute(tagged, sql_query_cleanup, other)
+
+    assert realign_sql_attribute_pii(tagged.sql_attribute, tagged.tag) is False
+    assert tagged.items()[TARGET_SQL_ATTRIBUTE]["id"] == tagged.sql_attribute
+    row = store().query_read(
+        select(s.sql_attribute.c.pii_processed).where(
+            s.sql_attribute.c.id == tagged.sql_attribute
+        )
+    )[0]
+    assert row["pii_processed"] is True
+
+
+def test_realign_clears_processed_when_tag_id_is_none(
+    tagged, sql_query_cleanup
+) -> None:
+    """No PII tag in the catalog means the SQL cannot still be reading one."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    store().query_write(
+        s.sql_attribute.update()
+        .where(s.sql_attribute.c.id == tagged.sql_attribute)
+        .values(pii_processed=True)
+    )
+
+    assert realign_sql_attribute_pii(tagged.sql_attribute, None) is True
+    row = store().query_read(
+        select(s.sql_attribute.c.pii_processed).where(
+            s.sql_attribute.c.id == tagged.sql_attribute
+        )
+    )[0]
+    assert row["pii_processed"] is False
+
+
+def _processed(table, attr_id: str) -> bool:
+    return store().query_read(
+        select(table.c.pii_processed).where(table.c.id == attr_id)
+    )[0]["pii_processed"]
+
+
+def test_untag_column_drops_all_its_column_attributes_and_sql_with_no_pii_left(
+    tagged, sql_query_cleanup
+) -> None:
+    """Every HAS_ATTRIBUTE of the column loses PII; SQL does too if that was its last."""
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    other_attr = _add(
+        s.column_attribute,
+        name=f"{tagged.prefix}-order-total-also",
+        source_column="total",
+        term_name=f"{tagged.prefix}-Order",
+        table_id="",
+    )
+    tagged.link(
+        s.column__has_attribute,
+        column_id=tagged.column,
+        attribute_id=other_attr,
+    )
+    tagged.link(s.column_attribute__term, attribute_id=other_attr, term_id=tagged.term)
+    tagged.label(column_id=tagged.column)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    detach_tag(tag_id=tagged.tag, kind=TARGET_COLUMN, item_id=tagged.column)
+    untag_attributes_of_column(tagged.column, tagged.tag)
+
+    labelled = {row["id"] for row in list_tag_targets(tagged.tag)}
+    assert labelled == set()
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.column_attribute, other_attr) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+
+
+def test_untag_column_keeps_sql_pii_when_another_tagged_column_remains(
+    tagged, sql_query_cleanup
+) -> None:
+    """SQL that still reads a PII column keeps the tag; the column attr does not."""
+    sql = _attach_attributes_to_column(tagged)
+    sql_query_cleanup.append(sql)
+    other = _add(s.catalog_column, table_id=tagged.table, name="also_pii")
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=other)
+    tagged.label(column_id=tagged.column)
+    tagged.label(column_id=other)
+    tag_attributes_of_tagged_columns(tagged.tag)
+
+    detach_tag(tag_id=tagged.tag, kind=TARGET_COLUMN, item_id=tagged.column)
+    untag_attributes_of_column(tagged.column, tagged.tag)
+
+    ids = {row["id"] for row in list_tag_targets(tagged.tag)}
+    assert tagged.column not in ids
+    assert other in ids
+    assert tagged.column_attribute not in ids
+    assert tagged.sql_attribute in ids
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is True
+
+
+def test_deleting_pii_columns_drops_attribute_pii_when_none_remain(
+    tagged, sql_query_cleanup
+) -> None:
+    """Ingest drop: take PII off the column first, then realign attributes."""
+    from auto_ontology.catalog.store.db import delete_columns_batch
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(tag_id=pii, column_id=tagged.column)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_columns_batch([tagged.column])
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute not in labelled
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+
+
+def test_deleting_one_pii_column_keeps_sql_when_another_tagged_column_remains(
+    tagged, sql_query_cleanup
+) -> None:
+    from auto_ontology.catalog.store.db import delete_columns_batch
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql = _attach_attributes_to_column(tagged)
+    sql_query_cleanup.append(sql)
+    other = _add(s.catalog_column, table_id=tagged.table, name="also_pii")
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=other)
+    tagged.label(tag_id=pii, column_id=tagged.column)
+    tagged.label(tag_id=pii, column_id=other)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_columns_batch([tagged.column])
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.column not in labelled
+    assert other in labelled
+    assert tagged.column_attribute not in labelled
+    assert tagged.sql_attribute in labelled
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is True
+
+
+def test_deleting_every_pii_column_a_sql_reads_drops_its_pii(
+    tagged, sql_query_cleanup
+) -> None:
+    """Batch drop: detach every column first, or SQL would still see a tagged one."""
+    from auto_ontology.catalog.store.db import delete_columns_batch
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql = _attach_attributes_to_column(tagged)
+    sql_query_cleanup.append(sql)
+    other = _add(s.catalog_column, table_id=tagged.table, name="also_pii")
+    tagged.link(s.sql_query__column, sql_query_id=sql, column_id=other)
+    tagged.label(tag_id=pii, column_id=tagged.column)
+    tagged.label(tag_id=pii, column_id=other)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_columns_batch([tagged.column, other])
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.sql_attribute not in labelled
+    assert tagged.column_attribute not in labelled
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+    assert _processed(s.column_attribute, tagged.column_attribute) is False
+
+
+def test_deleting_a_table_untags_sql_that_only_read_its_pii_columns(
+    tagged, sql_query_cleanup
+) -> None:
+    from auto_ontology.catalog.store.db import delete_table
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    sql_query_cleanup.append(_attach_attributes_to_column(tagged))
+    tagged.label(tag_id=pii, column_id=tagged.column)
+    _label_attributes_as_propagated(tagged, pii)
+
+    delete_table(tagged.table)
+
+    labelled = {row["id"] for row in list_tag_targets(pii)}
+    assert tagged.sql_attribute not in labelled
+    assert tagged.column_attribute not in labelled
+    assert _processed(s.sql_attribute, tagged.sql_attribute) is False
+
+
+def test_deleting_no_columns_is_a_noop() -> None:
+    untag_attributes_of_columns_being_deleted([])
+    untag_attributes_of_columns_being_deleted(["", ""])
+
+
+def _column_exists(column_id: str) -> bool:
+    return bool(
+        store().query_read(
+            select(s.catalog_column.c.id).where(s.catalog_column.c.id == column_id)
+        )
+    )
+
+
+def test_a_failed_pii_cleanup_does_not_delete_the_column(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cleanup and delete are one transaction: neither lands if untag raises."""
+    from auto_ontology.catalog.store import db as catalog_db
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    tagged.label(tag_id=pii, column_id=tagged.column)
+
+    def boom(_ids: list[str]) -> None:
+        raise RuntimeError("untag failed")
+
+    monkeypatch.setattr(catalog_db, "untag_attributes_of_columns_being_deleted", boom)
+
+    with pytest.raises(RuntimeError, match="untag failed"):
+        catalog_db.delete_columns_batch([tagged.column])
+
+    assert _column_exists(tagged.column)
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}
+
+
+def test_a_failed_pii_cleanup_does_not_delete_the_table(
+    tagged, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from auto_ontology.catalog.store import db as catalog_db
+
+    pii = get_or_create_tag(name=PII_TAG_NAME)["id"]
+    tagged.label(tag_id=pii, column_id=tagged.column)
+
+    def boom(_ids: list[str]) -> None:
+        raise RuntimeError("untag failed")
+
+    monkeypatch.setattr(catalog_db, "untag_attributes_of_columns_being_deleted", boom)
+
+    with pytest.raises(RuntimeError, match="untag failed"):
+        catalog_db.delete_table(tagged.table)
+
+    assert _column_exists(tagged.column)
+    assert store().query_read(
+        select(s.catalog_table.c.id).where(s.catalog_table.c.id == tagged.table)
+    )
+    assert tagged.column in {row["id"] for row in list_tag_targets(pii)}

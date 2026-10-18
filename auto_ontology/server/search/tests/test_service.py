@@ -11,7 +11,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from auto_ontology.server.search.constants import MIN_SEARCH_LENGTH
+from auto_ontology.server.search.constants import (
+    MIN_SEARCH_LENGTH,
+    UNTAGGED_FILTER_VALUE,
+)
 from auto_ontology.server.search.service import (
     SearchValidationError,
     global_search,
@@ -19,6 +22,7 @@ from auto_ontology.server.search.service import (
     match_selects,
     rank_key,
     resolve_object_types,
+    resolve_tag_filter,
 )
 
 
@@ -36,6 +40,38 @@ def test_resolve_object_types_empty_list_is_all() -> None:
 def test_resolve_object_types_rejects_unknown() -> None:
     with pytest.raises(SearchValidationError, match="metric"):
         resolve_object_types(["Term", "metric"])
+
+
+def test_resolve_tag_filter_is_empty_for_no_tags() -> None:
+    assert resolve_tag_filter(None) == ([], False)
+    assert resolve_tag_filter([]) == ([], False)
+
+
+def test_resolve_tag_filter_splits_the_untagged_sentinel_out() -> None:
+    """One list on the wire, two arguments to the DAL.
+
+    The sentinel must not reach the ``IN`` clause — an id column compared
+    against ``'(blanks)'`` matches nothing, so the untagged half of the
+    selection would silently disappear instead of widening it.
+    """
+    assert resolve_tag_filter(["t1", UNTAGGED_FILTER_VALUE, "t2"]) == (
+        ["t1", "t2"],
+        True,
+    )
+
+
+def test_resolve_tag_filter_accepts_the_sentinel_on_its_own() -> None:
+    assert resolve_tag_filter([UNTAGGED_FILTER_VALUE]) == ([], True)
+
+
+def test_resolve_tag_filter_does_not_check_the_ids() -> None:
+    """Unlike the object types, which raise for anything unknown.
+
+    A tag deleted between a rule being saved and replayed leaves an id naming
+    nothing, and that means the rule matches less rather than that it has
+    become unreplayable.
+    """
+    assert resolve_tag_filter(["gone"]) == (["gone"], False)
 
 
 def test_rank_key_prefers_names_containing_the_term_then_shorter() -> None:

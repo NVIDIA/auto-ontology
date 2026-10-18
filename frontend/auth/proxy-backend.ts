@@ -58,7 +58,9 @@ export async function proxyToBackend(
 
 	const upstream = await fetch(target, { method: req.method, headers, body });
 
-	const respBody = await upstream.text();
+	// Relayed as bytes: decoding as text would replace every byte of a binary
+	// answer, such as the Ossie export's zip, that is not valid UTF-8.
+	const respBody = await upstream.arrayBuffer();
 	return new Response(respBody, {
 		status: upstream.status,
 		headers: {

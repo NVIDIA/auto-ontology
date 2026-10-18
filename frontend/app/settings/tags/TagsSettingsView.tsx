@@ -27,6 +27,7 @@ import { EmptyStateVariant } from '@/enums/emptyState';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { useInfiniteList } from '@/hooks/useInfiniteList';
 import { invalidateTagVocabulary } from '@/lib/queries/tags';
+import { isProtectedTag } from '@/lib/tags';
 import type { TableColumn } from '@/types/table';
 import type { Tag, TagAuthor } from '@/types/tags';
 
@@ -298,42 +299,43 @@ const TagsList = () => {
 			width: 'w-20',
 			nowrap: true,
 			headerClassName: 'text-right',
-			cell: (tag) => (
-				// Stop propagation so opening the menu never also opens the tag.
-				<span
-					role="presentation"
-					onClick={(e) => e.stopPropagation()}
-					className="flex justify-end"
-				>
-					<PopoverMenu
-						items={[
-							{
-								label: 'Rename Tag',
-								icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
-								onClick: () => openRenameModal(tag),
-							},
-							{
-								label: 'Delete Tag',
-								icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
-								onClick: () => handleRequestDelete(tag),
-								danger: true,
-							},
-						]}
-						trigger={({ toggle }) => (
-							<Button
-								theme={ButtonTheme.IconNeutral}
-								size={Size.SMALL}
-								iconOnly
-								type="button"
-								onClick={toggle}
-								aria-label={`Actions for ${tag.name}`}
-							>
-								<Icon name={IconName.DotsVertical} className="h-4 w-4" />
-							</Button>
-						)}
-					/>
-				</span>
-			),
+			cell: (tag) =>
+				isProtectedTag(tag) ? null : (
+					// Stop propagation so opening the menu never also opens the tag.
+					<span
+						role="presentation"
+						onClick={(e) => e.stopPropagation()}
+						className="flex justify-end"
+					>
+						<PopoverMenu
+							items={[
+								{
+									label: 'Rename Tag',
+									icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
+									onClick: () => openRenameModal(tag),
+								},
+								{
+									label: 'Delete Tag',
+									icon: <Icon name={IconName.Trash} className="h-3.5 w-3.5" />,
+									onClick: () => handleRequestDelete(tag),
+									danger: true,
+								},
+							]}
+							trigger={({ toggle }) => (
+								<Button
+									theme={ButtonTheme.IconNeutral}
+									size={Size.SMALL}
+									iconOnly
+									type="button"
+									onClick={toggle}
+									aria-label={`Actions for ${tag.name}`}
+								>
+									<Icon name={IconName.DotsVertical} className="h-4 w-4" />
+								</Button>
+							)}
+						/>
+					</span>
+				),
 		},
 	];
 

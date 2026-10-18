@@ -21,13 +21,9 @@ from typing import Any
 
 import pandas as pd
 
-logger = logging.getLogger(__name__)
+from auto_ontology.infra.feature_flags import get_sql_query_timeout_seconds
 
-# A user is waiting on a chat answer and the pipeline allows one stream at a
-# time, so a runaway query would pin the slot. Databricks enforces this server
-# side and cancels the statement; connect and warehouse scheduling sit outside
-# the cap, so expect roughly this plus a couple of seconds of wall clock.
-CHAT_STATEMENT_TIMEOUT_S = 30
+logger = logging.getLogger(__name__)
 
 # Generated SQL is normally short, but a pathological statement shouldn't flood
 # the log; keep enough to be recognisable and say how much was cut.
@@ -65,18 +61,26 @@ def execute_chat_sql(
     sql: str,
     *,
     kind: str = "chat SQL",
-    timeout_s: int | None = CHAT_STATEMENT_TIMEOUT_S,
+    timeout_s: float | None = None,
 ) -> pd.DataFrame:
-    """Log and run one agent-issued statement, capped in time where supported.
+    """Log and run one agent-issued statement, capped in time.
 
-    Connectors that don't advertise ``supports_statement_timeout`` are called
-    unchanged, so adding a cap here never breaks a connector that has no way to
-    honour it.
+    A user is waiting on the answer and the pipeline allows one stream at a
+    time, so a runaway query would pin the slot. The cap is *timeout_s*, or
+    when that is ``None`` the SQL Query Timeout from Settings > Agent Settings
+    (30s unless an admin changed it, and always 30s without the frontend).
+    Connecting and warehouse scheduling may sit outside it, so expect roughly
+    the cap plus a couple of seconds of wall clock.
+
+    Every built-in connector honours the cap -- server side where the engine
+    has a statement timeout, client side for DuckDB, SQLite and HeavyDB. One
+    that doesn't advertise ``supports_statement_timeout`` is called unchanged,
+    so the cap never breaks a connector with no way to honour it.
     """
     log_chat_sql(connector, sql, kind=kind)
 
-    if timeout_s is not None and getattr(
-        connector, "supports_statement_timeout", False
-    ):
-        return connector.execute(sql, timeout_s=timeout_s)
-    return connector.execute(sql)
+    if not getattr(connector, "supports_statement_timeout", False):
+        return connector.execute(sql)
+    if timeout_s is None:
+        timeout_s = get_sql_query_timeout_seconds()
+    return connector.execute(sql, timeout_s=timeout_s)

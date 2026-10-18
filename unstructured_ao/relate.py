@@ -133,7 +133,9 @@ class PairVerdict(BaseModel):
     qualifier_a: str | None = Field(
         None, description="What distinguishes A: place, period or source, 1-4 words."
     )
-    qualifier_b: str | None = Field(None, description="What distinguishes B, 1-4 words.")
+    qualifier_b: str | None = Field(
+        None, description="What distinguishes B, 1-4 words."
+    )
 
 
 class FamilyMemberLabel(BaseModel):
@@ -251,7 +253,10 @@ def candidate_pairs(
     statement = _CANDIDATES_SQL.format(
         schema=config.ATTRIBUTE_SCHEMA, table=config.ATTRIBUTE_TABLE
     )
-    return [dict(row) for row in conn.execute(text(statement), {"threshold": threshold}).mappings()]
+    return [
+        dict(row)
+        for row in conn.execute(text(statement), {"threshold": threshold}).mappings()
+    ]
 
 
 def attribute_rows(conn: Connection) -> dict[str, dict[str, Any]]:
@@ -326,10 +331,13 @@ def adjudicate(
     verdicts: list[dict[str, Any]] = []
     counts: dict[str, int] = collections.Counter()
 
-    with limit_inflight(MAX_INFLIGHT), ThreadPoolExecutor(
-        max_workers=MAX_INFLIGHT
-    ) as pool:
-        futures = [pool.submit(_adjudicate_one, pair, attributes, llm) for pair in pairs]
+    with (
+        limit_inflight(MAX_INFLIGHT),
+        ThreadPoolExecutor(max_workers=MAX_INFLIGHT) as pool,
+    ):
+        futures = [
+            pool.submit(_adjudicate_one, pair, attributes, llm) for pair in pairs
+        ]
         for done, future in enumerate(as_completed(futures), 1):
             record = future.result()
             if record is None:
@@ -425,9 +433,10 @@ def label_families(
     llm = get_llm_client(max_tokens=2048)
     labelled: list[dict[str, Any]] = []
 
-    with limit_inflight(MAX_INFLIGHT), ThreadPoolExecutor(
-        max_workers=MAX_INFLIGHT
-    ) as pool:
+    with (
+        limit_inflight(MAX_INFLIGHT),
+        ThreadPoolExecutor(max_workers=MAX_INFLIGHT) as pool,
+    ):
         futures = [pool.submit(_label_one, group, attributes, llm) for group in groups]
         for done, future in enumerate(as_completed(futures), 1):
             label = future.result()
@@ -458,7 +467,9 @@ def write_relations(
     a later opinion should win.
     """
     model = model or adjudicator_model()
-    known = {row[0] for row in conn.execute(text("SELECT id FROM unstructured_attribute"))}
+    known = {
+        row[0] for row in conn.execute(text("SELECT id FROM unstructured_attribute"))
+    }
 
     skipped = 0
     for verdict in verdicts:
@@ -466,7 +477,10 @@ def write_relations(
         if a not in known or b not in known:
             skipped += 1
             continue
-        qualifier_a, qualifier_b = verdict.get("qualifier_a"), verdict.get("qualifier_b")
+        qualifier_a, qualifier_b = (
+            verdict.get("qualifier_a"),
+            verdict.get("qualifier_b"),
+        )
         side = (verdict.get("aggregate") or "").strip().lower() or None
         # The table stores one row per unordered pair, and the adjudicator's A
         # and B follow its prompt, so everything that names a side is remapped
@@ -507,7 +521,9 @@ def write_families(
     :func:`family_edges`.
     """
     model = model or adjudicator_model()
-    known = {row[0] for row in conn.execute(text("SELECT id FROM unstructured_attribute"))}
+    known = {
+        row[0] for row in conn.execute(text("SELECT id FROM unstructured_attribute"))
+    }
 
     conn.execute(text("DELETE FROM unstructured_attribute_family"))
     written = 0

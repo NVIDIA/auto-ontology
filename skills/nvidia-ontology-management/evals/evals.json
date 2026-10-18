@@ -52,7 +52,7 @@
     {
       "id": "management-eval-005-import-replace",
       "prompt": "POST /api/model/import with replace=true. What can go wrong?",
-      "expected_output": "Import requires modelInterchange:import and can replace existing catalog and semantic-layer data. replace defaults to true. Confirm with the user before applying. Format is detected from the document root: Auto Ontology uses data_layer/semantic_layer; Ossie uses semantic_model.",
+      "expected_output": "Import requires modelInterchange:import and can replace existing catalog and semantic-layer data. replace defaults to true. Confirm with the user before applying. Format is detected from the document root: Auto Ontology uses data_layer/semantic_layer; any other root is read as Apache Ossie, with version, name, and datasets at the root.",
       "assertions": [
         "Warns that import can replace existing data",
         "Notes replace defaults to true and asks before proceeding",

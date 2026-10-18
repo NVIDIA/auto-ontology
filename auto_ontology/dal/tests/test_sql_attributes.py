@@ -499,6 +499,24 @@ def test_update_with_nothing_set_is_a_no_op(world) -> None:
     assert row["source"] == "manual"
 
 
+def test_update_leaves_pii_processed_alone(world) -> None:
+    """PII realign lives on the service, not on this row patch."""
+    world.term("Revenue")
+    attr = world.attribute("revenue", "Revenue", sql="SELECT 1", source="manual")
+    store().query_write(
+        s.sql_attribute.update()
+        .where(s.sql_attribute.c.id == attr)
+        .values(pii_processed=True)
+    )
+
+    sa.update_sql_attribute(attr, description="metadata only", expression="SELECT 2")
+
+    row = store().query_read(
+        select(s.sql_attribute.c.pii_processed).where(s.sql_attribute.c.id == attr)
+    )[0]
+    assert row["pii_processed"] is True
+
+
 def test_description_suggestions_round_trip(world) -> None:
     world.term("Revenue")
     attr = world.attribute("revenue", "Revenue", sql="SELECT 1")

@@ -192,6 +192,7 @@ def get_column_ids(columns_df: pd.DataFrame, database_name: str) -> pd.DataFrame
             s.catalog_table.c.name.label("table_name"),
             s.catalog_column.c.name.label("column_name"),
             s.catalog_column.c.id.label("id"),
+            s.catalog_column.c.pii_processed.label("pii_processed"),
         )
         .select_from(_catalog_join())
         .where(s.catalog_database.c.name == database_name)

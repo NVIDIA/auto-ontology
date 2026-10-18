@@ -70,10 +70,21 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 
 from auto_ontology.dal import schema as s
-from auto_ontology.dal.session import store, write_transaction
+from auto_ontology.dal.session import IN_QUERY_BATCH, store, write_transaction
 
 #: The rule ``uq_tag_name_lower`` indexes, as a comparison the DAL can run.
 _FOLDED_NAME = func.lower(func.trim(s.tag.c.name))
+
+#: The tag automatic PII detection attaches. Ingestion finds it by name, so it
+#: may be neither deleted nor renamed: either would silently fork PII labels
+#: across two tags. Mirrored by ``PII_TAG_NAME`` in ``frontend/constants/tags.ts``.
+PII_TAG_NAME = "PII"
+
+
+def is_protected_tag(tag: dict[str, Any]) -> bool:
+    """Whether *tag* is system-managed and must keep its name and existence."""
+    return str(tag["name"]).strip().lower() == PII_TAG_NAME.lower()
+
 
 #: Every column the API returns for a tag, in one place so the list and the
 #: create path cannot drift into returning different shapes.
@@ -239,6 +250,36 @@ def get_tag(tag_id: str) -> dict[str, Any] | None:
     """
     rows = store().query_read(select(*_COLUMNS).where(s.tag.c.id == tag_id))
     return rows[0] if rows else None
+
+
+def get_tag_by_name(name: str) -> dict[str, Any] | None:
+    """One tag by its case-insensitive, trimmed name."""
+
+    rows = store().query_read(
+        select(*_COLUMNS).where(_FOLDED_NAME == name.strip().lower())
+    )
+    return rows[0] if rows else None
+
+
+def get_or_create_tag(*, name: str, created_by: str | None = None) -> dict[str, Any]:
+    """Return the named tag, creating it safely when it does not exist.
+
+    The unique index remains the concurrency guard. If another worker creates
+    the same tag after our initial read, :func:`create_tag` reports the
+    collision and this function re-reads the winning row.
+    """
+
+    normalized_name = name.strip()
+    existing = get_tag_by_name(normalized_name)
+    if existing is not None:
+        return existing
+    try:
+        return create_tag(name=normalized_name, created_by=created_by)
+    except ValueError:
+        existing = get_tag_by_name(normalized_name)
+        if existing is None:
+            raise
+        return existing
 
 
 def existing_tag_ids(tag_ids: list[str]) -> set[str]:
@@ -563,8 +604,11 @@ def _with_rule(row: dict[str, Any]) -> dict[str, Any]:
 def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, Any]]]:
     """``{item_id: [tag, ...]}`` for objects of one *kind*.
 
-    One query for the whole set, so a page listing a term's attributes reads
-    their tags once rather than once per row.
+    One query for the whole set when it fits, so a page listing a term's
+    attributes reads their tags once rather than once per row. Larger id lists
+    are split into batches of :data:`IN_QUERY_BATCH` so a first ingest of a
+    catalog bigger than psycopg's 65535 bind parameters cannot raise on the
+    ``IN``.
 
     Only id and name: this is the chip a detail page draws beside the object,
     and the timestamps :func:`list_tags` returns describe the tag rather than
@@ -576,18 +620,19 @@ def fetch_tags_map(kind: str, item_ids: list[str]) -> dict[str, list[dict[str, A
     if not item_ids:
         return {}
 
-    rows = store().query_read(
-        select(column.label("item_id"), s.tag.c.id, s.tag.c.name)
-        .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
-        .where(column.in_(item_ids))
-        .order_by(func.lower(s.tag.c.name), s.tag.c.id)
-    )
-
     tags: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        tags.setdefault(row["item_id"], []).append(
-            {"id": row["id"], "name": row["name"]}
+    for offset in range(0, len(item_ids), IN_QUERY_BATCH):
+        chunk = item_ids[offset : offset + IN_QUERY_BATCH]
+        rows = store().query_read(
+            select(column.label("item_id"), s.tag.c.id, s.tag.c.name)
+            .select_from(s.tag_target.join(s.tag, s.tag.c.id == s.tag_target.c.tag_id))
+            .where(column.in_(chunk))
+            .order_by(func.lower(s.tag.c.name), s.tag.c.id)
         )
+        for row in rows:
+            tags.setdefault(row["item_id"], []).append(
+                {"id": row["id"], "name": row["name"]}
+            )
     return tags
 
 
@@ -1002,6 +1047,15 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     fills exactly one of the five columns and leaves the rest null: ``NULL IN
     (...)`` is null, and a null inside the negation would leave the row
     undecided rather than deleted.
+
+    Taking the system ``PII`` tag off a column also takes it off that column's
+    attributes -- the same cascade as the tags API. Propagated attribute labels
+    have no ``rule_id``, so this statement would otherwise leave them behind.
+
+    One transaction for the delete and that cascade. Nested
+    :func:`write_transaction` calls in the untag reuse this one, so a failed
+    attribute cleanup rolls the column labels back and the next replay retries
+    instead of leaving attributes tagged after the column is not.
     """
     kept = [
         and_(_target_column(kind).is_not(None), _target_column(kind).in_(matched))
@@ -1010,11 +1064,39 @@ def remove_labels_no_longer_matched(*, rule_id: str, targets: dict[str, Select])
     conditions: list[ColumnElement[bool]] = [s.tag_target.c.rule_id == rule_id]
     if kept:
         conditions.append(not_(or_(*kept)))
-    return len(
-        store().query_write(
-            s.tag_target.delete().where(*conditions).returning(s.tag_target.c.id)
+    with write_transaction():
+        rows = store().query_write(
+            s.tag_target.delete()
+            .where(*conditions)
+            .returning(s.tag_target.c.tag_id, s.tag_target.c.column_id)
         )
-    )
+        _cascade_pii_off_columns(rows)
+        return len(rows)
+
+
+def _cascade_pii_off_columns(deleted: list[dict[str, Any]]) -> None:
+    """Drop ``PII`` from attributes of columns a rule just unlabelled.
+
+    Call after those column labels are gone -- a replay DELETE, or
+    ``delete_rule``'s ``rule_id`` cascade. Propagated attribute labels have
+    no ``rule_id``, so neither statement would take them on its own.
+
+    Imported lazily: :mod:`auto_ontology.dal.pii` imports this module, so a
+    top-level import would cycle.
+    """
+    pii_tag = get_tag_by_name(PII_TAG_NAME)
+    if pii_tag is None:
+        return
+    pii_id = str(pii_tag["id"])
+    from auto_ontology.dal.pii import untag_attributes_of_column
+
+    seen: set[str] = set()
+    for row in deleted:
+        column_id = row["column_id"]
+        if row["tag_id"] != pii_id or not column_id or column_id in seen:
+            continue
+        seen.add(column_id)
+        untag_attributes_of_column(column_id, pii_id)
 
 
 def detach_tag(*, tag_id: str, kind: str, item_id: str) -> list[dict[str, Any]] | None:

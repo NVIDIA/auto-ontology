@@ -5,6 +5,7 @@
 'use client';
 
 import { forwardRef, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useRouter } from 'next/navigation';
 import { Spinner } from '@nvidia/foundations-react-core';
 import type { Breadcrumb } from '@/types/breadcrumbs';
@@ -13,6 +14,8 @@ import {
 	isComposerSection,
 	type ComposerSection,
 	type ComposerEntityTagsSection,
+	type ComposerOwnerOption,
+	type ComposerOwnerSection,
 	type ComposerTagChip,
 	type ComposerZonesSection,
 	type ComposerCertification,
@@ -31,6 +34,12 @@ import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { datasources } from '@/api/datasources';
 import type { NodePatch } from '@/api/types';
 import type { TermZone } from '@/types/terms';
+import { OwnerLabel } from '@/common/OwnerLabel';
+import { OwnersSelect } from '@/common/OwnersSelect';
+import { ownerChoices } from '@/lib/owners';
+import { ownerQueries } from '@/lib/queries/owners';
+import type { Owner } from '@/types/owners';
+import { SidePanel, type SidePanelBulk } from '@/common/SidePanel';
 import { Toast } from '@/common/Toast';
 import { Label } from '@/common/Label';
 import { PopoverMenu } from '@/common/PopoverMenu';
@@ -94,8 +103,8 @@ export type SinglePageComposerProps = {
 		header: ComposerPageHeader;
 		errorBanner?: unknown;
 	};
-	leftPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
-	rightPanel?: { bulks: unknown[]; width: string; slot?: ReactNode };
+	leftPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
+	rightPanel?: { bulks: SidePanelBulk[]; width: string; slot?: ReactNode };
 	pdfProps?: {
 		isPDFView: boolean;
 		headerProps: Record<string, unknown>;
@@ -121,15 +130,23 @@ export type SinglePageComposerProps = {
 	onCertificationChange?: (id: string, certified: boolean) => void | Promise<void>;
 	/**
 	 * Called when a certification dropdown inside a DATA_TABLE row changes.
-	 * When provided (and in edit mode), the certification cell renders an
-	 * editable dropdown instead of a read-only badge. `rowId` is the row's
-	 * `rowIdKey` value. A returned promise drives the dropdown's saving spinner.
+	 * `rowId` is the row's `rowIdKey` value. A returned promise drives the
+	 * dropdown's saving spinner.
+	 *
+	 * Without `canCertifyDataTableRow`, the dropdown is shown in edit mode.
+	 * With it, the row's own owner decides, including while the page is not
+	 * being edited.
 	 */
 	onDataTableCertificationChange?: (
 		sectionId: string,
 		rowId: string,
 		certified: boolean,
 	) => void | Promise<void>;
+	/**
+	 * Whether this row's certification dropdown is offered. `ownerId` is the
+	 * row's `owner_id`, or null when that cell is empty.
+	 */
+	canCertifyDataTableRow?: (sectionId: string, rowId: string, ownerId: string | null) => boolean;
 	/** Returns an AI-suggested body for a `suggestable` text-card section, or null when none is available. */
 	onSuggestDescription?: (sectionId: string) => Promise<string | null>;
 	inlineSaveSectionId?: string;
@@ -147,6 +164,8 @@ function composerSectionHeading(section: ComposerSection): string {
 			return `${section.title} (${section.terms.length})`;
 		case ComposerSectionKind.ENTITY_TAGS:
 			return `${section.title} (${section.tags.length})`;
+		case ComposerSectionKind.OWNER:
+			return section.title;
 		default:
 			return section.title;
 	}
@@ -469,6 +488,69 @@ const EditableEntityTagsCard = ({
 	);
 };
 
+const ownerOption = (owner: Owner): ComposerOwnerOption => ({
+	id: owner.id,
+	name: owner.name,
+	kind: owner.kind,
+	color: owner.color,
+});
+
+/**
+ * The directory the card was built with, replaced by a live read once it
+ * arrives. Creating a group invalidates that read, so an open page picks the
+ * group up without being rebuilt.
+ */
+const useLiveOwnerOptions = (section: ComposerOwnerSection): ComposerOwnerOption[] => {
+	const { data } = useQuery(ownerQueries.all());
+	if (data == null) return section.options;
+	const source =
+		section.editable === false ? data : ownerChoices(data, section.permission, section.ownerId);
+	return source.map(ownerOption);
+};
+
+const OwnerSection = ({ section }: { section: ComposerOwnerSection }) => {
+	const options = useLiveOwnerOptions(section);
+	const owner = options.find((option) => option.id === section.ownerId);
+	return (
+		<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<OwnerLabel owner={owner} />
+			</div>
+		</div>
+	);
+};
+
+const EditableOwnerCard = ({
+	section,
+	onChange,
+}: {
+	section: ComposerOwnerSection;
+	onChange: (sectionId: string, value: string) => void;
+}) => {
+	const options = useLiveOwnerOptions(section);
+	const [ownerId, setOwnerId] = useState(section.ownerId ?? '');
+	return (
+		<div className="rounded-lg border border-[#76b900]/60 bg-white/90 p-5 ring-1 ring-[#76b900]/10 dark:bg-zinc-950/50">
+			<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
+				{section.title}
+			</h2>
+			<div className="mt-3">
+				<OwnersSelect
+					owners={options}
+					value={ownerId}
+					onChange={(next) => {
+						setOwnerId(next);
+						onChange(section.id, next);
+					}}
+				/>
+			</div>
+		</div>
+	);
+};
+
 const EntityTagsSection = ({ section }: { section: ComposerEntityTagsSection }) => (
 	<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
 		<h2 className="text-sm font-semibold text-heading dark:text-zinc-100">
@@ -523,6 +605,7 @@ function renderComposerSection(
 		rowId: string,
 		certified: boolean,
 	) => void | Promise<void>,
+	canCertifyDataTableRow?: (sectionId: string, rowId: string, ownerId: string | null) => boolean,
 ): ReactNode {
 	switch (section.type) {
 		case ComposerSectionKind.TEXT_CARD:
@@ -629,11 +712,23 @@ function renderComposerSection(
 										const rowId = section.rowIdKey
 											? row[section.rowIdKey]
 											: undefined;
+										const storedOwnerId =
+											typeof row.owner_id === 'string' && row.owner_id !== ''
+												? row.owner_id
+												: null;
+										const rowIdText = typeof rowId === 'string' ? rowId : '';
+										const mayCertify =
+											canCertifyDataTableRow != null
+												? canCertifyDataTableRow(
+														section.id,
+														rowIdText,
+														storedOwnerId,
+													)
+												: isEditingActive;
 										const control =
-											isEditingActive &&
+											mayCertify &&
 											onDataTableCertificationChange != null &&
-											typeof rowId === 'string' &&
-											rowId !== '' ? (
+											rowIdText !== '' ? (
 												// Stop propagation so toggling certification
 												// never triggers the row's navigation click.
 												<span
@@ -647,7 +742,7 @@ function renderComposerSection(
 														onChange={(next) =>
 															onDataTableCertificationChange(
 																section.id,
-																rowId,
+																rowIdText,
 																next,
 															)
 														}
@@ -710,6 +805,8 @@ function renderComposerSection(
 			return <ZonesSection section={section} />;
 		case ComposerSectionKind.ENTITY_TAGS:
 			return <EntityTagsSection section={section} />;
+		case ComposerSectionKind.OWNER:
+			return <OwnerSection section={section} />;
 		case ComposerSectionKind.RELATED_TERMS_CHIPS:
 			return (
 				<div className="rounded-lg border border-zinc-200/90 bg-white/90 p-5 dark:border-zinc-700/90 dark:bg-zinc-950/50">
@@ -825,6 +922,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			onSuggestDescription,
 			onCertificationChange,
 			onDataTableCertificationChange,
+			canCertifyDataTableRow,
 			inlineSaveSectionId,
 			hideEditToolbar = false,
 			headerActions,
@@ -874,8 +972,8 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 			sections.some(
 				(s) =>
 					isComposerSection(s) &&
-					s.type === ComposerSectionKind.ENTITY_TAGS &&
-					s.editable === true,
+					((s.type === ComposerSectionKind.ENTITY_TAGS && s.editable === true) ||
+						(s.type === ComposerSectionKind.OWNER && s.editable === true)),
 			);
 		const [localEditingMode, setLocalEditingMode] = useState(false);
 		const [saving, setSaving] = useState(false);
@@ -1133,56 +1231,41 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</div>
 				) : null}
 
-				{headerActions != null ? (
-					<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
-						{titleBlock}
-						{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
+				<header className="flex shrink-0 items-center gap-3 border-b border-zinc-200 px-7 py-4 sm:px-10 dark:border-zinc-800">
+					{titleBlock}
+					{statusBadge ? <div className="shrink-0">{statusBadge}</div> : null}
+					{editControls != null || headerActions != null ? (
 						<div className="ml-auto flex shrink-0 items-center gap-2">
 							{editControls}
 							{headerActions}
 						</div>
-					</header>
-				) : (
-					editControls != null && (
-						<div className="flex shrink-0 items-center justify-end px-7 py-2 sm:px-10">
-							{editControls}
-						</div>
-					)
-				)}
+					) : null}
+				</header>
 
 				<div
 					className="grid min-h-0 w-full min-w-0 flex-1 gap-0 overflow-hidden"
 					style={{ gridTemplateColumns: gridTemplate }}
 				>
 					{leftPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-r border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
 							{leftPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden p-0">
 									{leftPanel.slot}
 								</div>
 							) : (
-								<div className="px-5 py-4 text-sm text-body sm:px-6 dark:text-zinc-400">
-									<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
-										Left panel
-									</p>
-									<p className="text-xs text-secondary">
-										{leftPanel.bulks.length} bulk(s) · width {leftPanel.width}
-									</p>
-								</div>
+								<SidePanel
+									bulks={leftPanel.bulks}
+									isEditing={isEditingActive}
+									onChange={(id, value) => {
+										pendingEditsRef.current[id] = value;
+									}}
+								/>
 							)}
 						</aside>
 					) : null}
 
 					<main className="min-h-0 min-w-0 overflow-y-auto overflow-x-clip bg-[linear-gradient(180deg,rgba(255,255,255,1)_0%,rgba(250,250,250,0.6)_100%)] px-7 py-6 sm:px-10 sm:py-7 dark:bg-[linear-gradient(180deg,rgba(9,9,11,1)_0%,rgba(24,24,27,0.5)_100%)]">
 						<div className="space-y-5">
-							{headerActions == null ? (
-								<div className="flex items-start justify-between gap-3">
-									{titleBlock}
-									{statusBadge ? (
-										<div className="shrink-0 pt-1">{statusBadge}</div>
-									) : null}
-								</div>
-							) : null}
 							{sections.length === 0 ? (
 								<EmptyState
 									illustration={
@@ -1231,6 +1314,10 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 									const isEditableEntityTags =
 										isEditingActive &&
 										section.type === ComposerSectionKind.ENTITY_TAGS &&
+										section.editable === true;
+									const isEditableOwner =
+										isEditingActive &&
+										section.type === ComposerSectionKind.OWNER &&
 										section.editable === true;
 									return (
 										<div key={section.id}>
@@ -1285,6 +1372,13 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 														pendingEditsRef.current[id] = val;
 													}}
 												/>
+											) : isEditableOwner ? (
+												<EditableOwnerCard
+													section={section}
+													onChange={(id, val) => {
+														pendingEditsRef.current[id] = val;
+													}}
+												/>
 											) : (
 												renderComposerSection(
 													section,
@@ -1294,6 +1388,7 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 													onEditSql,
 													handleEntityClick,
 													onDataTableCertificationChange,
+													canCertifyDataTableRow,
 												)
 											)}
 										</div>
@@ -1323,20 +1418,19 @@ export const SinglePageComposer = forwardRef<HTMLDivElement, SinglePageComposerP
 					</main>
 
 					{rightPanel ? (
-						<aside className="flex min-h-0 min-w-0 flex-col border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
+						<aside className="flex min-h-0 min-w-0 flex-col overflow-y-auto border-l border-zinc-200/80 bg-gradient-to-b from-zinc-50/95 to-white dark:border-zinc-700/80 dark:from-zinc-950 dark:to-zinc-950/90">
 							{rightPanel.slot ? (
 								<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-4 py-4 sm:px-5">
 									{rightPanel.slot}
 								</div>
 							) : (
-								<div className="px-5 py-4 text-sm text-body sm:px-6 dark:text-zinc-400">
-									<p className="mb-2 text-xs font-semibold uppercase tracking-wide text-secondary">
-										Right panel
-									</p>
-									<p className="text-xs text-secondary">
-										{rightPanel.bulks.length} bulk(s) · width {rightPanel.width}
-									</p>
-								</div>
+								<SidePanel
+									bulks={rightPanel.bulks}
+									isEditing={isEditingActive}
+									onChange={(id, value) => {
+										pendingEditsRef.current[id] = value;
+									}}
+								/>
 							)}
 						</aside>
 					) : null}

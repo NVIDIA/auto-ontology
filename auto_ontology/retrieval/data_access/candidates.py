@@ -34,7 +34,7 @@ from auto_ontology.retrieval.data_access.semantic_search import (
 )
 
 if TYPE_CHECKING:
-    from nemo_retriever.graph.retriever import Retriever
+    from auto_ontology.utils.retriever import Retriever
 
 logger = logging.getLogger(__name__)
 

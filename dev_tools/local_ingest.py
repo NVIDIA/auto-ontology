@@ -19,11 +19,11 @@ import os
 from auto_ontology.utils.embedding_rows import (
     CatalogEmbeddingRowsOp,
 )
-from nemo_retriever.operators.vdb import IngestVdbOperator
 from auto_ontology.catalog import ingest_catalog
 from auto_ontology.utils import get_embed_params
 from auto_ontology.utils.embedding import batch_embed
 from auto_ontology.vdb import get_data_vdb
+from auto_ontology.vdb.records import write_embedded_rows
 from auto_ontology.connectors.registry import create_connector
 
 logger = logging.getLogger("dev_tools.local_ingest")
@@ -44,9 +44,8 @@ def run_ingest(connection_string: str) -> None:
     vdb = get_data_vdb(database_name=database_name)
 
     if result_df is not None and not result_df.empty:
-        ingest_op = IngestVdbOperator(vdb=vdb)
-        ingest_op(result_df.to_dict(orient="records"))
-        logger.info("Tabular ingest: %d rows written to pgvector.", len(result_df))
+        written = write_embedded_rows(vdb, result_df)
+        logger.info("Tabular ingest: %d rows written to pgvector.", written)
     else:
         logger.info("Tabular ingest: no rows produced.")
 

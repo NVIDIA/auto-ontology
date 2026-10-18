@@ -19,7 +19,8 @@ import logging
 import psycopg
 from psycopg.rows import dict_row
 
-from auto_ontology.infra.postgres import get_postgres_connection_string
+from auto_ontology.dal.schema import GroupRole
+from auto_ontology.infra.postgres import FRONTEND_SCHEMA, get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,14 @@ def get_user_role(user_id: str) -> str | None:
             get_postgres_connection_string(), connect_timeout=3
         ) as conn:
             with conn.cursor(row_factory=dict_row) as cur:
-                cur.execute('SELECT role FROM "user" WHERE id = %s', (user_id,))
+                # Schema-qualified. The role's search_path is `public`, and
+                # the Better Auth account table lives in `frontend`. An
+                # unqualified `"user"` raises, this function swallows that
+                # and returns None, and every admin then fails the check.
+                cur.execute(
+                    f'SELECT role FROM {FRONTEND_SCHEMA}."user" WHERE id = %s',
+                    (user_id,),
+                )
                 row = cur.fetchone()
                 return row["role"] if row else None
     except Exception:
@@ -47,4 +55,4 @@ def get_user_role(user_id: str) -> str | None:
 
 def is_admin(user_id: str) -> bool:
     """Return whether *user_id* currently has the ``admin`` role in Postgres."""
-    return get_user_role(user_id) == "admin"
+    return get_user_role(user_id) == GroupRole.ADMIN

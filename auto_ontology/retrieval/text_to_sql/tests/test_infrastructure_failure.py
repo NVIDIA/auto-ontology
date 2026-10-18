@@ -23,7 +23,10 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_execution import (
 from auto_ontology.retrieval.text_to_sql.agents.sql_unconstructable import (
     SQLUnconstructableAgent,
 )
-from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import route_sql_validation
+from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
+    route_sql_execution,
+    route_sql_validation,
+)
 
 _SESSION_LOST = "Invalid SessionHandle: 1f9c2c1e-0000-4c1e-9f00-2b0d5a7c9e11"
 _BAD_COLUMN = "cannot resolve 'activity_typ' given input columns: [activity_type]"
@@ -82,6 +85,18 @@ def test_router_still_retries_invalid_sql() -> None:
     state = _state(decision="invalid_sql", path_state={"failed_attempts": []})
 
     assert route_sql_validation(state) == "invalid_sql"
+
+
+def test_short_answer_execution_skips_empty_like_check() -> None:
+    state = _state(decision="valid_sql", shorten_answer=True)
+
+    assert route_sql_execution(state) == "valid_sql_without_like_check"
+
+
+def test_regular_execution_keeps_empty_like_check() -> None:
+    state = _state(decision="valid_sql", shorten_answer=False)
+
+    assert route_sql_execution(state) == "valid_sql"
 
 
 def test_router_gives_up_past_the_attempt_limit() -> None:

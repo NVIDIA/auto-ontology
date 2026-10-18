@@ -134,7 +134,7 @@ backend:
   # wait-for-catalog-schema init container blocks until public.alembic_version
   # matches it, so new Pods never serve against a schema the migration Job has
   # not finished applying. Bump this with the migration, in the same commit.
-  alembicRevision: c778a7d94c20
+  alembicRevision: f3a91c0e5b27
   # The images' published paths, not where the release pushes them. Releases
   # are staged in nvcr.io/nvstaging/gsf and NGC Catalog publishing copies this
   # chart to nvidia unmodified, so it has to name the registry customers
@@ -143,7 +143,7 @@ backend:
   # frontend. dev_tools/release_helm_chart.py refuses a release otherwise.
   image:
     repository: nvcr.io/nvidia/auto-ontology
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3001
@@ -160,7 +160,7 @@ ingestion:
   image:
     # Reuses the backend image with a different entrypoint arg.
     repository: nvcr.io/nvidia/auto-ontology
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3002
@@ -176,7 +176,7 @@ ingestion:
 frontend:
   image:
     repository: nvcr.io/nvidia/auto-ontology-frontend
-    tag: "1.0"
+    tag: "1.1.0"
     # digest: ""  # e.g. sha256:...; overrides tag when set (immutable pin)
   service:
     port: 3000

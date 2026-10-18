@@ -66,8 +66,7 @@ RELATION_HEADINGS = (
     ("inverse", "Measures that move oppositely by construction:"),
     (
         "related_but_distinct",
-        "Adjacent but different measures — do not treat them as the same "
-        "quantity:",
+        "Adjacent but different measures — do not treat them as the same quantity:",
     ),
     ("same_measure_different_place", "The same measure for different places:"),
 )

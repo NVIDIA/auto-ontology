@@ -14,3 +14,5 @@ type AppUser = AppSession['user'];
 export type User = Pick<AppUser, 'id' | 'name' | 'email'> & {
 	role: Role;
 };
+
+export type UpdateUserInput = Pick<User, 'name' | 'role'>;

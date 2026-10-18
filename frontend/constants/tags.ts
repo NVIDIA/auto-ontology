@@ -6,6 +6,12 @@
 export const MAX_TAG_NAME_LENGTH = 25;
 
 /**
+ * The tag PII detection attaches. Mirrors `PII_TAG_NAME` in
+ * `auto_ontology/dal/tags.py`, which refuses to delete or rename it.
+ */
+export const PII_TAG_NAME = 'PII';
+
+/**
  * Query param asking `/api/tags` to resolve `created_by` / `modified_by` to the
  * accounts they name.
  *

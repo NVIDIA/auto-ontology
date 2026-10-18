@@ -6,10 +6,12 @@ import pytest
 
 from auto_ontology.retrieval.text_to_sql.agents import evidence_refinement
 from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
+    EvidenceGroundingResult,
     EvidenceRefinementAgent,
     EvidenceRefinementResult,
     EvidenceLineRepair,
     apply_evidence_repairs,
+    validate_schema_grounding,
 )
 from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     create_graph,
@@ -57,6 +59,27 @@ def _nationality_tables() -> list[dict]:
     ]
 
 
+def _premium_account_tables() -> list[dict]:
+    return [
+        {
+            "schema_name": "main",
+            "name": "accounts",
+            "columns": [{"name": "Premium", "data_type": "integer"}],
+        },
+        {
+            "schema_name": "main",
+            "name": "account_flags",
+            "columns": [
+                {
+                    "name": "Premium Account (Y/N)",
+                    "data_type": "integer",
+                    "sample_values": [0, 1],
+                }
+            ],
+        },
+    ]
+
+
 def _repair(
     *,
     original_line: str,
@@ -77,6 +100,101 @@ def _repair(
         column_name=column_name,
         reason="The question or samples prove the correction.",
     )
+
+
+def test_schema_grounding_uses_exact_evidence_column_and_rewrites_question() -> None:
+    question = "How many premium accounts are there?"
+    evidence = (
+        "premium accounts refers to `Premium Account (Y/N)` = 1 "
+        "in the table account_flags"
+    )
+    physical = '"main"."account_flags"."Premium Account (Y/N)"'
+    result = EvidenceGroundingResult(
+        reasoning="The evidence names the physical column exactly.",
+        grounded_question=f"How many {physical} = 1 are there?",
+        grounded_evidence=(
+            f"premium accounts refers to {physical} = 1 in the table account_flags"
+        ),
+    )
+
+    grounded_question, grounded_evidence, accepted = validate_schema_grounding(
+        question, evidence, result, _premium_account_tables()
+    )
+
+    assert grounded_question == f"How many {physical} = 1 are there?"
+    assert grounded_evidence == (
+        f"premium accounts refers to {physical} = 1 in the table account_flags"
+    )
+    assert accepted
+
+
+@pytest.mark.parametrize(
+    ("dialect", "physical"),
+    [
+        (
+            "postgres",
+            '"main schema"."flag table"."Premium Account (Y/N)"',
+        ),
+        (
+            "spark",
+            "`main schema`.`flag table`.`Premium Account (Y/N)`",
+        ),
+    ],
+)
+def test_schema_grounding_quotes_every_identifier_for_dialect(
+    dialect: str,
+    physical: str,
+) -> None:
+    tables = [
+        {
+            "schema_name": "main schema",
+            "name": "flag table",
+            "columns": [{"name": "Premium Account (Y/N)"}],
+        }
+    ]
+    result = EvidenceGroundingResult(
+        grounded_question=f"Count {physical} = 1",
+        grounded_evidence=f"{physical} = 1 in flag table",
+    )
+
+    grounded_question, grounded_evidence, accepted = validate_schema_grounding(
+        "Count premium accounts",
+        "`Premium Account (Y/N)` = 1 in flag table",
+        result,
+        tables,
+        dialect=dialect,
+    )
+
+    assert accepted
+    assert grounded_question == f"Count {physical} = 1"
+    assert grounded_evidence == f"{physical} = 1 in flag table"
+
+
+def test_explicit_evidence_column_rejects_semantic_alternative() -> None:
+    evidence = (
+        "premium accounts refers to `Premium Account (Y/N)` = 1 "
+        "in the table account_flags"
+    )
+    wrong_result = EvidenceGroundingResult(
+        reasoning="A semantic phrase must not override an explicit identifier.",
+        grounded_question='How many "main"."accounts"."Premium" are there?',
+        grounded_evidence=(
+            'premium accounts refers to "main"."accounts"."Premium" = 1 '
+            "in the table account_flags"
+        ),
+    )
+
+    grounded_question, grounded_evidence, accepted = validate_schema_grounding(
+        "How many premium accounts are there?",
+        evidence,
+        wrong_result,
+        _premium_account_tables(),
+    )
+
+    assert grounded_question == "How many premium accounts are there?"
+    assert grounded_evidence == evidence
+    assert '"main"."accounts"."Premium"' not in grounded_evidence
+    assert not accepted
 
 
 def test_repairs_string_representation_only_when_sample_proves_it() -> None:
@@ -321,10 +439,9 @@ def test_llm_failure_keeps_original_evidence(
     result = EvidenceRefinementAgent().execute(state)
 
     assert result["evidence"] == "status = 'restricted'"
-    assert "evidence_original" not in result["path_state"]
 
 
-def test_agent_records_original_and_accepted_repairs(
+def test_agent_records_accepted_repairs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict = {}
@@ -343,6 +460,11 @@ def test_agent_records_original_and_accepted_repairs(
     )
 
     def _invoke(messages, schema):
+        if schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                grounded_question="Show restricted accounts",
+                grounded_evidence="status = 'restricted'",
+            )
         captured["messages"] = messages
         captured["schema"] = schema
         return response
@@ -364,11 +486,143 @@ def test_agent_records_original_and_accepted_repairs(
     result = EvidenceRefinementAgent().execute(state)
 
     assert result["evidence"] == "status = 'Restricted'"
-    assert result["path_state"]["evidence_original"] == "status = 'restricted'"
     assert len(result["path_state"]["evidence_repairs_applied"]) == 1
     assert "Show restricted accounts" in captured["messages"][1].content
     assert "Restricted" in captured["messages"][1].content
     assert captured["schema"] is EvidenceRefinementResult
+
+
+def test_agent_grounds_schema_before_value_anchor_repair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schemas: list[type] = []
+    prompts: list[str] = []
+    original_evidence = (
+        "premium accounts refers to `Premium Account (Y/N)` = 0 "
+        "in the table account_flags"
+    )
+    grounded_line = (
+        'premium accounts refers to "main"."account_flags".'
+        '"Premium Account (Y/N)" = 0 in the table account_flags'
+    )
+
+    def _invoke(messages, schema):
+        schemas.append(schema)
+        prompts.append("\n".join(message.content for message in messages))
+        if schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                reasoning="The evidence names the exact physical column.",
+                grounded_question=(
+                    'How many accounts have "main"."account_flags".'
+                    '"Premium Account (Y/N)" = 0 enabled?'
+                ),
+                grounded_evidence=grounded_line,
+            )
+        return EvidenceRefinementResult(
+            repairs=[
+                _repair(
+                    original_line=grounded_line,
+                    corrected_line=grounded_line.replace("= 0", "= 1"),
+                    corrected_value="1",
+                    kind="constant_value",
+                    table_name="main.account_flags",
+                    column_name="Premium Account (Y/N)",
+                )
+            ],
+            corrected_question=(
+                'How many accounts have "main"."account_flags".'
+                '"Premium Account (Y/N)" = 1 enabled?'
+            ),
+        )
+
+    monkeypatch.setattr(evidence_refinement, "safe_invoke_structured_nr", _invoke)
+    state = {
+        "initial_question": "How many accounts have premium membership enabled?",
+        "evidence": original_evidence,
+        "value_anchors": [
+            {
+                "phrase": "premium accounts",
+                "kind": "value",
+                "tbl": "account_flags",
+                "col": "Premium Account (Y/N)",
+                "stored_value": "1",
+            }
+        ],
+        "path_state": {"relevant_tables": _premium_account_tables()},
+    }
+
+    result = EvidenceRefinementAgent().execute(state)
+
+    assert schemas == [EvidenceGroundingResult, EvidenceRefinementResult]
+    assert "Verified database value anchors" not in prompts[0]
+    assert "Verified database value anchors" in prompts[1]
+    assert "the only allowed mapping targets" in prompts[0]
+    assert "Replace ONLY fields that are described or mapped" in prompts[0]
+    assert "not described by evidence MUST remain" in prompts[0]
+    assert "does NOT need to match the evidence wording exactly" in prompts[0]
+    assert "Treat the natural-language phrase before evidence cues" in prompts[0]
+    assert "you MUST replace the minimal matching question" in prompts[0]
+    assert result["evidence"] == grounded_line.replace("= 0", "= 1")
+    assert result["path_state"]["normalized_question"] == (
+        'How many accounts have "main"."account_flags".'
+        '"Premium Account (Y/N)" = 1 enabled?'
+    )
+    assert len(result["path_state"]["evidence_repairs_applied"]) == 1
+
+
+def test_value_repair_cannot_change_grounded_field_reference() -> None:
+    original = (
+        'premium accounts refers to "main"."account_flags".'
+        '"Premium Account (Y/N)" = 0 in the table account_flags'
+    )
+    repair = _repair(
+        original_line=original,
+        corrected_line=(
+            'premium accounts refers to "main"."accounts"."Premium" = 1 '
+            "in the table account_flags"
+        ),
+        corrected_value="1",
+        kind="constant_value",
+        table_name="main.account_flags",
+        column_name="Premium Account (Y/N)",
+    )
+
+    refined, accepted = apply_evidence_repairs(
+        original,
+        [repair],
+        "How many premium accounts are there?",
+        _premium_account_tables(),
+        [
+            {
+                "kind": "value",
+                "tbl": "account_flags",
+                "col": "Premium Account (Y/N)",
+                "stored_value": "1",
+            }
+        ],
+    )
+
+    assert refined == original
+    assert accepted == []
+
+
+def test_corrected_question_cannot_change_grounded_field_reference() -> None:
+    grounded_question = (
+        'How many "main"."account_flags"."Premium Account (Y/N)" = 0 are there?'
+    )
+    corrected = 'How many "main"."accounts"."Premium" = 1 are there?'
+
+    validated = evidence_refinement._validate_corrected_question(
+        grounded_question,
+        corrected,
+        [{"kind": "constant_value"}],
+        _premium_account_tables(),
+        target_db=None,
+        dialect=None,
+        connector=None,
+    )
+
+    assert validated == grounded_question
 
 
 def test_agent_supplies_value_anchors_before_fallback_samples(
@@ -377,6 +631,11 @@ def test_agent_supplies_value_anchors_before_fallback_samples(
     captured: dict = {}
 
     def _invoke(messages, _schema):
+        if _schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                grounded_question="Show human races",
+                grounded_evidence="race = 'human'",
+            )
         captured["prompt"] = messages[1].content
         return EvidenceRefinementResult()
 

@@ -47,6 +47,7 @@ from auto_ontology.ingestion_service.history import (
     record_run_finish,
     record_run_start,
 )
+from auto_ontology.ingestion_service.pii import run_pii_propagation_in_thread
 from auto_ontology.ingestion_service.rules import replay_rules_in_thread
 from auto_ontology.ingestion_service.scheduler import IntervalScheduler
 from auto_ontology.semantic.cancellation import clear_cancel, request_cancel
@@ -219,6 +220,29 @@ class SemanticScheduler(IntervalScheduler):
                     outcome = RUN_FAILED
                     logger.exception("semantic: failed for database %s", database_name)
 
+            # The boundary checks above catch a stop/disable before the next
+            # database. There is no next boundary after the final database, so
+            # re-check here before operating on a pass that was cancelled or
+            # disabled while that database was in flight.
+            if self.aborting:
+                logger.info(
+                    "semantic: stopped on request; skipping post-compilation work"
+                )
+                if outcome != RUN_FAILED:
+                    outcome = None
+                return
+            if not is_semantic_compilation_enabled():
+                logger.info(
+                    "semantic: disabled after compilation; "
+                    "skipping post-compilation work"
+                )
+                if outcome != RUN_FAILED:
+                    outcome = None
+                return
+
+            # Before the rules, so a rule matching on the PII tag sees the
+            # attributes compilation just created already labelled.
+            await run_pii_propagation_in_thread(self.name)
             await self._reapply_rules()
         finally:
             # A no-op when outcome is None (stop/disable) — see

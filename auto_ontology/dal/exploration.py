@@ -69,8 +69,10 @@ from auto_ontology.dal.zones import fetch_table_zones_map  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
-#: Hard ceiling on nodes returned by an Exploration graph endpoint, whatever a
-#: caller asks for — keeps the response bounded on large catalogs.
+#: Hard ceiling on nodes returned by an unfiltered Exploration graph, whatever
+#: a caller asks for — keeps the all-databases view bounded on large catalogs.
+#: A *database_id* filter skips this cap and returns every table (or every
+#: term linked to a table) in that database.
 MAX_EXPLORATION_GRAPH_NODES = 500
 
 
@@ -1138,21 +1140,23 @@ def fetch_exploration_related_nodes(
 def fetch_data_exploration_graph(
     zone_ids: list[str] | None = None,
     limit: int = MAX_EXPLORATION_GRAPH_NODES,
+    database_id: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """The whole data-layer graph in one payload.
 
     Built server-side so the client renders it from one request instead of
     walking databases → schemas → tables a level at a time.
 
-    *limit* is clamped to :data:`MAX_EXPLORATION_GRAPH_NODES` whatever is
-    passed. Nodes are ordered by name before truncating, so the subset is
-    deterministic, and links are filtered to pairs with both ends drawn.
+    Without *database_id*, *limit* is clamped to
+    :data:`MAX_EXPLORATION_GRAPH_NODES`. Nodes are ordered by name before
+    truncating, so the subset is deterministic. With *database_id*, every
+    table in that database is returned and *limit* is ignored. Links are
+    filtered to pairs with both ends drawn.
 
     **Relationship counts are computed before truncation**, over the whole
     accessible edge set — so a table's number matches what the related-nodes
     endpoint reports rather than shrinking because a neighbour was not drawn.
     """
-    limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
     resolved = resolve_accessible_catalog_ids(zone_ids)
 
     statement = (
@@ -1183,12 +1187,16 @@ def fetch_data_exploration_graph(
             )
         )
         .order_by(s.catalog_table.c.name)
-        .limit(limit)
     )
+    if database_id is not None:
+        statement = statement.where(s.catalog_database.c.id == database_id)
     if resolved is not None:
         statement = statement.where(
             s.catalog_table.c.id.in_(list(resolved["table_ids"]))
         )
+    if database_id is None:
+        limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
+        statement = statement.limit(limit)
 
     nodes = [dict(r) for r in store().query_read(statement)]
     node_ids = {row["id"] for row in nodes}
@@ -1217,9 +1225,25 @@ def fetch_data_exploration_graph(
     }
 
 
+def _table_ids_for_database(database_id: str) -> set[str]:
+    """Catalog tables that live under *database_id*."""
+    rows = store().query_read(
+        select(s.catalog_table.c.id)
+        .select_from(
+            s.catalog_table.join(
+                s.catalog_schema,
+                s.catalog_schema.c.id == s.catalog_table.c.schema_id,
+            )
+        )
+        .where(s.catalog_schema.c.database_id == database_id)
+    )
+    return {row["id"] for row in rows}
+
+
 def fetch_semantic_exploration_graph(
     zone_ids: list[str] | None = None,
     limit: int = MAX_EXPLORATION_GRAPH_NODES,
+    database_id: str | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """The whole semantic-layer graph in one payload.
 
@@ -1232,10 +1256,11 @@ def fetch_semantic_exploration_graph(
 
     Every count reuses the helper the corresponding list endpoint uses, so the
     numbers match across pages. As above, counts come from the untruncated
-    graph; nodes are then ordered by name and cut to *limit*, and links are kept
-    only where both ends survived.
+    graph; without *database_id*, nodes are then ordered by name and cut to
+    *limit*. With *database_id*, every term linked to a table in that
+    database is returned and *limit* is ignored. Links are kept only where
+    both ends survived.
     """
-    limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
     resolved = resolve_accessible_catalog_ids(zone_ids)
 
     terms = fetch_all_terms(zone_ids=zone_ids, data_ids_by_zone=resolved)
@@ -1266,6 +1291,15 @@ def fetch_semantic_exploration_graph(
         )
         if term_id and table_id and path:
             paths_by_pair.setdefault((term_id, table_id), set()).add(path)
+
+    if database_id is not None:
+        table_ids = _table_ids_for_database(database_id)
+        term_ids_in_db = {
+            row["term_id"]
+            for row in pairs
+            if row.get("term_id") and row.get("table_id") in table_ids
+        }
+        terms = [term for term in terms if term["id"] in term_ids_in_db]
 
     visible = {term["id"] for term in terms}
     degree: dict[str, int] = {}
@@ -1304,7 +1338,10 @@ def fetch_semantic_exploration_graph(
             for term in terms
         ),
         key=lambda node: node["name"],
-    )[:limit]
+    )
+    if database_id is None:
+        limit = max(1, min(limit, MAX_EXPLORATION_GRAPH_NODES))
+        nodes = nodes[:limit]
     kept = {node["id"] for node in nodes}
     return {
         "nodes": nodes,

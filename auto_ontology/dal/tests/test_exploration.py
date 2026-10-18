@@ -58,14 +58,24 @@ class World:
         self.prefix = prefix
         self.database = _add(s.catalog_database, name=prefix)
         self.schema = _add(s.catalog_schema, database_id=self.database, name="public")
+        self.extra_databases: list[str] = []
         self.tables: dict[str, str] = {}
         self.columns: dict[str, str] = {}
         self.terms: dict[str, str] = {}
         self.zones: dict[str, str] = {}
         self.queries: list[str] = []
 
-    def table(self, name: str, columns: tuple[str, ...] = ("id",)) -> str:
-        tid = _add(s.catalog_table, schema_id=self.schema, name=f"{self.prefix}_{name}")
+    def table(
+        self,
+        name: str,
+        columns: tuple[str, ...] = ("id",),
+        schema_id: str | None = None,
+    ) -> str:
+        tid = _add(
+            s.catalog_table,
+            schema_id=schema_id or self.schema,
+            name=f"{self.prefix}_{name}",
+        )
         self.tables[name] = tid
         for position, column in enumerate(columns, start=1):
             self.columns[f"{name}.{column}"] = _add(
@@ -75,6 +85,12 @@ class World:
                 ordinal_position=position,
             )
         return tid
+
+    def add_database(self, name: str) -> tuple[str, str]:
+        db_id = _add(s.catalog_database, name=f"{self.prefix}_{name}")
+        schema_id = _add(s.catalog_schema, database_id=db_id, name="public")
+        self.extra_databases.append(db_id)
+        return db_id, schema_id
 
     def statement(self, sql: str, *tables: str) -> str:
         qid = _add(s.sql_query, sql_full_query=sql)
@@ -111,9 +127,10 @@ def world():
     yield w
     for zone_id in w.zones.values():
         store().query_write(s.zone.delete().where(s.zone.c.id == zone_id))
-    store().query_write(
-        s.catalog_database.delete().where(s.catalog_database.c.id == w.database)
-    )
+    for db_id in [w.database, *w.extra_databases]:
+        store().query_write(
+            s.catalog_database.delete().where(s.catalog_database.c.id == db_id)
+        )
     store().query_write(s.term.delete().where(s.term.c.name.like(f"{w.prefix}%")))
     for query_id in w.queries:
         store().query_write(s.sql_query.delete().where(s.sql_query.c.id == query_id))
@@ -456,6 +473,31 @@ def test_the_limit_is_clamped_in_both_directions(graph) -> None:
     )
 
 
+def test_a_database_filter_returns_only_that_database(world) -> None:
+    world.table("orders")
+    world.table("customers")
+    other_db, other_schema = world.add_database("other")
+    world.table("secrets", schema_id=other_schema)
+
+    payload = e.fetch_data_exploration_graph(database_id=world.database)
+    assert {node["id"] for node in payload["nodes"]} == {
+        world.tables["orders"],
+        world.tables["customers"],
+    }
+
+    other = e.fetch_data_exploration_graph(database_id=other_db)
+    assert {node["id"] for node in other["nodes"]} == {world.tables["secrets"]}
+
+
+def test_a_database_filter_ignores_limit(world) -> None:
+    """Choosing one database returns every table in it, past the unfiltered cap."""
+    world.table("orders")
+    world.table("customers")
+    world.table("items")
+    payload = e.fetch_data_exploration_graph(database_id=world.database, limit=1)
+    assert len(payload["nodes"]) == 3
+
+
 # --------------------------------------------------------------------------
 # The semantic graph
 # --------------------------------------------------------------------------
@@ -506,6 +548,30 @@ def test_a_semantic_link_is_undirected_and_appears_once(semantic) -> None:
         tuple(sorted((link["source"], link["target"]))) for link in payload["links"]
     ]
     assert len(pairs) == len(set(pairs))
+
+
+def test_semantic_graph_filters_to_one_database(world) -> None:
+    world.table("orders")
+    world.term("Order", represents=("orders",))
+    _other_db, other_schema = world.add_database("other")
+    world.table("secrets", schema_id=other_schema)
+    world.term("Secret", represents=("secrets",))
+
+    payload = e.fetch_semantic_exploration_graph(database_id=world.database)
+    assert {node["id"] for node in payload["nodes"]} == {world.terms["Order"]}
+
+    other = e.fetch_semantic_exploration_graph(database_id=_other_db)
+    assert {node["id"] for node in other["nodes"]} == {world.terms["Secret"]}
+
+
+def test_semantic_database_filter_ignores_limit(world) -> None:
+    """Choosing one database returns every linked term, past the unfiltered cap."""
+    world.table("orders")
+    world.term("Alpha", represents=("orders",))
+    world.term("Beta", represents=("orders",))
+    world.term("Gamma", represents=("orders",))
+    payload = e.fetch_semantic_exploration_graph(database_id=world.database, limit=1)
+    assert len(payload["nodes"]) == 3
 
 
 def test_semantic_related_pages_by_name(semantic) -> None:

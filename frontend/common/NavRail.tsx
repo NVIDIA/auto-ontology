@@ -18,6 +18,7 @@ type NavItem = {
 
 const navItems: NavItem[] = [
 	{ icon: IconName.ChatBubble, href: '/chat', label: 'Chat' },
+	{ icon: IconName.Discovery, href: '/discovery', label: 'Discovery' },
 	{ icon: IconName.Terms, href: '/terms', label: 'Terms' },
 	{ icon: IconName.ChartBar, href: '/analysis', label: 'Analysis' },
 	{ icon: IconName.Exploration, href: '/exploration', label: 'Exploration' },

@@ -2,9 +2,11 @@
 // All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { entitySidePanel } from '@/common/SidePanel';
 import type { SinglePageFormat } from '@/common/SinglePageView';
 import { IconName } from '@/common/icons';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import {
 	ComposerColumnType,
 	ComposerSectionKind,
@@ -16,7 +18,9 @@ import type { ComposerCertification, ComposerSection } from '@/types/composer-se
 import type { TagChip } from '@/types/tags';
 import { isCatalogBranchLoadedForFocus } from '@/lib/data/catalog-branch-loaded';
 import { fieldStatus } from '@/lib/certification';
+import { entityOwnerSection } from '@/lib/owners';
 import { entityTagsSection } from '@/lib/tags';
+import { OwnerPermission, type Owner } from '@/types/owners';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
 
 export type TreeResolved =
@@ -116,6 +120,7 @@ export function buildTreeFocusPageFormat(
 	focusId: string | null,
 	databases: Database[],
 	tagOptions: TagChip[] = [],
+	owners: Owner[] = [],
 ): SinglePageFormat {
 	const resolvedFocus = resolveTreeNode(focusId, databases);
 
@@ -150,11 +155,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'all-databases',
 				title: `Databases (${databases.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'schemas', label: 'Schemas' },
 				],
 				rows: databases.map((database) => ({
+					id: database.id,
 					name: database.name,
 					schemas: String(database.num_of_schemas),
 				})),
@@ -180,11 +187,13 @@ export function buildTreeFocusPageFormat(
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-schemas',
 				title: `Schemas (${database.schemas.length})`,
+				rowIdKey: 'id',
 				columns: [
 					{ key: 'name', label: 'Name' },
 					{ key: 'tables', label: 'Tables' },
 				],
 				rows: database.schemas.map((schema) => ({
+					id: schema.id,
 					name: schema.schema_name,
 					tables: String(schema.tables_count),
 				})),
@@ -229,6 +238,7 @@ export function buildTreeFocusPageFormat(
 					name: table.name,
 					columns: String(table.columns_count),
 					certification: fieldStatus(table.description_certified === true),
+					owner_id: table.owner_id ?? '',
 				})),
 			});
 			return {
@@ -244,7 +254,8 @@ export function buildTreeFocusPageFormat(
 		}
 		case DataModels.TABLE: {
 			const { table } = resolvedFocus;
-			const tableTypeLabel = catalogNodeInfo[table.table_type].title;
+			const tableInfo = catalogNodeInfo[getTableType(table.table_type)];
+			const tableTypeLabel = tableInfo.title;
 			sections.push(
 				...baseCardsForEntity(
 					table.description ?? '',
@@ -258,7 +269,6 @@ export function buildTreeFocusPageFormat(
 					{ certified: table.description_certified === true },
 				),
 			);
-			sections.push(entityTagsSection(table.tags, tagOptions));
 			sections.push({
 				type: ComposerSectionKind.DATA_TABLE,
 				id: 'child-columns',
@@ -279,7 +289,7 @@ export function buildTreeFocusPageFormat(
 					id: column.id,
 					ordinal_position: String(column.ordinal_position),
 					name: column.column_name,
-					data_type: column.data_type,
+					data_type: column.data_type?.trim() ? column.data_type : '—',
 					certification: fieldStatus(column.description_certified === true),
 				})),
 			});
@@ -288,14 +298,18 @@ export function buildTreeFocusPageFormat(
 				header: {
 					header: {
 						title: table.name,
-						icon: catalogNodeInfo[table.table_type].icon,
+						icon: tableInfo.icon,
 						entityId: table.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(table.owner_id, owners, OwnerPermission.catalog),
+					tags: entityTagsSection(table.tags, tagOptions),
+				}),
 			};
 		}
 		case DataModels.COLUMN: {
-			const { column } = resolvedFocus;
+			const { column, table } = resolvedFocus;
 			const samplesEditable = sampleValuesEditable(column.data_type);
 			sections.push(
 				{
@@ -314,7 +328,6 @@ export function buildTreeFocusPageFormat(
 					editable: samplesEditable,
 					hint: samplesEditable ? undefined : sampleValuesReadOnlyHint(column.data_type),
 				},
-				entityTagsSection(column.tags, tagOptions),
 				{
 					type: ComposerSectionKind.INFO_GRID,
 					id: 'information',
@@ -323,7 +336,7 @@ export function buildTreeFocusPageFormat(
 						{ label: 'Column', value: column.column_name },
 						{
 							label: 'Data Type',
-							value: column.data_type.trim() ? column.data_type : '—',
+							value: column.data_type?.trim() ? column.data_type : '—',
 						},
 						{ label: 'Table', value: column.table_name },
 						{ label: 'Position', value: String(column.ordinal_position) },
@@ -339,6 +352,16 @@ export function buildTreeFocusPageFormat(
 						entityId: column.id,
 					},
 				},
+				rightPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						table.owner_id,
+						owners,
+						OwnerPermission.catalog,
+						false,
+						'Table Owner',
+					),
+					tags: entityTagsSection(column.tags, tagOptions),
+				}),
 			};
 		}
 	}

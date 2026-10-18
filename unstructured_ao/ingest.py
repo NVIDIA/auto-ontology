@@ -62,18 +62,28 @@ _CONTENT_TYPE_MAP: dict[str, str] = {
 
 
 def _embed_params():
-    """``EmbedParams`` for the chunk embeddings, in ``text_image`` modality.
+    """NeMo Retriever ``EmbedParams`` for the chunk embeddings, ``text_image``.
 
-    Starts from auto-ontology's shared ``get_embed_params`` so the endpoint,
-    model and key come from the one ``EMBED_*`` triplet the tabular ingest and
-    the retriever also use.  Only the modality differs: that helper is built for
-    catalog rows, which are text, whereas half of what the extract stage yields
-    here is charts, tables and infographics, and ``EMBED_MODEL`` is a
+    Reads the same ``EMBED_*`` triplet as the tabular ingest and the retriever,
+    through auto-ontology's ``resolve``, so one set of env vars configures
+    every embed path.  It does not reuse ``get_embed_params``: since #376 that
+    returns auto-ontology's own dataclass for its in-repo embed client, and the
+    extract graph needs the library's model.
+
+    ``text_image`` rather than ``text`` because half of what the extract stage
+    yields here is charts, tables and infographics, and ``EMBED_MODEL`` is a
     vision-language model that can read them as images.
     """
-    from auto_ontology.utils.embedding import get_embed_params
+    from nemo_retriever.common.params.models import EmbedParams
 
-    return get_embed_params().model_copy(update={"embed_modality": "text_image"})
+    from auto_ontology.utils.model_config import resolve
+
+    return EmbedParams(
+        embed_invoke_url=resolve("EMBED", "ENDPOINT"),
+        model_name=resolve("EMBED", "MODEL"),
+        api_key=resolve("EMBED", "API_KEY"),
+        embed_modality="text_image",
+    )
 
 
 def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:

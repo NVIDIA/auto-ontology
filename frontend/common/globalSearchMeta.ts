@@ -60,6 +60,7 @@ export const SEARCH_TYPE_LABEL: Record<SearchObjectType, string> = {
 	[SearchObjectType.Table]: 'Table',
 	[SearchObjectType.View]: 'View',
 	[SearchObjectType.Column]: 'Column',
+	[SearchObjectType.Tag]: 'Tag',
 };
 
 export const SEARCH_TYPE_TAB_LABEL: Record<SearchObjectType, string> = {
@@ -73,6 +74,7 @@ export const SEARCH_TYPE_TAB_LABEL: Record<SearchObjectType, string> = {
 	[SearchObjectType.Table]: 'Tables',
 	[SearchObjectType.View]: 'Views',
 	[SearchObjectType.Column]: 'Columns',
+	[SearchObjectType.Tag]: 'Tags',
 };
 
 export const SEARCH_TYPE_ICON: Record<SearchObjectType, IconName> = {
@@ -86,6 +88,7 @@ export const SEARCH_TYPE_ICON: Record<SearchObjectType, IconName> = {
 	[SearchObjectType.Table]: IconName.Table,
 	[SearchObjectType.View]: IconName.View,
 	[SearchObjectType.Column]: IconName.Column,
+	[SearchObjectType.Tag]: IconName.Tag,
 };
 
 export const SEARCH_TYPE_TAB_ORDER: SearchObjectType[] = [
@@ -99,4 +102,5 @@ export const SEARCH_TYPE_TAB_ORDER: SearchObjectType[] = [
 	SearchObjectType.Table,
 	SearchObjectType.View,
 	SearchObjectType.Column,
+	SearchObjectType.Tag,
 ];

@@ -38,6 +38,8 @@ Four decisions shape everything downstream:
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 from sqlalchemy import (
     ARRAY,
     BigInteger,
@@ -127,6 +129,50 @@ def _certified(name: str) -> Column:
     return Column(name, Boolean, nullable=False, server_default=text("false"))
 
 
+def _edited() -> tuple[Column, Column, Column, Column]:
+    """When the row was inserted and when someone last edited it in the app.
+
+    ``created`` is the database clock on insert. The migration adds the column
+    without backfilling, so a row that already existed stays null rather than
+    claiming it was created the day the column appeared.
+
+    ``modified`` and ``modified_by`` stay null until a person saves an edit.
+    Compilation rewrites descriptions on its own and does not count: the panel's
+    Last Modified is that save. ``modified_by`` is a Better Auth user id, null
+    when the request carried no identity, which the page reads as Auto Generated.
+    """
+    return (
+        Column(
+            "created",
+            DateTime(timezone=True),
+            nullable=True,
+            server_default=func.now(),
+        ),
+        Column("modified", DateTime(timezone=True), nullable=True),
+        Column("created_by", Text, nullable=True),
+        Column("modified_by", Text, nullable=True),
+    )
+
+
+def _owner_id() -> Column:
+    """The account or group that owns the row, or null when nobody does.
+
+    Stored on a database, a schema, a table, a term, and a sql attribute. The
+    catalog page edits it on a table, and the glossary page edits it on a
+    term. A column shows that table's owner and a column attribute shows its
+    term's owner; neither stores one of its own. A sql attribute keeps the
+    column, and its page shows the term's owner. The edit check for a column,
+    a column attribute, and a sql attribute does not read an owner on that
+    row. A database and a schema keep the column, and the page does not edit
+    it there. One column holds either id. An account id is
+    ``frontend."user".id`` and a group id is ``user_group.id``; neither can
+    be a foreign key, because the account table is outside this schema and
+    one reference cannot name both. An empty write clears it. A deleted
+    account or group leaves the id behind, which reads as unassigned.
+    """
+    return Column("owner_id", Text, nullable=True)
+
+
 # ---------------------------------------------------------------------------
 # Catalog tier — Database -> Schema -> Table -> Column
 # ---------------------------------------------------------------------------
@@ -148,6 +194,7 @@ catalog_database = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     Column("created", DateTime(timezone=True), server_default=func.now()),
     Column("pulled", DateTime(timezone=True), nullable=True),
 )
@@ -166,6 +213,7 @@ catalog_schema = Table(
     Column("description", Text, nullable=True),
     _certified("description_certified"),
     _imported_id(),
+    _owner_id(),
     UniqueConstraint("database_id", "name", name="uq_catalog_schema_database_name"),
 )
 
@@ -188,6 +236,7 @@ catalog_table = Table(
     # column the PATCH still returns 200 and the checkbox still ticks; the flag
     # is simply dropped on the way in and reads back false forever.
     _certified("description_certified"),
+    _owner_id(),
     # Primary key column names. A list on the node today, so a text[] here
     # rather than a join table -- nothing ever queries "which tables have this
     # pk column", and a join table would make every read a second query.
@@ -240,6 +289,10 @@ catalog_column = Table(
     # A genuine integer, despite the parser handing the write path a string --
     # something coerces on the way in.
     Column("ordinal_position", Integer, nullable=True),
+    # Set only after automatic PII classification completes. Tag edits are
+    # deliberately independent: removing an automatically assigned PII tag is
+    # a user override and must not make the next ingest add it back.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
     _imported_id(),
     UniqueConstraint("table_id", "name", name="uq_catalog_column_table_name"),
 )
@@ -411,6 +464,8 @@ term = Table(
     Column("synonyms", ARRAY(Text), nullable=True),
     _certified("name_certified"),
     _certified("description_certified"),
+    _owner_id(),
+    *_edited(),
     _imported_id(),
     UniqueConstraint("name", "source", name="uq_term_name_source"),
 )
@@ -447,6 +502,14 @@ column_attribute = Table(
     Column("table_id", Text, nullable=False),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
     Column("description_suggestion", Text, nullable=True),
+    # Set once PII propagation from the attribute's columns has handled it.
+    # Like `catalog_column.pii_processed`, tag edits are independent of it:
+    # removing an automatically assigned PII tag is a user override and must not
+    # make the next pass add it back. Taking PII off the owning column (or an
+    # expression rewrite that leaves every tagged column) clears this so a
+    # later tag can still propagate.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     # The 5-part merge key, exactly as merge_column_attribute matches on.
     UniqueConstraint(
@@ -537,7 +600,16 @@ sql_attribute = Table(
     Column("expression", Text, nullable=True),
     Column("source", Text, nullable=True),
     Column("certified", Boolean, nullable=False, server_default=text("false")),
+    _owner_id(),
     Column("description_suggestion", Text, nullable=True),
+    # Set once PII propagation from the attribute's columns has handled it.
+    # Like `catalog_column.pii_processed`, tag edits are independent of it:
+    # removing an automatically assigned PII tag is a user override and must not
+    # make the next pass add it back. An expression rewrite that no longer
+    # reads a tagged column is the exception: the tag is taken off and this
+    # flag cleared so a later tag on one of the new columns can still propagate.
+    Column("pii_processed", Boolean, nullable=False, server_default=text("false")),
+    *_edited(),
     _imported_id(),
     CheckConstraint(
         "source IS NULL OR source IN ('manual', 'sql', 'table', 'bridgeTable')",
@@ -1248,6 +1320,89 @@ semantic_compilation_history = Table(
 
 
 # ---------------------------------------------------------------------------
+# User groups
+# ---------------------------------------------------------------------------
+#
+# A group is a named set of accounts. Illumex loads the same idea from
+# Frontegg (id, name, description, color, roles, users, and the permissions
+# those roles expand to). There is no Frontegg here, so the group is a row
+# this schema owns.
+#
+# The role is one of the two an account already has, ``admin`` or ``viewer``.
+# A group does not carry a list of identity-provider roles, and membership
+# does not change the account's own role: that stays on ``frontend."user"``.
+# The API expands this single role into ``roles`` and ``permissions`` when it
+# answers, which is the shape a caller that learned groups elsewhere expects.
+#
+# ``user_id`` on the membership table is a Better Auth id — the ``id`` of a
+# row in ``frontend."user"``, which Prisma owns. Deliberately not a foreign
+# key, for the same reason ``tag.created_by`` is not one: that table is in a
+# schema Alembic does not manage, so there is nothing here to reference. A
+# deleted account can therefore leave a membership behind. Reads still return
+# that id, with no name, so the membership stays visible instead of vanishing.
+
+
+class GroupRole(StrEnum):
+    """The two roles an account and a group share. A group does not invent a third."""
+
+    ADMIN = "admin"
+    VIEWER = "viewer"
+
+
+#: The only roles a group can carry. The same two Better Auth stores on an account.
+GROUP_ROLE_ADMIN = GroupRole.ADMIN
+GROUP_ROLE_VIEWER = GroupRole.VIEWER
+
+user_group = Table(
+    "user_group",
+    METADATA,
+    _id(),
+    # Unique case-insensitively on the trimmed name, across the deployment.
+    # Unlike ``zone.name`` — whose rule is per database, which no index can
+    # express — a group name is global, so the expression index states it
+    # exactly and closes the window between the DAL's check and its insert.
+    #
+    # Spelled as ``text()`` in Postgres's own deparsed form, and declared on
+    # the table rather than beside the other indexes, for the same two reasons
+    # as ``uq_tag_name_lower``.
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("color", Text, nullable=False),
+    Column("role", Text, nullable=False),
+    CheckConstraint(
+        f"role IN ('{GROUP_ROLE_ADMIN}', '{GROUP_ROLE_VIEWER}')",
+        name="role_value",
+    ),
+    Column(
+        "created",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Index(
+        "uq_user_group_name_lower",
+        text("lower(TRIM(BOTH FROM name))"),
+        unique=True,
+    ),
+)
+
+# Who belongs to a group. The composite primary key leads with ``group_id``,
+# which answers "the members of this group". The reverse — "the groups of this
+# account" — is ``ix_user_group__member_user_id`` below.
+user_group__member = Table(
+    "user_group__member",
+    METADATA,
+    Column(
+        "group_id",
+        Text,
+        ForeignKey(user_group.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("user_id", Text, primary_key=True),
+)
+
+
+# ---------------------------------------------------------------------------
 # Indexes for the read paths
 # ---------------------------------------------------------------------------
 
@@ -1301,6 +1456,10 @@ Index("ix_zone_target_database_id", zone_target.c.database_id)
 Index("ix_zone_target_schema_id", zone_target.c.schema_id)
 Index("ix_zone_target_table_id", zone_target.c.table_id)
 
+# "The groups of this account". The primary key of ``user_group__member`` leads
+# with ``group_id`` and so cannot serve it.
+Index("ix_user_group__member_user_id", user_group__member.c.user_id)
+
 # "The tags on this object", which every detail page asks for its own kind. The
 # unique constraints on tag_target lead with `tag_id` and so cannot serve it.
 Index("ix_tag_target_term_id", tag_target.c.term_id)
@@ -1350,6 +1509,7 @@ TRIGRAM_SEARCH_TABLES = (
     column_attribute,
     sql_attribute,
     pql_analysis,
+    tag,
 )
 
 #: Global search matches a *substring*: typing ``mount`` has to find
@@ -1364,8 +1524,17 @@ TRIGRAM_SEARCH_TABLES = (
 #: only when the caller asks for it. Neither carries ``lower()``: ``gin_trgm_ops``
 #: folds case itself, so ``ILIKE`` uses these exactly as written -- adding
 #: ``lower()`` here would build an index that ``ILIKE`` then could not match.
+#:
+#: ``tag`` is searched but has no ``description`` column -- a tag is a name and
+#: its authorship, nothing more -- so it takes the one index it can. Skipped
+#: here rather than kept out of the tuple above, which would leave the table
+#: searched and unindexed.
+#: ``auto_ontology.dal.search._LABELS_WITHOUT_DESCRIPTION`` is the same fact on
+#: the query side.
 for _table in TRIGRAM_SEARCH_TABLES:
     for _column in ("name", "description"):
+        if _column not in _table.c:
+            continue
         Index(
             f"ix_{_table.name}_{_column}_trgm",
             _table.c[_column],
@@ -1474,6 +1643,11 @@ __all__ = [
     "table__term",
     "term",
     "text_attribute",
+    "user_group",
+    "user_group__member",
+    "GroupRole",
+    "GROUP_ROLE_ADMIN",
+    "GROUP_ROLE_VIEWER",
     "zone",
     "zone_target",
     "unstructured_document",

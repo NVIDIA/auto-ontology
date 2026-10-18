@@ -98,6 +98,7 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
         select(
             s.catalog_database.c.id,
             s.catalog_database.c.name,
+            s.catalog_database.c.owner_id,
             func.count(s.catalog_schema.c.id).label("schema_count"),
         )
         .select_from(
@@ -106,7 +107,11 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
                 s.catalog_schema.c.database_id == s.catalog_database.c.id,
             )
         )
-        .group_by(s.catalog_database.c.id, s.catalog_database.c.name)
+        .group_by(
+            s.catalog_database.c.id,
+            s.catalog_database.c.name,
+            s.catalog_database.c.owner_id,
+        )
         .order_by(s.catalog_database.c.name)
     )
     if scoped is not None:
@@ -124,6 +129,7 @@ def fetch_databases(zone_ids: list[str] | None = None) -> list[dict[str, Any]]:
             # Nothing writes a database description, so this is always None.
             # Kept in the shape because callers read the key.
             "description": None,
+            "owner_id": r["owner_id"],
             "num_of_schemas": int(r["schema_count"]),
             "schemas": [],
         }
@@ -152,6 +158,7 @@ def fetch_schemas_for_database(
         select(
             s.catalog_schema.c.id,
             s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_schema.c.owner_id,
             func.count(s.catalog_table.c.id).label("tables_count"),
         )
         .select_from(
@@ -160,7 +167,11 @@ def fetch_schemas_for_database(
             )
         )
         .where(s.catalog_schema.c.database_id == db_id)
-        .group_by(s.catalog_schema.c.id, s.catalog_schema.c.name)
+        .group_by(
+            s.catalog_schema.c.id,
+            s.catalog_schema.c.name,
+            s.catalog_schema.c.owner_id,
+        )
         .order_by(s.catalog_schema.c.name)
     )
     if scoped is not None:
@@ -181,6 +192,7 @@ def fetch_schemas_for_database(
                 "id": r["id"],
                 "schema_name": r["schema_name"],
                 "description": None,
+                "owner_id": r["owner_id"],
                 "tables_count": int(r["tables_count"]),
             }
             for r in rows
@@ -810,6 +822,7 @@ def fetch_tables_for_schema(
             s.catalog_schema.c.name.label("schema_name"),
             table_description_expr().label("description"),
             s.catalog_table.c.description_certified,
+            s.catalog_table.c.owner_id,
             _count_of(
                 s.catalog_column, s.catalog_column.c.table_id == s.catalog_table.c.id
             ).label("columns_count"),

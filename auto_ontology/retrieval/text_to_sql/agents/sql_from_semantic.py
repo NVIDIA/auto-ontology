@@ -142,11 +142,14 @@ class SQLFromCandidatesAgent(BaseAgent):
             - decision: "constructable" or "unconstructable"
         """
         path_state = state.get("path_state", {})
-        llm = state["llm"]
+        llm = state.get("reasoning_llm") or state["llm"]
         connectors = state.get("connectors") or []
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
         evidence = state.get("evidence", "")
+        authoritative_evidence_section = format_authoritative_evidence(
+            evidence, evidence_first_sql=True
+        )
         sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
         calculation_template_section = format_calculation_sql_template(path_state)
@@ -230,6 +233,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             glossary_section = format_glossary_section(state.get("glossary") or [])
             if glossary_section:
                 observation_block += f"\n{glossary_section}"
+            if authoritative_evidence_section:
+                observation_block += f"\n{authoritative_evidence_section}\n"
             # Build custom analyses section for user prompt
             ca_section = format_custom_analyses_section(custom_analyses)
 
@@ -314,10 +319,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
-            if evidence:
-                messages.append(
-                    SystemMessage(content=format_authoritative_evidence(evidence))
-                )
+            if authoritative_evidence_section:
+                messages.append(SystemMessage(content=authoritative_evidence_section))
             if calculation_template_section:
                 messages.append(SystemMessage(content=calculation_template_section))
             # Before the query patterns: anchors state what this database

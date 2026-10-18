@@ -332,6 +332,10 @@ def update_term(
     description: str | None = None,
     name_certified: bool | None = None,
     description_certified: bool | None = None,
+    owner_id: str | None = None,
+    set_owner: bool = False,
+    modified_by: str | None = None,
+    touch: bool = False,
 ) -> dict[str, Any] | None:
     """Update a Term, returning old and new values, or ``None`` when missing.
 
@@ -358,25 +362,33 @@ def update_term(
         )
         old_name = previous[0]["name"] if previous else None
 
+        values: dict[str, Any] = {
+            "name": func.coalesce(literal(name, String), s.term.c.name),
+            "description": func.coalesce(
+                literal(description, String), s.term.c.description
+            ),
+            "name_certified": func.coalesce(name_certified, s.term.c.name_certified),
+            "description_certified": func.coalesce(
+                description_certified, s.term.c.description_certified
+            ),
+            "owner_id": (literal(owner_id, String) if set_owner else s.term.c.owner_id),
+        }
+        # Only an edit from the app. Compilation calls this without ``touch``
+        # and must not look like someone saved the term.
+        if touch:
+            values["modified"] = func.now()
+            values["modified_by"] = modified_by
         rows = store().query_write(
             update(s.term)
             .where(s.term.c.id == term_id)
-            .values(
-                name=func.coalesce(literal(name, String), s.term.c.name),
-                description=func.coalesce(
-                    literal(description, String), s.term.c.description
-                ),
-                name_certified=func.coalesce(name_certified, s.term.c.name_certified),
-                description_certified=func.coalesce(
-                    description_certified, s.term.c.description_certified
-                ),
-            )
+            .values(**values)
             .returning(
                 s.term.c.id,
                 s.term.c.name,
                 s.term.c.description,
                 s.term.c.name_certified,
                 s.term.c.description_certified,
+                s.term.c.owner_id,
             )
         )
         if not rows:
@@ -559,9 +571,10 @@ def fetch_all_terms(
     table is reachable — a term also representing an out-of-zone table is
     excluded outright. ``None`` returns everything, for admin callers.
 
-    Each row carries its ``zones`` and its aggregate ``certification``, both
-    scoped to the same boundary, so the list renders chips and badges from one
-    response rather than a request per card.
+    Each row carries its ``zones``, its ``tags``, its ``owner_id`` and its
+    aggregate ``certification``, all scoped to the same boundary, so a card
+    renders chips, an owner and a badge from one response rather than a
+    request per card. Tags are one query for the page, not one per term.
 
     Ordered by name case-insensitively then by id — the id breaks ties between
     same-named terms, without which a page boundary could repeat one and skip
@@ -591,6 +604,7 @@ def fetch_all_terms(
             schema_names.label("schema_names"),
             s.term.c.name_certified,
             s.term.c.description_certified,
+            s.term.c.owner_id,
             _certification(table_ids).label("certification"),
         )
         .where(*_semantic_terms(zone_ids, search, data_ids_by_zone))
@@ -601,14 +615,15 @@ def fetch_all_terms(
         statement = statement.limit(limit)
 
     terms = [dict(r) for r in store().query_read(statement)]
-    # Scoped to the rows just read, so paging does not resolve zones for the
-    # rest of the glossary on every page.
-    zones_by_term = fetch_term_zones_map(
-        zone_ids, term_ids=[row["id"] for row in terms]
-    )
+    # Scoped to the rows just read, so paging does not resolve zones and tags
+    # for the rest of the glossary on every page.
+    term_ids = [row["id"] for row in terms]
+    zones_by_term = fetch_term_zones_map(zone_ids, term_ids=term_ids)
+    tags_by_term = fetch_tags_map(TARGET_TERM, term_ids)
     for row in terms:
         row["schema_names"] = row["schema_names"] or []
         row["zones"] = zones_by_term.get(row["id"], [])
+        row["tags"] = tags_by_term.get(row["id"], [])
     return terms
 
 
@@ -699,6 +714,11 @@ def get_full_term_by_id(
         s.term.c.id,
         s.term.c.name_certified,
         s.term.c.description_certified,
+        s.term.c.owner_id,
+        s.term.c.created,
+        s.term.c.modified,
+        s.term.c.created_by,
+        s.term.c.modified_by,
         _certification(table_ids).label("certification"),
     ).where(s.term.c.id == term_id)
     scope = _in_scope(table_ids)
@@ -1288,6 +1308,10 @@ def fetch_column_attributes_by_term_id(
             s.column_attribute.c.table_id,
             sample_values.label("sample_values"),
             s.column_attribute.c.certified,
+            s.column_attribute.c.created,
+            s.column_attribute.c.modified,
+            s.column_attribute.c.created_by,
+            s.column_attribute.c.modified_by,
         )
         .where(*_column_attribute_scope(term_id, zone_ids))
         .order_by(s.column_attribute.c.name, s.column_attribute.c.id)

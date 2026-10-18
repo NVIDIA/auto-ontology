@@ -6,10 +6,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auto_ontology.dal import terms as terms_dal
+from auto_ontology.dal.owners import CATALOG_EDIT, edit_subject
+from auto_ontology.server.identity import resolve_internal_user
+from auto_ontology.server.owners import enforce_edit, owner_from_body
 from auto_ontology.server.sql_attributes import service as dal
 from auto_ontology.server.responses import (
     DescriptionSuggestionResponse,
@@ -35,6 +38,7 @@ class SqlAttributeCreate(BaseModel):
     expression: str = Field(..., min_length=1)
     term_id: str
     source: str = "manual"
+    owner_id: str | None = None
 
 
 class SqlAttributeUpdate(BaseModel):
@@ -49,6 +53,7 @@ class SqlAttributeMetadataPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1)
     description: str | None = None
     certified: bool | None = None
+    owner_id: str | None = None
 
 
 @router.get("/sql-attributes", response_model=SqlAttributeListResponse)
@@ -74,13 +79,18 @@ def get_sql_attribute(attr_id: str) -> dict:
     "/sql-attributes/{attr_id}/description-suggestion",
     response_model=DescriptionSuggestionResponse,
 )
-def get_sql_attribute_description_suggestion(attr_id: str) -> dict:
+def get_sql_attribute_description_suggestion(request: Request, attr_id: str) -> dict:
     """LLM-generated (or cached) description suggestion for a SqlAttribute.
 
     Returns 404 when no SqlAttribute with that id exists. ``data`` is
     ``null`` when a suggestion could not be produced (e.g. the LLM call
-    failed) — that is not treated as an error.
+    failed) — that is not treated as an error. Returns 403 when the caller
+    may not edit this attribute. A suggestion is cached on the attribute,
+    so the same edit check as a save applies.
     """
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     if dal.get_sql_attribute_by_id(attr_id) is None:
         raise HTTPException(
             status_code=404,
@@ -110,13 +120,16 @@ def validate_sql_attribute(body: SqlAttributeValidate) -> dict:
 
 
 @router.post("/sql-attributes", status_code=201, response_model=SqlAttributeResponse)
-def create_sql_attribute(body: SqlAttributeCreate) -> dict:
+def create_sql_attribute(request: Request, body: SqlAttributeCreate) -> dict:
     """Create a SqlAttribute with its Sql node, linked to a Term.
 
     The connector is resolved server-side (never chosen by the client —
-    see ``auto_ontology/connectors/registry.py``). Returns 409 when the name is
-    already taken, 422 when the target Term does not exist or the SQL
-    can't be parsed.
+    see ``auto_ontology/connectors/registry.py``). ``owner_id``, when set,
+    names a user or a group that can edit the catalog; omit it to leave the
+    attribute unassigned. The caller is stored as ``created_by`` so the side
+    panel can name them. Returns 400 when that id cannot be assigned, 409
+    when the name is already taken, 422 when the target Term does not exist
+    or the SQL can't be parsed.
     """
     try:
         row = dal.create_sql_attribute(
@@ -125,6 +138,8 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
             expression=body.expression,
             term_id=body.term_id,
             source=body.source,
+            owner_id=owner_from_body(body.owner_id, CATALOG_EDIT),
+            created_by=resolve_internal_user(request, required=False),
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -136,14 +151,20 @@ def create_sql_attribute(body: SqlAttributeCreate) -> dict:
 
 
 @router.put("/sql-attributes/{attr_id}", response_model=SqlAttributeResponse)
-def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
+def update_sql_attribute(
+    request: Request, attr_id: str, body: SqlAttributeUpdate
+) -> dict:
     """Replace a SqlAttribute, re-parse SQL, and re-link to a Term.
 
     The connector is resolved server-side (never chosen by the client —
     see ``auto_ontology/connectors/registry.py``). Returns 404 when no SqlAttribute
     with that id exists, 409 on name conflict, 422 when the Term doesn't
-    exist or SQL can't be parsed.
+    exist or SQL can't be parsed. Returns 403 when the caller may not edit
+    this attribute, the same check as the metadata patch.
     """
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     try:
         row = dal.update_sql_attribute(
             attr_id=attr_id,
@@ -152,6 +173,8 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
             expression=body.expression,
             term_id=body.term_id,
             source=body.source,
+            modified_by=resolve_internal_user(request, required=False),
+            touch=True,
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -168,7 +191,9 @@ def update_sql_attribute(attr_id: str, body: SqlAttributeUpdate) -> dict:
 
 
 @router.patch("/sql-attributes/{attr_id}", response_model=SqlAttributePatchResponse)
-def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
+def patch_sql_attribute(
+    request: Request, attr_id: str, body: SqlAttributeMetadataPatch
+) -> dict:
     """Patch SqlAttribute name/description without touching SQL expression."""
     patch = body.model_dump(exclude_unset=True)
     if not patch:
@@ -182,12 +207,22 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
             status_code=422, detail="SQL attribute name cannot be blank"
         )
 
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
+    set_owner = "owner_id" in patch
+    owner_id = owner_from_body(body.owner_id, CATALOG_EDIT) if set_owner else None
+
     try:
         row = dal.update_sql_attribute(
             attr_id=attr_id,
             name=name if isinstance(name, str) else None,
             description=patch.get("description"),
             certified=patch.get("certified"),
+            owner_id=owner_id,
+            set_owner=set_owner,
+            modified_by=resolve_internal_user(request, required=False),
+            touch=True,
         )
     except dal.SqlAttributeNameConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -212,8 +247,11 @@ def patch_sql_attribute(attr_id: str, body: SqlAttributeMetadataPatch) -> dict:
 
 
 @router.delete("/sql-attributes/{attr_id}", response_model=IdResponse)
-def delete_sql_attribute(attr_id: str) -> dict:
+def delete_sql_attribute(request: Request, attr_id: str) -> dict:
     """Delete a SqlAttribute and its edges."""
+    subject = edit_subject(attr_id)
+    if subject is not None:
+        enforce_edit(request, subject)
     row = dal.delete_sql_attribute(attr_id)
     if row is None:
         raise HTTPException(

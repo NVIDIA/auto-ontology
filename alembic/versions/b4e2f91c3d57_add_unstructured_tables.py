@@ -5,7 +5,7 @@
 """Add unstructured document/chunk/term/attribute tables.
 
 Revision ID: b4e2f91c3d57
-Revises: c778a7d94c20
+Revises: f3a91c0e5b27
 Create Date: 2026-10-08
 """
 
@@ -16,7 +16,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 revision = "b4e2f91c3d57"
-down_revision = "c778a7d94c20"
+down_revision = "f3a91c0e5b27"
 branch_labels = None
 depends_on = None
 

@@ -64,6 +64,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -71,7 +72,7 @@ import httpx
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,9 @@ _SYSTEM_DATABASES = frozenset({"system", "information_schema", "INFORMATION_SCHE
 # its own data.
 _VIEW_ENGINES = frozenset({"View", "LiveView", "WindowView"})
 _MATERIALIZED_VIEW_ENGINE = "MaterializedView"
+
+
+_TIMEOUT_EXCEEDED_CODE = "159"
 
 
 class ClickHouseError(RuntimeError):
@@ -221,6 +225,18 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
         "verify_ssl": _is_true(_first(query, "verify_ssl"), default=True),
         "max_rows": _positive_int(_first(query, "max_rows"), DEFAULT_MAX_ROWS),
     }
+
+
+def _is_timeout_exceeded(response: httpx.Response, message: str) -> bool:
+    """Whether the server stopped the statement at ``max_execution_time``.
+
+    That is error code 159, ``TIMEOUT_EXCEEDED``. The code arrives in a header
+    on every modern server; the message check covers proxies that strip it.
+    """
+    code = response.headers.get("X-ClickHouse-Exception-Code")
+    if code is not None:
+        return code.strip() == _TIMEOUT_EXCEEDED_CODE
+    return "(TIMEOUT_EXCEEDED)" in message
 
 
 def _error_message(response: httpx.Response) -> str:
@@ -404,10 +420,21 @@ class ClickHouseDatabase(SQLDatabase):
             if timeout_s is None
             else timeout_s + _TIMEOUT_GRACE_S
         )
+        started = time.monotonic()
         try:
             response = client.post(
                 "/", content=sql.encode("utf-8"), params=params, timeout=timeout
             )
+        except httpx.ReadTimeout as error:
+            # Connected and sent, then no answer within the cap plus grace: the
+            # server checks max_execution_time only between blocks, so a slow
+            # block (or a buffering proxy) can outlast it. That is a slow
+            # statement, not an unreachable server.
+            if timeout_s is None:
+                raise ClickHouseError(
+                    f"Could not connect to ClickHouse at {self._base_url}: {error!r}"
+                ) from error
+            raise StatementTimeout.since(timeout_s, started) from error
         except httpx.HTTPError as error:
             # The wording matters: ``auto_ontology.connectors.db_errors`` classifies by
             # message text, and "could not connect" is one of the phrases it
@@ -420,7 +447,12 @@ class ClickHouseDatabase(SQLDatabase):
                 f"Could not connect to ClickHouse at {self._base_url}: {error!r}"
             ) from error
         if response.status_code >= 400:
-            raise ClickHouseError(_error_message(response))
+            message = _error_message(response)
+            if timeout_s is not None and _is_timeout_exceeded(response, message):
+                raise StatementTimeout.since(timeout_s, started) from ClickHouseError(
+                    message
+                )
+            raise ClickHouseError(message)
 
         body = response.text.strip()
         if not body:

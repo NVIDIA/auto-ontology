@@ -214,9 +214,7 @@ def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
 
     # Charged per attempt, not once per call: a retry costs the endpoint the
     # same tokens as the attempt it is replacing.
-    slots = max(
-        1, round(sum(len(m["content"]) for m in messages) / GEN_CHARS_PER_SLOT)
-    )
+    slots = max(1, round(sum(len(m["content"]) for m in messages) / GEN_CHARS_PER_SLOT))
 
     for attempt in range(MAX_ATTEMPTS):
         GEN_LIMITER.acquire(slots)
@@ -230,7 +228,10 @@ def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
             )
         except Exception as exc:  # noqa: BLE001 — one bad call must not end a run
             error = f"{type(exc).__name__}: {exc}"[:200]
-            if type(exc).__name__ not in RETRYABLE_ERRORS or attempt == MAX_ATTEMPTS - 1:
+            if (
+                type(exc).__name__ not in RETRYABLE_ERRORS
+                or attempt == MAX_ATTEMPTS - 1
+            ):
                 return "", error
             time.sleep(BACKOFF_BASE_SECONDS * 2**attempt + random.random())
             continue
