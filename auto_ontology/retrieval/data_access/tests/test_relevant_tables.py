@@ -137,3 +137,23 @@ def test_normalize_merges_rich_nullability_into_parsed_columns() -> None:
             "is_nullable": True,
         }
     ]
+
+
+@pytest.mark.parametrize(
+    "data_type", ["NUMBER(38,0)", "decimal(12,2)", "Nullable(Decimal(12, 2))", "text"]
+)
+def test_a_type_with_a_comma_in_brackets_is_read_whole(data_type: str) -> None:
+    text = (
+        "table_name: orders, columns: "
+        f"{{name: total, data_type: {data_type}, description: Order total}},"
+        "{name: status, data_type: text}"
+    )
+
+    normalized = relevant_tables._normalize_table_to_relevant_shape(
+        {"id": "table-1", "label": Labels.TABLE, "text": text}
+    )
+
+    assert normalized["columns"] == [
+        {"name": "total", "data_type": data_type, "description": "Order total"},
+        {"name": "status", "data_type": "text"},
+    ]
