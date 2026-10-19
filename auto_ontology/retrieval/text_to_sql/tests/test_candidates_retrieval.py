@@ -13,6 +13,7 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
 )
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
+from auto_ontology.semantic.constants import LABEL_SEMANTIC_RELATIONSHIP
 
 
 def _hit(
@@ -55,6 +56,30 @@ def _state(
     if evidence is not None:
         state["evidence"] = evidence
     return cast(AgentState, state)
+
+
+def test_relationship_retrieval_uses_full_question_and_separate_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_search(_retriever, query, label, _k, _database_name=None):
+        calls.append((query, label))
+        if label == LABEL_SEMANTIC_RELATIONSHIP:
+            return [_hit("edge-1", "db-a", 0.1)]
+        return []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda _db: False
+    )
+
+    result = CandidateRetrievalAgent().execute(_state([], target_db="db-a"))
+
+    assert ("question", LABEL_SEMANTIC_RELATIONSHIP) in calls
+    assert result["path_state"]["retrieved_relationships"] == [
+        _hit("edge-1", "db-a", 0.1)
+    ]
 
 
 def test_selects_database_by_entity_coverage_before_total_hits() -> None:
@@ -305,7 +330,7 @@ def test_explicit_target_db_preserves_existing_search_behavior(
         _state(["revenue", "region"], target_db="db-a")
     )
 
-    assert len(calls) == 4
+    assert len(calls) == 5
     assert {database_name for _, _, database_name in calls} == {"db-a"}
     assert result["path_state"]["target_db"] == "db-a"
     assert len(result["path_state"]["retrieved_column_attributes"]) == 2

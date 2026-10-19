@@ -228,7 +228,9 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
         lambda candidates: [],
     )
     monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
-    monkeypatch.setattr(candidates_preparation, "find_join_paths", lambda *a, **k: [])
+    monkeypatch.setattr(
+        candidates_preparation, "find_join_path_candidates", lambda *a, **k: []
+    )
     monkeypatch.setattr(
         candidates_preparation,
         "find_connected_junction_tables",

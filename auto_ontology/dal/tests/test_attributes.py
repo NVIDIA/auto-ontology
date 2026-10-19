@@ -25,6 +25,18 @@ from auto_ontology.dal import attributes as a  # noqa: E402
 from auto_ontology.dal import schema as s  # noqa: E402
 from auto_ontology.dal.session import store  # noqa: E402
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE  # noqa: E402
+from auto_ontology.semantic.relationship_metadata import (  # noqa: E402
+    CuratedRelationship,
+    RelationshipCardinality,
+    RelationshipFacts,
+    RelationshipKind,
+    RelationshipMetadata,
+    RelationshipOptionality,
+    RelationshipProvenance,
+    RelationshipResolutionSource,
+    RelationshipReview,
+    RelationshipSuggestion,
+)
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -252,6 +264,172 @@ def test_all_parallel_foreign_keys_between_tables_are_returned(world) -> None:
         and path[0]["target_column"] == "id"
         for path in paths
     )
+
+
+def test_candidates_include_direct_and_longer_qualified_routes(world) -> None:
+    """A direct district relation does not hide the account-qualified route."""
+    world.table("districts", pk=["id"])
+    world.column("districts", "id")
+    world.table("accounts", pk=["id"])
+    world.column("accounts", "id", 1)
+    world.column("accounts", "district_id", 2)
+    world.table("clients", pk=["id"])
+    world.column("clients", "id", 1)
+    world.column("clients", "district_id", 2)
+    world.column("clients", "account_id", 3)
+    world.attribute("district-id", owner="districts.id")
+    world.attribute("account-id", owner="accounts.id")
+    world.references("clients.district_id", "district-id")
+    world.references("clients.account_id", "account-id")
+    world.references("accounts.district_id", "district-id")
+
+    candidates = a.find_join_path_candidates(
+        world.columns["clients.id"], world.columns["districts.id"]
+    )
+
+    assert [candidate.hop_count for candidate in candidates] == [1, 2]
+    assert candidates[0].is_shortest is True
+    assert candidates[1].is_shortest is False
+    assert candidates[1].hops[0].target_table == "accounts"
+    assert "intermediate qualification" in candidates[1].meaning.contrast
+
+
+def test_candidate_shortest_parallel_edges_are_never_capped(world) -> None:
+    world.table("people", pk=["id"])
+    world.column("people", "id")
+    world.table("events")
+    world.column("events", "created_by", 1)
+    world.column("events", "approved_by", 2)
+    world.attribute("person-id", owner="people.id")
+    world.references("events.created_by", "person-id")
+    world.references("events.approved_by", "person-id")
+
+    candidates = a.find_join_path_candidates(
+        world.columns["events.created_by"],
+        world.columns["people.id"],
+        max_longer_paths=0,
+    )
+
+    assert len(candidates) == 2
+    assert all(candidate.is_shortest for candidate in candidates)
+    assert {candidate.hops[0].source_column for candidate in candidates} == {
+        "created_by",
+        "approved_by",
+    }
+
+
+def test_candidate_reverse_direction_and_curated_precedence(world) -> None:
+    world.table("districts", pk=["id"])
+    world.column("districts", "id")
+    world.table("clients")
+    world.column("clients", "district_id")
+    attr = world.attribute("district-id", owner="districts.id")
+    world.references("clients.district_id", "district-id")
+    metadata = RelationshipMetadata(
+        facts=RelationshipFacts(
+            cardinality=RelationshipCardinality.MANY_TO_ONE,
+            source_to_target_fan_out=False,
+            target_to_source_fan_out=True,
+        ),
+        suggestion=RelationshipSuggestion(
+            kind=RelationshipKind.MEMBERSHIP,
+            review=RelationshipReview.UNREVIEWED,
+        ),
+        curated=CuratedRelationship(
+            kind=RelationshipKind.LOCATION,
+            review=RelationshipReview.CERTIFIED,
+        ),
+    ).model_dump(mode="json", exclude_none=True)
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id == world.columns["clients.district_id"],
+            s.column__semantic_fk.c.attribute_id == attr,
+        )
+        .values(relationship_metadata=metadata)
+    )
+
+    candidate = a.find_join_path_candidates(
+        world.columns["districts.id"], world.columns["clients.district_id"]
+    )[0]
+    hop = candidate.hops[0]
+    assert hop.direction.value == "reverse"
+    assert hop.cardinality is RelationshipCardinality.ONE_TO_MANY
+    assert hop.fan_out is True
+    assert hop.relationship_kind is RelationshipKind.LOCATION
+    assert hop.interpretation_source.value == "curated"
+
+
+def test_candidate_recognizes_shared_child_bridge(world) -> None:
+    world.table("chemicals", pk=["id"])
+    world.column("chemicals", "id")
+    world.table("molecules", pk=["id"])
+    world.column("molecules", "id")
+    world.table("chemical_molecule")
+    world.column("chemical_molecule", "chemical_id", 1)
+    world.column("chemical_molecule", "molecule_id", 2)
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["chemical_molecule"])
+        .values(is_junction_table=True)
+    )
+    world.attribute("chemical-id", owner="chemicals.id")
+    world.attribute("molecule-id", owner="molecules.id")
+    world.references("chemical_molecule.chemical_id", "chemical-id")
+    world.references("chemical_molecule.molecule_id", "molecule-id")
+
+    candidate = a.find_join_path_candidates(
+        world.columns["chemicals.id"], world.columns["molecules.id"]
+    )[0]
+
+    assert [hop.direction.value for hop in candidate.hops] == ["reverse", "forward"]
+    assert candidate.meaning.pattern.value == "shared_child_junction"
+    assert candidate.meaning.duplication_risk.value in {"possible", "high"}
+    assert "incidence" in candidate.meaning.qualification_scope
+
+
+def test_candidate_longer_cap_prevents_cycles_and_preserves_unknowns(world) -> None:
+    for table in ("a", "b", "c", "d"):
+        world.table(table, pk=["id"])
+        world.column(table, "id", 1)
+        world.attribute(f"{table}-id", owner=f"{table}.id")
+    world.column("a", "b_id", 2)
+    world.column("a", "c_id", 3)
+    world.column("a", "d_id", 4)
+    world.column("b", "d_id", 2)
+    world.column("c", "d_id", 2)
+    world.column("b", "a_id", 3)
+    world.references("a.b_id", "b-id")
+    world.references("a.c_id", "c-id")
+    world.references("a.d_id", "d-id")
+    world.references("b.d_id", "d-id")
+    world.references("c.d_id", "d-id")
+    world.references("b.a_id", "a-id")
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id == world.columns["a.d_id"],
+            s.column__semantic_fk.c.attribute_id == world.attributes["d-id"],
+        )
+        .values(relationship_metadata={"kind": "unversioned-membership"})
+    )
+
+    candidates = a.find_join_path_candidates(
+        world.columns["a.id"],
+        world.columns["d.id"],
+        max_longer_paths=1,
+    )
+
+    assert [candidate.hop_count for candidate in candidates] == [1, 2]
+    assert candidates[0].hops[0].relationship_metadata is None
+    assert candidates[0].hops[0].raw_relationship_metadata == {
+        "kind": "unversioned-membership"
+    }
+    assert candidates[0].meaning.resulting_grain == "unknown"
+    for candidate in candidates:
+        visited = [candidate.hops[0].source_table_id]
+        visited.extend(hop.target_table_id for hop in candidate.hops)
+        assert len(visited) == len(set(visited))
 
 
 def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None:
@@ -876,6 +1054,62 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
     assert len(rows) == 1
 
 
+def test_merge_semantic_fk_updates_only_the_supplied_metadata_section(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+    column_id = world.columns["orders.customer_id"]
+
+    a.merge_semantic_fk(
+        column_id,
+        attr,
+        RelationshipMetadata(
+            curated=CuratedRelationship(
+                kind=RelationshipKind.OWNERSHIP,
+                provenance=RelationshipProvenance.MANUAL,
+                review=RelationshipReview.CERTIFIED,
+            )
+        ),
+    )
+    a.merge_semantic_fk(
+        column_id,
+        attr,
+        RelationshipMetadata(
+            suggestion=RelationshipSuggestion(
+                kind=RelationshipKind.REFERENCE,
+                provenance=RelationshipProvenance.MODEL,
+                confidence=0.8,
+            )
+        ),
+    )
+    a.merge_semantic_fk(
+        column_id,
+        attr,
+        RelationshipMetadata(facts=RelationshipFacts(source_nullable=True)),
+    )
+    a.merge_semantic_fk(
+        column_id,
+        attr,
+        RelationshipMetadata(facts=RelationshipFacts(source_nullable=False)),
+    )
+
+    metadata = store().query_read(
+        select(s.column__semantic_fk.c.relationship_metadata).where(
+            s.column__semantic_fk.c.column_id == column_id,
+            s.column__semantic_fk.c.attribute_id == attr,
+        )
+    )[0]["relationship_metadata"]
+    assert metadata["facts"] == {"source_nullable": False}
+    assert metadata["suggestion"]["kind"] == "reference"
+    assert metadata["curated"] == {
+        "kind": "ownership",
+        "provenance": "manual",
+        "review": "certified",
+    }
+
+
 def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     """A column and attribute in different ingested databases must never link.
 
@@ -899,6 +1133,64 @@ def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
         )
     )
     assert rows == []
+
+
+def test_refresh_semantic_fk_facts_is_deterministic_and_idempotent(world) -> None:
+    world.table("customers", pk=["id"])
+    target_id = world.column("customers", "id")
+    world.table("orders")
+    source_id = world.column("orders", "customer_id")
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["orders"])
+        .values(is_junction_table=True)
+    )
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == source_id)
+        .values(is_nullable=True, is_unique=False)
+    )
+    store().query_write(
+        s.catalog_column.update()
+        .where(s.catalog_column.c.id == target_id)
+        .values(is_nullable=False, is_unique=True)
+    )
+    _link(
+        s.column__foreign_key,
+        source_column_id=source_id,
+        target_column_id=target_id,
+    )
+    attr = world.attribute("customer-id", owner="customers.id")
+    a.merge_semantic_fk(
+        source_id,
+        attr,
+        RelationshipMetadata(
+            facts=RelationshipFacts(
+                resolution_source=RelationshipResolutionSource.DECLARED
+            )
+        ),
+    )
+
+    assert a.refresh_semantic_fk_facts(f"{world.prefix}-shopdb") == 1
+    assert a.refresh_semantic_fk_facts(f"{world.prefix}-shopdb") == 1
+    metadata = store().query_read(
+        select(s.column__semantic_fk.c.relationship_metadata).where(
+            s.column__semantic_fk.c.column_id == source_id,
+            s.column__semantic_fk.c.attribute_id == attr,
+        )
+    )[0]["relationship_metadata"]
+
+    assert metadata["facts"]["resolution_source"] == "declared"
+    assert metadata["facts"]["physical_foreign_key"] is True
+    assert metadata["facts"]["source_declared_unique"] is False
+    assert metadata["facts"]["source_sampled_unique"] is False
+    assert metadata["facts"]["target_declared_unique"] is True
+    assert metadata["facts"]["target_sampled_unique"] is True
+    assert metadata["facts"]["cardinality"] == RelationshipCardinality.MANY_TO_ONE
+    assert metadata["facts"]["source_junction"] is True
+    assert metadata["facts"]["optionality"] == RelationshipOptionality.OPTIONAL
+    assert metadata["facts"]["source_to_target_fan_out"] is False
+    assert metadata["facts"]["target_to_source_fan_out"] is True
 
 
 # --------------------------------------------------------------------------

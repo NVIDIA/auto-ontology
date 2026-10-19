@@ -77,9 +77,7 @@ logger = logging.getLogger(__name__)
 _OVERLAP_KEEP_THRESHOLD = 0.2
 
 
-def _find_join_paths_either_direction(
-    col_a_id: str, col_b_id: str
-) -> list[list[dict]]:
+def _find_join_paths_either_direction(col_a_id: str, col_b_id: str) -> list[list[dict]]:
     """``find_join_paths``, tried in both column orders.
 
     ``find_join_paths`` walks ``SEMANTIC_FK`` outgoing-only (child FK ->

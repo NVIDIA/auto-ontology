@@ -189,6 +189,45 @@ class AnchorColumnModel(BaseModel):
     )
 
 
+class JoinPathRankItem(BaseModel):
+    """A recommendation for one exact, supplied join-path fingerprint."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    fingerprint: str
+    confidence: Literal["high", "medium", "low", "unknown"]
+    rationale: str = Field(max_length=240)
+
+
+class JoinPathRankingModel(BaseModel):
+    """Structured ranking output; callers validate exact fingerprint coverage."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rankings: list[JoinPathRankItem]
+
+
+SemanticValidationStatus = Literal[
+    "matched",
+    "ambiguous",
+    "unknown_metadata",
+    "semantic_mismatch",
+    "structurally_invalid",
+]
+
+
+class SemanticScopeValidationResult(BaseModel):
+    """Deterministic semantic assessment of the SQL's selected join route."""
+
+    status: SemanticValidationStatus
+    selected_fingerprints: list[str] = Field(default_factory=list)
+    alternative_fingerprints: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    message: str = ""
+    enforce_rejection: bool = False
+    auto_repair_fingerprint: str | None = None
+
+
 class FollowUpResolutionModel(StrictModel):
     """Contextualize the current user question against completed prior turns."""
 

@@ -28,6 +28,9 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from auto_ontology.utils.llm_invoke import safe_invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
+from auto_ontology.retrieval.text_to_sql.semantic_path_observability import (
+    record_generated_sql,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -159,6 +162,7 @@ class SQLFromCandidatesAgent(BaseAgent):
 
         primary_attribute: dict | None = path_state.get("primary_attribute")
         attribute_join_paths: list[dict] = path_state.get("attribute_join_paths") or []
+        join_path_candidates: list[dict] = path_state.get("join_path_candidates") or []
         relevant_tables = path_state.get("relevant_tables", [])
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])
@@ -273,6 +277,7 @@ class SQLFromCandidatesAgent(BaseAgent):
                         attribute_join_paths,
                         target_db=target_db,
                         dialect=dialect,
+                        join_path_candidates=join_path_candidates,
                     )
                     + "\n\n"
                 )
@@ -404,6 +409,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         has_response = bool(response.response and response.response.strip())
 
         if has_sql:
+            record_generated_sql(path_state, response.sql_code)
             custom_analyses_used = []
             if (
                 hasattr(response, "custom_analyses_used")

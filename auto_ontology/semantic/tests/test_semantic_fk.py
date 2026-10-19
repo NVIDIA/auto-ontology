@@ -12,7 +12,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from auto_ontology.semantic import semantic_fk
-from auto_ontology.semantic.embed import _build_rows
+from auto_ontology.semantic.embed import _build_relationship_rows, _build_rows
+from auto_ontology.semantic.relationship_metadata import (
+    RelationshipResolutionSource,
+)
 
 
 def _hit(
@@ -133,6 +136,57 @@ def test_vdb_resolution_uses_sql_fallback_when_llm_abstains(
     mock_sql_fallback.assert_called_once_with(column, [hit], connector)
 
 
+@patch(
+    "auto_ontology.semantic.semantic_fk._match_hit_by_sample_values",
+    return_value="target-attr",
+)
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value=None)
+def test_vdb_resolution_returns_sql_source_receipt(
+    _mock_llm_pick: MagicMock,
+    _mock_sql_fallback: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    retriever.query.side_effect = [[_hit("target-attr", "table-2")], []]
+
+    resolved = semantic_fk._resolve_via_vdb(
+        {"id": "source", "name": "id", "table_id": "table-1"},
+        retriever,
+        "database",
+        MagicMock(),
+        include_source=True,
+    )
+
+    assert resolved is not None
+    assert resolved.attribute_id == "target-attr"
+    assert resolved.source is RelationshipResolutionSource.SQL_SAMPLE
+
+
+def test_resolution_metadata_records_typed_declared_receipt() -> None:
+    metadata = semantic_fk._resolution_metadata(RelationshipResolutionSource.DECLARED)
+
+    assert metadata.facts is not None
+    assert metadata.facts.resolution_source is RelationshipResolutionSource.DECLARED
+    assert metadata.facts.resolution_generator == "semantic_fk_resolver"
+
+
+@patch("auto_ontology.semantic.semantic_fk._llm_pick_hit", return_value="target-attr")
+def test_vdb_resolution_returns_llm_source_receipt(
+    _mock_llm_pick: MagicMock,
+) -> None:
+    retriever = MagicMock()
+    retriever.query.side_effect = [[_hit("target-attr", "table-2")], []]
+
+    resolved = semantic_fk._resolve_via_vdb(
+        {"id": "source", "name": "id", "table_id": "table-1"},
+        retriever,
+        "database",
+        include_source=True,
+    )
+
+    assert resolved is not None
+    assert resolved.source is RelationshipResolutionSource.VDB_LLM
+
+
 def test_column_attribute_embedding_includes_physical_table() -> None:
     rows = _build_rows(
         "database",
@@ -156,6 +210,39 @@ def test_column_attribute_embedding_includes_physical_table() -> None:
     assert rows[0]["metadata"]["content_metadata"]["table_id"] == "table-1"
     assert rows[0]["metadata"]["content_metadata"]["table_name"] == "tags"
     assert rows[0]["metadata"]["content_metadata"]["is_unique"] is True
+
+
+def test_relationship_embedding_includes_semantic_metadata() -> None:
+    rows = _build_relationship_rows(
+        "database",
+        [
+            {
+                "id": "column-1:attribute-2",
+                "source_column_id": "column-1",
+                "target_attribute_id": "attribute-2",
+                "source_table_id": "orders",
+                "target_table_id": "accounts",
+                "source_table": "orders",
+                "target_table": "accounts",
+                "kind": "ownership",
+                "source_role": "owned order",
+                "target_role": "owning account",
+                "description": "Orders belong to accounts.",
+                "intent_phrases": ["orders for an account"],
+                "trust": "certified",
+                "version": 1,
+            }
+        ],
+    )
+
+    metadata = rows[0]["metadata"]
+    assert metadata["label"] == "SemanticRelationship"
+    assert metadata["edge_id"] == "column-1:attribute-2"
+    assert metadata["source_table_id"] == "orders"
+    assert metadata["target_table_id"] == "accounts"
+    assert metadata["intent_phrases"] == ["orders for an account"]
+    assert metadata["trust"] == "certified"
+    assert metadata["version"] == 1
 
 
 def _probe_result(*values: object, ok: bool = True) -> dict:
@@ -323,6 +410,7 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
             "auto_ontology.semantic.semantic_fk._resolve_connector", return_value=None
         ),
         patch("auto_ontology.semantic.semantic_fk._resolve_via_vdb", return_value=None),
+        patch("auto_ontology.semantic.semantic_fk.refresh_semantic_fk_facts"),
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 0
 

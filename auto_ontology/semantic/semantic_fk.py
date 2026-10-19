@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import logging
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -38,6 +39,7 @@ from auto_ontology.dal.attributes import (
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
+    refresh_semantic_fk_facts,
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
 from auto_ontology.utils.embedding import EmbedParams
@@ -49,6 +51,12 @@ from auto_ontology.utils.model_config import resolve
 from auto_ontology.utils.retriever import Retriever
 from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.semantic.models import FkHitSelection
+from auto_ontology.semantic.relationship_metadata import (
+    RelationshipFacts,
+    RelationshipMetadata,
+    RelationshipProvenance,
+    RelationshipResolutionSource,
+)
 from auto_ontology.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
@@ -57,6 +65,7 @@ _EMBED_ENDPOINT = resolve("EMBED", "ENDPOINT")
 _EMBED_MODEL = resolve("EMBED", "MODEL")
 _NVIDIA_API_KEY = resolve("EMBED", "API_KEY")
 _WORKERS = 2
+_RESOLVER_VERSION = "2"
 _SYSTEM_PROMPT = """\
 You are a database schema expert. You will be given a foreign-key column \
 description and a list of candidate primary-key columns retrieved from a \
@@ -79,6 +88,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     """
     candidates = find_unlinked_fk_columns(database_name)
     if not candidates:
+        refresh_semantic_fk_facts(database_name)
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
         return 0
 
@@ -119,7 +129,11 @@ def resolve_semantic_fks(database_name: str) -> int:
                 # FK, whose target is always a column in the same connected
                 # database, but treat "not written" the same as "no attribute
                 # found" rather than assume.
-                if merge_semantic_fk(col["id"], attr_id):
+                if merge_semantic_fk(
+                    col["id"],
+                    attr_id,
+                    _resolution_metadata(RelationshipResolutionSource.DECLARED),
+                ):
                     declared_written += 1
                     logger.debug(
                         "resolve_semantic_fks [declared]: %s.%s → attr %s",
@@ -145,6 +159,7 @@ def resolve_semantic_fks(database_name: str) -> int:
     )
 
     if not llm_queue:
+        refresh_semantic_fk_facts(database_name)
         return declared_written
 
     retriever = _build_retriever(database_name)
@@ -154,6 +169,7 @@ def resolve_semantic_fks(database_name: str) -> int:
             "for %d column(s)",
             len(llm_queue),
         )
+        refresh_semantic_fk_facts(database_name)
         return declared_written
     connector = _resolve_connector(database_name)
 
@@ -162,14 +178,25 @@ def resolve_semantic_fks(database_name: str) -> int:
     def _resolve_one(index: int, col: dict[str, Any]) -> bool:
         _log_start(index, col)
         try:
-            attr_id = _resolve_via_vdb(col, retriever, database_name, connector)
+            resolution = _resolve_via_vdb(
+                col,
+                retriever,
+                database_name,
+                connector,
+                include_source=True,
+            )
+            attr_id = resolution.attribute_id if resolution else None
             # The VDB where-filter already scopes hits to database_name, but
             # it's a query-time filter over a collection shared by every
             # ingested database, not physical isolation -- the same shape of
             # mechanism that let Term nodes leak across databases elsewhere.
             # merge_semantic_fk verifies against the catalog before writing
             # rather than trust the filter alone, and logs its own rejection.
-            if attr_id and merge_semantic_fk(col["id"], attr_id):
+            if attr_id and merge_semantic_fk(
+                col["id"],
+                attr_id,
+                _resolution_metadata(resolution.source),
+            ):
                 logger.debug(
                     "resolve_semantic_fks [resolved]: %s.%s → attr %s",
                     col.get("table_name"),
@@ -193,6 +220,7 @@ def resolve_semantic_fks(database_name: str) -> int:
                 inferred_written += 1
 
     total = declared_written + inferred_written
+    refresh_semantic_fk_facts(database_name)
     logger.info(
         "resolve_semantic_fks: done — %d declared + %d inferred = %d total "
         "SEMANTIC_FK edge(s)",
@@ -206,6 +234,33 @@ def resolve_semantic_fks(database_name: str) -> int:
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _ResolvedTarget:
+    attribute_id: str
+    source: RelationshipResolutionSource
+
+
+def _resolution_metadata(
+    source: RelationshipResolutionSource,
+) -> RelationshipMetadata:
+    """Build the typed receipt persisted with a resolver-created edge."""
+    creator = (
+        RelationshipProvenance.CATALOG
+        if source is RelationshipResolutionSource.DECLARED
+        else RelationshipProvenance.MODEL
+        if source is RelationshipResolutionSource.VDB_LLM
+        else RelationshipProvenance.DETERMINISTIC
+    )
+    return RelationshipMetadata(
+        facts=RelationshipFacts(
+            creator=creator,
+            resolution_source=source,
+            resolution_generator="semantic_fk_resolver",
+            resolution_version=_RESOLVER_VERSION,
+        )
+    )
 
 
 def _resolve_connector(database_name: str) -> SQLDatabase | None:
@@ -258,7 +313,9 @@ def _resolve_via_vdb(
     retriever: Retriever,
     database_name: str,
     connector: SQLDatabase | None = None,
-) -> str | None:
+    *,
+    include_source: bool = False,
+) -> str | _ResolvedTarget | None:
     """Search the semantic VDB for a matching ColumnAttribute and return its id.
 
     Runs two queries and merges up to 6 unique hits:
@@ -314,8 +371,13 @@ def _resolve_via_vdb(
 
     selected = _llm_pick_hit(col, merged)
     if selected:
-        return selected
-    return _match_hit_by_sample_values(col, merged, connector)
+        resolved = _ResolvedTarget(selected, RelationshipResolutionSource.VDB_LLM)
+        return resolved if include_source else resolved.attribute_id
+    selected = _match_hit_by_sample_values(col, merged, connector)
+    if selected:
+        resolved = _ResolvedTarget(selected, RelationshipResolutionSource.SQL_SAMPLE)
+        return resolved if include_source else resolved.attribute_id
+    return None
 
 
 def _match_hit_by_sample_values(

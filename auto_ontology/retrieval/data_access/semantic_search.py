@@ -292,7 +292,27 @@ def _hits_to_semantic_rows(
             "label": lab,
             "score": score,
         }
-        for _field in ("name", "schema_name", "database_name", "data_type", "source"):
+        for _field in (
+            "name",
+            "schema_name",
+            "database_name",
+            "data_type",
+            "source",
+            "edge_id",
+            "source_column_id",
+            "target_attribute_id",
+            "source_table_id",
+            "target_table_id",
+            "source_table",
+            "target_table",
+            "kind",
+            "source_role",
+            "target_role",
+            "description",
+            "intent_phrases",
+            "trust",
+            "version",
+        ):
             val = meta.get(_field)
             if val is not None:
                 row[_field] = val

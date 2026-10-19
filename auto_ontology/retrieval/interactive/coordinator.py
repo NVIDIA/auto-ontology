@@ -12,6 +12,10 @@ from typing import Any, Union
 # import time (which requires NVIDIA_API_KEY to be set).
 from concurrent.futures import ThreadPoolExecutor
 
+from auto_ontology.retrieval.text_to_sql.semantic_path_observability import (
+    record_ranked_paths,
+)
+
 from .clarify import (
     should_clarify,
     refresh_grounded_knowledge,
@@ -132,8 +136,14 @@ def _apply_debug_seed(
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
+        "semantic_join_observability",
+        "semantic_scope_validation",
+        "semantic_join_repair_candidates",
     ):
         session.path_state.pop(key, None)
+    join_path_candidates = session.path_state.get("join_path_candidates") or []
+    if join_path_candidates:
+        record_ranked_paths(session.path_state, join_path_candidates)
 
 
 def _apply_follow_up_seed(
@@ -175,6 +185,10 @@ def _apply_follow_up_seed(
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
+        "join_path_candidates",
+        "semantic_join_observability",
+        "semantic_scope_validation",
+        "semantic_join_repair_candidates",
     ):
         session.path_state.pop(key, None)
 

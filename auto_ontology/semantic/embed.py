@@ -87,6 +87,33 @@ class SemanticEmbedder:
         """Embed only ColumnAttribute rows, without rewriting the parent Term row."""
         return self.embed_term({}, attrs)
 
+    def embed_relationships(self, relationships: list[dict[str, Any]]) -> int:
+        """Replace relationship documents after FK compilation.
+
+        Label-scoped cleanup removes deleted or newly abstained relationships
+        without disturbing Terms, ColumnAttributes, or other semantic rows.
+        """
+        rows = _build_relationship_rows(self.database_name, relationships)
+        if not rows:
+            self.vdb.delete_by_database_and_label(
+                self.database_name, "SemanticRelationship"
+            )
+            return 0
+        embedded_df = batch_embed(rows, self.embed_params)
+        if embedded_df is None or embedded_df.empty:
+            return 0
+        embedded = [
+            row
+            for row in embedded_df.to_dict(orient="records")
+            if (row.get("metadata") or {}).get("embedding")
+        ]
+        if embedded:
+            self.vdb.delete_by_database_and_label(
+                self.database_name, "SemanticRelationship"
+            )
+            write_embedded_rows(self.vdb, embedded)
+        return len(embedded)
+
 
 def build_semantic_embedder(
     database_name: str,
@@ -129,7 +156,10 @@ def embed_all_semantic_nodes(
     from auto_ontology.dal.terms import fetch_all_terms_and_attributes
 
     terms, attrs = fetch_all_terms_and_attributes()
-    if not terms and not attrs:
+    from auto_ontology.dal.attributes import fetch_semantic_relationship_documents
+
+    relationships = fetch_semantic_relationship_documents(embedder.database_name)
+    if not terms and not attrs and not relationships:
         logger.info("embed_all_semantic_nodes: nothing to embed")
         return 0
 
@@ -157,6 +187,7 @@ def embed_all_semantic_nodes(
                 attrs_by_term.get(term_name, []),
             )
         )
+    all_rows.extend(_build_relationship_rows(embedder.database_name, relationships))
 
     if not all_rows:
         logger.info("embed_all_semantic_nodes: no rows to embed")
@@ -287,4 +318,54 @@ def _build_rows(
             }
         )
 
+    return rows
+
+
+def _build_relationship_rows(
+    database_name: str,
+    relationships: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build stable VDB documents for semantic FK interpretations."""
+    rows: list[dict[str, Any]] = []
+    for relationship in relationships:
+        relationship_id = str(relationship.get("id") or "")
+        if not relationship_id:
+            continue
+        intents = [str(value) for value in relationship.get("intent_phrases") or []]
+        fields = {
+            "label": "SemanticRelationship",
+            "id": relationship_id,
+            "edge_id": relationship_id,
+            "source_column_id": relationship.get("source_column_id"),
+            "target_attribute_id": relationship.get("target_attribute_id"),
+            "source_table_id": relationship.get("source_table_id"),
+            "target_table_id": relationship.get("target_table_id"),
+            "source_table": relationship.get("source_table"),
+            "target_table": relationship.get("target_table"),
+            "kind": relationship.get("kind"),
+            "source_role": relationship.get("source_role"),
+            "target_role": relationship.get("target_role"),
+            "description": relationship.get("description"),
+            "intent_phrases": intents,
+            "trust": relationship.get("trust") or "unknown",
+            "version": relationship.get("version"),
+            "database_name": database_name,
+            "source_path": f"semantic:relationship:{relationship_id}",
+        }
+        phrases = f" Intent phrases: {', '.join(intents)}." if intents else ""
+        text = (
+            "Semantic relationship: "
+            f"{fields['source_table']} ({fields['source_role'] or 'source'}) to "
+            f"{fields['target_table']} ({fields['target_role'] or 'target'}). "
+            f"Kind: {fields['kind'] or 'unknown'}. "
+            f"{fields['description'] or ''}{phrases}"
+        ).strip()
+        rows.append(
+            {
+                "text": text,
+                "path": fields["source_path"],
+                "page_number": -1,
+                "metadata": {**fields, "content_metadata": dict(fields)},
+            }
+        )
     return rows

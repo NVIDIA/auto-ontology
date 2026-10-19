@@ -36,6 +36,7 @@ from auto_ontology.semantic.constants import (
     SQL_ATTR_SOURCE_SQL,
     SQL_ATTR_SOURCE_TABLE,
 )
+from auto_ontology.semantic.relationship_metadata import RelationshipKind
 from auto_ontology.server.model_interchange import service
 from auto_ontology.server.model_interchange.embed import (
     ImportEmbedBuffer,
@@ -359,6 +360,53 @@ def test_export_yaml_round_trips_through_safe_load() -> None:
     assert (
         round_tripped.semantic_layer.terms[0].columns_attributes[0].column_id == "col-1"
     )
+
+
+def test_metadata_free_semantic_fk_round_trip_omits_empty_metadata() -> None:
+    document = assemble_export_document(
+        _in_scope_export_rows(),
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+    dumped = document.model_dump(mode="json")
+    semantic_fk = dumped["semantic_layer"]["semantic_fks"][0]
+
+    assert set(semantic_fk) == {"column_attribute_id", "column_id"}
+    assert AutoOntologyModelDocument.model_validate(dumped) == document
+
+
+def test_versioned_semantic_fk_metadata_round_trips_and_is_strict() -> None:
+    rows = _in_scope_export_rows()
+    rows["semantic_fks"][0]["relationship_metadata"] = {
+        "version": 1,
+        "facts": {"source_nullable": True},
+        "suggestion": {
+            "kind": "reference",
+            "provenance": "model",
+            "confidence": 0.75,
+        },
+        "curated": {"kind": "ownership", "review": "certified"},
+    }
+    document = assemble_export_document(
+        rows,
+        dialect_by_db_name={"retail": "sqlite"},
+        sql_column_resolver=lambda _sql, _db: [],
+    )
+    dumped = document.model_dump(mode="json")
+    round_tripped = AutoOntologyModelDocument.model_validate(
+        yaml.safe_load(yaml.safe_dump(dumped))
+    )
+
+    metadata = round_tripped.semantic_layer.semantic_fks[0].relationship_metadata
+    assert metadata is not None
+    assert metadata.suggestion is not None
+    assert metadata.suggestion.kind is RelationshipKind.REFERENCE
+
+    dumped["semantic_layer"]["semantic_fks"][0]["relationship_metadata"]["facts"][
+        "invented"
+    ] = True
+    with pytest.raises(ValidationError):
+        AutoOntologyModelDocument.model_validate(dumped)
 
 
 @patch(

@@ -588,6 +588,12 @@ column__semantic_fk = Table(
         ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
         primary_key=True,
     ),
+    Column(
+        "relationship_metadata",
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
+    ),
 )
 
 sql_attribute = Table(

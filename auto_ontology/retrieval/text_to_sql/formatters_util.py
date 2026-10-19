@@ -153,6 +153,7 @@ def format_semantic_context(
     attribute_join_paths: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
+    join_path_candidates: list[dict[str, Any]] | None = None,
 ) -> str:
     """Format the semantic anchor and verified optional join paths for a prompt.
 
@@ -179,7 +180,73 @@ def format_semantic_context(
         f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
     ]
 
-    if attribute_join_paths:
+    if join_path_candidates:
+        lines.extend(
+            [
+                "",
+                "SEMANTIC JOIN OPTIONS (all alternatives remain available):",
+                "Choose by the question's relationship intent, not merely path length. "
+                "Wording such as 'bonded to' or 'connected to' calls for direct "
+                "incidence through the association record. Wording such as 'all items "
+                "in containers containing X' calls for shared-container membership, "
+                "which does not assert direct incidence. A client's own district is a "
+                "different role from the district of an account or branch reached through "
+                "that client. Treat recommendations as soft guidance. Preserve the "
+                "requested grain and account for stated fan-out or duplication risk.",
+            ]
+        )
+        current_destination: tuple[str, str] | None = None
+        for entry in join_path_candidates:
+            destination = entry.get("destination") or {}
+            destination_key = (
+                str(entry.get("destination_id") or ""),
+                str(destination.get("table_name") or ""),
+            )
+            if destination_key != current_destination:
+                current_destination = destination_key
+                lines.append(
+                    f"  Destination: {destination.get('attr_name') or destination_key[1]} "
+                    f"({destination_key[1]})"
+                )
+            candidate = entry.get("candidate") or {}
+            meaning = candidate.get("meaning") or {}
+            recommendation = entry.get("recommendation") or {}
+            kinds = ", ".join(meaning.get("relationship_kinds") or []) or "unknown"
+            trust = ", ".join(meaning.get("relationship_trust") or []) or "unknown"
+            lines.append(f"    Option fingerprint: {entry.get('fingerprint')}")
+            lines.append(
+                "      Recommendation: "
+                f"{recommendation.get('confidence', 'unknown')} — "
+                f"{recommendation.get('rationale', 'No rationale supplied.')}"
+            )
+            lines.append(
+                f"      Meaning: {meaning.get('description') or 'unknown'}; kind: {kinds}"
+            )
+            lines.append(
+                f"      Scope: {meaning.get('qualification_scope') or 'unknown'}; "
+                f"resulting grain: {meaning.get('resulting_grain') or 'unknown'}"
+            )
+            lines.append(
+                f"      Fan-out: {meaning.get('fan_out')}; duplication risk: "
+                f"{meaning.get('duplication_risk') or 'unknown'}; trust: {trust}"
+            )
+            lines.append(f"      Contrast: {meaning.get('contrast') or 'none stated'}")
+            lines.append("      Exact joins:")
+            for hop in candidate.get("hops") or []:
+                lines.append(
+                    f"        {_hop_column(hop, 'source', target_db, dialect)} = "
+                    f"{_hop_column(hop, 'target', target_db, dialect)}"
+                )
+
+    structural_join_paths = attribute_join_paths
+    if join_path_candidates:
+        # Typed options above carry every named relationship path. Keep only
+        # bridge/junction entries here so each semantic route is shown once.
+        structural_join_paths = [
+            entry for entry in attribute_join_paths if not entry.get("id")
+        ]
+
+    if structural_join_paths:
         lines.append("")
         lines.append(
             "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
@@ -189,7 +256,7 @@ def format_semantic_context(
             "because it is listed. When a path is needed, use its exact join "
             "conditions and only the required hops:"
         )
-        for entry in attribute_join_paths:
+        for entry in structural_join_paths:
             attr_name = entry.get("attr_name", "")
             col_name = entry.get("col_name", "")
             schema = entry.get("schema_name", "")
@@ -208,15 +275,10 @@ def format_semantic_context(
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
-                if len(path) == 1:
-                    left = _hop_column(path[0], "source", target_db, dialect)
-                    right = _hop_column(path[0], "target", target_db, dialect)
+                for hop in path:
+                    left = _hop_column(hop, "source", target_db, dialect)
+                    right = _hop_column(hop, "target", target_db, dialect)
                     lines.append(f"      {left} = {right}")
-                else:
-                    for cur, nxt in zip(path, path[1:]):
-                        left = _hop_column(cur, "target", target_db, dialect)
-                        right = _hop_column(nxt, "source", target_db, dialect)
-                        lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 

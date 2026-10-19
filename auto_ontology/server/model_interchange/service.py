@@ -156,7 +156,7 @@ def _project_terms_onto_one_table(
 
 def _dump_yaml(document: AutoOntologyModelDocument) -> str:
     return yaml.safe_dump(
-        document.model_dump(mode="python"),
+        document.model_dump(mode="json"),
         sort_keys=False,
         default_flow_style=False,
     )

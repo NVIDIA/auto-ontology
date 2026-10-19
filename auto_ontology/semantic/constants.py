@@ -20,6 +20,7 @@ LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"
 LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"
+LABEL_SEMANTIC_RELATIONSHIP = "SemanticRelationship"
 
 # PQL (predictive) custom analyses — the KumoRFM-prediction twin of CustomAnalysis.
 # Stored under their own label so they never mix into the SQL text-to-SQL retrieval;

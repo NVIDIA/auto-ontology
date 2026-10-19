@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
-from auto_ontology.semantic.embed import _format_sample_values
+from unittest.mock import MagicMock
+
+from auto_ontology.semantic.embed import SemanticEmbedder, _format_sample_values
 
 
 def test_format_sample_values_handles_legacy_json_string_and_native_list() -> None:
@@ -23,3 +25,17 @@ def test_format_sample_values_filters_long_values_and_handles_empty() -> None:
     assert _format_sample_values([]) == ""
     assert _format_sample_values(["a", None, "b"]) == " Sample values: a, b."
     assert _format_sample_values('["a", null, "b"]') == " Sample values: a, b."
+
+
+def test_relationship_embedding_cleans_stale_rows_when_none_remain() -> None:
+    vdb = MagicMock()
+    embedder = SemanticEmbedder(
+        database_name="chemistry",
+        embed_params=MagicMock(),
+        vdb=vdb,
+    )
+
+    assert embedder.embed_relationships([]) == 0
+    vdb.delete_by_database_and_label.assert_called_once_with(
+        "chemistry", "SemanticRelationship"
+    )

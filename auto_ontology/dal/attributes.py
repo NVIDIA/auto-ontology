@@ -12,6 +12,7 @@ run BFS over tables while retaining the exact join columns on every edge.
 from __future__ import annotations
 
 from collections import defaultdict, deque
+from dataclasses import dataclass
 import itertools
 import logging
 from typing import Any
@@ -32,6 +33,25 @@ from auto_ontology.dal import schema as s
 from auto_ontology.dal.datasources import fetch_col_table_contexts
 from auto_ontology.dal.session import store, write_transaction
 from auto_ontology.semantic.constants import SEMANTIC_SOURCE
+from auto_ontology.semantic.join_paths import (
+    DuplicationRisk,
+    InterpretationSource,
+    JoinPathMeaning,
+    JoinPathPattern,
+    RelationshipTrust,
+    SemanticJoinHop,
+    SemanticJoinPathCandidate,
+    TraversalDirection,
+)
+from auto_ontology.semantic.relationship_metadata import RelationshipMetadata
+from auto_ontology.semantic.relationship_metadata import (
+    RelationshipCardinality,
+    RelationshipFacts,
+    RelationshipOptionality,
+    RelationshipProvenance,
+    RelationshipResolutionSource,
+    RelationshipReview,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -524,7 +544,55 @@ def _same_database(src_column_id: str, tgt_attr_id: str) -> bool:
     return bool(col_db) and col_db == attr_db
 
 
-def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
+def _relationship_metadata_values(
+    metadata: RelationshipMetadata,
+) -> dict[str, Any]:
+    """Serialize only caller-owned sections for a JSONB top-level merge."""
+    values = metadata.model_dump(
+        mode="json",
+        exclude_unset=True,
+        exclude_none=True,
+    )
+    values["version"] = metadata.version
+    return values
+
+
+def semantic_fk_upsert_statement(
+    src_column_id: str,
+    tgt_attr_id: str,
+    metadata: RelationshipMetadata | None = None,
+) -> Any:
+    """Build a semantic-FK insert that updates only supplied metadata sections."""
+    values: dict[str, Any] = {
+        "column_id": src_column_id,
+        "attribute_id": tgt_attr_id,
+    }
+    if metadata is not None:
+        values["relationship_metadata"] = _relationship_metadata_values(metadata)
+
+    statement = insert(s.column__semantic_fk).values(**values)
+    if metadata is None:
+        return statement.on_conflict_do_nothing()
+    return statement.on_conflict_do_update(
+        index_elements=[
+            s.column__semantic_fk.c.column_id,
+            s.column__semantic_fk.c.attribute_id,
+        ],
+        set_={
+            "relationship_metadata": (
+                s.column__semantic_fk.c.relationship_metadata.op("||")(
+                    statement.excluded.relationship_metadata
+                )
+            )
+        },
+    )
+
+
+def merge_semantic_fk(
+    src_column_id: str,
+    tgt_attr_id: str,
+    metadata: RelationshipMetadata | None = None,
+) -> bool:
     """Point a column at the attribute it references. Idempotent.
 
     Refuses — writes nothing, returns ``False`` — when the two belong to
@@ -535,6 +603,9 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     it here, rather than in each caller, means every writer — compilation,
     test fixtures, dev tooling — gets the guarantee for free instead of having
     to remember to check first.
+
+    Metadata is merged by top-level ownership section. A facts refresh or new
+    machine suggestion therefore cannot erase a human-curated decision.
     """
     if not _same_database(src_column_id, tgt_attr_id):
         logger.warning(
@@ -544,11 +615,167 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
         )
         return False
     store().query_write(
-        insert(s.column__semantic_fk)
-        .values(column_id=src_column_id, attribute_id=tgt_attr_id)
-        .on_conflict_do_nothing()
+        semantic_fk_upsert_statement(src_column_id, tgt_attr_id, metadata)
     )
     return True
+
+
+def fetch_semantic_fk_contexts(
+    database_name: str,
+) -> list[dict[str, Any]]:
+    """Return deterministic catalog context for every semantic FK in a database."""
+    source_column = s.catalog_column.alias("semantic_fk_source_column")
+    source_table = s.catalog_table.alias("semantic_fk_source_table")
+    source_schema = s.catalog_schema.alias("semantic_fk_source_schema")
+    owner_link = s.column__has_attribute.alias("semantic_fk_owner_link")
+    target_column = s.catalog_column.alias("semantic_fk_target_column")
+    target_table = s.catalog_table.alias("semantic_fk_target_table")
+    physical_fk = s.column__foreign_key.alias("semantic_fk_physical")
+
+    rows = store().query_read(
+        select(
+            s.column__semantic_fk.c.column_id,
+            s.column__semantic_fk.c.attribute_id,
+            s.column__semantic_fk.c.relationship_metadata,
+            source_column.c.name.label("source_column_name"),
+            source_column.c.description.label("source_column_description"),
+            source_column.c.sample_values.label("source_sample_values"),
+            source_column.c.is_nullable.label("source_nullable"),
+            source_column.c.is_unique.label("source_sampled_unique"),
+            source_table.c.id.label("source_table_id"),
+            source_table.c.name.label("source_table_name"),
+            source_table.c.description.label("source_table_description"),
+            source_table.c.pk.label("source_pk"),
+            source_table.c.is_junction_table.label("source_junction"),
+            target_column.c.id.label("target_column_id"),
+            target_column.c.name.label("target_column_name"),
+            target_column.c.description.label("target_column_description"),
+            target_column.c.sample_values.label("target_sample_values"),
+            target_column.c.is_nullable.label("target_nullable"),
+            target_column.c.is_unique.label("target_sampled_unique"),
+            target_table.c.id.label("target_table_id"),
+            target_table.c.name.label("target_table_name"),
+            target_table.c.description.label("target_table_description"),
+            target_table.c.pk.label("target_pk"),
+            target_table.c.is_junction_table.label("target_junction"),
+            physical_fk.c.target_column_id.label("physical_target_column_id"),
+            s.column_attribute.c.name.label("target_attribute_name"),
+            s.column_attribute.c.description.label("target_attribute_description"),
+            s.term.c.name.label("target_term_name"),
+        )
+        .select_from(
+            s.column__semantic_fk.join(
+                source_column,
+                source_column.c.id == s.column__semantic_fk.c.column_id,
+            )
+            .join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(source_table, source_table.c.id == source_column.c.table_id)
+            .join(source_schema, source_schema.c.id == source_table.c.schema_id)
+            .join(
+                s.catalog_database,
+                s.catalog_database.c.id == source_schema.c.database_id,
+            )
+            .outerjoin(
+                owner_link,
+                owner_link.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+            )
+            .outerjoin(target_column, target_column.c.id == owner_link.c.column_id)
+            .outerjoin(target_table, target_table.c.id == target_column.c.table_id)
+            .outerjoin(
+                s.column_attribute__term,
+                s.column_attribute__term.c.attribute_id
+                == s.column__semantic_fk.c.attribute_id,
+            )
+            .outerjoin(s.term, s.term.c.id == s.column_attribute__term.c.term_id)
+            .outerjoin(
+                physical_fk,
+                and_(
+                    physical_fk.c.source_column_id == source_column.c.id,
+                    physical_fk.c.target_column_id == target_column.c.id,
+                ),
+            )
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(
+            s.column__semantic_fk.c.column_id,
+            s.column__semantic_fk.c.attribute_id,
+            target_column.c.id,
+        )
+    )
+    return [dict(row) for row in rows]
+
+
+def refresh_semantic_fk_facts(database_name: str) -> int:
+    """Idempotently derive and persist catalog facts for every semantic FK."""
+    rows = fetch_semantic_fk_contexts(database_name)
+    refreshed = 0
+    seen: set[tuple[str, str]] = set()
+    for row in rows:
+        edge = (row["column_id"], row["attribute_id"])
+        if edge in seen:
+            continue
+        seen.add(edge)
+        existing = (row.get("relationship_metadata") or {}).get("facts") or {}
+        source_declared_unique = row["source_column_name"] in (row["source_pk"] or [])
+        target_declared_unique = row["target_column_name"] in (row["target_pk"] or [])
+        source_unique = source_declared_unique or row["source_sampled_unique"] is True
+        target_unique = target_declared_unique or row["target_sampled_unique"] is True
+        if source_unique and target_unique:
+            cardinality = RelationshipCardinality.ONE_TO_ONE
+        elif target_unique:
+            cardinality = RelationshipCardinality.MANY_TO_ONE
+        elif source_unique:
+            cardinality = RelationshipCardinality.ONE_TO_MANY
+        else:
+            cardinality = RelationshipCardinality.UNKNOWN
+
+        resolution_source = existing.get(
+            "resolution_source", RelationshipResolutionSource.UNKNOWN
+        )
+        facts = RelationshipFacts(
+            creator=existing.get("creator", RelationshipProvenance.UNKNOWN),
+            resolution_source=resolution_source,
+            resolution_generator=existing.get("resolution_generator"),
+            resolution_version=existing.get("resolution_version"),
+            physical_foreign_key=row["physical_target_column_id"] is not None,
+            declared_foreign_key=row["physical_target_column_id"] is not None,
+            source_nullable=row["source_nullable"],
+            source_declared_unique=source_declared_unique,
+            source_sampled_unique=row["source_sampled_unique"],
+            target_nullable=row["target_nullable"],
+            target_declared_unique=target_declared_unique,
+            target_sampled_unique=row["target_sampled_unique"],
+            cardinality=cardinality,
+            optionality=(
+                RelationshipOptionality.UNKNOWN
+                if row["source_nullable"] is None
+                else (
+                    RelationshipOptionality.OPTIONAL
+                    if row["source_nullable"]
+                    else RelationshipOptionality.REQUIRED
+                )
+            ),
+            source_to_target_fan_out=not target_unique,
+            target_to_source_fan_out=not source_unique,
+            source_junction=bool(row["source_junction"]),
+            target_junction=(
+                bool(row["target_junction"])
+                if row["target_table_id"] is not None
+                else None
+            ),
+        )
+        store().query_write(
+            semantic_fk_upsert_statement(
+                row["column_id"],
+                row["attribute_id"],
+                RelationshipMetadata(facts=facts),
+            )
+        )
+        refreshed += 1
+    return refreshed
 
 
 def _column_path_select(link_table):
@@ -641,9 +868,15 @@ _owner_schema = s.catalog_schema.alias("join_owner_schema")
 _SEMANTIC_TABLE_EDGES = (
     select(
         _fk_table.c.id.label("fk_table_id"),
+        _fk_table.c.name.label("fk_table_name"),
         _fk_column.c.id.label("fk_column_id"),
         _owner_table.c.id.label("owner_table_id"),
+        _owner_table.c.name.label("owner_table_name"),
         _owner_column.c.id.label("owner_column_id"),
+        s.column__semantic_fk.c.attribute_id,
+        s.column__semantic_fk.c.relationship_metadata,
+        _fk_table.c.is_junction_table.label("fk_is_junction"),
+        _owner_table.c.is_junction_table.label("owner_is_junction"),
         (_owner_column.c.name == any_(_owner_table.c.pk)).label("owner_is_pk"),
     )
     .select_from(
@@ -673,6 +906,242 @@ _SEMANTIC_TABLE_EDGES = (
 )
 
 
+@dataclass(frozen=True)
+class _TableJoinEdge:
+    source_table_id: str
+    target_table_id: str
+    source_column_id: str
+    target_column_id: str
+    relationship_source_column_id: str
+    relationship_target_attribute_id: str
+    relationship_metadata: dict[str, Any]
+    direction: TraversalDirection
+    fk_is_junction: bool | None
+    owner_is_junction: bool | None
+
+    @property
+    def sort_key(self) -> tuple[str, ...]:
+        return (
+            self.target_table_id,
+            self.source_column_id,
+            self.target_column_id,
+            self.relationship_source_column_id,
+            self.relationship_target_attribute_id,
+            self.direction.value,
+        )
+
+
+def _table_join_adjacency(database_id: str) -> dict[str, list[_TableJoinEdge]]:
+    """Load the semantic table graph once, retaining relationship evidence."""
+    rows = store().query_read(
+        _SEMANTIC_TABLE_EDGES,
+        {"database_id": database_id},
+    )
+    adjacency: dict[str, list[_TableJoinEdge]] = defaultdict(list)
+    for row in rows:
+        fk_table_id = row["fk_table_id"]
+        owner_table_id = row["owner_table_id"]
+        if fk_table_id == owner_table_id:
+            continue
+        common = {
+            "relationship_source_column_id": row["fk_column_id"],
+            "relationship_target_attribute_id": row["attribute_id"],
+            "relationship_metadata": row["relationship_metadata"] or {},
+            "fk_is_junction": row["fk_is_junction"],
+            "owner_is_junction": row["owner_is_junction"],
+        }
+        adjacency[fk_table_id].append(
+            _TableJoinEdge(
+                source_table_id=fk_table_id,
+                target_table_id=owner_table_id,
+                source_column_id=row["fk_column_id"],
+                target_column_id=row["owner_column_id"],
+                direction=TraversalDirection.FORWARD,
+                **common,
+            )
+        )
+        if row["owner_is_pk"]:
+            adjacency[owner_table_id].append(
+                _TableJoinEdge(
+                    source_table_id=owner_table_id,
+                    target_table_id=fk_table_id,
+                    source_column_id=row["owner_column_id"],
+                    target_column_id=row["fk_column_id"],
+                    direction=TraversalDirection.REVERSE,
+                    **common,
+                )
+            )
+    for edges in adjacency.values():
+        edges.sort(key=lambda edge: edge.sort_key)
+    return adjacency
+
+
+def fetch_semantic_relationship_documents(
+    database_name: str,
+) -> list[dict[str, Any]]:
+    """Return one embedding-ready semantic document source per stored FK edge."""
+    database_rows = store().query_read(
+        select(s.catalog_database.c.id).where(
+            s.catalog_database.c.name == database_name
+        )
+    )
+    if not database_rows:
+        return []
+    database_id = database_rows[0]["id"]
+    rows = store().query_read(
+        _SEMANTIC_TABLE_EDGES,
+        {"database_id": database_id},
+    )
+    documents: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        relationship_id = f"{row['fk_column_id']}:{row['attribute_id']}"
+        if relationship_id in documents:
+            continue
+        raw = row["relationship_metadata"] or {}
+        metadata = _validated_relationship_metadata(raw)
+        interpretation, source = _effective_interpretation(metadata)
+        facts = metadata.facts if metadata is not None else None
+        if source is InterpretationSource.CURATED:
+            trust = (
+                RelationshipTrust.CERTIFIED
+                if interpretation.review is RelationshipReview.CERTIFIED
+                else RelationshipTrust.CURATED
+            )
+        elif source is InterpretationSource.SUGGESTION:
+            trust = RelationshipTrust.SUGGESTED
+        else:
+            trust = RelationshipTrust.UNKNOWN
+        documents[relationship_id] = {
+            "id": relationship_id,
+            "source_column_id": row["fk_column_id"],
+            "target_attribute_id": row["attribute_id"],
+            "source_table_id": row["fk_table_id"],
+            "target_table_id": row["owner_table_id"],
+            "source_table": row.get("fk_table_name") or "",
+            "target_table": row.get("owner_table_name") or "",
+            "kind": interpretation.kind.value
+            if interpretation is not None and interpretation.kind
+            else None,
+            "source_role": interpretation.source_role if interpretation else None,
+            "target_role": interpretation.target_role if interpretation else None,
+            "description": interpretation.description if interpretation else None,
+            "intent_phrases": list(interpretation.intent_phrases)
+            if interpretation
+            else [],
+            "trust": trust.value,
+            "version": metadata.version if metadata is not None else None,
+            "cardinality": facts.cardinality.value
+            if facts is not None and facts.cardinality
+            else None,
+        }
+    return list(documents.values())
+
+
+def _shortest_table_distance(
+    adjacency: dict[str, list[_TableJoinEdge]],
+    anchor_table_id: str,
+    dest_table_id: str,
+    max_hops: int,
+) -> int | None:
+    distances = {anchor_table_id: 0}
+    frontier = deque([anchor_table_id])
+    while frontier:
+        table_id = frontier.popleft()
+        depth = distances[table_id]
+        if depth >= max_hops:
+            continue
+        for edge in adjacency.get(table_id, []):
+            if edge.target_table_id in distances:
+                continue
+            next_depth = depth + 1
+            if edge.target_table_id == dest_table_id:
+                return next_depth
+            distances[edge.target_table_id] = next_depth
+            frontier.append(edge.target_table_id)
+    return None
+
+
+def _find_table_join_edge_paths(
+    anchor_table_id: str,
+    dest_table_id: str,
+    database_id: str,
+    *,
+    include_longer: bool,
+    max_longer_paths: int,
+) -> tuple[list[list[_TableJoinEdge]], int | None]:
+    """Find deterministic simple paths while never capping shortest routes."""
+    adjacency = _table_join_adjacency(database_id)
+    max_hops = (MAX_PATH_DEPTH + 2) // 4
+    shortest = _shortest_table_distance(
+        adjacency, anchor_table_id, dest_table_id, max_hops
+    )
+    if shortest is None:
+        return [], None
+
+    search_depth = min(max_hops, shortest + 2 if include_longer else shortest)
+    shortest_paths: list[list[_TableJoinEdge]] = []
+    longer_paths: list[list[_TableJoinEdge]] = []
+    longer_signatures: set[tuple[tuple[str, str, bool, bool], ...]] = set()
+
+    def semantic_signature(
+        path: list[_TableJoinEdge],
+    ) -> tuple[tuple[str, str, bool, bool], ...]:
+        """Group longer routes by meaning before applying their bounded cap."""
+        signature: list[tuple[str, str, bool, bool]] = []
+        for edge in path:
+            metadata = edge.relationship_metadata or {}
+            interpretation = metadata.get("curated") or metadata.get("suggestion") or {}
+            kind = str(interpretation.get("kind") or "")
+            role = str(interpretation.get("role_name") or "")
+            semantic_role = (
+                f"{kind}:{role}" if kind or role else f"unknown:{edge.target_table_id}"
+            )
+            signature.append(
+                (
+                    edge.direction.value,
+                    semantic_role,
+                    bool(edge.fk_is_junction),
+                    bool(edge.owner_is_junction),
+                )
+            )
+        return tuple(signature)
+
+    def visit(
+        table_id: str,
+        path: list[_TableJoinEdge],
+        visited: set[str],
+    ) -> None:
+        if len(path) >= search_depth:
+            return
+        for edge in adjacency.get(table_id, []):
+            next_table = edge.target_table_id
+            if next_table in visited:
+                continue
+            next_path = [*path, edge]
+            if next_table == dest_table_id:
+                if len(next_path) == shortest:
+                    shortest_paths.append(next_path)
+                elif include_longer and len(next_path) <= search_depth:
+                    signature = semantic_signature(next_path)
+                    if (
+                        signature not in longer_signatures
+                        and len(longer_paths) < max_longer_paths
+                    ):
+                        longer_signatures.add(signature)
+                        longer_paths.append(next_path)
+                continue
+            if len(next_path) >= shortest and len(longer_paths) >= max_longer_paths:
+                # Any destination below this node is necessarily a longer
+                # alternative. Once that budget is full there is no useful
+                # work left on this branch; shortest paths remain uncapped.
+                continue
+            if len(next_path) < search_depth:
+                visit(next_table, next_path, visited | {next_table})
+
+    visit(anchor_table_id, [], {anchor_table_id})
+    return [*shortest_paths, *longer_paths], shortest
+
+
 def _find_table_join_paths(
     anchor_table_id: str,
     dest_table_id: str,
@@ -695,68 +1164,17 @@ def _find_table_join_paths(
     can't reach (both endpoints are FK columns *into* the same identity hub,
     so there's no forward edge on either side to start from).
     """
-    rows = store().query_read(
-        _SEMANTIC_TABLE_EDGES,
-        {"database_id": database_id},
+    paths, _ = _find_table_join_edge_paths(
+        anchor_table_id,
+        dest_table_id,
+        database_id,
+        include_longer=False,
+        max_longer_paths=0,
     )
-    adjacency: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
-    for row in rows:
-        fk_table_id = row["fk_table_id"]
-        owner_table_id = row["owner_table_id"]
-        if fk_table_id == owner_table_id:
-            continue
-        adjacency[fk_table_id].append(
-            (owner_table_id, row["fk_column_id"], row["owner_column_id"])
-        )
-        if row["owner_is_pk"]:
-            adjacency[owner_table_id].append(
-                (fk_table_id, row["owner_column_id"], row["fk_column_id"])
-            )
-    for edges in adjacency.values():
-        edges.sort()
-
-    max_hops = (MAX_PATH_DEPTH + 2) // 4
-    distances = {anchor_table_id: 0}
-    parents: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
-    frontier: deque[tuple[str, int]] = deque([(anchor_table_id, 0)])
-    destination_depth: int | None = None
-    while frontier:
-        table_id, depth = frontier.popleft()
-        if depth >= max_hops:
-            continue
-        if destination_depth is not None and depth >= destination_depth:
-            continue
-        for next_table_id, source_col_id, target_col_id in adjacency.get(table_id, []):
-            next_depth = depth + 1
-            if destination_depth is not None and next_depth > destination_depth:
-                continue
-            known_depth = distances.get(next_table_id)
-            parent = (table_id, source_col_id, target_col_id)
-            if known_depth is None:
-                distances[next_table_id] = next_depth
-                parents[next_table_id].append(parent)
-                if next_table_id == dest_table_id:
-                    destination_depth = next_depth
-                else:
-                    frontier.append((next_table_id, next_depth))
-            elif known_depth == next_depth and parent not in parents[next_table_id]:
-                # Preserve parallel FKs between the same tables, plus distinct
-                # table routes that reach this node at the same minimum depth.
-                parents[next_table_id].append(parent)
-
-    if dest_table_id not in distances:
-        return []
-
-    def build_paths(table_id: str) -> list[list[tuple[str, str]]]:
-        if table_id == anchor_table_id:
-            return [[]]
-        paths: list[list[tuple[str, str]]] = []
-        for previous, source_col_id, target_col_id in parents[table_id]:
-            for prefix in build_paths(previous):
-                paths.append(prefix + [(source_col_id, target_col_id)])
-        return paths
-
-    return sorted(build_paths(dest_table_id))
+    return [
+        [(edge.source_column_id, edge.target_column_id) for edge in path]
+        for path in paths
+    ]
 
 
 def _find_table_join_hops(
@@ -947,6 +1365,298 @@ def find_connected_junction_tables(
     return list(junctions.values()), paths
 
 
+def _validated_relationship_metadata(
+    raw: dict[str, Any],
+) -> RelationshipMetadata | None:
+    """Treat absent or malformed metadata as unknown semantics."""
+    if not raw:
+        return None
+    try:
+        return RelationshipMetadata.model_validate(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def _effective_interpretation(
+    metadata: RelationshipMetadata | None,
+) -> tuple[Any | None, InterpretationSource]:
+    if metadata is None:
+        return None, InterpretationSource.UNKNOWN
+    effective = metadata.effective_interpretation()
+    if effective is None:
+        return None, InterpretationSource.UNKNOWN
+    if metadata.curated is effective:
+        return effective, InterpretationSource.CURATED
+    return effective, InterpretationSource.SUGGESTION
+
+
+def _oriented_cardinality(
+    cardinality: RelationshipCardinality | None,
+    direction: TraversalDirection,
+) -> RelationshipCardinality:
+    cardinality = cardinality or RelationshipCardinality.UNKNOWN
+    if direction is TraversalDirection.FORWARD:
+        return cardinality
+    return {
+        RelationshipCardinality.ONE_TO_MANY: RelationshipCardinality.MANY_TO_ONE,
+        RelationshipCardinality.MANY_TO_ONE: RelationshipCardinality.ONE_TO_MANY,
+    }.get(cardinality, cardinality)
+
+
+def _semantic_hop(
+    edge: _TableJoinEdge,
+    contexts: dict[str, dict],
+    names: dict[str, str],
+) -> SemanticJoinHop:
+    source = contexts.get(edge.source_column_id, {})
+    target = contexts.get(edge.target_column_id, {})
+    metadata = _validated_relationship_metadata(edge.relationship_metadata)
+    interpretation, interpretation_source = _effective_interpretation(metadata)
+    if interpretation_source is InterpretationSource.CURATED:
+        trust = (
+            RelationshipTrust.CERTIFIED
+            if interpretation.review is RelationshipReview.CERTIFIED
+            else RelationshipTrust.CURATED
+        )
+    elif interpretation_source is InterpretationSource.SUGGESTION:
+        trust = RelationshipTrust.SUGGESTED
+    else:
+        trust = RelationshipTrust.UNKNOWN
+    facts = metadata.facts if metadata is not None else None
+    if facts is None:
+        fan_out = None
+        cardinality = RelationshipCardinality.UNKNOWN
+    elif edge.direction is TraversalDirection.FORWARD:
+        fan_out = facts.source_to_target_fan_out
+        cardinality = _oriented_cardinality(facts.cardinality, edge.direction)
+    else:
+        fan_out = facts.target_to_source_fan_out
+        cardinality = _oriented_cardinality(facts.cardinality, edge.direction)
+
+    source_role = interpretation.source_role if interpretation is not None else None
+    target_role = interpretation.target_role if interpretation is not None else None
+    if edge.direction is TraversalDirection.REVERSE:
+        source_role, target_role = target_role, source_role
+    description = interpretation.description if interpretation is not None else None
+    kind = interpretation.kind if interpretation is not None else None
+    if not description and kind is not None:
+        description = (
+            f"{source.get('table_name', '')} has a {kind.value} relationship "
+            f"to {target.get('table_name', '')}."
+        )
+
+    return SemanticJoinHop(
+        source_database=source.get("database_name", ""),
+        source_schema=source.get("schema_name", ""),
+        source_table=source.get("table_name", ""),
+        source_column=names.get(edge.source_column_id, ""),
+        target_database=target.get("database_name", ""),
+        target_schema=target.get("schema_name", ""),
+        target_table=target.get("table_name", ""),
+        target_column=names.get(edge.target_column_id, ""),
+        source_table_id=edge.source_table_id,
+        source_column_id=edge.source_column_id,
+        target_table_id=edge.target_table_id,
+        target_column_id=edge.target_column_id,
+        relationship_source_column_id=edge.relationship_source_column_id,
+        relationship_target_attribute_id=edge.relationship_target_attribute_id,
+        relationship_id=(
+            f"{edge.relationship_source_column_id}:"
+            f"{edge.relationship_target_attribute_id}"
+        ),
+        direction=edge.direction,
+        raw_relationship_metadata=edge.relationship_metadata,
+        relationship_metadata=metadata,
+        interpretation_source=interpretation_source,
+        trust=trust,
+        relationship_kind=kind,
+        source_role=source_role,
+        target_role=target_role,
+        cardinality=cardinality,
+        fan_out=fan_out,
+        source_junction=edge.fk_is_junction,
+        target_junction=edge.owner_is_junction,
+        description=description or "",
+    )
+
+
+def _path_pattern(hops: tuple[SemanticJoinHop, ...]) -> JoinPathPattern:
+    if len(hops) == 1:
+        return JoinPathPattern.DIRECT
+    if len(hops) == 2:
+        first, second = hops
+        if (
+            first.direction is TraversalDirection.REVERSE
+            and second.direction is TraversalDirection.FORWARD
+            and first.target_table_id == second.source_table_id
+            and (first.source_junction is True or second.source_junction is True)
+        ):
+            return JoinPathPattern.SHARED_CHILD_JUNCTION
+        if (
+            first.direction is TraversalDirection.FORWARD
+            and second.direction is TraversalDirection.REVERSE
+            and first.target_table_id == second.source_table_id
+        ):
+            return JoinPathPattern.SHARED_PARENT
+    return JoinPathPattern.CHAIN if hops else JoinPathPattern.UNKNOWN
+
+
+def _compose_path_meaning(
+    hops: tuple[SemanticJoinHop, ...],
+) -> JoinPathMeaning:
+    pattern = _path_pattern(hops)
+    kinds = tuple(hop.relationship_kind for hop in hops if hop.relationship_kind)
+    trust = tuple(hop.trust for hop in hops)
+    if any(hop.fan_out is True for hop in hops):
+        fan_out: bool | None = True
+    elif hops and all(hop.fan_out is False for hop in hops):
+        fan_out = False
+    else:
+        fan_out = None
+
+    source_table = hops[0].source_table if hops else ""
+    target_table = hops[-1].target_table if hops else ""
+    intermediates = [hop.target_table for hop in hops[:-1]]
+    source_meaning = (
+        hops[0].source_role or source_table or "unknown" if hops else "unknown"
+    )
+    target_meaning = (
+        hops[-1].target_role or target_table or "unknown" if hops else "unknown"
+    )
+
+    if pattern is JoinPathPattern.DIRECT:
+        qualification = "direct relationship"
+        description = f"{source_table} directly relates to {target_table}."
+        contrast = "No intermediate entity qualifies the relationship."
+    elif pattern is JoinPathPattern.SHARED_CHILD_JUNCTION:
+        junction = intermediates[0]
+        qualification = f"incidence or association recorded by {junction}"
+        description = (
+            f"{source_table} and {target_table} are directly associated by "
+            f"incidence rows in {junction}."
+        )
+        contrast = (
+            "The junction records their association, not shared parent membership."
+        )
+    elif pattern is JoinPathPattern.SHARED_PARENT:
+        parent = intermediates[0]
+        qualification = f"shared-parent membership through {parent}"
+        description = (
+            f"{source_table} and {target_table} share membership under {parent}."
+        )
+        contrast = "Co-membership does not assert a direct endpoint association."
+    else:
+        via = " -> ".join(intermediates)
+        qualification = f"multi-hop qualification through {via}" if via else "unknown"
+        description = (
+            f"{source_table} reaches {target_table} through {via}."
+            if via
+            else "Relationship meaning is unknown."
+        )
+        contrast = "This route adds intermediate qualification to any direct route."
+
+    many_to_many = any(
+        hop.cardinality is RelationshipCardinality.MANY_TO_MANY for hop in hops
+    )
+    bridge = pattern is JoinPathPattern.SHARED_CHILD_JUNCTION
+    if many_to_many or (bridge and fan_out is not False):
+        risk = DuplicationRisk.HIGH
+    elif fan_out is True or bridge:
+        risk = DuplicationRisk.POSSIBLE
+    elif fan_out is False:
+        risk = DuplicationRisk.NONE
+    else:
+        risk = DuplicationRisk.UNKNOWN
+
+    if fan_out is True:
+        grain = f"{source_table} rows may expand at {target_table} grain"
+    elif fan_out is False:
+        grain = f"preserves {source_table} row grain"
+    else:
+        grain = "unknown"
+
+    return JoinPathMeaning(
+        pattern=pattern,
+        relationship_kinds=kinds,
+        relationship_trust=trust,
+        source_endpoint_meaning=str(source_meaning),
+        target_endpoint_meaning=str(target_meaning),
+        qualification_scope=qualification,
+        resulting_grain=grain,
+        fan_out=fan_out,
+        duplication_risk=risk,
+        description=description,
+        contrast=contrast,
+    )
+
+
+def find_join_path_candidates(
+    anchor_col_id: str,
+    dest_col_id: str,
+    *,
+    max_longer_paths: int = 20,
+) -> list[SemanticJoinPathCandidate]:
+    """Return all shortest paths plus bounded, semantically distinct alternatives.
+
+    Every shortest route and every parallel FK edge on such a route is always
+    returned. The cap applies only to simple alternatives one or two hops
+    longer; table revisits are prohibited.
+    """
+    if anchor_col_id == dest_col_id:
+        return []
+    max_longer_paths = max(0, max_longer_paths)
+    endpoint_contexts = fetch_col_table_contexts([anchor_col_id, dest_col_id])
+    anchor = endpoint_contexts.get(anchor_col_id)
+    dest = endpoint_contexts.get(dest_col_id)
+    if not anchor or not dest or anchor["table_id"] == dest["table_id"]:
+        return []
+    if anchor["database_id"] != dest["database_id"]:
+        return []
+
+    try:
+        edge_paths, shortest = _find_table_join_edge_paths(
+            anchor["table_id"],
+            dest["table_id"],
+            anchor["database_id"],
+            include_longer=True,
+            max_longer_paths=max_longer_paths,
+        )
+    except Exception:
+        logger.warning(
+            "find_join_path_candidates: query failed for %s -> %s",
+            anchor_col_id,
+            dest_col_id,
+            exc_info=True,
+        )
+        return []
+    if shortest is None:
+        return []
+
+    col_ids = list(
+        dict.fromkeys(
+            column_id
+            for path in edge_paths
+            for edge in path
+            for column_id in (edge.source_column_id, edge.target_column_id)
+        )
+    )
+    names = _name_columns(col_ids)
+    contexts = fetch_col_table_contexts(col_ids)
+    candidates: list[SemanticJoinPathCandidate] = []
+    seen: set[str] = set()
+    for edge_path in edge_paths:
+        hops = tuple(_semantic_hop(edge, contexts, names) for edge in edge_path)
+        candidate = SemanticJoinPathCandidate(
+            hops=hops,
+            meaning=_compose_path_meaning(hops),
+            is_shortest=len(edge_path) == shortest,
+        )
+        if candidate.fingerprint not in seen:
+            seen.add(candidate.fingerprint)
+            candidates.append(candidate)
+    return candidates
+
+
 def find_join_paths(anchor_col_id: str, dest_col_id: str) -> list[list[dict]]:
     """All shortest semantic join routes between the columns' tables.
 
@@ -995,9 +1705,7 @@ def find_join_paths(anchor_col_id: str, dest_col_id: str) -> list[list[dict]]:
         return []
 
     col_ids = list(
-        dict.fromkeys(
-            col_id for path in hop_paths for pair in path for col_id in pair
-        )
+        dict.fromkeys(col_id for path in hop_paths for pair in path for col_id in pair)
     )
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)

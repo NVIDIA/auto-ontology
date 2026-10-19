@@ -44,6 +44,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
     format_used_schema_for_prompt,
 )
+from auto_ontology.retrieval.text_to_sql.models import SemanticScopeValidationResult
 from auto_ontology.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
@@ -56,6 +57,13 @@ from auto_ontology.retrieval.text_to_sql.state import (
     get_original_question,
     get_question_for_processing,
     get_standalone_question,
+)
+from auto_ontology.retrieval.text_to_sql.semantic_scope_validation import (
+    validate_semantic_join_scope,
+)
+from auto_ontology.retrieval.text_to_sql.semantic_path_observability import (
+    debug_summary,
+    record_validator_outcome,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
@@ -822,6 +830,18 @@ class SQLValidationAgent(BaseAgent):
             error_msg = validation_result["error"]
             self.logger.info(f"SQL validation failed: {error_msg}")
             path_state["error"] = error_msg
+            semantic_result = SemanticScopeValidationResult(
+                status="structurally_invalid",
+                message=error_msg,
+            )
+            path_state["semantic_scope_validation"] = semantic_result.model_dump(
+                mode="json"
+            )
+            record_validator_outcome(
+                path_state,
+                response.sql_code,
+                semantic_result,
+            )
             return {
                 "decision": "invalid_sql",
                 "path_state": path_state,
@@ -903,6 +923,45 @@ class SQLValidationAgent(BaseAgent):
             "custom_analyses_used": custom_analyses_used,
             "sql_code": response.sql_code,  # Store SQL code for execution
         }
+
+        # This semantic check is intentionally independent of the topology
+        # probe represented by _JOINS_VALIDATED_ELSEWHERE: an existing FK can
+        # still express the wrong qualification scope or output grain.
+        semantic_result = validate_semantic_join_scope(
+            response.sql_code,
+            path_state.get("join_path_candidates") or [],
+            dialect=degenerate_dialect,
+        )
+        updated_path_state["semantic_scope_validation"] = semantic_result.model_dump(
+            mode="json"
+        )
+        record_validator_outcome(
+            updated_path_state,
+            response.sql_code,
+            semantic_result,
+        )
+        record_thought(
+            updated_path_state,
+            "validate_sql_query",
+            debug_summary(updated_path_state),
+        )
+        if semantic_result.warnings:
+            updated_path_state.setdefault("validation_warnings", []).extend(
+                semantic_result.warnings
+            )
+        if semantic_result.enforce_rejection:
+            updated_path_state["error"] = semantic_result.message
+            updated_path_state["error_known_fixable"] = (
+                semantic_result.auto_repair_fingerprint is not None
+            )
+            updated_path_state["semantic_join_repair_candidates"] = (
+                semantic_result.alternative_fingerprints
+            )
+            updated_path_state["last_intent_rejected_sql"] = response.sql_code
+            return {
+                "decision": "invalid_sql",
+                "path_state": updated_path_state,
+            }
 
         return self._validate_intent(
             state,

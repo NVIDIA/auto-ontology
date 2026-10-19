@@ -158,6 +158,10 @@ def test_restore_discards_failed_attempt_mutations_and_messages() -> None:
             "_resume_from": "reconstruct_sql",
             "error": "bad SQL",
             "thoughts_log": [{"node": "reconstruct_sql", "text": "failed"}],
+            "join_path_candidates": [{"fingerprint": "stale"}],
+            "semantic_join_observability": {"version": 1},
+            "semantic_scope_validation": {"status": "semantic_mismatch"},
+            "semantic_join_repair_candidates": ["stale"],
         }
     )
 

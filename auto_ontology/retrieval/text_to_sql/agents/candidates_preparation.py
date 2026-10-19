@@ -34,7 +34,7 @@ from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
     find_anchor_hub_siblings,
     find_connected_junction_tables,
-    find_join_paths,
+    find_join_path_candidates,
     find_kept_table_bridges,
 )
 from auto_ontology.dal.custom_analyses import (
@@ -58,8 +58,14 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
     CustomAnalysisRelevanceModel,
+    JoinPathRankingModel,
     TableRelevanceModel,
 )
+from auto_ontology.retrieval.text_to_sql.semantic_path_observability import (
+    debug_summary,
+    record_ranked_paths,
+)
+from auto_ontology.semantic.join_paths import SemanticJoinPathCandidate
 from auto_ontology.retrieval.text_to_sql.prompts import (
     CUSTOM_ANALYSIS_RELEVANCE_FILTER_PROMPT,
     SQL_GEN_MAX_ENTITIES,
@@ -145,6 +151,53 @@ _HUB_SIBLING_RANK_K = 30
 #: Concurrent join-path lookups. Held below the DAL pool (5 + 5 overflow) so a
 #: wide candidate set cannot starve the rest of the request.
 _JOIN_PATH_WORKERS = 4
+
+
+def _trusted_path_table_ids(
+    ranked: list[dict[str, Any]],
+    candidates: list[SemanticJoinPathCandidate],
+) -> set[str]:
+    """Tables protected by recommended curated/certified paths."""
+    by_fingerprint = {candidate.fingerprint: candidate for candidate in candidates}
+    protected: set[str] = set()
+    for record in ranked:
+        candidate = by_fingerprint.get(str(record.get("fingerprint") or ""))
+        recommendation = record.get("recommendation") or {}
+        if (
+            candidate is None
+            or recommendation.get("confidence") not in {"high", "medium"}
+            or not all(
+                hop.trust.value in {"certified", "curated"} for hop in candidate.hops
+            )
+        ):
+            continue
+        protected.update(hop.source_table_id for hop in candidate.hops)
+        protected.update(hop.target_table_id for hop in candidate.hops)
+    return protected
+
+
+def _semantic_path_table_ids(
+    relationship_hits: list[dict[str, Any]],
+    ranked_paths: list[dict[str, Any]],
+) -> set[str]:
+    """Tables seeded by relationship retrieval and every retained path option."""
+    table_ids = {
+        str(table_id)
+        for hit in relationship_hits
+        for table_id in (
+            hit.get("source_table_id"),
+            hit.get("target_table_id"),
+        )
+        if table_id
+    }
+    table_ids.update(
+        str(hop.get(key))
+        for record in ranked_paths
+        for hop in ((record.get("candidate") or {}).get("hops") or [])
+        for key in ("source_table_id", "target_table_id")
+        if hop.get(key)
+    )
+    return table_ids
 
 
 def _format_relevance_filter_column(c: dict) -> str:
@@ -293,6 +346,7 @@ class CandidatePreparationAgent(BaseAgent):
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
+        relationship_hits = list(path_state.get("retrieved_relationships") or [])
         candidates = custom_analyses + column_attributes + sql_attributes_raw
 
         # --- 1. Custom analyses ---
@@ -321,12 +375,14 @@ class CandidatePreparationAgent(BaseAgent):
         # --- 2. Enrich ColumnAttributes with store context and build join paths ---
         primary_attribute: dict | None = None
         attribute_join_paths: list[dict] = []
+        join_path_candidates: list[dict[str, Any]] = []
         attr_contexts: dict[str, dict] = {}
         term_synonyms: dict[str, list[str]] = {}
         # Table ids to force back into relevant_tables after the relevance
         # filter runs (§5b-§5c), regardless of what it decides — see rationale
         # at the junction, hub-sibling, and pairwise-bridge computations below.
         forced_table_ids: set[str] = set()
+        protected_table_ids: set[str] = set()
 
         try:
             if column_attributes:
@@ -374,24 +430,41 @@ class CandidatePreparationAgent(BaseAgent):
                         if did != anchor_id
                     ]
                     # Bounded, not one worker per destination. Each worker runs
-                    # find_join_paths, which is several sequential checkouts from a
-                    # 10-connection pool; a wide fan-out exhausts it, and
-                    # find_join_paths catches the QueuePool timeout and returns []
+                    # Path discovery uses several sequential checkouts from a
+                    # 10-connection pool; a wide fan-out exhausts it, and the
+                    # lookup catches the QueuePool timeout and returns []
                     # -- so the failure shows up as missing joins in the prompt
                     # rather than as an error.
                     workers = min(len(dest_items) or 1, _JOIN_PATH_WORKERS)
                     with ThreadPoolExecutor(max_workers=workers) as pool:
                         futures = {
                             pool.submit(
-                                find_join_paths, anchor_ctx["col_id"], dctx["col_id"]
+                                find_join_path_candidates,
+                                anchor_ctx["col_id"],
+                                dctx["col_id"],
                             ): (did, dctx)
                             for did, dctx in dest_items
                         }
                         for future in as_completed(futures):
                             dest_id, dest_ctx = futures[future]
-                            join_paths = future.result()
-                            # Preserve the old disconnected-entry behavior while
-                            # surfacing every equal-length relationship option.
+                            typed_paths = list(future.result())
+                            ranked = self._rank_join_path_group(
+                                state,
+                                question,
+                                dest_id,
+                                dest_ctx,
+                                typed_paths,
+                                path_state.get("retrieved_relationships") or [],
+                            )
+                            join_path_candidates.extend(ranked)
+                            join_paths = [
+                                candidate.join_path() for candidate in typed_paths
+                            ]
+                            protected_table_ids.update(
+                                _trusted_path_table_ids(ranked, typed_paths)
+                            )
+                            # Preserve the disconnected-entry behavior while
+                            # surfacing every relationship option.
                             for join_path in join_paths or [[]]:
                                 attribute_join_paths.append(
                                     {
@@ -476,6 +549,16 @@ class CandidatePreparationAgent(BaseAgent):
                     if tbl.get("id") not in existing_ids:
                         relevant_tables.append(tbl)
                         existing_ids.add(tbl.get("id"))
+
+            relationship_table_ids = _semantic_path_table_ids(
+                relationship_hits,
+                join_path_candidates,
+            )
+            if relationship_table_ids:
+                relevant_tables = _merge_tables(
+                    relevant_tables,
+                    fetch_tables_by_ids(sorted(relationship_table_ids)),
+                )
 
             self.logger.info(
                 "Tables from candidates: %s", [t["name"] for t in relevant_tables]
@@ -642,6 +725,13 @@ class CandidatePreparationAgent(BaseAgent):
             custom_analyses,
             attribute_join_paths,
         )
+        if protected_table_ids:
+            present_ids = {str(table.get("id") or "") for table in relevant_tables}
+            restore_ids = protected_table_ids - present_ids
+            if restore_ids:
+                relevant_tables = _merge_tables(
+                    relevant_tables, fetch_tables_by_ids(list(restore_ids))
+                )
         self.logger.debug(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
@@ -765,12 +855,190 @@ class CandidatePreparationAgent(BaseAgent):
                 "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
+                "join_path_candidates": join_path_candidates,
                 "term_synonyms": term_synonyms,
             }
         }
         if incoming_anchors:
             result["value_anchors"] = kept_anchors
+        record_ranked_paths(
+            result["path_state"],
+            join_path_candidates,
+            fallback_reason=(
+                "no_ranked_semantic_join_paths" if not join_path_candidates else None
+            ),
+        )
+        record_thought(
+            result["path_state"],
+            _GRAPH_NODE_NAME,
+            debug_summary(result["path_state"]),
+        )
         return result
+
+    def _rank_join_path_group(
+        self,
+        state: AgentState,
+        question: str,
+        destination_id: str,
+        destination: dict[str, Any],
+        candidates: list[SemanticJoinPathCandidate],
+        relationship_hits: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Rank one destination's alternatives without ever filtering them."""
+        if not candidates:
+            return []
+        words = {word.strip(".,?!:;()").casefold() for word in question.split()}
+        hit_ids = {
+            str(hit.get("edge_id") or hit.get("id") or "") for hit in relationship_hits
+        }
+        scored: list[tuple[tuple[int, ...], SemanticJoinPathCandidate, dict]] = []
+        for candidate in candidates:
+            edge_hits = sum(hop.relationship_id in hit_ids for hop in candidate.hops)
+            intent_phrases: set[str] = set()
+            for hop in candidate.hops:
+                interpretation = (
+                    hop.relationship_metadata.effective_interpretation()
+                    if hop.relationship_metadata
+                    else None
+                )
+                for phrase in interpretation.intent_phrases if interpretation else []:
+                    intent_phrases.add(phrase)
+            intent_hits = sum(
+                bool(words & {part.casefold() for part in phrase.split()})
+                for phrase in intent_phrases
+            )
+            kind_hits = len(
+                words
+                & {
+                    hop.relationship_kind.value
+                    for hop in candidate.hops
+                    if hop.relationship_kind is not None
+                }
+            )
+            scope_hits = len(
+                words
+                & {
+                    part.strip(".,?!:;()").casefold()
+                    for part in candidate.meaning.qualification_scope.split()
+                }
+            )
+            grain_hits = len(
+                words
+                & {
+                    part.strip(".,?!:;()").casefold()
+                    for part in candidate.meaning.resulting_grain.split()
+                }
+            )
+            trusted = int(
+                bool(candidate.hops)
+                and all(
+                    hop.trust.value in {"certified", "curated"}
+                    for hop in candidate.hops
+                )
+            )
+            no_fan_out = int(candidate.meaning.fan_out is False)
+            shortest = int(candidate.is_shortest)
+            score = (
+                edge_hits,
+                intent_hits,
+                kind_hits,
+                scope_hits,
+                grain_hits,
+                trusted,
+                no_fan_out,
+                shortest,
+                -candidate.hop_count,
+            )
+            signals = {
+                "relationship_hits": edge_hits,
+                "intent_matches": intent_hits,
+                "kind_matches": kind_hits,
+                "scope_matches": scope_hits,
+                "grain_matches": grain_hits,
+                "trusted_hops": trusted,
+                "scope": candidate.meaning.qualification_scope,
+                "resulting_grain": candidate.meaning.resulting_grain,
+                "fan_out": candidate.meaning.fan_out,
+            }
+            scored.append((score, candidate, signals))
+        scored.sort(key=lambda item: (item[0], item[1].fingerprint), reverse=True)
+        recommendations: dict[str, dict[str, str]] = {}
+        for index, (score, candidate, _signals) in enumerate(scored):
+            confidence = (
+                "high" if score[0] or score[1] else "medium" if index == 0 else "low"
+            )
+            recommendations[candidate.fingerprint] = {
+                "confidence": confidence,
+                "rationale": "Deterministic semantic signals and path safety.",
+            }
+
+        top_score = scored[0][0]
+        tied = [candidate for score, candidate, _ in scored if score == top_score]
+        if len(tied) > 1:
+            options = "\n".join(
+                (
+                    f"- fingerprint: {candidate.fingerprint}; "
+                    f"meaning: {candidate.meaning.description}; "
+                    f"scope: {candidate.meaning.qualification_scope}; "
+                    f"grain: {candidate.meaning.resulting_grain}; "
+                    f"fan-out: {candidate.meaning.fan_out}; "
+                    f"kind: {', '.join(k.value for k in candidate.meaning.relationship_kinds) or 'unknown'}"
+                )
+                for candidate in tied
+            )
+            messages = [
+                SystemMessage(
+                    content=(
+                        "Rank ambiguous join meanings for the question. Return every "
+                        "supplied fingerprint exactly once, unchanged, with "
+                        "high/medium/low/unknown confidence and a short rationale. "
+                        "Never invent or omit a fingerprint."
+                    )
+                ),
+                HumanMessage(
+                    content=f"Question: {question}\nDestination: {destination.get('table_name')}\n{options}"
+                ),
+            ]
+            try:
+                result = invoke_with_structured_output(
+                    state["llm"], messages, JoinPathRankingModel
+                )
+            except Exception:
+                result = None
+            expected = {candidate.fingerprint for candidate in tied}
+            returned = (
+                {item.fingerprint for item in result.rankings}
+                if result is not None
+                else set()
+            )
+            if (
+                result is not None
+                and returned == expected
+                and len(result.rankings) == len(expected)
+            ):
+                for item in result.rankings:
+                    recommendations[item.fingerprint] = {
+                        "confidence": item.confidence,
+                        "rationale": item.rationale,
+                    }
+
+        return [
+            {
+                "destination_id": destination_id,
+                "destination": {
+                    "attr_name": destination.get("attr_name"),
+                    "database_name": destination.get("database_name"),
+                    "schema_name": destination.get("schema_name"),
+                    "table_name": destination.get("table_name"),
+                    "col_name": destination.get("col_name"),
+                },
+                "fingerprint": candidate.fingerprint,
+                "candidate": candidate.model_dump(mode="json"),
+                "recommendation": recommendations[candidate.fingerprint],
+                "deterministic_signals": signals,
+            }
+            for _score, candidate, signals in scored
+        ]
 
     def _rank_and_cap_hub_siblings(
         self,

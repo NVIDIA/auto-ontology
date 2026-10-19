@@ -151,6 +151,57 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert "## Authoritative Evidence" in invoked_messages[-1].content
 
 
+def test_semantic_join_candidates_are_always_prompted(monkeypatch) -> None:
+    prompts: list[str] = []
+
+    def fake_invoke(_llm, messages, _schema):
+        prompts.append("\n".join(message.content for message in messages))
+        return SQLGenerationModel(
+            thought="",
+            sql_code="SELECT 1",
+            response="ok",
+        )
+
+    monkeypatch.setattr(
+        sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
+    )
+    state = {
+        "llm": object(),
+        "initial_question": "clients in their district",
+        "messages": [],
+        "connectors": [],
+        "path_state": {
+            "primary_attribute": {
+                "attr_name": "Client",
+                "schema_name": "bank",
+                "table_name": "client",
+                "col_name": "id",
+            },
+            "attribute_join_paths": [],
+            "join_path_candidates": [
+                {
+                    "destination_id": "district",
+                    "destination": {
+                        "attr_name": "District",
+                        "table_name": "district",
+                    },
+                    "fingerprint": "direct-client-district",
+                    "recommendation": {
+                        "confidence": "high",
+                        "rationale": "direct intent",
+                    },
+                    "candidate": {"hops": [], "meaning": {}},
+                }
+            ],
+            "relevant_tables": [],
+            "relevant_queries": [],
+        },
+    }
+
+    SQLFromCandidatesAgent().execute(state)
+    assert "direct-client-district" in prompts[-1]
+
+
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
     rendered = format_important_columns_for_prompt(
         {

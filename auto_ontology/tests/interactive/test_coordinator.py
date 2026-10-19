@@ -54,6 +54,31 @@ def test_debug_seed_sets_resume_from():
     assert sess.path_state["error_analysis_done"] is False
 
 
+def test_debug_seed_preserves_paths_but_resets_per_request_trace():
+    candidate = {
+        "destination_id": "district",
+        "fingerprint": "direct-client-district",
+        "recommendation": {"confidence": "high", "rationale": "direct"},
+        "candidate": {"hops": [], "meaning": {}},
+    }
+    sess = _make_session()
+    sess.path_state.update(
+        {
+            "join_path_candidates": [candidate],
+            "semantic_join_observability": {"stale": True},
+            "semantic_scope_validation": {"status": "semantic_mismatch"},
+        }
+    )
+
+    _apply_debug_seed(sess, debug_error=None)
+
+    assert sess.path_state["join_path_candidates"] == [candidate]
+    assert "semantic_scope_validation" not in sess.path_state
+    trace = sess.path_state["semantic_join_observability"]
+    assert trace["paths"][0]["fingerprint"] == "direct-client-district"
+    assert trace["sql_selections"] == []
+
+
 def test_debug_seed_sets_error():
     sess = _make_session()
     _apply_debug_seed(sess, debug_error="column X does not exist")

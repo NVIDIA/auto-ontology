@@ -14,6 +14,9 @@ from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attribu
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
+from auto_ontology.semantic.relationship_enrichment import (
+    enrich_semantic_fk_relationships,
+)
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -90,6 +93,20 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
+    enriched_fk_count = enrich_semantic_fk_relationships(database_name)
+    if enriched_fk_count:
+        logger.info(
+            "Semantic FK relationship suggestions written: %d", enriched_fk_count
+        )
+    if embedder is not None:
+        from auto_ontology.dal.attributes import (
+            fetch_semantic_relationship_documents,
+        )
+
+        relationship_count = embedder.embed_relationships(
+            fetch_semantic_relationship_documents(database_name)
+        )
+        logger.info("Semantic relationship documents embedded: %d", relationship_count)
 
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 

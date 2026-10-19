@@ -429,6 +429,21 @@ class PostgresVDB:
         store.delete(filter=filter)
         return ids
 
+    def delete_by_database_and_label(self, database_name: str, label: str) -> list[str]:
+        """Delete rows for one database and semantic document label."""
+        store = self._get_store()
+        if store is None:
+            return []
+        filter: dict[str, Any] = {
+            _DATABASE_METADATA_COLUMN: database_name,
+            _LABEL_METADATA_COLUMN: label,
+        }
+        existing = store.get(where=filter, include=[])
+        ids = list(existing.get("ids", []) or [])
+        if ids:
+            store.delete(filter=filter)
+        return ids
+
     def delete_all(self) -> int:
         """Delete every row in the collection.
 

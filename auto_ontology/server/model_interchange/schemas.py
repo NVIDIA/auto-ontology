@@ -11,6 +11,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from auto_ontology.semantic.relationship_metadata import RelationshipMetadata
+
 
 class ModelFormat(str, Enum):
     """Serialisation dialect of an exchanged model document."""
@@ -115,6 +117,10 @@ class ModelTerm(BaseModel):
 class ModelSemanticFk(BaseModel):
     column_attribute_id: str
     column_id: str
+    relationship_metadata: RelationshipMetadata | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
 
 class ModelSqlAttribute(BaseModel):

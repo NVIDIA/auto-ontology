@@ -28,6 +28,7 @@ from auto_ontology.catalog.constants import Props
 from auto_ontology.catalog.model import CatalogNode
 from auto_ontology.catalog.store.queries import add_query
 from auto_ontology.dal import schema as s
+from auto_ontology.dal.attributes import semantic_fk_upsert_statement
 from auto_ontology.dal.custom_analyses import (
     detach_existing_sql_edges as detach_ca_sql_edges,
 )
@@ -343,6 +344,7 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
             select(
                 s.column__semantic_fk.c.column_id,
                 s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
+                s.column__semantic_fk.c.relationship_metadata,
             )
             .select_from(
                 _catalog_join().join(
@@ -526,6 +528,7 @@ def assemble_export_document(
         ModelSemanticFk(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
+            relationship_metadata=row.get("relationship_metadata") or None,
         )
         for row in rows["semantic_fks"]
         if str(row.get("column_attribute_id") or "") in _attribute_ids
@@ -1489,7 +1492,6 @@ def _import_column_attributes(
 def _import_semantic_fks(
     document: AutoOntologyModelDocument, id_map: dict[str, str]
 ) -> None:
-    rows = []
     for fk in document.semantic_layer.semantic_fks:
         column_id = _remap_optional(id_map, fk.column_id)
         attribute_id = _remap_optional(id_map, fk.column_attribute_id)
@@ -1501,11 +1503,13 @@ def _import_semantic_fks(
                 fk.column_attribute_id,
             )
             continue
-        rows.append({"column_id": column_id, "attribute_id": attribute_id})
-    _link(
-        s.column__semantic_fk,
-        rows,
-    )
+        store().query_write(
+            semantic_fk_upsert_statement(
+                column_id,
+                attribute_id,
+                fk.relationship_metadata,
+            )
+        )
 
 
 def _cached_dialects_and_schemas(
