@@ -8,6 +8,7 @@ import pytest
 from auto_ontology.catalog.constants import Labels
 
 from auto_ontology.retrieval.data_access import relevant_tables
+from auto_ontology.utils.embedding_rows import build_table_text
 
 
 def test_get_relevant_tables_uses_default_limit_when_k_is_omitted(
@@ -140,7 +141,17 @@ def test_normalize_merges_rich_nullability_into_parsed_columns() -> None:
 
 
 @pytest.mark.parametrize(
-    "data_type", ["NUMBER(38,0)", "decimal(12,2)", "Nullable(Decimal(12, 2))", "text"]
+    "data_type",
+    [
+        "NUMBER(38,0)",
+        "decimal(12,2)",
+        "Nullable(Decimal(12, 2))",
+        "Tuple(Decimal(12,2), String)",
+        "map<string,int>",
+        "struct<a:int,b:string>",
+        "struct<a:int,description:string>",
+        "text",
+    ],
 )
 def test_a_type_with_a_comma_in_brackets_is_read_whole(data_type: str) -> None:
     text = (
@@ -156,4 +167,67 @@ def test_a_type_with_a_comma_in_brackets_is_read_whole(data_type: str) -> None:
     assert normalized["columns"] == [
         {"name": "total", "data_type": data_type, "description": "Order total"},
         {"name": "status", "data_type": "text"},
+    ]
+
+
+def test_a_column_without_a_type_is_kept() -> None:
+    text = (
+        "table_name: orders, columns: "
+        "{name: total, data_type: },{name: status, data_type: text}"
+    )
+
+    normalized = relevant_tables._normalize_table_to_relevant_shape(
+        {"id": "table-1", "label": Labels.TABLE, "text": text}
+    )
+
+    assert normalized["columns"] == [
+        {"name": "total"},
+        {"name": "status", "data_type": "text"},
+    ]
+
+
+def test_every_column_the_table_text_writes_is_read_back() -> None:
+    columns = [
+        {"column_name": "order_id", "data_type": "NUMBER(38,0)", "description": "Key"},
+        {"column_name": "attrs", "data_type": "map<string,int>"},
+        {
+            "column_name": "line",
+            "data_type": "struct<sku:string,qty:int>",
+            "description": "Item, quantity",
+        },
+        {"column_name": "price", "data_type": "Tuple(Decimal(12,2), String)"},
+        {
+            "column_name": "meta",
+            "data_type": "struct<a:int,description:string>",
+            "description": "Extra",
+        },
+        {"column_name": "note", "data_type": None},
+    ]
+    text = build_table_text(
+        table_name="orders",
+        table_description="",
+        columns=columns,
+        schema_name="s",
+        database_name="db",
+    )
+
+    normalized = relevant_tables._normalize_table_to_relevant_shape(
+        {"id": "table-1", "label": Labels.TABLE, "text": text}
+    )
+
+    assert normalized["columns"] == [
+        {"name": "order_id", "data_type": "NUMBER(38,0)", "description": "Key"},
+        {"name": "attrs", "data_type": "map<string,int>"},
+        {
+            "name": "line",
+            "data_type": "struct<sku:string,qty:int>",
+            "description": "Item, quantity",
+        },
+        {"name": "price", "data_type": "Tuple(Decimal(12,2), String)"},
+        {
+            "name": "meta",
+            "data_type": "struct<a:int,description:string>",
+            "description": "Extra",
+        },
+        {"name": "note"},
     ]
