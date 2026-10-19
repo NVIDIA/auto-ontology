@@ -19,6 +19,10 @@ class Labels:
     COLUMN = "Column"
     SQL = "Sql"
     CUSTOM_ANALYSIS = "CustomAnalysis"
+    #: One question/answer pair from a chat transcript. Singular because it is
+    #: the label on a *row*, as TABLE is -- the row is a turn, not a whole
+    #: conversation. See :data:`auto_ontology.dal.schema.conversation`.
+    CONVERSATION = "Conversation"
 
     LIST_OF_ALL = [
         DB,
@@ -27,6 +31,7 @@ class Labels:
         TABLE,
         COLUMN,
         SQL,
+        CONVERSATION,
     ]
 
 
