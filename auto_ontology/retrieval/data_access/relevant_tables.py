@@ -57,7 +57,9 @@ def _parse_table_text(text: str) -> dict:
         columns_match = re.search(r"columns:\s*(.+)$", text)
         if columns_match:
             columns_str = columns_match.group(1).strip()
-            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*([^,}]+))?(?:,\s*description:\s*([^}]+))?\}"
+            # A type may carry a comma in brackets (NUMBER(38,0), decimal(12,2),
+            # Nullable(Decimal(12, 2))), which must not end it.
+            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*((?:\([^)]*\)|[^,}(])+))?(?:,\s*description:\s*([^}]+))?\}"
             columns = []
             for match in re.finditer(column_pattern, columns_str):
                 column = {
