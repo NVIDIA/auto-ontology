@@ -41,13 +41,13 @@ def _column_id(table_name, column_name, database_name=None):
     return f"{table_name}.{column_name}"
 
 
-def _join_path_only_addr1_verified(col_a_id, col_b_id):
+def _join_paths_only_addr1_verified(col_a_id, col_b_id):
     if {col_a_id, col_b_id} == {"worksite.w_addr1", "case_worksite.ws_addr1"}:
-        return _VERIFIED_HOP
+        return [_VERIFIED_HOP]
     return []
 
 
-def _join_path_nothing_verified(col_a_id, col_b_id):
+def _join_paths_nothing_verified(col_a_id, col_b_id):
     return []
 
 
@@ -68,8 +68,8 @@ _JOIN_SQL = (
 )
 
 _VERIFIED_PATCH = patch(
-    "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_join_path",
-    side_effect=_join_path_only_addr1_verified,
+    "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_join_paths",
+    side_effect=_join_paths_only_addr1_verified,
 )
 _COL_ID_PATCH = patch(
     "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_column_id_by_table_and_name",
@@ -136,8 +136,8 @@ def test_not_flagged_when_extra_predicate_rejects_nothing(
 
 
 @patch(
-    "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_join_path",
-    side_effect=_join_path_nothing_verified,
+    "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_join_paths",
+    side_effect=_join_paths_nothing_verified,
 )
 @patch(
     "auto_ontology.retrieval.text_to_sql.db_probe.join_path_check.find_column_id_by_table_and_name",

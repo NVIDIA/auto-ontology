@@ -53,7 +53,7 @@ from sqlglot import exp
 
 from auto_ontology.dal.attributes import (
     column_participates_in_semantic_fk,
-    find_join_path,
+    find_join_paths,
     find_shared_hub_bridge,
 )
 from auto_ontology.dal.datasources import (
@@ -77,10 +77,12 @@ logger = logging.getLogger(__name__)
 _OVERLAP_KEEP_THRESHOLD = 0.2
 
 
-def _find_join_path_either_direction(col_a_id: str, col_b_id: str) -> list[dict]:
-    """``find_join_path``, tried in both column orders.
+def _find_join_paths_either_direction(
+    col_a_id: str, col_b_id: str
+) -> list[list[dict]]:
+    """``find_join_paths``, tried in both column orders.
 
-    ``find_join_path`` walks ``SEMANTIC_FK`` outgoing-only (child FK ->
+    ``find_join_paths`` walks ``SEMANTIC_FK`` outgoing-only (child FK ->
     parent attribute — see its docstring), so a real, single-hop edge is
     only found when the *child* column is passed as the anchor. Every
     caller here derives ``col_a``/``col_b`` from a written predicate's
@@ -92,10 +94,10 @@ def _find_join_path_either_direction(col_a_id: str, col_b_id: str) -> list[dict]
     reverse order costs one extra graph query only when the forward one
     finds nothing.
     """
-    hops = find_join_path(col_a_id, col_b_id)
-    if hops:
-        return hops
-    return find_join_path(col_b_id, col_a_id)
+    paths = find_join_paths(col_a_id, col_b_id)
+    if paths:
+        return paths
+    return find_join_paths(col_b_id, col_a_id)
 
 
 def _join_equalities(tree: exp.Expression) -> list[tuple[exp.Column, exp.Column]]:
@@ -273,20 +275,29 @@ def find_join_path_mismatches(
         ):
             continue  # neither side is FK-shaped — out of scope for this check
 
-        hops = _find_join_path_either_direction(col_a_id, col_b_id)
+        paths = _find_join_paths_either_direction(col_a_id, col_b_id)
 
-        if len(hops) == 1:
-            hop = hops[0]
-            hop_pair = {
-                (hop["source_table"].lower(), hop["source_column"].lower()),
-                (hop["target_table"].lower(), hop["target_column"].lower()),
-            }
-            written_pair = {
-                (table_a.lower(), left.name.lower()),
-                (table_b.lower(), right.name.lower()),
-            }
-            if hop_pair == written_pair:
-                continue  # verified — exactly what the graph says
+        written_pair = {
+            (table_a.lower(), left.name.lower()),
+            (table_b.lower(), right.name.lower()),
+        }
+        direct_paths = [path for path in paths if len(path) == 1]
+        if direct_paths:
+            if any(
+                {
+                    (
+                        path[0]["source_table"].lower(),
+                        path[0]["source_column"].lower(),
+                    ),
+                    (
+                        path[0]["target_table"].lower(),
+                        path[0]["target_column"].lower(),
+                    ),
+                }
+                == written_pair
+                for path in direct_paths
+            ):
+                continue  # verified — one of the graph's direct relationships
 
             # The graph knows *a* direct relationship between these two
             # tables — but two tables can legitimately have more than one
@@ -328,13 +339,17 @@ def find_join_path_mismatches(
                     "table_b": table_b,
                     "col_b": right.name,
                     "verdict": "wrong_column",
-                    "hops": [hop],
+                    "hops": direct_paths[0],
                     "bridge_tables": [],
                 }
             )
             continue
 
-        if len(hops) > 1:
+        if paths:
+            # Every returned path has the same minimum length. Keep one
+            # deterministic repair route in the existing mismatch payload;
+            # generation receives all alternatives up front.
+            hops = paths[0]
             # The graph knows *an* indirect path — but unlike the "no path
             # at all" branch below, this used to trust that as proof the
             # model's direct join is wrong, with no live check. That's only
@@ -974,19 +989,26 @@ def _is_verified_edge(predicate: dict[str, Any], database_name: Optional[str]) -
     col_b_id = find_column_id_by_table_and_name(table_right, right.name, database_name)
     if not col_a_id or not col_b_id:
         return False
-    hops = _find_join_path_either_direction(col_a_id, col_b_id)
-    if len(hops) != 1:
-        return False
-    hop = hops[0]
-    hop_pair = {
-        (hop["source_table"].lower(), hop["source_column"].lower()),
-        (hop["target_table"].lower(), hop["target_column"].lower()),
-    }
+    paths = _find_join_paths_either_direction(col_a_id, col_b_id)
     written_pair = {
         (table_left.lower(), left.name.lower()),
         (table_right.lower(), right.name.lower()),
     }
-    return hop_pair == written_pair
+    return any(
+        len(path) == 1
+        and {
+            (
+                path[0]["source_table"].lower(),
+                path[0]["source_column"].lower(),
+            ),
+            (
+                path[0]["target_table"].lower(),
+                path[0]["target_column"].lower(),
+            ),
+        }
+        == written_pair
+        for path in paths
+    )
 
 
 def _oriented_columns(predicate: dict[str, Any], table_a: str) -> tuple[str, str]:

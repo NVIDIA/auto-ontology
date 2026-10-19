@@ -34,7 +34,7 @@ from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
     find_anchor_hub_siblings,
     find_connected_junction_tables,
-    find_join_path,
+    find_join_paths,
     find_kept_table_bridges,
 )
 from auto_ontology.dal.custom_analyses import (
@@ -374,39 +374,43 @@ class CandidatePreparationAgent(BaseAgent):
                         if did != anchor_id
                     ]
                     # Bounded, not one worker per destination. Each worker runs
-                    # find_join_path, which is several sequential checkouts from a
+                    # find_join_paths, which is several sequential checkouts from a
                     # 10-connection pool; a wide fan-out exhausts it, and
-                    # find_join_path catches the QueuePool timeout and returns []
+                    # find_join_paths catches the QueuePool timeout and returns []
                     # -- so the failure shows up as missing joins in the prompt
                     # rather than as an error.
                     workers = min(len(dest_items) or 1, _JOIN_PATH_WORKERS)
                     with ThreadPoolExecutor(max_workers=workers) as pool:
                         futures = {
                             pool.submit(
-                                find_join_path, anchor_ctx["col_id"], dctx["col_id"]
+                                find_join_paths, anchor_ctx["col_id"], dctx["col_id"]
                             ): (did, dctx)
                             for did, dctx in dest_items
                         }
                         for future in as_completed(futures):
                             dest_id, dest_ctx = futures[future]
-                            join_path = future.result()
-                            attribute_join_paths.append(
-                                {
-                                    "id": dest_id,
-                                    "attr_name": dest_ctx["attr_name"],
-                                    "col_name": dest_ctx["col_name"],
-                                    "table_name": dest_ctx["table_name"],
-                                    "schema_name": dest_ctx["schema_name"],
-                                    "database_name": dest_ctx["database_name"],
-                                    "datatype": dest_ctx.get("datatype") or "",
-                                    "path": join_path,
-                                }
-                            )
+                            join_paths = future.result()
+                            # Preserve the old disconnected-entry behavior while
+                            # surfacing every equal-length relationship option.
+                            for join_path in join_paths or [[]]:
+                                attribute_join_paths.append(
+                                    {
+                                        "id": dest_id,
+                                        "attr_name": dest_ctx["attr_name"],
+                                        "col_name": dest_ctx["col_name"],
+                                        "table_name": dest_ctx["table_name"],
+                                        "schema_name": dest_ctx["schema_name"],
+                                        "database_name": dest_ctx["database_name"],
+                                        "datatype": dest_ctx.get("datatype") or "",
+                                        "path": join_path,
+                                    }
+                                )
                             self.logger.info(
-                                "Join path to %s (%s): %d hop(s)",
+                                "Join paths to %s (%s): %d option(s), %s hop(s)",
                                 dest_ctx["attr_name"],
                                 dest_id,
-                                len(join_path),
+                                len(join_paths),
+                                len(join_paths[0]) if join_paths else 0,
                             )
 
                     # Looser, discovery-only signal: find_join_path above cannot

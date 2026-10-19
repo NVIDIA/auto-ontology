@@ -673,12 +673,12 @@ _SEMANTIC_TABLE_EDGES = (
 )
 
 
-def _find_table_join_hops(
+def _find_table_join_paths(
     anchor_table_id: str,
     dest_table_id: str,
     database_id: str,
-) -> list[tuple[str, str]]:
-    """Find table-to-table joins, oriented from anchor table to destination.
+) -> list[list[tuple[str, str]]]:
+    """Find all shortest table-to-table join paths, oriented from anchor to destination.
 
     Each semantic relationship becomes a table edge whose payload is the
     actual FK/owner column pair, letting input column choice be irrelevant.
@@ -716,27 +716,57 @@ def _find_table_join_hops(
         edges.sort()
 
     max_hops = (MAX_PATH_DEPTH + 2) // 4
-    parents: dict[str, tuple[str, str, str] | None] = {anchor_table_id: None}
+    distances = {anchor_table_id: 0}
+    parents: dict[str, list[tuple[str, str, str]]] = defaultdict(list)
     frontier: deque[tuple[str, int]] = deque([(anchor_table_id, 0)])
+    destination_depth: int | None = None
     while frontier:
         table_id, depth = frontier.popleft()
         if depth >= max_hops:
             continue
+        if destination_depth is not None and depth >= destination_depth:
+            continue
         for next_table_id, source_col_id, target_col_id in adjacency.get(table_id, []):
-            if next_table_id in parents:
+            next_depth = depth + 1
+            if destination_depth is not None and next_depth > destination_depth:
                 continue
-            parents[next_table_id] = (table_id, source_col_id, target_col_id)
-            if next_table_id == dest_table_id:
-                hops: list[tuple[str, str]] = []
-                current = dest_table_id
-                while parents[current] is not None:
-                    previous, source_col_id, target_col_id = parents[current]
-                    hops.append((source_col_id, target_col_id))
-                    current = previous
-                hops.reverse()
-                return hops
-            frontier.append((next_table_id, depth + 1))
-    return []
+            known_depth = distances.get(next_table_id)
+            parent = (table_id, source_col_id, target_col_id)
+            if known_depth is None:
+                distances[next_table_id] = next_depth
+                parents[next_table_id].append(parent)
+                if next_table_id == dest_table_id:
+                    destination_depth = next_depth
+                else:
+                    frontier.append((next_table_id, next_depth))
+            elif known_depth == next_depth and parent not in parents[next_table_id]:
+                # Preserve parallel FKs between the same tables, plus distinct
+                # table routes that reach this node at the same minimum depth.
+                parents[next_table_id].append(parent)
+
+    if dest_table_id not in distances:
+        return []
+
+    def build_paths(table_id: str) -> list[list[tuple[str, str]]]:
+        if table_id == anchor_table_id:
+            return [[]]
+        paths: list[list[tuple[str, str]]] = []
+        for previous, source_col_id, target_col_id in parents[table_id]:
+            for prefix in build_paths(previous):
+                paths.append(prefix + [(source_col_id, target_col_id)])
+        return paths
+
+    return sorted(build_paths(dest_table_id))
+
+
+def _find_table_join_hops(
+    anchor_table_id: str,
+    dest_table_id: str,
+    database_id: str,
+) -> list[tuple[str, str]]:
+    """Compatibility wrapper returning the first shortest table join path."""
+    paths = _find_table_join_paths(anchor_table_id, dest_table_id, database_id)
+    return paths[0] if paths else []
 
 
 def _table_database_id(table_id: str) -> str | None:
@@ -917,12 +947,13 @@ def find_connected_junction_tables(
     return list(junctions.values()), paths
 
 
-def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
-    """The shortest semantic join route between the columns' tables.
+def find_join_paths(anchor_col_id: str, dest_col_id: str) -> list[list[dict]]:
+    """All shortest semantic join routes between the columns' tables.
 
     The endpoint columns identify the tables to connect; they do not have to be
-    the join columns. Returned hops contain the actual columns for each
-    adjacent table crossing.
+    the join columns. Every returned path contains the actual columns for each
+    adjacent table crossing. Parallel foreign keys between the same two tables
+    are returned as distinct one-hop paths.
 
     ``[]`` when both columns belong to the same table, no semantic route exists,
     either endpoint is missing, or the endpoints belong to different databases.
@@ -946,7 +977,7 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         return []
 
     try:
-        hop_pairs = _find_table_join_hops(
+        hop_paths = _find_table_join_paths(
             anchor_context["table_id"],
             dest_context["table_id"],
             anchor_context["database_id"],
@@ -960,30 +991,43 @@ def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
         )
         return []
 
-    if not hop_pairs:
+    if not hop_paths:
         return []
 
-    col_ids = list(dict.fromkeys(col_id for pair in hop_pairs for col_id in pair))
+    col_ids = list(
+        dict.fromkeys(
+            col_id for path in hop_paths for pair in path for col_id in pair
+        )
+    )
     names = _name_columns(col_ids)
     contexts = fetch_col_table_contexts(col_ids)
 
-    hops: list[dict] = []
-    for source_id, target_id in hop_pairs:
-        source_context = contexts.get(source_id, {})
-        target_context = contexts.get(target_id, {})
-        hops.append(
-            {
-                "source_database": source_context.get("database_name", ""),
-                "source_schema": source_context.get("schema_name", ""),
-                "source_table": source_context.get("table_name", ""),
-                "source_column": names.get(source_id, ""),
-                "target_database": target_context.get("database_name", ""),
-                "target_schema": target_context.get("schema_name", ""),
-                "target_table": target_context.get("table_name", ""),
-                "target_column": names.get(target_id, ""),
-            }
-        )
-    return hops
+    paths: list[list[dict]] = []
+    for hop_pairs in hop_paths:
+        hops: list[dict] = []
+        for source_id, target_id in hop_pairs:
+            source_context = contexts.get(source_id, {})
+            target_context = contexts.get(target_id, {})
+            hops.append(
+                {
+                    "source_database": source_context.get("database_name", ""),
+                    "source_schema": source_context.get("schema_name", ""),
+                    "source_table": source_context.get("table_name", ""),
+                    "source_column": names.get(source_id, ""),
+                    "target_database": target_context.get("database_name", ""),
+                    "target_schema": target_context.get("schema_name", ""),
+                    "target_table": target_context.get("table_name", ""),
+                    "target_column": names.get(target_id, ""),
+                }
+            )
+        paths.append(hops)
+    return paths
+
+
+def find_join_path(anchor_col_id: str, dest_col_id: str) -> list[dict]:
+    """Compatibility wrapper returning the first shortest semantic join path."""
+    paths = find_join_paths(anchor_col_id, dest_col_id)
+    return paths[0] if paths else []
 
 
 def find_shared_hub_bridge(col_a_id: str, col_b_id: str) -> dict:

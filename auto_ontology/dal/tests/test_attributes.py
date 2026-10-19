@@ -225,6 +225,35 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
     ]
 
 
+def test_all_parallel_foreign_keys_between_tables_are_returned(world) -> None:
+    """Parallel FK roles must not collapse to an arbitrary first table edge."""
+    world.table("posts", pk=["id"])
+    world.column("posts", "id")
+    world.table("post_links")
+    world.column("post_links", "post_id", 1)
+    world.column("post_links", "related_post_id", 2)
+    world.attribute("post-id", owner="posts.id")
+    world.references("post_links.post_id", "post-id")
+    world.references("post_links.related_post_id", "post-id")
+
+    paths = a.find_join_paths(
+        world.columns["post_links.post_id"], world.columns["posts.id"]
+    )
+
+    assert len(paths) == 2
+    assert {path[0]["source_column"] for path in paths} == {
+        "post_id",
+        "related_post_id",
+    }
+    assert all(
+        len(path) == 1
+        and path[0]["source_table"] == "post_links"
+        and path[0]["target_table"] == "posts"
+        and path[0]["target_column"] == "id"
+        for path in paths
+    )
+
+
 def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None:
     """Sibling FKs route through their owner table, never directly to each other."""
     joined.table("invoices")
