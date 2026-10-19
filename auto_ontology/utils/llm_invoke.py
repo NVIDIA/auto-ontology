@@ -10,7 +10,7 @@ import os
 import random
 import threading
 import time
-from typing import Iterator, Type, TypeVar
+from typing import Callable, Iterator, Type, TypeVar
 
 import requests as _requests
 from langchain_core.language_models import BaseChatModel
@@ -20,6 +20,8 @@ from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 from auto_ontology.utils.model_config import resolve
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R")
 
 
 class StrictLLMOutputModel(BaseModel):
@@ -45,6 +47,26 @@ class StrictLLMOutputModel(BaseModel):
 
 RETRY_MAX_ATTEMPTS = 3
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
+
+# Rate limits, server errors and dropped connections come in bursts: a gateway
+# throttling a key answered 17 429s in ~30s during a benchmark, and a NeMo Gym
+# model server passes each on as an empty-body 500. Three attempts 2s and 4s
+# apart are over in ~7s, so the step failed mid-burst. These are retried on
+# their own budget, backing off 2, 4, 8, 16, then 30s (~60s in all).
+LLM_TRANSIENT_RETRIES = int(os.environ.get("LLM_TRANSIENT_RETRIES", "5"))
+LLM_RETRY_MAX_BACKOFF_S = float(os.environ.get("LLM_RETRY_MAX_BACKOFF_S", "30"))
+
+# A reasoning call that spends max_tokens thinking returns nothing, and sampled
+# again it often does the same: one benchmark question made 18 such calls at
+# ~100s each and got no SQL. The retries after one such call run with thinking
+# off, as json_schema, capped low. Measured with nemotron-3.5-lightning on five
+# SQL-generation prompts x2: thinking off, json_schema finished all 10 in
+# 330-1,060 tokens (2.5-7s), while tool calls ran 9 of 10 to 32k writing the
+# leading free-text field. "off" disables the fallback.
+LLM_THINKING_FALLBACK = os.environ.get("LLM_THINKING_FALLBACK", "on").lower() != "off"
+LLM_THINKING_FALLBACK_MAX_TOKENS = int(
+    os.environ.get("LLM_THINKING_FALLBACK_MAX_TOKENS", "4096")
+)
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
 # to live at this call site, defaulting to 6, to stop semantic compilation's
@@ -193,6 +215,99 @@ _UNUSABLE_OUTPUT_TYPES = frozenset({"LengthFinishReasonError", "OutputParserExce
 def _is_unusable_output(e: Exception) -> bool:
     """Whether *e* is a completed call whose output was cut off or did not parse."""
     return type(e).__name__ in _UNUSABLE_OUTPUT_TYPES
+
+
+_TIMEOUT_EXCEPTION_TYPES = frozenset({"APITimeoutError", "ReadTimeout", "Timeout"})
+
+
+def _is_timeout(e: Exception) -> bool:
+    """Whether *e* is the client giving up on a call that was still running."""
+    return type(e).__name__ in _TIMEOUT_EXCEPTION_TYPES or "timed out" in str(e)
+
+
+def _is_transient(e: Exception) -> bool:
+    """A rate limit, server error or dropped connection: worth waiting out.
+
+    Timeouts are excluded. A call cut off by ``LLM_INVOKE_TIMEOUT_S`` is usually
+    a model still generating, and minutes of backoff would only repeat it; those
+    keep the ``RETRY_MAX_ATTEMPTS`` budget. So are client errors other than 408
+    and 429: a gateway's 401 for a bad key mentions "litellm", which
+    ``_is_retryable`` accepts, and would otherwise take a minute to surface.
+    """
+    status = getattr(e, "status_code", None)
+    if isinstance(status, int) and 400 <= status < 500 and status not in (408, 429):
+        return False
+    return _is_retryable(e) and not _is_timeout(e)
+
+
+def _invoke_with_backoff(call: Callable[[], R], label: str) -> R:
+    """Run *call* under the inflight bound, waiting out transient server errors.
+
+    Retries up to ``LLM_TRANSIENT_RETRIES`` times, backing off exponentially to
+    ``LLM_RETRY_MAX_BACKOFF_S``. The bound is released while waiting. Anything
+    else, and a transient error once the budget is spent, is raised.
+    """
+    for retry in range(LLM_TRANSIENT_RETRIES + 1):
+        try:
+            with _inflight_guard():
+                return call()
+        except Exception as e:
+            if retry == LLM_TRANSIENT_RETRIES or not _is_transient(e):
+                raise
+            wait = min(2 ** (retry + 1), LLM_RETRY_MAX_BACKOFF_S) + random.uniform(0, 1)
+            logger.warning(
+                "Rate-limited or server error for %s (retry %d/%d) — retrying in "
+                "%.1fs: %s: %s",
+                label,
+                retry + 1,
+                LLM_TRANSIENT_RETRIES,
+                wait,
+                type(e).__name__,
+                str(e)[:120],
+            )
+            time.sleep(wait)
+    raise AssertionError("unreachable")
+
+
+def _ran_out_while_thinking(e: Exception) -> bool:
+    """Whether *e* is a call cut off at max_tokens before writing any answer."""
+    if type(e).__name__ != "LengthFinishReasonError":
+        return False
+    try:
+        message = e.completion.choices[0].message  # type: ignore[attr-defined]
+    except (AttributeError, IndexError, TypeError):
+        return False
+    return not (message.content or "").strip() and not getattr(
+        message, "tool_calls", None
+    )
+
+
+def _without_thinking(llm: BaseChatModel) -> BaseChatModel | None:
+    """A copy of *llm* with thinking off and a low cap, or None if not applicable.
+
+    Only for nemotron on ChatOpenAI, where ``enable_thinking`` was measured to
+    work; a gateway fronting another model may reject the field. The copy shares
+    the underlying HTTP client, and *llm* itself is left as it was.
+    """
+    if not LLM_THINKING_FALLBACK:
+        return None
+    client = getattr(llm, "bound", llm)
+    if type(client).__name__ != "ChatOpenAI" or _thinking_is_off(client):
+        return None
+    model = str(getattr(client, "model_name", "") or "")
+    if "nemotron" not in model.lower():
+        return None
+    extra_body = dict(getattr(client, "extra_body", None) or {})
+    extra_body["chat_template_kwargs"] = {
+        **(extra_body.get("chat_template_kwargs") or {}),
+        "enable_thinking": False,
+    }
+    return client.model_copy(
+        update={
+            "extra_body": extra_body,
+            "max_tokens": LLM_THINKING_FALLBACK_MAX_TOKENS,
+        }
+    )
 
 
 class _TimeoutSession(_requests.Session):
@@ -472,8 +587,7 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
     messages = [HumanMessage(content=prompt)]
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
-            with _inflight_guard():
-                response = llm.invoke(messages)
+            response = _invoke_with_backoff(lambda: llm.invoke(messages), "text")
             content = getattr(response, "content", response)
             return content if isinstance(content, str) else str(content)
         except _requests.exceptions.ReadTimeout:
@@ -488,11 +602,11 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
                 continue
             raise
         except Exception as e:
-            is_retryable = _is_retryable(e)
-            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+            # Transient errors were already waited out in _invoke_with_backoff.
+            if _is_timeout(e) and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
-                    "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                    "LLM call timed out on attempt %d/%d — retrying in %.1fs: %s",
                     attempt + 1,
                     RETRY_MAX_ATTEMPTS,
                     wait,
@@ -517,8 +631,9 @@ def safe_invoke_with_structured_output(
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:
             model_llm = llm.with_structured_output(schema, **structured_kwargs)
-            with _inflight_guard():
-                result = model_llm.invoke(current_messages)
+            result = _invoke_with_backoff(
+                lambda: model_llm.invoke(current_messages), schema_name
+            )
         except _requests.exceptions.ReadTimeout:
             logger.error(
                 "LLM invoke timed out after %ds on attempt %d/%d for %s",
@@ -568,13 +683,29 @@ def safe_invoke_with_structured_output(
                 # Sampled again, the model usually finishes: a cut-off answer is a
                 # bad draw, not a bad request, so this retries at once and fresh.
                 if attempt < RETRY_MAX_ATTEMPTS - 1:
-                    logger.warning(
-                        "Unusable output for %s on attempt %d/%d (%s) — retrying",
-                        schema_name,
-                        attempt + 1,
-                        RETRY_MAX_ATTEMPTS,
-                        type(e).__name__,
+                    fallback = (
+                        _without_thinking(llm) if _ran_out_while_thinking(e) else None
                     )
+                    if fallback is not None:
+                        logger.warning(
+                            "%s spent max_tokens thinking on attempt %d/%d — "
+                            "retrying with thinking off",
+                            schema_name,
+                            attempt + 1,
+                            RETRY_MAX_ATTEMPTS,
+                        )
+                        llm = fallback
+                        # json_schema, whatever the thinking-off rule picks: see
+                        # LLM_THINKING_FALLBACK.
+                        structured_kwargs = {}
+                    else:
+                        logger.warning(
+                            "Unusable output for %s on attempt %d/%d (%s) — retrying",
+                            schema_name,
+                            attempt + 1,
+                            RETRY_MAX_ATTEMPTS,
+                            type(e).__name__,
+                        )
                     current_messages = _ensure_non_system_message(messages.copy())
                     continue
                 logger.error(
@@ -584,12 +715,11 @@ def safe_invoke_with_structured_output(
                     type(e).__name__,
                 )
                 raise
-            is_retryable = _is_retryable(e)
-            if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
+            # Transient errors were already waited out in _invoke_with_backoff.
+            if _is_timeout(e) and attempt < RETRY_MAX_ATTEMPTS - 1:
                 wait = 2 ** (attempt + 1) + random.uniform(0, 1)
                 logger.warning(
-                    "Retryable LLM error (endpoint saturated/rate-limited) on attempt "
-                    "%d/%d for %s — retrying in %.1fs",
+                    "LLM call timed out on attempt %d/%d for %s — retrying in %.1fs",
                     attempt + 1,
                     RETRY_MAX_ATTEMPTS,
                     schema_name,

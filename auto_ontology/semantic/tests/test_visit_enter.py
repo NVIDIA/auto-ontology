@@ -31,6 +31,21 @@ from auto_ontology.semantic.visit_enter import (
 from auto_ontology.utils.sql_identifiers import qualified_name
 
 
+@pytest.fixture(autouse=True)
+def _no_column_description_llm():
+    """Keep process_table's column-description call off the network.
+
+    Unstubbed, it reaches a real endpoint whenever an earlier test module has set
+    REASONING_API_KEY (test_agent_run_failure does, at import), and then waits
+    out the LLM client's connection-error backoff.
+    """
+    with patch(
+        "auto_ontology.semantic.deterministic._generate_column_descriptions",
+        return_value={},
+    ):
+        yield
+
+
 def _mock_connector(dialect: str = "postgres") -> MagicMock:
     """A mock connector that qualifies names the way a real one would.
 

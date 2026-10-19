@@ -7,6 +7,7 @@
 import contextlib
 import threading
 import time
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -357,7 +358,12 @@ def test_openai_client_sends_no_extra_body_by_default(
 
 
 class LengthFinishReasonError(Exception):
-    """Stand-in for openai's: it is matched by name, and the real one needs a completion."""
+    """Stand-in for openai's, matched by name: carries the cut-off completion."""
+
+    def __init__(self, content: str | None = None) -> None:
+        super().__init__("length")
+        message = SimpleNamespace(content=content, tool_calls=None)
+        self.completion = SimpleNamespace(choices=[SimpleNamespace(message=message)])
 
 
 class _Answer(BaseModel):
@@ -372,8 +378,10 @@ class _ScriptedLLM:
     def __init__(self, outcomes: list[Any]) -> None:
         self.outcomes = list(outcomes)
         self.calls = 0
+        self.structured_kwargs: list[dict] = []
 
     def with_structured_output(self, schema: Any, **kwargs: Any) -> "_ScriptedLLM":
+        self.structured_kwargs.append(kwargs)
         return self
 
     def invoke(self, messages: Any) -> Any:
@@ -418,3 +426,177 @@ def test_a_non_retryable_error_still_stops_at_once() -> None:
     with pytest.raises(KeyError):
         safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
     assert llm.calls == 1
+
+
+# ── Waiting out rate limits; falling back from thinking ───────────────────────
+
+
+class InternalServerError(Exception):
+    """Stand-in for openai's, matched by name: what Gym returns for an upstream 429."""
+
+
+class APITimeoutError(Exception):
+    """Stand-in for openai's, matched by name."""
+
+
+@pytest.fixture
+def waits(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Backoff sleeps, recorded instead of slept, with the jitter removed."""
+    recorded: list[float] = []
+    monkeypatch.setattr(llm_invoke.time, "sleep", recorded.append)
+    monkeypatch.setattr(llm_invoke.random, "uniform", lambda a, b: 0.0)
+    return recorded
+
+
+def test_a_rate_limit_burst_is_waited_out(waits: list[float]) -> None:
+    """Four failures span 2+4+8+16 = 30s, which three attempts 2s and 4s apart could not."""
+    llm = _ScriptedLLM(
+        [InternalServerError() for _ in range(4)] + [_Answer(value="ok")]
+    )
+
+    result = safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    assert result.value == "ok"
+    assert waits == [2, 4, 8, 16]
+
+
+def test_backoff_is_capped(waits: list[float], monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(llm_invoke, "LLM_RETRY_MAX_BACKOFF_S", 5.0)
+    llm = _ScriptedLLM(
+        [InternalServerError() for _ in range(3)] + [_Answer(value="ok")]
+    )
+
+    safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    assert waits == [2, 4, 5]
+
+
+def test_a_burst_that_outlasts_the_budget_fails_without_multiplying(
+    waits: list[float],
+) -> None:
+    """The outer attempts must not retry what the backoff already gave up on."""
+    calls = llm_invoke.LLM_TRANSIENT_RETRIES + 1
+    llm = _ScriptedLLM([InternalServerError() for _ in range(calls * 3)])
+
+    with pytest.raises(InternalServerError):
+        safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+    assert llm.calls == calls
+
+
+def test_a_timeout_keeps_the_short_budget(waits: list[float]) -> None:
+    """A timed-out call is usually a model still generating: minutes of backoff only repeat it."""
+    llm = _ScriptedLLM([APITimeoutError("Request timed out.") for _ in range(10)])
+
+    with pytest.raises(APITimeoutError):
+        safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+    assert llm.calls == RETRY_MAX_ATTEMPTS
+    assert waits == [2, 4]
+
+
+def _scripted_chat_openai(
+    outcomes: list[Any], model: str = _LIGHTNING, thinking: bool | None = None
+) -> Any:
+    """A scripted client named ChatOpenAI whose ``model_copy`` hands back *copy_outcomes*."""
+
+    class ChatOpenAI(_ScriptedLLM):
+        def __init__(self, outcomes: list[Any]) -> None:
+            super().__init__(outcomes)
+            self.model_name = model
+            self.extra_body = (
+                None
+                if thinking is None
+                else {"chat_template_kwargs": {"enable_thinking": thinking}}
+            )
+            self.max_tokens = 32768
+            self.copies: list[Any] = []
+            self.copy_outcomes: list[Any] = []
+
+        def model_copy(self, update: dict) -> Any:
+            copy = ChatOpenAI(self.copy_outcomes)
+            for key, value in update.items():
+                setattr(copy, key, value)
+            self.copies.append(copy)
+            return copy
+
+    return ChatOpenAI(outcomes)
+
+
+def test_a_call_that_spends_its_tokens_thinking_retries_with_thinking_off(
+    waits: list[float],
+) -> None:
+    """The same question once made 18 such calls at ~100s each and got no SQL."""
+    llm = _scripted_chat_openai([LengthFinishReasonError(content="")])
+    llm.copy_outcomes = [_Answer(value="ok")]
+
+    result = safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    assert result.value == "ok"
+    (fallback,) = llm.copies
+    assert fallback.extra_body == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert fallback.max_tokens == llm_invoke.LLM_THINKING_FALLBACK_MAX_TOKENS
+    assert llm.calls == 1 and fallback.calls == 1
+
+
+def test_the_fallback_asks_for_json_schema(waits: list[float]) -> None:
+    """Without thinking, SQL generation as a tool call wrote its free-text field to 32k
+    on 9 of 10 calls; as json_schema it finished all 10 in at most ~1k tokens."""
+    llm = _scripted_chat_openai([LengthFinishReasonError(content="")])
+    llm.copy_outcomes = [_Answer(value="ok")]
+
+    safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    (fallback,) = llm.copies
+    assert fallback.structured_kwargs == [{}]
+
+
+def test_a_cut_off_answer_is_not_a_thinking_failure(waits: list[float]) -> None:
+    """Text came back, so thinking finished; the answer stalled. Retry as is."""
+    llm = _scripted_chat_openai(
+        [LengthFinishReasonError(content='{"value": "o'), _Answer(value="ok")]
+    )
+
+    safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+
+    assert llm.copies == [] and llm.calls == 2
+
+
+def test_no_fallback_where_thinking_cannot_be_turned_off(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        llm_invoke._without_thinking(_scripted_chat_openai([], model="openai/gpt-5"))
+        is None
+    )
+    assert (
+        llm_invoke._without_thinking(_scripted_chat_openai([], thinking=False)) is None
+    )
+    assert llm_invoke._without_thinking(_ScriptedLLM([])) is None  # type: ignore[arg-type]
+
+    monkeypatch.setattr(llm_invoke, "LLM_THINKING_FALLBACK", False)
+    assert llm_invoke._without_thinking(_scripted_chat_openai([])) is None
+
+
+class AuthenticationError(Exception):
+    """Stand-in for openai's: a 401 whose message names the gateway."""
+
+    status_code = 401
+
+
+class RateLimitError(Exception):
+    status_code = 429
+
+
+def test_a_client_error_is_not_waited_out(waits: list[float]) -> None:
+    """A bad key fails at once, though its message mentions litellm."""
+    llm = _ScriptedLLM([AuthenticationError("litellm.AuthenticationError: bad key")])
+
+    with pytest.raises(AuthenticationError):
+        safe_invoke_with_structured_output(llm, _QUESTION, _Answer)  # type: ignore[arg-type]
+    assert llm.calls == 1 and waits == []
+
+
+def test_a_direct_429_is_waited_out(waits: list[float]) -> None:
+    llm = _ScriptedLLM([RateLimitError("429"), _Answer(value="ok")])
+
+    assert safe_invoke_with_structured_output(llm, _QUESTION, _Answer).value == "ok"  # type: ignore[arg-type]
+    assert waits == [2]

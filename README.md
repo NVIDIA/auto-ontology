@@ -94,6 +94,12 @@ more, with the same fallback:
 | `MAX_TOKENS` | integer          | Replaces every call's completion-token cap (300 to 8192 by default). Raise it for reasoning models, whose thinking counts against the cap.                                                                |
 | `THINKING`   | `on`, `off`      | Sent as `chat_template_kwargs={"enable_thinking": ...}`. Unset sends nothing. Set it per triplet: a gateway fronting Claude may reject the field.                                                         |
 
+LLM calls retry rate limits, server errors and dropped connections for about a
+minute with exponential backoff (`LLM_TRANSIENT_RETRIES`,
+`LLM_RETRY_MAX_BACKOFF_S`). A nemotron call that runs out of tokens while
+thinking is retried with thinking off (`LLM_THINKING_FALLBACK`,
+`LLM_THINKING_FALLBACK_MAX_TOKENS`). See `.env.example`.
+
 ## Deployment
 
 ### Prerequisites
