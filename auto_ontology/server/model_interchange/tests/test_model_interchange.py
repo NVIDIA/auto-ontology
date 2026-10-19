@@ -47,6 +47,7 @@ from auto_ontology.server.model_interchange.schemas import (
     ExportRequest,
     AutoOntologyModelDocument,
     ModelFormat,
+    ModelSemanticFk,
 )
 
 
@@ -211,6 +212,15 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
 
 
+def test_semantic_fk_without_join_path_flag_defaults_to_enabled() -> None:
+    semantic_fk = ModelSemanticFk(
+        column_id="source-column",
+        column_attribute_id="target-attribute",
+    )
+
+    assert semantic_fk.use_in_join_paths is True
+
+
 def test_assemble_export_document_keeps_sample_value_types() -> None:
     """An integer column must leave as numbers, or a re-import cannot restore them."""
     rows = _export_rows()
@@ -292,7 +302,11 @@ def _in_scope_export_rows() -> dict:
     ]
     rows["joins"] = []
     rows["semantic_fks"] = [
-        {"column_id": "col-2", "column_attribute_id": "attr-1"},
+        {
+            "column_id": "col-2",
+            "column_attribute_id": "attr-1",
+            "use_in_join_paths": False,
+        },
     ]
     return rows
 
@@ -326,6 +340,7 @@ def test_assemble_export_document_keeps_in_scope_references() -> None:
 
     assert document.data_layer.foreign_keys[0].source_column_id == "col-2"
     assert document.semantic_layer.semantic_fks[0].column_attribute_id == "attr-1"
+    assert document.semantic_layer.semantic_fks[0].use_in_join_paths is False
     assert document.semantic_layer.terms[0].represents == ["tbl-1"]
 
 

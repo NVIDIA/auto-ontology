@@ -112,11 +112,18 @@ class World:
             )
         return aid
 
-    def references(self, column: str, attribute: str) -> None:
+    def references(
+        self,
+        column: str,
+        attribute: str,
+        *,
+        use_in_join_paths: bool = True,
+    ) -> None:
         _link(
             s.column__semantic_fk,
             column_id=self.columns[column],
             attribute_id=self.attributes[attribute],
+            use_in_join_paths=use_in_join_paths,
         )
 
 
@@ -195,6 +202,26 @@ def test_connected_junctions_require_at_least_one_table() -> None:
     assert a.find_connected_junction_tables([]) == ([], [])
 
 
+def test_connected_junctions_ignore_unselected_semantic_fks(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("customer_tag")
+    world.column("customer_tag", "customer_id")
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["customer_tag"])
+        .values(is_junction_table=True)
+    )
+    world.references(
+        "customer_tag.customer_id",
+        "customer-id",
+        use_in_join_paths=False,
+    )
+
+    assert a.find_connected_junction_tables([world.tables["customers"]]) == ([], [])
+
+
 @pytest.fixture
 def joined(world):
     """`orders.customer_id` references the attribute `customers.id` owns."""
@@ -223,6 +250,66 @@ def test_a_two_column_join_is_one_hop(joined) -> None:
             "target_column": "id",
         }
     ]
+
+
+def test_join_path_uses_only_the_selected_parallel_semantic_fk(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("orders")
+    world.column("orders", "billing_customer_id", 1)
+    world.column("orders", "customer_id", 2)
+    world.references(
+        "orders.billing_customer_id",
+        "customer-id",
+        use_in_join_paths=False,
+    )
+    world.references("orders.customer_id", "customer-id")
+
+    hops = a.find_join_path(
+        world.columns["orders.billing_customer_id"],
+        world.columns["customers.id"],
+    )
+
+    assert len(hops) == 1
+    assert hops[0]["source_column"] == "customer_id"
+    assert hops[0]["target_column"] == "id"
+
+
+def test_setting_join_default_disables_every_other_group_member(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.attribute("customer-id", owner="customers.id")
+    world.table("orders")
+    world.column("orders", "billing_customer_id", 1)
+    world.column("orders", "customer_id", 2)
+    world.references("orders.billing_customer_id", "customer-id")
+    world.references("orders.customer_id", "customer-id")
+
+    group = a.fetch_semantic_fk_join_groups(f"{world.prefix}-shopdb")
+    assert {
+        (row["source_column_name"], row["target_column_name"]) for row in group
+    } == {
+        ("billing_customer_id", "id"),
+        ("customer_id", "id"),
+    }
+
+    a.set_semantic_fk_join_default(
+        world.tables["orders"],
+        world.attributes["customer-id"],
+        world.columns["orders.customer_id"],
+    )
+
+    rows = store().query_read(
+        select(
+            s.column__semantic_fk.c.column_id,
+            s.column__semantic_fk.c.use_in_join_paths,
+        ).where(s.column__semantic_fk.c.attribute_id == world.attributes["customer-id"])
+    )
+    assert {row["column_id"]: row["use_in_join_paths"] for row in rows} == {
+        world.columns["orders.billing_customer_id"]: False,
+        world.columns["orders.customer_id"]: True,
+    }
 
 
 def test_two_referencing_tables_join_through_the_attribute_owner(joined) -> None:
@@ -913,6 +1000,26 @@ def test_shared_hub_bridge_is_order_independent(hub_and_spokes) -> None:
         hub_and_spokes.columns["spoke_b.hub_id"],
         hub_and_spokes.columns["spoke_a.hub_id"],
     ) == {"hub_table": "hub", "hub_column": "id"}
+
+
+def test_hub_helpers_ignore_unselected_semantic_fks(hub_and_spokes) -> None:
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id
+            == hub_and_spokes.columns["spoke_b.hub_id"]
+        )
+        .values(use_in_join_paths=False)
+    )
+
+    assert (
+        a.find_shared_hub_bridge(
+            hub_and_spokes.columns["spoke_a.hub_id"],
+            hub_and_spokes.columns["spoke_b.hub_id"],
+        )
+        == {}
+    )
+    assert a.find_anchor_hub_siblings(hub_and_spokes.tables["spoke_a"]) == ([], 0)
 
 
 def test_shared_hub_bridge_returns_empty_for_the_same_column_twice(

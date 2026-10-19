@@ -115,6 +115,7 @@ class ModelTerm(BaseModel):
 class ModelSemanticFk(BaseModel):
     column_attribute_id: str
     column_id: str
+    use_in_join_paths: bool = True
 
 
 class ModelSqlAttribute(BaseModel):
