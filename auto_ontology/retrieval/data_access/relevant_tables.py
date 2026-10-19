@@ -61,7 +61,11 @@ def _parse_table_text(text: str) -> dict:
             # commas in nested brackets of any kind (Tuple(Decimal(12,2), String),
             # map<string,int>), and no SQL type holds a brace. It may also be
             # empty: the table text writes "data_type: " for a column without one.
-            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*(.*?))?(?:,\s*description:\s*([^}]+))?\}"
+            # The description is found by the exact ", description: " the table
+            # text writes, since a struct may have a field of that name and
+            # connectors spell struct types without spaces
+            # (struct<a:int,description:string>).
+            column_pattern = r"\{name:\s*([^,}]+)(?:,\s*data_type:\s*(.*?))?(?:, description: ([^}]+))?\}"
             columns = []
             for match in re.finditer(column_pattern, columns_str):
                 column = {

@@ -149,6 +149,7 @@ def test_normalize_merges_rich_nullability_into_parsed_columns() -> None:
         "Tuple(Decimal(12,2), String)",
         "map<string,int>",
         "struct<a:int,b:string>",
+        "struct<a:int,description:string>",
         "text",
     ],
 )
@@ -195,6 +196,11 @@ def test_every_column_the_table_text_writes_is_read_back() -> None:
             "description": "Item, quantity",
         },
         {"column_name": "price", "data_type": "Tuple(Decimal(12,2), String)"},
+        {
+            "column_name": "meta",
+            "data_type": "struct<a:int,description:string>",
+            "description": "Extra",
+        },
         {"column_name": "note", "data_type": None},
     ]
     text = build_table_text(
@@ -218,5 +224,10 @@ def test_every_column_the_table_text_writes_is_read_back() -> None:
             "description": "Item, quantity",
         },
         {"name": "price", "data_type": "Tuple(Decimal(12,2), String)"},
+        {
+            "name": "meta",
+            "data_type": "struct<a:int,description:string>",
+            "description": "Extra",
+        },
         {"name": "note"},
     ]
