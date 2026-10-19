@@ -43,7 +43,19 @@ class StrictLLMOutputModel(BaseModel):
         return data
 
 
-RETRY_MAX_ATTEMPTS = 3
+# Three attempts with the doubling below spends about eight seconds before
+# giving up: the right budget for a transient blip, and hopeless against a
+# saturated endpoint. Configurable because the two callers want opposite
+# things. A server answering a user would rather fail fast than hang; a
+# benchmark would rather wait a minute than record a wrong answer, because a
+# rate-limited question comes back with no SQL and scores exactly like the
+# model being wrong. A full BIRD run was lost to that -- 31,872 429s read as
+# 1,500 wrong answers and a -1110 delta.
+RETRY_MAX_ATTEMPTS = int(os.environ.get("LLM_RETRY_MAX_ATTEMPTS", "3"))
+
+#: Ceiling on any single backoff sleep. Without one, doubling runs to hours as
+#: soon as the attempt budget is raised.
+RETRY_MAX_BACKOFF_S = float(os.environ.get("LLM_RETRY_MAX_BACKOFF_S", "45"))
 LLM_INVOKE_TIMEOUT_S = int(os.environ.get("LLM_INVOKE_TIMEOUT_S", "120"))
 
 # Concurrent LLM requests are unbounded here by default. A process-wide cap used
@@ -388,7 +400,7 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
         except Exception as e:
             is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                wait = min(2 ** (attempt + 1) + random.uniform(0, 1), RETRY_MAX_BACKOFF_S)
                 logger.warning(
                     "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
                     attempt + 1,
@@ -400,6 +412,47 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
                 continue
             raise
     raise RuntimeError("safe_invoke_text exhausted retries")
+
+
+def safe_invoke_messages(llm: BaseChatModel, messages: list[BaseMessage]) -> BaseMessage:
+    """Invoke *llm* on a full message list and return the raw reply.
+
+    The structured wrappers below own the response shape, which is wrong for a
+    tool-calling loop: there the reply is either a tool call or an answer, and
+    the caller has to see which. This keeps the retry/backoff and the inflight
+    guard and hands back the ``AIMessage`` untouched.
+    """
+    current_messages = _ensure_non_system_message(list(messages))
+
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            with _inflight_guard():
+                return llm.invoke(current_messages)
+        except _requests.exceptions.ReadTimeout:
+            logger.error(
+                "LLM invoke timed out after %ds on attempt %d/%d",
+                LLM_INVOKE_TIMEOUT_S,
+                attempt + 1,
+                RETRY_MAX_ATTEMPTS,
+            )
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                time.sleep(2 ** (attempt + 1) + random.uniform(0, 1))
+                continue
+            raise
+        except Exception as e:
+            if _is_retryable(e) and attempt < RETRY_MAX_ATTEMPTS - 1:
+                wait = min(2 ** (attempt + 1) + random.uniform(0, 1), RETRY_MAX_BACKOFF_S)
+                logger.warning(
+                    "Retryable LLM error on attempt %d/%d — retrying in %.1fs: %s",
+                    attempt + 1,
+                    RETRY_MAX_ATTEMPTS,
+                    wait,
+                    str(e)[:120],
+                )
+                time.sleep(wait)
+                continue
+            raise
+    raise RuntimeError("safe_invoke_messages exhausted retries")
 
 
 def safe_invoke_with_structured_output(
@@ -426,7 +479,7 @@ def safe_invoke_with_structured_output(
                 schema_name,
             )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                wait = min(2 ** (attempt + 1) + random.uniform(0, 1), RETRY_MAX_BACKOFF_S)
                 time.sleep(wait)
                 continue
             raise
@@ -464,7 +517,7 @@ def safe_invoke_with_structured_output(
         except Exception as e:
             is_retryable = _is_retryable(e)
             if is_retryable and attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                wait = min(2 ** (attempt + 1) + random.uniform(0, 1), RETRY_MAX_BACKOFF_S)
                 logger.warning(
                     "Retryable LLM error (endpoint saturated/rate-limited) on attempt "
                     "%d/%d for %s — retrying in %.1fs",
@@ -490,7 +543,7 @@ def safe_invoke_with_structured_output(
                 RETRY_MAX_ATTEMPTS,
             )
             if attempt < RETRY_MAX_ATTEMPTS - 1:
-                wait = 2 ** (attempt + 1) + random.uniform(0, 1)
+                wait = min(2 ** (attempt + 1) + random.uniform(0, 1), RETRY_MAX_BACKOFF_S)
                 time.sleep(wait)
             continue
         if isinstance(result, schema):

@@ -20,7 +20,10 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 from auto_ontology.retrieval.text_to_sql.node_labels import NODE_LABELS
 from auto_ontology.retrieval.text_to_sql.state import AgentState, TextToSQLPayload
 from auto_ontology.retrieval.text_to_sql.prompts import main_system_prompt_template
-from auto_ontology.utils.llm_invoke import get_llm_client
+from auto_ontology.utils.llm_invoke import (
+    get_llm_client,
+    get_non_reasoning_llm_client,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,10 +44,25 @@ class AgentRunError(RuntimeError):
 
 
 try:
-    llm_client = get_llm_client()
-except ValueError as e:
-    logger.error("Failed to initialize LLM client: %s", e)
-    llm_client = None
+    reasoning_llm_client = get_llm_client()
+except (ValueError, EnvironmentError) as e:
+    logger.error("Failed to initialize reasoning LLM client: %s", e)
+    reasoning_llm_client = None
+
+# Everything but SQL generation runs on the cheap model, as it does on main.
+# Falling back to the reasoning client rather than to None when the
+# non-reasoning model is unconfigured: an unset NON_REASONING_API_KEY should
+# leave the pipeline running exactly as it did before this split, not hand
+# every node a null client.
+try:
+    llm_client = get_non_reasoning_llm_client()
+except (ValueError, EnvironmentError) as e:
+    logger.info(
+        "No non-reasoning LLM client (%s); running every node on the "
+        "reasoning model.",
+        e,
+    )
+    llm_client = reasoning_llm_client
 
 graph = create_graph()
 app = graph.compile()
@@ -130,6 +148,7 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
 
     state: dict = {
         "llm": llm_client,
+        "reasoning_llm": reasoning_llm_client,
         "initial_question": submitted_question,
         "evidence": payload.get("evidence") or "",
         "sql_examples": list(payload.get("sql_examples") or []),
@@ -415,5 +434,6 @@ __all__ = [
     "app",
     "graph",
     "llm_client",
+    "reasoning_llm_client",
     "AgentRunError",
 ]

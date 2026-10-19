@@ -166,6 +166,7 @@ def _get_node_ids_for_embedding_update(
 def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
     """Delete stale VDB rows, re-embed, and append Table/Column rows."""
     from auto_ontology.utils import get_embed_params
+    from auto_ontology.utils.embedding import _embed_with_retry
     from auto_ontology.vdb import get_data_vdb
     from nemo_retriever.models.inference.main_text_embed import (
         TextEmbeddingConfig,
@@ -202,25 +203,35 @@ def _refresh_vdb_embeddings(node_ids: list[str]) -> None:
         return
 
     embed_params = get_embed_params()
-    embedded, _ = create_text_embeddings_for_df(
-        pd.DataFrame(records),
-        task_config={
-            "api_key": embed_params.api_key,
-            "endpoint_url": embed_params.embed_invoke_url,
-            "model_name": embed_params.model_name,
-        },
-        transform_config=TextEmbeddingConfig(
-            embed_modality=embed_params.embed_modality,
-        ),
-    )
+
+    # Through the same retry the catalog embeds use. The library catches per
+    # frame, so one refused request zeroes every row it was given, and a
+    # transient 5xx here aborts a semantic compile that has already paid for
+    # its descriptions.
+    def _embed(part: "pd.DataFrame") -> "pd.DataFrame | None":
+        frame, _ = create_text_embeddings_for_df(
+            part,
+            task_config={
+                "api_key": embed_params.api_key,
+                "endpoint_url": embed_params.embed_invoke_url,
+                "model_name": embed_params.model_name,
+            },
+            transform_config=TextEmbeddingConfig(
+                embed_modality=embed_params.embed_modality,
+            ),
+        )
+        return frame
+
+    frame = pd.DataFrame(records)
+    embedded = _embed_with_retry(_embed, frame, label=f"catalog {database_name}")
     rows = [
         row
-        for row in embedded.to_dict(orient="records")
+        for row in (embedded.to_dict(orient="records") if embedded is not None else [])
         if (row.get("metadata") or {}).get("embedding")
     ]
     if not rows:
         raise RuntimeError(
-            f"Embedding step produced 0/{len(embedded)} tabular rows with embeddings."
+            f"Embedding step produced 0/{len(frame)} tabular rows with embeddings."
         )
 
     vdb = get_data_vdb()

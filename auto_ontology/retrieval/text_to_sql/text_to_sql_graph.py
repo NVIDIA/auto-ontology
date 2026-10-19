@@ -47,6 +47,10 @@ from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
 from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
+from auto_ontology.retrieval.text_to_sql.agents.sql_agent_construction import (
+    SQLAgentConstructionAgent,
+    SQLDeepAgentConstructionAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -66,6 +70,10 @@ from auto_ontology.retrieval.text_to_sql.db_probe.config import (
     is_db_probe_proactive,
     is_db_probe_jsonb_path_check,
     is_db_probe_join_path_check,
+)
+from auto_ontology.retrieval.text_to_sql.sql_agent.config import (
+    is_sql_agent_enabled,
+    is_sql_deep_agent_enabled,
 )
 
 logger = logging.getLogger(__name__)
@@ -366,9 +374,25 @@ def create_graph():
         if combined_precheck_enabled
         else None
     )
+    # Agentic construction swaps the agent behind this node rather than adding
+    # a second one. Four routes already target "construct_sql_from_candidates",
+    # and a parallel node would mean keeping all of them, the resume path and
+    # the node labels in sync for what is one A/B switch.
+    # Most specific flag wins, so an arm can be switched on without having to
+    # remember to switch the previous one off.
+    if is_sql_deep_agent_enabled():
+        construction_agent = SQLDeepAgentConstructionAgent()
+    elif is_sql_agent_enabled():
+        construction_agent = SQLAgentConstructionAgent()
+    else:
+        construction_agent = sql_from_candidates_agent
+    logger.info(
+        "Text-to-SQL graph: SQL construction via %s",
+        type(construction_agent).__name__,
+    )
     construct_sql_from_candidates_node = _make_node(
         "construct_sql_from_candidates",
-        agent_wrapper(sql_from_candidates_agent),
+        agent_wrapper(construction_agent),
     )
     reconstruct_sql_node = _make_node(
         "reconstruct_sql", agent_wrapper(sql_reconstruction_agent)

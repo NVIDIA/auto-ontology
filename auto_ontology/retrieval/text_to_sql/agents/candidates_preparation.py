@@ -116,6 +116,29 @@ _RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
 # DB round trip, only extra prompt tokens.
 _RELEVANCE_FILTER_MAX_COLS = 25
 
+# On by default, so existing deployments keep filtering. Turning it off hands
+# SQL generation the whole candidate pool.
+#
+# Worth having as a switch because the filter's cost and its damage are badly
+# matched. Measured over BIRD dev: it drops nothing on 47% of questions and a
+# single table on another 37%, mean 0.7 -- but those drops account for 42 of
+# the 96 questions whose gold table never reaches the agent, and a question
+# missing a gold table scores 45% against 78% for the rest. The pool is small
+# enough (mean 2.8 tables, max 8) that keeping all of it is not the flood the
+# filter exists to prevent.
+_RELEVANCE_FILTER_ENABLED = os.environ.get(
+    "RELEVANCE_FILTER_ENABLED", "true"
+).strip().lower() in ("1", "true", "yes")
+
+# Tables each search query may contribute to the candidate pool. Zero keeps
+# the derived value, which is what every run so far has used.
+#
+# Worth a knob because the derived value collapses to 1 as soon as there are
+# five search queries, and over BIRD dev that leaves 54 of the 96 questions
+# whose gold table never reaches the agent with a table that was never
+# retrieved in the first place -- not dropped later, never seen.
+_TABLES_PER_SEARCH_QUERY = int(os.environ.get("TABLES_PER_SEARCH_QUERY", "0") or 0)
+
 # Off by default. find_anchor_hub_siblings() pulls in tables that share a
 # hub with the anchor's own table via FK — see its docstring for why. Opt-in
 # via env flag (this deployment's .env sets it to true) so new/other
@@ -896,7 +919,14 @@ class CandidatePreparationAgent(BaseAgent):
         intended to run in a background thread in parallel with it.
         """
         search_queries = [question] + list(entities)
-        k_per_query = max(1, SQL_GEN_MAX_ENTITIES // len(search_queries))
+        # Splitting the entity budget across the queries leaves k=1 whenever
+        # there are five or more of them, so each search contributes its single
+        # best table and the pool comes out ~2.8 tables wide. Overridable on
+        # its own because ``SQL_GEN_MAX_ENTITIES`` also bounds entity
+        # extraction, and raising it to widen retrieval would move both.
+        k_per_query = _TABLES_PER_SEARCH_QUERY or max(
+            1, SQL_GEN_MAX_ENTITIES // len(search_queries)
+        )
 
         def _fetch_tables_for_query(query: str) -> list[dict]:
             return get_relevant_tables(
@@ -1015,6 +1045,13 @@ class CandidatePreparationAgent(BaseAgent):
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
         if len(tables) <= 2:
+            return tables, ""
+
+        if not _RELEVANCE_FILTER_ENABLED:
+            self.logger.info(
+                "Relevance filter disabled — passing all %d candidate tables through",
+                len(tables),
+            )
             return tables, ""
 
         try:

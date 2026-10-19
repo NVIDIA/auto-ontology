@@ -67,6 +67,10 @@ class AgentState(TypedDict):
     """State object passed through the LangGraph."""
 
     llm: ChatNVIDIA
+    #: The reasoning model, for the one step that needs it. ``llm`` above is
+    #: the cheap model every other node runs on, so a node wanting the strong
+    #: one must ask for this explicitly — see ``main._build_state``.
+    reasoning_llm: NotRequired[ChatNVIDIA]
     initial_question: str
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]

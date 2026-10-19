@@ -11,6 +11,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "httpx>=0.28.1",
     "hvac>=2.4.0",
+    "deepagents>=0.7.21",
     "langchain-openai>=1.6.0",
     "langgraph>=1.2.11",
     "nemo-retriever>=26.8.1",
