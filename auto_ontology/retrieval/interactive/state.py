@@ -114,6 +114,9 @@ class InteractiveSessionState:
         default_factory=list
     )  # injected verbatim into evidence, computed once
     _ambiguity_resolved: bool = False  # guards the once-only resolution call — an empty notes list still means "already ran"
+    # Whether the last non-debug submit returned ``"float"`` or ``"decimal"``
+    # numbers (None: neither). The debug retry uses the other one.
+    first_submit_numeric_kind: Optional[str] = None
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )

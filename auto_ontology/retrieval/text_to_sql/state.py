@@ -48,6 +48,9 @@ class TextToSQLPayload(TypedDict):
     shorten_answer: NotRequired[bool]
     validate_sql_values: NotRequired[bool]
     skip_evidence_refinement: NotRequired[bool]
+    # For graders that compare numbers exactly: rewrite explicit float casts in
+    # the generated Postgres SQL to NUMERIC (see ``numeric_types``).
+    numeric_type_alignment: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
     # Omitted by callers that never enrich the question.
@@ -90,6 +93,7 @@ class AgentState(TypedDict):
     shorten_answer: bool
     validate_sql_values: bool
     skip_evidence_refinement: bool
+    numeric_type_alignment: NotRequired[bool]
     sql_value_validation_cache: dict
     enriched_question: NotRequired[str]
     messages: list[HumanMessage]

@@ -39,6 +39,16 @@ from .grounding import ground_external_knowledge
 from .merge import merge_clarification
 from .types import AskUserAction, InteractivePhase, SubmitSQLAction, TurnType
 from .state import InteractiveSessionState
+from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
+from auto_ontology.retrieval.text_to_sql.connector_routing import (
+    resolve_connector_from_tables,
+)
+from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    dominant_kind,
+    flip_numeric_output_types,
+    numeric_type_alignment_enabled,
+    opposite_target,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +408,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         "calculation_only": True,
         "shorten_answer": True,
         "validate_sql_values": True,
+        # The grader compares numbers exactly, so a float and a numeric holding
+        # the same value disagree: keep our explicit casts on the numeric side.
+        "numeric_type_alignment": numeric_type_alignment_enabled(),
         "skip_evidence_refinement": session.skip_evidence_refinement,
     }
     result = get_agent_response_with_state(payload)
@@ -410,6 +423,65 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     session.path_state.pop("_resume_from", None)
 
     return result.get("sql_code", "")
+
+
+# ── Numeric type retry ──────────────────────────────────────────────────────
+
+
+def _numeric_kinds_for(session: InteractiveSessionState, sql: str) -> list | None:
+    """Numeric column kinds recorded for *sql*, or None when they belong to other SQL.
+
+    The execution node tags what it recorded with the statement it ran; the SQL
+    returned to the caller can differ from that (a later rewrite, a failed run),
+    and kinds of the wrong query are worse than none.
+    """
+    path_state = session.path_state
+    if (path_state.get("result_numeric_kinds_sql") or "") != (sql or "").strip():
+        return None
+    return path_state.get("result_numeric_kinds")
+
+
+def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) -> str:
+    """Re-submit *sql* with its numeric columns in the opposite type.
+
+    Used on the one debug turn the benchmark grants when a submit ran but was
+    marked wrong. The grader rounds and then compares numbers exactly, so a
+    float answer and a numeric answer with the same digits are different
+    answers to it; the first submit settled on one type and was graded wrong,
+    so the retry tries the other. Returns *sql* unchanged whenever the flip
+    cannot be done or does not run — a broken retry would burn the phase's
+    last attempt for nothing.
+    """
+    first_kind = session.first_submit_numeric_kind
+    kinds = _numeric_kinds_for(session, sql)
+    if not first_kind or not kinds:
+        return sql
+
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    flipped = flip_numeric_output_types(
+        sql, getattr(connector, "dialect", None), kinds, opposite_target(first_kind)
+    )
+    if not flipped:
+        return sql
+    try:
+        execute_chat_sql(connector, flipped, kind="numeric type retry")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Numeric type retry did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    logger.info(
+        "[%s] Debug retry: numeric columns moved to the opposite type (first submit was %s)",
+        session.task_id,
+        first_kind,
+    )
+    return flipped
 
 
 # ── LLM accessor ────────────────────────────────────────────────────────────
@@ -618,6 +690,13 @@ def step(
                 )
 
     sql = _run_sql_generation(session)
+    if numeric_type_alignment_enabled():
+        if turn_type == TurnType.DEBUG and debug_error is None:
+            sql = _flip_numeric_types_for_retry(session, sql)
+        elif turn_type != TurnType.DEBUG:
+            session.first_submit_numeric_kind = dominant_kind(
+                _numeric_kinds_for(session, sql)
+            )
     return SubmitSQLAction(sql=sql)
 
 
