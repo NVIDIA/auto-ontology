@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -16,6 +18,7 @@ import pytest
 pytest.importorskip("psycopg")
 
 from sqlalchemy import select  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
 
 from auto_ontology.catalog.store.rows import upsert_row  # noqa: E402
 from auto_ontology.catalog.write import populate_pks  # noqa: E402
@@ -27,17 +30,17 @@ _PK_COLUMNS = ["table_schema", "table_name", "column_name", "ordinal_position"]
 
 
 @pytest.fixture(scope="module", autouse=True)
-def require_schema():
+def require_schema() -> None:
     if not os.environ.get("POSTGRES_USER"):
         pytest.skip("POSTGRES_* not set")
     try:
         store().query_read("SELECT 1 FROM catalog_database LIMIT 1")
-    except Exception as exc:  # noqa: BLE001
-        pytest.skip(f"catalog schema not reachable: {exc}")
+    except OperationalError as exc:
+        pytest.skip(f"catalog database not reachable: {exc}")
 
 
 @pytest.fixture
-def db_name():
+def db_name() -> Iterator[str]:
     name = f"pk-{uuid.uuid4().hex[:8]}"
     yield name
     store().query_write(
@@ -61,7 +64,7 @@ def _stored_pk(table_id: str) -> list[str] | None:
     return rows[0]["pk"]
 
 
-def test_a_key_listed_alphabetically_is_stored_in_key_order(db_name) -> None:
+def test_a_key_listed_alphabetically_is_stored_in_key_order(db_name: str) -> None:
     """Snowflake's ``SHOW PRIMARY KEYS`` lists a table's key columns by name.
 
     These are the rows it returned for TPC-H, whose ``LINEITEM`` is keyed
@@ -86,7 +89,7 @@ def test_a_key_listed_alphabetically_is_stored_in_key_order(db_name) -> None:
 
 
 def test_a_sqlite_key_declared_out_of_column_order_is_stored_in_key_order(
-    db_name, tmp_path
+    db_name: str, tmp_path: Path
 ) -> None:
     """SQLite reports a table's key columns in the table's column order."""
     path = tmp_path / "shop.sqlite"
@@ -104,7 +107,7 @@ def test_a_sqlite_key_declared_out_of_column_order_is_stored_in_key_order(
     assert _stored_pk(ids["line"]) == ["order_id", "item_id"]
 
 
-def test_rows_without_a_position_keep_the_order_they_arrived_in(db_name) -> None:
+def test_rows_without_a_position_keep_the_order_they_arrived_in(db_name: str) -> None:
     ids = _tables(db_name, "s", "orders")
     pks = pd.DataFrame(
         [("s", "orders", "region"), ("s", "orders", "id")],
