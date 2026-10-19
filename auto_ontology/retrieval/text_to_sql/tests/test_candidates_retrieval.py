@@ -22,6 +22,7 @@ def _hit(
     *,
     query_entity: str | None = None,
     source: str | None = None,
+    table_id: str | None = None,
 ) -> dict[str, Any]:
     hit: dict[str, Any] = {
         "id": hit_id,
@@ -34,6 +35,8 @@ def _hit(
         hit["query_entity"] = query_entity
     if source is not None:
         hit["source"] = source
+    if table_id is not None:
+        hit["table_id"] = table_id
     return hit
 
 
@@ -350,3 +353,66 @@ def test_full_evidence_adds_column_attribute_vector_results(
     assert hits[0]["id"] == "eligible-rate"
     assert hits[0]["query_evidence"] == evidence
     assert hits[0]["query_entities"] == ["eligible rate"]
+
+
+def test_evidence_first_search_scopes_then_falls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    evidence = "Revenue is the eligible amount."
+    calls: list[tuple[str, str | None, tuple[str, ...]]] = []
+
+    def fake_search(
+        _retriever: object,
+        query: str,
+        label: str,
+        _k: int,
+        database_name: str | None = None,
+        table_ids: list[str] | None = None,
+    ) -> list[dict]:
+        if label != LABEL_COLUMN_ATTRIBUTE:
+            return []
+        calls.append((query, database_name, tuple(table_ids or [])))
+        if query == "eligible amount":
+            return [_hit("revenue-col", "db-a", 0.1, table_id="orders")]
+        if query == "region" and table_ids == ["orders"]:
+            return [_hit("region-col", "db-a", 0.2, table_id="orders")]
+        if query == "customer" and not table_ids:
+            return [_hit("customer-col", "db-a", 0.3, table_id="customers")]
+        return []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_map_evidence_to_entities",
+        lambda *_: [("eligible amount", ["revenue"])],
+    )
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (custom, sql),
+    )
+    monkeypatch.setattr(
+        candidates_retrieval, "custom_analysis_exists", lambda *_: False
+    )
+
+    result = CandidateRetrievalAgent().execute(
+        _state(
+            ["revenue", "region", "customer"],
+            target_db="db-a",
+            evidence=evidence,
+        )
+    )
+
+    assert ("eligible amount", "db-a", ()) in calls
+    assert ("region", "db-a", ("orders",)) in calls
+    assert ("customer", "db-a", ("orders",)) in calls
+    assert ("customer", "db-a", ()) in calls
+    assert ("region", "db-a", ()) not in calls
+
+    hits = {
+        hit["id"]: hit for hit in result["path_state"]["retrieved_column_attributes"]
+    }
+    assert set(hits) == {"revenue-col", "region-col", "customer-col"}
+    assert hits["revenue-col"]["query_entities"] == ["revenue"]
+    assert hits["region-col"]["query_entities"] == ["region"]
+    assert hits["customer-col"]["query_entities"] == ["customer"]

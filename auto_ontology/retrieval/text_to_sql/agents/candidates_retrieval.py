@@ -43,6 +43,7 @@ from auto_ontology.retrieval.text_to_sql.models import (
     ColumnAttributeSpec,
     CombinedCandidateFilterModel,
     CustomAnalysisFilterModel,
+    EvidenceEntityMappingModel,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -63,6 +64,7 @@ def _search_by_label(
     label: str,
     k: int,
     database_name: str | None = None,
+    table_ids: list[str] | None = None,
 ) -> list[dict]:
     """Return up to *k* VDB hits for *label*."""
     try:
@@ -73,6 +75,7 @@ def _search_by_label(
                 label_filter=[label],
                 per_label_k=k,
                 database_name=database_name,
+                table_ids=table_ids,
             )
         )
     except Exception:
@@ -97,6 +100,9 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         qe = hit.get("query_entity")
         if qe:
             entities_by_id.setdefault(key, set()).add(str(qe))
+        for entity in hit.get("query_entities") or []:
+            if entity:
+                entities_by_id.setdefault(key, set()).add(str(entity))
         evidence_query = hit.get("query_evidence")
         if evidence_query:
             evidence_by_id[key] = str(evidence_query)
@@ -151,9 +157,15 @@ def _select_candidate_database(
         database_name = _database_name(hit)
         if database_name is None:
             continue
-        entity = str(hit.get("query_entity") or "").strip()
-        if entity:
-            stats[database_name]["entities"].add(entity)
+        entities = {
+            str(entity).strip()
+            for entity in [
+                hit.get("query_entity"),
+                *(hit.get("query_entities") or []),
+            ]
+            if str(entity or "").strip()
+        }
+        stats[database_name]["entities"].update(entities)
         stats[database_name]["hit_count"] += 1
         stats[database_name]["score_total"] += _score(hit)
 
@@ -186,16 +198,84 @@ def _filter_hits_to_database(hits: list[dict], database_name: str) -> list[dict]
 
 def _covered_entities(column_hits: list[dict]) -> set[str]:
     """Return entities represented by the retained ColumnAttribute hits."""
-    return {
-        str(hit.get("query_entity")).strip()
-        for hit in column_hits
-        if str(hit.get("query_entity") or "").strip()
-    }
+    covered: set[str] = set()
+    for hit in column_hits:
+        entity = str(hit.get("query_entity") or "").strip()
+        if entity:
+            covered.add(entity)
+        covered.update(
+            str(item).strip()
+            for item in (hit.get("query_entities") or [])
+            if str(item or "").strip()
+        )
+    return covered
 
 
 # ---------------------------------------------------------------------------
 # LLM intent filter
 # ---------------------------------------------------------------------------
+
+_EVIDENCE_MAPPING_PROMPT = """\
+Split the supplied evidence into concise fragments for semantic column search,
+then associate each fragment with every extracted entity it directly supports.
+
+Use entity strings exactly as supplied. Partial coverage is expected. Keep useful
+evidence even when it does not match an entity by returning an empty entity list.
+Do not infer facts that are absent from the evidence.
+
+Extracted entities:
+{entities}
+
+Evidence:
+{evidence}
+"""
+
+
+def _map_evidence_to_entities(
+    llm: object, evidence: str, entities: list[str]
+) -> list[tuple[str, list[str]]]:
+    """Return validated ``(evidence query, entities)`` pairs.
+
+    A failed or empty mapping falls back to searching the complete evidence
+    without claiming entity coverage.
+    """
+    if not evidence:
+        return []
+
+    messages = [
+        SystemMessage(
+            content=_EVIDENCE_MAPPING_PROMPT.format(
+                entities="\n".join(f"- {entity}" for entity in entities) or "(none)",
+                evidence=evidence,
+            )
+        )
+    ]
+    try:
+        result = invoke_with_structured_output(
+            llm, messages, EvidenceEntityMappingModel
+        )
+    except Exception:
+        logger.warning("Evidence-to-entity mapping failed", exc_info=True)
+        result = None
+
+    entity_lookup = {entity.casefold(): entity for entity in entities}
+    mapped: list[tuple[str, list[str]]] = []
+    if result is not None:
+        for item in result.evidence_queries:
+            query = item.query.strip()
+            if not query:
+                continue
+            validated_entities = sorted(
+                {
+                    entity_lookup[entity.strip().casefold()]
+                    for entity in item.entities
+                    if entity.strip().casefold() in entity_lookup
+                }
+            )
+            mapped.append((query, validated_entities))
+
+    return mapped or [(evidence, [])]
+
 
 _FILTER_PROMPT_TEMPLATE = """\
 You are selecting the single best candidate that matches a user's question.
@@ -426,9 +506,9 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 class CandidateRetrievalAgent(BaseAgent):
     """Retrieve ColumnAttribute, CustomAnalysis, SqlAttribute, and subject Term candidates.
 
-    - ColumnAttributes: searched per entity from the semantic VDB.
-    - Evidence: the complete evidence text performs one additional
-      ColumnAttribute search, and those hits are merged with entity hits.
+    - Evidence: mapped to extracted entities and searched for ColumnAttributes first.
+    - ColumnAttributes: uncovered entities are searched within evidence-derived
+      tables, then globally when the table-scoped search finds nothing.
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
     - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit)
@@ -485,6 +565,7 @@ class CandidateRetrievalAgent(BaseAgent):
 
         if semantic_retriever is not None:
             clean_entities = entities
+            evidence_queries = _map_evidence_to_entities(llm, evidence, clean_entities)
 
             has_custom = custom_analysis_exists(target_db)
             if not has_custom:
@@ -520,22 +601,19 @@ class CandidateRetrievalAgent(BaseAgent):
                         target_db,
                     ),
                 ),
-                *(
-                    [
+                *[
+                    (
+                        f"evidence_col_attr:{index}",
                         (
-                            "evidence_col_attr",
-                            (
-                                semantic_retriever,
-                                evidence,
-                                LABEL_COLUMN_ATTRIBUTE,
-                                3,
-                                target_db,
-                            ),
-                        )
-                    ]
-                    if evidence
-                    else []
-                ),
+                            semantic_retriever,
+                            evidence_query,
+                            LABEL_COLUMN_ATTRIBUTE,
+                            3,
+                            target_db,
+                        ),
+                    )
+                    for index, (evidence_query, _) in enumerate(evidence_queries)
+                ],
                 *[
                     (
                         f"col_attr:{entity}",
@@ -548,6 +626,7 @@ class CandidateRetrievalAgent(BaseAgent):
                         ),
                     )
                     for entity in clean_entities
+                    if not evidence_queries
                 ],
             ]
             if subject:
@@ -578,11 +657,19 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_sql_attr_hits = result
                     elif key == "subject_term":
                         subject_term_hits = result
-                    elif key == "evidence_col_attr":
+                    elif key.startswith("evidence_col_attr:"):
+                        index = int(key.rsplit(":", 1)[1])
+                        evidence_query, mapped_entities = evidence_queries[index]
                         for hit in result:
                             tagged = dict(hit)
-                            tagged["query_evidence"] = evidence
-                            all_col_attr_hits.append(tagged)
+                            tagged["query_evidence"] = evidence_query
+                            if mapped_entities:
+                                for entity in mapped_entities:
+                                    entity_tagged = dict(tagged)
+                                    entity_tagged["query_entity"] = entity
+                                    all_col_attr_hits.append(entity_tagged)
+                            else:
+                                all_col_attr_hits.append(tagged)
                     else:
                         # key is "col_attr:{entity}" — tag each hit for coverage.
                         entity = key.split(":", 1)[1]
@@ -590,6 +677,35 @@ class CandidateRetrievalAgent(BaseAgent):
                             tagged = dict(hit)
                             tagged["query_entity"] = entity
                             all_col_attr_hits.append(tagged)
+
+            if target_db is None and evidence_queries:
+                selected_database, _ = _select_candidate_database(
+                    all_col_attr_hits,
+                    all_custom_hits,
+                    all_sql_attr_hits,
+                )
+                if selected_database is None:
+                    # Evidence may not identify a database. Restore today's
+                    # unscoped entity search so database selection still works.
+                    with ThreadPoolExecutor(
+                        max_workers=len(clean_entities) or 1
+                    ) as pool:
+                        futures = {
+                            pool.submit(
+                                _search_by_label,
+                                semantic_retriever,
+                                entity,
+                                LABEL_COLUMN_ATTRIBUTE,
+                                2,
+                            ): entity
+                            for entity in clean_entities
+                        }
+                        for future in as_completed(futures):
+                            entity = futures[future]
+                            for hit in future.result():
+                                tagged = dict(hit)
+                                tagged["query_entity"] = entity
+                                all_col_attr_hits.append(tagged)
 
             if target_db is None:
                 selected_database, database_stats = _select_candidate_database(
@@ -645,41 +761,80 @@ class CandidateRetrievalAgent(BaseAgent):
                         selected_database,
                     )
 
-                    covered_entities = _covered_entities(all_col_attr_hits)
-                    uncovered_entities = [
-                        entity
-                        for entity in clean_entities
-                        if entity not in covered_entities
-                    ]
-                    if uncovered_entities:
-                        self.logger.info(
-                            "Backfilling %d uncovered entities in database %r: %s",
-                            len(uncovered_entities),
-                            selected_database,
-                            uncovered_entities,
-                        )
-                        with ThreadPoolExecutor(
-                            max_workers=len(uncovered_entities)
-                        ) as pool:
-                            futures = {
-                                pool.submit(
-                                    _search_by_label,
-                                    semantic_retriever,
-                                    entity,
-                                    LABEL_COLUMN_ATTRIBUTE,
-                                    2,
-                                    selected_database,
-                                ): entity
-                                for entity in uncovered_entities
-                            }
-                            for future in as_completed(futures):
-                                entity = futures[future]
-                                for hit in _filter_hits_to_database(
-                                    future.result(), selected_database
-                                ):
-                                    tagged = dict(hit)
-                                    tagged["query_entity"] = entity
-                                    all_col_attr_hits.append(tagged)
+            if target_db is not None:
+                evidence_table_ids = sorted(
+                    {
+                        str(hit["table_id"])
+                        for hit in all_col_attr_hits
+                        if hit.get("query_evidence") and hit.get("table_id")
+                    }
+                )
+                uncovered_entities = [
+                    entity
+                    for entity in clean_entities
+                    if entity not in _covered_entities(all_col_attr_hits)
+                ]
+
+                if uncovered_entities and evidence_table_ids:
+                    self.logger.info(
+                        "Searching %d uncovered entities in %d evidence-derived tables",
+                        len(uncovered_entities),
+                        len(evidence_table_ids),
+                    )
+                    with ThreadPoolExecutor(
+                        max_workers=len(uncovered_entities)
+                    ) as pool:
+                        futures = {
+                            pool.submit(
+                                _search_by_label,
+                                semantic_retriever,
+                                entity,
+                                LABEL_COLUMN_ATTRIBUTE,
+                                2,
+                                target_db,
+                                evidence_table_ids,
+                            ): entity
+                            for entity in uncovered_entities
+                        }
+                        for future in as_completed(futures):
+                            entity = futures[future]
+                            for hit in future.result():
+                                tagged = dict(hit)
+                                tagged["query_entity"] = entity
+                                all_col_attr_hits.append(tagged)
+
+                uncovered_entities = [
+                    entity
+                    for entity in clean_entities
+                    if entity not in _covered_entities(all_col_attr_hits)
+                ]
+                if uncovered_entities:
+                    self.logger.info(
+                        "Backfilling %d uncovered entities in database %r: %s",
+                        len(uncovered_entities),
+                        target_db,
+                        uncovered_entities,
+                    )
+                    with ThreadPoolExecutor(
+                        max_workers=len(uncovered_entities)
+                    ) as pool:
+                        futures = {
+                            pool.submit(
+                                _search_by_label,
+                                semantic_retriever,
+                                entity,
+                                LABEL_COLUMN_ATTRIBUTE,
+                                2,
+                                target_db,
+                            ): entity
+                            for entity in uncovered_entities
+                        }
+                        for future in as_completed(futures):
+                            entity = futures[future]
+                            for hit in future.result():
+                                tagged = dict(hit)
+                                tagged["query_entity"] = entity
+                                all_col_attr_hits.append(tagged)
 
         if _all_bridge_sourced(all_sql_attr_hits):
             # All hits are structural bridge-table joins — nothing to judge

@@ -177,6 +177,38 @@ class CombinedCandidateFilterModel(BaseModel):
     )
 
 
+class EvidenceSearchQuery(BaseModel):
+    """One evidence fragment to search, with the extracted entities it supports."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    query: str = Field(
+        ...,
+        description="A concise evidence fragment suitable for semantic search.",
+    )
+    entities: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Extracted entity strings directly supported by this evidence fragment. "
+            "Use only exact values from the provided entity list."
+        ),
+    )
+
+
+class EvidenceEntityMappingModel(BaseModel):
+    """LLM decomposition of evidence into entity-linked semantic searches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    evidence_queries: list[EvidenceSearchQuery] = Field(
+        default_factory=list,
+        description=(
+            "Searchable evidence fragments. Preserve useful evidence even when no "
+            "extracted entity matches it by returning an empty entities list."
+        ),
+    )
+
+
 class AnchorColumnModel(BaseModel):
     """LLM output for identifying the primary ColumnAttribute for the question."""
 

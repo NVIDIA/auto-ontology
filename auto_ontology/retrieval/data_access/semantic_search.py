@@ -190,10 +190,11 @@ def _build_metadata_where_clause(
     labels: list[str] | None = None,
     database_name: str | None = None,
     schema_name: str | None = None,
+    table_ids: list[str] | None = None,
     *,
     fmt: MetadataFilterFormat = "sql",
 ) -> str | dict | None:
-    """Build a per-query metadata filter for ``label`` / ``database_name`` / ``schema_name``.
+    """Build a metadata filter for labels and database/schema/table scope.
 
     The output shape is selected by *fmt*:
 
@@ -210,7 +211,7 @@ def _build_metadata_where_clause(
 
     Returns ``None`` when no filter criteria are supplied.
     """
-    if not labels and not database_name and not schema_name:
+    if not labels and not database_name and not schema_name and not table_ids:
         return None
 
     if fmt == "dict":
@@ -221,6 +222,8 @@ def _build_metadata_where_clause(
             out["database_name"] = database_name
         if schema_name:
             out["schema_name"] = schema_name
+        if table_ids:
+            out["table_id"] = table_ids[0] if len(table_ids) == 1 else list(table_ids)
         return out
 
     parts: list[str] = []
@@ -241,6 +244,16 @@ def _build_metadata_where_clause(
     if schema_name:
         parts.append(
             f"""metadata LIKE '%"schema_name":"{_escape_like(schema_name)}"%' ESCAPE '\\'"""
+        )
+    if table_ids:
+        table_preds = [
+            f"""metadata LIKE '%"table_id":"{_escape_like(table_id)}"%' ESCAPE '\\'"""
+            for table_id in table_ids
+        ]
+        parts.append(
+            "(" + " OR ".join(table_preds) + ")"
+            if len(table_preds) > 1
+            else table_preds[0]
         )
     return " AND ".join(parts) if parts else None
 
@@ -292,7 +305,15 @@ def _hits_to_semantic_rows(
             "label": lab,
             "score": score,
         }
-        for _field in ("name", "schema_name", "database_name", "data_type", "source"):
+        for _field in (
+            "name",
+            "schema_name",
+            "database_name",
+            "table_id",
+            "table_name",
+            "data_type",
+            "source",
+        ):
             val = meta.get(_field)
             if val is not None:
                 row[_field] = val
@@ -307,12 +328,13 @@ def search_semantic_index(
     per_label_k: "int | dict[str, int]" = PER_LABEL_LIMIT,
     database_name: str | None = None,
     schema_name: str | None = None,
+    table_ids: list[str] | None = None,
 ) -> list[dict]:
     """Vector search via the injected :class:`~auto_ontology.utils.retriever.Retriever`.
 
     Runs one query **per label** with a server-side metadata filter on
-    ``label`` + ``database_name`` + ``schema_name``, requesting exactly the
-    label-specific *k* rows.  *per_label_k* can be a single int or a
+    ``label`` + ``database_name`` + ``schema_name`` + ``table_ids``, requesting
+    exactly the label-specific *k* rows.  *per_label_k* can be a single int or a
     ``{label: k}`` dict (e.g. ``{"Column": 10, "CustomAnalysis": 3}``).
     When no *label_filter* is given, falls back to a single query with
     ``DEFAULT_FETCH_LIMIT``.
@@ -331,6 +353,7 @@ def search_semantic_index(
             labels=[label] if label else None,
             database_name=database_name,
             schema_name=schema_name,
+            table_ids=table_ids,
             fmt=fmt,
         )
         vdb_kwargs = {"where": where_clause} if where_clause else None
