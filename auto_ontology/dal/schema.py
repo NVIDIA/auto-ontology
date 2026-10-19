@@ -375,6 +375,68 @@ table__join = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Conversation tier — Database -> Conversation turn
+# ---------------------------------------------------------------------------
+
+#: One question/answer exchange from a chat transcript.
+#:
+#: The grain is the *pair*, not the message, because the pair is the unit that
+#: answers a question on its own: an assistant turn read without its prompt is
+#: a paragraph with no subject, and retrieving one without the other puts the
+#: model in exactly that position.
+#:
+#: Hangs off ``catalog_database`` for the same reason the catalog tier does.
+#: ``database_name`` is already what scopes a connector, an embedding row and
+#: a pgvector delete, so a conversation that is its own database needs no new
+#: scoping concept — and ``ON DELETE CASCADE`` means ``delete_all_data`` sweeps
+#: these up without being taught about them.
+#:
+#: Two levels of ordering are kept rather than one. ``turn_index`` is unique
+#: within the conversation and is what "the next thing said" means; a BEAM
+#: transcript is split into sessions held days apart, and the gap between
+#: ``session_index`` 1 and 2 is the difference between a correction and a
+#: change of mind.
+conversation = Table(
+    "conversation",
+    METADATA,
+    _id(),
+    Column(
+        "database_id",
+        Text,
+        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    # The transcript this pair came from. Not a foreign key: a conversation has
+    # no attributes of its own that a row here does not already carry, and a
+    # parent table holding only a name would be a join for nothing.
+    Column("conversation_id", Text, nullable=False),
+    Column("turn_index", Integer, nullable=False),
+    Column("session_index", Integer, nullable=True),
+    Column("question", Text, nullable=False),
+    Column("answer", Text, nullable=False),
+    # What the speaker treated as "now". BEAM states it per turn, and without
+    # it "next Tuesday" cannot be resolved to a date -- the transcript's own
+    # ordering gives the sequence but never the calendar.
+    Column("time_anchor", Text, nullable=True),
+    UniqueConstraint(
+        "database_id",
+        "conversation_id",
+        "turn_index",
+        name="uq_conversation_database_conversation_turn",
+    ),
+    # Reading a conversation back in order is the common query -- the semantic
+    # pass walks a transcript start to finish, and retrieval widens a hit to
+    # its neighbours. Without this that is a sort over every turn in the
+    # database.
+    Index(
+        "ix_conversation_database_conversation_turn",
+        "database_id",
+        "conversation_id",
+        "turn_index",
+    ),
+)
+
+# ---------------------------------------------------------------------------
 # SQL statements and their table references
 # ---------------------------------------------------------------------------
 

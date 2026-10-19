@@ -230,8 +230,16 @@ def build_embed_row(
     name: str,
     schema_name: str,
     database_name: str | None,
+    extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Wrap embedding *text* in the row shape the embed → VDB path expects."""
+    """Wrap embedding *text* in the row shape the embed → VDB path expects.
+
+    *extra* adds label-specific identifiers alongside the common ones -- a
+    conversation turn carries the transcript and position that let retrieval
+    widen a hit to its neighbours, which no tabular row needs. They go into
+    both copies of the metadata, so a consumer reading either sees the same
+    fields.
+    """
     path = f"auto_ontology:{node_id}" if node_id else "auto_ontology:unknown"
     # Retrieval reads the top-level copies: the store keeps the whole metadata
     # dict. The copies under content_metadata are kept so rows written now look
@@ -243,6 +251,7 @@ def build_embed_row(
         "source_path": path,
         "schema_name": schema_name,
         "database_name": database_name,
+        **(extra or {}),
     }
     return {
         "text": text.strip(),
