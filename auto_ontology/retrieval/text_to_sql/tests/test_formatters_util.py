@@ -108,6 +108,28 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
     assert "unused" not in rendered
 
 
+def test_used_schema_context_marks_semantic_fk() -> None:
+    rendered = format_used_schema_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "customer_id",
+                        "data_type": "integer",
+                        "semantic_fk": "public.customers.id",
+                    }
+                ],
+            }
+        ],
+        used_tables=["public.orders"],
+        used_columns=["public.orders.customer_id"],
+    )
+
+    assert "foreign_key: public.customers.id" in rendered
+
+
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
     """The model copies these names verbatim, so the catalog has to survive."""
     rendered = format_tables_for_prompt(

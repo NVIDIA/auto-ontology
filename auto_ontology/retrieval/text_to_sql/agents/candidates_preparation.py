@@ -203,7 +203,7 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples or nullability metadata."""
+    """Whether a relevant table lacks samples, nullability, or semantic-FK metadata."""
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
@@ -211,7 +211,12 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_nullability = bool(columns) and all(
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
-    return not has_samples or not has_complete_nullability
+    has_complete_semantic_fks = bool(columns) and all(
+        isinstance(column, dict) and "semantic_fk" in column for column in columns
+    )
+    return (
+        not has_samples or not has_complete_nullability or not has_complete_semantic_fks
+    )
 
 
 logger = logging.getLogger(__name__)
@@ -503,9 +508,9 @@ class CandidatePreparationAgent(BaseAgent):
 
         # --- 4a. Back-fill rich per-column metadata when it is incomplete ---
         # Tables retrieved from the vector index carry only name/data_type/description;
-        # sample_values and is_nullable live in the store's row for that table.
-        # Fetch rich rows whenever either signal is missing, then merge per-column
-        # so nothing already present is overwritten.
+        # sample_values, is_nullable, and semantic_fk live in the store's row for
+        # that table. Fetch rich rows whenever any signal is missing, then merge
+        # per-column so nothing already present is overwritten.
         metadata_incomplete_ids = [
             str(t["id"])
             for t in relevant_tables

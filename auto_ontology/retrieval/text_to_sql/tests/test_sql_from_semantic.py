@@ -89,6 +89,15 @@ def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
     assert "preserve rows containing NULLs" in create_sql_user_prompt
 
 
+def test_prompt_does_not_infer_distinct_from_foreign_keys() -> None:
+    assert "Use DISTINCT only when the question or authoritative evidence" in (
+        create_sql_user_prompt
+    )
+    assert "COUNT(fk) counts matching child rows" in create_sql_user_prompt
+    assert "Never infer DISTINCT solely from an FK" in create_sql_user_prompt
+    assert "necessary one-to-many join" not in create_sql_user_prompt
+
+
 def test_projection_strictness_is_configured_per_request() -> None:
     strict_rule = "- Return exactly the requested output fields and NO others."
     combined_aggregate_rule = (

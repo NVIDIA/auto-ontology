@@ -80,6 +80,9 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: false"
     else:
         line += " | is_nullable: unknown"
+    semantic_fk = column.get("semantic_fk")
+    if semantic_fk:
+        line += f" | foreign_key: {_plain_cell(semantic_fk)}"
     return line
 
 
