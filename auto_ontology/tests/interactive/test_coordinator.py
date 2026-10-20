@@ -9,6 +9,8 @@ import pytest
 from auto_ontology.retrieval.interactive.coordinator import (
     _apply_debug_seed,
     _apply_follow_up_seed,
+    _format_user_clarifications,
+    _run_sql_generation,
     apply_user_answer,
     step,
 )
@@ -163,3 +165,75 @@ def test_apply_user_answer_no_pending_still_merges():
         return_value=mock_llm,
     ):
         apply_user_answer(sess, "some answer")  # should not raise
+
+
+def test_format_user_clarifications_concatenates_usable_answers():
+    sess = _make_session()
+    sess.clarify_history = [
+        {"q": "Which year?", "a": "2023"},
+        {"q": "Which status?", "a": "Use completed, ignoring case."},
+    ]
+
+    evidence = _format_user_clarifications(sess)
+
+    assert "## User Clarifications (verbatim — authoritative)" in evidence
+    assert "Clarification 1:\nQuestion: Which year?\nAnswer: 2023" in evidence
+    assert (
+        "Clarification 2:\n"
+        "Question: Which status?\n"
+        "Answer: Use completed, ignoring case."
+    ) in evidence
+
+
+def test_format_user_clarifications_excludes_unusable_answers():
+    sess = _make_session()
+    sess.clarify_history = [
+        {"q": "Which formula?", "a": "Sorry, this question is out of scope."},
+        {"q": "Which year?", "a": "2024"},
+        {"q": "Which region?", "a": ""},
+    ]
+
+    evidence = _format_user_clarifications(sess)
+
+    assert "out of scope" not in evidence
+    assert "Which region?" not in evidence
+    assert "Question: Which year?\nAnswer: 2024" in evidence
+
+
+def test_sql_generation_includes_raw_clarifications_in_evidence():
+    sess = _make_session(
+        original_question="original question",
+        working_question="expanded merged question",
+        data_retriever=MagicMock(),
+        semantic_retriever=MagicMock(),
+        connectors=[],
+    )
+    sess._grounded_knowledge_for = sess.working_question
+    sess.clarify_history = [
+        {"q": "Which formula?", "a": "Divide cost by revenue."},
+        {"q": "Anything else?", "a": "Sorry, this question is out of scope."},
+    ]
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="generated evidence",
+        ),
+        patch(
+            "auto_ontology.retrieval.text_to_sql.main.get_agent_response_with_state",
+            return_value={"sql_code": "SELECT 1"},
+        ) as mock_generate,
+    ):
+        sql = _run_sql_generation(sess)
+
+    payload = mock_generate.call_args.args[0]
+    assert sql == "SELECT 1"
+    assert payload["question"] == "original question"
+    assert payload["enriched_question"] == "expanded merged question"
+    assert "## Expanded Question" in payload["evidence"]
+    assert (
+        "Question: Which formula?\nAnswer: Divide cost by revenue."
+        in payload["evidence"]
+    )
+    assert "out of scope" not in payload["evidence"]
+    assert "generated evidence" in payload["evidence"]

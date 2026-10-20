@@ -280,9 +280,9 @@ def test_export_carries_keys_joins_and_semantics(world) -> None:
     assert term.represents == [world.orders]
     assert [a.id for a in term.columns_attributes] == [world.attribute]
     assert [
-        (fk.column_id, fk.column_attribute_id)
+        (fk.column_id, fk.column_attribute_id, fk.use_in_join_paths)
         for fk in document.semantic_layer.semantic_fks
-    ] == [(world.customer_ref, world.attribute)]
+    ] == [(world.customer_ref, world.attribute, True)]
 
 
 def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
@@ -371,6 +371,7 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
     target = f"{world.prefix}-copy"
     document = _reid(_document(world), target)
     document.data_layer.databases[0].schemas[0].database_name = target
+    document.semantic_layer.semantic_fks[0].use_in_join_paths = False
 
     try:
         summary = mi.apply_import_model(document, replace=False)
@@ -385,6 +386,20 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
             select(s.catalog_database.c.id).where(s.catalog_database.c.name == target)
         )
         assert copied
+        copied_semantic_fk = store().query_read(
+            select(s.column__semantic_fk.c.use_in_join_paths)
+            .select_from(
+                s.column__semantic_fk.join(
+                    s.catalog_column,
+                    s.catalog_column.c.id == s.column__semantic_fk.c.column_id,
+                )
+            )
+            .where(
+                s.catalog_column.c.imported_id
+                == document.semantic_layer.semantic_fks[0].column_id
+            )
+        )
+        assert copied_semantic_fk == [{"use_in_join_paths": False}]
     finally:
         _cleanup(f"{world.prefix}-copy")
 
@@ -421,6 +436,21 @@ def test_importing_onto_the_source_catalog_adopts_it(world) -> None:
     """
     summary = mi.apply_import_model(_document(world), replace=False)
     assert sum(summary["created"].values()) == 0, summary["created"]
+
+
+def test_reimport_updates_semantic_fk_join_path_selection(world) -> None:
+    document = _document(world)
+    document.semantic_layer.semantic_fks[0].use_in_join_paths = False
+
+    mi.apply_import_model(document, replace=False)
+
+    selected = store().query_read(
+        select(s.column__semantic_fk.c.use_in_join_paths).where(
+            s.column__semantic_fk.c.column_id == world.customer_ref,
+            s.column__semantic_fk.c.attribute_id == world.attribute,
+        )
+    )
+    assert selected == [{"use_in_join_paths": False}]
 
 
 def test_an_adopted_row_is_stamped_so_the_next_import_is_faster(world) -> None:

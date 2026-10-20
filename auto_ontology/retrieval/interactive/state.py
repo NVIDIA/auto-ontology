@@ -117,6 +117,9 @@ class InteractiveSessionState:
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )
+    # Callers that already refine evidence can disable the text-to-SQL graph's
+    # second evidence-refinement pass.
+    skip_evidence_refinement: bool = False
     data_retriever: Any = None
     semantic_retriever: Any = None
     connectors: list = field(default_factory=list)

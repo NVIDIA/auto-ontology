@@ -589,6 +589,12 @@ column__semantic_fk = Table(
         ForeignKey(column_attribute.c.id, ondelete="CASCADE"),
         primary_key=True,
     ),
+    Column(
+        "use_in_join_paths",
+        Boolean,
+        nullable=False,
+        server_default=text("true"),
+    ),
 )
 
 sql_attribute = Table(

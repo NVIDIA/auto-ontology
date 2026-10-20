@@ -13,6 +13,7 @@ import pytest
 
 from auto_ontology.semantic import semantic_fk
 from auto_ontology.semantic.embed import _build_rows
+from auto_ontology.semantic.models import SemanticFkJoinDefaultSelection
 
 
 def _hit(
@@ -323,6 +324,10 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
             "auto_ontology.semantic.semantic_fk._resolve_connector", return_value=None
         ),
         patch("auto_ontology.semantic.semantic_fk._resolve_via_vdb", return_value=None),
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=[],
+        ),
     ):
         assert semantic_fk.resolve_semantic_fks("database") == 0
 
@@ -330,3 +335,157 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
     assert (
         "Resolving semantic FK edges… (2/2): order_items.product_id" in caplog.messages
     )
+
+
+def _join_group_row(column_id: str, column_name: str) -> dict:
+    return {
+        "source_table_id": "orders-table",
+        "source_table_name": "orders",
+        "source_table_description": "Customer orders.",
+        "source_column_id": column_id,
+        "source_column_name": column_name,
+        "source_column_description": f"The {column_name} role.",
+        "target_attribute_id": "customer-attribute",
+        "target_attribute_name": "Customer ID",
+        "target_table_id": "customers-table",
+        "target_table_name": "customers",
+        "target_table_description": "Customers.",
+        "target_column_id": "customer-id",
+        "target_column_name": "id",
+        "target_column_description": "Customer identifier.",
+        "use_in_join_paths": True,
+    }
+
+
+def test_single_semantic_fk_is_default_without_llm() -> None:
+    group = [_join_group_row("customer-id-column", "customer_id")]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+        patch("auto_ontology.semantic.semantic_fk.get_llm_client") as get_llm_client,
+    ):
+        assert semantic_fk.select_semantic_fk_join_defaults("database") == 1
+
+    get_llm_client.assert_not_called()
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "customer-id-column",
+    )
+
+
+def test_llm_selects_default_from_parallel_semantic_fks() -> None:
+    group = [
+        _join_group_row("billing-column", "billing_customer_id"),
+        _join_group_row("customer-column", "customer_id"),
+    ]
+    result = SemanticFkJoinDefaultSelection(
+        selected_column_id="customer-column",
+        rationale="The unqualified customer relationship.",
+    )
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            return_value=result,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "customer-column",
+    )
+
+
+def test_invalid_llm_selection_uses_deterministic_default() -> None:
+    group = [
+        _join_group_row("z-column", "z_customer_id"),
+        _join_group_row("a-column", "a_customer_id"),
+    ]
+    result = SemanticFkJoinDefaultSelection(
+        selected_column_id="invented-column",
+        rationale="Invalid.",
+    )
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            return_value=object(),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output",
+            return_value=result,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "a-column",
+    )
+
+
+def test_missing_llm_uses_deterministic_default() -> None:
+    group = [
+        _join_group_row("z-column", "z_customer_id"),
+        _join_group_row("a-column", "a_customer_id"),
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.get_llm_client",
+            side_effect=EnvironmentError("not configured"),
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    set_default.assert_called_once_with(
+        "orders-table",
+        "customer-attribute",
+        "a-column",
+    )
+
+
+def test_resolution_always_normalizes_join_defaults() -> None:
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk._resolve_semantic_fks",
+            return_value=3,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.select_semantic_fk_join_defaults"
+        ) as select_defaults,
+    ):
+        assert semantic_fk.resolve_semantic_fks("database") == 3
+
+    select_defaults.assert_called_once_with("database")

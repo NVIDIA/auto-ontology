@@ -187,7 +187,9 @@ def format_semantic_context(
             "and most may be irrelevant to this question. Select only paths needed "
             "to reach tables that contribute to the answer. Never add a path merely "
             "because it is listed. When a path is needed, use its exact join "
-            "conditions and only the required hops:"
+            "conditions. A selected path is indivisible: keep every intermediate "
+            "bridge table and every hop. Never shorten it or join its endpoints "
+            "directly:"
         )
         for entry in attribute_join_paths:
             attr_name = entry.get("attr_name", "")
@@ -208,15 +210,10 @@ def format_semantic_context(
             path = entry.get("path") or []
             if path:
                 lines.append("    Join path:")
-                if len(path) == 1:
-                    left = _hop_column(path[0], "source", target_db, dialect)
-                    right = _hop_column(path[0], "target", target_db, dialect)
+                for hop in path:
+                    left = _hop_column(hop, "source", target_db, dialect)
+                    right = _hop_column(hop, "target", target_db, dialect)
                     lines.append(f"      {left} = {right}")
-                else:
-                    for cur, nxt in zip(path, path[1:]):
-                        left = _hop_column(cur, "target", target_db, dialect)
-                        right = _hop_column(nxt, "source", target_db, dialect)
-                        lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
 

@@ -10,6 +10,7 @@ import os
 import random
 import threading
 import time
+import weakref
 from typing import Iterator, Type, TypeVar
 
 import requests as _requests
@@ -298,12 +299,102 @@ def get_non_reasoning_llm_client(
     if not _NON_REASONING_API_KEY:
         raise EnvironmentError("NON_REASONING_API_KEY is not set")
 
-    return _build_client(
+    client = _build_client(
         model=model or _NON_REASONING_MODEL_NAME,
         api_key=_NON_REASONING_API_KEY,
         base_url=_NON_REASONING_BASE_URL,
         temperature=temperature,
         max_tokens=max_tokens,
+    )
+    _remember_non_reasoning(client)
+    return client
+
+
+# Identity of every live non-reasoning client. Model name is not enough: the two
+# roles can be configured to the same model string, and the langchain clients
+# compare equal by their fields, so a reasoning call must not match a
+# non-reasoning client that happens to share its configuration. ``.bind()``
+# returns a wrapper whose ``bound`` is the client registered here.
+_NON_REASONING_IDS: set[int] = set()
+_NON_REASONING_STRONG_REFS: dict[int, object] = {}
+_REASONING_FALLBACK_CLIENT: BaseChatModel | None = None
+_REASONING_FALLBACK_LOCK = threading.Lock()
+
+# How many ``bound`` links to follow. Real ``.bind()`` chains are a level or two
+# deep; the cap stops the walk on objects whose ``bound`` never ends — a
+# ``MagicMock`` returns a fresh mock for every attribute access.
+_MAX_BINDING_DEPTH = 8
+
+
+def _remember_non_reasoning(client: object) -> None:
+    """Record *client* so a failed call on it can fall back to the reasoning model."""
+    client_id = id(client)
+    _NON_REASONING_IDS.add(client_id)
+    try:
+        weakref.finalize(client, _NON_REASONING_IDS.discard, client_id)
+    except TypeError:
+        # Keep non-weak-referenceable clients alive so Python cannot reuse their
+        # registered id for an unrelated reasoning client.
+        _NON_REASONING_STRONG_REFS[client_id] = client
+
+
+def _is_non_reasoning_client(llm: object) -> bool:
+    """Whether *llm* is a non-reasoning client, including a ``.bind()`` wrapper."""
+    current = llm
+    for _ in range(_MAX_BINDING_DEPTH):
+        if id(current) in _NON_REASONING_IDS:
+            registered = _NON_REASONING_STRONG_REFS.get(id(current))
+            if registered is None or registered is current:
+                return True
+        bound = getattr(current, "bound", None)
+        if bound is None or isinstance(bound, (str, bytes, int, float, bool)):
+            return False
+        current = bound
+    return False
+
+
+def _get_reasoning_fallback_client() -> BaseChatModel:
+    """Build the default reasoning fallback once and reuse its connection pool."""
+    global _REASONING_FALLBACK_CLIENT
+    if _REASONING_FALLBACK_CLIENT is None:
+        with _REASONING_FALLBACK_LOCK:
+            if _REASONING_FALLBACK_CLIENT is None:
+                _REASONING_FALLBACK_CLIENT = get_llm_client()
+    return _REASONING_FALLBACK_CLIENT
+
+
+def _reasoning_fallback_client(llm: object) -> BaseChatModel | None:
+    """The reasoning client when *llm* is non-reasoning, else ``None``.
+
+    A missing reasoning client leaves the original failure in place.
+    """
+    if not _is_non_reasoning_client(llm):
+        return None
+    try:
+        return _get_reasoning_fallback_client()
+    except Exception:
+        logger.warning(
+            "Non-reasoning LLM failed and the reasoning LLM client could not be created",
+            exc_info=True,
+        )
+        return None
+
+
+def _log_non_reasoning_fallback(exc: Exception, schema_name: str | None = None) -> None:
+    """Log the handoff from a failed non-reasoning call to the reasoning model."""
+    detail = (type(exc).__name__, str(exc)[:120])
+    if schema_name is None:
+        logger.warning(
+            "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
+            RETRY_MAX_ATTEMPTS,
+            *detail,
+        )
+        return
+    logger.warning(
+        "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
+        RETRY_MAX_ATTEMPTS,
+        schema_name,
+        *detail,
     )
 
 
@@ -354,18 +445,34 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     return {}
 
 
-def invoke_text(llm: BaseChatModel, prompt: str) -> str:
-    """Invoke the LLM with a single system-message *prompt* and return its text.
-
-    Free-text counterpart to :func:`invoke_with_structured_output`, for callers
-    that parse the raw response themselves (e.g. the text-to-PQL pipeline).
-    """
+def _invoke_text_once(llm: BaseChatModel, prompt: str) -> str:
     response = llm.invoke([HumanMessage(content=prompt)])
     content = getattr(response, "content", response)
     return content if isinstance(content, str) else str(content)
 
 
-def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
+def invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """Invoke the LLM with a single system-message *prompt* and return its text.
+
+    Free-text counterpart to :func:`invoke_with_structured_output`, for callers
+    that parse the raw response themselves (e.g. the text-to-PQL pipeline).
+    A non-reasoning client that fails is retried once on the reasoning model.
+    """
+    try:
+        return _invoke_text_once(llm, prompt)
+    except Exception as exc:
+        fallback = _reasoning_fallback_client(llm)
+        if fallback is None:
+            raise
+        logger.warning(
+            "Non-reasoning LLM call failed (%s: %s) — falling back to reasoning LLM",
+            type(exc).__name__,
+            str(exc)[:120],
+        )
+        return _invoke_text_once(fallback, prompt)
+
+
+def _safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
     """invoke_text with retry/backoff for 503/429 and the inflight semaphore."""
     messages = [HumanMessage(content=prompt)]
     for attempt in range(RETRY_MAX_ATTEMPTS):
@@ -400,6 +507,18 @@ def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
                 continue
             raise
     raise RuntimeError("safe_invoke_text exhausted retries")
+
+
+def safe_invoke_text(llm: BaseChatModel, prompt: str) -> str:
+    """invoke_text with retry/backoff, then the reasoning model if this client is non-reasoning."""
+    try:
+        return _safe_invoke_text(llm, prompt)
+    except Exception as exc:
+        fallback = _reasoning_fallback_client(llm)
+        if fallback is None:
+            raise
+        _log_non_reasoning_fallback(exc)
+        return _safe_invoke_text(fallback, prompt)
 
 
 def safe_invoke_with_structured_output(
@@ -503,11 +622,28 @@ def invoke_with_structured_output(
     messages: list[BaseMessage],
     schema: Type[T],
 ) -> T | None:
-    """Safe wrapper that returns None on failure."""
+    """Safe wrapper that returns None on failure.
+
+    A non-reasoning client that still fails after its retries is tried once more
+    on the reasoning model. Reasoning clients are not retried on a second model.
+    """
+    schema_name = getattr(schema, "__name__", str(schema))
     try:
-        schema_name = getattr(schema, "__name__", str(schema))
         return safe_invoke_with_structured_output(llm, messages, schema)
     except Exception as e:
+        fallback = _reasoning_fallback_client(llm)
+        if fallback is not None:
+            _log_non_reasoning_fallback(e, schema_name)
+            try:
+                return safe_invoke_with_structured_output(fallback, messages, schema)
+            except Exception as e2:
+                logger.error(
+                    "Reasoning LLM also failed for %s: %s: %s",
+                    schema_name,
+                    type(e2).__name__,
+                    str(e2)[:120],
+                )
+                return None
         logger.error(
             f"invoke_with_structured_output failed for {schema_name} after {RETRY_MAX_ATTEMPTS} attempts: "
             f"{type(e).__name__}: {e}",
@@ -516,53 +652,42 @@ def invoke_with_structured_output(
         return None
 
 
-# ── Non-reasoning → reasoning fallback helpers ───────────────────────────────
-# These try the non-reasoning (fast/cheap) LLM first. If it exhausts all
-# retries (e.g. persistent Azure connection errors), they transparently fall
-# back to the reasoning LLM for that single call rather than crashing.
-
-
 def safe_invoke_text_nr(prompt: str) -> str:
-    """invoke_text using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    """Free-text call on the non-reasoning LLM.
+
+    ``safe_invoke_text`` retries, then falls back to the reasoning model for
+    that single call when the non-reasoning endpoint stays down.
+    """
     try:
-        llm = get_non_reasoning_llm_client()
-        return safe_invoke_text(llm, prompt)
-    except Exception as e:
-        logger.warning(
-            "Non-reasoning LLM exhausted %d retries (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS,
-            type(e).__name__,
-            str(e)[:120],
-        )
-        return safe_invoke_text(get_llm_client(), prompt)
+        client = get_non_reasoning_llm_client()
+    except Exception as exc:
+        _log_non_reasoning_fallback(exc)
+        client = _get_reasoning_fallback_client()
+    return safe_invoke_text(client, prompt)
 
 
 def safe_invoke_structured_nr(
     messages: list[BaseMessage],
     schema: Type[T],
 ) -> T | None:
-    """invoke_with_structured_output using non-reasoning LLM; falls back to reasoning on persistent failure."""
+    """Structured call on the non-reasoning LLM.
+
+    ``invoke_with_structured_output`` retries, then falls back to the reasoning
+    model for that single call. Returns ``None`` when both models fail.
+    """
     try:
-        llm = get_non_reasoning_llm_client()
-        return safe_invoke_with_structured_output(llm, messages, schema)
-    except Exception as e:
+        client = get_non_reasoning_llm_client()
+    except Exception as exc:
         schema_name = getattr(schema, "__name__", str(schema))
-        logger.warning(
-            "Non-reasoning LLM exhausted %d retries for %s (%s: %s) — falling back to reasoning LLM",
-            RETRY_MAX_ATTEMPTS,
-            schema_name,
-            type(e).__name__,
-            str(e)[:120],
-        )
+        _log_non_reasoning_fallback(exc, schema_name)
         try:
-            return safe_invoke_with_structured_output(
-                get_llm_client(), messages, schema
-            )
-        except Exception as e2:
+            client = _get_reasoning_fallback_client()
+        except Exception as fallback_exc:
             logger.error(
                 "Reasoning LLM also failed for %s: %s: %s",
                 schema_name,
-                type(e2).__name__,
-                str(e2)[:120],
+                type(fallback_exc).__name__,
+                str(fallback_exc)[:120],
             )
             return None
+    return invoke_with_structured_output(client, messages, schema)
