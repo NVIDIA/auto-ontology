@@ -216,3 +216,18 @@ class FkHitSelection(BaseModel):
         ),
     )
     rationale: str = Field(default="")
+
+
+class SemanticFkJoinDefaultSelection(BaseModel):
+    """LLM output selecting one FK column as the default join relationship."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_column_id: str | None = Field(
+        ...,
+        description=(
+            "The exact source-column ID of the relationship that best represents "
+            "the default join between the supplied tables, or null when uncertain."
+        ),
+    )
+    rationale: str = Field(default="")
