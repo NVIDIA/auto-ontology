@@ -17,8 +17,10 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.text_to_sql.sql_agent import config
+from auto_ontology.retrieval.text_to_sql.sql_agent import deep
 from auto_ontology.retrieval.text_to_sql.sql_agent.loop import run_sql_agent
 from auto_ontology.retrieval.text_to_sql.sql_agent.tools import SQLAgentToolbox
+from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 
 
 class FakeToolLLM:
@@ -247,7 +249,9 @@ def test_a_collapsed_tool_call_is_recovered(prompt) -> None:
     assert outcome.result.response == "The withdrawal transactions."
 
 
-def test_a_submission_with_no_query_falls_back_to_the_draft(prompt, monkeypatch) -> None:
+def test_a_submission_with_no_query_falls_back_to_the_draft(
+    prompt, monkeypatch
+) -> None:
     monkeypatch.setenv("SQL_AGENT_MAX_TURNS", "3")
     draft = "SELECT COUNT(*) FROM results"
     llm = FakeToolLLM(
@@ -369,7 +373,9 @@ def test_static_problems_send_the_submission_back(prompt, monkeypatch) -> None:
         return ["GROUP BY is unsafe: toy finding"] if len(seen) == 1 else []
 
     monkeypatch.setattr(SQLAgentToolbox, "static_findings", fake_static, raising=True)
-    llm = FakeToolLLM([_submit("SELECT a FROM t", "a"), _submit("SELECT b FROM t", "b")])
+    llm = FakeToolLLM(
+        [_submit("SELECT a FROM t", "a"), _submit("SELECT b FROM t", "b")]
+    )
 
     outcome = run_sql_agent(llm, prompt, _toolbox())
 
@@ -494,6 +500,33 @@ def test_every_turn_is_handed_a_conversation_ending_in_a_user_message(
     for index, conversation in enumerate(llm.invocations[1:], start=2):
         last = conversation[-1]
         assert not isinstance(last, (SystemMessage, AIMessage)), (
-            f"turn {index} was handed a conversation ending in "
-            f"{type(last).__name__}"
+            f"turn {index} was handed a conversation ending in {type(last).__name__}"
         )
+
+
+def test_deep_agent_returns_first_candidate_even_when_gate_finds_issues(
+    monkeypatch,
+) -> None:
+    answer = SQLGenerationModel(
+        thought="No assumptions were needed.",
+        sql_code="SELECT 1",
+        response="Returns the requested value.",
+    )
+    invocations = 0
+
+    def invoke_once(*_args, **_kwargs):
+        nonlocal invocations
+        invocations += 1
+        return {"messages": [], "structured_response": answer}
+
+    monkeypatch.setattr(deep, "_build_agent", lambda *_args: object())
+    monkeypatch.setattr(deep, "_invoke_with_retry", invoke_once)
+    monkeypatch.setattr(deep, "_normalise", lambda sql, _toolbox: sql)
+    monkeypatch.setattr(deep, "_gate_submission", lambda *_args, **_kwargs: "revise")
+    monkeypatch.setattr(config, "reflector_enabled", lambda: False)
+
+    outcome = deep.run_deep_sql_agent(object(), [], _toolbox(), {})
+
+    assert invocations == 1
+    assert outcome.result is answer
+    assert outcome.stop_reason == "gate_exhausted"
