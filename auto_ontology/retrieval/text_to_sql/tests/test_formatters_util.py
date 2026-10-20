@@ -288,6 +288,43 @@ def test_semantic_context_falls_back_to_target_db_for_bridge_hops() -> None:
     assert "lakehouse.lakehouse.clusters.id = lakehouse.lakehouse.events.id" in rendered
 
 
+def test_semantic_context_keeps_every_hop_through_a_bridge_table() -> None:
+    rendered = format_semantic_context(
+        {"schema_name": "public", "table_name": "orders", "col_name": "id"},
+        [
+            {
+                "attr_name": "Region",
+                "col_name": "id",
+                "schema_name": "public",
+                "table_name": "regions",
+                "path": [
+                    {
+                        "source_schema": "public",
+                        "source_table": "orders",
+                        "source_column": "account_id",
+                        "target_schema": "public",
+                        "target_table": "accounts",
+                        "target_column": "id",
+                    },
+                    {
+                        "source_schema": "public",
+                        "source_table": "accounts",
+                        "source_column": "region_id",
+                        "target_schema": "public",
+                        "target_table": "regions",
+                        "target_column": "id",
+                    },
+                ],
+            }
+        ],
+    )
+
+    assert "selected path is indivisible" in rendered
+    assert "public.orders.account_id = public.accounts.id" in rendered
+    assert "public.accounts.region_id = public.regions.id" in rendered
+    assert "public.accounts.id = public.accounts.region_id" not in rendered
+
+
 def test_semantic_context_matches_table_section_spelling() -> None:
     """The hint and the schema context must name the same table identically."""
     table = {

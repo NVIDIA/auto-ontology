@@ -318,12 +318,22 @@ class SnowflakeDatabase(SQLDatabase):
         )
 
     def get_columns(self) -> pd.DataFrame:
+        # DATA_TYPE is plain NUMBER for every fixed-point column, whole numbers
+        # and amounts alike; the scale that tells them apart is a separate
+        # column. Spell it out as NUMBER(38,0) or NUMBER(12,2), the way
+        # Snowflake's own DDL does.
         df = self.execute("""
             SELECT
                 TABLE_SCHEMA     AS "table_schema",
                 TABLE_NAME       AS "table_name",
                 COLUMN_NAME      AS "column_name",
-                DATA_TYPE        AS "data_type",
+                CASE
+                    WHEN DATA_TYPE = 'NUMBER'
+                        AND NUMERIC_PRECISION IS NOT NULL
+                        AND NUMERIC_SCALE IS NOT NULL
+                    THEN 'NUMBER(' || NUMERIC_PRECISION || ',' || NUMERIC_SCALE || ')'
+                    ELSE DATA_TYPE
+                END              AS "data_type",
                 IS_NULLABLE = 'YES' AS "is_nullable",
                 ORDINAL_POSITION AS "ordinal_position"
             FROM INFORMATION_SCHEMA.COLUMNS
