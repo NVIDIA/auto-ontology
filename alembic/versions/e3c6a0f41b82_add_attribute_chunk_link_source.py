@@ -27,8 +27,10 @@ def upgrade() -> None:
         "unstructured_attribute__chunk",
         sa.Column("source", sa.Text, nullable=False, server_default="vector"),
     )
+    # Bare name: NAMING_CONVENTION prepends `ck_unstructured_attribute__chunk_`
+    # on both the create and the drop, so writing the prefix here applies it twice.
     op.create_check_constraint(
-        "ck_unstructured_attribute__chunk_source_value",
+        "source_value",
         "unstructured_attribute__chunk",
         "source IN ('llm', 'vector')",
     )
@@ -36,7 +38,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "ck_unstructured_attribute__chunk_source_value",
+        "source_value",
         "unstructured_attribute__chunk",
         type_="check",
     )

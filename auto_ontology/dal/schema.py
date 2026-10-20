@@ -1184,7 +1184,7 @@ unstructured_attribute__chunk = Table(
     ),
     Column("score", Text, nullable=True),
     Column("source", Text, nullable=False, server_default="vector"),
-    CheckConstraint("source IN ('llm', 'vector')", name="attribute_chunk_source_value"),
+    CheckConstraint("source IN ('llm', 'vector')", name="source_value"),
 )
 
 #: How two attributes relate, for the pairs a model was asked to adjudicate.
@@ -1235,15 +1235,15 @@ unstructured_attribute__attribute = Table(
         "relation IN ('same_measure_different_place', "
         "'same_measure_different_period', 'same_measure_different_source', "
         "'aggregate_and_part', 'related_but_distinct', 'inverse', 'unrelated')",
-        name="attribute_attribute_relation_value",
+        name="relation_value",
     ),
     CheckConstraint(
         "aggregate_side IS NULL OR aggregate_side IN ('a', 'b')",
-        name="attribute_attribute_aggregate_side_value",
+        name="aggregate_side_value",
     ),
     CheckConstraint(
         "attribute_id_a < attribute_id_b",
-        name="attribute_attribute_ordered",
+        name="ordered",
     ),
 )
 
@@ -1266,7 +1266,7 @@ unstructured_attribute_family = Table(
     Column("model", Text, nullable=False),
     CheckConstraint(
         "dimension IS NULL OR dimension IN ('place', 'period', 'source')",
-        name="attribute_family_dimension_value",
+        name="dimension_value",
     ),
 )
 

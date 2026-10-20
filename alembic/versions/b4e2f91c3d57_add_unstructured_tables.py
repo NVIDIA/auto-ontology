@@ -107,9 +107,14 @@ def upgrade() -> None:
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("attribute_type", sa.Text, nullable=False),
+        # Bare name, no `ck_<table>_` prefix: `op.create_table` builds its Table in
+        # a MetaData carrying NAMING_CONVENTION, so `ck_%(table_name)s_` is
+        # prepended here too. Spelling the prefix out gets it applied twice, and
+        # the result is over 63 characters, so Postgres stores a truncated hash
+        # of it that no longer matches the model -- permanent `alembic check` drift.
         sa.CheckConstraint(
             "attribute_type IN ('sql', 'ref')",
-            name="ck_unstructured_attribute_attribute_type_value",
+            name="attribute_type_value",
         ),
     )
     op.create_index(
