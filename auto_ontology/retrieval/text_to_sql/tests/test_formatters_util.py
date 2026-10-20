@@ -108,6 +108,54 @@ def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None
     assert "unused" not in rendered
 
 
+def test_used_schema_context_marks_semantic_fk() -> None:
+    rendered = format_used_schema_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "customer_id",
+                        "data_type": "integer",
+                        "semantic_fk": "public.customers.id",
+                    }
+                ],
+            }
+        ],
+        used_tables=["public.orders"],
+        used_columns=["public.orders.customer_id"],
+    )
+
+    assert "foreign_key: public.customers.id" in rendered
+
+
+def test_available_tables_mark_semantic_fk_on_ordinary_columns() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "columns": [
+                    {
+                        "name": "id",
+                        "data_type": "integer",
+                        "semantic_fk": None,
+                    },
+                    {
+                        "name": "customer_id",
+                        "data_type": "integer",
+                        "semantic_fk": "public.customers.id",
+                    },
+                ],
+            }
+        ]
+    )
+
+    assert "column | type | is_nullable | foreign key" in rendered
+    assert "customer_id | integer | unknown | public.customers.id" in rendered
+
+
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
     """The model copies these names verbatim, so the catalog has to survive."""
     rendered = format_tables_for_prompt(
