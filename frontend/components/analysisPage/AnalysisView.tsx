@@ -30,7 +30,12 @@ export type AnalysisViewProps = Record<string, never>;
 type AnalysisMode = 'sql' | 'pql';
 
 // Normalized item so the SQL and PQL variants share one rendering/edit path.
-type AnalysisItem = { id: string; name: string; description: string; code: string };
+type AnalysisItem = {
+	id: string;
+	name: string;
+	description: string;
+	code: string;
+};
 
 const FIELD_INPUT_CLASSNAME =
 	'w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-body outline-none transition-colors placeholder:text-secondary focus:border-[#76b900] focus:ring-2 focus:ring-[#76b900]/30 dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-300 dark:placeholder:text-zinc-500';

@@ -17,7 +17,6 @@ import logging
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.operators.rerank import rerank_hits
 from pydantic import BaseModel, ConfigDict
 
 from auto_ontology.dal.datasources import (
@@ -33,10 +32,10 @@ from auto_ontology.dal.terms import get_term_record_for_table
 from auto_ontology.semantic.constants import SQL_ATTR_SOURCE_BRIDGE
 from auto_ontology.server.sql_attributes.service import create_sql_attribute
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
-from auto_ontology.utils.rerank import get_rerank_kwargs
+from auto_ontology.utils.rerank import get_rerank_kwargs, rerank_hits
 
 logger = logging.getLogger(__name__)
 
@@ -177,7 +176,7 @@ def _generate_bridge_sql_attribute(
         else "Join the bridge table to each related entity table using the FK pairs."
     )
 
-    llm = get_non_reasoning_llm_client(temperature=0.0)
+    llm = get_llm_client(temperature=0.0)
     messages = [
         SystemMessage(
             content=(

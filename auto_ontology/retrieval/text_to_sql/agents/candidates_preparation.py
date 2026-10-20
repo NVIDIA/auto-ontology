@@ -95,26 +95,19 @@ def _qualified_name(t: dict) -> str:
     )
 
 
-# Off by default: an A/B test (real LLM calls, real schema/GT data) showed
-# showing the relevance filter each table's columns — with sample values for
+# The relevance filter sees each table's columns, with sample values for
 # JSONB columns specifically, since their key names alone (e.g. "Res_Scr")
-# can decoy-match unrelated tables — fixes real wrong table drops (including
-# ones production's downstream force-include reconciliation had to paper
-# over), at the cost of a real ~2s/call latency increase. Gate behind an env
-# flag rather than shipping unconditionally so that cost is opt-in; a future
-# version may make this conditional on whether the candidate tables actually
-# contain JSONB columns instead of a global on/off switch.
-_RELEVANCE_FILTER_INCLUDE_COLUMNS = os.environ.get(
-    "RELEVANCE_FILTER_INCLUDE_COLUMNS", ""
-).strip().lower() in ("1", "true", "yes")
-
-# Only added for JSONB-typed columns (see _RELEVANCE_FILTER_INCLUDE_COLUMNS
-# docstring above) — flat columns have self-explanatory names in this schema
-# and get their description (when present) instead; JSONB sample values are
-# already stored on the Column row (profiling at ingestion) and reach here
-# for free via fetch_tables_by_ids's nested `columns`, so this adds no extra
-# DB round trip, only extra prompt tokens.
-_RELEVANCE_FILTER_MAX_COLS = 25
+# can decoy-match unrelated tables. Flat columns get their description when
+# one is present. JSONB sample values are already stored on the Column row
+# and reach here via fetch_tables_by_ids's nested `columns`, so this adds no
+# extra DB round trip, only extra prompt tokens.
+#
+# Truncation is silent and costs the answer when the cut column is the one
+# that justified the table: on BIRD dev, 5 wrong drops all named a column
+# past position 25 in a 44-column table. Env-overridable because the right
+# value is schema-dependent — it has to exceed the widest table the filter
+# must reason about, not the median one.
+_RELEVANCE_FILTER_MAX_COLS = int(os.environ.get("RELEVANCE_FILTER_MAX_COLS", "25"))
 
 # On by default, so existing deployments keep filtering. Turning it off hands
 # SQL generation the whole candidate pool.
@@ -148,14 +141,15 @@ _HUB_SIBLING_EXPANSION_ENABLED = os.environ.get(
     "HUB_SIBLING_EXPANSION_ENABLED", "false"
 ).strip().lower() in ("1", "true", "yes")
 
-# Off by default. find_kept_table_bridges() force-restores tables the
-# relevance filter dropped when they join two tables the filter kept — see
-# §5c below and find_kept_table_bridges' docstring. Opt-in via env flag
-# (this deployment's .env sets it to true) so new/other deployments aren't
-# defaulted into the extra round trip without an explicit choice.
-_TABLE_BRIDGE_RECONCILIATION_ENABLED = os.environ.get(
-    "TABLE_BRIDGE_RECONCILIATION_ENABLED", "false"
-).strip().lower() in ("1", "true", "yes")
+# Pools this size or smaller skip the relevance filter. Default 2 is the
+# long-standing behaviour. The filter drops a uniquely-needed table at a
+# near-constant rate whatever the pool size (BIRD dev: 2.0% at 2-4 candidates,
+# 2.5% at 5-7, 2.2% at 8+), so raising this buys recoveries and perturbations
+# in roughly equal measure — 4 was the only value measured to recover more
+# than it risks, and every larger bypass lands at the same break-even.
+_RELEVANCE_FILTER_BYPASS_MAX_TABLES = int(
+    os.environ.get("RELEVANCE_FILTER_BYPASS_MAX_TABLES", "2")
+)
 
 # How many siblings per hub survive the cap — see _rank_and_cap_hub_siblings.
 # Raised from 5 (find_anchor_hub_siblings' old built-in default) to 6 after
@@ -192,11 +186,6 @@ def _format_relevance_filter_column(c: dict) -> str:
 
 
 def _build_relevance_tables_summary(tables: list[dict]) -> str:
-    if not _RELEVANCE_FILTER_INCLUDE_COLUMNS:
-        return "\n".join(
-            f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
-            for t in tables
-        )
     lines = []
     for t in tables:
         lines.append(
@@ -717,34 +706,33 @@ class CandidatePreparationAgent(BaseAgent):
         #       relevant, it never second-guesses which tables matter, and
         #       (via pre_filter_candidate_ids) never introduces a table the
         #       filter was never shown in the first place.
-        if _TABLE_BRIDGE_RECONCILIATION_ENABLED:
-            kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
-            bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
-                kept_ids, pre_filter_candidate_ids
+        kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
+        bridge_tables, bridge_paths, skipped_pairs = find_kept_table_bridges(
+            kept_ids, pre_filter_candidate_ids
+        )
+        if bridge_tables:
+            forced_table_ids.update(t["id"] for t in bridge_tables)
+            self.logger.info(
+                "Pairwise bridge reconciliation added %d table(s) between "
+                "kept tables: %s%s",
+                len(bridge_tables),
+                [t["name"] for t in bridge_tables],
+                f" ({skipped_pairs} pair(s) skipped after cap)"
+                if skipped_pairs
+                else "",
             )
-            if bridge_tables:
-                forced_table_ids.update(t["id"] for t in bridge_tables)
-                self.logger.info(
-                    "Pairwise bridge reconciliation added %d table(s) between "
-                    "kept tables: %s%s",
-                    len(bridge_tables),
-                    [t["name"] for t in bridge_tables],
-                    f" ({skipped_pairs} pair(s) skipped after cap)"
-                    if skipped_pairs
-                    else "",
-                )
-            # A bridge table with no join hops reaching SQL-gen is a table the
-            # model can see but not connect — without the real FK chain, it has
-            # to guess the join condition and can fabricate one between unrelated
-            # columns. Surface the real FK chain the same way attribute_join_paths
-            # already does for verified semantic joins.
-            if bridge_paths:
-                attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
-                self.logger.info(
-                    "Pairwise bridge reconciliation added %d join path(s) for "
-                    "bridge table(s)",
-                    len(bridge_paths),
-                )
+        # A bridge table with no join hops reaching SQL-gen is a table the
+        # model can see but not connect — without the real FK chain, it has
+        # to guess the join condition and can fabricate one between unrelated
+        # columns. Surface the real FK chain the same way attribute_join_paths
+        # already does for verified semantic joins.
+        if bridge_paths:
+            attribute_join_paths.extend({"path": hops} for hops in bridge_paths)
+            self.logger.info(
+                "Pairwise bridge reconciliation added %d join path(s) for "
+                "bridge table(s)",
+                len(bridge_paths),
+            )
 
         forced_table_ids -= {t.get("id") for t in relevant_tables}
         if forced_table_ids:
@@ -941,8 +929,10 @@ class CandidatePreparationAgent(BaseAgent):
             futures = {
                 pool.submit(_fetch_tables_for_query, q): q for q in search_queries
             }
-            for future in as_completed(futures):
-                query = futures[future]
+            # Collected in submission order, not completion order, so the rows
+            # merged for a table that several searches return are merged in the
+            # same order every time, whichever search happened to return first.
+            for future, query in futures.items():
                 try:
                     additional_tables.extend(future.result())
                 except Exception:
@@ -1044,7 +1034,12 @@ class CandidatePreparationAgent(BaseAgent):
         attribute_join_paths: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
-        if len(tables) <= 2:
+        if len(tables) <= _RELEVANCE_FILTER_BYPASS_MAX_TABLES:
+            self.logger.info(
+                "Relevance filter bypassed: %d candidate table(s) <= bypass max %d",
+                len(tables),
+                _RELEVANCE_FILTER_BYPASS_MAX_TABLES,
+            )
             return tables, ""
 
         if not _RELEVANCE_FILTER_ENABLED:
@@ -1266,12 +1261,21 @@ class CandidatePreparationAgent(BaseAgent):
             )
             return ids[0], ""
 
+        def _physical_column(ctx: dict) -> str:
+            parts = (
+                ctx.get("schema_name"),
+                ctx.get("table_name"),
+                ctx.get("col_name"),
+            )
+            return ".".join(str(part) for part in parts if part) or "(unknown)"
+
         attrs_block = "\n".join(
-            f"- id: {aid} | {ctx['attr_name']} "
-            f"(table: {ctx.get('table_name', '?')}, column: {ctx.get('col_name', '?')})"
+            f"- id: {aid} | physical column: {_physical_column(ctx)}"
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
             for aid, ctx in contexts.items()
         )
+        evidence = str(state.get("evidence") or "").strip()
+        evidence_block = f"\n\nAuthoritative evidence:\n{evidence}" if evidence else ""
         messages = [
             SystemMessage(
                 content=(
@@ -1281,10 +1285,12 @@ class CandidatePreparationAgent(BaseAgent):
             ),
             HumanMessage(
                 content=(
-                    f"Question: {question}\n\n"
+                    f"Question: {question}{evidence_block}\n\n"
                     f"Available column attributes:\n{attrs_block}\n\n"
                     "Return the id of the single column attribute that best represents "
-                    "the primary subject of the question."
+                    "the primary subject of the question. Map evidence concepts to "
+                    "the listed schema.table.column physical references, not to "
+                    "semantic attribute names."
                 )
             ),
         ]

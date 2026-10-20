@@ -37,9 +37,10 @@ what it *is*, and changing either would move which objects it labels while
 leaving the labels it has already written behind.
 
 :func:`delete_rule` leans on the cascades and then cleans up after them: the
-labels the rule applied are taken back, and a tag those labels were the whole of
-goes with them. Read its docstring, because that reach is the reason a rule is
-deletable at all, and because a caller can ask for the labels to be kept
+labels the rule applied are taken back, PII copied onto attributes of those
+columns is realigned the same way as a replay, and a tag those labels were the
+whole of goes with them. Read its docstring, because that reach is the reason a
+rule is deletable at all, and because a caller can ask for the labels to be kept
 instead.
 """
 
@@ -341,9 +342,14 @@ def _delete_tags_left_labelling_nothing(tag_ids: list[str]) -> None:
     condition is about the rows that are left, and asking the database keeps the
     answer and the delete in one statement.
     """
+    from auto_ontology.dal.tags import PII_TAG_NAME
+
     store().query_write(
         s.tag.delete().where(
             s.tag.c.id.in_(tag_ids),
+            # Ingestion finds the system tag by name; deleting an emptied copy
+            # would let the next detect create another id and fork the labels.
+            func.lower(func.trim(s.tag.c.name)) != PII_TAG_NAME.lower(),
             ~select(literal(1)).where(s.tag_target.c.tag_id == s.tag.c.id).exists(),
             ~select(literal(1)).where(s.rule__tag.c.tag_id == s.tag.c.id).exists(),
         )
@@ -365,6 +371,11 @@ def delete_rule(rule_id: str, *, keep_tags: bool = False) -> bool:
     than a property of how this is written -- a rule-applied tag is the rule
     still holding, and it goes on re-applying as the catalog grows until the
     rule is gone.
+
+    Propagated ``PII`` on attributes has no ``rule_id``, so the cascade would
+    leave those chips behind. Column ids the rule labelled are read first, the
+    rule is deleted, then the same attribute realign as a replay runs against
+    columns whose own label is already gone.
 
     **A tag the rule leaves labelling nothing goes too**, unless another rule
     applies it -- see :func:`_delete_tags_left_labelling_nothing`. Taking back
@@ -423,18 +434,33 @@ def delete_rule(rule_id: str, *, keep_tags: bool = False) -> bool:
 
         # Read before the delete, which is the only moment the rule's tags can
         # be known: `rule__tag` cascades, so afterwards there is nothing left
-        # saying which tags this rule was applying.
+        # saying which tags this rule was applying. Column labels go the same
+        # way (`tag_target.rule_id`), so the columns to realign PII on have
+        # to be named now too.
         applied = [
             row["tag_id"]
             for row in store().query_read(
                 select(s.rule__tag.c.tag_id).where(s.rule__tag.c.rule_id == rule_id)
             )
         ]
+        labelled_columns = store().query_read(
+            select(s.tag_target.c.tag_id, s.tag_target.c.column_id).where(
+                s.tag_target.c.rule_id == rule_id,
+                s.tag_target.c.column_id.is_not(None),
+            )
+        )
         deleted = bool(
             store().query_write(
                 s.rule.delete().where(s.rule.c.id == rule_id).returning(s.rule.c.id)
             )
         )
-        if deleted and applied:
-            _delete_tags_left_labelling_nothing(applied)
+        if deleted:
+            # After the cascade, so SQL realign does not still see this rule's
+            # column labels. Imported lazily: :mod:`auto_ontology.dal.tags`
+            # must not load this module at import time.
+            from auto_ontology.dal.tags import _cascade_pii_off_columns
+
+            _cascade_pii_off_columns(labelled_columns)
+            if applied:
+                _delete_tags_left_labelling_nothing(applied)
         return deleted

@@ -98,6 +98,17 @@ export const distinctValueProbingApi = {
 		}),
 };
 
+export const piiDetectionApi = {
+	get: () => json<{ enabled: boolean }>('/api/configurations/pii-detection'),
+
+	setEnabled: (enabled: boolean) =>
+		json<{ enabled: boolean }>('/api/configurations/pii-detection', {
+			method: 'PUT',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ enabled }),
+		}),
+};
+
 // Instance-wide "Visualize SQL Results" toggle (Settings > Agent Settings).
 export const visualizationApi = {
 	get: (): Promise<ResponseWithError<{ enabled: boolean }>> =>
@@ -105,4 +116,13 @@ export const visualizationApi = {
 
 	setEnabled: (enabled: boolean): Promise<ResponseWithError<{ enabled: boolean }>> =>
 		requests.put('configurations/visualization', { enabled }),
+};
+
+// Instance-wide timeout for SQL the text-to-SQL agent runs (Settings > Agent Settings).
+export const sqlQueryTimeoutApi = {
+	get: (): Promise<ResponseWithError<{ seconds: number }>> =>
+		requests.get('configurations/sql-query-timeout'),
+
+	set: (seconds: number): Promise<ResponseWithError<{ seconds: number }>> =>
+		requests.put('configurations/sql-query-timeout', { seconds }),
 };

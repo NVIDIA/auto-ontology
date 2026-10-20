@@ -29,12 +29,36 @@ from auto_ontology.server.responses import (
 
 router = APIRouter()
 
-_LIMIT_QUERY = Query(
+_DATA_GRAPH_LIMIT_QUERY = Query(
     default=service.MAX_EXPLORATION_GRAPH_NODES,
     ge=1,
     description=(
-        f"Max nodes returned; always capped at {service.MAX_EXPLORATION_GRAPH_NODES} "
-        "server-side."
+        f"Max nodes returned when database_id is omitted; always capped at "
+        f"{service.MAX_EXPLORATION_GRAPH_NODES}. Ignored when database_id is set."
+    ),
+)
+_DATABASE_ID_QUERY = Query(
+    default=None,
+    description=(
+        "When set, scope the graph to this database and skip the "
+        f"{service.MAX_EXPLORATION_GRAPH_NODES}-node cap that applies to the "
+        "unfiltered catalog."
+    ),
+)
+_SEMANTIC_DATABASE_ID_QUERY = Query(
+    default=None,
+    description=(
+        "When set, return every term linked to a table in this database. The "
+        f"{service.MAX_EXPLORATION_GRAPH_NODES}-node cap that applies to the "
+        "unfiltered glossary is skipped."
+    ),
+)
+_SEMANTIC_GRAPH_LIMIT_QUERY = Query(
+    default=service.MAX_EXPLORATION_GRAPH_NODES,
+    ge=1,
+    description=(
+        f"Max nodes returned when database_id is omitted; always capped at "
+        f"{service.MAX_EXPLORATION_GRAPH_NODES}. Ignored when database_id is set."
     ),
 )
 
@@ -47,15 +71,25 @@ def list_data_exploration_edges() -> dict:
 
 
 @router.get("/exploration/graph", response_model=DataExplorationGraphResponse)
-def get_data_exploration_graph(limit: int = _LIMIT_QUERY) -> dict:
-    """Return the full data-layer Exploration graph (``{nodes, links}``).
+def get_data_exploration_graph(
+    limit: int = _DATA_GRAPH_LIMIT_QUERY,
+    database_id: str | None = _DATABASE_ID_QUERY,
+) -> dict:
+    """Return the data-layer Exploration graph (``{nodes, links}``).
 
     Lets the client render the data graph from one request instead of
     walking the catalog tree (databases → schemas → tables) with a request
-    per level. Node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``
-    regardless of *limit*.
+    per level.
+
+    Without *database_id*, node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``
+    regardless of *limit*. With *database_id*, every table in that database
+    is returned and *limit* is ignored.
     """
-    return {"data": service.fetch_data_exploration_graph(zone_ids=None, limit=limit)}
+    return {
+        "data": service.fetch_data_exploration_graph(
+            zone_ids=None, limit=limit, database_id=database_id
+        )
+    }
 
 
 @router.get(
@@ -199,16 +233,23 @@ def list_table_zones() -> dict:
 @router.get(
     "/exploration/semantic-graph", response_model=SemanticExplorationGraphResponse
 )
-def get_semantic_exploration_graph(limit: int = _LIMIT_QUERY) -> dict:
-    """Return the full semantic-layer Exploration graph (``{nodes, links}``).
+def get_semantic_exploration_graph(
+    limit: int = _SEMANTIC_GRAPH_LIMIT_QUERY,
+    database_id: str | None = _SEMANTIC_DATABASE_ID_QUERY,
+) -> dict:
+    """Return the semantic-layer Exploration graph (``{nodes, links}``).
 
     Lets the client render the semantic graph from one request instead of
-    fetching related terms once per term (an N+1). Node count is capped at
-    ``MAX_EXPLORATION_GRAPH_NODES`` regardless of *limit*.
+    fetching related terms once per term (an N+1).
+
+    Without *database_id*, node count is capped at ``MAX_EXPLORATION_GRAPH_NODES``
+    regardless of *limit*. With *database_id*, every term linked to a table
+    in that database is returned and *limit* is ignored.
     """
     return {
         "data": service.fetch_semantic_exploration_graph(
             zone_ids=None,
             limit=limit,
+            database_id=database_id,
         )
     }

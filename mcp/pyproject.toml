@@ -11,7 +11,7 @@
 
 [project]
 name = "auto-ontology-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "MCP server exposing the Auto Ontology semantic layer to agent harnesses"
 readme = "README.md"
 requires-python = ">=3.11"

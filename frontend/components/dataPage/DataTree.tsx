@@ -12,6 +12,7 @@ import { DataModels } from '@/enums/datasources';
 import { Icon, IconName } from '@/common/icons';
 import { datasources } from '@/api/datasources';
 import { catalogNodeInfo } from '@/components/dataPage/catalog-node-utils';
+import { getTableType } from '@/components/dataPage/get-table-type';
 import { catalogPathFromFocusId } from '@/lib/data/data-catalog-path';
 import { splitId } from '@/lib/data/catalog-ids';
 import { Text } from '@/common/Text';
@@ -322,6 +323,7 @@ function TableBlock({
 	}, [open, table.columns.length, table.columns_count, tableLoadRef, onLoadColumns]);
 
 	const loading = open && table.columns.length === 0 && table.columns_count > 0;
+	const tableInfo = catalogNodeInfo[getTableType(table.table_type)];
 
 	return (
 		<div className="flex flex-col gap-y-1">
@@ -332,8 +334,8 @@ function TableBlock({
 				hasChildren={hasChildren}
 				loading={loading}
 				name={table.name}
-				icon={catalogNodeInfo[table.table_type].icon}
-				title={catalogNodeInfo[table.table_type].title}
+				icon={tableInfo.icon}
+				title={tableInfo.title}
 				selected={selectedId === tableFocusPath}
 				href={hasChildren ? undefined : catalogPathFromFocusId(tableFocusPath, pathBase)}
 				onActivateBranch={hasChildren ? activateTable : undefined}

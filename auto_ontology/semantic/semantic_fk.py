@@ -30,24 +30,30 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from nemo_retriever.graph.retriever import Retriever
-from nemo_retriever.tabular_data.sql_database import SQLDatabase
 from sqlglot import exp
 
 from auto_ontology.connectors import get_connectors
+from auto_ontology.connectors.base import SQLDatabase
 from auto_ontology.dal.attributes import (
+    fetch_semantic_fk_join_groups,
     find_column_attribute_by_column_id,
     find_unlinked_fk_columns,
     merge_semantic_fk,
+    set_semantic_fk_join_default,
 )
 from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.utils.embedding import EmbedParams
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 from auto_ontology.utils.model_config import resolve
+from auto_ontology.utils.retriever import Retriever
 from auto_ontology.utils.sample_values import stringify_sample_values
-from auto_ontology.semantic.models import FkHitSelection
+from auto_ontology.semantic.models import (
+    FkHitSelection,
+    SemanticFkJoinDefaultSelection,
+)
 from auto_ontology.vdb import get_semantic_vdb
 
 logger = logging.getLogger(__name__)
@@ -69,6 +75,16 @@ Rules:
 - Do NOT guess. If unsure, return null.
 """
 
+_JOIN_DEFAULT_SYSTEM_PROMPT = """\
+You are choosing the default foreign-key relationship used to join two database
+tables. Several columns on the same source table reference the same target column,
+but each column can represent a different business role.
+
+Choose the relationship that most naturally represents an unqualified join between
+the source and target tables. Return exactly one supplied source_column_id. Return
+null only when the schema context is genuinely insufficient. Never invent an ID.
+"""
+
 
 def resolve_semantic_fks(database_name: str) -> int:
     """Create SEMANTIC_FK edges for all unlinked FK columns.
@@ -76,6 +92,13 @@ def resolve_semantic_fks(database_name: str) -> int:
     Runs after the taxonomy while-loop in ``compile_semantic_layer``.
     Returns the total number of SEMANTIC_FK edges created.
     """
+    created = _resolve_semantic_fks(database_name)
+    select_semantic_fk_join_defaults(database_name)
+    return created
+
+
+def _resolve_semantic_fks(database_name: str) -> int:
+    """Create missing semantic FK edges before default selection."""
     candidates = find_unlinked_fk_columns(database_name)
     if not candidates:
         logger.info("resolve_semantic_fks: no unlinked FK columns found")
@@ -202,6 +225,136 @@ def resolve_semantic_fks(database_name: str) -> int:
     return total
 
 
+def select_semantic_fk_join_defaults(database_name: str) -> int:
+    """Persist exactly one join-path default for every semantic FK group."""
+    rows = fetch_semantic_fk_join_groups(database_name)
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        key = (row["source_table_id"], row["target_attribute_id"])
+        grouped.setdefault(key, []).append(row)
+
+    ambiguous = [group for group in grouped.values() if len(group) > 1]
+    llm = None
+    if ambiguous:
+        try:
+            llm = get_llm_client()
+        except EnvironmentError:
+            logger.warning(
+                "Semantic FK join-default selection has no configured LLM; "
+                "using deterministic fallbacks for %d group(s)",
+                len(ambiguous),
+            )
+        except Exception:
+            logger.exception(
+                "Semantic FK join-default client initialization failed; "
+                "using deterministic fallbacks for %d group(s)",
+                len(ambiguous),
+            )
+
+    for (source_table_id, target_attribute_id), group in grouped.items():
+        selected_column_id = group[0]["source_column_id"]
+        if len(group) > 1:
+            llm_selected = _select_join_default_with_llm(group, llm)
+            if llm_selected is None:
+                selected_column_id = _deterministic_join_default(group)
+                logger.warning(
+                    "Semantic FK join-default selection fell back to %s for %s -> %s",
+                    selected_column_id,
+                    group[0]["source_table_name"],
+                    group[0]["target_table_name"],
+                )
+            else:
+                selected_column_id = llm_selected
+
+        set_semantic_fk_join_default(
+            source_table_id,
+            target_attribute_id,
+            selected_column_id,
+        )
+        logger.info(
+            "Semantic FK join default: %s.%s -> %s.%s",
+            group[0]["source_table_name"],
+            next(
+                row["source_column_name"]
+                for row in group
+                if row["source_column_id"] == selected_column_id
+            ),
+            group[0]["target_table_name"],
+            group[0]["target_column_name"],
+        )
+
+    return len(grouped)
+
+
+def _select_join_default_with_llm(
+    group: list[dict[str, Any]],
+    llm: object | None,
+) -> str | None:
+    """Return an exact source-column ID selected by the LLM, or ``None``."""
+    if llm is None:
+        return None
+
+    first = group[0]
+    candidates = "\n".join(
+        (
+            f"- source_column_id: {row['source_column_id']}\n"
+            f"  column: {row['source_column_name']}\n"
+            f"  description: {row.get('source_column_description') or '(none)'}"
+        )
+        for row in group
+    )
+    prompt = f"""\
+Source table: {first["source_table_name"]}
+Source table description: {first.get("source_table_description") or "(none)"}
+Target table: {first["target_table_name"]}
+Target table description: {first.get("target_table_description") or "(none)"}
+Target column: {first["target_column_name"]}
+Target column description: {first.get("target_column_description") or "(none)"}
+Target semantic attribute: {first.get("target_attribute_name") or "(none)"}
+
+Candidate relationships:
+{candidates}
+"""
+    try:
+        result = invoke_with_structured_output(
+            llm,
+            [
+                SystemMessage(content=_JOIN_DEFAULT_SYSTEM_PROMPT),
+                HumanMessage(content=prompt),
+            ],
+            SemanticFkJoinDefaultSelection,
+        )
+    except Exception:
+        logger.exception(
+            "Semantic FK join-default LLM failed for %s -> %s",
+            first["source_table_name"],
+            first["target_table_name"],
+        )
+        return None
+
+    selected = result.selected_column_id if result is not None else None
+    valid_ids = {row["source_column_id"] for row in group}
+    if selected not in valid_ids:
+        if selected is not None:
+            logger.warning(
+                "Semantic FK join-default LLM returned unknown column id %r",
+                selected,
+            )
+        return None
+    return selected
+
+
+def _deterministic_join_default(group: list[dict[str, Any]]) -> str:
+    """Choose a stable fallback when the LLM cannot decide."""
+    return min(
+        group,
+        key=lambda row: (
+            str(row.get("source_column_name") or "").casefold(),
+            str(row["source_column_id"]),
+        ),
+    )["source_column_id"]
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -222,14 +375,13 @@ def _build_retriever(database_name: str) -> Retriever | None:
     if not _NVIDIA_API_KEY:
         return None
 
-    vdb = get_semantic_vdb(database_name=database_name)
     return Retriever(
-        vdb_kwargs={"vdb": vdb},
-        embed_kwargs={
-            "model_name": _EMBED_MODEL,
-            "embed_invoke_url": _EMBED_ENDPOINT,
-            "api_key": _NVIDIA_API_KEY,
-        },
+        get_semantic_vdb(database_name=database_name),
+        EmbedParams(
+            model_name=_EMBED_MODEL,
+            embed_invoke_url=_EMBED_ENDPOINT,
+            api_key=_NVIDIA_API_KEY,
+        ),
     )
 
 
@@ -431,9 +583,13 @@ def _sample_match_sql(
 
 
 def _hit_score(hit: dict[str, Any]) -> float:
-    """Return VDB distance, treating missing or malformed scores as worst."""
+    """Return the hit's vector distance (lower is closer); missing or malformed is worst.
+
+    The retriever reports it as ``_distance``. This used to read ``score``,
+    which no hit ever carried, so every candidate tied and the first one won.
+    """
     try:
-        return float(hit.get("score", float("inf")))
+        return float(hit.get("_distance", float("inf")))
     except (TypeError, ValueError):
         return float("inf")
 
@@ -473,7 +629,7 @@ def _llm_pick_hit(
     )
 
     result = invoke_with_structured_output(
-        get_non_reasoning_llm_client(max_tokens=4096),
+        get_llm_client(max_tokens=4096),
         [SystemMessage(content=_SYSTEM_PROMPT), HumanMessage(content=human_text)],
         FkHitSelection,
     )

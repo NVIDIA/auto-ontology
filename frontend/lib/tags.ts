@@ -17,6 +17,7 @@ import type { QueryClient } from '@tanstack/react-query';
 
 import { tagsApi } from '@/api/tags';
 import { tagQueries } from '@/lib/queries/tags';
+import { PII_TAG_NAME } from '@/constants/tags';
 import { ComposerSectionKind } from '@/enums/datasources';
 import type { TagItemType } from '@/enums/tags';
 import type { ComposerEntityTagsSection } from '@/types/composer-section';
@@ -29,6 +30,10 @@ import type { TagChip } from '@/types/tags';
  * the edit — are written in different files.
  */
 export const TAGS_SECTION_ID = 'tags';
+
+/** Whether the tag is system-managed, which the backend refuses to delete or rename. */
+export const isProtectedTag = (tag: Pick<TagChip, 'name'>): boolean =>
+	tag.name.trim().toLowerCase() === PII_TAG_NAME.toLowerCase();
 
 /**
  * Every tag that exists, which is what the picker offers.

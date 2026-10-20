@@ -6,7 +6,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { Placeholders } from '@/assets/images/placeholders';
 import type { BreadcrumbItem } from '@/common/Breadcrumbs';
@@ -25,6 +25,7 @@ import { sqlAttributesApi } from '@/api/sqlAttributes';
 import { useDebouncedValue } from '@/hooks/useDebouncedValue';
 import { DEFAULT_PAGE_SIZE, useInfiniteList } from '@/hooks/useInfiniteList';
 import { type ComposerEditValue } from '@/common/SinglePageComposer';
+import { entitySidePanel } from '@/common/SidePanel';
 import { Label } from '@/common/Label';
 import { CertificationBadge } from '@/common/CertificationBadge';
 import { ComposerColumnType, ComposerSectionKind } from '@/enums/datasources';
@@ -41,9 +42,15 @@ import {
 	syncTags,
 } from '@/lib/tags';
 import { sampleValuesEditable, sampleValuesReadOnlyHint } from '@/lib/column-types';
+import { canEditEntity, changedOwnerId, entityOwnerSection, findOwner } from '@/lib/owners';
+import { fetchOwnerDirectory, ownerQueries } from '@/lib/queries/owners';
+import { OwnerPermission } from '@/types/owners';
+import { useSession } from '@/auth/auth-client';
 import { SinglePageView, type SinglePageFormat } from '@/common/SinglePageView';
 import { SqlEditor } from '@/common/SqlBlock';
 import { Toast } from '@/common/Toast';
+import { OwnerLabel } from '@/common/OwnerLabel';
+import type { Owner } from '@/types/owners';
 import type { ColumnAttribute, SqlAttribute, Term, TermCount, TermDetail } from '@/types/terms';
 
 const termFocusTrail = ({
@@ -74,12 +81,16 @@ const termFocusTrail = ({
 
 type TermCardProps = {
 	term: Term;
+	owners: Owner[];
 	columnAttributeCount: number;
 	sqlAttributeCount: number;
 	relatedCount: number;
 	certificationStatus: CertificationStatus;
 	onClick: (term: Term) => void;
 };
+
+/** How many tag chips a card shows before the rest collapse to a count. */
+const CARD_TAG_LIMIT = 2;
 
 type SqlAttributeDeleteTarget = {
 	id: string;
@@ -107,122 +118,149 @@ export const TermsLoadingSkeleton = () => (
 
 const TermCard = ({
 	term,
+	owners,
 	columnAttributeCount,
 	sqlAttributeCount,
 	relatedCount,
 	certificationStatus,
 	onClick,
-}: TermCardProps) => (
-	<li
-		role="button"
-		tabIndex={0}
-		onClick={() => onClick(term)}
-		onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick(term)}
-		className="cursor-pointer rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
-	>
-		{/* Card header */}
-		<div className="flex items-start justify-between gap-3">
-			<div className="min-w-0 space-y-0.5">
-				<div className="flex min-w-0 items-center gap-2">
-					<Icon
-						name={IconName.Terms}
-						className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
-					/>
-					<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
-				</div>
-				{term.synonyms && term.synonyms.length > 0 && (
-					<Text as="p" text={term.synonyms.join(', ')} variant={TextVariant.Caption} />
-				)}
-			</div>
-			<CertificationBadge status={certificationStatus} />
-		</div>
-
-		<div className="mt-2">
-			{term.description != null && term.description.trim() !== '' ? (
-				<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
-			) : (
-				<p className="text-sm italic text-secondary dark:text-zinc-500">
-					No Description Available
-				</p>
-			)}
-		</div>
-
-		{/* Four-column section */}
-		<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
-			{/* Column Attributes */}
-			<div className="border-r border-zinc-200 dark:border-zinc-700">
-				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-						Column Attributes
-					</span>
-				</div>
-				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-						<span>Column Attributes</span>
-						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
-							{columnAttributeCount}
-						</span>
-					</span>
-				</div>
-			</div>
-
-			{/* SQL Attributes */}
-			<div className="border-r border-zinc-200 dark:border-zinc-700">
-				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-						SQL Attributes
-					</span>
-				</div>
-				<div className="flex items-center">
-					<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-						<span>SQL Attributes</span>
-						<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
-							{sqlAttributeCount}
-						</span>
-					</span>
-				</div>
-			</div>
-
-			{/* Related Terms */}
-			<div className="border-r border-zinc-200 dark:border-zinc-700">
-				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-						Related Terms
-					</span>
-				</div>
-				<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
-					<span>Related Terms</span>
-					<span className="font-medium text-heading dark:text-zinc-100">
-						{relatedCount}
-					</span>
-				</div>
-			</div>
-
-			{/* Zones */}
-			<div>
-				<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
-					<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
-						Zones
-					</span>
-				</div>
-				<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
-					{term.zones.length > 0 ? (
-						term.zones.map((zone) => (
-							<Label
-								key={zone.id}
-								label={zone.name}
-								color={zone.color}
-								muted={!zone.enabled}
-							/>
-						))
-					) : (
-						<span className="text-sm text-secondary dark:text-zinc-400">-</span>
+}: TermCardProps) => {
+	const tags = term.tags ?? [];
+	const shownTags = tags.slice(0, CARD_TAG_LIMIT);
+	const hiddenTagCount = tags.length - shownTags.length;
+	return (
+		<li
+			role="button"
+			tabIndex={0}
+			onClick={() => onClick(term)}
+			onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onClick(term)}
+			className="cursor-pointer rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900 dark:hover:border-zinc-700"
+		>
+			{/* Card header */}
+			<div className="flex items-start justify-between gap-3">
+				<div className="min-w-0 space-y-0.5">
+					<div className="flex min-w-0 items-center gap-2">
+						<Icon
+							name={IconName.Terms}
+							className="h-4 w-4 shrink-0 text-body dark:text-zinc-300"
+						/>
+						<Text as="h2" text={term.name} variant={TextVariant.CardTitle} fill />
+					</div>
+					{term.synonyms && term.synonyms.length > 0 && (
+						<Text
+							as="p"
+							text={term.synonyms.join(', ')}
+							variant={TextVariant.Caption}
+						/>
 					)}
 				</div>
+				<div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+					<span className="inline-flex items-center gap-1 text-sm font-semibold text-heading dark:text-zinc-100">
+						<Icon name={IconName.Tag} className="h-4 w-4" />
+						Tags
+					</span>
+					{shownTags.length === 0 ? (
+						<span className="text-sm text-[#B3B4B7]">None</span>
+					) : (
+						shownTags.map((tag) => <Label key={tag.id} label={tag.name} />)
+					)}
+					{hiddenTagCount > 0 ? (
+						<span className="text-xs text-secondary dark:text-zinc-400">
+							+{hiddenTagCount}
+						</span>
+					) : null}
+					<OwnerLabel owner={findOwner(owners, term.owner_id)} />
+					<CertificationBadge status={certificationStatus} />
+				</div>
 			</div>
-		</div>
-	</li>
-);
+
+			<div className="mt-2">
+				{term.description != null && term.description.trim() !== '' ? (
+					<Text as="p" text={term.description} lines={3} variant={TextVariant.Body} />
+				) : (
+					<p className="text-sm italic text-secondary dark:text-zinc-500">
+						No Description Available
+					</p>
+				)}
+			</div>
+
+			{/* Four-column section */}
+			<div className="mt-4 grid grid-cols-4 gap-0 overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700">
+				{/* Column Attributes */}
+				<div className="border-r border-zinc-200 dark:border-zinc-700">
+					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
+							Column Attributes
+						</span>
+					</div>
+					<div className="flex items-center">
+						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+							<span>Column Attributes</span>
+							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
+								{columnAttributeCount}
+							</span>
+						</span>
+					</div>
+				</div>
+
+				{/* SQL Attributes */}
+				<div className="border-r border-zinc-200 dark:border-zinc-700">
+					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
+							SQL Attributes
+						</span>
+					</div>
+					<div className="flex items-center">
+						<span className="flex w-full items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+							<span>SQL Attributes</span>
+							<span className="ml-1.5 font-medium text-heading dark:text-zinc-100">
+								{sqlAttributeCount}
+							</span>
+						</span>
+					</div>
+				</div>
+
+				{/* Related Terms */}
+				<div className="border-r border-zinc-200 dark:border-zinc-700">
+					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
+							Related Terms
+						</span>
+					</div>
+					<div className="flex items-center justify-between px-4 py-3 text-sm text-body dark:text-zinc-300">
+						<span>Related Terms</span>
+						<span className="font-medium text-heading dark:text-zinc-100">
+							{relatedCount}
+						</span>
+					</div>
+				</div>
+
+				{/* Zones */}
+				<div>
+					<div className="border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-700">
+						<span className="text-xs font-semibold text-secondary dark:text-zinc-400">
+							Zones
+						</span>
+					</div>
+					<div className="flex flex-wrap items-center gap-1.5 px-4 py-3">
+						{term.zones.length > 0 ? (
+							term.zones.map((zone) => (
+								<Label
+									key={zone.id}
+									label={zone.name}
+									color={zone.color}
+									muted={!zone.enabled}
+								/>
+							))
+						) : (
+							<span className="text-sm text-secondary dark:text-zinc-400">-</span>
+						)}
+					</div>
+				</div>
+			</div>
+		</li>
+	);
+};
 
 /**
  * Per-card badge numbers, keyed by term id. The list endpoint sends them
@@ -258,6 +296,8 @@ export const TermsView = () => {
 	// this page's own, so opening a term after a column attribute doesn't ask
 	// for the vocabulary twice.
 	const queryClient = useQueryClient();
+	const { data: session } = useSession();
+	const { data: owners = [] } = useQuery(ownerQueries.all());
 	const searchParams = useSearchParams();
 	const focusId = searchParams.get('focus');
 	const sqlAttrId = searchParams.get('sqlAttr');
@@ -627,7 +667,11 @@ export const TermsView = () => {
 			: (focusedColAttr.sample_values ?? []);
 		const previousSampleValues = focusedColAttr.sample_values ?? [];
 
-		const patch: { name?: string; description?: string; sample_values?: string[] } = {};
+		const patch: {
+			name?: string;
+			description?: string;
+			sample_values?: string[];
+		} = {};
 		if (name !== focusedColAttr.name.trim()) {
 			patch.name = name;
 		}
@@ -702,13 +746,15 @@ export const TermsView = () => {
 				? payload.description
 				: (focusedTerm.description ?? '');
 
-		const patch: { name?: string; description?: string } = {};
+		const patch: { name?: string; description?: string; owner_id?: string | null } = {};
 		if (name !== focusedTerm.name.trim()) {
 			patch.name = name;
 		}
 		if (description !== (focusedTerm.description ?? '')) {
 			patch.description = description;
 		}
+		const nextOwner = changedOwnerId(payload.owner_id, focusedTerm.owner_id);
+		if (nextOwner !== undefined) patch.owner_id = nextOwner;
 		const nextTagIds = stagedTagIds(payload[TAGS_SECTION_ID]);
 		if (Object.keys(patch).length === 0 && nextTagIds == null) {
 			return { error: false };
@@ -719,7 +765,11 @@ export const TermsView = () => {
 			if (res.error) {
 				return { error: true, message: res.message ?? 'Failed to update term' };
 			}
-			patchTerm(focusId, { name: res.data.name, description: res.data.description });
+			patchTerm(focusId, {
+				name: res.data.name,
+				description: res.data.description,
+				owner_id: res.data.owner_id,
+			});
 		}
 
 		if (nextTagIds != null) {
@@ -729,11 +779,10 @@ export const TermsView = () => {
 				current: (focusedTermDetail?.id === focusId ? focusedTermDetail.tags : null) ?? [],
 				nextIds: nextTagIds,
 			});
-			// The baseline the next save diffs against, for the reason on the
-			// attribute handlers above. Not through `patchTerm`, which patches
-			// both copies of a `Term`: only the detail read resolves tags, so
-			// the list card has no `tags` to bring up to date.
-			setFocusedTermDetail((prev) => (prev?.id === focusId ? { ...prev, tags } : prev));
+			// The baseline the next save diffs against, and what the list card
+			// draws. `patchTerm` writes both copies, so going back to the list
+			// shows the chips this save just landed.
+			patchTerm(focusId, { tags });
 			if (tagError != null) {
 				// Some of the writes may have landed, and the text edit — if
 				// there was one — is already saved, so the refetch has to
@@ -814,10 +863,9 @@ export const TermsView = () => {
 		setSqlAttrsEpoch((prev) => prev + 1);
 	};
 
-	// Certification dropdowns inside the term page's Column/SQL attribute
-	// tables save immediately and update the relevant attribute cache so the
-	// table cell reflects the change. The epoch bump refetches the term page
-	// (which passes `treeDataEpoch={sqlAttrsEpoch}`) for both branches.
+	// Certification dropdowns in the attribute tables save immediately. Each
+	// one is offered only when the caller may edit that attribute, and the
+	// epoch bump refetches the term page (`treeDataEpoch={sqlAttrsEpoch}`).
 	const handleTermTableCertificationChange = async (
 		sectionId: string,
 		rowId: string,
@@ -950,9 +998,11 @@ export const TermsView = () => {
 			// TODO: viewer zone-scoping handled in a separate PR — for now the
 			// client treats a viewer the same as an admin here (no zone fetch,
 			// userZoneIds = null → all zones accessible).
-			const [res, tagOptions] = await Promise.all([
+			const [res, tagOptions, ownerDirectory, termRes] = await Promise.all([
 				termsApi.getColumnAttributes(focusId),
 				fetchTagOptions(queryClient),
+				fetchOwnerDirectory(queryClient),
+				termsApi.get(focusId),
 			]);
 			const attrs = res.error ? [] : (res.data ?? []);
 			const attr = attrs.find((a) => a.id === attrId);
@@ -975,7 +1025,7 @@ export const TermsView = () => {
 				header: {
 					header: {
 						title: attr.name,
-						icon: IconName.Column,
+						icon: IconName.Key,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1008,7 +1058,6 @@ export const TermsView = () => {
 						})),
 						userZoneIds,
 					},
-					entityTagsSection(attr.tags, tagOptions),
 					{
 						type: ComposerSectionKind.ENTITY_CHIPS,
 						id: 'primary_column',
@@ -1039,6 +1088,17 @@ export const TermsView = () => {
 						})),
 					},
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						termRes.error ? null : termRes.data.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						false,
+						'Term Owner',
+					),
+					tags: entityTagsSection(attr.tags, tagOptions),
+					activity: attr,
+				}),
 			};
 		},
 		[focusId, queryClient],
@@ -1046,9 +1106,10 @@ export const TermsView = () => {
 
 	const getSqlAttributeSinglePage = useCallback(
 		async (attrId: string): Promise<SinglePageFormat> => {
-			const [res, tagOptions] = await Promise.all([
+			const [res, tagOptions, ownerDirectory] = await Promise.all([
 				sqlAttributesApi.get(attrId),
 				fetchTagOptions(queryClient),
+				fetchOwnerDirectory(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {
@@ -1068,11 +1129,13 @@ export const TermsView = () => {
 				return prev.map((a) => (a.id === attr.id ? attr : a));
 			});
 
+			const termRes = await termsApi.get(attr.term_id);
+
 			return {
 				header: {
 					header: {
 						title: attr.name,
-						icon: IconName.Link,
+						icon: IconName.ChartLine,
 						titleEditable: true,
 						certification: { certified: attr.certified, showLabel: true },
 					},
@@ -1104,8 +1167,19 @@ export const TermsView = () => {
 							enabled: z.enabled,
 						})),
 					},
-					entityTagsSection(attr.tags, tagOptions),
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						termRes.error ? null : termRes.data.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						false,
+						'Term Owner',
+					),
+					tags: entityTagsSection(attr.tags, tagOptions),
+					activity: attr,
+					showCreatedBy: true,
+				}),
 			};
 		},
 		[queryClient],
@@ -1113,11 +1187,12 @@ export const TermsView = () => {
 
 	const getSinglePage = useCallback(
 		async (termId: string): Promise<SinglePageFormat> => {
-			const [res, attrsRes, sqlAttrsRes, tagOptions] = await Promise.all([
+			const [res, attrsRes, sqlAttrsRes, tagOptions, ownerDirectory] = await Promise.all([
 				termsApi.get(termId),
 				termsApi.getColumnAttributes(termId),
 				termsApi.getSqlAttributes(termId),
 				fetchTagOptions(queryClient),
+				fetchOwnerDirectory(queryClient),
 			]);
 			if (res.error || !res.data) {
 				return {
@@ -1178,7 +1253,6 @@ export const TermsView = () => {
 							focusId: [table.db_id, table.schema_id, table.id].join('|'),
 						})),
 					},
-					entityTagsSection(term.tags, tagOptions),
 					{
 						type: ComposerSectionKind.ZONES_CHIPS,
 						id: 'zones',
@@ -1249,6 +1323,17 @@ export const TermsView = () => {
 						emptyMessage: 'SQL Attribute Does Not Exist',
 					},
 				],
+				leftPanel: entitySidePanel({
+					owner: entityOwnerSection(
+						term.owner_id,
+						ownerDirectory,
+						OwnerPermission.catalog,
+						true,
+						'Term Owner',
+					),
+					tags: entityTagsSection(term.tags, tagOptions),
+					activity: term,
+				}),
 			};
 		},
 		[queryClient],
@@ -1256,8 +1341,8 @@ export const TermsView = () => {
 
 	const listedTerm = focusId != null ? (terms.find((t) => t.id === focusId) ?? null) : null;
 	const focusedTerm =
-		listedTerm ??
-		(focusId != null && focusedTermDetail?.id === focusId ? focusedTermDetail : null);
+		(focusId != null && focusedTermDetail?.id === focusId ? focusedTermDetail : null) ??
+		listedTerm;
 	const focusedSqlAttr =
 		sqlAttrId != null ? (sqlAttrs.find((attr) => attr.id === sqlAttrId) ?? null) : null;
 	const focusedColAttr =
@@ -1274,6 +1359,24 @@ export const TermsView = () => {
 		}),
 	);
 
+	const actor = session?.user ? { id: session.user.id, role: session.user.role ?? null } : null;
+	const canEditCatalog = canEditEntity({
+		user: actor,
+		permission: { catalog: ['edit'] },
+	});
+	const canEditFocusedTerm = canEditEntity({
+		user: actor,
+		permission: { catalog: ['edit'] },
+		ownerId: focusedTerm?.owner_id,
+		owners,
+	});
+	// A SQL attribute shows the term's owner and does not grant edit through an
+	// owner of its own. The button and the certification dropdown follow the
+	// account role, the same way a column attribute does.
+	const canEditFocusedSqlAttr = canEditCatalog;
+	const canEditFocusedColAttr = canEditCatalog;
+	const canCertifyAttributeRow = (): boolean => canEditCatalog;
+
 	if (focusId != null && sqlAttrId != null) {
 		const sqlAttrTitle = focusedSqlAttr?.name ?? sqlAttrId;
 		return (
@@ -1286,7 +1389,7 @@ export const TermsView = () => {
 						treeDataEpoch={sqlAttrsEpoch}
 						headerActions={
 							<>
-								{sqlAttrEditing ? null : (
+								{sqlAttrEditing || !canEditFocusedSqlAttr ? null : (
 									<>
 										<Button
 											theme={ButtonTheme.Primary}
@@ -1423,7 +1526,7 @@ export const TermsView = () => {
 						treeDataEpoch={columnAttrsEpoch}
 						headerActions={
 							<>
-								{columnAttrEditing ? null : (
+								{columnAttrEditing || !canEditFocusedColAttr ? null : (
 									<Button
 										theme={ButtonTheme.Primary}
 										size={Size.REGULAR}
@@ -1479,7 +1582,7 @@ export const TermsView = () => {
 						treeDataEpoch={sqlAttrsEpoch}
 						headerActions={
 							<>
-								{termEditing ? null : (
+								{termEditing || !canEditFocusedTerm ? null : (
 									<Button
 										theme={ButtonTheme.Primary}
 										size={Size.REGULAR}
@@ -1493,17 +1596,19 @@ export const TermsView = () => {
 										Edit
 									</Button>
 								)}
-								<Button
-									theme={ButtonTheme.Primary}
-									size={Size.REGULAR}
-									type="button"
-									onClick={() => setCreateSqlAttrModalOpen(true)}
-									iconPosition="left"
-									shadow
-								>
-									<Icon name={IconName.Plus} className="h-4 w-4" />
-									Create New SQL Attribute
-								</Button>
+								{canEditCatalog ? (
+									<Button
+										theme={ButtonTheme.Primary}
+										size={Size.REGULAR}
+										type="button"
+										onClick={() => setCreateSqlAttrModalOpen(true)}
+										iconPosition="left"
+										shadow
+									>
+										<Icon name={IconName.Plus} className="h-4 w-4" />
+										Create New SQL Attribute
+									</Button>
+								) : null}
 							</>
 						}
 						isEditing={termEditing}
@@ -1517,6 +1622,7 @@ export const TermsView = () => {
 						onDataTableRowClick={handleDataTableRowClick}
 						onCertificationChange={handleTermCertificationChange}
 						onDataTableCertificationChange={handleTermTableCertificationChange}
+						canCertifyDataTableRow={canCertifyAttributeRow}
 					/>
 				</main>
 				<Toast
@@ -1652,6 +1758,7 @@ export const TermsView = () => {
 							<TermCard
 								key={term.id}
 								term={term}
+								owners={owners}
 								columnAttributeCount={
 									badgeCounts.columnAttributes.get(term.id) ?? 0
 								}

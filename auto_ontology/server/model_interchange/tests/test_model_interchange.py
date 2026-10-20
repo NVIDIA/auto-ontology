@@ -13,12 +13,18 @@ reads."""
 
 from __future__ import annotations
 
+import io
+import zipfile
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
-from ossie_nvidia_gsf import GSFConversionError, convert_gsf_to_ossie
+from ossie_nvidia_auto_ontology import (
+    AutoOntologyConversionError,
+    convert_auto_ontology_to_ossie,
+)
+from pydantic import ValidationError
 
 from auto_ontology.dal.model_interchange import (
     assemble_export_document,
@@ -41,6 +47,7 @@ from auto_ontology.server.model_interchange.schemas import (
     ExportRequest,
     AutoOntologyModelDocument,
     ModelFormat,
+    ModelSemanticFk,
 )
 
 
@@ -205,6 +212,15 @@ def test_assemble_export_document_groups_sql_attributes_by_source() -> None:
     assert len(document.semantic_layer.sql_attributes.bridge_table) == 1
 
 
+def test_semantic_fk_without_join_path_flag_defaults_to_enabled() -> None:
+    semantic_fk = ModelSemanticFk(
+        column_id="source-column",
+        column_attribute_id="target-attribute",
+    )
+
+    assert semantic_fk.use_in_join_paths is True
+
+
 def test_assemble_export_document_keeps_sample_value_types() -> None:
     """An integer column must leave as numbers, or a re-import cannot restore them."""
     rows = _export_rows()
@@ -286,7 +302,11 @@ def _in_scope_export_rows() -> dict:
     ]
     rows["joins"] = []
     rows["semantic_fks"] = [
-        {"column_id": "col-2", "column_attribute_id": "attr-1"},
+        {
+            "column_id": "col-2",
+            "column_attribute_id": "attr-1",
+            "use_in_join_paths": False,
+        },
     ]
     return rows
 
@@ -320,6 +340,7 @@ def test_assemble_export_document_keeps_in_scope_references() -> None:
 
     assert document.data_layer.foreign_keys[0].source_column_id == "col-2"
     assert document.semantic_layer.semantic_fks[0].column_attribute_id == "attr-1"
+    assert document.semantic_layer.semantic_fks[0].use_in_join_paths is False
     assert document.semantic_layer.terms[0].represents == ["tbl-1"]
 
 
@@ -418,9 +439,44 @@ def test_export_model_ossie_format_emits_ossie_document(
     payload = yaml.safe_load(yaml_text)
 
     assert "data_layer" not in payload
-    model = payload["semantic_model"][0]
-    assert [dataset["name"] for dataset in model["datasets"]] == ["Order"]
+    model = payload
+    assert [dataset["name"] for dataset in model["datasets"]] == ["order"]
     assert model["datasets"][0]["source"] == "retail.main.orders"
+
+
+@patch(
+    "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.fetch_export_rows")
+@patch("auto_ontology.server.model_interchange.service.dal.validate_database_ids")
+def test_export_ossie_documents_zips_the_model_its_ontology_and_mapping(
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+) -> None:
+    mock_fetch.return_value = _export_rows()
+    request = ExportRequest(
+        databases=[], format=ModelFormat.OSSIE, include_ontology=True
+    )
+
+    with zipfile.ZipFile(io.BytesIO(service.export_ossie_documents(request))) as zf:
+        files = {name: zf.read(name).decode("utf-8") for name in zf.namelist()}
+
+    semantic_model, ontology, mapping = service.OSSIE_EXPORT_FILES
+    assert set(files) == {semantic_model, ontology, mapping}
+    # The zip carries the same semantic model the single-file export returns.
+    assert files[semantic_model] == service.export_model(request)
+    concepts = [item["concept"] for item in yaml.safe_load(files[ontology])["ontology"]]
+    assert concepts == ["Order"]
+    references = yaml.safe_load(files[mapping])
+    assert references["ontology_ref"]["iri"] == f"./{ontology}"
+    assert references["semantic_model_ref"]["iri"] == f"./{semantic_model}"
+
+
+def test_include_ontology_requires_the_ossie_format() -> None:
+    with pytest.raises(ValidationError, match="only to the ossie format"):
+        ExportRequest(databases=[], include_ontology=True)
 
 
 @patch(
@@ -468,7 +524,7 @@ def test_export_model_ossie_reports_all_duplicate_custom_analysis_names(
     mock_fetch.return_value = rows
 
     with pytest.raises(
-        GSFConversionError,
+        AutoOntologyConversionError,
         match=r"duplicate names.*'name25' \(2\), 'name3' \(2\)",
     ):
         service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE))
@@ -550,12 +606,14 @@ def test_export_model_ossie_keeps_one_table_per_term(
         service.export_model(ExportRequest(databases=[], format=ModelFormat.OSSIE)),
     )
 
-    datasets = payload["semantic_model"][0]["datasets"]
-    assert [dataset["name"] for dataset in datasets] == ["Category"]
+    datasets = payload["datasets"]
+    assert [dataset["name"] for dataset in datasets] == ["category"]
     assert datasets[0]["source"] == "retail.main.categories"
+    # The primary-key column no attribute exposes is exported as a field too.
     assert [field["name"] for field in datasets[0]["fields"]] == [
-        "category id",
-        "category id again",
+        "category_id",
+        "category_id_again",
+        "id",
     ]
 
 
@@ -579,9 +637,82 @@ def test_export_model_auto_ontology_keeps_every_represented_table(
     assert len(term["columns_attributes"]) == 3
 
 
+def test_dialects_fall_back_to_saved_settings_when_a_database_is_unreachable(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """One unreachable database must not fail the whole export."""
+    with (
+        patch(
+            "auto_ontology.server.model_interchange.service.get_connectors",
+            side_effect=ConnectionError("Can't connect to MySQL server"),
+        ),
+        patch(
+            "auto_ontology.server.model_interchange.service.list_connections",
+            return_value=[
+                {"name": "dw", "type": "mysql"},
+                {"name": "wwi", "type": "postgresql"},
+            ],
+        ),
+    ):
+        dialects = service._dialect_by_database_name()
+
+    assert dialects == {"dw": "mysql", "wwi": "postgresql"}
+    assert "Can't connect to MySQL server" in caplog.text
+
+
+@patch(
+    "auto_ontology.server.model_interchange.service.dal.make_cached_sql_column_resolver",
+    return_value=lambda *args, **kwargs: [],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.fetch_export_rows")
+@patch("auto_ontology.server.model_interchange.service.dal.validate_database_ids")
+@patch(
+    "auto_ontology.server.model_interchange.service.get_connectors",
+    side_effect=ConnectionError("Can't connect to MySQL server"),
+)
+@pytest.mark.parametrize("model_format", list(ModelFormat))
+def test_export_model_succeeds_with_an_unreachable_database(
+    _mock_connectors: MagicMock,
+    _mock_validate: MagicMock,
+    mock_fetch: MagicMock,
+    _mock_resolver: MagicMock,
+    model_format: ModelFormat,
+) -> None:
+    mock_fetch.return_value = _export_rows()
+
+    yaml_text = service.export_model(ExportRequest(databases=[], format=model_format))
+
+    assert yaml.safe_load(yaml_text)
+
+
 def test_detect_model_format_tells_the_vocabularies_apart() -> None:
     assert service.detect_model_format({"data_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
+    assert (
+        service.detect_model_format({"semantic_layer": {}}) is ModelFormat.AUTO_ONTOLOGY
+    )
+    flat_ossie = {"version": "0.2.0", "name": "retail", "datasets": []}
+    assert service.detect_model_format(flat_ossie) is ModelFormat.OSSIE
     assert service.detect_model_format({"semantic_model": []}) is ModelFormat.OSSIE
+
+
+@pytest.mark.parametrize(
+    "document",
+    [
+        {"semantic_model": [{"name": "retail", "datasets": []}]},
+        {"unrelated": "mapping"},
+    ],
+)
+@patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
+def test_import_model_rejects_unreadable_documents_before_touching_data(
+    mock_apply: MagicMock,
+    document: dict,
+) -> None:
+    """Read as native, these would validate as an empty model and wipe the
+    catalog on a replacing import."""
+    with pytest.raises(AutoOntologyConversionError):
+        service.import_model(yaml.safe_dump(document), replace=True, embed=False)
+
+    mock_apply.assert_not_called()
 
 
 @patch("auto_ontology.server.model_interchange.service.dal.apply_import_model")
@@ -598,7 +729,7 @@ def test_import_model_converts_ossie_document_back_to_auto_ontology(
     auto_ontology_yaml = yaml.safe_dump(
         document.model_dump(mode="python"), sort_keys=False
     )
-    ossie_yaml = convert_gsf_to_ossie(auto_ontology_yaml)
+    ossie_yaml = convert_auto_ontology_to_ossie(auto_ontology_yaml)
 
     summary = service.import_model(ossie_yaml, replace=True, embed=False)
 

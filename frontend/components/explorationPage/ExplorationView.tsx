@@ -47,6 +47,7 @@ import { NODE_TYPE_ACCENT_COLOR } from './graph/nodeTypeColors';
 import type { NodeType } from './graph/nodeTypeColors';
 import { ViewToggle } from './graph/ViewToggle';
 import { ZoomControls } from './graph/ZoomControls';
+import { DatabaseFilter } from './DatabaseFilter';
 import { ActiveExpansionCard } from './ActiveExpansionCard';
 import { HoverNodeCard } from './HoverNodeCard';
 import { ActiveDataCard, buildDataGraph } from './ExplorationData';
@@ -201,8 +202,9 @@ export const ExplorationView = () => {
 	const [dataLoading, setDataLoading] = useState(false);
 	const [semanticError, setSemanticError] = useState<string | null>(null);
 	const [dataError, setDataError] = useState<string | null>(null);
-	const [dataLoaded, setDataLoaded] = useState(false);
 	const [search, setSearch] = useState('');
+	/** One database id, or null for the unfiltered (500-node) graphs. */
+	const [selectedDatabaseId, setSelectedDatabaseId] = useState<string | null>(null);
 	const [activeNodeId, setActiveNodeId] = useState<string | null>(activeNodeIdFromUrl);
 
 	const activeNodeIdRef = useRef<string | null>(activeNodeId);
@@ -324,12 +326,24 @@ export const ExplorationView = () => {
 		semanticGraphRef.current = semanticGraph;
 	}, [semanticGraph]);
 
+	const loadedSemanticDatabaseIdRef = useRef<string | null | undefined>(undefined);
+
 	useEffect(() => {
+		if (loadedSemanticDatabaseIdRef.current === selectedDatabaseId) {
+			// A cancelled in-flight load leaves semanticLoading true without
+			// updating the ref. If this database is already loaded, skip the
+			// fetch and drop the overlay so the page cannot get stuck.
+			setSemanticLoading(false);
+			return undefined;
+		}
 		let cancelled = false;
 
 		const loadGraph = async () => {
 			setSemanticLoading(true);
-			const response = await explorationApi.getSemanticExplorationGraph();
+			setSemanticError(null);
+			const response = await explorationApi.getSemanticExplorationGraph(
+				selectedDatabaseId ?? undefined,
+			);
 			if (cancelled) return;
 
 			if (response.error) {
@@ -341,7 +355,7 @@ export const ExplorationView = () => {
 			const nextGraph = buildSemanticGraph(response.data ?? { nodes: [], links: [] });
 			if (cancelled) return;
 			setSemanticGraph(nextGraph);
-			setSemanticError(null);
+			loadedSemanticDatabaseIdRef.current = selectedDatabaseId;
 			setSemanticLoading(false);
 		};
 
@@ -349,16 +363,27 @@ export const ExplorationView = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, []);
+	}, [selectedDatabaseId]);
+
+	const loadedDatabaseIdRef = useRef<string | null | undefined>(undefined);
 
 	useEffect(() => {
-		if (layer !== ExplorationLayer.Data || dataLoaded) return undefined;
+		if (layer !== ExplorationLayer.Data) return undefined;
+		if (loadedDatabaseIdRef.current === selectedDatabaseId) {
+			// Same race as the semantic effect: returning early without
+			// clearing dataLoading leaves ExplorationLoader covering the page.
+			setDataLoading(false);
+			return undefined;
+		}
 		let cancelled = false;
 
 		const loadGraph = async () => {
 			setDataLoading(true);
+			setDataError(null);
 			try {
-				const response = await explorationApi.getDataExplorationGraph();
+				const response = await explorationApi.getDataExplorationGraph(
+					selectedDatabaseId ?? undefined,
+				);
 				if (cancelled) return;
 				if (response.error) {
 					throw new Error(response.message ?? 'Failed to load data objects');
@@ -366,15 +391,16 @@ export const ExplorationView = () => {
 				const nextGraph = buildDataGraph(response.data ?? { nodes: [], links: [] });
 				if (cancelled) return;
 				setDataGraph(nextGraph);
-				setDataError(null);
-				setDataLoaded(true);
+				loadedDatabaseIdRef.current = selectedDatabaseId;
 			} catch (loadError) {
 				if (cancelled) return;
 				setDataError(
 					loadError instanceof Error ? loadError.message : 'Failed to load data objects',
 				);
 			} finally {
-				if (!cancelled) setDataLoading(false);
+				if (!cancelled) {
+					setDataLoading(false);
+				}
 			}
 		};
 
@@ -382,7 +408,7 @@ export const ExplorationView = () => {
 		return () => {
 			cancelled = true;
 		};
-	}, [dataLoaded, layer]);
+	}, [layer, selectedDatabaseId]);
 
 	useEffect(() => {
 		setActiveNodeId(activeNodeIdFromUrl);
@@ -550,7 +576,7 @@ export const ExplorationView = () => {
 						schemaName: tableNode.schemaName,
 						tableId: tableNode.id,
 						tableName: tableNode.name,
-						dataType: column.data_type,
+						dataType: column.data_type ?? undefined,
 					});
 				});
 			}
@@ -1879,8 +1905,24 @@ export const ExplorationView = () => {
 		[semanticGraph.links, expandSemanticConnection, collapseSemanticConnection],
 	);
 
-	const handleToggleLayer = useCallback(() => {
-		setSearch('');
+	// `GraphCanvas`'s own effect tears down and rebuilds its `graphology`/
+	// controller from scratch whenever `graph` changes (see its own doc
+	// comment) — switching layer always does, and so does narrowing the
+	// data graph by database. These refs otherwise keep marking nodes as
+	// "already expanded" from the graph just left, so re-expanding the
+	// very same node on the freshly-rebuilt (graft-free) canvas would
+	// silently no-op. Iterates `expandedIdsRefs` (every one of them,
+	// together) rather than `.clear()`-ing each by name, so a future
+	// expansion kind's ref can't be added elsewhere and forgotten here.
+	//
+	// Also drops any id flagged mid-flight (collapsed before its own
+	// `expandXNode` fetch resolved — see `collapseExpansion`). Left
+	// uncleared, a stale entry here would silently swallow a *later*,
+	// unrelated `expandXNode` call for the same id after this canvas is
+	// rebuilt — its own pending-cancel guard would find this leftover
+	// entry and bail without grafting anything, even though nothing is
+	// actually pending anymore.
+	const clearGraphInteraction = useCallback(() => {
 		setActiveNodeId(null);
 		setHoveredNodePosition(null);
 		setSelectedSemanticEdgeId(null);
@@ -1889,34 +1931,32 @@ export const ExplorationView = () => {
 		setDataDetailsType(null);
 		setColumnAttributesNodeId(null);
 		setSqlAttributesNodeId(null);
-		// `GraphCanvas`'s own effect tears down and rebuilds its `graphology`/
-		// controller from scratch whenever `graph` changes (see its own doc
-		// comment) — switching layer always does, since `graph` is
-		// `dataGraph`/`semanticGraph` depending on it. These refs otherwise
-		// keep marking nodes as "already expanded" from the layer just left,
-		// so re-expanding the very same node on the freshly-rebuilt (graft-
-		// free) canvas after switching back would silently no-op. Iterates
-		// `expandedIdsRefs` (every one of them, together) rather than
-		// `.clear()`-ing each by name, so a future expansion kind's ref
-		// can't be added elsewhere and forgotten here.
 		expandedIdsRefs.current.forEach((expandedIdsRef) => expandedIdsRef.current.clear());
-		// Also drops any id flagged mid-flight (collapsed before its own
-		// `expandXNode` fetch resolved — see `collapseExpansion`) on the
-		// layer just left. Left uncleared, a stale entry here would silently
-		// swallow a *later*, unrelated `expandXNode` call for the same id
-		// after switching back to this layer and re-expanding it — its own
-		// pending-cancel guard would find this leftover entry and bail
-		// without grafting anything, even though nothing is actually pending
-		// anymore.
 		pendingCollapseIdsRef.current.clear();
-
 		setExpandedNodesById(new Map());
 		setConnectionHopsByEdgeId(new Map());
+	}, []);
+
+	const handleToggleLayer = useCallback(() => {
+		setSearch('');
+		clearGraphInteraction();
 		router.replace(
 			layer === ExplorationLayer.Semantic ? '/exploration?view=data' : '/exploration',
 			{ scroll: false },
 		);
-	}, [layer, router]);
+	}, [clearGraphInteraction, layer, router]);
+
+	const handleDatabaseFilterChange = useCallback(
+		(next: string | null) => {
+			setSelectedDatabaseId(next);
+			clearGraphInteraction();
+			router.replace(
+				layer === ExplorationLayer.Data ? '/exploration?view=data' : '/exploration',
+				{ scroll: false },
+			);
+		},
+		[clearGraphInteraction, layer, router],
+	);
 
 	const handleControllerChange = useCallback((nextController: GraphController | null) => {
 		controllerRef.current = nextController;
@@ -2143,7 +2183,11 @@ export const ExplorationView = () => {
 					</div>
 					<ViewToggle layer={layer} onToggle={handleToggleLayer} />
 				</div>
-				<div className="pointer-events-auto">
+				<div className="pointer-events-auto flex items-start gap-2">
+					<DatabaseFilter
+						selected={selectedDatabaseId}
+						onChange={handleDatabaseFilterChange}
+					/>
 					<ZoomControls controller={controller} />
 				</div>
 			</div>
@@ -2164,8 +2208,12 @@ export const ExplorationView = () => {
 					icon={IconName.Exploration}
 					title={
 						layer === ExplorationLayer.Semantic
-							? 'No Terms Created Yet'
-							: 'No Data Objects Found'
+							? selectedDatabaseId !== null
+								? 'No Terms Match This Filter'
+								: 'No Terms Created Yet'
+							: selectedDatabaseId !== null
+								? 'No Data Objects Match This Filter'
+								: 'No Data Objects Found'
 					}
 				/>
 			)}

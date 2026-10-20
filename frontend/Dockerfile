@@ -28,7 +28,10 @@ ARG BASE_IMG_TAG=jammy-20250619
 FROM $BASE_IMG:$BASE_IMG_TAG AS base-node
 
 ARG NODE_MAJOR
+# The pinned base image predates later Ubuntu security fixes (libssl3, ...),
+# so apply them first; every later stage builds on this one.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
  && curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
  && apt-get install -y --no-install-recommends nodejs \
@@ -117,10 +120,17 @@ COPY --from=builder --chown=nextjs:nodejs /app/public ./app/public
 # doesn't perturb the Next.js standalone node_modules at /app/app.
 COPY --from=builder --chown=nextjs:nodejs /app/prisma /app/migrate/prisma
 COPY --from=builder --chown=nextjs:nodejs /app/prisma.config.ts /app/migrate/prisma.config.ts
+# prisma pins mysql2 3.15.3 exactly, even in its latest 7.x; it only uses it
+# for MySQL, but the copy still ships (GHSA-3f6p-5ww8-9rcr, fixed in 3.22.0).
+# npm is only needed to install this; migrate.sh runs prisma with plain
+# `node`, so npm, npx and corepack are removed from the runtime image along
+# with the vulnerable packages they bundle.
 RUN cd /app/migrate \
- && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"},"overrides":{"deepmerge-ts":"^8.0.2"}}' > package.json \
+ && echo '{"name":"auto-ontology-migrate","version":"0.0.1","private":true,"dependencies":{"prisma":"7.7.0","dotenv":"17.4.2"},"overrides":{"deepmerge-ts":"^8.0.2","mysql2":"^3.22.0"}}' > package.json \
  && npm install --omit=dev --no-audit --no-fund --no-package-lock \
- && chown -R nextjs:nodejs /app/migrate
+ && chown -R nextjs:nodejs /app/migrate \
+ && rm -rf /usr/lib/node_modules/npm /usr/lib/node_modules/corepack \
+           /usr/bin/npm /usr/bin/npx /usr/bin/corepack /root/.npm
 
 # License and attribution files (OSRB): see CONTAINER_THIRD_PARTY_NOTICES.md.
 COPY LICENSE THIRD_PARTY_NOTICES.md CONTAINER_THIRD_PARTY_NOTICES.md OPEN_SOURCE_NOTICE /licenses/

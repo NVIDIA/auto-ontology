@@ -36,7 +36,7 @@ from auto_ontology.server.sql_attributes.service import (
     create_sql_attribute,
 )
 from auto_ontology.utils.llm_invoke import (
-    get_non_reasoning_llm_client,
+    get_llm_client,
     invoke_with_structured_output,
 )
 
@@ -493,7 +493,7 @@ def _judge_with_llm(
         for i, (expr, score) in enumerate(expressions)
     )
 
-    llm = get_non_reasoning_llm_client(temperature=0.0)
+    llm = get_llm_client(temperature=0.0)
     messages = [
         SystemMessage(
             content=(

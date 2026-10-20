@@ -40,7 +40,7 @@ class KumoModel:
         Raises ``ValueError`` with the parser's detail on invalid PQL — the
         repair-loop signal. Resolves locally, so it costs no request.
         """
-        from kumorfm.rfm.query_parser import parse_query_locally
+        from kumo_relational_engine.rfm.query_parser import parse_query_locally
 
         if self._graph_def is None:
             self._graph_def = self.graph._to_api_graph_definition()

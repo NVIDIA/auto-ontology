@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { signOut, useSession } from '@/auth/auth-client';
+import { userCan } from '@/auth/permissions';
 import { SelectButton } from '@/common/Button';
 import { PopoverMenu } from '@/common/PopoverMenu';
 import { Text } from '@/common/Text';
@@ -27,6 +28,11 @@ export const UserMenu = ({ version }: { version?: string }) => {
 	const roleLabel = user.role
 		? user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase()
 		: null;
+
+	const canManageTokens = userCan(
+		{ id: user.id, role: user.role ?? null },
+		{ apiToken: ['manage'] },
+	);
 
 	const handleSignOut = async () => {
 		setSigningOut(true);
@@ -49,12 +55,14 @@ export const UserMenu = ({ version }: { version?: string }) => {
 				</div>
 			}
 			items={[
-				{
-					// Self-service, so it lives here rather than under the
-					// admin-only Settings section.
-					label: 'API Tokens',
-					onClick: () => router.push('/account/api-tokens'),
-				},
+				...(canManageTokens
+					? [
+							{
+								label: 'API Tokens',
+								onClick: () => router.push('/account/api-tokens'),
+							},
+						]
+					: []),
 				{
 					label: signingOut ? 'Signing out…' : 'Sign out',
 					onClick: () => {

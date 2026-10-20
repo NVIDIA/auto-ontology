@@ -44,7 +44,11 @@ from auto_ontology.server.rules import service as rule_service
 # A rule's search *is* a global search, so both come from the search router
 # rather than being restated here: the filters a rule saves and the filters a
 # search accepts cannot drift apart if they are the same model.
-from auto_ontology.server.search.constants import MIN_SEARCH_LENGTH, TEXT_MATCH_CONTAINS
+from auto_ontology.server.search.constants import (
+    MIN_SEARCH_LENGTH,
+    TEXT_MATCH_CONTAINS,
+    UNTAGGED_FILTER_VALUE,
+)
 from auto_ontology.server.search.router import GlobalSearchFilters
 
 router = APIRouter()
@@ -177,6 +181,38 @@ def _validated_match_option(option: str) -> str:
     return option
 
 
+def _validated_filters(filters: GlobalSearchFilters) -> GlobalSearchFilters:
+    """*filters*, unless they describe a rule that would undo itself.
+
+    ``filters.tags`` is fine for a rule and useful -- "label everything already
+    tagged PII as Sensitive" is a standing instruction that stays true. The
+    untagged sentinel is the one value that is not, because it is the only
+    filter a rule's own writes can falsify: a rule matching untagged objects
+    and then tagging them has, by its next replay, made its own match set
+    empty.
+
+    That does not merely leave the rule inert. ``reapply_rules`` takes back
+    every label a rule no longer matches before applying anything, so each
+    nightly pass would remove the labels this rule wrote, find the objects
+    untagged again, and rewrite them -- resetting every ``tag_target.tagged``
+    to the date of the last ingest and reporting the whole set as churn
+    forever. The search itself has no such problem, which is why this is
+    refused here rather than in ``GlobalSearchFilters``: a person narrowing a
+    Discovery search to untagged objects is asking a question, not leaving an
+    instruction.
+    """
+    if filters.tags and UNTAGGED_FILTER_VALUE in filters.tags:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A rule cannot filter on {UNTAGGED_FILTER_VALUE!r}: applying "
+                "its tags would empty its own match, and every later pass "
+                "would remove and rewrite the labels it just applied"
+            ),
+        )
+    return filters
+
+
 def _resolved_tags(tags: list[RuleTagRef]) -> list[str]:
     """The ids in *tags*, or a 404 naming the first that is not a tag.
 
@@ -302,7 +338,7 @@ def create_rule(request: Request, body: RuleCreate) -> dict:
     name = _validated_name(body.name)
     search_term = _validated_search_term(body.search_term)
     text_match_option = _validated_match_option(body.text_match_option)
-    filters = body.filters.model_dump(exclude_none=True)
+    filters = _validated_filters(body.filters).model_dump(exclude_none=True)
     tags = _resolved_tags(body.tags)
 
     # Before the transaction, and so before the 409 a taken name would answer:
@@ -420,9 +456,11 @@ def delete_rule(
     says otherwise. The labels it wrote cascade with it -- see
     ``rules_dal.delete_rule`` -- while labels people applied by hand stay,
     including on an object the rule had also matched, because those rows record
-    no rule to cascade from. A rule goes on labelling the catalog as the catalog
-    grows, so by default its labels are not left behind for nothing on screen to
-    explain and nothing to re-apply.
+    no rule to cascade from. Taking ``PII`` off a column this way also takes it
+    off that column's attributes, the same cascade as detaching the tag or a
+    replay that no longer matches. A rule goes on labelling the catalog as the
+    catalog grows, so by default its labels are not left behind for nothing on
+    screen to explain and nothing to re-apply.
 
     **And a tag left labelling nothing is deleted**, unless another rule applies
     it: emptying it is what this request just did, and a tag that describes no

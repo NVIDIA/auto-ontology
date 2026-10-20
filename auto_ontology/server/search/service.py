@@ -6,14 +6,18 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NamedTuple
 
 from sqlalchemy import Select
 
 from auto_ontology.catalog.constants import Labels
 from auto_ontology.dal import search as search_dal
 from auto_ontology.semantic.constants import LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE
-from auto_ontology.server.search.constants import MIN_SEARCH_LENGTH, TEXT_MATCH_CONTAINS
+from auto_ontology.server.search.constants import (
+    MIN_SEARCH_LENGTH,
+    TEXT_MATCH_CONTAINS,
+    UNTAGGED_FILTER_VALUE,
+)
 
 _PARENT_FROM_LAST_CRUMB = {Labels.COLUMN, LABEL_COLUMN_ATTRIBUTE, LABEL_SQL_ATTRIBUTE}
 
@@ -176,6 +180,48 @@ def _normalize_item(
     }
 
 
+def resolve_tag_filter(tags: list[str] | None) -> tuple[list[str], bool]:
+    """Split ``filters.tags`` into tag ids and the ``(blanks)`` sentinel.
+
+    The wire format is one list because the control is one picker -- see
+    :data:`UNTAGGED_FILTER_VALUE` -- and the DAL takes the two apart because
+    they are different SQL: an ``EXISTS`` narrowed to those ids, and a ``NOT
+    EXISTS`` over any label at all.
+
+    An unknown id is not rejected. A tag deleted from the vocabulary between a
+    rule being saved and the rule being replayed is exactly that case, and it
+    means the rule now matches less rather than that it has become invalid --
+    where :func:`resolve_object_types` raises for an unknown object type,
+    because that one can only be a caller sending something the search does not
+    implement.
+    """
+    if not tags:
+        return [], False
+    return [tag for tag in tags if tag != UNTAGGED_FILTER_VALUE], (
+        UNTAGGED_FILTER_VALUE in tags
+    )
+
+
+class _Prepared(NamedTuple):
+    """A validated, expanded query -- what all three read paths run on.
+
+    A named tuple rather than the plain one this used to be: every field is
+    threaded into the DAL by keyword, and two ``list[str]`` beside a
+    ``set[str]`` beside a ``bool`` is an unpacking order worth naming.
+    """
+
+    tokens: list[str]
+    types: set[str]
+    stripped: str
+    synonym_tokens: list[str]
+    tag_ids: list[str]
+    include_untagged: bool
+    #: Database and schema ids in one list, passed through unvalidated -- an
+    #: id belonging to neither table narrows the search to nothing, which is
+    #: the same answer a deleted schema gives and needs no separate error.
+    data_ids: list[str]
+
+
 def _tokens_or_empty(search_term: str) -> list[str] | None:
     stripped = search_term.strip()
     if len(stripped) < MIN_SEARCH_LENGTH:
@@ -189,7 +235,9 @@ def _prepare_search(
     text_match_option: str,
     objects: list[str] | None,
     include_synonyms: bool,
-) -> tuple[list[str], set[str], str, list[str]] | None:
+    tags: list[str] | None,
+    data: list[str] | None,
+) -> _Prepared | None:
     """Validate and expand a query. ``None`` means nothing searchable.
 
     *include_synonyms* is honoured by returning no synonym tokens rather than
@@ -218,7 +266,10 @@ def _prepare_search(
     synonym_tokens = (
         search_dal.synonym_word_tokens(stripped) if include_synonyms else []
     )
-    return tokens, types, stripped, synonym_tokens
+    tag_ids, include_untagged = resolve_tag_filter(tags)
+    return _Prepared(
+        tokens, types, stripped, synonym_tokens, tag_ids, include_untagged, data or []
+    )
 
 
 def global_search(
@@ -228,6 +279,8 @@ def global_search(
     objects: list[str] | None,
     include_description: bool,
     include_synonyms: bool,
+    tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the list path: fulltext + enrichment, capped and ranked."""
     prepared = _prepare_search(
@@ -235,21 +288,26 @@ def global_search(
         text_match_option=text_match_option,
         objects=objects,
         include_synonyms=include_synonyms,
+        tags=tags,
+        data=data,
     )
     if prepared is None:
         return {"data": [], "count": 0}
 
-    tokens, types, stripped, synonym_tokens = prepared
+    synonym_tokens = prepared.synonym_tokens
     rows = search_dal.fetch_global_search(
-        tokens,
-        types,
+        prepared.tokens,
+        prepared.types,
         include_description=include_description,
         synonym_tokens=synonym_tokens,
+        tag_ids=prepared.tag_ids,
+        include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
         limit=search_dal.LIST_LIMIT,
         synonym_limit=_synonym_rescue_budget(search_dal.LIST_LIMIT),
     )
     items = [_normalize_item(row, synonym_tokens=synonym_tokens) for row in rows]
-    items = _fit_list_limit(items, search_term=stripped)
+    items = _fit_list_limit(items, search_term=prepared.stripped)
     return {"data": items, "count": len(items)}
 
 
@@ -260,6 +318,8 @@ def match_selects(
     objects: list[str] | None,
     include_description: bool,
     include_synonyms: bool,
+    tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Select]:
     """The same match as :func:`global_search`, uncapped, as unexecuted
     statements — one ``SELECT id`` per object type.
@@ -298,6 +358,8 @@ def match_selects(
         text_match_option=text_match_option,
         objects=objects,
         include_synonyms=include_synonyms,
+        tags=tags,
+        data=data,
     )
     if prepared is None:
         raise SearchValidationError(
@@ -306,12 +368,14 @@ def match_selects(
             f"something searchable"
         )
 
-    tokens, types, _stripped, synonym_tokens = prepared
     return search_dal.matching_id_selects(
-        tokens,
-        types,
+        prepared.tokens,
+        prepared.types,
         include_description=include_description,
-        synonym_tokens=synonym_tokens,
+        synonym_tokens=prepared.synonym_tokens,
+        tag_ids=prepared.tag_ids,
+        include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
     )
 
 
@@ -322,6 +386,8 @@ def global_search_count(
     objects: list[str] | None,
     include_description: bool,
     include_synonyms: bool,
+    tags: list[str] | None = None,
+    data: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run the count path: same match as list, grouped by type, no cap."""
     prepared = _prepare_search(
@@ -329,15 +395,19 @@ def global_search_count(
         text_match_option=text_match_option,
         objects=objects,
         include_synonyms=include_synonyms,
+        tags=tags,
+        data=data,
     )
     if prepared is None:
         return {"data": {}}
 
-    tokens, types, _stripped, synonym_tokens = prepared
     counts = search_dal.count_global_search(
-        tokens,
-        types,
+        prepared.tokens,
+        prepared.types,
         include_description=include_description,
-        synonym_tokens=synonym_tokens,
+        synonym_tokens=prepared.synonym_tokens,
+        tag_ids=prepared.tag_ids,
+        include_untagged=prepared.include_untagged,
+        data_ids=prepared.data_ids,
     )
     return {"data": counts}

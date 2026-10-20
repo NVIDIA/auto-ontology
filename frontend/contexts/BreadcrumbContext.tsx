@@ -18,6 +18,7 @@ import type { BreadcrumbItem } from '@/common/Breadcrumbs';
 
 const SECTION_LABELS: Record<string, string> = {
 	'/chat': 'Chat',
+	'/discovery': 'Discovery',
 	'/terms': 'Terms',
 	'/analysis': 'Analysis',
 	'/exploration': 'Exploration',
@@ -33,6 +34,7 @@ const SETTINGS_SECTION_LABELS: Record<string, string> = {
 	rules: 'Rules',
 	'semantic-input': 'Semantic Input',
 	'semantic-compilation': 'Semantic Compilation',
+	pii: 'PII Settings',
 	'agent-settings': 'Agent Settings',
 	users: 'Users',
 	sso: 'Single Sign-On',

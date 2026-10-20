@@ -11,12 +11,14 @@ import { Button } from '@/common/Button';
 import { FileUpload } from '@/common/FileUpload';
 import { Icon, IconName } from '@/common/icons';
 import { ConfirmModal } from '@/common/modal';
+import { ProgressBar } from '@/common/ProgressBar';
 import { SkeletonRows } from '@/common/Skeleton';
 import { Toast } from '@/common/Toast';
 import { Toggle } from '@/common/Toggle';
 import { ButtonTheme, Size } from '@/enums/button';
 import { ModelFormat } from '@/enums/modelInterchange';
 import { ToastVariant } from '@/enums/toast';
+import { useSmoothProgress } from '@/lib/useSmoothProgress';
 import type { Database } from '@/types/datasources';
 import type { ImportEntityCounts, ImportSummary } from '@/types/modelInterchange';
 
@@ -29,6 +31,9 @@ const EXPORT_FILENAME: Record<ModelFormat, string> = {
 	[ModelFormat.AUTO_ONTOLOGY]: 'auto-ontology-model.yaml',
 	[ModelFormat.OSSIE]: 'ossie-model.yaml',
 };
+
+// The Ossie semantic model, ontology and mapping, which are separate documents.
+const OSSIE_WITH_ONTOLOGY_FILENAME = 'ossie-model.zip';
 
 const FORMAT_OPTIONS: { value: ModelFormat; description: string }[] = [
 	{
@@ -72,9 +77,11 @@ export const ImportExportView = () => {
 	const [selectedDbIds, setSelectedDbIds] = useState<Set<string>>(new Set());
 
 	const [exportFormat, setExportFormat] = useState<ModelFormat>(ModelFormat.AUTO_ONTOLOGY);
+	const [includeOntology, setIncludeOntology] = useState(true);
 	const [exporting, setExporting] = useState(false);
 	const [exportError, setExportError] = useState<string | null>(null);
 	const [exportMessage, setExportMessage] = useState<string | null>(null);
+	const exportProgress = useSmoothProgress();
 
 	const [importFile, setImportFile] = useState<File | null>(null);
 	const [replace, setReplace] = useState(true);
@@ -127,18 +134,42 @@ export const ImportExportView = () => {
 
 	const handleExport = async () => {
 		if (selectedDbIds.size === 0 || exporting) return;
+		const withOntology = exportFormat === ModelFormat.OSSIE && includeOntology;
 		setExporting(true);
 		setExportError(null);
-		const res = await modelInterchangeApi.exportModel(Array.from(selectedDbIds), exportFormat);
-		setExporting(false);
-
-		if (res.error) {
-			setExportError(res.message ?? 'Failed to export model.');
-			return;
+		// The YAML arrives in one response, so this eases toward 90% while we
+		// wait, then `complete()` snaps to 100% when the file is ready.
+		exportProgress.start({
+			tauMs:
+				2200 + selectedDbIds.size * 450 + (exportFormat === ModelFormat.OSSIE ? 1200 : 0),
+		});
+		try {
+			const res = await modelInterchangeApi.exportModel(
+				Array.from(selectedDbIds),
+				exportFormat,
+				withOntology,
+			);
+			if (res.error) {
+				exportProgress.fail();
+				setExportError(res.message ?? 'Failed to export model.');
+				return;
+			}
+			await exportProgress.complete();
+			downloadBlob(
+				res.blob,
+				withOntology ? OSSIE_WITH_ONTOLOGY_FILENAME : EXPORT_FILENAME[exportFormat],
+			);
+			setExportMessage(
+				withOntology
+					? `Model exported as ${FORMAT_LABEL[exportFormat]}, with its ontology and mapping.`
+					: `Model exported as ${FORMAT_LABEL[exportFormat]}.`,
+			);
+		} catch {
+			exportProgress.fail();
+			setExportError('Failed to export model.');
+		} finally {
+			setExporting(false);
 		}
-
-		downloadBlob(res.blob, EXPORT_FILENAME[exportFormat]);
-		setExportMessage(`Model exported as ${FORMAT_LABEL[exportFormat]}.`);
 	};
 
 	const handleImportFileChange = (file: File | null) => {
@@ -187,7 +218,7 @@ export const ImportExportView = () => {
 				</h2>
 				<p className="mt-1 text-xs text-secondary">
 					Download the catalog and semantic layer for the selected databases as a YAML
-					file.
+					file, or as a .zip when the Ossie ontology is included.
 				</p>
 
 				<fieldset className="mt-4">
@@ -220,6 +251,25 @@ export const ImportExportView = () => {
 						))}
 					</div>
 				</fieldset>
+
+				{exportFormat === ModelFormat.OSSIE ? (
+					<div className="mt-3 flex items-center justify-between rounded-lg border border-zinc-200 px-4 py-3 dark:border-zinc-700">
+						<div className="flex flex-col">
+							<span className="text-sm font-medium text-heading dark:text-zinc-100">
+								Include Ontology and Mapping
+							</span>
+							<span className="text-xs text-secondary">
+								Also exports the terms as an Ossie ontology, with a mapping onto the
+								semantic model, as a .zip of three files.
+							</span>
+						</div>
+						<Toggle
+							checked={includeOntology}
+							aria-label="Include Ontology and Mapping"
+							onChange={setIncludeOntology}
+						/>
+					</div>
+				) : null}
 
 				{databasesLoading ? (
 					<div className="mt-4">
@@ -265,6 +315,16 @@ export const ImportExportView = () => {
 
 				{exportError ? (
 					<p className="mt-3 text-sm text-red-600 dark:text-red-400">{exportError}</p>
+				) : null}
+
+				{exporting ? (
+					<ProgressBar
+						value={exportProgress.value}
+						showValue
+						label="Exporting"
+						className="mt-4"
+						aria-label={`Exporting model, ${Math.round(exportProgress.value)} percent`}
+					/>
 				) : null}
 
 				<div className="mt-4 flex justify-end">

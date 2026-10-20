@@ -41,6 +41,8 @@ export enum ComposerSectionKind {
 	 */
 	ENTITY_TAGS = 'entityTags',
 	SQL_BLOCK = 'sqlBlock',
+	/** One user or one group, or nobody. Edited as a pending select, like tags. */
+	OWNER = 'owner',
 }
 
 /** How a DATA_TABLE column renders its cells. */

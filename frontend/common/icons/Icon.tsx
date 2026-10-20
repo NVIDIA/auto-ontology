@@ -25,6 +25,7 @@ import SchemaSvg from './svg/schema.svg';
 import ColumnSvg from './svg/column.svg';
 import ChartLineSvg from './svg/chart-line.svg';
 import UsersSvg from './svg/users.svg';
+import UserSvg from './svg/user.svg';
 import KeySvg from './svg/key.svg';
 import TagSvg from './svg/tag.svg';
 import TermsSvg from './svg/terms.svg';
@@ -39,6 +40,8 @@ import DownloadSvg from './svg/download.svg';
 import UploadSvg from './svg/upload.svg';
 import CodeBracketSvg from './svg/code-bracket.svg';
 import LightningSvg from './svg/lightning.svg';
+import DiscoverySvg from './svg/discovery.svg';
+import FilterSvg from './svg/filter.svg';
 
 export enum IconName {
 	Close = 'close',
@@ -64,6 +67,7 @@ export enum IconName {
 	Schema = 'schema',
 	Column = 'column',
 	Users = 'users',
+	User = 'user',
 	Key = 'key',
 	Tag = 'tag',
 	Terms = 'terms',
@@ -76,6 +80,8 @@ export enum IconName {
 	Upload = 'upload',
 	CodeBracket = 'code-bracket',
 	Lightning = 'lightning',
+	Discovery = 'discovery',
+	Filter = 'filter',
 }
 
 const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
@@ -102,6 +108,7 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Schema]: SchemaSvg,
 	[IconName.Column]: ColumnSvg,
 	[IconName.Users]: UsersSvg,
+	[IconName.User]: UserSvg,
 	[IconName.Key]: KeySvg,
 	[IconName.Tag]: TagSvg,
 	[IconName.Terms]: TermsSvg,
@@ -114,6 +121,8 @@ const icons: Record<IconName, FC<SVGProps<SVGSVGElement>>> = {
 	[IconName.Upload]: UploadSvg,
 	[IconName.CodeBracket]: CodeBracketSvg,
 	[IconName.Lightning]: LightningSvg,
+	[IconName.Discovery]: DiscoverySvg,
+	[IconName.Filter]: FilterSvg,
 };
 
 export type IconProps = SVGProps<SVGSVGElement> & {

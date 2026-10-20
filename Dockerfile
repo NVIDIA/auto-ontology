@@ -5,17 +5,9 @@
 # ---------------------------------------------------------------------------
 # Auto Ontology FastAPI backend image
 # ---------------------------------------------------------------------------
-# Build (default — uses the committed nemo-retriever stub; image starts and
-# serves /api/health but real chat/datasource calls raise NotImplementedError):
+# Build:
 #
 #   docker build -t auto-ontology:latest .
-#
-# Build with the real NeMo-Retriever source — point a BuildKit named context
-# at any local clone of the upstream repo (no copy into this repo):
-#
-#   docker build \
-#       --build-context nemo=/path/to/NeMo-Retriever \
-#       -t auto-ontology:latest .
 #
 # Run:
 #
@@ -78,7 +70,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}" \
     PORT=3001
 
+# The pinned base image predates later Ubuntu security fixes (libssl3, gpgv,
+# ...), so apply them before installing anything on top.
 RUN apt-get update \
+ && apt-get upgrade -y --no-install-recommends \
  && apt-get install -y --no-install-recommends \
         ca-certificates \
         libpq5 \
@@ -93,6 +88,8 @@ COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
 COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
+# Fail the image build if the generated permission resource is absent or invalid.
+RUN python -c "from auto_ontology.server.users.permissions import permissions_for_role; assert 'group:read' in permissions_for_role('admin')"
 # Schema migrations for the `public` schema, run by the `migrate` mode below.
 COPY --chown=auto_ontology:auto_ontology alembic/ ./alembic/
 COPY --chown=auto_ontology:auto_ontology alembic.ini ./

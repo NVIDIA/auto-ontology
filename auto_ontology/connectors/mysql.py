@@ -6,14 +6,23 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+import logging
+import time
+from typing import Any, Callable, Optional
 from urllib.parse import unquote, urlparse
 
 import mysql.connector
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
+
+logger = logging.getLogger(__name__)
+
+# The server stopping a statement at the session cap: MySQL's
+# ER_QUERY_TIMEOUT (``max_execution_time``) and MariaDB's ER_STATEMENT_TIMEOUT
+# (``max_statement_time``).
+_TIMEOUT_ERRNOS = frozenset({3024, 1969})
 
 
 def _parse_connection_string(connection_string: str) -> dict[str, Any]:
@@ -36,14 +45,60 @@ def _parse_connection_string(connection_string: str) -> dict[str, Any]:
     }
 
 
+# ER_UNKNOWN_SYSTEM_VARIABLE: this server does not have the variable we tried.
+_UNKNOWN_VARIABLE_ERRNO = 1193
+
+# How each server spells the cap, as (variable, value for a cap in seconds):
+# MySQL 5.7.8+ takes milliseconds, MariaDB 10.1+ takes seconds. Tried in order.
+_TIMEOUT_VARIABLES: tuple[tuple[str, Callable[[float], float]], ...] = (
+    ("max_execution_time", lambda s: max(1, int(s * 1000))),
+    ("max_statement_time", float),
+)
+
+# ``_timeout_variable`` before the first capped statement has probed the server.
+_NOT_PROBED = "not probed"
+
+
 class MySQLDatabase(SQLDatabase):
     """Concrete :class:`SQLDatabase` backed by ``mysql-connector-python``."""
+
+    supports_statement_timeout = True
 
     def __init__(self, connection_string: str) -> None:
         self._connection_string = connection_string
         self._connect_kwargs = _parse_connection_string(connection_string)
         self._database_name = str(self._connect_kwargs["database"])
+        # Which of _TIMEOUT_VARIABLES this server accepts, learned on the first
+        # capped statement so later ones skip the variants it rejected. None
+        # once neither is supported.
+        self._timeout_variable: str | None = _NOT_PROBED
         self.ping()
+
+    def _set_statement_timeout(self, cursor: Any, timeout_s: float) -> None:
+        """Cap statements on *cursor*'s session at *timeout_s* seconds.
+
+        A server that knows neither variable (MySQL < 5.7.8, MariaDB < 10.1,
+        other MySQL-protocol engines) runs the statement uncapped, as it did
+        before the cap existed, rather than failing every query.
+        """
+        for variable, to_value in _TIMEOUT_VARIABLES:
+            if self._timeout_variable not in (_NOT_PROBED, variable):
+                continue
+            try:
+                cursor.execute(f"SET SESSION {variable} = %s", (to_value(timeout_s),))
+            except mysql.connector.Error as exc:
+                if exc.errno != _UNKNOWN_VARIABLE_ERRNO:
+                    raise
+                continue
+            self._timeout_variable = variable
+            return
+        if self._timeout_variable is not None:
+            logger.warning(
+                "MySQL server for %s supports no statement timeout variable; "
+                "statements on it run uncapped",
+                self._database_name,
+            )
+        self._timeout_variable = None
 
     @property
     def dialect(self) -> str:
@@ -58,17 +113,39 @@ class MySQLDatabase(SQLDatabase):
     def database_name(self) -> str:
         return self._database_name
 
-    def execute(self, sql: str, parameters: Optional[list] = None) -> pd.DataFrame:
+    def execute(
+        self,
+        sql: str,
+        parameters: Optional[list] = None,
+        *,
+        timeout_s: float | None = None,
+    ) -> pd.DataFrame:
+        """Run *sql*; with *timeout_s*, the server stops it after that long.
+
+        The cap is a session variable, and each call owns its connection, so it
+        never outlives the statement. MySQL applies ``max_execution_time`` to
+        read-only ``SELECT`` only, which is all the agent issues.
+
+        Raises:
+            StatementTimeout: the server stopped the statement at the cap.
+        """
         connection = mysql.connector.connect(**self._connect_kwargs)
         try:
             cursor = connection.cursor(dictionary=True)
+            started = time.monotonic()
             try:
+                if timeout_s is not None:
+                    self._set_statement_timeout(cursor, timeout_s)
                 cursor.execute(sql, parameters)
                 if cursor.description is None:
                     return pd.DataFrame()
                 rows = cursor.fetchall()
                 columns = [description[0] for description in cursor.description]
                 return pd.DataFrame(rows, columns=columns)
+            except mysql.connector.Error as exc:
+                if timeout_s is not None and exc.errno in _TIMEOUT_ERRNOS:
+                    raise StatementTimeout.since(timeout_s, started) from exc
+                raise
             finally:
                 cursor.close()
         finally:

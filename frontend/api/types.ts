@@ -41,6 +41,8 @@ export type NodePatch = {
 	description?: string;
 	sample_values?: string[];
 	description_certified?: boolean;
+	/** A user id or a group id. Null or "" clears the owner. */
+	owner_id?: string | null;
 };
 
 /** Response from the node update endpoint. */

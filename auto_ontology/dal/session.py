@@ -44,6 +44,12 @@ from auto_ontology.infra.postgres import get_postgres_connection_string
 
 logger = logging.getLogger(__name__)
 
+# psycopg / libpq reject a statement with more than 65535 bind parameters.
+# Callers that expand an ``IN`` list of catalog ids stay at this size, well
+# under the cap and in the same range illumex used for the equivalent Neo4j
+# writes. Read at call time so tests can shrink it without rewriting queries.
+IN_QUERY_BATCH = 1000
+
 # Auto Ontology's tables are unqualified and resolve through `search_path`, which
 # `get_engine` pins to `public` on every connection. There is deliberately no
 # schema constant: naming the default schema is what produced permanent

@@ -5,16 +5,71 @@
 import threading
 from typing import cast
 
+import pytest
+
 from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
 from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
+    AnchorColumnModel,
     TableRelevanceModel,
     TableRemovalModel,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
+
+
+def test_anchor_maps_evidence_to_schema_table_column(
+    monkeypatch,
+) -> None:
+    captured: dict = {}
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, messages, _model):
+        captured["prompt"] = messages[-1].content
+        return AnchorColumnModel(anchor_id="frpm", reasoning="Evidence matches")
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": FakeLlm(),
+            "evidence": "eligible rate = FRPM / Enrollment",
+        },
+    )
+    contexts = {
+        "frpm": {
+            "attr_name": "FRPM Count (K-12)",
+            "schema_name": "main",
+            "table_name": "frpm",
+            "col_name": "frpm_count_k12",
+            "attr_description": "Eligible meal-program students.",
+        },
+        "enrollment": {
+            "attr_name": "Enrollment (K-12)",
+            "schema_name": "main",
+            "table_name": "frpm",
+            "col_name": "enrollment_k12",
+            "attr_description": "K-12 student enrollment.",
+        },
+    }
+
+    anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
+        state, "Which school has the highest eligible rate?", contexts
+    )
+
+    assert anchor_id == "frpm"
+    assert "Authoritative evidence:" in captured["prompt"]
+    assert "main.frpm.frpm_count_k12" in captured["prompt"]
+    assert "main.frpm.enrollment_k12" in captured["prompt"]
+    assert "FRPM Count (K-12)" not in captured["prompt"]
+    assert "schema.table.column physical references" in captured["prompt"]
 
 
 def test_column_metadata_backfill_requires_samples_and_nullability() -> None:
@@ -74,11 +129,51 @@ def test_retrieve_additional_tables_searches_question_and_entities(
         object(), "q", ["e1", "e2"], "db"
     )
 
-    assert [q for q, _, _ in seen] == ["q", "e1", "e2"]
+    # The searches run on a thread pool, so the order they are called in is the
+    # scheduler's; the order their results are collected in is not. (The deduper
+    # is stubbed out here, so `out` shows the collection order directly.)
+    assert sorted(q for q, _, _ in seen) == ["e1", "e2", "q"]
+    assert [t["name"] for t in out] == ["q", "e1", "e2"]
     expected_k = max(1, SQL_GEN_MAX_ENTITIES // len(seen))
     assert all(k == expected_k for _, k, _ in seen)
     assert all(db == "db" for _, _, db in seen)
     assert len(out) == 3
+
+
+def test_a_table_two_searches_return_merges_the_same_way_whichever_finishes_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The real deduper keeps the first non-empty description it sees.
+
+    The question's search is made to finish last. Collected in completion order,
+    the entity's description would win; collected in submission order, the
+    question's does, every time.
+    """
+    entity_done = threading.Event()
+
+    def fake_get_relevant_tables(
+        retriever: object,
+        query: str,
+        k: int = 1,
+        database_name: str | None = None,
+        **kwargs: object,
+    ) -> list[dict]:
+        if query == "q":
+            assert entity_done.wait(5)
+        else:
+            entity_done.set()
+        return [{"id": "t1", "name": "t1", "description": f"found by {query}"}]
+
+    monkeypatch.setattr(
+        candidates_preparation, "get_relevant_tables", fake_get_relevant_tables
+    )
+
+    out = CandidatePreparationAgent()._retrieve_additional_tables(
+        object(), "q", ["e1"], "db"
+    )
+
+    assert [t["id"] for t in out] == ["t1"]
+    assert out[0]["description"] == "found by q"
 
 
 def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> None:
@@ -385,6 +480,13 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
     monkeypatch.setattr(
         candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
     )
+    bridge_calls: list[list[str]] = []
+
+    def fake_bridges(ids, allowed=None):
+        bridge_calls.append(list(ids))
+        return [], [], 0
+
+    monkeypatch.setattr(candidates_preparation, "find_kept_table_bridges", fake_bridges)
 
     state = cast(
         AgentState,
@@ -402,6 +504,7 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
     result = CandidatePreparationAgent().execute(state)
 
     assert judged == [["superhero", "race"]]
+    assert bridge_calls == [["superhero", "race"]]
     assert "race" in [t["name"] for t in result["path_state"]["relevant_tables"]]
     # The anchor still names data, so §6 keeps it: the table arriving in scope
     # is not what the schema-naming check looks at.

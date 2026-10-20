@@ -1,11 +1,11 @@
 ---
 name: nvidia-ontology-management
-version: "0.2.0"
 description: >-
   Model and publish semantic definitions in Auto Ontology. Use for terms, relationships,
   measures, imports, and governed results—not deployment or querying.
 license: Apache-2.0
 metadata:
+  version: "0.2.1"
   author: "NVIDIA <opensource@nvidia.com>"
   tags:
     - nvidia-ontology
@@ -117,7 +117,8 @@ revision, certification history, or version lineage.
   Permission `modelInterchange:export`. Body may set catalog database **IDs**
   in `databases` (empty = all) and `format` (`auto_ontology` or `ossie`).
 - `POST /api/model/import` — multipart YAML; native Auto Ontology
-  (`data_layer` / `semantic_layer`) or Apache Ossie (`semantic_model`).
+  (`data_layer` / `semantic_layer`) or Apache Ossie (`version`, `name`,
+  `datasets` at the root).
   Query `replace` (default true) and `embed` (default true). Permission
   `modelInterchange:import`. Can replace existing data — confirm with the
   user before `replace=true`, apply first in isolation, and use the exact
