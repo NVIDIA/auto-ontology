@@ -15,8 +15,8 @@ The CV models are not on the embed gateway. They live only on
 ``ai.api.nvidia.com`` and only authenticate with an ``nvapi-`` key; the
 ``sk-`` gateway key returns 401 ("Invalid JWT serialization") and
 ``inference-api.nvidia.com`` returns 404 for the same path even though it lists
-the model in ``/v1/models``. Hence a separate ``PAGE_ELEMENTS_*`` triplet rather
-than reusing ``EMBED_*``.
+the model in ``/v1/models``. Hence a separate triplet rather than reusing
+``EMBED_*``.
 
 Wire format
 -----------
@@ -34,6 +34,10 @@ from dataclasses import dataclass
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+#: Model-config triplet prefix, so the vars sit in the same ``UNSTRUCTURED_*``
+#: namespace as the rest of this package's settings.
+_PREFIX = "UNSTRUCTURED_PAGE_ELEMENTS"
 
 #: Labels this model emits that are figures — a region whose meaning is in the
 #: pixels, so it needs reading separately.  ``paragraph`` and ``title`` are
@@ -80,14 +84,14 @@ class Box:
 def _resolved() -> tuple[str, str, str]:
     from auto_ontology.utils.model_config import resolve
 
-    endpoint = resolve("PAGE_ELEMENTS", "ENDPOINT").rstrip("/")
-    model = resolve("PAGE_ELEMENTS", "MODEL")
-    key = resolve("PAGE_ELEMENTS", "API_KEY")
+    endpoint = resolve(_PREFIX, "ENDPOINT").rstrip("/")
+    model = resolve(_PREFIX, "MODEL")
+    key = resolve(_PREFIX, "API_KEY")
     if not endpoint or not model:
         raise RuntimeError(
-            "PAGE_ELEMENTS_ENDPOINT and PAGE_ELEMENTS_MODEL must be set; the CV "
-            "models have no built-in default in model_config because they are "
-            "neither a chat nor an embed triplet."
+            f"{_PREFIX}_ENDPOINT and {_PREFIX}_MODEL must be set; the CV models "
+            "have no built-in default in model_config because they are neither "
+            "a chat nor an embed triplet."
         )
     return endpoint, key, model
 

@@ -277,19 +277,39 @@ def retrieved_pages(query: str, *, pool: int = POOL) -> list[tuple[str, int]]:
     Collapses the chunk ranking onto pages: a page enters at the rank of its
     best chunk, which is the unit the judgements grade. Document names lose
     their extension to match the qrels' ``doc_id``.
+
+    Page and document come off the vector row's own metadata rather than from
+    ``search.chunk_search``. The product's version resolves them by joining
+    chunk ids against the relational ``unstructured_chunk`` table, which holds
+    only the most recent ingest — so an arm became unscorable the moment
+    another arm was ingested, and re-scoring it silently returned zeros
+    instead of failing. Reading the arm's own table keeps every arm scorable
+    for as long as its vectors exist.
     """
-    from unstructured_ao import search
+    from unstructured_ao.vectorstore import get_chunk_store
 
     pages: list[tuple[str, int]] = []
     seen: set[tuple[str, int]] = set()
-    for passage in search.chunk_search(query, k=pool):
-        if not passage.document or passage.page is None:
-            continue
-        key = (Path(passage.document).stem, int(passage.page))
-        if key not in seen:
+    for document, _score in get_chunk_store().similarity_search_with_score(
+        query=query, k=pool
+    ):
+        key = _page_key(document.metadata)
+        if key is not None and key not in seen:
             seen.add(key)
             pages.append(key)
     return pages
+
+
+def _page_key(metadata: dict) -> tuple[str, int] | None:
+    """``(doc_id, page)`` from a chunk's metadata, or ``None`` if unusable.
+
+    A row with no page cannot be scored against page-level judgements.
+    """
+    source = metadata.get("source")
+    page = metadata.get("page_number")
+    if not source or page is None:
+        return None
+    return (Path(str(source)).stem, int(page))
 
 
 def score_arm(*, pool: int = POOL, limit: int | None = None) -> Scores:
@@ -341,26 +361,27 @@ def score_arm(*, pool: int = POOL, limit: int | None = None) -> Scores:
 
 
 def indexed_pages() -> set[tuple[str, int]]:
-    """``(doc_id, page)`` actually present in ``unstructured_chunk``."""
-    from sqlalchemy import select
+    """``(doc_id, page)`` present in the arm's own vector table.
 
-    from auto_ontology.dal.schema import unstructured_chunk, unstructured_document
+    Read from the vector rows rather than the relational ``unstructured_chunk``
+    table so the number describes the arm being scored. The relational table
+    carries only the latest ingest, which made this count report whichever
+    ingest ran last no matter which ``--table`` was passed.
+    """
+    from sqlalchemy import text as sql
+
     from auto_ontology.dal.session import get_engine
+    from unstructured_ao import config
 
-    statement = select(
-        unstructured_document.c.name, unstructured_chunk.c.page_number
-    ).select_from(
-        unstructured_chunk.join(
-            unstructured_document,
-            unstructured_document.c.id == unstructured_chunk.c.document_id,
-        )
+    statement = sql(
+        f"SELECT langchain_metadata->>'source' AS source, "  # noqa: S608 - names are config, not input
+        f"       langchain_metadata->>'page_number' AS page_number "
+        f"FROM {config.CHUNK_SCHEMA}.{config.CHUNK_TABLE}"
     )
     with get_engine().connect() as conn:
-        return {
-            (Path(row["name"]).stem, int(row["page_number"]))
-            for row in conn.execute(statement).mappings()
-            if row["page_number"] is not None
-        }
+        rows = conn.execute(statement).mappings().all()
+    keys = (_page_key(dict(row)) for row in rows)
+    return {key for key in keys if key is not None}
 
 
 def validate() -> bool:

@@ -30,8 +30,9 @@ os.environ.setdefault(
 #: service and figures from the gateway's vision model, which scored
 #: indistinguishable from NeMo over 318 queries at ~2x its wall clock.
 #:
-#: ``hosted`` needs the ``PAGE_ELEMENTS_*`` triplet, and those models live only
-#: on ``ai.api.nvidia.com`` with an ``nvapi-`` key — not on the ``sk-`` gateway.
+#: ``hosted`` needs the ``UNSTRUCTURED_PAGE_ELEMENTS_*`` triplet, and those
+#: models live only on ``ai.api.nvidia.com`` with an ``nvapi-`` key — not on the
+#: ``sk-`` gateway.
 #:
 #: They write the same chunk shape but not the same chunks, so switching this
 #: against an already-populated table mixes two corpora.  Point ``CHUNK_TABLE``
