@@ -510,7 +510,7 @@ def _ensure_non_system_message(messages: list[BaseMessage]) -> list[BaseMessage]
     return converted
 
 
-def _structured_output_kwargs(llm: BaseChatModel) -> dict:
+def _structured_output_kwargs(llm: BaseChatModel, schema_name: str = "") -> dict:
     """Pick the ``with_structured_output`` method for *llm*.
 
     Anthropic/Claude models served through the OpenAI-compatible gateway (e.g.
@@ -547,14 +547,29 @@ def _structured_output_kwargs(llm: BaseChatModel) -> dict:
     - Thinking on (5 SQL-generation prompts x3): tool calls ran to the cap on
       15 of 15, generating unseen for ~90s after a complete call, while
       json_schema did on 1 of 15.
+
+    SQL generation keeps json_schema with thinking off too (see
+    ``_TOOL_CALL_RUNAWAY_SCHEMAS``).
     """
     model = str(getattr(llm, "model_name", "") or getattr(llm, "model", "") or "")
     lowered = model.lower()
     if "anthropic" in lowered or "claude" in lowered:
         return {"method": "function_calling", "tool_choice": None}
-    if "nemotron" in lowered and _thinking_is_off(llm):
+    if (
+        "nemotron" in lowered
+        and _thinking_is_off(llm)
+        and schema_name not in _TOOL_CALL_RUNAWAY_SCHEMAS
+    ):
         return {"method": "function_calling"}
     return {}
+
+
+# Schemas nemotron does not finish as a tool call even with thinking off. For
+# SQL generation it writes the free-text ``thought`` field on to the cap, or
+# returns ``{}``: 10 of 10 replayed SQL-generation prompts ran to 32k, and all 46
+# SQL-repair calls in a 10-question BEAVER run ran to a 4096 cap, so no failing
+# query was ever repaired. As json_schema the same prompts finished 10 of 10.
+_TOOL_CALL_RUNAWAY_SCHEMAS = frozenset({"SQLGenerationModel"})
 
 
 def _thinking_is_off(llm: BaseChatModel) -> bool:
@@ -626,7 +641,7 @@ def safe_invoke_with_structured_output(
     """LLM structured call with retry."""
     current_messages = _ensure_non_system_message(messages.copy())
     schema_name = getattr(schema, "__name__", str(schema))
-    structured_kwargs = _structured_output_kwargs(llm)
+    structured_kwargs = _structured_output_kwargs(llm, schema_name)
 
     for attempt in range(RETRY_MAX_ATTEMPTS):
         try:

@@ -100,6 +100,16 @@ def test_nemotron_with_thinking_off_uses_tool_calling() -> None:
     assert kwargs == {"method": "function_calling"}
 
 
+def test_sql_generation_keeps_json_schema_with_thinking_off() -> None:
+    """As a tool call, nemotron wrote SQL repairs on to the cap 46 times in 46."""
+    llm = ChatOpenAI(_LIGHTNING, thinking=False)
+
+    assert _structured_output_kwargs(llm, "SQLGenerationModel") == {}
+    assert _structured_output_kwargs(llm, "ValueValidationAction") == {
+        "method": "function_calling"
+    }
+
+
 def test_nemotron_with_thinking_on_keeps_json_schema() -> None:
     """With thinking on, tool calls ran on unseen to the cap 15 times in 15."""
     assert _structured_output_kwargs(ChatOpenAI(_LIGHTNING, thinking=True)) == {}
