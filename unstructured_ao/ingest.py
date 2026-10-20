@@ -28,6 +28,13 @@ Usage
         for doc_id in ingest_directory("/path/to/documents", conn):
             print(f"Ingested document {doc_id}")
 
+Run it with ``RAY_AUTH_MODE=disabled`` in the environment.  NeMo Retriever runs
+its stages as Ray actors, and without that the raylet spends ~80s on auth setup
+before giving up with "The current node timed out during startup"; with it Ray
+is up in about 7.  It is not set in ``config.py`` on purpose — it turns off a
+security feature, which is a call for whoever runs the pipeline to make, not a
+default to inherit.
+
 Terms and attributes come afterwards, from
 ``unstructured_ao.semantic.run_document_semantics``.
 """
@@ -73,6 +80,18 @@ def _embed_params():
     ``text_image`` rather than ``text`` because half of what the extract stage
     yields here is charts, tables and infographics, and ``EMBED_MODEL`` is a
     vision-language model that can read them as images.
+
+    That reasoning does not survive measurement, and this is the next thing to
+    change here.  Scored against ViDoRe v3 HR with ``dev_tools/vidore_eval.py``
+    — 318 queries, page-level graded qrels — embedding the same chunks
+    ``text``-only beat ``text_image`` on nDCG@5 (0.2317 against 0.2131) and
+    recall@5 (0.2215 against 0.1929), with a paired-bootstrap interval that
+    excludes zero.  The images do not add signal; they dilute one the text
+    already carries, because the extract stage OCRs the text inside a chart
+    into the chunk (chart chunks average ~800 characters and none come back
+    empty).  Left as ``text_image`` only because flipping it invalidates every
+    vector already in the store, which is a re-ingest of the corpus rather than
+    a one-line change.
     """
     from nemo_retriever.common.params.models import EmbedParams
 
@@ -87,6 +106,54 @@ def _embed_params():
 
 
 def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
+    """Extract and embed *file_path* with whichever extractor is configured.
+
+    ``config.EXTRACTOR`` picks between NeMo Retriever's graph, Docling, and the
+    fully hosted path.  All three return the same record shape with an
+    ``embedding`` attached, so nothing downstream of here knows which one ran.
+    """
+    if config.EXTRACTOR == "nemo":
+        return _extract_with_nemo(file_path)
+    if config.EXTRACTOR in _LIBRARY_EXTRACTORS:
+        return _extract_with_library(file_path)
+    raise ValueError(
+        f"Unknown EXTRACTOR {config.EXTRACTOR!r}; expected one of "
+        f"'nemo', {', '.join(repr(name) for name in sorted(_LIBRARY_EXTRACTORS))}."
+    )
+
+
+#: Extractors that hand back rows without embedding them, keyed to the module
+#: holding their ``extract_chunks``.  Unlike NeMo's graph these do not embed, so
+#: ``ingest`` does it in a second pass: extraction stays testable without an
+#: endpoint, and a re-embed does not re-extract.
+_LIBRARY_EXTRACTORS: dict[str, str] = {
+    "docling": "unstructured_ao.docling_extract",
+    "hosted": "unstructured_ao.hosted_extract",
+}
+
+
+def _extract_with_library(file_path: str) -> list[dict[str, Any]]:
+    """Extract with a library extractor, then embed the rows.
+
+    Embedding is ``text`` only — measured better than ``text_image`` on this
+    corpus, see :func:`_embed_params`.
+    """
+    from importlib import import_module
+
+    from unstructured_ao.embed_client import get_embed_client
+
+    module = import_module(_LIBRARY_EXTRACTORS[config.EXTRACTOR])
+    client = get_embed_client()
+    chunks = module.extract_chunks(file_path, client=client)
+    if not chunks:
+        return []
+    vectors = client.embed([chunk["text"] for chunk in chunks])
+    for chunk, vector in zip(chunks, vectors):
+        chunk["embedding"] = vector
+    return chunks
+
+
+def _extract_with_nemo(file_path: str) -> list[dict[str, Any]]:
     """Extract and embed *file_path* in one NeMo Retriever pass.
 
     Each returned dict is one element of a page, in the library's compact
@@ -206,7 +273,9 @@ def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
     try:
         raw_chunks = _extract_chunks_from_file(path)
     except Exception:
-        logger.exception("NeMo Retriever extraction failed for %s — skipping.", path)
+        logger.exception(
+            "The %s extractor failed on %s — skipping.", config.EXTRACTOR, path
+        )
         return None
 
     if not raw_chunks:

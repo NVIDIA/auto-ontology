@@ -67,13 +67,24 @@ dependencies = [
 
 [project.optional-dependencies]
 kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
-# Only `unstructured_ao/` imports this. The backend dropped it in #376, but the
-# document ingest still runs on the retriever's extract + embed graph, which has
-# no in-repo replacement: it reads PDFs/DOCX/PPTX and yields text, tables,
-# charts and infographics as chunks. Exact pin for the same reason as before —
+# Only `unstructured_ao/` imports these: the two document extractors it can run,
+# selected by `config.EXTRACTOR`.
+#
+# nemo-retriever is the original. The backend dropped it in #376, but ingest
+# still runs on the retriever's extract + embed graph. The pin is exact because
 # 26.8.2 rejects the inference-api embed model id ("not revision-pinned") and
 # fails every ingest.
-unstructured = ["nemo-retriever==26.8.1"]
+#
+# docling is the replacement under evaluation. It reads the same formats without
+# a Ray cluster, but brings torch and torchvision (~1.2GB) for its layout and
+# table-structure models, and cannot read the inside of a chart on its own — see
+# `unstructured_ao/docling_extract.py` for how that gap is filled. The slimmer
+# `docling-slim[models-onnxruntime]` build drops torch and is worth trying once
+# the retrieval question is settled.
+unstructured = [
+    "docling>=2.140.0",
+    "nemo-retriever==26.8.1",
+]
 
 [build-system]
 requires = ["hatchling"]
