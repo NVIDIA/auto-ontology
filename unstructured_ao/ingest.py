@@ -90,14 +90,16 @@ def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
     """Extract and embed *file_path* in one NeMo Retriever pass.
 
     Each returned dict is one element of a page, in the library's compact
-    result shape: ``text``, ``source_id``, ``element_type``, ``page_number``
-    and — because ``return_embeddings`` is on — ``embedding``.
+    result shape — ``text``, ``source_id``, ``element_type``, ``page_number``
+    — plus the ``embedding`` this function attaches.
 
     ``ingest`` itself hands back the full pipeline frame, one row per element
     and some thirty columns wide, most of which are stage bookkeeping and
     base64 page images.  ``dataframe_to_transport_records`` is the library's own
     projection down to the public fields, so the column names the stages happen
     to use stay the library's business rather than something we read directly.
+    The one exception is the embedding, which that projection drops; see
+    :func:`_embeddings_from_frame`.
 
     Embedding is part of the graph rather than a second pass so each chunk is
     embedded by the same VL model that read it, and so the retry and batching
@@ -109,6 +111,7 @@ def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
     from nemo_retriever import create_ingestor
     from nemo_retriever.ingestor.results import dataframe_to_transport_records
 
+    params = _embed_params()
     ingestor = (
         create_ingestor(run_mode="batch")
         .files([file_path])
@@ -118,13 +121,43 @@ def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
             extract_charts=True,
             extract_infographics=True,
         )
-        .embed(_embed_params())
+        .embed(params)
     )
-    return dataframe_to_transport_records(
-        ingestor.ingest(),
-        result_schema="compact",
-        return_embeddings=True,
-    )
+    frame = ingestor.ingest()
+    chunks = dataframe_to_transport_records(frame, result_schema="compact")
+    for chunk, embedding in zip(chunks, _embeddings_from_frame(frame, params)):
+        chunk["embedding"] = embedding
+    return chunks
+
+
+def _embeddings_from_frame(frame: Any, params: Any) -> list[list[float] | None]:
+    """The embed stage's vectors, in the frame's row order.
+
+    Taken off the frame rather than out of the transport records because
+    ``compact_result_record`` has no embedding field at all: the
+    ``return_embeddings`` flag applies only to ``result_schema="legacy"``.
+    Legacy is not an alternative here — it keeps every column, base64 page
+    images included, and ``_source_metadata`` would write those into Postgres.
+    Column names come from the same params the stage was configured with, so a
+    change of embed model does not strand this on a stale column.
+    """
+    column = params.output_column
+    if column not in frame.columns:
+        return [None] * len(frame)
+    flag = params.has_embedding_column
+
+    def vector(row: Any) -> list[float] | None:
+        if flag in frame.columns and not row[flag]:
+            return None
+        cell = row[column]
+        # The stage reports a per-row embed failure in ``info_msg`` alongside
+        # the vector, so a dict here is the success shape, not a wrapper to
+        # unwrap defensively.
+        if isinstance(cell, dict):
+            cell = cell.get("embedding")
+        return None if cell is None else list(cell)
+
+    return [vector(row) for _, row in frame.iterrows()]
 
 
 def _resolve_content_type(chunk: dict[str, Any]) -> str:
