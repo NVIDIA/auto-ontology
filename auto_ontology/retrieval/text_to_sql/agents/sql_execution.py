@@ -18,7 +18,10 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
-from auto_ontology.retrieval.text_to_sql.numeric_types import numeric_column_kinds
+from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    numeric_column_kinds,
+    result_values_digest,
+)
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -60,10 +63,13 @@ class QueryResponse:
         error: Optional[str] = None,
         statement: Optional[str] = None,
         numeric_kinds: Optional[list] = None,
+        values_digest: Optional[str] = None,
     ):
         # Per output column ``"float"`` / ``"decimal"`` / ``None``; lets a caller
         # that needs a predictable numeric type know what this SQL returned.
         self.numeric_kinds = numeric_kinds or []
+        # Type-blind digest of the result values (see ``result_values_digest``).
+        self.values_digest = values_digest
         self.result = result
         self.sliced = sliced
         self.error = error
@@ -114,6 +120,7 @@ def _run_sql(
         error=None,
         statement=sql,
         numeric_kinds=numeric_column_kinds(df) if record_numeric_kinds else [],
+        values_digest=result_values_digest(df) if record_numeric_kinds else None,
     )
 
 
@@ -220,4 +227,5 @@ class SQLExecutionAgent(BaseAgent):
             # SQL they belong to so a reader can tell when they are stale.
             updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
             updated_path_state["result_numeric_kinds_sql"] = str(sql_code).strip()
+            updated_path_state["result_values_digest"] = response_from_db.values_digest
         return {"decision": "valid_sql", "path_state": updated_path_state}

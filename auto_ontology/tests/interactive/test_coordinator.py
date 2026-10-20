@@ -259,9 +259,18 @@ class _Connector:
         return pd.DataFrame({"v": [1.5]})
 
 
-def _debug_session(connector, *, first_kind="decimal", kinds=("float",)):
+def _debug_session(
+    connector,
+    *,
+    first_kind="decimal",
+    kinds=("float",),
+    first_values_digest="same-values",
+    retry_values_digest="same-values",
+):
     sess = _make_session(connectors=[connector])
     sess.first_submit_numeric_kind = first_kind
+    sess.first_submit_values_digest = first_values_digest
+    sess.path_state["result_values_digest"] = retry_values_digest
     sess.path_state["relevant_tables"] = []
     sql = "SELECT AVG(x) AS v FROM aliens"
     sess.path_state["result_numeric_kinds"] = list(kinds)
@@ -300,6 +309,29 @@ def test_decimal_first_submit_retries_as_double_precision():
     action = _step_debug(sess, sql)
 
     assert action.sql == "SELECT CAST(AVG(x) AS DOUBLE PRECISION) AS v FROM aliens"
+
+
+def test_debug_that_changed_the_answer_keeps_its_own_types():
+    connector = _Connector()
+    sess, sql = _debug_session(
+        connector,
+        first_kind="float",
+        first_values_digest="old-values",
+        retry_values_digest="new-values",
+    )
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
+def test_no_flip_without_a_first_submit_values_digest():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="float", first_values_digest=None)
+
+    assert _step_debug(sess, sql).sql == sql
+    assert connector.executed == []
 
 
 def test_execution_error_debug_never_flips_types():
@@ -349,6 +381,7 @@ def test_first_submit_records_which_numeric_type_it_returned():
     sql = "SELECT AVG(x) FROM aliens"
     sess.path_state["result_numeric_kinds"] = ["float", None]
     sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "digest"
 
     with patch(
         "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
@@ -357,3 +390,4 @@ def test_first_submit_records_which_numeric_type_it_returned():
         step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
 
     assert sess.first_submit_numeric_kind == "float"
+    assert sess.first_submit_values_digest == "digest"

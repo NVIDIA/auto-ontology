@@ -441,6 +441,14 @@ def _numeric_kinds_for(session: InteractiveSessionState, sql: str) -> list | Non
     return path_state.get("result_numeric_kinds")
 
 
+def _values_digest_for(session: InteractiveSessionState, sql: str) -> str | None:
+    """Type-blind digest of the result values recorded for *sql* (same tagging rule)."""
+    path_state = session.path_state
+    if (path_state.get("result_numeric_kinds_sql") or "") != (sql or "").strip():
+        return None
+    return path_state.get("result_values_digest")
+
+
 def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) -> str:
     """Re-submit *sql* with its numeric columns in the opposite type.
 
@@ -451,10 +459,25 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
     so the retry tries the other. Returns *sql* unchanged whenever the flip
     cannot be done or does not run — a broken retry would burn the phase's
     last attempt for nothing.
+
+    Only a retry that *kept the first submit's answer* is flipped. If debugging
+    changed the values themselves (a different filter, join, or expression), the
+    type the first submit had says nothing about the new answer, and flipping
+    would swap a possibly-correct type for a wrong one.
     """
     first_kind = session.first_submit_numeric_kind
     kinds = _numeric_kinds_for(session, sql)
     if not first_kind or not kinds:
+        return sql
+
+    first_values_digest = session.first_submit_values_digest
+    if not first_values_digest or first_values_digest != _values_digest_for(
+        session, sql
+    ):
+        logger.info(
+            "[%s] Debug retry changed the answer's values; keeping its numeric types",
+            session.task_id,
+        )
         return sql
 
     connector = resolve_connector_from_tables(
@@ -697,6 +720,7 @@ def step(
             session.first_submit_numeric_kind = dominant_kind(
                 _numeric_kinds_for(session, sql)
             )
+            session.first_submit_values_digest = _values_digest_for(session, sql)
     return SubmitSQLAction(sql=sql)
 
 

@@ -18,6 +18,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     numeric_column_kinds,
     numeric_type_alignment_enabled,
     opposite_target,
+    result_values_digest,
 )
 
 
@@ -220,6 +221,7 @@ def test_execution_records_the_kinds_and_the_sql_they_belong_to(monkeypatch) -> 
     path_state = update["path_state"]
     assert path_state["result_numeric_kinds"] == ["decimal"]
     assert path_state["result_numeric_kinds_sql"] == "SELECT v FROM t"
+    assert path_state["result_values_digest"] == result_values_digest(frame)
 
 
 def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
@@ -239,6 +241,39 @@ def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
     assert update["decision"] == "valid_sql"
     assert "result_numeric_kinds" not in update["path_state"]
     assert "result_numeric_kinds_sql" not in update["path_state"]
+    assert "result_values_digest" not in update["path_state"]
+
+
+# ── result values digest ────────────────────────────────────────────────────
+
+
+def _digest(**columns: list) -> str | None:
+    return result_values_digest(pd.DataFrame(columns))
+
+
+def test_values_digest_ignores_numeric_type_and_digits_past_two_places() -> None:
+    assert _digest(v=[Decimal("0.01")]) == _digest(v=[0.013369])
+    assert _digest(v=[5]) == _digest(v=[Decimal("5.00")]) == _digest(v=[5.0])
+    assert _digest(v=[Decimal("2.345")]) == _digest(
+        v=[2.35]
+    )  # half-up, like the grader
+
+
+def test_values_digest_follows_row_order() -> None:
+    # A retry that reordered the rows rewrote the query: not a type-only change.
+    assert _digest(k=["a", "b"], v=[1.5, 2.5]) != _digest(k=["b", "a"], v=[2.5, 1.5])
+
+
+def test_values_digest_separates_different_answers() -> None:
+    assert _digest(v=[0.01]) != _digest(v=[0.02])
+    assert _digest(k=["a"], v=[1.5]) != _digest(k=["b"], v=[1.5])
+    assert _digest(v=[1.5, 2.5]) != _digest(v=[1.5])
+    assert _digest(v=[None]) != _digest(v=[0.0])
+
+
+def test_values_digest_of_nothing_is_none() -> None:
+    assert result_values_digest(None) is None
+    assert result_values_digest(pd.DataFrame({"v": []})) is None
 
 
 # ── the validation node applies the rewrite ─────────────────────────────────

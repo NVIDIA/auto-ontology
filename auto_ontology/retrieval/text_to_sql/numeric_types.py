@@ -27,10 +27,12 @@ The module is pure (``sqlglot`` only) so it can be exercised without a database.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import numbers
 import os
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal, Optional, Sequence
 
 import sqlglot
@@ -115,6 +117,60 @@ def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
     return kinds
 
 
+_CENT = Decimal("0.01")
+
+
+def _normalise_cell(value: Any) -> str:
+    """One result cell as text that does not depend on its numeric *type*.
+
+    Numbers are taken to two decimal places, half-up, through ``Decimal`` — the
+    way the grader this module serves compares them — so ``Decimal('0.01')`` and
+    ``0.013369`` come out the same and ``int 5`` equals ``Decimal('5.00')``.
+    """
+    if value is None or str(value) in ("NaT", "<NA>"):
+        return "NULL"
+    if isinstance(value, bool):
+        return repr(value)
+    if isinstance(value, numbers.Real):
+        try:
+            if isinstance(value, numbers.Integral):
+                exact = Decimal(int(value))
+            else:
+                exact = Decimal(repr(float(value)))
+            return str(exact.quantize(_CENT, rounding=ROUND_HALF_UP))
+        except (InvalidOperation, ValueError):
+            return str(value)  # NaN, infinity
+    if isinstance(value, Decimal):
+        return str(value.quantize(_CENT, rounding=ROUND_HALF_UP))
+    if hasattr(value, "strftime"):
+        return value.strftime("%Y-%m-%d")
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, sort_keys=True, default=str)
+    return str(value)
+
+
+def result_values_digest(frame: Any) -> Optional[str]:
+    """A digest of a result's *values* in order, blind to numeric type.
+
+    Two results with the same digest hold the same rows, in the same order,
+    once rounded the way the grader rounds — whether the numbers are floats or
+    numerics. Row order counts on purpose: a retry that reordered rows rewrote
+    the query, so it is not a type-only change. ``None`` for an empty result.
+    Used to tell a debug retry that only needs another numeric type from one
+    that changed the answer itself.
+    """
+    if frame is None:
+        return None
+    shape = getattr(frame, "shape", (0, 0))
+    if shape[0] == 0 or shape[1] == 0:
+        return None
+    rows = [
+        repr(tuple(_normalise_cell(cell) for cell in record))
+        for record in frame.itertuples(index=False, name=None)
+    ]
+    return hashlib.sha1("\n".join(rows).encode()).hexdigest()
+
+
 def dominant_kind(
     kinds: Optional[Sequence[Optional[NumericKind]]],
 ) -> Optional[NumericKind]:
@@ -186,4 +242,5 @@ __all__ = [
     "numeric_column_kinds",
     "numeric_type_alignment_enabled",
     "opposite_target",
+    "result_values_digest",
 ]
