@@ -94,7 +94,11 @@ create_sql_user_prompt = (
     "- When evidence rules map to columns in different tables, include the joins "
     "that connect those tables using the listed paths. Choose the join type "
     "(INNER / LEFT / RIGHT) from the question's intent and avoid fan-out from "
-    "many-to-many joins.\n\n"
+    "many-to-many joins.\n"
+    "- A listed join path is indivisible. If it contains intermediate or bridge "
+    "tables, include every table and every hop exactly as listed. Removing a "
+    "bridge table, skipping a hop, or replacing the path with a direct endpoint "
+    "join is forbidden, even when the bridge contributes no projected column.\n\n"
     "{join_paths}\n\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
@@ -129,9 +133,12 @@ create_sql_user_prompt = (
     "entities or a necessary one-to-many join would otherwise count the same "
     "requested entity more than once. Use COUNT(*) when each input row represents "
     "exactly one requested entity.\n"
-    "- When a projected field has `is_nullable: true` in the schema metadata, "
-    "add an `IS NOT NULL` predicate for that field so the result excludes rows "
-    "where the projected value is NULL.\n"
+    "- NULL filtering: Do not add `IS NOT NULL` solely because a projected field "
+    "has `is_nullable: true`, or because one or multiple fields are projected. "
+    "Add it only when the question or evidence requires the requested value to "
+    "exist. If the concept maps to one nullable column, check that column; if it "
+    "maps to a composite concept, check every required nullable component. "
+    "Otherwise, preserve rows containing NULLs.\n"
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
@@ -374,7 +381,9 @@ ORDER BY total_sales DESC;"""
   when it fits. Never force the semantic hint if it doesn't match the question.
 - SUGGESTED JOIN PATHS show verified column-level join conditions:
 {join_template}
-  Follow hops in order when the path spans more than one table.
+  Follow hops in order when the path spans more than one table. Once you choose
+  a path, every intermediate/bridge table and every listed hop is mandatory.
+  Never shorten the path or join its endpoints directly.
 - DOMAIN-SPECIFIC CUSTOM ANALYSES: if one closely matches the question, use or
   adapt its full SQL directly as your starting point — you may reuse it wholesale,
   trimming only what does not apply. Do NOT copy its aliases.

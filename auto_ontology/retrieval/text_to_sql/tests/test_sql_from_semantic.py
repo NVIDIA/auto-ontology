@@ -73,11 +73,20 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
         create_sql_user_prompt
     )
     assert "include the joins that connect those tables" in create_sql_user_prompt
+    assert "include every table and every hop exactly as listed" in (
+        create_sql_user_prompt
+    )
+    assert "every intermediate/bridge table and every listed hop is mandatory" in (
+        system_prompt
+    )
 
 
-def test_prompt_filters_nulls_from_nullable_projected_fields() -> None:
-    assert "projected field has `is_nullable: true`" in create_sql_user_prompt
-    assert "add an `IS NOT NULL` predicate for that field" in create_sql_user_prompt
+def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
+    assert "Do not add `IS NOT NULL` solely because" in create_sql_user_prompt
+    assert "question or evidence requires the requested value" in (
+        create_sql_user_prompt
+    )
+    assert "preserve rows containing NULLs" in create_sql_user_prompt
 
 
 def test_projection_strictness_is_configured_per_request() -> None:
