@@ -64,7 +64,9 @@ def upgrade() -> None:
         sa.Column("chunk_index", sa.Integer, nullable=False),
         sa.Column("source_metadata", postgresql.JSONB, nullable=True),
     )
-    op.create_index("ix_unstructured_chunk_document_id", "unstructured_chunk", ["document_id"])
+    op.create_index(
+        "ix_unstructured_chunk_document_id", "unstructured_chunk", ["document_id"]
+    )
 
     op.create_table(
         "unstructured_term",
@@ -84,7 +86,9 @@ def upgrade() -> None:
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("description", sa.Text, nullable=True),
     )
-    op.create_index("ix_unstructured_term_document_id", "unstructured_term", ["document_id"])
+    op.create_index(
+        "ix_unstructured_term_document_id", "unstructured_term", ["document_id"]
+    )
 
     op.create_table(
         "unstructured_attribute",
@@ -103,9 +107,14 @@ def upgrade() -> None:
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("description", sa.Text, nullable=True),
         sa.Column("attribute_type", sa.Text, nullable=False),
-        sa.CheckConstraint("attribute_type IN ('sql', 'ref')", name="ck_unstructured_attribute_attribute_type_value"),
+        sa.CheckConstraint(
+            "attribute_type IN ('sql', 'ref')",
+            name="ck_unstructured_attribute_attribute_type_value",
+        ),
     )
-    op.create_index("ix_unstructured_attribute_term_id", "unstructured_attribute", ["term_id"])
+    op.create_index(
+        "ix_unstructured_attribute_term_id", "unstructured_attribute", ["term_id"]
+    )
 
     op.create_table(
         "unstructured_attribute__chunk",
