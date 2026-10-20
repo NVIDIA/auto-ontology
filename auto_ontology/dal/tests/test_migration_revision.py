@@ -25,18 +25,41 @@ VALUES = ROOT / "helm" / "auto-ontology" / "values.yaml"
 
 
 def _head_revisions() -> list[str]:
-    """Revisions nothing else lists as its ``down_revision``."""
-    revisions: dict[str, str | None] = {}
+    """Revisions nothing else lists as its ``down_revision``.
+
+    Both identifiers are matched with and without their type annotation, and
+    every quoted revision on the right-hand side of ``down_revision`` counts as
+    a parent.  Alembic writes all three shapes: ``revision = "x"`` from the
+    older template, ``revision: str = "x"`` from the current one, and a tuple
+    of parents on a merge revision.  Reading only the annotated single-string
+    form makes a file invisible, and an invisible file's parent looks like a
+    head that nothing descends from.
+    """
+    revisions: dict[str, tuple[str, ...]] = {}
     for path in VERSIONS.glob("*.py"):
         text = path.read_text()
-        rev = re.search(r'^revision: str = ["\']([^"\']+)["\']', text, re.M)
-        down = re.search(
-            r'^down_revision: [^=]+= (?:["\']([^"\']+)["\']|None)', text, re.M
-        )
+        rev = re.search(r'^revision(?:: *str)? *= *["\']([^"\']+)["\']', text, re.M)
+        down = re.search(r"^down_revision(?:[^=]*?)? *= *(.+)$", text, re.M)
         if rev:
-            revisions[rev.group(1)] = down.group(1) if down else None
-    parents = {d for d in revisions.values() if d}
+            found = re.findall(r'["\']([^"\']+)["\']', down.group(1)) if down else []
+            revisions[rev.group(1)] = tuple(found)
+    parents = {parent for parents_ in revisions.values() for parent in parents_}
     return sorted(set(revisions) - parents)
+
+
+def test_every_migration_file_is_parsed() -> None:
+    """A file the parser cannot read is a head it cannot see.
+
+    Guards the checks below rather than the migrations: both of them read the
+    lineage through :func:`_head_revisions`, so a shape it skips makes them pass
+    while the history is in fact branched.
+    """
+    unparsed = [
+        path.name
+        for path in sorted(VERSIONS.glob("*.py"))
+        if not re.search(r'^revision(?:: *str)? *= *["\']', path.read_text(), re.M)
+    ]
+    assert not unparsed, f"_head_revisions cannot read: {unparsed}"
 
 
 def test_there_is_exactly_one_head_migration() -> None:
