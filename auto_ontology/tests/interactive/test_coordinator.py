@@ -12,6 +12,7 @@ from auto_ontology.retrieval.interactive.coordinator import (
     _format_user_clarifications,
     _run_sql_generation,
     apply_user_answer,
+    create_session,
     step,
 )
 from auto_ontology.retrieval.interactive.types import SubmitSQLAction, TurnType
@@ -237,3 +238,181 @@ def test_sql_generation_includes_raw_clarifications_in_evidence():
     )
     assert "out of scope" not in payload["evidence"]
     assert "generated evidence" in payload["evidence"]
+
+
+# ── numeric type retry on a wrong-answer debug turn ─────────────────────────
+
+
+class _Connector:
+    dialect = "postgres"
+    database_name = "alien"
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.executed: list[str] = []
+
+    def execute(self, sql: str, **_):
+        self.executed.append(sql)
+        if self.fail:
+            raise RuntimeError("boom")
+        import pandas as pd
+
+        return pd.DataFrame({"v": [1.5]})
+
+
+def _debug_session(
+    connector,
+    *,
+    first_kind="decimal",
+    kinds=("float",),
+    first_values_digest="same-values",
+    retry_values_digest="same-values",
+):
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sess.first_submit_numeric_kind = first_kind
+    sess.first_submit_values_digest = first_values_digest
+    sess.path_state["result_values_digest"] = retry_values_digest
+    sess.path_state["relevant_tables"] = []
+    sql = "SELECT AVG(x) AS v FROM aliens"
+    sess.path_state["result_numeric_kinds"] = list(kinds)
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    return sess, sql
+
+
+def _step_debug(sess, sql, **kwargs):
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        return step(sess, turn_type=TurnType.DEBUG, **kwargs)
+
+
+def test_wrong_answer_debug_resubmits_the_opposite_numeric_type():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="float", kinds=("float",))
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == "SELECT CAST(AVG(x) AS DECIMAL) AS v FROM aliens"
+    assert connector.executed == [action.sql]  # verified before it is submitted
+
+
+def test_decimal_first_submit_retries_as_double_precision():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="decimal", kinds=("decimal",))
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == "SELECT CAST(AVG(x) AS DOUBLE PRECISION) AS v FROM aliens"
+
+
+def test_debug_that_changed_the_answer_keeps_its_own_types():
+    connector = _Connector()
+    sess, sql = _debug_session(
+        connector,
+        first_kind="float",
+        first_values_digest="old-values",
+        retry_values_digest="new-values",
+    )
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
+def test_no_flip_without_a_first_submit_values_digest():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="float", first_values_digest=None)
+
+    assert _step_debug(sess, sql).sql == sql
+    assert connector.executed == []
+
+
+def test_execution_error_debug_never_flips_types():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="float")
+
+    action = _step_debug(sess, sql, debug_error='column "x" does not exist')
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
+def test_flip_that_does_not_run_falls_back_to_the_generated_sql():
+    connector = _Connector(fail=True)
+    sess, sql = _debug_session(connector, first_kind="float")
+
+    assert _step_debug(sess, sql).sql == sql
+
+
+def test_stale_kinds_for_other_sql_are_not_used():
+    connector = _Connector()
+    sess, _ = _debug_session(connector, first_kind="float")
+
+    action = _step_debug(sess, "SELECT SUM(y) AS v FROM aliens")
+
+    assert action.sql == "SELECT SUM(y) AS v FROM aliens"
+    assert connector.executed == []
+
+
+def test_no_flip_when_the_first_submit_had_no_fractional_numbers():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind=None)
+
+    assert _step_debug(sess, sql).sql == sql
+
+
+def test_alignment_is_off_unless_the_session_asks_for_it():
+    connector = _Connector()
+    sess, sql = _debug_session(connector, first_kind="float")
+    sess.numeric_type_alignment = False
+
+    assert _step_debug(sess, sql).sql == sql
+    assert connector.executed == []
+
+
+def _new_session(**kwargs):
+    return create_session(
+        session_id="s1",
+        task_id="t1",
+        db_name="alien",
+        db_schema="",
+        external_kb="[]",
+        question="q",
+        data_retriever=None,
+        semantic_retriever=None,
+        connectors=[],
+        **kwargs,
+    )
+
+
+def test_create_session_leaves_alignment_off_by_default():
+    assert _new_session().numeric_type_alignment is False
+
+
+def test_create_session_can_opt_in_to_alignment():
+    assert _new_session(numeric_type_alignment=True).numeric_type_alignment is True
+
+
+def test_first_submit_records_which_numeric_type_it_returned():
+    sess = _make_session(numeric_type_alignment=True)
+    sql = "SELECT AVG(x) FROM aliens"
+    sess.path_state["result_numeric_kinds"] = ["float", None]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "digest"
+
+    with patch(
+        "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+        return_value=sql,
+    ):
+        step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert sess.first_submit_numeric_kind == "float"
+    assert sess.first_submit_values_digest == "digest"

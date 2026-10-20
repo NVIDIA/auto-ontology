@@ -18,6 +18,10 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
+from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    numeric_column_kinds,
+    result_values_digest,
+)
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -58,7 +62,14 @@ class QueryResponse:
         sliced: bool,
         error: Optional[str] = None,
         statement: Optional[str] = None,
+        numeric_kinds: Optional[list] = None,
+        values_digest: Optional[str] = None,
     ):
+        # Per output column ``"float"`` / ``"decimal"`` / ``None``; lets a caller
+        # that needs a predictable numeric type know what this SQL returned.
+        self.numeric_kinds = numeric_kinds or []
+        # Type-blind digest of the result values (see ``result_values_digest``).
+        self.values_digest = values_digest
         self.result = result
         self.sliced = sliced
         self.error = error
@@ -75,7 +86,12 @@ def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
     return sql
 
 
-def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
+def _run_sql(
+    sql: str,
+    connector: SQLDatabase | None,
+    *,
+    record_numeric_kinds: bool = False,
+) -> QueryResponse:
     """Execute SQL against the supplied ``connector``.
 
     Caller is responsible for picking the right connector for ``sql``
@@ -98,7 +114,14 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
         if len(df)
         else "[]"
     )
-    return QueryResponse(result=[payload], sliced=False, error=None)
+    return QueryResponse(
+        result=[payload],
+        sliced=False,
+        error=None,
+        statement=sql,
+        numeric_kinds=numeric_column_kinds(df) if record_numeric_kinds else [],
+        values_digest=result_values_digest(df) if record_numeric_kinds else None,
+    )
 
 
 class SQLExecutionAgent(BaseAgent):
@@ -141,7 +164,14 @@ class SQLExecutionAgent(BaseAgent):
         relevant_tables = path_state.get("relevant_tables", [])
         connector = resolve_connector_from_tables(relevant_tables, connectors)
 
-        response_from_db = _run_sql(sql_code, connector)
+        # Only for callers that asked for numeric-type alignment (BIRD-Interact's
+        # coordinator); every other caller keeps the exact call and result shape
+        # it had before.
+        record_kinds = bool(state.get("numeric_type_alignment"))
+        if record_kinds:
+            response_from_db = _run_sql(sql_code, connector, record_numeric_kinds=True)
+        else:
+            response_from_db = _run_sql(sql_code, connector)
 
         if response_from_db.error:
             self.logger.info(
@@ -188,10 +218,14 @@ class SQLExecutionAgent(BaseAgent):
             )
             return {"decision": "invalid_sql", "path_state": path_state}
 
-        return {
-            "decision": "valid_sql",
-            "path_state": {
-                **path_state,
-                "sql_response_from_db": response_from_db.result,
-            },
+        updated_path_state = {
+            **path_state,
+            "sql_response_from_db": response_from_db.result,
         }
+        if record_kinds:
+            # Numeric types of what ``sql_code`` just returned, tagged with the
+            # SQL they belong to so a reader can tell when they are stale.
+            updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
+            updated_path_state["result_numeric_kinds_sql"] = str(sql_code).strip()
+            updated_path_state["result_values_digest"] = response_from_db.values_digest
+        return {"decision": "valid_sql", "path_state": updated_path_state}

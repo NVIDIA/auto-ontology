@@ -114,9 +114,19 @@ class InteractiveSessionState:
         default_factory=list
     )  # injected verbatim into evidence, computed once
     _ambiguity_resolved: bool = False  # guards the once-only resolution call — an empty notes list still means "already ran"
+    # Whether the last non-debug submit returned ``"float"`` or ``"decimal"``
+    # numbers (None: neither). The debug retry uses the other one.
+    first_submit_numeric_kind: Optional[str] = None
+    # Type-blind digest of that submit's result values; the debug retry only
+    # flips the numeric type if its own answer still has these same values.
+    first_submit_values_digest: Optional[str] = None
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )
+    # Opt-in for callers graded by a checker that compares rounded numbers with
+    # ``==`` (BIRD-Interact): keep float casts on the numeric side and let the one
+    # debug retry switch float <-> numeric output. Off for everyone else.
+    numeric_type_alignment: bool = False
     # Callers that already refine evidence can disable the text-to-SQL graph's
     # second evidence-refinement pass.
     skip_evidence_refinement: bool = False

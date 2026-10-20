@@ -32,6 +32,9 @@ from sqlglot import expressions as exp
 from auto_ontology.catalog.sql_parse import parse_query_single
 from auto_ontology.dal.datasources import find_table_key_columns
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
+from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    float_casts_to_numeric,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -813,6 +816,19 @@ class SQLValidationAgent(BaseAgent):
             )
             response.sql_code = quoted_sql
             path_state["sql_generation_result"] = response
+
+        # Graders that compare numbers exactly cannot tell a float from a numeric
+        # holding the same value, and a reference that rounds is always numeric.
+        # Same single choke point as above, same reason it is not left to the
+        # prompt — and opt-in, so ordinary chat SQL is never rewritten.
+        if state.get("numeric_type_alignment"):
+            aligned_sql = float_casts_to_numeric(response.sql_code, degenerate_dialect)
+            if aligned_sql != response.sql_code:
+                self.logger.info(
+                    "Rewrote explicit float cast(s) to NUMERIC in the generated SQL"
+                )
+                response.sql_code = aligned_sql
+                path_state["sql_generation_result"] = response
 
         validation_result = self._sql_parse_validation(
             schemas, response.sql_code, dialects
