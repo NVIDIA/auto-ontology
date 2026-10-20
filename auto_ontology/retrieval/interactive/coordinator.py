@@ -46,7 +46,6 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
-    numeric_type_alignment_enabled,
     opposite_target,
 )
 
@@ -410,7 +409,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
         "validate_sql_values": True,
         # The grader compares numbers exactly, so a float and a numeric holding
         # the same value disagree: keep our explicit casts on the numeric side.
-        "numeric_type_alignment": numeric_type_alignment_enabled(),
+        "numeric_type_alignment": session.numeric_type_alignment,
         "skip_evidence_refinement": session.skip_evidence_refinement,
     }
     result = get_agent_response_with_state(payload)
@@ -550,6 +549,7 @@ def create_session(
     max_clarify_turns: int = 5,
     external_kb_children_map: dict | None = None,
     skip_evidence_refinement: bool = False,
+    numeric_type_alignment: bool = False,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -562,6 +562,7 @@ def create_session(
         max_clarify_turns=max_clarify_turns,
         external_kb_children_map=external_kb_children_map or {},
         skip_evidence_refinement=skip_evidence_refinement,
+        numeric_type_alignment=numeric_type_alignment,
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
@@ -713,7 +714,7 @@ def step(
                 )
 
     sql = _run_sql_generation(session)
-    if numeric_type_alignment_enabled():
+    if session.numeric_type_alignment:
         if turn_type == TurnType.DEBUG and debug_error is None:
             sql = _flip_numeric_types_for_retry(session, sql)
         elif turn_type != TurnType.DEBUG:

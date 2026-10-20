@@ -16,7 +16,6 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     flip_numeric_output_types,
     float_casts_to_numeric,
     numeric_column_kinds,
-    numeric_type_alignment_enabled,
     opposite_target,
     result_values_digest,
 )
@@ -176,19 +175,6 @@ def test_flip_is_postgres_only() -> None:
     )
 
 
-# ── feature flag ────────────────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "value,expected", [("", True), ("1", True), ("false", False), ("0", False)]
-)
-def test_alignment_flag_defaults_on_and_can_be_disabled(
-    monkeypatch, value: str, expected: bool
-) -> None:
-    monkeypatch.setenv("NUMERIC_TYPE_ALIGNMENT", value)
-    assert numeric_type_alignment_enabled() is expected
-
-
 # ── the execution node records the kinds ────────────────────────────────────
 
 
@@ -329,10 +315,9 @@ def test_validation_leaves_ordinary_chat_sql_alone(monkeypatch) -> None:
     assert _validate(monkeypatch, original) == original
 
 
-def test_validation_respects_the_kill_switch(monkeypatch) -> None:
-    monkeypatch.setenv("NUMERIC_TYPE_ALIGNMENT", "0")
+def test_validation_ignores_an_explicitly_disabled_flag(monkeypatch) -> None:
     original = "SELECT CAST(SUM(x) AS REAL) / COUNT(y) FROM t"
-    assert _validate(monkeypatch, original, numeric_type_alignment=True) == original
+    assert _validate(monkeypatch, original, numeric_type_alignment=False) == original
 
 
 def test_validation_does_not_rewrite_sqlite(monkeypatch) -> None:

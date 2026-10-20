@@ -123,6 +123,10 @@ class InteractiveSessionState:
     scalar_hint: bool = (
         False  # True when output type is detected as scalar (one-way: False→True only)
     )
+    # Opt-in for callers graded by a checker that compares rounded numbers with
+    # ``==`` (BIRD-Interact): keep float casts on the numeric side and let the one
+    # debug retry switch float <-> numeric output. Off for everyone else.
+    numeric_type_alignment: bool = False
     # Callers that already refine evidence can disable the text-to-SQL graph's
     # second evidence-refinement pass.
     skip_evidence_refinement: bool = False

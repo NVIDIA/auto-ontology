@@ -12,6 +12,7 @@ from auto_ontology.retrieval.interactive.coordinator import (
     _format_user_clarifications,
     _run_sql_generation,
     apply_user_answer,
+    create_session,
     step,
 )
 from auto_ontology.retrieval.interactive.types import SubmitSQLAction, TurnType
@@ -267,7 +268,7 @@ def _debug_session(
     first_values_digest="same-values",
     retry_values_digest="same-values",
 ):
-    sess = _make_session(connectors=[connector])
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
     sess.first_submit_numeric_kind = first_kind
     sess.first_submit_values_digest = first_values_digest
     sess.path_state["result_values_digest"] = retry_values_digest
@@ -368,16 +369,40 @@ def test_no_flip_when_the_first_submit_had_no_fractional_numbers():
     assert _step_debug(sess, sql).sql == sql
 
 
-def test_flip_can_be_switched_off(monkeypatch):
-    monkeypatch.setenv("NUMERIC_TYPE_ALIGNMENT", "0")
+def test_alignment_is_off_unless_the_session_asks_for_it():
     connector = _Connector()
     sess, sql = _debug_session(connector, first_kind="float")
+    sess.numeric_type_alignment = False
 
     assert _step_debug(sess, sql).sql == sql
+    assert connector.executed == []
+
+
+def _new_session(**kwargs):
+    return create_session(
+        session_id="s1",
+        task_id="t1",
+        db_name="alien",
+        db_schema="",
+        external_kb="[]",
+        question="q",
+        data_retriever=None,
+        semantic_retriever=None,
+        connectors=[],
+        **kwargs,
+    )
+
+
+def test_create_session_leaves_alignment_off_by_default():
+    assert _new_session().numeric_type_alignment is False
+
+
+def test_create_session_can_opt_in_to_alignment():
+    assert _new_session(numeric_type_alignment=True).numeric_type_alignment is True
 
 
 def test_first_submit_records_which_numeric_type_it_returned():
-    sess = _make_session()
+    sess = _make_session(numeric_type_alignment=True)
     sql = "SELECT AVG(x) FROM aliens"
     sess.path_state["result_numeric_kinds"] = ["float", None]
     sess.path_state["result_numeric_kinds_sql"] = sql

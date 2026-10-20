@@ -34,7 +34,6 @@ from auto_ontology.dal.datasources import find_table_key_columns
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     float_casts_to_numeric,
-    numeric_type_alignment_enabled,
 )
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
@@ -822,7 +821,7 @@ class SQLValidationAgent(BaseAgent):
         # holding the same value, and a reference that rounds is always numeric.
         # Same single choke point as above, same reason it is not left to the
         # prompt — and opt-in, so ordinary chat SQL is never rewritten.
-        if state.get("numeric_type_alignment") and numeric_type_alignment_enabled():
+        if state.get("numeric_type_alignment"):
             aligned_sql = float_casts_to_numeric(response.sql_code, degenerate_dialect)
             if aligned_sql != response.sql_code:
                 self.logger.info(

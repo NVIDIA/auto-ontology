@@ -31,7 +31,6 @@ import hashlib
 import json
 import logging
 import numbers
-import os
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal, Optional, Sequence
 
@@ -45,14 +44,6 @@ TargetType = Literal["numeric", "double"]
 
 _POSTGRES_DIALECTS = frozenset({"postgres", "postgresql"})
 _FLOAT_TYPES = frozenset({exp.DataType.Type.FLOAT, exp.DataType.Type.DOUBLE})
-
-
-def numeric_type_alignment_enabled() -> bool:
-    """``NUMERIC_TYPE_ALIGNMENT=false/0`` turns the whole feature off (default on)."""
-    return os.environ.get("NUMERIC_TYPE_ALIGNMENT", "").strip().lower() not in (
-        "false",
-        "0",
-    )
 
 
 def _is_postgres(dialect: Optional[str]) -> bool:
@@ -117,14 +108,18 @@ def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
     return kinds
 
 
-_CENT = Decimal("0.01")
+# The one number this module copies from the grader it serves (BIRD-Interact's
+# checker rounds every number to 2 places, half-up, before comparing). Change it
+# here if another grader needs the same treatment with a different precision.
+GRADER_DECIMAL_PLACES = 2
+_CENT = Decimal(1).scaleb(-GRADER_DECIMAL_PLACES)
 
 
 def _normalise_cell(value: Any) -> str:
     """One result cell as text that does not depend on its numeric *type*.
 
-    Numbers are taken to two decimal places, half-up, through ``Decimal`` — the
-    way the grader this module serves compares them — so ``Decimal('0.01')`` and
+    Numbers are rounded to ``GRADER_DECIMAL_PLACES`` places, half-up, through
+    ``Decimal`` — the way the grader this module serves compares them — so ``Decimal('0.01')`` and
     ``0.013369`` come out the same and ``int 5`` equals ``Decimal('5.00')``.
     """
     if value is None or str(value) in ("NaT", "<NA>"):
@@ -240,7 +235,6 @@ __all__ = [
     "flip_numeric_output_types",
     "float_casts_to_numeric",
     "numeric_column_kinds",
-    "numeric_type_alignment_enabled",
     "opposite_target",
     "result_values_digest",
 ]
