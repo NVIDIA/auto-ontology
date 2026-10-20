@@ -122,6 +122,118 @@ def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk()
     )
 
 
+@pytest.mark.parametrize("source", ["custom_analysis", "sql_attribute"])
+def test_linked_tables_are_backfilled_before_relevance_filter(
+    monkeypatch, source: str
+) -> None:
+    captured_tables: list[dict] = []
+    linked_table = {
+        "id": "linked",
+        "name": "orders",
+        "database_name": "db",
+        "schema_name": "public",
+        "columns": [
+            {
+                "name": "customer_id",
+                "sample_values": ["1"],
+                "is_nullable": False,
+            }
+        ],
+    }
+    enriched_table = {
+        **linked_table,
+        "columns": [
+            {
+                **linked_table["columns"][0],
+                "semantic_fk": "public.customers.id",
+            }
+        ],
+    }
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+
+    def capture_filter(
+        self,
+        state,
+        question,
+        tables,
+        custom_analyses=None,
+        attribute_join_paths=None,
+    ):
+        captured_tables.extend(tables)
+        return tables, ""
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent, "_filter_tables_by_relevance", capture_filter
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_custom_analyses_with_sql",
+        lambda ids: [{"id": "analysis"}] if source == "custom_analysis" else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_from_custom_analyses",
+        lambda ids: [linked_table] if source == "custom_analysis" else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_sql_attributes_with_sql",
+        lambda ids: [{"id": "attribute"}] if source == "sql_attribute" else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_from_sql_attributes",
+        lambda ids: [linked_table] if source == "sql_attribute" else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda ids: [enriched_table] if ids == ["linked"] else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda ids: ([], []),
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda kept_ids, candidate_ids: ([], [], 0),
+    )
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "Count orders",
+            "data_retriever": object(),
+            "path_state": {
+                "target_db": "db",
+                (
+                    "retrieved_custom_analyses"
+                    if source == "custom_analysis"
+                    else "retrieved_sql_attributes"
+                ): [
+                    {"id": ("analysis" if source == "custom_analysis" else "attribute")}
+                ],
+            },
+        },
+    )
+
+    CandidatePreparationAgent().execute(state)
+
+    assert captured_tables[0]["columns"][0]["semantic_fk"] == "public.customers.id"
+
+
 def test_retrieve_additional_tables_searches_question_and_entities(
     monkeypatch,
 ) -> None:
