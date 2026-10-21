@@ -11,7 +11,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.text_to_sql.agents import sql_reconstruction
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
+    ErrorAnalysis,
+    ErrorType,
     SQLReconstructionAgent,
+    _is_numeric_format_cast_error,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import DIRECT_ANSWER_FIELD_RULES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
@@ -158,3 +161,85 @@ def test_reconstruction_drops_prior_repair_turns(
     assert prior_repair not in captured_messages
     assert "SELECT bad" in captured_messages[-1].content
     assert "column missing" in captured_messages[-1].content
+
+
+def test_dictionary_error_is_normalized_before_classification(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_messages: list = []
+
+    def fake_invoke(_llm: object, messages: list, model: object):
+        captured_messages.append(messages)
+        if model is ErrorAnalysis:
+            return ErrorAnalysis(
+                error_type=ErrorType.FIXABLE,
+                explanation="The existing SQL can be repaired.",
+            )
+        return None
+
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    structured_error = {
+        "type": "ValueError",
+        "message": "duplicate output label",
+        "agent": "sql_execution",
+    }
+    state = cast(
+        AgentState,
+        {
+            "llm": MagicMock(),
+            "initial_question": "List the identifiers.",
+            "evidence": "",
+            "messages": [],
+            "path_state": {
+                "error": structured_error,
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT a.id, b.id FROM a JOIN b ON a.id = b.id",
+                    thought="",
+                ),
+            },
+        },
+    )
+
+    result = SQLReconstructionAgent().execute(state)
+
+    normalized = "duplicate output label (type=ValueError, agent=sql_execution)"
+    assert result["path_state"]["error"] == normalized
+    assert result["path_state"]["error_details"] == structured_error
+    assert result["path_state"]["failed_attempts"][0]["error"] == normalized
+    assert normalized in captured_messages[0][0].content
+    assert normalized in captured_messages[1][-1].content
+
+
+def test_historical_dictionary_errors_are_rendered_safely() -> None:
+    lines = SQLReconstructionAgent()._format_attempt_history(
+        [
+            {
+                "sql": "SELECT broken",
+                "error": {
+                    "type": "KeyError",
+                    "message": "missing column",
+                    "agent": "sql_parse_validation",
+                },
+            }
+        ],
+        label="Attempt",
+    )
+
+    assert lines == [
+        "  Attempt 1: SELECT broken\n"
+        "  Error: missing column (type=KeyError, agent=sql_parse_validation)"
+    ]
+
+
+def test_numeric_cast_detection_accepts_dictionary_errors() -> None:
+    assert _is_numeric_format_cast_error(
+        {
+            "type": "DataError",
+            "message": 'invalid input syntax for type numeric: "45.2%"',
+            "agent": "sql_execution",
+        }
+    )
