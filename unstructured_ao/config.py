@@ -30,9 +30,9 @@ os.environ.setdefault(
 #:
 #: - ``hosted`` runs no model locally.  Layout comes from NVIDIA's page-elements
 #:   service and figures from the gateway's vision model, so the only local work
-#:   is parsing and rasterising the PDF.  1.70 s/page.  Needs the
-#:   ``UNSTRUCTURED_PAGE_ELEMENTS_*`` triplet, and those models live *only* on
-#:   ``ai.api.nvidia.com`` with an ``nvapi-`` key — not on the ``sk-`` gateway.
+#:   is parsing and rasterising the PDF.  1.70 s/page.  Both are on the
+#:   ``inference-api.nvidia.com`` gateway, so the shared ``sk-`` key is enough;
+#:   ``UNSTRUCTURED_PAGE_ELEMENTS_*`` overrides the layout model's triplet.
 #: - ``docling`` runs page layout on the local CPU, which costs 3.0GB of torch
 #:   and CUDA wheels on linux-x86_64 and crashes on Apple's MPS backend, so it
 #:   is pinned to CPU.  2.05 s/page.  Install the ``unstructured-docling`` extra.

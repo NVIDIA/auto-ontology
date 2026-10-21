@@ -11,12 +11,12 @@ CPU, which is what makes it worth a second client.
 
 Host and key
 ------------
-The CV models are not on the embed gateway. They live only on
-``ai.api.nvidia.com`` and only authenticate with an ``nvapi-`` key; the
-``sk-`` gateway key returns 401 ("Invalid JWT serialization") and
-``inference-api.nvidia.com`` returns 404 for the same path even though it lists
-the model in ``/v1/models``. Hence a separate triplet rather than reusing
-``EMBED_*``.
+Served by the ``inference-api.nvidia.com`` gateway under
+``/v1/ocr/<model>/v1/page-elements``, so the same ``sk-`` key as every other
+model works.  Endpoint and model default here rather than through
+``model_config.resolve``: that falls back to ``DEFAULT_MODELS_*``, which Helm
+always sets to the chat triplet, and a chat model is never a layout model.  The
+key does go through ``resolve`` — the shared key is exactly what is wanted.
 
 Wire format
 -----------
@@ -29,6 +29,7 @@ before cropping.
 from __future__ import annotations
 
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
@@ -38,6 +39,9 @@ logger = logging.getLogger(__name__)
 #: Model-config triplet prefix, so the vars sit in the same ``UNSTRUCTURED_*``
 #: namespace as the rest of this package's settings.
 _PREFIX = "UNSTRUCTURED_PAGE_ELEMENTS"
+
+_DEFAULT_ENDPOINT = "https://inference-api.nvidia.com/v1/ocr"
+_DEFAULT_MODEL = "nvidia/nvidia/nemotron-page-elements-v3"
 
 #: Labels this model emits that are figures — a region whose meaning is in the
 #: pixels, so it needs reading separately.  ``paragraph`` and ``title`` are
@@ -84,16 +88,15 @@ class Box:
 def _resolved() -> tuple[str, str, str]:
     from auto_ontology.utils.model_config import resolve
 
-    endpoint = resolve(_PREFIX, "ENDPOINT").rstrip("/")
-    model = resolve(_PREFIX, "MODEL")
+    endpoint = os.environ.get(f"{_PREFIX}_ENDPOINT") or _DEFAULT_ENDPOINT
+    model = os.environ.get(f"{_PREFIX}_MODEL") or _DEFAULT_MODEL
     key = resolve(_PREFIX, "API_KEY")
-    if not endpoint or not model:
+    if not key:
         raise RuntimeError(
-            f"{_PREFIX}_ENDPOINT and {_PREFIX}_MODEL must be set; the CV models "
-            "have no built-in default in model_config because they are neither "
-            "a chat nor an embed triplet."
+            f"No API key for page-element detection: set {_PREFIX}_API_KEY or "
+            "the shared DEFAULT_MODELS_API_KEY."
         )
-    return endpoint, key, model
+    return endpoint.rstrip("/"), key, model.strip("/")
 
 
 class PageElementClient:
@@ -103,7 +106,7 @@ class PageElementClient:
         import httpx
 
         endpoint, self._api_key, model = _resolved()
-        self._url = f"{endpoint}/{model}"
+        self._url = f"{endpoint}/{model}/v1/page-elements"
         self._http = httpx.Client(timeout=_TIMEOUT)
 
     def _detect_batch(self, images_b64: list[str]) -> list[list[Box]]:

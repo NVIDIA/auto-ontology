@@ -125,3 +125,18 @@ def test_figure_labels_exclude_prose() -> None:
     """Paragraph and title text already comes from the PDF's text layer."""
     assert "chart" in FIGURE_LABELS
     assert not FIGURE_LABELS & {"paragraph", "title"}
+
+
+def test_client_posts_to_the_gateway_route(monkeypatch: Any) -> None:
+    """The gateway serves the model under ``/<model>/v1/page-elements``."""
+    for field in ("ENDPOINT", "MODEL"):
+        monkeypatch.delenv(f"UNSTRUCTURED_PAGE_ELEMENTS_{field}", raising=False)
+    monkeypatch.setenv("UNSTRUCTURED_PAGE_ELEMENTS_API_KEY", "sk-test")
+    # A chat triplet must not leak into the layout model's endpoint or name.
+    monkeypatch.setenv("DEFAULT_MODELS_ENDPOINT", "https://example.invalid/v1")
+    monkeypatch.setenv("DEFAULT_MODELS_MODEL", "some/chat-model")
+
+    assert PageElementClient()._url == (
+        "https://inference-api.nvidia.com/v1/ocr/"
+        "nvidia/nvidia/nemotron-page-elements-v3/v1/page-elements"
+    )
