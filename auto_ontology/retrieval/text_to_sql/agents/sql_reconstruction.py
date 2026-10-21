@@ -494,6 +494,9 @@ class SQLReconstructionAgent(BaseAgent):
         # the question text, so question_block never contains it and needs
         # no stripping.
         evidence = state["evidence"]
+        identifier_instruction = str(
+            path_state.get("subject_identifier_instruction") or ""
+        ).strip()
         question_block = format_dual_question_block(
             original_question,
             sanitized_question,
@@ -684,6 +687,8 @@ class SQLReconstructionAgent(BaseAgent):
             prompt_messages.append(
                 SystemMessage(content=format_authoritative_evidence(evidence))
             )
+        if identifier_instruction:
+            prompt_messages.append(SystemMessage(content=identifier_instruction))
         prompt_messages.append(HumanMessage(content=error_prompt))
 
         response = invoke_with_structured_output(

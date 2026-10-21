@@ -709,13 +709,8 @@ def test_graph_wires_refinement_before_sql_construction(
     }
 
     assert ("prepare_candidates", "refine_evidence", True) in edges
-    assert ("prepare_candidates", "add_identifier_evidence", True) in edges
-    assert ("refine_evidence", "add_identifier_evidence", False) in edges
-    assert (
-        "add_identifier_evidence",
-        "construct_sql_from_candidates",
-        False,
-    ) in edges
+    assert ("prepare_candidates", "construct_sql_from_candidates", True) in edges
+    assert ("refine_evidence", "construct_sql_from_candidates", False) in edges
 
 
 def test_prediction_graph_can_bypass_refinement(

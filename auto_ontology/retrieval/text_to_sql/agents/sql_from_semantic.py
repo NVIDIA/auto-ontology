@@ -58,6 +58,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_value_anchors_section,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
+from auto_ontology.utils.sql_identifiers import qualified_name, quoted_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,65 @@ logger = logging.getLogger(__name__)
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
 # right step event and ``NODE_LABELS`` entry.
 _GRAPH_NODE_NAME = "construct_sql_from_candidates"
+_IDENTIFIER_INSTRUCTION_PREFIX = "Subject identifier instruction:"
+
+
+def _subject_table(path_state: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the one relevant subject table, declining ambiguous mappings."""
+    subject_ids = {
+        str(table_id)
+        for table_id in path_state.get("subject_table_ids") or []
+        if table_id
+    }
+    if not subject_ids:
+        return None
+
+    candidates = [
+        table
+        for table in path_state.get("relevant_tables") or []
+        if str(table.get("id") or "") in subject_ids and table.get("default_identifier")
+    ]
+    if len(candidates) == 1:
+        return candidates[0]
+
+    anchor_table_id = str(
+        (path_state.get("primary_attribute") or {}).get("table_id") or ""
+    )
+    anchored = [
+        table for table in candidates if str(table.get("id") or "") == anchor_table_id
+    ]
+    return anchored[0] if len(anchored) == 1 else None
+
+
+def _subject_identifier_instruction(
+    path_state: dict[str, Any],
+    connector: Any | None,
+) -> str:
+    """Build one SQL-generation instruction for the resolved subject table."""
+    table = _subject_table(path_state)
+    if table is None:
+        return ""
+
+    schema = str(table.get("schema_name") or "")
+    table_name = str(table.get("name") or "")
+    database = str(table.get("database_name") or path_state.get("target_db") or "")
+    dialect = getattr(connector, "dialect", None)
+    qualified_table = (
+        connector.qualify(schema or None, table_name)
+        if connector is not None
+        else qualified_name(database, schema, table_name, dialect=dialect)
+    )
+    identifier = (
+        f"{qualified_table}."
+        f"{quoted_identifier(str(table['default_identifier']), dialect)}"
+    )
+    subject = str(path_state.get("subject") or table_name).strip() or table_name
+    return (
+        f'{_IDENTIFIER_INSTRUCTION_PREFIX} When identifying the subject "{subject}" '
+        f"without an explicitly requested output field, return only {identifier}. "
+        "Explicitly requested fields, aggregates, and requested properties take "
+        "precedence."
+    )
 
 
 def format_calculation_sql_template(path_state: dict[str, Any]) -> str:
@@ -170,6 +230,20 @@ class SQLFromCandidatesAgent(BaseAgent):
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
+
+        # Build this only after table preparation and connector routing have
+        # resolved the exact physical reference. It is a dedicated SQL-generation
+        # instruction, not evidence and not a mutation of request state.
+        identifier_instruction = ""
+        if state.get("shorten_answer", False):
+            identifier_instruction = _subject_identifier_instruction(
+                path_state, connector
+            )
+        if identifier_instruction:
+            path_state["subject_identifier_instruction"] = identifier_instruction
+            self.logger.info("Added subject identifier instruction to SQL generation")
+        else:
+            path_state.pop("subject_identifier_instruction", None)
 
         self.logger.info(
             "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, "
@@ -321,6 +395,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
             if authoritative_evidence_section:
                 messages.append(SystemMessage(content=authoritative_evidence_section))
+            if identifier_instruction:
+                messages.append(SystemMessage(content=identifier_instruction))
             if calculation_template_section:
                 messages.append(SystemMessage(content=calculation_template_section))
             # Before the query patterns: anchors state what this database
