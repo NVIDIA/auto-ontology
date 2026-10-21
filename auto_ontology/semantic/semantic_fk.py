@@ -26,6 +26,7 @@ Algorithm
 from __future__ import annotations
 
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -77,12 +78,17 @@ Rules:
 
 _JOIN_DEFAULT_SYSTEM_PROMPT = """\
 You are choosing the default foreign-key relationship used to join two database
-tables. Several columns on the same source table reference the same target column,
-but each column can represent a different business role.
+tables. Several columns on the same source table reference identifiers on the same
+target table, but each column can represent a different business role or identifier
+namespace.
 
 Choose the relationship that most naturally represents an unqualified join between
-the source and target tables. Return exactly one supplied source_column_id. Return
-null only when the schema context is genuinely insufficient. Never invent an ID.
+the source and target tables. Prefer a general relationship over a role-specific or
+provider-specific one (for example, customer_id over billing_customer_id, or
+player_api_id over player_fifa_api_id). Do not mistake peer roles such as home/away
+or source/target for a general relationship. Return exactly one supplied
+source_column_id. Return null only when the schema context is genuinely insufficient.
+Never invent an ID.
 """
 
 
@@ -226,14 +232,18 @@ def _resolve_semantic_fks(database_name: str) -> int:
 
 
 def select_semantic_fk_join_defaults(database_name: str) -> int:
-    """Persist exactly one join-path default for every semantic FK group."""
+    """Persist one default relationship for each source-table/target-table pair."""
     rows = fetch_semantic_fk_join_groups(database_name)
     grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
     for row in rows:
-        key = (row["source_table_id"], row["target_attribute_id"])
+        key = (row["source_table_id"], row["target_table_id"])
         grouped.setdefault(key, []).append(row)
 
-    ambiguous = [group for group in grouped.values() if len(group) > 1]
+    ambiguous = [
+        group
+        for group in grouped.values()
+        if len(group) > 1 and _select_generic_join_default(group) is None
+    ]
     llm = None
     if ambiguous:
         try:
@@ -251,39 +261,126 @@ def select_semantic_fk_join_defaults(database_name: str) -> int:
                 len(ambiguous),
             )
 
-    for (source_table_id, target_attribute_id), group in grouped.items():
+    for (source_table_id, target_table_id), group in grouped.items():
         selected_column_id = group[0]["source_column_id"]
         if len(group) > 1:
-            llm_selected = _select_join_default_with_llm(group, llm)
-            if llm_selected is None:
-                selected_column_id = _deterministic_join_default(group)
-                logger.warning(
-                    "Semantic FK join-default selection fell back to %s for %s -> %s",
-                    selected_column_id,
-                    group[0]["source_table_name"],
-                    group[0]["target_table_name"],
-                )
+            generic_selected = _select_generic_join_default(group)
+            if generic_selected is not None:
+                selected_column_id = generic_selected
             else:
-                selected_column_id = llm_selected
+                llm_selected = _select_join_default_with_llm(group, llm)
+                if llm_selected is None:
+                    selected_column_id = _deterministic_join_default(group)
+                    logger.warning(
+                        "Semantic FK join-default selection fell back to %s "
+                        "for %s -> %s",
+                        selected_column_id,
+                        group[0]["source_table_name"],
+                        group[0]["target_table_name"],
+                    )
+                else:
+                    selected_column_id = llm_selected
 
         set_semantic_fk_join_default(
             source_table_id,
-            target_attribute_id,
+            target_table_id,
             selected_column_id,
+        )
+        selected_row = next(
+            row for row in group if row["source_column_id"] == selected_column_id
         )
         logger.info(
             "Semantic FK join default: %s.%s -> %s.%s",
-            group[0]["source_table_name"],
-            next(
-                row["source_column_name"]
-                for row in group
-                if row["source_column_id"] == selected_column_id
-            ),
-            group[0]["target_table_name"],
-            group[0]["target_column_name"],
+            selected_row["source_table_name"],
+            selected_row["source_column_name"],
+            selected_row["target_table_name"],
+            selected_row["target_column_name"],
         )
 
     return len(grouped)
+
+
+_IDENTIFIER_TOKEN_RE = re.compile(r"[A-Z]+(?=[A-Z][a-z]|\d|$)|[A-Z]?[a-z]+|\d+")
+
+
+def _identifier_tokens(name: Any) -> tuple[str, ...]:
+    """Split snake/camel identifiers into normalized comparison tokens."""
+    return tuple(
+        token.casefold()
+        for part in re.split(r"[^A-Za-z0-9]+", str(name or ""))
+        for token in _IDENTIFIER_TOKEN_RE.findall(part)
+    )
+
+
+def _singular_token(token: str) -> str:
+    """Apply enough singularization to compare table and identifier names."""
+    if len(token) > 3 and token.endswith("ies"):
+        return token[:-3] + "y"
+    if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+        return token[:-1]
+    return token
+
+
+def _is_ordered_subsequence(
+    candidate: tuple[str, ...],
+    other: tuple[str, ...],
+) -> bool:
+    """Whether all candidate tokens occur in order within ``other``."""
+    if not candidate:
+        return False
+    iterator = iter(other)
+    return all(any(token == value for value in iterator) for token in candidate)
+
+
+def _select_generic_join_default(group: list[dict[str, Any]]) -> str | None:
+    """Choose a uniquely less-qualified identifier relationship when evident.
+
+    A relationship is structurally more general when both its source and target
+    identifier names are ordered token subsequences of every peer, with at least
+    one strict reduction. Requiring the source name to mention the target entity
+    prevents a bare ``api_id`` or ``id`` from outranking ``player_api_id``.
+    """
+    candidates: list[tuple[dict[str, Any], tuple[str, ...], tuple[str, ...]]] = []
+    for row in group:
+        source_tokens = _identifier_tokens(row.get("source_column_name"))
+        target_tokens = _identifier_tokens(row.get("target_column_name"))
+        if not source_tokens or not target_tokens:
+            return None
+        candidates.append((row, source_tokens, target_tokens))
+
+    generic_rows: list[dict[str, Any]] = []
+    for row, source_tokens, target_tokens in candidates:
+        target_table_tokens = {
+            _singular_token(token)
+            for token in _identifier_tokens(row.get("target_table_name"))
+        }
+        source_entity_tokens = {
+            _singular_token(token) for token in source_tokens if token != "id"
+        }
+        if not target_table_tokens.intersection(source_entity_tokens):
+            continue
+
+        dominates_every_peer = True
+        strictly_less_qualified = False
+        for other_row, other_source, other_target in candidates:
+            if other_row is row:
+                continue
+            if not (
+                _is_ordered_subsequence(source_tokens, other_source)
+                and _is_ordered_subsequence(target_tokens, other_target)
+            ):
+                dominates_every_peer = False
+                break
+            if len(source_tokens) < len(other_source) or len(target_tokens) < len(
+                other_target
+            ):
+                strictly_less_qualified = True
+        if dominates_every_peer and strictly_less_qualified:
+            generic_rows.append(row)
+
+    if len(generic_rows) != 1:
+        return None
+    return generic_rows[0]["source_column_id"]
 
 
 def _select_join_default_with_llm(
@@ -298,8 +395,12 @@ def _select_join_default_with_llm(
     candidates = "\n".join(
         (
             f"- source_column_id: {row['source_column_id']}\n"
-            f"  column: {row['source_column_name']}\n"
-            f"  description: {row.get('source_column_description') or '(none)'}"
+            f"  source column: {row['source_column_name']}\n"
+            f"  source description: "
+            f"{row.get('source_column_description') or '(none)'}\n"
+            f"  target column: {row['target_column_name']}\n"
+            f"  target semantic attribute: "
+            f"{row.get('target_attribute_name') or '(none)'}"
         )
         for row in group
     )
@@ -308,9 +409,6 @@ Source table: {first["source_table_name"]}
 Source table description: {first.get("source_table_description") or "(none)"}
 Target table: {first["target_table_name"]}
 Target table description: {first.get("target_table_description") or "(none)"}
-Target column: {first["target_column_name"]}
-Target column description: {first.get("target_column_description") or "(none)"}
-Target semantic attribute: {first.get("target_attribute_name") or "(none)"}
 
 Candidate relationships:
 {candidates}

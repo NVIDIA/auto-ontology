@@ -296,7 +296,7 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
 
     a.set_semantic_fk_join_default(
         world.tables["orders"],
-        world.attributes["customer-id"],
+        world.tables["customers"],
         world.columns["orders.customer_id"],
     )
 
@@ -309,6 +309,43 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
     assert {row["column_id"]: row["use_in_join_paths"] for row in rows} == {
         world.columns["orders.billing_customer_id"]: False,
         world.columns["orders.customer_id"]: True,
+    }
+
+
+def test_setting_join_default_spans_target_attributes_on_same_table(world) -> None:
+    world.table("players")
+    world.column("players", "player_api_id", 1)
+    world.column("players", "player_fifa_api_id", 2)
+    world.attribute("player-api-id", owner="players.player_api_id")
+    world.attribute("player-fifa-api-id", owner="players.player_fifa_api_id")
+    world.table("player_attributes")
+    world.column("player_attributes", "player_api_id", 1)
+    world.column("player_attributes", "player_fifa_api_id", 2)
+    world.references("player_attributes.player_api_id", "player-api-id")
+    world.references("player_attributes.player_fifa_api_id", "player-fifa-api-id")
+
+    a.set_semantic_fk_join_default(
+        world.tables["player_attributes"],
+        world.tables["players"],
+        world.columns["player_attributes.player_api_id"],
+    )
+
+    rows = store().query_read(
+        select(
+            s.column__semantic_fk.c.column_id,
+            s.column__semantic_fk.c.use_in_join_paths,
+        ).where(
+            s.column__semantic_fk.c.attribute_id.in_(
+                [
+                    world.attributes["player-api-id"],
+                    world.attributes["player-fifa-api-id"],
+                ]
+            )
+        )
+    )
+    assert {row["column_id"]: row["use_in_join_paths"] for row in rows} == {
+        world.columns["player_attributes.player_api_id"]: True,
+        world.columns["player_attributes.player_fifa_api_id"]: False,
     }
 
 

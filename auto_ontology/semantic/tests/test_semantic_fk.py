@@ -337,7 +337,15 @@ def test_resolution_logs_candidate_progress(caplog: pytest.LogCaptureFixture) ->
     )
 
 
-def _join_group_row(column_id: str, column_name: str) -> dict:
+def _join_group_row(
+    column_id: str,
+    column_name: str,
+    *,
+    target_attribute_id: str = "customer-attribute",
+    target_table_id: str = "customers-table",
+    target_table_name: str = "customers",
+    target_column_name: str = "id",
+) -> dict:
     return {
         "source_table_id": "orders-table",
         "source_table_name": "orders",
@@ -345,13 +353,13 @@ def _join_group_row(column_id: str, column_name: str) -> dict:
         "source_column_id": column_id,
         "source_column_name": column_name,
         "source_column_description": f"The {column_name} role.",
-        "target_attribute_id": "customer-attribute",
+        "target_attribute_id": target_attribute_id,
         "target_attribute_name": "Customer ID",
-        "target_table_id": "customers-table",
-        "target_table_name": "customers",
+        "target_table_id": target_table_id,
+        "target_table_name": target_table_name,
         "target_table_description": "Customers.",
         "target_column_id": "customer-id",
-        "target_column_name": "id",
+        "target_column_name": target_column_name,
         "target_column_description": "Customer identifier.",
         "use_in_join_paths": True,
     }
@@ -374,19 +382,125 @@ def test_single_semantic_fk_is_default_without_llm() -> None:
     get_llm_client.assert_not_called()
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customers-table",
         "customer-id-column",
     )
 
 
-def test_llm_selects_default_from_parallel_semantic_fks() -> None:
+@pytest.mark.parametrize(
+    ("target_table_name", "general_name", "qualified_name"),
+    [
+        ("Player", "player_api_id", "player_fifa_api_id"),
+        ("Team", "team_api_id", "team_fifa_api_id"),
+        ("customers", "customer_id", "billing_customer_id"),
+    ],
+)
+def test_generic_identifier_relationship_outranks_qualified_variant(
+    target_table_name: str,
+    general_name: str,
+    qualified_name: str,
+) -> None:
     group = [
-        _join_group_row("billing-column", "billing_customer_id"),
-        _join_group_row("customer-column", "customer_id"),
+        _join_group_row(
+            "qualified-column",
+            qualified_name,
+            target_attribute_id="qualified-attribute",
+            target_table_id="entity-table",
+            target_table_name=target_table_name,
+            target_column_name=qualified_name,
+        ),
+        _join_group_row(
+            "general-column",
+            general_name,
+            target_attribute_id="general-attribute",
+            target_table_id="entity-table",
+            target_table_name=target_table_name,
+            target_column_name=general_name,
+        ),
+    ]
+
+    assert semantic_fk._select_generic_join_default(group) == "general-column"
+
+
+def test_peer_roles_have_no_deterministic_generic_relationship() -> None:
+    group = [
+        _join_group_row("home-column", "home_customer_id"),
+        _join_group_row("away-column", "away_customer_id"),
+    ]
+
+    assert semantic_fk._select_generic_join_default(group) is None
+
+
+def test_bare_identifier_does_not_outrank_entity_identifier() -> None:
+    group = [
+        _join_group_row(
+            "bare-column",
+            "api_id",
+            target_table_name="Player",
+            target_column_name="api_id",
+        ),
+        _join_group_row(
+            "player-column",
+            "player_api_id",
+            target_table_name="Player",
+            target_column_name="player_api_id",
+        ),
+    ]
+
+    assert semantic_fk._select_generic_join_default(group) is None
+
+
+def test_generic_relationship_is_selected_without_initializing_llm() -> None:
+    group = [
+        _join_group_row(
+            "fifa-column",
+            "player_fifa_api_id",
+            target_attribute_id="fifa-attribute",
+            target_table_id="players-table",
+            target_table_name="Player",
+            target_column_name="player_fifa_api_id",
+        ),
+        _join_group_row(
+            "api-column",
+            "player_api_id",
+            target_attribute_id="api-attribute",
+            target_table_id="players-table",
+            target_table_name="Player",
+            target_column_name="player_api_id",
+        ),
+    ]
+    with (
+        patch(
+            "auto_ontology.semantic.semantic_fk.fetch_semantic_fk_join_groups",
+            return_value=group,
+        ),
+        patch(
+            "auto_ontology.semantic.semantic_fk.set_semantic_fk_join_default"
+        ) as set_default,
+        patch("auto_ontology.semantic.semantic_fk.get_llm_client") as get_llm_client,
+        patch(
+            "auto_ontology.semantic.semantic_fk.invoke_with_structured_output"
+        ) as invoke_llm,
+    ):
+        semantic_fk.select_semantic_fk_join_defaults("database")
+
+    get_llm_client.assert_not_called()
+    invoke_llm.assert_not_called()
+    set_default.assert_called_once_with(
+        "orders-table",
+        "players-table",
+        "api-column",
+    )
+
+
+def test_llm_selects_default_from_parallel_roles() -> None:
+    group = [
+        _join_group_row("home-column", "home_customer_id"),
+        _join_group_row("away-column", "away_customer_id"),
     ]
     result = SemanticFkJoinDefaultSelection(
-        selected_column_id="customer-column",
-        rationale="The unqualified customer relationship.",
+        selected_column_id="home-column",
+        rationale="The home relationship is the likely default.",
     )
     with (
         patch(
@@ -409,8 +523,8 @@ def test_llm_selects_default_from_parallel_semantic_fks() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
-        "customer-column",
+        "customers-table",
+        "home-column",
     )
 
 
@@ -444,7 +558,7 @@ def test_invalid_llm_selection_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customers-table",
         "a-column",
     )
 
@@ -471,7 +585,7 @@ def test_missing_llm_uses_deterministic_default() -> None:
 
     set_default.assert_called_once_with(
         "orders-table",
-        "customer-attribute",
+        "customers-table",
         "a-column",
     )
 

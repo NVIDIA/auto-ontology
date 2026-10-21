@@ -619,17 +619,27 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
 
 def set_semantic_fk_join_default(
     source_table_id: str,
-    target_attribute_id: str,
+    target_table_id: str,
     selected_column_id: str,
 ) -> None:
-    """Atomically enable one semantic FK in a source-table/target group."""
+    """Atomically enable one semantic FK between a source and target table."""
     source_column_ids = select(s.catalog_column.c.id).where(
         s.catalog_column.c.table_id == source_table_id
+    )
+    target_attribute_ids = (
+        select(s.column__has_attribute.c.attribute_id)
+        .select_from(
+            s.column__has_attribute.join(
+                s.catalog_column,
+                s.catalog_column.c.id == s.column__has_attribute.c.column_id,
+            )
+        )
+        .where(s.catalog_column.c.table_id == target_table_id)
     )
     statement = (
         update(s.column__semantic_fk)
         .where(
-            s.column__semantic_fk.c.attribute_id == target_attribute_id,
+            s.column__semantic_fk.c.attribute_id.in_(target_attribute_ids),
             s.column__semantic_fk.c.column_id.in_(source_column_ids),
         )
         .values(
