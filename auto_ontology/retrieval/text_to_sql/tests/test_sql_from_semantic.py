@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -202,7 +204,10 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
             "reasoning_llm": reasoning_llm,
             "initial_question": "How many accounts?",
             "evidence": "Active means accounts.status = 'active'.",
-            "messages": [],
+            "messages": [
+                SystemMessage(content="Follow the deployment policy."),
+                HumanMessage(content="How many accounts?"),
+            ],
             "connectors": [],
             "path_state": {
                 "primary_attribute": None,
@@ -222,6 +227,15 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
                     }
                 ],
                 "relevant_queries": [],
+                "custom_analyses": [
+                    {
+                        "name": "Active account count",
+                        "description": "Counts active accounts.",
+                        "sql": "SELECT COUNT(*) FROM accounts WHERE status = 'active'",
+                    }
+                ],
+                "custom_analyses_str": ["DUPLICATE CUSTOM ANALYSIS REPRESENTATION"],
+                "table_relevance_reasoning": "INTERNAL TABLE SELECTION REASONING",
             },
         }
     )
@@ -229,9 +243,25 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert result["decision"] == "constructable"
     assert invoked_with == [reasoning_llm]
     evidence = "Active means accounts.status = 'active'."
-    assert sum(evidence in message.content for message in invoked_messages) == 2
+    assert len(invoked_messages) == 2
+    assert isinstance(invoked_messages[0], SystemMessage)
+    assert isinstance(invoked_messages[1], HumanMessage)
+    assert "Follow the deployment policy." in invoked_messages[0].content
+    assert sum(evidence in message.content for message in invoked_messages) == 1
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    assert invoked_messages[-1].content.count("How many accounts?") == 1
+    assert invoked_messages[-1].content.index("## Authoritative Evidence") < (
+        invoked_messages[-1].content.index("## Available Schema")
+    )
+    assert invoked_messages[-1].content.index("## Rules") < (
+        invoked_messages[-1].content.index("## Final Checklist")
+    )
+    assert "Active account count" in invoked_messages[-1].content
+    assert "DUPLICATE CUSTOM ANALYSIS REPRESENTATION" not in (
+        invoked_messages[-1].content
+    )
+    assert "INTERNAL TABLE SELECTION REASONING" not in invoked_messages[-1].content
     assert "multiple foreign-key columns referencing the same" in (
         invoked_messages[-1].content
     )

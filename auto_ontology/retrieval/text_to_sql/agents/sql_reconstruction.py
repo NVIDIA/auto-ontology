@@ -714,7 +714,11 @@ class SQLReconstructionAgent(BaseAgent):
         # send every earlier error prompt again. ``failed_attempts`` already
         # carries that history inside this one prompt.
         prompt_messages = _without_prior_repair_turns(list(state["messages"]))
-        if evidence:
+        evidence_already_present = any(
+            isinstance(message.content, str) and evidence in message.content
+            for message in prompt_messages
+        )
+        if evidence and not evidence_already_present:
             prompt_messages.append(
                 SystemMessage(content=format_authoritative_evidence(evidence))
             )

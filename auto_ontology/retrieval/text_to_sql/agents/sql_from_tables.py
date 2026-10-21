@@ -23,11 +23,14 @@ Design Decisions:
 import logging
 from typing import Any, Dict
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    build_focused_sql_messages,
+)
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -109,7 +112,6 @@ class SQLFromTablesAgent(BaseAgent):
                 question,
                 database_name=path_state.get("target_db"),
             )
-        similar_questions = []
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
@@ -124,8 +126,6 @@ class SQLFromTablesAgent(BaseAgent):
         else:
             system_prompt = create_sql_general_prompt
 
-        observation_block = ""
-
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
@@ -135,8 +135,7 @@ class SQLFromTablesAgent(BaseAgent):
                 relevant_tables,
             ),
             main_question=main_question,
-            observation_block=observation_block,
-            queries=[],
+            authoritative_evidence=format_authoritative_evidence(evidence),
             tables=format_tables_for_prompt(
                 relevant_tables,
                 target_db=path_state.get("target_db"),
@@ -144,16 +143,29 @@ class SQLFromTablesAgent(BaseAgent):
             ),
             important_columns="No semantically matched columns.",
             join_paths="",
-            qa_from_conversations=similar_questions,
             custom_analyses="",
+            glossary="",
+            value_anchors="",
+            calculation_template="",
+            target_sql_examples="",
+            sql_examples="",
+            conversation_history="",
+            calendar_rules=(
+                "- Apply only calendar time windows. DO NOT apply rolling "
+                "time windows.\n"
+                if any(
+                    phrase in question.lower()
+                    for phrase in ["last week", "last month", "last year"]
+                )
+                else ""
+            ),
         )
 
-        messages = state["messages"] + [SystemMessage(content=system_prompt)]
-        if evidence:
-            messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
-        messages.append(HumanMessage(content=user_prompt))
+        messages = build_focused_sql_messages(
+            state.get("messages") or [],
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
 
         response = invoke_with_structured_output(llm, messages, SQLGenerationModel)
 

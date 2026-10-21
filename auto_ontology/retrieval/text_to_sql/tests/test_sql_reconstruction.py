@@ -78,7 +78,18 @@ def test_reconstruction_uses_evidence_from_state(
             "llm": MagicMock(),
             "initial_question": "What happened at 0:01:54?",
             "evidence": "The time refers to events.duration LIKE 'M:SS%'.",
-            "messages": [],
+            "messages": [
+                SystemMessage(content="SQL construction rules"),
+                HumanMessage(
+                    content=(
+                        "## Authoritative Evidence\n"
+                        "This evidence is critical. The generated SQL MUST follow "
+                        "every instruction in it exactly.\n\n"
+                        "Evidence (verbatim):\n"
+                        "The time refers to events.duration LIKE 'M:SS%'."
+                    )
+                ),
+            ],
             "path_state": {
                 "error": "invalid time filter",
                 "error_analysis_done": True,
@@ -97,6 +108,13 @@ def test_reconstruction_uses_evidence_from_state(
     assert "## Authoritative Evidence" in evidence_message
     assert "MUST follow every instruction" in evidence_message
     assert evidence_message.endswith("The time refers to events.duration LIKE 'M:SS%'.")
+    assert (
+        sum(
+            "The time refers to events.duration LIKE 'M:SS%'." in message.content
+            for message in captured_messages
+        )
+        == 1
+    )
     assert "The time refers to" not in prompt
     assert "events.duration LIKE '1:54%'" not in prompt
 

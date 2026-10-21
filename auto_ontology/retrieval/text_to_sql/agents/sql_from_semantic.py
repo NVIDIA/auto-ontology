@@ -24,7 +24,7 @@ Design Decisions:
 
 import logging
 from typing import Any, Dict
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage
 
 from auto_ontology.utils.llm_invoke import safe_invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
@@ -40,6 +40,9 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
+)
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    build_focused_sql_messages,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -163,9 +166,7 @@ class SQLFromCandidatesAgent(BaseAgent):
         relevant_queries = path_state.get("relevant_queries", [])
         similar_questions = path_state.get("similar_questions", [])
         custom_analyses = path_state.get("custom_analyses", [])
-        custom_analyses_str = path_state.get("custom_analyses_str", [])
         sql_attributes = path_state.get("sql_attributes", [])
-        sql_attributes_str = path_state.get("sql_attributes_str", [])
         term_synonyms: dict = path_state.get("term_synonyms") or {}
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
@@ -208,33 +209,27 @@ class SQLFromCandidatesAgent(BaseAgent):
             """
             Build messages for SQL construction.
 
-            Includes semantic candidate context, similar questions, and optionally
-            extracted file data or file excerpts.
+            Render all request-specific context once in one consistently ordered
+            human message. The only system message contains the SQL policy plus
+            inherited caller-level system context.
             """
-            relevance_reasoning = path_state.get("table_relevance_reasoning", "")
-            observation_block = ""
-            if relevance_reasoning:
-                observation_block += (
-                    f"\nTable selection reasoning:\n{relevance_reasoning}\n"
-                )
-            observation_block += f"\nlist of important semantic entities with sql snippets:\n{custom_analyses_str}\n"
-            if sql_attributes_str:
-                observation_block += (
-                    f"\nlist of sql attributes (derived metrics/formulas):\n"
-                    f"{sql_attributes_str}\n"
-                )
+
+            def prompt_section(content: str) -> str:
+                """Separate an optional rendered section from the next one."""
+                return f"{content.strip()}\n\n" if content.strip() else ""
+
+            glossary_parts: list[str] = []
             if term_synonyms:
                 gloss_lines = ["TERM GLOSSARY (alternate names users may use):"]
                 for term_name, syns in term_synonyms.items():
                     gloss_lines.append(
                         f"  {term_name}: also known as {', '.join(syns)}"
                     )
-                observation_block += "\n" + "\n".join(gloss_lines) + "\n"
+                glossary_parts.append("\n".join(gloss_lines))
             glossary_section = format_glossary_section(state.get("glossary") or [])
             if glossary_section:
-                observation_block += f"\n{glossary_section}"
-            if authoritative_evidence_section:
-                observation_block += f"\n{authoritative_evidence_section}\n"
+                glossary_parts.append(glossary_section)
+
             # Build custom analyses section for user prompt
             ca_section = format_custom_analyses_section(custom_analyses)
 
@@ -303,13 +298,34 @@ class SQLFromCandidatesAgent(BaseAgent):
                     relevant_tables,
                 ),
                 main_question=main_question,
-                observation_block=observation_block,
-                queries=relevant_queries,
-                qa_from_conversations=similar_questions_txt,
+                authoritative_evidence=authoritative_evidence_section,
                 tables=tables_section,
                 important_columns=important_columns,
                 join_paths=join_paths,
-                custom_analyses=ca_section + sa_section,
+                glossary=prompt_section("\n\n".join(glossary_parts)),
+                value_anchors=prompt_section(value_anchors_section),
+                calculation_template=prompt_section(calculation_template_section),
+                custom_analyses=prompt_section(ca_section + sa_section),
+                target_sql_examples=prompt_section(
+                    f"## Target-Database SQL Examples\n{relevant_queries}"
+                    if relevant_queries
+                    else ""
+                ),
+                sql_examples=prompt_section(sql_examples_section),
+                conversation_history=prompt_section(
+                    f"## Conversation History\n{similar_questions_txt}"
+                    if similar_questions_txt
+                    else ""
+                ),
+                calendar_rules=(
+                    "- Apply only calendar time windows. Do NOT apply rolling "
+                    "time windows.\n"
+                    if any(
+                        phrase in sanitized_question.lower()
+                        for phrase in ["last week", "last month", "last year"]
+                    )
+                    else ""
+                ),
             )
 
             # Choose system prompt based on context
@@ -319,34 +335,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                 has_sql_examples=bool(sql_examples_section),
             )
 
-            messages = state["messages"] + [SystemMessage(content=system_prompt)]
-            if authoritative_evidence_section:
-                messages.append(SystemMessage(content=authoritative_evidence_section))
-            if calculation_template_section:
-                messages.append(SystemMessage(content=calculation_template_section))
-            # Before the query patterns: anchors state what this database
-            # contains, which constrains the SQL more tightly than precedent
-            # from another database does.
-            if value_anchors_section:
-                messages.append(SystemMessage(content=value_anchors_section))
-            # After evidence, so that on any conflict the authoritative block is
-            # the one the model read first and the advisory one qualifies it.
-            if sql_examples_section:
-                messages.append(SystemMessage(content=sql_examples_section))
-            messages.append(HumanMessage(content=user_prompt))
-
-            # Add calendar time window reminder if needed
-            if any(
-                phrase in sanitized_question.lower()
-                for phrase in ["last week", "last month", "last year"]
-            ):
-                messages.append(
-                    SystemMessage(
-                        content="Apply only calendar time windows. DO NOT apply rolling time windows."
-                    )
-                )
-
-            return messages
+            return build_focused_sql_messages(
+                state.get("messages") or [],
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
 
         # Choose schema based on context
         # Use SQLGenerationModel for new flow (without formatting)

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.text_to_sql.agents import sql_from_tables
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_tables import (
@@ -62,13 +63,16 @@ def test_tables_agent_uses_state_evidence_as_authoritative_context(
         evidence="The time refers to events.duration LIKE 'M:SS%'.",
     )
 
+    assert len(messages) == 2
+    assert isinstance(messages[0], SystemMessage)
+    assert isinstance(messages[1], HumanMessage)
     assert "## Authoritative Evidence" in messages[1].content
     assert "MUST follow every instruction" in messages[1].content
-    assert messages[1].content.endswith(
-        "The time refers to events.duration LIKE 'M:SS%'."
+    assert (
+        messages[1].content.count("The time refers to events.duration LIKE 'M:SS%'.")
+        == 1
     )
-    assert "events.duration LIKE '1:54%'" not in messages[2].content
-    assert "The time refers to" not in messages[2].content
+    assert "events.duration LIKE '1:54%'" not in messages[1].content
 
 
 def test_tables_agent_does_not_scan_question_for_evidence(
@@ -98,6 +102,23 @@ def test_tables_agent_enables_reference_query_guidance(
     )
 
     assert "## How To Use Reference Query Patterns" in messages[0].content
+
+
+def test_tables_agent_places_calendar_rule_before_generation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="How many customers ordered last month?",
+        evidence="",
+    )
+
+    assert len(messages) == 2
+    assert isinstance(messages[-1], HumanMessage)
+    assert "Apply only calendar time windows" in messages[-1].content
+    assert messages[-1].content.index("Apply only calendar time windows") < (
+        messages[-1].content.index("## Final Checklist")
+    )
 
 
 def test_tables_agent_uses_request_projection_configuration(
