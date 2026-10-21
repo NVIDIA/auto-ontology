@@ -17,6 +17,8 @@ from .clarify import (
     refresh_grounded_knowledge,
     prune_resolved_terms,
     _STUCK_PHRASES,
+    external_kb_text,
+    knowledge_for_user_decisions,
     should_inject_default_sort,
     _DEFAULT_SORT_HINT,
     _format_resolved_schema_terms,
@@ -232,6 +234,25 @@ def _apply_follow_up_seed(
 # ── SQL generation ──────────────────────────────────────────────────────────
 
 
+def _verbatim_external_knowledge(external_kb: str) -> str:
+    """Authoritative knowledge block for SQL evidence.
+
+    Injected after evidence generation. The evidence model paraphrases the
+    coverage slice and drops a formula it cannot bind to a column; this block
+    is the same text ``/knowledge`` already returned, unchanged.
+    """
+    text = external_kb_text(external_kb)
+    if not text:
+        return ""
+    return (
+        "## External Knowledge (authoritative definitions — use these formulas "
+        "and conditions exactly; do not invent a different formula for a metric "
+        "defined here. If a shorter line below states a different formula for "
+        "the same metric, ignore that line and use this definition.)\n"
+        f"{text}\n\n"
+    )
+
+
 def _format_user_clarifications(session: InteractiveSessionState) -> str:
     """Render usable clarification Q&A verbatim for the SQL evidence payload."""
     clarifications: list[str] = []
@@ -331,6 +352,7 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             f"formulas from this SQL where applicable)\n{p1_sql}\n\n"
         )
     user_clarifications_note = _format_user_clarifications(session)
+    external_kb_note = _verbatim_external_knowledge(session.external_kb)
 
     resolved_terms_section = build_grounded_terms_hint(session)
     evidence = generate_evidence(
@@ -371,17 +393,24 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             logger.info(
                 "[%s] SQL gen — injected conditional output hint", session.task_id
             )
-    if expanded_question_note or user_clarifications_note or phase1_sql_reference_note:
+    if (
+        expanded_question_note
+        or user_clarifications_note
+        or phase1_sql_reference_note
+        or external_kb_note
+    ):
         evidence = (
             expanded_question_note
             + user_clarifications_note
             + phase1_sql_reference_note
+            + external_kb_note
             + evidence
         )
         logger.info(
             "[%s] SQL gen — prepended expanded question/user clarifications/"
-            "Phase 1 SQL reference to evidence",
+            "Phase 1 SQL reference/external knowledge (%d chars) to evidence",
             session.task_id,
+            len(external_kb_note),
         )
     if evidence:
         logger.info("[%s] SQL gen — Evidence: %s", session.task_id, evidence)
@@ -735,6 +764,13 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
     if not user_could_not_answer and session.clarify_history:
         last_turn = session.clarify_history[-1]
         relevant_knowledge = session._grounded_knowledge or ""
+        # Completeness sees the full external knowledge so a formula the
+        # coverage filter did not attach is not flagged as something to ask.
+        # Merge stays on the grounded slice: the working question should record
+        # what the user said, not a copy of the whole knowledge base.
+        decision_knowledge = knowledge_for_user_decisions(
+            relevant_knowledge, session.external_kb
+        )
 
         with ThreadPoolExecutor(max_workers=3) as pool:
             merge_future = pool.submit(
@@ -748,7 +784,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                 detect_incomplete_formulas,
                 session.working_question,
                 last_turn,
-                relevant_knowledge,
+                decision_knowledge,
                 list(session.incomplete_formula_terms),
                 _get_llm(),
                 None,

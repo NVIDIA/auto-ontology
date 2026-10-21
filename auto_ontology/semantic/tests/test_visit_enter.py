@@ -185,6 +185,101 @@ def test_calculate_columns_profiling_unhashable_values(
     assert stored["tags"] == [["a", "b"]]
 
 
+def _jsonb_ordered(document: dict) -> dict:
+    """Order object keys the way Postgres jsonb returns them: by length, then bytes."""
+    return {
+        key: _jsonb_ordered(document[key])
+        if isinstance(document[key], dict)
+        else document[key]
+        for key in sorted(document, key=lambda k: (len(k.encode()), k.encode()))
+    }
+
+
+def _profile_jsonb_column(document: dict) -> list[str]:
+    """Run profiling over a one-row jsonb column and return the stored key list."""
+    connector = _mock_connector()
+    connector.execute.return_value = pd.DataFrame({"snapshot": [document]})
+    table = {"id": "t1", "name": "readings", "schema_name": "public"}
+    columns = [{"name": "snapshot", "data_type": "jsonb"}]
+    with (
+        patch("auto_ontology.semantic.visit_enter.store_column_date_formats"),
+        patch("auto_ontology.semantic.visit_enter.store_column_uniqueness"),
+        patch(
+            "auto_ontology.semantic.visit_enter.store_column_sample_values"
+        ) as store_samples,
+    ):
+        calculate_columns_profiling(table, columns, connector)
+    return store_samples.call_args[0][1]["snapshot"]
+
+
+def test_wide_jsonb_column_keeps_every_key_path() -> None:
+    """solar_panel.electrical_performance: 32 paths, the useful ones are the long ones.
+
+    jsonb hands keys back shortest first, so a 20-path cap cut exactly
+    ``iv_curve.fill_factor_*`` and ``efficiency.cumulative_deg_pct`` — the keys
+    the SQL generator then re-derived or guessed.
+    """
+    sections = {
+        "efficiency": [
+            "instant_eff_pct",
+            "eff_loss_pct",
+            "cumulative_deg_pct",
+            "soil_loss_pct",
+            "spectral_mismatch",
+        ],
+        "power": ["power_now_w", "power_loss_w"],
+        "iv_curve": [
+            "isc_initial_a",
+            "isc_now_a",
+            "voc_initial_v",
+            "voc_now_v",
+            "imp_initial_a",
+            "imp_now_a",
+            "vmp_initial_v",
+            "vmp_now_v",
+            "fill_factor_initial",
+            "fill_factor_now",
+            "series_res_ohm",
+            "shunt_res_ohm",
+        ],
+        "inverter": ["inverter_eff_pct", "power_factor", "inverter_temp_c"],
+        "grid": [
+            "grid_voltage_v",
+            "grid_frequency_hz",
+            "power_quality_idx",
+            "harmonic_distortion_pct",
+            "reactive_power_var",
+        ],
+        "energy_yield": [
+            "energy_yield_kwh",
+            "performance_ratio",
+            "specific_yield_kwh_kw",
+            "capacity_factor_pct",
+            "availability_pct",
+        ],
+    }
+    document = _jsonb_ordered(
+        {section: {key: 1.5 for key in keys} for section, keys in sections.items()}
+    )
+
+    stored = _profile_jsonb_column(document)
+
+    expected = {f"{s}.{k}" for s, keys in sections.items() for k in keys}
+    assert len(expected) == 32
+    assert expected <= set(stored)
+    assert len(stored) == len(expected)
+
+
+def test_jsonb_key_list_is_still_bounded_for_pathological_documents() -> None:
+    from auto_ontology.semantic.visit_enter import _MAX_JSON_KEYS_PER_COLUMN
+
+    document = {f"key_{i:04d}": i for i in range(_MAX_JSON_KEYS_PER_COLUMN + 50)}
+
+    stored = _profile_jsonb_column(document)
+
+    assert len(stored) == _MAX_JSON_KEYS_PER_COLUMN
+
+
 @patch("auto_ontology.semantic.visit_enter.store_column_date_formats")
 @patch("auto_ontology.semantic.visit_enter.store_column_uniqueness")
 @patch("auto_ontology.semantic.visit_enter.store_column_sample_values")

@@ -39,21 +39,18 @@ Your task — produce a FRESH updated list:
 2. KEEP any prior gap that the answer did not fully resolve and does not require an update.
 4. ADD any new gap introduced by the answer or the external knowledge that would \
    prevent writing correct SQL — for example:
-   - A formula whose exact operators, constants, or column combinations are still unknown
-   - A threshold or classification condition expressed vaguely or in natural language \
-     with no mapping to a specific column value
+   - A business label, population, or cutoff the question depends on that is not \
+     stated in the user's answer or the external knowledge
+   - A threshold or classification condition expressed as a choice between meanings, \
+     where the knowledge does not say which meaning applies
    - A KB condition or user answer using hedged language (e.g. "typically", "often",\
-    "approximately", "things like") or referencing an undefined sub-condition
-   - A composite formula whose aggregation semantics are unspecified — i.e. the formula \
-     combines multiple columns non-linearly and it is unclear at which level it should \
-     be evaluated before grouping
-   - A natural language formula description that does not map to a unique equation — \
-     e.g. "adjusted by X", "modified with Y", "compensated for Z" where different \
-     placements of the adjustment (inside a fraction vs. outside, numerator vs. denominator) \
-     produce different values; include the user's exact phrase in the description
+    "approximately", "things like") that leaves which cases qualify undecided
  
 Do NOT flag:
-- Business context or motivation that does not affect SQL structure
+- A missing formula, equation, operator, constant, or column binding. Those are \
+  taken from external knowledge and the schema at SQL generation time. Do not ask \
+  the user for them, even when the formula names concepts rather than schema columns.
+- Business context or motivation that does not affect which rows or values qualify
 - Terms fully defined by an explicit formula in the answer or KB
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
   handling, boundary operators)
@@ -84,20 +81,25 @@ Schema columns already resolved by VDB (drop a gap only if the description direc
 {resolved_schema_terms}
 
 Identify gaps in either of the following categories:
-1. Terms in the external knowledge that are ambiguously defined:
-   - Expressed with hedged language ("typically", "often", "approximately", "things like")
-   - Reference sub-conditions not mapped to specific column values
-   - Use natural language that does not map to a unique equation
-2. Schema entities (listed above) that the working question asks to CALCULATE using a \
-   specific formula, where no formula exists anywhere — flag only if a SQL generator \
-   would have to invent the computation. Standard aggregations (SUM, AVG, COUNT) do NOT count.
+1. A business label, population, or cutoff the working question depends on that \
+   external knowledge does not already decide:
+   - Expressed with hedged language ("typically", "often", "approximately", "things like") \
+     so which cases qualify is undecided
+   - Two documented meanings and no indication which one applies
+2. Do NOT flag a schema entity just because its formula is not written next to a \
+   column name. A formula stated anywhere in external knowledge is complete. \
+   Standard aggregations (SUM, AVG, COUNT) are not gaps.
 
-A gap is only significant if it would prevent writing correct SQL.
+A gap is only significant if the user must choose a meaning, population, or cutoff \
+that the knowledge does not decide.
 
 Do NOT flag:
-- Terms fully defined with exact operators and all relevant column names found in the schema entities.
+- A missing formula, equation, operator, or column name. Column binding is not a \
+  question for the user.
+- Terms fully defined with an explicit formula in external knowledge, even when \
+  that formula uses business names rather than schema column names.
 - Terms already resolved to a specific column above (schema columns already resolved by VDB).
-- Business context that does not affect SQL structure
+- Business context that does not affect which rows or values qualify
 - Minor ambiguities a SQL generator can resolve on its own
 
 Output one line per gap found, ordered from most to least critical:

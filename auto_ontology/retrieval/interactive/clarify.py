@@ -53,8 +53,61 @@ _STUCK_PHRASES = frozenset(
         "can't answer",
         "unable to answer",
         "not able to answer",
+        # The user left the computation unspecified. That is a refusal, not a
+        # formula: do not merge it into the question and do not ask it again.
+        "leave the specifics",
+        "leave that to you",
+        "best judgment",
+        "don't have the specific",
+        "do not have the specific",
     ]
 )
+
+# The user simulator (and the product prompt) will not answer these. A question
+# that asks for one of them burns a clarify turn and comes back unanswered.
+_UNANSWERABLE_MECHANICS = re.compile(
+    r"\b(formulas?|equations?|columns?|tables?|schemas?|sql)\b", re.IGNORECASE
+)
+# Gap descriptions often mention a column while the real choice is a business
+# cutoff ("no mapping to a column value"). Only a formula/SQL gap is skipped
+# before a question is generated; the question itself is still screened.
+_FORMULA_GAP = re.compile(r"\b(formulas?|equations?|sql)\b", re.IGNORECASE)
+
+_EMPTY_EXTERNAL_KB = frozenset({"", "[]", "none", "null"})
+
+
+def external_kb_text(external_kb: str) -> str:
+    """Return external knowledge text, or "" when the session has none."""
+    text = (external_kb or "").strip()
+    if text.lower() in _EMPTY_EXTERNAL_KB:
+        return ""
+    return text
+
+
+def knowledge_for_user_decisions(grounded: str, external_kb: str) -> str:
+    """Grounded slice plus the full external knowledge, for completeness checks.
+
+    Coverage still decides which entries are about this question. The full
+    text is appended so a formula coverage did not attach is not reported as
+    missing and then asked of the user.
+    """
+    parts: list[str] = []
+    grounded_text = (grounded or "").strip()
+    if grounded_text:
+        parts.append(grounded_text)
+    kb = external_kb_text(external_kb)
+    if kb:
+        parts.append(
+            "Full external knowledge (already known; do not treat a definition "
+            "or formula that appears here as missing):\n" + kb
+        )
+    return "\n\n".join(parts)
+
+
+def asks_unanswerable_mechanics(text: str) -> bool:
+    """True when text asks for a formula, column, table, or SQL structure."""
+    return bool(_UNANSWERABLE_MECHANICS.search(text or ""))
+
 
 _CLARIFY_PROMPT = """\
 You are deciding whether to ask the user a clarification question before writing SQL.
@@ -64,6 +117,9 @@ Database schema:
 
 Relevant external knowledge:
 {relevant_knowledge}
+
+Full external knowledge (authoritative; never ask the user to repeat a definition or formula from here):
+{external_knowledge}
 
 Schema mappings already resolved (use these directly — do NOT ask where these terms are stored):
 {resolved_schema_terms}
@@ -79,22 +135,22 @@ Topics already asked about that went UNANSWERED:
 Terms not found in the database schema or external knowledge (ask the user to define these):
 {unresolvable_terms}
 
-Formulas or conditions whose exact specification is still missing, ranked most-critical first (ask about the first unasked item before proceeding):
+Business choices still open, ranked most-critical first. Ask only when one of these is a meaning, population, or cutoff that external knowledge does not decide. Never ask about a formula, column, or SQL structure:
 {incomplete_formulas_note}
 
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
-2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output.
-4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
-5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
-6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
+1. NEVER ask where data is stored, and never ask for a formula, equation, column, table, or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. If external knowledge states a formula or definition, that text is complete — use it, do not ask the user to restate it. BAD: "Which column stores quality X?" BAD: "What is the exact formula for quality X?" GOOD: "When you say health crisis, which documented risk condition do you mean?" The user will not answer questions about schema, columns, formulas, or how to write the query.
+2. Only ask about a business ambiguity that the schema, external knowledge, resolved schema mappings, and history do not already resolve: which of two documented meanings applies, which population is in scope, or a cutoff the knowledge does not state. Do not ask the user to supply a formula that is missing from the text you see. SQL generation receives the external knowledge separately and uses the formula written there.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output. Ask for the business names, not for columns or formulas.
+4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). Do not rephrase an unanswered question into a request for a formula, a column, or SQL. You MAY ask a follow-up about a business choice the user already started to answer, such as which of two meanings they confirmed.
+5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, full external knowledge, or db_schema, ask what the business term refers to, one term at a time. Do not ask how to calculate it.
+6. Suggested format: "What do you mean by [TERM]?" Name the exact term. Do not ask what it measures as a formula and do not ask where it is stored.
 7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
-8. If anything else in the user's question seems unclear, you may ask about it - for example, ambiguous grouping term, thresholds, unspecified limits, normalization methods, or preferred output format.
+8. If anything else in the user's question seems unclear, you may ask about it — for example an ambiguous grouping term, a threshold the knowledge does not state, an unspecified limit, or a preferred output format.
 9. Output a single focused question only — never two questions joined with "and" or "or".
-10. Output PROCEED only when ALL of the following hold: (a) you have enough information to write correct SQL, AND (b) every term in "Terms not found in the database schema or external knowledge" is either already in the unanswered topics list or fully defined by the working question, AND (c) "Formulas or conditions whose exact specification is still missing" lists "None". If any condition fails, ASK about the most critical unresolved item before proceeding.
+10. Output PROCEED when you can write the query from the schema, the external knowledge, and the clarifications. A missing formula, column name, or SQL detail is not a reason to ask. ASK only about the most critical business choice that is still open: a meaning, a population, or a cutoff the knowledge does not decide. If "Business choices still open" lists only formula or column gaps, output PROCEED.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -106,8 +162,10 @@ Term: {term}
 Why it's needed: {description}
 
 Generate a single, focused question to ask the user to clarify this specification.
-Ask about the business concept — what data they want to see — not about database tables or columns.
-Output only the question text, nothing else.\
+Ask which business meaning, population, or cutoff they intend.
+Do not ask for a formula, equation, column, table, or SQL structure.
+If the only unresolved piece is a formula or where a value is stored, output exactly SKIP.
+Output only the question text, or SKIP, nothing else.\
 """
 
 
@@ -452,7 +510,9 @@ def should_clarify(
         gaps = detect_incomplete_formulas(
             session.working_question,
             last_turn=None,
-            relevant_knowledge=session._grounded_knowledge,
+            relevant_knowledge=knowledge_for_user_decisions(
+                session._grounded_knowledge or "", session.external_kb
+            ),
             current_gaps=[],
             llm=llm,
             vdb_only_entities=vdb_only,
@@ -475,6 +535,7 @@ def should_clarify(
     prompt = _CLARIFY_PROMPT.format(
         db_schema=_compact_schema(session.db_schema),
         relevant_knowledge=grounded_knowledge_for_prompt,
+        external_knowledge=external_kb_text(session.external_kb) or "None",
         resolved_schema_terms=resolved_schema_text,
         question=session.working_question,
         history=history_text,
@@ -484,6 +545,23 @@ def should_clarify(
         sort_direction_note=sort_direction_note,
     )
     response = safe_invoke_text(llm, prompt).strip()
+
+    if response.upper().startswith("ASK:"):
+        question = response[4:].strip()
+        if asks_unanswerable_mechanics(question):
+            # A formula or column question will be refused. Drop it and still
+            # allow a never-asked business choice below to use this turn.
+            logger.info(
+                "Clarify — suppressed formula/column/SQL question: %r",
+                question,
+            )
+            response = "PROCEED"
+        else:
+            logger.info(
+                "Clarify — DECISION: ASK  (history len=%d)",
+                len(session.clarify_history),
+            )
+            return True, question
 
     # Guard: override PROCEED if any incomplete term has never been asked about.
     # The decide-LLM may rationalize PROCEED when it can see VDB hints, but a term
@@ -518,20 +596,35 @@ def should_clarify(
                 if tok and tok not in _FILLER and tok not in _CONNECTIVES
             }
             if term_tokens and not (term_tokens & asked_tokens):
+                if _FORMULA_GAP.search(term) or _FORMULA_GAP.search(description):
+                    # A missing formula or column is resolved from external
+                    # knowledge at SQL time. Forcing a user question here only
+                    # spends a turn the user will refuse.
+                    session._forced_terms_asked.add(term_key)
+                    logger.info(
+                        "Clarify — skip forced question for mechanics gap %r",
+                        term,
+                    )
+                    continue
                 question = _generate_forced_question(term, description, llm)
                 session._forced_terms_asked.add(term_key)
+                if (
+                    question.strip().upper() == "SKIP"
+                    or asks_unanswerable_mechanics(question)
+                    or "?" not in question
+                ):
+                    logger.info(
+                        "Clarify — forced question for %r is not a business "
+                        "choice (%r)",
+                        term,
+                        question,
+                    )
+                    continue
                 logger.info(
                     "Clarify — DECISION override: ASK (never-asked incomplete term %r)",
                     term,
                 )
                 return True, question
-
-    if response.upper().startswith("ASK:"):
-        question = response[4:].strip()
-        logger.info(
-            "Clarify — DECISION: ASK  (history len=%d)", len(session.clarify_history)
-        )
-        return True, question
 
     # Malformed-response fallback: the decide-LLM is instructed to return exactly
     # "ASK: <question>" or "PROCEED", so anything else is a parsing failure, not
@@ -541,6 +634,13 @@ def should_clarify(
     # misfiring on longer off-format text (e.g. stray reasoning) that happens to
     # contain a question mark without actually being a question to ask.
     if "?" in response and len(response) < 300:
+        if asks_unanswerable_mechanics(response):
+            logger.info(
+                "Clarify — DECISION: PROCEED (suppressed malformed "
+                "formula/column/SQL question: %r)",
+                response,
+            )
+            return False, None
         logger.warning(
             "Clarify — DECISION: malformed response treated as ASK (%r)", response
         )

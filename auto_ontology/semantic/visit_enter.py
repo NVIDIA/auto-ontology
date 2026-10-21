@@ -60,6 +60,16 @@ _PROFILING_QUERY_TIMEOUT_SECONDS = 120
 _MAX_CONSECUTIVE_SAMPLE_FAILURES = 3
 # Most-common values kept per column.
 _PROFILING_TOP_N = 5
+# JSONB key paths kept per JSONB column. This is a ceiling for pathological
+# documents, not a tuning knob: every path past it is invisible to the SQL
+# generator and to retrieval, and which paths those are is decided by the key
+# order the database returns, not by relevance. Postgres jsonb orders keys by
+# length and then bytes, so a column with 32 paths loses the *long* ones first
+# — `iv_curve.fill_factor_initial` and `efficiency.cumulative_deg_pct` are
+# exactly the paths a 20-path cap cut, and the generator then derived or
+# guessed them instead of reading them. The widest column in the BIRD-Interact
+# schemas has 32 paths; keep this well above any real document.
+_MAX_JSON_KEYS_PER_COLUMN = 100
 # String sample values longer than this are not persisted.
 _MAX_SAMPLE_VALUE_LEN = 30
 # Declared data-type substrings whose sample values are not persisted.
@@ -720,11 +730,12 @@ def calculate_columns_profiling(
                 json_keys.append(best)
 
             if json_keys:
-                # Capped well above the typical real key count (see
-                # mental_health.treatmentoutcomes.txprogmet, which has 11) so
-                # a wide-but-not-huge JSONB column doesn't lose keys to a
-                # cap tuned for a narrower column shape seen elsewhere.
-                sample_values[col_name] = json_keys[:20]
+                # Bounded only against pathological documents (see
+                # _MAX_JSON_KEYS_PER_COLUMN): a path dropped here is gone for
+                # both retrieval and the SQL generator's "available JSONB
+                # keys" list, and the cut falls on whichever keys the database
+                # happened to return last.
+                sample_values[col_name] = json_keys[:_MAX_JSON_KEYS_PER_COLUMN]
             continue
 
         filtered = [v for v in col_values if _keep_persisted_sample(v)]

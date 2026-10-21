@@ -32,6 +32,10 @@ from sqlglot import expressions as exp
 from auto_ontology.catalog.sql_parse import parse_query_single
 from auto_ontology.dal.datasources import find_table_key_columns
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
+from auto_ontology.retrieval.text_to_sql.grader_compat import (
+    distinct_on_problem,
+    rewrite_null_safe_comparisons,
+)
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
     float_casts_to_numeric,
 )
@@ -829,6 +833,32 @@ class SQLValidationAgent(BaseAgent):
                 )
                 response.sql_code = aligned_sql
                 path_state["sql_generation_result"] = response
+
+            # The same graders strip a standalone DISTINCT token before running
+            # the SQL, which breaks IS [NOT] DISTINCT FROM and DISTINCT ON (see
+            # grader_compat). The first has an exact rewrite; the second is sent
+            # back to the generator with a concrete replacement.
+            null_safe_sql = rewrite_null_safe_comparisons(
+                response.sql_code, degenerate_dialect
+            )
+            if null_safe_sql != response.sql_code:
+                self.logger.info("Rewrote IS [NOT] DISTINCT FROM in the generated SQL")
+                response.sql_code = null_safe_sql
+                path_state["sql_generation_result"] = response
+
+            distinct_on_error = distinct_on_problem(
+                response.sql_code, degenerate_dialect
+            )
+            if distinct_on_error:
+                self.logger.info("DISTINCT ON rejected for an exact-match grader")
+                path_state["error"] = distinct_on_error
+                # Deterministic and self-contained, like the GROUP BY checks
+                # below: no missing table or column would fix it.
+                path_state["error_known_fixable"] = True
+                return {
+                    "decision": "invalid_sql",
+                    "path_state": path_state,
+                }
 
         validation_result = self._sql_parse_validation(
             schemas, response.sql_code, dialects

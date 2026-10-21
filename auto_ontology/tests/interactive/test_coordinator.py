@@ -238,6 +238,128 @@ def test_sql_generation_includes_raw_clarifications_in_evidence():
     )
     assert "out of scope" not in payload["evidence"]
     assert "generated evidence" in payload["evidence"]
+    assert "## External Knowledge" not in payload["evidence"]
+
+
+def test_sql_generation_injects_external_kb_verbatim():
+    """The evidence model must not be the only carrier of external knowledge.
+
+    It paraphrases the coverage slice and drops a formula it cannot bind to a
+    column. The session knowledge is appended unchanged, ahead of that paraphrase.
+    """
+    formula = "medical_personnel / (casualties + injured)"
+    sess = _make_session(
+        external_kb=f"- MSR\n  Definition: {formula}",
+        original_question="Which sites are in a health crisis?",
+        working_question="Which sites are in a health crisis?",
+        data_retriever=MagicMock(),
+        semantic_retriever=MagicMock(),
+        connectors=[],
+    )
+    sess._grounded_knowledge_for = sess.working_question
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="MSR = 1 - medical / total",
+        ) as mock_evidence,
+        patch(
+            "auto_ontology.retrieval.text_to_sql.main.get_agent_response_with_state",
+            return_value={"sql_code": "SELECT 1"},
+        ) as mock_generate,
+    ):
+        _run_sql_generation(sess)
+
+    knowledge_arg = mock_evidence.call_args.args[1]
+    assert formula not in (knowledge_arg or "")
+    evidence = mock_generate.call_args.args[0]["evidence"]
+    assert formula in evidence
+    assert evidence.index(formula) < evidence.index("1 - medical / total")
+    assert "use these formulas" in evidence
+
+
+def test_external_kb_helpers_ignore_empty_placeholders():
+    from auto_ontology.retrieval.interactive.clarify import (
+        asks_unanswerable_mechanics,
+        external_kb_text,
+        knowledge_for_user_decisions,
+    )
+
+    assert external_kb_text("") == ""
+    assert external_kb_text("[]") == ""
+    assert external_kb_text(" None ") == ""
+    assert (
+        external_kb_text("- MSR\n  Definition: a / b") == "- MSR\n  Definition: a / b"
+    )
+    assert knowledge_for_user_decisions("", "[]") == ""
+    combined = knowledge_for_user_decisions(
+        "grounded slice", "- MSR\n  Definition: a / b"
+    )
+    assert combined.startswith("grounded slice")
+    assert "a / b" in combined
+    assert asks_unanswerable_mechanics("What is the exact formula for MSR?")
+    assert asks_unanswerable_mechanics("Which column stores the risk?")
+    assert not asks_unanswerable_mechanics("What cutoff counts as a health crisis?")
+
+
+def test_should_clarify_drops_formula_question_and_shows_full_kb():
+    from auto_ontology.retrieval.interactive.clarify import should_clarify
+
+    sess = _make_session(
+        external_kb="- MSR\n  Definition: medical / (casualties + injured)"
+    )
+    sess._cached_unresolvable_for = sess.working_question
+    sess._cached_unresolvable = []
+    sess.incomplete_formula_terms = [("MSR", "exact formula missing")]
+    seen: list[str] = []
+
+    def _invoke(_llm, prompt: str) -> str:
+        seen.append(prompt)
+        return "ASK: What is the exact formula for MSR?"
+
+    with patch(
+        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
+        side_effect=_invoke,
+    ):
+        ask, question = should_clarify(sess, MagicMock())
+
+    assert ask is False
+    assert question is None
+    assert len(seen) == 1
+    assert "medical / (casualties + injured)" in seen[0]
+    assert "never ask the user to repeat" in seen[0]
+
+
+def test_should_clarify_asks_a_business_cutoff():
+    from auto_ontology.retrieval.interactive.clarify import should_clarify
+
+    sess = _make_session()
+    sess._cached_unresolvable_for = sess.working_question
+    sess._cached_unresolvable = []
+    with patch(
+        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
+        return_value="ASK: What cutoff counts as a health crisis?",
+    ):
+        ask, question = should_clarify(sess, MagicMock())
+
+    assert ask is True
+    assert question == "What cutoff counts as a health crisis?"
+
+
+def test_format_user_clarifications_excludes_formula_refusal():
+    sess = _make_session()
+    sess.clarify_history = [
+        {
+            "q": "What is the formula?",
+            "a": "I'll leave the specifics of how you compute that up to you.",
+        },
+        {"q": "What counts as a crisis?", "a": "PHRS greater than 70."},
+    ]
+
+    evidence = _format_user_clarifications(sess)
+
+    assert "leave the specifics" not in evidence
+    assert "PHRS greater than 70." in evidence
 
 
 # ── numeric type retry on a wrong-answer debug turn ─────────────────────────

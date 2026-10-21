@@ -49,7 +49,10 @@ class TextToSQLPayload(TypedDict):
     validate_sql_values: NotRequired[bool]
     skip_evidence_refinement: NotRequired[bool]
     # For graders that compare numbers exactly: rewrite explicit float casts in
-    # the generated Postgres SQL to NUMERIC (see ``numeric_types``).
+    # the generated Postgres SQL to NUMERIC (see ``numeric_types``). The same
+    # switch also keeps SQL valid after such a grader strips DISTINCT tokens:
+    # IS [NOT] DISTINCT FROM is rewritten and DISTINCT ON is rejected
+    # (see ``grader_compat``).
     numeric_type_alignment: NotRequired[bool]
     # The clarified/merged question on its own — no hint blocks or SQL
     # references mixed in (unlike `evidence`, which carries those too).
