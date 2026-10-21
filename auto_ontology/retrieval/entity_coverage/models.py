@@ -29,9 +29,11 @@ class QuestionExtractionLiteModel(StrictLLMOutputModel):
             "Concepts present in the completed sanitized question that refer to "
             "database entities. Do not extract directly from supporting context. "
             "When words describe a single filterable item, keep them in one "
-            "phrase instead of splitting. Keep brand names, product names, and "
-            "descriptive named constants; omit numeric literals, dates, and "
-            "number-based thresholds."
+            "phrase instead of splitting. Express an action, event, state, or "
+            "attribute belonging to a subject as a subject-qualified noun phrase, "
+            "never as a separate bare verb. Keep brand names, product names, "
+            "and descriptive named constants; omit numeric literals, dates, "
+            "and number-based thresholds."
         ),
     )
 

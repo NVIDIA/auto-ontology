@@ -106,8 +106,10 @@ without the Glossary. Leave a phrase untouched when no Glossary entry applies.
 
 Guidelines for what to include in required_entity_name:
 - Subject nouns and domain terms ("invoice", "customer", "shipment")
-- Qualified entity phrases that combine a subject with its relevant action or attribute
-  ("order shipment", "employee hire", "ticket resolution")
+- Keep related entity words together as one phrase. When a subject and its action, event,
+  state, or attribute describe one concept, return them as one subject-qualified noun
+  phrase ("order shipment", "employee hire", "ticket resolution"). Use the noun form of
+  an action; do not split the subject and action into separate entities.
 - Aggregation-qualified metric rule: when "count", "total", "average", "sum", "min",
   or "max" is attached to a domain noun as the name of a requested metric or column,
   keep it as one entity phrase. This does not
@@ -145,6 +147,9 @@ Date rule: When a question references a time-qualified event, collapse subject +
 Examples:
   Q: "How many shipments were delivered last month?"
   → required_entity_name: ["shipment", "shipment delivery month date"]
+
+  Q: "Which customer was approved for financing?"
+  → required_entity_name: ["customer financing approval"]
 
   Q: "Find a waterproof hiking tent for family camping."
   → required_entity_name: ["waterproof hiking tent for family camping"]

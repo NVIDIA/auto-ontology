@@ -52,6 +52,18 @@ def test_prompt_omits_evidence_section_when_not_provided(
     assert "## Evidence for sanitization" not in prompt
 
 
+def test_prompt_keeps_related_entity_words_together() -> None:
+    prompt = create_question_extraction_prompt(
+        "Which employees were assigned to the support team?",
+        include_subject=True,
+    )
+
+    assert "Keep related entity words together as one phrase" in prompt
+    assert "one subject-qualified noun" in prompt
+    assert "do not split the subject and action into separate entities" in prompt
+    assert 'required_entity_name: ["customer financing approval"]' in prompt
+
+
 def test_agent_forwards_state_evidence_without_changing_original_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

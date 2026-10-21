@@ -554,6 +554,7 @@ class CandidatePreparationAgent(BaseAgent):
             subject_table_ids = list(
                 dict.fromkeys(str(p["table_id"]) for p in pairs if p.get("table_id"))
             )
+            path_state["subject_table_ids"] = subject_table_ids
             subject_tables = fetch_tables_by_ids(subject_table_ids)
             existing_ids = {t.get("id") for t in relevant_tables}
             added = 0
@@ -568,6 +569,8 @@ class CandidatePreparationAgent(BaseAgent):
                 subject_term.get("name") or subject_term_id,
                 [t["name"] for t in subject_tables],
             )
+        else:
+            path_state.pop("subject_table_ids", None)
 
         sql_attributes_str = self._build_sql_attributes_str(sql_attributes)
 
