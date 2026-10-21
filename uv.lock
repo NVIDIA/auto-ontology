@@ -339,7 +339,12 @@ kumo = [
     { name = "kumo-relational-client", extra = ["relational"] },
 ]
 unstructured = [
+    { name = "pypdfium2" },
+]
+unstructured-docling = [
     { name = "docling" },
+]
+unstructured-nemo = [
     { name = "nemo-retriever" },
 ]
 
@@ -359,7 +364,7 @@ requires-dist = [
     { name = "apache-ossie-nvidia-auto-ontology", git = "https://github.com/apache/ossie.git?subdirectory=converters%2Fnvidia&rev=ef91cb61092c60f4b918016a81cfdbe483e113bc" },
     { name = "cryptography", specifier = ">=50.0.1" },
     { name = "databricks-sql-connector", extras = ["pyarrow"], specifier = ">=4.4.0" },
-    { name = "docling", marker = "extra == 'unstructured'", specifier = ">=2.140.0" },
+    { name = "docling", marker = "extra == 'unstructured-docling'", specifier = ">=2.140.0" },
     { name = "duckdb", specifier = ">=1.5.5" },
     { name = "fastapi", specifier = ">=0.141.1" },
     { name = "httpx", specifier = ">=0.28.1" },
@@ -372,7 +377,7 @@ requires-dist = [
     { name = "langchain-postgres", specifier = ">=0.0.17" },
     { name = "langgraph", specifier = ">=1.2.11" },
     { name = "mysql-connector-python", specifier = ">=26.7.0" },
-    { name = "nemo-retriever", marker = "extra == 'unstructured'", specifier = "==26.8.1" },
+    { name = "nemo-retriever", marker = "extra == 'unstructured-nemo'", specifier = "==26.8.1" },
     { name = "numpy", specifier = ">=2.5.2" },
     { name = "openai", specifier = "==2.44.0" },
     { name = "pandas", specifier = ">=2.3.3,<3" },
@@ -383,6 +388,7 @@ requires-dist = [
     { name = "pyheavydb", specifier = ">=8.0.1.post1" },
     { name = "pyhive", extras = ["hive-pure-sasl"], specifier = ">=0.7.0" },
     { name = "pyjks", specifier = ">=20.0.0" },
+    { name = "pypdfium2", marker = "extra == 'unstructured'", specifier = ">=4.30.0" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -396,7 +402,7 @@ requires-dist = [
     { name = "trino", specifier = ">=0.339.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
-provides-extras = ["kumo", "unstructured"]
+provides-extras = ["kumo", "unstructured", "unstructured-docling", "unstructured-nemo"]
 
 [package.metadata.requires-dev]
 dev = [

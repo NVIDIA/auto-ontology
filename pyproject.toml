@@ -67,22 +67,33 @@ dependencies = [
 
 [project.optional-dependencies]
 kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
-# Only `unstructured_ao/` imports these: the two document extractors it can run,
-# selected by `config.EXTRACTOR`.
+# Only `unstructured_ao/` imports these.  Split by extractor, because the three
+# extractors `config.EXTRACTOR` selects differ enormously in what they install
+# and all three scored the same.
 #
-# nemo-retriever is the original. The backend dropped it in #376, but ingest
-# still runs on the retriever's extract + embed graph. The pin is exact because
-# 26.8.2 rejects the inference-api embed model id ("not revision-pinned") and
-# fails every ingest.
-#
-# docling is the replacement under evaluation. It reads the same formats without
-# a Ray cluster, but brings torch and torchvision (~1.2GB) for its layout and
-# table-structure models, and cannot read the inside of a chart on its own — see
-# `unstructured_ao/docling_extract.py` for how that gap is filled. The slimmer
-# `docling-slim[models-onnxruntime]` build drops torch and is worth trying once
-# the retrieval question is settled.
+# `unstructured` is the default extractor ("hosted") and needs nothing but a PDF
+# parser: layout comes from NVIDIA's page-elements service and figures from the
+# gateway's vision model, so no ML runs locally.  pypdfium2 is declared here
+# rather than inherited from docling or nemo-retriever, which this extra no
+# longer installs.
 unstructured = [
+    "pypdfium2>=4.30.0",
+]
+# Docling scored the same as hosted (nDCG@5 0.2219 vs 0.2237, difference not
+# significant over 318 queries) and runs 20% slower, but pays 3.0GB of torch and
+# nvidia-* CUDA wheels on linux-x86_64 for a layout model it runs on the CPU
+# anyway.  Kept as a fallback for the two things it alone offers: layout without
+# network access, and correct reading order on multi-column pages.  It cannot
+# read the inside of a chart on its own — see `unstructured_ao/docling_extract.py`
+# for how that gap is filled.  `docling-slim[models-onnxruntime]` drops torch and
+# is the first thing to try if this extra is ever needed in an image.
+unstructured-docling = [
     "docling>=2.140.0",
+]
+# The original extractor, kept so its numbers stay reproducible.  Needs a Ray
+# cluster to ingest anything.  The pin is exact because 26.8.2 rejects the
+# inference-api embed model id ("not revision-pinned") and fails every ingest.
+unstructured-nemo = [
     "nemo-retriever==26.8.1",
 ]
 

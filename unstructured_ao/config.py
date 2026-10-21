@@ -6,7 +6,9 @@
 
 Import this module before nemo_retriever so that the Ray resource override is
 in place before Ray initialises.  Apple Silicon advertises as a GPU; the
-override forces Ray to plan for CPU-only NIM endpoints instead.
+override forces Ray to plan for CPU-only NIM endpoints instead.  Only the
+``nemo`` extractor touches Ray, but the override is set unconditionally because
+it has to land before any import that might start a cluster.
 """
 
 from __future__ import annotations
@@ -19,25 +21,33 @@ os.environ.setdefault(
     json.dumps({"GPU": 0, "CPU": max(16, os.cpu_count() or 8)}),
 )
 
-#: Which document extractor ``ingest`` runs: ``"nemo"``, ``"docling"``, or
-#: ``"hosted"``.
+#: Which document extractor ``ingest`` runs: ``"hosted"``, ``"docling"``, or
+#: ``"nemo"``.
 #:
-#: ``nemo`` is NeMo Retriever's extract + embed graph, which needs a Ray cluster
-#: and ``RAY_AUTH_MODE=disabled`` to start.  ``docling`` runs page layout on the
-#: local CPU — no cluster, but measured ~10x NeMo's wall clock on this corpus,
-#: and it crashes on Apple's MPS backend so it is pinned to CPU.  ``hosted``
-#: runs no model locally at all: layout comes from NVIDIA's page-elements
-#: service and figures from the gateway's vision model, which scored
-#: indistinguishable from NeMo over 318 queries at ~2x its wall clock.
+#: All three scored the same over the 318 ViDoRe v3 HR queries — nDCG@5 0.2237,
+#: 0.2219 and 0.2317, with every paired bootstrap interval crossing zero — so
+#: the default is chosen on what each one costs to run, not on quality:
 #:
-#: ``hosted`` needs the ``UNSTRUCTURED_PAGE_ELEMENTS_*`` triplet, and those
-#: models live only on ``ai.api.nvidia.com`` with an ``nvapi-`` key — not on the
-#: ``sk-`` gateway.
+#: - ``hosted`` runs no model locally.  Layout comes from NVIDIA's page-elements
+#:   service and figures from the gateway's vision model, so the only local work
+#:   is parsing and rasterising the PDF.  1.70 s/page.  Needs the
+#:   ``UNSTRUCTURED_PAGE_ELEMENTS_*`` triplet, and those models live *only* on
+#:   ``ai.api.nvidia.com`` with an ``nvapi-`` key — not on the ``sk-`` gateway.
+#: - ``docling`` runs page layout on the local CPU, which costs 3.0GB of torch
+#:   and CUDA wheels on linux-x86_64 and crashes on Apple's MPS backend, so it
+#:   is pinned to CPU.  2.05 s/page.  Install the ``unstructured-docling`` extra.
+#: - ``nemo`` is NeMo Retriever's extract + embed graph.  Fastest at 0.76 s/page,
+#:   but needs a Ray cluster and ``RAY_AUTH_MODE=disabled`` to start.  Install
+#:   the ``unstructured-nemo`` extra.
+#:
+#: ``hosted`` takes text from the PDF's own text layer, so an image-only page
+#: yields nothing unless a figure is detected on it.  A scanned corpus needs OCR
+#: wired in; this one did not.
 #:
 #: They write the same chunk shape but not the same chunks, so switching this
 #: against an already-populated table mixes two corpora.  Point ``CHUNK_TABLE``
 #: somewhere else when comparing them.
-EXTRACTOR = os.environ.get("UNSTRUCTURED_EXTRACTOR", "nemo")
+EXTRACTOR = os.environ.get("UNSTRUCTURED_EXTRACTOR", "hosted")
 
 #: Table holding unstructured chunk embeddings, written by the v2
 #: ``PGVectorStore`` API.  Must be stable across ingest and retrieve runs — a
