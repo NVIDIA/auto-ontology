@@ -4,6 +4,10 @@
 
 import os
 
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    has_alternative_semantic_fk_roles,
+)
+
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
@@ -20,34 +24,42 @@ _PROJECTION_RULES = (
     "IDs unless the user explicitly asks for them.\n"
     "- Preserve the question's field order in SELECT: project explicitly requested "
     "outputs from left to right in the same order the user names them.\n"
+    "- If evidence maps an answer concept to specific columns, preserve that "
+    "projection exactly; do not collapse, reshape, or replace those columns "
+    "unless the question explicitly asks for a transformed value.\n"
+)
+
+_BRIDGE_ROLE_PROJECTION_RULE = (
     "- When a bridge table has multiple foreign-key columns referencing the same "
     "parent entity type, treat them as alternative roles of that entity. If the "
     "question requests one attribute across those roles, return ONE output column "
     "by combining role-specific SELECTs with UNION. Do not join every role and "
     "project one column per role unless the question explicitly requests separate "
     "role-specific outputs.\n"
-    "- If evidence maps an answer concept to specific columns, preserve that "
-    "projection exactly; do not collapse, reshape, or replace those columns "
-    "unless the question explicitly asks for a transformed value.\n"
 )
 
 
-def format_projection_rules(shorten_answer: bool = False) -> str:
+def format_projection_rules(
+    shorten_answer: bool = False,
+    relevant_tables: list[dict] | None = None,
+) -> str:
     """Render benchmark-strict guidance only when shorter answers are requested."""
 
-    if not shorten_answer:
-        return _PROJECTION_RULES
-    return (
-        _PROJECTION_RULES
-        + "- Return exactly the requested output fields and NO others.\n"
-        "- When the question or evidence requests one aggregate over two "
-        "alternative categories joined by 'and' (for example, a count for X and Y), "
-        "return ONE aggregate and combine the category predicates with OR in the "
-        "filter. Do NOT project separate conditional aggregates for X and Y. Apply "
-        "this only to one aggregate over alternatives; if separate results, a "
-        "comparison, a per-category breakdown, or distinct metrics are explicitly "
-        "requested, preserve those separate outputs.\n"
-    )
+    rules = _PROJECTION_RULES
+    if has_alternative_semantic_fk_roles(relevant_tables):
+        rules += _BRIDGE_ROLE_PROJECTION_RULE
+    if shorten_answer:
+        rules += (
+            "- Return exactly the requested output fields and NO others.\n"
+            "- When the question or evidence requests one aggregate over two "
+            "alternative categories joined by 'and' (for example, a count for X and Y), "
+            "return ONE aggregate and combine the category predicates with OR in the "
+            "filter. Do NOT project separate conditional aggregates for X and Y. Apply "
+            "this only to one aggregate over alternatives; if separate results, a "
+            "comparison, a per-category breakdown, or distinct metrics are explicitly "
+            "requested, preserve those separate outputs.\n"
+        )
+    return rules
 
 
 main_system_prompt_template = (

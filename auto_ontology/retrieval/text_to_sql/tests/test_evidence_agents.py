@@ -20,6 +20,7 @@ def _run_sql_from_tables(
     evidence: str,
     sql_examples: list[dict] | None = None,
     shorten_answer: bool | None = None,
+    relevant_tables: list[dict] | None = None,
 ) -> list:
     captured: list = []
     monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
@@ -42,7 +43,9 @@ def _run_sql_from_tables(
         "connectors": [object()],
         "data_retriever": object(),
         "sql_examples": sql_examples or [],
-        "path_state": {"relevant_tables": [{}]},
+        "path_state": {
+            "relevant_tables": relevant_tables if relevant_tables is not None else [{}]
+        },
     }
     if shorten_answer is not None:
         state["shorten_answer"] = shorten_answer
@@ -110,3 +113,24 @@ def test_tables_agent_uses_request_projection_configuration(
     assert "Return exactly the requested output fields and NO others" in (
         messages[-1].content
     )
+
+
+def test_tables_agent_passes_relevant_tables_to_projection_rules(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="Which people participate in the relationship?",
+        evidence="",
+        relevant_tables=[
+            {
+                "name": "relationship",
+                "columns": [
+                    {"name": "source_id", "semantic_fk": "main.people.id"},
+                    {"name": "target_id", "semantic_fk": "people.id"},
+                ],
+            }
+        ],
+    )
+
+    assert "multiple foreign-key columns referencing the same" in messages[-1].content

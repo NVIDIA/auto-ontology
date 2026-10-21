@@ -103,15 +103,52 @@ def test_projection_strictness_is_configured_per_request() -> None:
     combined_aggregate_rule = (
         "return ONE aggregate and combine the category predicates with OR"
     )
+    field_order_rule = "Preserve the question's field order in SELECT"
 
     assert strict_rule not in format_projection_rules(shorten_answer=False)
     assert strict_rule in format_projection_rules(shorten_answer=True)
     assert combined_aggregate_rule not in format_projection_rules(False)
     assert combined_aggregate_rule in format_projection_rules(True)
+    assert field_order_rule in format_projection_rules(False)
+    assert field_order_rule in format_projection_rules(True)
+
+
+def test_bridge_role_projection_rule_is_absent_without_relevant_tables() -> None:
+    assert "multiple foreign-key columns" not in format_projection_rules(
+        relevant_tables=None
+    )
+
+
+def test_bridge_role_projection_rule_is_absent_for_different_parents() -> None:
+    tables = [
+        {
+            "name": "relationship",
+            "columns": [
+                {"name": "customer_id", "semantic_fk": "main.customers.id"},
+                {"name": "order_id", "semantic_fk": "main.orders.id"},
+            ],
+        }
+    ]
+
+    assert "multiple foreign-key columns" not in format_projection_rules(
+        relevant_tables=tables
+    )
 
 
 def test_projection_rules_combine_alternative_bridge_roles() -> None:
-    rules = format_projection_rules(shorten_answer=False)
+    tables = [
+        {
+            "name": "relationship",
+            "columns": [
+                {"name": "source_id", "semantic_fk": '"main"."people"."id"'},
+                {"name": "target_id", "semantic_fk": "people.person_id"},
+            ],
+        }
+    ]
+    rules = format_projection_rules(
+        shorten_answer=False,
+        relevant_tables=tables,
+    )
 
     assert (
         "bridge table has multiple foreign-key columns referencing the same "
@@ -169,7 +206,21 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
             "connectors": [],
             "path_state": {
                 "primary_attribute": None,
-                "relevant_tables": [],
+                "relevant_tables": [
+                    {
+                        "name": "account_relationship",
+                        "columns": [
+                            {
+                                "name": "source_account_id",
+                                "semantic_fk": "main.accounts.id",
+                            },
+                            {
+                                "name": "target_account_id",
+                                "semantic_fk": "accounts.id",
+                            },
+                        ],
+                    }
+                ],
                 "relevant_queries": [],
             },
         }
@@ -181,6 +232,9 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    assert "multiple foreign-key columns referencing the same" in (
+        invoked_messages[-1].content
+    )
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

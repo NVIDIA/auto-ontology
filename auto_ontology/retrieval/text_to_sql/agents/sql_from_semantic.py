@@ -299,7 +299,8 @@ class SQLFromCandidatesAgent(BaseAgent):
                 dialect=dialect,
                 dialect_rules=format_dialect_rules(dialect),
                 projection_rules=format_projection_rules(
-                    state.get("shorten_answer", False)
+                    state.get("shorten_answer", False),
+                    relevant_tables,
                 ),
                 main_question=main_question,
                 observation_block=observation_block,

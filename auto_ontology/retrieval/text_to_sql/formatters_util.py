@@ -34,6 +34,51 @@ def _plain_cell(value: Any) -> str:
     return " ".join(str(value).replace("|", "/").split())
 
 
+def _semantic_fk_parent(semantic_fk: Any) -> tuple[str, ...] | None:
+    """Normalize ``schema.table.column`` variants to the referenced table."""
+    if semantic_fk is None:
+        return None
+    text = str(semantic_fk).strip()
+    if not text:
+        return None
+    parts = [
+        part.strip().strip('"`[]').casefold()
+        for part in text.split(".")
+        if part.strip().strip('"`[]')
+    ]
+    return tuple(parts[:-1]) if len(parts) >= 2 else None
+
+
+def _same_semantic_fk_parent(
+    left: tuple[str, ...],
+    right: tuple[str, ...],
+) -> bool:
+    """Compare qualified and unqualified references without conflating schemas."""
+    shorter, longer = sorted((left, right), key=len)
+    return tuple(longer[-len(shorter) :]) == shorter
+
+
+def has_alternative_semantic_fk_roles(
+    relevant_tables: list[dict[str, Any]] | None,
+) -> bool:
+    """Whether one table has distinct columns pointing at the same parent table."""
+    for table in relevant_tables or []:
+        roles: list[tuple[str, tuple[str, ...]]] = []
+        for column in table.get("columns") or []:
+            parent = _semantic_fk_parent(column.get("semantic_fk"))
+            column_name = column.get("name")
+            if parent and column_name:
+                roles.append((str(column_name), parent))
+        for index, (column_name, parent) in enumerate(roles):
+            if any(
+                other_name != column_name
+                and _same_semantic_fk_parent(parent, other_parent)
+                for other_name, other_parent in roles[index + 1 :]
+            ):
+                return True
+    return False
+
+
 def _pipe_table(headers: list[str], rows: list[dict[str, str]]) -> str:
     """Render ``header 1 | header 2`` then one ``|``-separated row per record.
 
