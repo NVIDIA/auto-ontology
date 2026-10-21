@@ -110,6 +110,20 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert combined_aggregate_rule in format_projection_rules(True)
 
 
+def test_projection_rules_combine_alternative_bridge_roles() -> None:
+    rules = format_projection_rules(shorten_answer=False)
+
+    assert (
+        "bridge table has multiple foreign-key columns referencing the same "
+        "parent entity type"
+    ) in rules
+    assert "return ONE output column" in rules
+    assert "combining role-specific SELECTs with UNION" in rules
+    assert "unless the question explicitly requests separate role-specific outputs" in (
+        rules
+    )
+
+
 def test_calculation_sql_template_is_structural_guidance() -> None:
     rendered = format_calculation_sql_template(
         {
