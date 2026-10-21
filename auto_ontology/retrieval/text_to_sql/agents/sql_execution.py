@@ -86,6 +86,40 @@ def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
     return sql
 
 
+def _deduplicate_result_columns(df: Any) -> Any:
+    """Return ``df`` with deterministic, unique result-column labels.
+
+    Existing unique labels are reserved so resolving one duplicate cannot steal
+    a label belonging to another result column. For example, ``ID, ID, ID__2``
+    becomes ``ID, ID__3, ID__2``.
+    """
+    columns = list(df.columns)
+    reserved = set(columns)
+    used: set[Any] = set()
+    occurrences: dict[Any, int] = {}
+    normalized: list[Any] = []
+
+    for column in columns:
+        occurrences[column] = occurrences.get(column, 0) + 1
+        if column not in used:
+            normalized.append(column)
+            used.add(column)
+            continue
+
+        suffix = occurrences[column]
+        candidate = f"{column}__{suffix}"
+        while candidate in reserved or candidate in used:
+            suffix += 1
+            candidate = f"{column}__{suffix}"
+        normalized.append(candidate)
+        used.add(candidate)
+
+    if normalized != columns:
+        df = df.copy()
+        df.columns = normalized
+    return df
+
+
 def _run_sql(
     sql: str,
     connector: SQLDatabase | None,
@@ -106,21 +140,24 @@ def _run_sql(
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
         df = execute_chat_sql(connector, sql)
+        df = _deduplicate_result_columns(df)
+        numeric_kinds = numeric_column_kinds(df) if record_numeric_kinds else []
+        values_digest = result_values_digest(df) if record_numeric_kinds else None
+        payload = (
+            df.to_json(orient="records", date_format="iso", default_handler=str)
+            if len(df)
+            else "[]"
+        )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
-    payload = (
-        df.to_json(orient="records", date_format="iso", default_handler=str)
-        if len(df)
-        else "[]"
-    )
     return QueryResponse(
         result=[payload],
         sliced=False,
         error=None,
         statement=sql,
-        numeric_kinds=numeric_column_kinds(df) if record_numeric_kinds else [],
-        values_digest=result_values_digest(df) if record_numeric_kinds else None,
+        numeric_kinds=numeric_kinds,
+        values_digest=values_digest,
     )
 
 

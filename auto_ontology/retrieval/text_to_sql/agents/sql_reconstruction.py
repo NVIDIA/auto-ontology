@@ -19,6 +19,7 @@ prompt so the LLM does not repeat the same broken SQL.
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 from enum import Enum
@@ -63,6 +64,32 @@ _GRAPH_NODE_NAME = "reconstruct_sql"
 # schema — so a transcript that already contains them is stripped back to the
 # constructor messages before the current error prompt is added.
 _REPAIR_TURN_PREFIX = "The following SQL contains an ERROR:"
+
+
+def _error_to_text(error: Any) -> str:
+    """Render arbitrary error state safely for logs, regexes, and prompts."""
+    if isinstance(error, str):
+        return error
+
+    if isinstance(error, dict):
+        message = error.get("message")
+        context = [
+            f"{key}={error[key]}"
+            for key in ("type", "agent")
+            if error.get(key) is not None
+        ]
+        if message is not None:
+            text = _error_to_text(message)
+            return f"{text} ({', '.join(context)})" if context else text
+
+    try:
+        return json.dumps(error, sort_keys=True, default=str)
+    except Exception:
+        try:
+            return str(error)
+        except Exception:
+            return f"<unprintable {type(error).__name__}>"
+
 
 # ------------------------------------------------------------------
 # Known-column grounding (from the semantic resolution done up front)
@@ -233,10 +260,10 @@ _NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
 )
 
 
-def _is_numeric_format_cast_error(error: str) -> bool:
+def _is_numeric_format_cast_error(error: Any) -> bool:
     """Whether ``error`` is a Postgres cast failure on a %/currency-formatted
     string value (see ``_NUMERIC_FORMAT_CAST_ERROR_RE``)."""
-    return bool(_NUMERIC_FORMAT_CAST_ERROR_RE.search(error or ""))
+    return bool(_NUMERIC_FORMAT_CAST_ERROR_RE.search(_error_to_text(error)))
 
 
 class ErrorType(str, Enum):
@@ -331,17 +358,18 @@ class SQLReconstructionAgent(BaseAgent):
         """Render past ``{"sql", "error"}`` attempts as numbered prompt lines."""
         lines: list[str] = []
         for i, attempt in enumerate(attempts, 1):
-            if len(attempt["sql"]) > 600 or len(attempt["error"]) > 600:
+            sql_text = _error_to_text(attempt.get("sql", ""))
+            error_text = _error_to_text(attempt.get("error", ""))
+            if len(sql_text) > 600 or len(error_text) > 600:
                 self.logger.info(
                     "History %s %d truncated for prompt (sql=%d chars, error=%d chars)",
                     label,
                     i,
-                    len(attempt["sql"]),
-                    len(attempt["error"]),
+                    len(sql_text),
+                    len(error_text),
                 )
             lines.append(
-                f"  {label} {i}: {attempt['sql'][:600]}\n"
-                f"  Error: {attempt['error'][:600]}"
+                f"  {label} {i}: {sql_text[:600]}\n  Error: {error_text[:600]}"
             )
         return lines
 
@@ -361,7 +389,9 @@ class SQLReconstructionAgent(BaseAgent):
         path_state = state["path_state"]
 
         if ext_err := path_state.get("error"):
-            error_context = f"External feedback: {ext_err}\n\n{error_context}"
+            error_context = (
+                f"External feedback: {_error_to_text(ext_err)}\n\n{error_context}"
+            )
 
         table_summary = (
             ", ".join(t.get("name", "?") for t in existing_tables) or "(none)"
@@ -486,7 +516,11 @@ class SQLReconstructionAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         llm = state["llm"]
-        error = path_state.get("error", "")
+        raw_error = path_state.get("error", "")
+        error = _error_to_text(raw_error)
+        if not isinstance(raw_error, str):
+            path_state.setdefault("error_details", raw_error)
+        path_state["error"] = error
         incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
