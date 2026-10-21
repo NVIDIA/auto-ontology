@@ -69,6 +69,7 @@ def test_normalize_keeps_the_key_when_applied_twice() -> None:
         "label": Labels.TABLE,
         "text": "table_name: Store Locations",
         "pk": ["StoreID"],
+        "default_identifier": "StoreID",
     }
 
     once = relevant_tables._normalize_table_to_relevant_shape(table)
@@ -76,6 +77,8 @@ def test_normalize_keeps_the_key_when_applied_twice() -> None:
 
     assert once["pk"] == ["StoreID"]
     assert twice["pk"] == ["StoreID"]
+    assert once["default_identifier"] == "StoreID"
+    assert twice["default_identifier"] == "StoreID"
 
 
 def test_get_relevant_tables_from_candidates_keeps_an_already_normalized_key() -> None:

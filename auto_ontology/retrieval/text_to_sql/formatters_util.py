@@ -299,7 +299,13 @@ def format_important_columns_for_prompt(
     return "\n".join(lines) or "No semantically matched columns."
 
 
-_TABLE_HEADERS = ["table", "label", "description", "primary key"]
+_TABLE_HEADERS = [
+    "table",
+    "label",
+    "description",
+    "primary key",
+    "default identifier",
+]
 _COLUMN_HEADERS = [
     "column",
     "type",
@@ -382,6 +388,9 @@ def format_tables_for_prompt(
                         ),
                         "description": _plain_cell(table.get("description")),
                         "primary key": _plain_cell(table.get("pk")),
+                        "default identifier": _plain_cell(
+                            table.get("default_identifier")
+                        ),
                     }
                 ],
             )
@@ -448,6 +457,8 @@ def format_used_schema_for_prompt(
             line += f" | description: {table['description']}"
         if table.get("pk"):
             line += f" | primary key: {table['pk']}"
+        if table.get("default_identifier"):
+            line += f" | default identifier: {table['default_identifier']}"
         table_lines.append(line)
 
     column_lines: list[str] = []

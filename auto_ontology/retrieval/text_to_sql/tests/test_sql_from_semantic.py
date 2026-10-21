@@ -110,6 +110,59 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert combined_aggregate_rule in format_projection_rules(True)
 
 
+def test_short_projection_preserves_explicit_field_requests() -> None:
+    rules = format_projection_rules(shorten_answer=True)
+
+    assert "Explicitly requested fields always take precedence" in rules
+
+
+def test_short_projection_uses_compiled_default_identifier() -> None:
+    rules = format_projection_rules(shorten_answer=True)
+
+    assert "return exactly its `default identifier` from AVAILABLE TABLES" in rules
+    assert "declared single-column `primary key`" not in rules
+    assert "infer the most likely identifier" not in rules
+
+
+def test_available_tables_expose_compiled_default_identifier() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "cards",
+                "schema_name": "public",
+                "pk": ["card_key"],
+                "default_identifier": "card_key",
+                "columns": [{"name": "card_key", "data_type": "integer"}],
+            }
+        ]
+    )
+
+    assert "primary key | default identifier" in rendered
+    assert "card_key | card_key" in rendered
+
+
+def test_regular_projection_does_not_apply_identifier_fallback() -> None:
+    rules = format_projection_rules(shorten_answer=False)
+
+    assert "Return exactly the requested output fields" not in rules
+    assert "For superlative/ranking questions" not in rules
+    assert "never add IDs unless the user explicitly asks" not in rules
+    assert "Preserve the question's field order" in rules
+    assert "If evidence maps an answer concept" in rules
+    assert "declared primary key" not in rules
+    assert "most likely identifier column" not in rules
+    assert "name if it exists, else id" not in rules
+
+
+def test_short_projection_skips_default_identifier_for_aggregates_and_properties() -> (
+    None
+):
+    rules = format_projection_rules(shorten_answer=True)
+
+    assert "Do not use the default identifier for aggregates" in rules
+    assert "or requested properties" in rules
+
+
 def test_calculation_sql_template_is_structural_guidance() -> None:
     rendered = format_calculation_sql_template(
         {

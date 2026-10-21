@@ -103,6 +103,21 @@ class SeedSelectionResult(BaseModel):
     rationale: str = Field(default="")
 
 
+class IdentifierSelectionResult(BaseModel):
+    """LLM output: the best default identity projection for one table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_column_id: str | None = Field(
+        default=None,
+        description=(
+            "ID of the one supplied column that best identifies a row/entity, "
+            "or null when no candidate is reliable."
+        ),
+    )
+    rationale: str = Field(default="")
+
+
 class ColumnAttributeSpec(BaseModel):
     """Column candidate for Term assignment; display_name set by extract_term."""
 

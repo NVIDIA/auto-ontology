@@ -240,6 +240,20 @@ catalog_table = Table(
     # rather than a join table -- nothing ever queries "which tables have this
     # pk column", and a join table would make every read a second query.
     Column("pk", ARRAY(Text), nullable=True),
+    # The one column SQL generation should use when a question asks to identify
+    # this table's entity without naming an output field. Semantic compilation
+    # fills it; explicit question/evidence projections always override it.
+    Column(
+        "default_identifier_column_id",
+        Text,
+        ForeignKey(
+            "catalog_column.id",
+            ondelete="SET NULL",
+            use_alter=True,
+            name="fk_catalog_table_default_identifier_column",
+        ),
+        nullable=True,
+    ),
     Column("table_type", Text, nullable=True),
     # Promoted by semantic compilation when a table's row grain is an
     # association between entity roles. Compilation deliberately never clears

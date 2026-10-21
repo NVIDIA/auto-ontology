@@ -72,9 +72,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "schema.table.column physical references" in captured["prompt"]
 
 
-def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (
-    None
-):
+def test_column_metadata_backfill_requires_complete_prompt_metadata() -> None:
     assert candidates_preparation._needs_column_metadata_backfill(
         {
             "columns": [
@@ -109,6 +107,19 @@ def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk()
         }
     )
     assert not candidates_preparation._needs_column_metadata_backfill(
+        {
+            "default_identifier": None,
+            "columns": [
+                {
+                    "name": "status",
+                    "sample_values": ["open"],
+                    "is_nullable": None,
+                    "semantic_fk": None,
+                }
+            ],
+        }
+    )
+    assert candidates_preparation._needs_column_metadata_backfill(
         {
             "columns": [
                 {

@@ -882,6 +882,83 @@ def fetch_all_tables_without_term(
     return [dict(r) for r in store().query_read(statement)]
 
 
+def fetch_tables_for_identifier_selection(
+    database_name: str,
+) -> list[dict[str, Any]]:
+    """Return every table and column needed to choose a default identifier."""
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.description,
+            s.catalog_table.c.pk,
+            s.catalog_table.c.default_identifier_column_id,
+            s.catalog_schema.c.name.label("schema_name"),
+            s.catalog_column.c.id.label("column_id"),
+            s.catalog_column.c.name.label("column_name"),
+            column_description_expr().label("column_description"),
+            s.catalog_column.c.data_type,
+            s.catalog_column.c.is_unique,
+        )
+        .select_from(
+            _table_join().outerjoin(
+                s.catalog_column,
+                s.catalog_column.c.table_id == s.catalog_table.c.id,
+            )
+        )
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(
+            s.catalog_table.c.id,
+            s.catalog_column.c.ordinal_position,
+            s.catalog_column.c.id,
+        )
+    )
+    tables: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        table = tables.setdefault(
+            row["id"],
+            {
+                "id": row["id"],
+                "name": row["name"],
+                "description": row["description"],
+                "schema_name": row["schema_name"],
+                "pk": row["pk"] or [],
+                "default_identifier_column_id": row["default_identifier_column_id"],
+                "columns": [],
+            },
+        )
+        if row["column_id"]:
+            table["columns"].append(
+                {
+                    "id": row["column_id"],
+                    "name": row["column_name"],
+                    "description": row["column_description"],
+                    "data_type": row["data_type"],
+                    "is_unique": row["is_unique"],
+                }
+            )
+    return list(tables.values())
+
+
+def set_default_table_identifier(table_id: str, column_id: str) -> bool:
+    """Set a table identifier only when the column belongs to that table."""
+    belongs_to_table = (
+        select(s.catalog_column.c.id)
+        .where(
+            s.catalog_column.c.id == column_id,
+            s.catalog_column.c.table_id == table_id,
+        )
+        .exists()
+    )
+    updated = store().query_write(
+        update(s.catalog_table)
+        .where(s.catalog_table.c.id == table_id, belongs_to_table)
+        .values(default_identifier_column_id=column_id)
+        .returning(s.catalog_table.c.id)
+    )
+    return bool(updated)
+
+
 def fetch_columns_for_table(
     table_id: str,
     *,
@@ -983,6 +1060,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     semantic_target = s.catalog_column.alias("semantic_fk_target")
     semantic_table = s.catalog_table.alias("semantic_fk_table")
     semantic_schema = s.catalog_schema.alias("semantic_fk_schema")
+    default_identifier = s.catalog_column.alias("default_identifier")
     semantic_fk_target = (
         select(
             func.concat_ws(
@@ -1027,6 +1105,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.name,
                 s.catalog_table.c.description,
                 s.catalog_table.c.pk,
+                default_identifier.c.name.label("default_identifier"),
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
@@ -1038,9 +1117,15 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 semantic_fk_target.label("semantic_fk"),
             )
             .select_from(
-                _table_join().join(
+                _table_join()
+                .join(
                     s.catalog_column,
                     s.catalog_column.c.table_id == s.catalog_table.c.id,
+                )
+                .outerjoin(
+                    default_identifier,
+                    default_identifier.c.id
+                    == s.catalog_table.c.default_identifier_column_id,
                 )
             )
             .where(s.catalog_table.c.id.in_(list(table_ids)))
@@ -1066,6 +1151,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # which costs it every edge and makes it unusable in
                 # `FOR EACH`. It has to survive every path to relevant_tables.
                 "pk": row.get("pk") or [],
+                "default_identifier": row.get("default_identifier"),
                 "columns": [],
             },
         )

@@ -63,6 +63,7 @@ class ModelTable(BaseModel):
     name: str = ""
     description: str = ""
     pk: list[str] = Field(default_factory=list)
+    default_identifier_column_id: str | None = None
     type: str = ""
     columns: list[ModelColumn] = Field(default_factory=list)
 

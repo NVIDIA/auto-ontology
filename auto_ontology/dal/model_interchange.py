@@ -163,6 +163,7 @@ def _export_catalog(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.name.label("table_name"),
                 s.catalog_table.c.description.label("table_description"),
                 s.catalog_table.c.pk,
+                s.catalog_table.c.default_identifier_column_id,
                 s.catalog_table.c.table_type,
                 s.catalog_column.c.id.label("column_id"),
                 # The same column twice: `column_id` is what the document is
@@ -637,6 +638,7 @@ def _assemble_databases(
                 "name": row.get("table_name") or "",
                 "description": row.get("table_description") or "",
                 "pk": row.get("pk") or [],
+                "default_identifier_column_id": row.get("default_identifier_column_id"),
                 "type": row.get("table_type") or "",
                 "columns": [],
             },
@@ -1129,6 +1131,30 @@ def _import_catalog(
     for column_id, (live_id, was_created) in column_results.items():
         id_map[column_id] = live_id
         (created if was_created else skipped)["columns"] += 1
+
+    for db in databases:
+        for schema in db.schemas:
+            for table in schema.tables:
+                identifier_id = table.default_identifier_column_id
+                if identifier_id is None:
+                    continue
+                table_column_ids = {column.id for column in table.columns}
+                if identifier_id not in table_column_ids:
+                    raise ModelImportValidationError(
+                        "Table default_identifier_column_id must reference one "
+                        f"of its own columns: {table.id!r} -> {identifier_id!r}",
+                    )
+                store().query_write(
+                    update(s.catalog_table)
+                    .where(s.catalog_table.c.id == id_map[table.id])
+                    .values(
+                        default_identifier_column_id=_remap(
+                            id_map,
+                            identifier_id,
+                            kind="default identifier column",
+                        )
+                    )
+                )
 
     if embed_buffer is not None:
         for db in databases:

@@ -395,6 +395,13 @@ def test_columns_for_table_carries_each_columns_tags(world) -> None:
 
 def test_tables_by_ids_nests_column_summaries(world) -> None:
     store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["orders"])
+        .values(
+            default_identifier_column_id=world.columns["orders.order_id"],
+        )
+    )
+    store().query_write(
         s.catalog_column.update()
         .where(s.catalog_column.c.id == world.columns["orders.order_id"])
         .values(is_nullable=False)
@@ -423,6 +430,8 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     }
     assert set(rows) == {"orders", "customers"}
     assert rows["orders"]["label"] == "Table"
+    assert rows["orders"]["default_identifier"] == "order_id"
+    assert rows["customers"]["default_identifier"] is None
     assert [c["name"] for c in rows["orders"]["columns"]] == [
         "order_id",
         "customer_id",

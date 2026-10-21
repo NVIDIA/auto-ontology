@@ -96,6 +96,11 @@ class World:
             ordinal_position=1,
             is_nullable=False,
         )
+        store().query_write(
+            s.catalog_table.update()
+            .where(s.catalog_table.c.id == self.orders)
+            .values(default_identifier_column_id=self.order_id)
+        )
         _link(
             s.column__foreign_key,
             source_column_id=self.customer_ref,
@@ -173,6 +178,10 @@ def _reid(document, seed: str):
             schema.id = new(schema.id)
             for table in schema.tables:
                 table.id = new(table.id)
+                if table.default_identifier_column_id is not None:
+                    table.default_identifier_column_id = new(
+                        table.default_identifier_column_id
+                    )
                 for column in table.columns:
                     column.id = new(column.id)
     for fk in document.data_layer.foreign_keys:
@@ -260,6 +269,7 @@ def test_export_carries_the_catalog(world) -> None:
     assert set(tables) == {"orders", "customers"}
     assert tables["orders"].description == "an order"
     assert tables["orders"].pk == ["id"]
+    assert tables["orders"].default_identifier_column_id == world.order_id
     assert [c.name for c in tables["orders"].columns] == ["id", "customer_id"]
 
 
@@ -400,6 +410,25 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
             )
         )
         assert copied_semantic_fk == [{"use_in_join_paths": False}]
+        identifier_table = next(
+            table
+            for table in document.data_layer.databases[0].schemas[0].tables
+            if table.default_identifier_column_id is not None
+        )
+        copied_identifier = store().query_read(
+            select(s.catalog_column.c.imported_id)
+            .select_from(
+                s.catalog_table.join(
+                    s.catalog_column,
+                    s.catalog_column.c.id
+                    == s.catalog_table.c.default_identifier_column_id,
+                )
+            )
+            .where(s.catalog_table.c.imported_id == identifier_table.id)
+        )
+        assert copied_identifier == [
+            {"imported_id": identifier_table.default_identifier_column_id}
+        ]
     finally:
         _cleanup(f"{world.prefix}-copy")
 
