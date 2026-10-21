@@ -301,8 +301,15 @@ def test_tables_without_term_scopes_to_one_database(world) -> None:
 
 def test_tables_without_term_reads_the_tables_own_description(world) -> None:
     """No Term means no Term description to fall back to, by construction."""
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == world.tables["customers"])
+        .values(pk=["customer_id"], is_junction_table=True)
+    )
     rows = _by_name(d.fetch_all_tables_without_term(world.prefix))
     assert rows["customers"]["description"] == "People who buy"
+    assert rows["customers"]["pk"] == ["customer_id"]
+    assert rows["customers"]["is_junction_table"] is True
     assert rows["orders"]["description"] is None
 
 
@@ -551,7 +558,7 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
+def test_mark_table_as_junction_can_update_and_clear_classification(world) -> None:
     table_id = world.tables["order_tag"]
     before = store().query_read(
         select(s.catalog_table.c.is_junction_table).where(
@@ -569,6 +576,88 @@ def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
         )
     )
     assert after[0]["is_junction_table"] is True
+
+    d.mark_table_as_junction(table_id, is_junction_table=False)
+    cleared = store().query_read(
+        select(s.catalog_table.c.is_junction_table).where(
+            s.catalog_table.c.id == table_id
+        )
+    )
+    assert cleared[0]["is_junction_table"] is False
+
+
+def test_fetch_junction_tables_returns_allowed_fk_pairs(world) -> None:
+    d.mark_table_as_junction(world.tables["order_tag"])
+
+    rows = d.fetch_junction_tables(world.prefix)
+
+    assert len(rows) == 1
+    assert rows[0]["table_name"] == "order_tag"
+    assert rows[0]["schema_name"] == "shop"
+    assert rows[0]["fk_pairs"] == [
+        {
+            "source_column": "order_id",
+            "target_schema": "shop",
+            "target_table": "orders",
+            "target_column": "order_id",
+        },
+        {
+            "source_column": "tag_id",
+            "target_schema": "shop",
+            "target_table": "tags",
+            "target_column": "tag_id",
+        },
+    ]
+
+
+def test_fetch_junction_tables_includes_enabled_semantic_fk_pairs(world) -> None:
+    world.table("semantic_link")
+    world.column("semantic_link", "customer_ref", 1)
+    world.column("semantic_link", "tag_ref", 2)
+    customer_key = world.attribute("semantic-customer-key")
+    tag_key = world.attribute("semantic-tag-key")
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["customers.customer_id"],
+        attribute_id=customer_key,
+    )
+    _link(
+        s.column__has_attribute,
+        column_id=world.columns["tags.tag_id"],
+        attribute_id=tag_key,
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["semantic_link.customer_ref"],
+        attribute_id=customer_key,
+        use_in_join_paths=True,
+    )
+    _link(
+        s.column__semantic_fk,
+        column_id=world.columns["semantic_link.tag_ref"],
+        attribute_id=tag_key,
+        use_in_join_paths=True,
+    )
+    d.mark_table_as_junction(world.tables["semantic_link"])
+
+    rows = d.fetch_junction_tables(world.prefix)
+
+    assert len(rows) == 1
+    assert rows[0]["table_name"] == "semantic_link"
+    assert rows[0]["fk_pairs"] == [
+        {
+            "source_column": "customer_ref",
+            "target_schema": "shop",
+            "target_table": "customers",
+            "target_column": "customer_id",
+        },
+        {
+            "source_column": "tag_ref",
+            "target_schema": "shop",
+            "target_table": "tags",
+            "target_column": "tag_id",
+        },
+    ]
 
 
 def test_a_pure_junction_table_is_a_candidate(world) -> None:

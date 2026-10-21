@@ -52,6 +52,7 @@ def test_wide_declared_fk_table_is_classified_without_suggestion_candidates(
 
     result = suggest_potential_foreign_keys(table, ctx)
 
+    assert result.junction_classification_evaluated is True
     assert result.is_junction_table is True
     assert result.junction_table_rationale.startswith("One row associates")
     prompt = mock_invoke.call_args.args[1][1].content

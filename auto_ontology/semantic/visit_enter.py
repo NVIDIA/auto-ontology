@@ -821,20 +821,38 @@ def process_table(
         fk["source_column"] for fk in declared_fks if fk.get("source_column")
     }
     all_fk_names = declared_fk_names | suggested_fk_names
+    raw_pk = table.get("pk") or []
+    pk_names = {raw_pk} if isinstance(raw_pk, str) else set(raw_pk)
+    has_non_fk_composite_pk_component = len(pk_names) > 1 and not pk_names.issubset(
+        all_fk_names
+    )
 
     # Payload-bearing junctions are wider than the pure two-key shape handled
     # by the later bridge pass. Require both the conservative LLM decision and
-    # structural evidence for at least two FK roles before persisting it.
-    if (
+    # structural evidence for at least two FK roles before persisting it. A
+    # non-FK component in a composite PK establishes an independent row grain,
+    # rather than merely describing the relationship between the FK roles.
+    is_junction_table = (
         len(ctx.get("columns", [])) > 2
         and fk_suggestions.is_junction_table
         and len(all_fk_names) >= 2
-    ):
+        and not has_non_fk_composite_pk_component
+    )
+    if is_junction_table:
         mark_table_as_junction(table_id)
         logger.info(
             "[%s] marked as a junction table: %s",
             table_name,
             fk_suggestions.junction_table_rationale or "LLM table-grain decision",
+        )
+    elif table.get("is_junction_table") and (
+        has_non_fk_composite_pk_component
+        or fk_suggestions.junction_classification_evaluated
+    ):
+        mark_table_as_junction(table_id, is_junction_table=False)
+        logger.info(
+            "[%s] cleared stale junction-table classification",
+            table_name,
         )
 
     # --- Build attribute specs for non-FK columns ---

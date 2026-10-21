@@ -159,6 +159,10 @@ class PotentialFkResult(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    junction_classification_evaluated: bool = Field(
+        default=False,
+        description="Whether the LLM returned a table-grain classification.",
+    )
     suggestions: list[PotentialFkSuggestion] = Field(
         default_factory=list,
         description="Suspected FK columns; empty when none apply.",

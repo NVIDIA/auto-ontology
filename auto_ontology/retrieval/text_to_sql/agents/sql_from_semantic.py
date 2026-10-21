@@ -35,11 +35,13 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
     build_custom_analyses_section,
     get_custom_analyses_ids,
 )
+from auto_ontology.dal.datasources import fetch_junction_tables
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
+    qualify_table,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -85,6 +87,43 @@ the same identifiers or values.
 {sql_template}
 ```
 """
+
+
+def format_junction_tables_for_prompt(
+    junction_tables: list[dict[str, Any]],
+    *,
+    target_db: str | None,
+    dialect: str | None,
+) -> str:
+    """Render every marked junction table with its permitted relationship columns."""
+    if not junction_tables:
+        return "(none)"
+
+    lines: list[str] = []
+    for table in junction_tables:
+        table_ref = qualify_table(
+            target_db or "",
+            table.get("schema_name") or "",
+            table.get("table_name") or "",
+            dialect,
+        )
+        lines.append(f"- {table_ref}")
+        pairs = table.get("fk_pairs") or []
+        if not pairs:
+            lines.append("  - no relationship columns recorded")
+            continue
+        for pair in pairs:
+            target_ref = qualify_table(
+                target_db or "",
+                pair.get("target_schema") or "",
+                pair.get("target_table") or "",
+                dialect,
+            )
+            lines.append(
+                f"  - {table_ref}.{pair.get('source_column')} = "
+                f"{target_ref}.{pair.get('target_column')}"
+            )
+    return "\n".join(lines)
 
 
 class SQLFromCandidatesAgent(BaseAgent):
@@ -167,9 +206,11 @@ class SQLFromCandidatesAgent(BaseAgent):
         sql_attributes = path_state.get("sql_attributes", [])
         sql_attributes_str = path_state.get("sql_attributes_str", [])
         term_synonyms: dict = path_state.get("term_synonyms") or {}
+        target_db = path_state.get("target_db")
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
         dialect = getattr(connector, "dialect", None)
+        junction_tables = fetch_junction_tables(target_db) if target_db else []
 
         self.logger.info(
             "Semantic context: anchor=%s, join_paths=%d, custom_analyses=%d, "
@@ -261,8 +302,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n\n"
                 )
 
-            target_db = path_state.get("target_db")
-
             # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
             if primary_attribute:
@@ -306,6 +345,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                 queries=relevant_queries,
                 qa_from_conversations=similar_questions_txt,
                 tables=tables_section,
+                junction_tables=format_junction_tables_for_prompt(
+                    junction_tables,
+                    target_db=target_db,
+                    dialect=dialect,
+                ),
                 important_columns=important_columns,
                 join_paths=join_paths,
                 custom_analyses=ca_section + sa_section,

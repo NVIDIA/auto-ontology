@@ -545,15 +545,12 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
 # ---------------------------------------------------------------------------
 
 
-def mark_table_as_junction(table_id: str) -> None:
-    """Promote a catalog table to a junction table without ever clearing it."""
+def mark_table_as_junction(table_id: str, *, is_junction_table: bool = True) -> None:
+    """Persist the semantic compiler's junction-table classification."""
     store().query_write(
         update(s.catalog_table)
-        .where(
-            s.catalog_table.c.id == table_id,
-            ~s.catalog_table.c.is_junction_table,
-        )
-        .values(is_junction_table=True)
+        .where(s.catalog_table.c.id == table_id)
+        .values(is_junction_table=is_junction_table)
     )
 
 
@@ -866,6 +863,8 @@ def fetch_all_tables_without_term(
             s.catalog_table.c.id,
             s.catalog_table.c.name,
             s.catalog_table.c.description,
+            s.catalog_table.c.pk,
+            s.catalog_table.c.is_junction_table,
             s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(_table_join())
@@ -1389,6 +1388,133 @@ def fetch_bridge_table_candidates(database_name: str) -> list[dict[str, Any]]:
         )
 
     return [{**dict(c), "fk_pairs": pairs.get(c["table_id"], [])} for c in candidates]
+
+
+def fetch_junction_tables(database_name: str) -> list[dict[str, Any]]:
+    """Return marked junction tables and their allowed outgoing FK column pairs."""
+    junctions = [
+        dict(row)
+        for row in store().query_read(
+            select(
+                s.catalog_table.c.id.label("table_id"),
+                s.catalog_table.c.name.label("table_name"),
+                s.catalog_schema.c.name.label("schema_name"),
+            )
+            .select_from(_table_join())
+            .where(
+                s.catalog_database.c.name == database_name,
+                s.catalog_table.c.is_junction_table.is_(True),
+            )
+            .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
+        )
+    ]
+    if not junctions:
+        return []
+
+    table_ids = [row["table_id"] for row in junctions]
+    source = s.catalog_column.alias("junction_source")
+    target = s.catalog_column.alias("junction_target")
+    target_table = s.catalog_table.alias("junction_target_table")
+    target_schema = s.catalog_schema.alias("junction_target_schema")
+
+    physical_pairs = store().query_read(
+        select(
+            source.c.table_id.label("owner_table_id"),
+            source.c.name.label("source_column"),
+            target_table.c.name.label("target_table"),
+            target_schema.c.name.label("target_schema"),
+            target.c.name.label("target_column"),
+        )
+        .select_from(
+            source.join(
+                s.column__foreign_key,
+                s.column__foreign_key.c.source_column_id == source.c.id,
+            )
+            .join(target, target.c.id == s.column__foreign_key.c.target_column_id)
+            .join(target_table, target_table.c.id == target.c.table_id)
+            .join(target_schema, target_schema.c.id == target_table.c.schema_id)
+        )
+        .where(source.c.table_id.in_(table_ids))
+    )
+
+    semantic_source = s.catalog_column.alias("semantic_junction_source")
+    semantic_owner = s.column__has_attribute.alias("semantic_junction_owner")
+    semantic_target = s.catalog_column.alias("semantic_junction_target")
+    semantic_target_table = s.catalog_table.alias("semantic_junction_target_table")
+    semantic_target_schema = s.catalog_schema.alias("semantic_junction_target_schema")
+    semantic_pairs = store().query_read(
+        select(
+            semantic_source.c.table_id.label("owner_table_id"),
+            semantic_source.c.name.label("source_column"),
+            semantic_target_table.c.name.label("target_table"),
+            semantic_target_schema.c.name.label("target_schema"),
+            semantic_target.c.name.label("target_column"),
+        )
+        .select_from(
+            semantic_source.join(
+                s.column__semantic_fk,
+                s.column__semantic_fk.c.column_id == semantic_source.c.id,
+            )
+            .join(
+                semantic_owner,
+                semantic_owner.c.attribute_id == s.column__semantic_fk.c.attribute_id,
+            )
+            .join(
+                semantic_target,
+                semantic_target.c.id == semantic_owner.c.column_id,
+            )
+            .join(
+                semantic_target_table,
+                semantic_target_table.c.id == semantic_target.c.table_id,
+            )
+            .join(
+                semantic_target_schema,
+                semantic_target_schema.c.id == semantic_target_table.c.schema_id,
+            )
+        )
+        .where(
+            semantic_source.c.table_id.in_(table_ids),
+            s.column__semantic_fk.c.use_in_join_paths.is_(True),
+        )
+    )
+
+    pairs: dict[str, list[dict[str, str]]] = {}
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for row in [*physical_pairs, *semantic_pairs]:
+        key = (
+            row["owner_table_id"],
+            row["source_column"],
+            row["target_schema"],
+            row["target_table"],
+            row["target_column"],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        pairs.setdefault(row["owner_table_id"], []).append(
+            {
+                "source_column": row["source_column"],
+                "target_schema": row["target_schema"],
+                "target_table": row["target_table"],
+                "target_column": row["target_column"],
+            }
+        )
+
+    return [
+        {
+            **row,
+            "fk_pairs": sorted(
+                pairs.get(row["table_id"], []),
+                key=lambda pair: (
+                    pair["source_column"],
+                    pair["target_schema"],
+                    pair["target_table"],
+                    pair["target_column"],
+                ),
+            ),
+        }
+        for row in junctions
+    ]
 
 
 def find_column_id_by_table_and_name(

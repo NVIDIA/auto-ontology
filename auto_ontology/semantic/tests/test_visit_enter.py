@@ -692,7 +692,12 @@ def test_process_table_skips_fk_columns(
 def test_process_table_marks_a_wide_llm_junction() -> None:
     from auto_ontology.semantic.models import PotentialFkResult
 
-    table = {"id": "line", "name": "order_product", "schema_name": "public"}
+    table = {
+        "id": "line",
+        "name": "order_product",
+        "schema_name": "public",
+        "pk": ["order_id", "product_id"],
+    }
     ctx = {
         "columns": [
             {"name": "order_id", "data_type": "integer"},
@@ -722,6 +727,50 @@ def test_process_table_marks_a_wide_llm_junction() -> None:
         process_table(table, ctx, domain_summary=None)
 
     mock_mark.assert_called_once_with("line")
+
+
+def test_process_table_rejects_non_fk_composite_pk_grain_and_clears_mark() -> None:
+    from auto_ontology.semantic.models import PotentialFkResult
+
+    table = {
+        "id": "laps",
+        "name": "lapTimes",
+        "schema_name": "main",
+        "pk": ["raceId", "driverId", "lap"],
+        "is_junction_table": True,
+    }
+    ctx = {
+        "columns": [
+            {"name": "raceId", "data_type": "integer"},
+            {"name": "driverId", "data_type": "integer"},
+            {"name": "lap", "data_type": "integer"},
+            {"name": "position", "data_type": "integer"},
+            {"name": "time", "data_type": "text"},
+            {"name": "milliseconds", "data_type": "integer"},
+        ],
+        "fks": [
+            {"source_column": "raceId", "target_table": "races"},
+            {"source_column": "driverId", "target_table": "drivers"},
+        ],
+    }
+    decision = PotentialFkResult(
+        is_junction_table=True,
+        junction_table_rationale="Incorrectly treated as an association.",
+    )
+
+    with (
+        patch(
+            "auto_ontology.semantic.visit_enter.suggest_potential_foreign_keys",
+            return_value=decision,
+        ),
+        patch(
+            "auto_ontology.semantic.visit_enter.column_attribute_specs", return_value=[]
+        ),
+        patch("auto_ontology.semantic.visit_enter.mark_table_as_junction") as mock_mark,
+    ):
+        process_table(table, ctx, domain_summary=None)
+
+    mock_mark.assert_called_once_with("laps", is_junction_table=False)
 
 
 @pytest.mark.parametrize(

@@ -227,6 +227,7 @@ def suggest_potential_foreign_keys(
             )
 
     return PotentialFkResult(
+        junction_classification_evaluated=True,
         suggestions=filtered,
         is_junction_table=result.is_junction_table,
         junction_table_rationale=result.junction_table_rationale.strip(),

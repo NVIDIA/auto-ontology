@@ -10,6 +10,7 @@ from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
     format_calculation_sql_template,
+    format_junction_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
@@ -79,6 +80,44 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     assert "every intermediate/bridge table and every listed hop is mandatory" in (
         system_prompt
     )
+    assert "always pass through that table using the exact listed column pairs" in (
+        create_sql_user_prompt
+    )
+    assert "connect its related endpoint tables directly as a substitute" in (
+        create_sql_user_prompt
+    )
+
+
+def test_junction_tables_list_the_required_column_pairs() -> None:
+    rendered = format_junction_tables_for_prompt(
+        [
+            {
+                "table_name": "order_tag",
+                "schema_name": "shop",
+                "fk_pairs": [
+                    {
+                        "source_column": "order_id",
+                        "target_schema": "shop",
+                        "target_table": "orders",
+                        "target_column": "order_id",
+                    },
+                    {
+                        "source_column": "tag_id",
+                        "target_schema": "shop",
+                        "target_table": "tags",
+                        "target_column": "tag_id",
+                    },
+                ],
+            }
+        ],
+        target_db="commerce",
+        dialect="postgres",
+    )
+
+    assert (
+        "commerce.shop.order_tag.order_id = commerce.shop.orders.order_id" in rendered
+    )
+    assert "commerce.shop.order_tag.tag_id = commerce.shop.tags.tag_id" in rendered
 
 
 def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
