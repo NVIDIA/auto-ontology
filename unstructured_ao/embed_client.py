@@ -17,13 +17,9 @@ vectors written by either path have to share a space.
 
 Modality
 --------
-``text`` by default, and that is a measured choice, not a simplification.  On
-ViDoRe v3 HR, embedding the same chunks text-only beat ``text_image`` on nDCG@5
-(0.2317 against 0.2131) and recall@5 (0.2215 against 0.1929) with a
-paired-bootstrap interval excluding zero.  ``text_image`` is still reachable
-through :meth:`EmbedClient.embed` for a re-measurement; the wire format for it
-is one string, text and data URL joined by a newline, plus a top-level
-``modality`` field.
+``text`` by default.  ``text_image`` is also available through
+:meth:`EmbedClient.embed`; its wire format is one string, text and data URL
+joined by a newline, plus a top-level ``modality`` field.
 """
 
 from __future__ import annotations

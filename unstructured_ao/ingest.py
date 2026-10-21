@@ -82,17 +82,8 @@ def _embed_params():
     yields here is charts, tables and infographics, and ``EMBED_MODEL`` is a
     vision-language model that can read them as images.
 
-    That reasoning does not survive measurement, and this is the next thing to
-    change here.  Scored against ViDoRe v3 HR with ``dev_tools/vidore_eval.py``
-    — 318 queries, page-level graded qrels — embedding the same chunks
-    ``text``-only beat ``text_image`` on nDCG@5 (0.2317 against 0.2131) and
-    recall@5 (0.2215 against 0.1929), with a paired-bootstrap interval that
-    excludes zero.  The images do not add signal; they dilute one the text
-    already carries, because the extract stage OCRs the text inside a chart
-    into the chunk (chart chunks average ~800 characters and none come back
-    empty).  Left as ``text_image`` only because flipping it invalidates every
-    vector already in the store, which is a re-ingest of the corpus rather than
-    a one-line change.
+    Changing modality invalidates the vectors already in the store and requires
+    re-ingesting the corpus.
     """
     from nemo_retriever.common.params.models import EmbedParams
 

@@ -24,10 +24,6 @@ os.environ.setdefault(
 #: Which document extractor ``ingest`` runs: ``"hosted"``, ``"docling"``, or
 #: ``"nemo"``.
 #:
-#: All three scored the same over the 318 ViDoRe v3 HR queries — nDCG@5 0.2237,
-#: 0.2219 and 0.2317, with every paired bootstrap interval crossing zero — so
-#: the default is chosen on what each one costs to run, not on quality:
-#:
 #: - ``hosted`` runs no model locally.  Layout comes from NVIDIA's page-elements
 #:   service and figures from the gateway's vision model, so the only local work
 #:   is parsing and rasterising the PDF.  1.70 s/page.  Needs the
