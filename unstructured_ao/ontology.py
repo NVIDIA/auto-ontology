@@ -111,31 +111,6 @@ def family_rows(conn: Connection, attribute_ids: list[str]) -> list[dict[str, An
     return [dict(row) for row in conn.execute(statement).mappings()]
 
 
-def all_family_rows(conn: Connection) -> list[dict[str, Any]]:
-    """Every family and its members, for a caller that wants the whole set.
-
-    :func:`family_rows` answers "what do these attributes belong to", which is
-    the query-time question. This answers "what does the corpus state more than
-    once", which is the one asked when surveying the ontology rather than
-    using it.
-    """
-    member = unstructured_attribute_family__attribute
-    statement = select(
-        unstructured_attribute_family.c.id.label("family_id"),
-        unstructured_attribute_family.c.canonical,
-        unstructured_attribute_family.c.dimension,
-        unstructured_attribute_family.c.note,
-        member.c.attribute_id,
-        member.c.qualifier,
-        member.c.value,
-    ).select_from(
-        unstructured_attribute_family.join(
-            member, member.c.family_id == unstructured_attribute_family.c.id
-        )
-    )
-    return [dict(row) for row in conn.execute(statement).mappings()]
-
-
 def relation_rows(conn: Connection, attribute_ids: list[str]) -> list[dict[str, Any]]:
     """Every adjudicated relation holding *between* two of *attribute_ids*.
 

@@ -69,24 +69,6 @@ def delete_document(conn: Connection, document_id: str) -> None:
     )
 
 
-def list_documents(
-    conn: Connection, *, without_term: bool = False
-) -> list[dict[str, Any]]:
-    """All ingested documents, oldest first.
-
-    With *without_term*, only those the semantic stage has not processed —
-    which is what makes a second ``run_semantic`` run resume rather than redo.
-    """
-    query = select(unstructured_document).order_by(unstructured_document.c.ingested_at)
-    if without_term:
-        query = query.where(
-            ~select(unstructured_term.c.id)
-            .where(unstructured_term.c.document_id == unstructured_document.c.id)
-            .exists()
-        )
-    return [dict(r) for r in conn.execute(query).mappings().all()]
-
-
 # ---------------------------------------------------------------------------
 # Chunks
 # ---------------------------------------------------------------------------
@@ -167,30 +149,6 @@ def _vector_table_exists(conn: Connection) -> bool:
             {"qualified": f"{config.ATTRIBUTE_SCHEMA}.{config.ATTRIBUTE_TABLE}"},
         ).scalar()
     )
-
-
-def delete_term(conn: Connection, term_id: str) -> None:
-    """Delete a term, cascading to its attributes and their chunk links.
-
-    How the semantic stage re-runs: a document has at most one term, so a
-    second extraction pass has to clear the first one before inserting.
-
-    The attributes' embeddings go too.  The vector table has no foreign key to
-    cascade through, so without this a re-extraction would leave rows pointing
-    at attribute ids that no longer exist — harmless to results, which join
-    back to ``unstructured_attribute``, but they would occupy hits and make a
-    ``k`` of 10 return fewer than 10 live attributes.  Issued on *conn* so it
-    commits or rolls back with the delete it belongs to.
-    """
-    if _vector_table_exists(conn):
-        conn.execute(
-            text(
-                f"DELETE FROM {config.ATTRIBUTE_SCHEMA}.{config.ATTRIBUTE_TABLE} "  # noqa: S608 — identifiers are module constants
-                f"WHERE term_id = :term_id"
-            ),
-            {"term_id": term_id},
-        )
-    conn.execute(unstructured_term.delete().where(unstructured_term.c.id == term_id))
 
 
 def get_document_term(conn: Connection, document_id: str) -> dict[str, Any] | None:
@@ -305,16 +263,3 @@ def insert_attribute_chunk_link(
             },
         )
     )
-
-
-def get_attribute_chunks(conn: Connection, attribute_id: str) -> list[dict[str, Any]]:
-    rows = (
-        conn.execute(
-            select(unstructured_attribute__chunk).where(
-                unstructured_attribute__chunk.c.attribute_id == attribute_id
-            )
-        )
-        .mappings()
-        .all()
-    )
-    return [dict(r) for r in rows]

@@ -50,11 +50,12 @@ SOURCE_RANK = {"llm": 0, "vector": 1}
 def joinable(text: str) -> str:
     """A chunk's text reduced to what every store agrees on.
 
-    Postgres keeps the chunk text as it was written; the NeMo retriever hands
-    back the same text with its whitespace normalised. One chunk in five
-    differs by a single doubled space, so comparing raw strings reports 80%
-    agreement between stores that agree completely, and a join on raw text
-    silently drops that same fifth.
+    Postgres keeps the chunk text as it was written, and a store need not.
+    Measured against the ``nemo`` extractor, which hands the same text back
+    with its whitespace normalised: one chunk in five differs by a single
+    doubled space, so comparing raw strings reports 80% agreement between
+    stores that agree completely, and a join on raw text silently drops that
+    same fifth.
     """
     return " ".join((text or "").split())
 

@@ -21,7 +21,9 @@ because it is what the comparison is against.
 End-to-end pipeline for a single document
 ------------------------------------------
     import unstructured_ao.config  # Ray override — import before nemo_retriever
+    from unstructured_ao.dal import get_document_chunks
     from unstructured_ao.ingest import ingest_file
+    from unstructured_ao.windows import build_windows
     from unstructured_ao.extract import run_extraction
     from unstructured_ao.retrieve import link_document_attributes
     from auto_ontology.dal.session import get_engine
@@ -30,8 +32,18 @@ End-to-end pipeline for a single document
     with engine.begin() as conn:
         doc_id = ingest_file("path/to/file.pdf", conn)
         if doc_id:
-            run_extraction(doc_id, full_text, conn)
+            chunks = get_document_chunks(conn, doc_id)
+            windows = build_windows(
+                [c["id"] for c in chunks], [c["content"] for c in chunks]
+            )
+            run_extraction(doc_id, windows, conn)
             link_document_attributes(doc_id, conn)
+
+``ingest_file`` has a CLI (``python -m unstructured_ao.ingest``) and so do
+``retrieve`` and ``relate``; the extraction step in the middle does not, and
+nothing calls it automatically.  Composing it means building the windows as
+above — that is the only thing that constructs the argument ``run_extraction``
+takes.
 
 Once the corpus is in, ``unstructured_ao.relate`` adjudicates how the extracted
 attributes stand to one another — which of them are rival readings of one

@@ -12,7 +12,8 @@ Rows are keyed by ``unstructured_chunk.id``: ingest passes the same UUID as
 ``ids=`` when adding embeddings, which is what lets a vector hit be resolved
 back to its relational chunk row.
 
-Documents are embedded upstream by the NeMo Retriever ingest graph and written
+Documents are embedded upstream — by ``embed_client`` for the ``hosted`` and
+``docling`` extractors, inside its own graph pass for ``nemo`` — and written
 here with ``add_embeddings``; the only embedding this module performs is of the
 query at search time.
 """
@@ -205,8 +206,8 @@ def get_chunk_store(*, vector_size: int | None = None) -> PGVectorStore:
             [DOCUMENT_ID_COLUMN],
         )
 
-    # Only ever used to embed queries: documents arrive pre-embedded by the
-    # NeMo Retriever pipeline and go in through ``add_embeddings``.
+    # Only ever used to embed queries: documents arrive pre-embedded from
+    # whichever extractor ran and go in through ``add_embeddings``.
     _store = PGVectorStore.create_sync(
         engine=engine,
         embedding_service=build_embeddings(),

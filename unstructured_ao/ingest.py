@@ -6,18 +6,19 @@
 
 No LLM runs here.  Everything this stage writes follows mechanically from the
 file, so it can be re-run over a corpus for the cost of the embeddings alone,
-while the semantic pass (``unstructured_ao.semantic``) works from the chunks it
+while the extraction pass (``unstructured_ao.extract``) works from the chunks it
 leaves in Postgres.
 
 Pipeline per file
 -----------------
-1. NeMo Retriever ``create_ingestor`` extracts text / tables / charts /
-   infographics as chunks and embeds them in the same graph pass.
+1. The extractor named by ``config.EXTRACTOR`` turns the file into chunks of
+   text, tables, charts and infographics.  ``hosted`` and ``docling`` return
+   text only and are embedded in step 3; ``nemo`` embeds inside its own graph
+   pass and skips it.
 2. Each chunk is written to ``unstructured_chunk`` (relational) with a
    pre-generated UUID that is also used as the vector-store row key.
-3. The embeddings the graph produced are uploaded to the chunk vector store
-   under those same ids, so attribute → chunk vector search works in the
-   semantic step.
+3. The embeddings are uploaded to the chunk vector store under those same ids,
+   so attribute → chunk vector search works in the extraction step.
 
 Usage
 -----
@@ -28,15 +29,15 @@ Usage
         for doc_id in ingest_directory("/path/to/documents", conn):
             print(f"Ingested document {doc_id}")
 
-Run it with ``RAY_AUTH_MODE=disabled`` in the environment.  NeMo Retriever runs
-its stages as Ray actors, and without that the raylet spends ~80s on auth setup
-before giving up with "The current node timed out during startup"; with it Ray
-is up in about 7.  It is not set in ``config.py`` on purpose — it turns off a
-security feature, which is a call for whoever runs the pipeline to make, not a
-default to inherit.
+The ``nemo`` extractor additionally needs ``RAY_AUTH_MODE=disabled`` in the
+environment.  It runs its stages as Ray actors, and without that the raylet
+spends ~80s on auth setup before giving up with "The current node timed out
+during startup"; with it Ray is up in about 7.  It is not set in ``config.py``
+on purpose — it turns off a security feature, which is a call for whoever runs
+the pipeline to make, not a default to inherit.
 
 Terms and attributes come afterwards, from
-``unstructured_ao.semantic.run_document_semantics``.
+``unstructured_ao.extract.run_extraction``.
 """
 
 from __future__ import annotations
