@@ -19,7 +19,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.state import AgentState
-from auto_ontology.connectors.base import SQLDatabase
+from auto_ontology.connectors.base import AccessDenied, SQLDatabase
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +58,7 @@ class QueryResponse:
         sliced: bool,
         error: Optional[str] = None,
         statement: Optional[str] = None,
+        access_denied: Optional[str] = None,
     ):
         self.result = result
         self.sliced = sliced
@@ -66,6 +67,9 @@ class QueryResponse:
         # ``_sanitize_sql_for_dialect``. Classifying ``error`` means stripping
         # the statement the driver echoed, so it has to be this text.
         self.statement = statement
+        # User-facing reason when the database refused the statement on the
+        # caller's privileges (:class:`AccessDenied`); ``None`` otherwise.
+        self.access_denied = access_denied
 
 
 def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
@@ -90,6 +94,15 @@ def _run_sql(sql: str, connector: SQLDatabase | None) -> QueryResponse:
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
         df = execute_chat_sql(connector, sql)
+    except AccessDenied as e:
+        logger.warning("SQL refused on the caller's privileges: %s", e)
+        return QueryResponse(
+            result=None,
+            sliced=False,
+            error=str(e),
+            statement=sql,
+            access_denied=e.explanation,
+        )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
@@ -150,6 +163,23 @@ class SQLExecutionAgent(BaseAgent):
                 response_from_db.error,
             )
             path_state["error"] = response_from_db.error
+            if response_from_db.access_denied:
+                # A rewrite runs under the same user and so cannot get past a
+                # missing grant; retrying would only burn the attempts and end
+                # on a vaguer message than the one we already have.
+                record_thought(
+                    path_state,
+                    _GRAPH_NODE_NAME,
+                    f"Access denied: {_short_error(response_from_db.error)}",
+                )
+                return {
+                    "decision": "unconstructable",
+                    "path_state": {
+                        **path_state,
+                        "access_denied": True,
+                        "unconstructable_explanation": response_from_db.access_denied,
+                    },
+                }
             if is_infrastructure_error(
                 response_from_db.error, response_from_db.statement or sql_code
             ):

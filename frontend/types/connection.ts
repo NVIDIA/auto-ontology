@@ -73,6 +73,24 @@ export type HeavyDBConnectionParams = {
 	protocol: string;
 };
 
+export type ClickHouseConnectionParams = {
+	type: ConnectionType.CLICKHOUSE;
+	host: string;
+	port?: string;
+	user?: string;
+	password?: string;
+	database: string;
+	http_scheme?: string;
+	/**
+	 * Run chat queries via ClickHouse `EXECUTE AS <user>`, where the user is the
+	 * local part of the signed-in user's email (alice.smith@corp.com ->
+	 * alice.smith). The stored connection user is the admin and needs
+	 * `GRANT IMPERSONATE` on those users. Ingestion and profiling are unaffected
+	 * and always run as the stored user.
+	 */
+	execute_as_user?: boolean;
+};
+
 /**
  * Ingestion filters offered on every connector, regardless of type.
  *
@@ -94,8 +112,12 @@ export type ConnectionParams = (
 	| MySqlConnectionParams
 	| SnowflakeConnectionParams
 	| HeavyDBConnectionParams
+	| ClickHouseConnectionParams
 ) &
 	TableFilterParams;
+
+/** Per-connection "run chat queries as the signed-in user" flags, toggled inline. */
+export type ConnectionUserToggle = 'sso_federation' | 'execute_as_user';
 
 /** A stored connection returned by the API. */
 export type Connection = {

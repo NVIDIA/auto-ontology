@@ -503,6 +503,46 @@ def _subject_token(http_request: Request) -> str | None:
     return token
 
 
+def _execute_as_username(http_request: Request) -> str | None:
+    """Return the ClickHouse user a connection should run this request's SQL as.
+
+    ``None`` when no connection runs chat queries as the signed-in user. Fail
+    closed otherwise: a request whose user, or whose user's email, cannot be
+    resolved is refused rather than allowed to run as the stored user.
+    """
+    from auto_ontology.connectors.execute_as import (
+        any_connection_uses_execute_as_user,
+        username_from_email,
+    )
+    from auto_ontology.server.users.postgres_dal import get_user_email
+
+    if not any_connection_uses_execute_as_user():
+        return None
+
+    user_id = resolve_internal_user(http_request, required=False)
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail=(
+                "A connection is configured to run chat queries as the signed-in "
+                "user, but the request carried no user."
+            ),
+        )
+    email = get_user_email(user_id)
+    if not email:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "A connection is configured to run chat queries as the signed-in "
+                "user, but the user's email could not be resolved."
+            ),
+        )
+    try:
+        return username_from_email(email)
+    except ValueError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
 def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
     """Replay ``slot.buffer`` from the start, then tail it live.
 
@@ -558,6 +598,10 @@ async def chat_completions(
     request for the same conversation gets 409 too. Omitting ``conversation_id``
     runs the question statelessly: no history, no persisted turn, and no chart
     step (``_build_charts_event`` needs a conversation to save into).
+
+    When a ClickHouse connection runs chat queries as the signed-in user, a
+    request with no forwarded user is rejected with 401, and one whose user's
+    email cannot be resolved with 403, rather than run as the stored user.
     """
     logger.info("Chat completions request: %s", request.model_dump())
 
@@ -580,6 +624,7 @@ async def chat_completions(
     )
 
     subject_token = _subject_token(http_request)
+    execute_as = await asyncio.to_thread(_execute_as_username, http_request)
 
     pool = get_pool()
     worker = await asyncio.to_thread(pool.acquire)
@@ -657,6 +702,7 @@ async def chat_completions(
         prediction=request.prediction,
         target_db=target_db,
         subject_token=subject_token,
+        execute_as=execute_as,
         conversation_history=conversation_history,
         evidence=request.evidence,
     )

@@ -139,6 +139,7 @@ def _worker_loop(
             prediction,
             target_db,
             subject_token,
+            execute_as,
             conversation_history,
             evidence,
         ) = payload
@@ -170,6 +171,14 @@ def _worker_loop(
                 ask_connectors = get_connectors_for_subject_token(subject_token)
             else:
                 ask_connectors = connectors
+
+            # Always applied, even with no *execute_as*: it raises when a
+            # connection is flagged to run as the signed-in user but there is
+            # none, instead of running as the stored user. Cheap -- the views
+            # share their parent's HTTP client.
+            from auto_ontology.connectors.execute_as import apply_execute_as
+
+            ask_connectors = apply_execute_as(ask_connectors, execute_as)
 
             is_follow_up, processing_question = resolve_follow_up(
                 question=question,
@@ -244,6 +253,7 @@ class PrewarmedWorker:
         prediction: bool | None = None,
         target_db: str | None = None,
         subject_token: str | None = None,
+        execute_as: str | None = None,
         conversation_history: list[dict[str, str | None]] | None = None,
         evidence: str | None = None,
     ) -> None:
@@ -255,6 +265,8 @@ class PrewarmedWorker:
         *subject_token* is the caller's SSO JWT. When present the worker builds
         per-user connectors for this question instead of using the prewarmed
         ones, so SQL executes under that user's own Databricks grants.
+        *execute_as* is the ClickHouse user that connections flagged to run as
+        the signed-in user send their SQL as (``EXECUTE AS``).
         *evidence* is optional authoritative evidence kept separate from
         the question.
         """
@@ -266,6 +278,7 @@ class PrewarmedWorker:
                     prediction,
                     target_db,
                     subject_token,
+                    execute_as,
                     conversation_history or [],
                     evidence,
                 ),

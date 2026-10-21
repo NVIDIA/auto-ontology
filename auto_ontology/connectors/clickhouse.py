@@ -58,11 +58,31 @@ Example
 
     CONNECTION_STRINGS=clickhouse://default:SECRET@ch.example.com:8123/analytics
     CONNECTION_STRINGS=clickhouse://user:SECRET@abc.clickhouse.cloud:8443/default
+
+Running chat SQL as the signed-in user
+--------------------------------------
+With ``execute_as_user`` on the connection, chat SQL is sent as
+``EXECUTE AS `alice` <query>`` through :meth:`ClickHouseDatabase.impersonating`
+(see :mod:`auto_ontology.connectors.execute_as`). The stored user is still the
+one that authenticates -- it needs ``GRANT IMPERSONATE`` -- and the query runs
+under ``alice``'s grants. The single-statement form is used rather than a
+session ``EXECUTE AS``: each request stands alone, so an impersonation can never
+outlive the query it was for. The server must enable
+``access_control_improvements.allow_impersonate_user``; ClickHouse Cloud does
+not support it at all.
+
+An impersonated user whose profile sets ``readonly=1`` runs under that
+profile's limits, not this connector's: ClickHouse drops the request's
+``max_execution_time`` and ``max_result_rows`` in that mode, and refuses them as
+an inline ``SETTINGS`` clause too. Give such users ``readonly=2``, or put both
+limits in their profile.
 """
 
 from __future__ import annotations
 
+import copy
 import logging
+import re
 import threading
 import time
 from typing import Any, Optional
@@ -72,7 +92,7 @@ import httpx
 import pandas as pd
 
 from auto_ontology.catalog.constants import TableTypes
-from auto_ontology.connectors.base import SQLDatabase, StatementTimeout
+from auto_ontology.connectors.base import AccessDenied, SQLDatabase, StatementTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +127,20 @@ _MATERIALIZED_VIEW_ENGINE = "MaterializedView"
 
 
 _TIMEOUT_EXCEEDED_CODE = "159"
+
+# How ClickHouse refuses an ``EXECUTE AS``: 497 ACCESS_DENIED (the impersonated
+# user lacks a grant, or the authenticating one lacks IMPERSONATE), 192
+# UNKNOWN_USER, and 344 SUPPORT_IS_DISABLED when the server has impersonation
+# turned off. The names are matched as well, for proxies that strip the header.
+_ACCESS_DENIED_CODE = "497"
+_UNKNOWN_USER_CODE = "192"
+_SUPPORT_IS_DISABLED_CODE = "344"
+_ERROR_NAMES = {
+    _ACCESS_DENIED_CODE: "(ACCESS_DENIED)",
+    _UNKNOWN_USER_CODE: "(UNKNOWN_USER)",
+    _SUPPORT_IS_DISABLED_CODE: "(SUPPORT_IS_DISABLED)",
+}
+_MISSING_GRANT = re.compile(r"necessary to have the grant (.+?)\.(?: \(|$)")
 
 
 class ClickHouseError(RuntimeError):
@@ -250,6 +284,72 @@ def _error_message(response: httpx.Response) -> str:
     return f"ClickHouse request failed (HTTP {response.status_code}): {detail}"
 
 
+def _quoted_identifier(name: str) -> str:
+    """Return *name* as a backtick-quoted ClickHouse identifier."""
+    return "`" + name.replace("\\", "\\\\").replace("`", "\\`") + "`"
+
+
+def _has_error(response: httpx.Response, message: str, code: str) -> bool:
+    """Whether the server answered with error *code*."""
+    header = response.headers.get("X-ClickHouse-Exception-Code")
+    if header is not None:
+        return header.strip() == code
+    return _ERROR_NAMES[code] in message
+
+
+def _impersonation_error(
+    response: httpx.Response, message: str, username: str
+) -> AccessDenied | None:
+    """Translate a refusal of an ``EXECUTE AS`` statement, else ``None``.
+
+    Splits the two audiences apart: the signed-in user can act on "you lack a
+    grant", while a missing user, a missing IMPERSONATE grant, or a server with
+    impersonation off is for whoever administers ClickHouse.
+    """
+    user = _quoted_identifier(username)
+    if _has_error(response, message, _ACCESS_DENIED_CODE):
+        if "grant IMPERSONATE" in message:
+            return AccessDenied(
+                message,
+                explanation=(
+                    "This connection runs chat queries as the signed-in user, but "
+                    f"its stored ClickHouse user is not allowed to act as {user}. "
+                    "A ClickHouse administrator needs to run "
+                    f"GRANT IMPERSONATE ON {user} (or ON *) TO the stored user."
+                ),
+            )
+        missing = _MISSING_GRANT.search(message)
+        needed = f" It needs {missing.group(1)}." if missing else ""
+        return AccessDenied(
+            message,
+            explanation=(
+                f"Your ClickHouse account {user} is not allowed to run this "
+                f"query.{needed} Ask a ClickHouse administrator for access."
+            ),
+        )
+    if _has_error(response, message, _UNKNOWN_USER_CODE):
+        return AccessDenied(
+            message,
+            explanation=(
+                f"There is no ClickHouse user {user} for your account, so the "
+                "query was not run. Ask a ClickHouse administrator to create it."
+            ),
+        )
+    if _has_error(response, message, _SUPPORT_IS_DISABLED_CODE) and (
+        "IMPERSONATE" in message
+    ):
+        return AccessDenied(
+            message,
+            explanation=(
+                "This connection runs chat queries as the signed-in user, but "
+                "the ClickHouse server has impersonation turned off. An "
+                "administrator needs to set "
+                "access_control_improvements.allow_impersonate_user to 1."
+            ),
+        )
+    return None
+
+
 # ClickHouse reports its types in ``system.columns`` and in a result's ``meta``
 # the same way, wrapping the nullable ones. ``LowCardinality`` may wrap
 # ``Nullable`` but never the other way round, so those two prefixes cover it.
@@ -342,6 +442,30 @@ class ClickHouseDatabase(SQLDatabase):
 
         self._lock = threading.RLock()
         self._client: httpx.Client | None = None
+        # Set only on the views :meth:`impersonating` returns, which borrow
+        # their parent's client and so must not close it.
+        self._execute_as: str | None = None
+        self._owns_client = True
+
+    def impersonating(self, username: str) -> "ClickHouseDatabase":
+        """Return a view of this connector that runs SQL as *username*.
+
+        Every statement it sends is prefixed with ``EXECUTE AS``. The view
+        shares this connector's HTTP client, so building one per question
+        costs no new connection pool, and closing it leaves the client open.
+        """
+        view = copy.copy(self)
+        view._client = self._ensure_client()
+        view._execute_as = username
+        view._owns_client = False
+        return view
+
+    @property
+    def auth_mode(self) -> str | None:
+        """The impersonated user, for the chat SQL log; ``None`` when there is none."""
+        if self._execute_as is None:
+            return None
+        return f"execute_as:{self._execute_as}"
 
     # ------------------------------------------------------------------
     # Transport
@@ -403,6 +527,8 @@ class ClickHouseDatabase(SQLDatabase):
                 the statement.
         """
         client = self._ensure_client()
+        if self._execute_as is not None:
+            sql = f"EXECUTE AS {_quoted_identifier(self._execute_as)} {sql}"
         params: dict[str, str] = {
             "database": self._database_name,
             "default_format": "JSONCompact",
@@ -452,6 +578,10 @@ class ClickHouseDatabase(SQLDatabase):
                 raise StatementTimeout.since(timeout_s, started) from ClickHouseError(
                     message
                 )
+            if self._execute_as is not None:
+                denied = _impersonation_error(response, message, self._execute_as)
+                if denied is not None:
+                    raise denied
             raise ClickHouseError(message)
 
         body = response.text.strip()
@@ -826,6 +956,8 @@ class ClickHouseDatabase(SQLDatabase):
         self.execute("SELECT 1")
 
     def close(self) -> None:
+        if not self._owns_client:
+            return
         with self._lock:
             if self._client is not None:
                 try:

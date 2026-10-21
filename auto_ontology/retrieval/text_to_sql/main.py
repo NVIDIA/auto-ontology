@@ -294,6 +294,10 @@ def _should_retry_full_pipeline(
         return False
     if final_state.get("full_pipeline_attempt", 1) >= _MAX_FULL_PIPELINE_ATTEMPTS:
         return False
+    # A restart runs as the same user, so it would hit the same missing grant
+    # and only run the refused query a second time.
+    if (final_state.get("path_state") or {}).get("access_denied"):
+        return False
     return not str(_extract_answer(final_state).get("sql_code") or "").strip()
 
 

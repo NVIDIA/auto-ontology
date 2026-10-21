@@ -82,6 +82,20 @@ class StatementTimeout(TimeoutError):
         return cls(timeout_s, elapsed_s=time.monotonic() - started)
 
 
+class AccessDenied(PermissionError):
+    """The database refused a statement on the credentials it ran under.
+
+    Raised by connectors that run chat SQL as the signed-in user, where a
+    refusal is about who is asking rather than about the SQL: rewriting the
+    query cannot grant a privilege, so the text-to-SQL graph stops on this
+    instead of spending its retries. ``explanation`` is the user-facing reason.
+    """
+
+    def __init__(self, message: str, *, explanation: str) -> None:
+        super().__init__(message)
+        self.explanation = explanation
+
+
 def _timeout_message(timeout_s: float, elapsed_s: float | None) -> str:
     if elapsed_s is not None and elapsed_s < timeout_s * _OWN_CAP_FRACTION:
         return (

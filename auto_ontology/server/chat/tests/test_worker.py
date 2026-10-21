@@ -33,6 +33,8 @@ def _run_loop(
     connector_batches: list[list[str]],
     *,
     evidence: str | None = None,
+    execute_as: str | None = None,
+    applied: list[tuple[list[str], str | None]] | None = None,
 ) -> dict:
     """Drive one ASK through ``_worker_loop`` and return the agent payload it built.
 
@@ -80,7 +82,24 @@ def _run_loop(
         "auto_ontology.retrieval.text_to_sql.main.stream_agent_response", fake_stream
     )
 
-    in_q = _FakeQueue([(worker_module._MSG_ASK, ("q", None, None, None, [], evidence))])
+    def fake_apply_execute_as(connectors: list[str], username: str | None) -> list[str]:
+        if applied is not None:
+            applied.append((connectors, username))
+        return connectors
+
+    # The real one reads the connection store on every question.
+    monkeypatch.setattr(
+        "auto_ontology.connectors.execute_as.apply_execute_as", fake_apply_execute_as
+    )
+
+    in_q = _FakeQueue(
+        [
+            (
+                worker_module._MSG_ASK,
+                ("q", None, None, None, execute_as, [], evidence),
+            )
+        ]
+    )
     worker_module._worker_loop(in_q, _FakeQueue())
     return captured
 
@@ -122,3 +141,29 @@ def test_worker_forwards_evidence_without_changing_question(
     assert payload["question"] == "q"
     assert payload["processing_question"] == "q"
     assert payload["evidence"] == "status means accounts.status"
+
+
+def test_worker_applies_execute_as_to_every_question(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    applied: list[tuple[list[str], str | None]] = []
+
+    _run_loop(
+        monkeypatch,
+        connector_batches=[["boot-connector"]],
+        execute_as="alice.smith",
+        applied=applied,
+    )
+
+    assert applied == [(["boot-connector"], "alice.smith")]
+
+
+def test_worker_applies_execute_as_even_without_a_user(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """With no user it still has to run, so a flagged connection can refuse."""
+    applied: list[tuple[list[str], str | None]] = []
+
+    _run_loop(monkeypatch, connector_batches=[["boot-connector"]], applied=applied)
+
+    assert applied == [(["boot-connector"], None)]

@@ -54,6 +54,14 @@ export const connectionsApi = {
 			{ enabled },
 		),
 
+	// Narrow update: flips ClickHouse "run chat queries as the signed-in user"
+	// without re-sending credentials.
+	setExecuteAsUser: (databaseName: string, enabled: boolean) =>
+		requests.patch<{ data: { database_name: string; execute_as_user: boolean } }>(
+			`connections/${encodeURIComponent(databaseName)}/execute-as-user`,
+			{ enabled },
+		),
+
 	delete: (databaseName: string) =>
 		requests.delete<{ data: { database_name: string } }>(
 			`connections/${encodeURIComponent(databaseName)}`,

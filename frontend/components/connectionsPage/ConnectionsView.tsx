@@ -23,7 +23,7 @@ import {
 	invalidateConnectionList,
 	patchConnectionList,
 } from '@/lib/queries/connections';
-import type { Connection } from '@/types/connection';
+import type { Connection, ConnectionUserToggle } from '@/types/connection';
 
 export const ConnectionsView = () => {
 	const queryClient = useQueryClient();
@@ -47,8 +47,8 @@ export const ConnectionsView = () => {
 	const [deletingConnection, setDeletingConnection] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
-	const [ssoFederationPending, setSsoFederationPending] = useState<string | null>(null);
-	const [ssoError, setSsoError] = useState<string | null>(null);
+	const [userTogglePending, setUserTogglePending] = useState<string | null>(null);
+	const [userToggleError, setUserToggleError] = useState<string | null>(null);
 
 	const handleCreateConnection = () => {
 		setEditingConnection(null);
@@ -70,33 +70,40 @@ export const ConnectionsView = () => {
 		void invalidateConnectionList(queryClient);
 	};
 
-	const handleSsoFederationChange = async (databaseName: string, enabled: boolean) => {
-		setSsoError(null);
-		setSsoFederationPending(databaseName);
+	const handleUserToggleChange = async (
+		databaseName: string,
+		toggle: ConnectionUserToggle,
+		enabled: boolean,
+	) => {
+		setUserToggleError(null);
+		setUserTogglePending(databaseName);
 
 		// Optimistic update — applied before the write so the checkbox doesn't
 		// snap back while it is out.
 		await patchConnections((prev) =>
 			prev.map((c) =>
 				c.database_name === databaseName
-					? { ...c, connection: { ...c.connection, sso_federation: enabled } }
+					? { ...c, connection: { ...c.connection, [toggle]: enabled } }
 					: c,
 			),
 		);
 
-		const res = await connectionsApi.setSsoFederation(databaseName, enabled);
-		setSsoFederationPending(null);
+		const res =
+			toggle === 'sso_federation'
+				? await connectionsApi.setSsoFederation(databaseName, enabled)
+				: await connectionsApi.setExecuteAsUser(databaseName, enabled);
+		setUserTogglePending(null);
 
 		if (res.error) {
 			// Revert optimistic update on failure.
 			await patchConnections((prev) =>
 				prev.map((c) =>
 					c.database_name === databaseName
-						? { ...c, connection: { ...c.connection, sso_federation: !enabled } }
+						? { ...c, connection: { ...c.connection, [toggle]: !enabled } }
 						: c,
 				),
 			);
-			setSsoError(res.message ?? 'Failed to update connection.');
+			setUserToggleError(res.message ?? 'Failed to update connection.');
 		}
 	};
 
@@ -188,10 +195,10 @@ export const ConnectionsView = () => {
 						connections={connections}
 						onEdit={handleEditConnection}
 						onDelete={handleDeleteRequest}
-						onSsoFederationChange={(databaseName, enabled) => {
-							void handleSsoFederationChange(databaseName, enabled);
+						onUserToggleChange={(databaseName, toggle, enabled) => {
+							void handleUserToggleChange(databaseName, toggle, enabled);
 						}}
-						ssoFederationPending={ssoFederationPending}
+						userTogglePending={userTogglePending}
 					/>
 				</div>
 			)}
@@ -224,10 +231,10 @@ export const ConnectionsView = () => {
 			/>
 
 			<Toast
-				open={ssoError !== null}
-				message={ssoError ?? ''}
+				open={userToggleError !== null}
+				message={userToggleError ?? ''}
 				variant={ToastVariant.Error}
-				onClose={() => setSsoError(null)}
+				onClose={() => setUserToggleError(null)}
 			/>
 		</div>
 	);

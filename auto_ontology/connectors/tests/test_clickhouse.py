@@ -20,6 +20,7 @@ import pandas as pd
 import pytest
 
 from auto_ontology.catalog.constants import TableTypes
+from auto_ontology.connectors.base import AccessDenied
 from auto_ontology.connectors.clickhouse import (
     ClickHouseDatabase,
     ClickHouseError,
@@ -734,3 +735,160 @@ def test_an_enum_naming_date_is_not_coerced_to_null() -> None:
     frame = db.execute("SELECT kind FROM t")
 
     assert frame["kind"].tolist() == ["Date", "Time"]
+
+
+# ----------------------------------------------------------------------
+# Running as the signed-in user (EXECUTE AS)
+# ----------------------------------------------------------------------
+
+# The server's own wording, captured from ClickHouse 26.9 with impersonation on.
+_USER_LACKS_GRANT = (
+    "Code: 497. DB::Exception: alice.smith: Not enough privileges. To execute "
+    "this query, it's necessary to have the grant SELECT ON shop.secret. "
+    "(ACCESS_DENIED) (version 26.9.19.9 (official build))"
+)
+_ADMIN_LACKS_IMPERSONATE = (
+    "Code: 497. DB::Exception: svc: Not enough privileges. To execute this "
+    "query, it's necessary to have the grant IMPERSONATE ON `alice.smith`. "
+    "(ACCESS_DENIED) (version 26.9.19.9 (official build))"
+)
+_UNKNOWN_USER = (
+    "Code: 192. DB::Exception: There is no user `alice.smith` in `user "
+    "directories`. (UNKNOWN_USER) (version 26.9.19.9 (official build))"
+)
+_IMPERSONATION_DISABLED = (
+    "Code: 344. DB::Exception: IMPERSONATE feature is disabled, set "
+    "access_control_improvements.allow_impersonate_user to 1 to enable. "
+    "(SUPPORT_IS_DISABLED) (version 26.9.19.9 (official build))"
+)
+
+
+def _queue_clickhouse_error(server: _FakeServer, code: str, text: str) -> None:
+    server.responses.append(
+        httpx.Response(403, text=text, headers={"X-ClickHouse-Exception-Code": code})
+    )
+
+
+def test_impersonating_prefixes_every_statement_with_execute_as() -> None:
+    db, server = _database()
+
+    db.impersonating("alice.smith").execute("SELECT 1")
+
+    assert server.statements == ["EXECUTE AS `alice.smith` SELECT 1"]
+
+
+def test_impersonating_leaves_the_parent_connector_as_the_stored_user() -> None:
+    db, server = _database()
+    db.impersonating("alice.smith")
+
+    db.execute("SELECT 1")
+
+    assert server.statements == ["SELECT 1"]
+
+
+def test_impersonating_escapes_the_user_name_as_an_identifier() -> None:
+    db, server = _database()
+
+    db.impersonating("a`b").execute("SELECT 1")
+
+    assert server.statements == ["EXECUTE AS `a\\`b` SELECT 1"]
+
+
+def test_impersonating_keeps_the_request_settings() -> None:
+    db, server = _database()
+
+    db.impersonating("alice.smith").execute("SELECT 1", timeout_s=7)
+
+    assert server.params[0]["max_execution_time"] == ["7"]
+    assert server.params[0]["database"] == ["analytics"]
+
+
+def test_closing_an_impersonating_view_leaves_the_shared_client_open() -> None:
+    db, _server = _database()
+    view = db.impersonating("alice.smith")
+
+    view.close()
+    db.execute("SELECT 1")
+
+    assert view._client is db._client
+    assert not db._client.is_closed
+
+
+def test_auth_mode_names_the_impersonated_user() -> None:
+    db, _server = _database()
+
+    assert db.auth_mode is None
+    assert db.impersonating("alice.smith").auth_mode == "execute_as:alice.smith"
+
+
+def test_a_missing_grant_is_access_denied_naming_the_grant() -> None:
+    db, server = _database()
+    _queue_clickhouse_error(server, "497", _USER_LACKS_GRANT)
+
+    with pytest.raises(AccessDenied) as caught:
+        db.impersonating("alice.smith").execute("SELECT count() FROM shop.secret")
+
+    assert "`alice.smith`" in caught.value.explanation
+    assert "SELECT ON shop.secret" in caught.value.explanation
+
+
+def test_a_missing_impersonate_grant_is_reported_for_the_administrator() -> None:
+    db, server = _database()
+    _queue_clickhouse_error(server, "497", _ADMIN_LACKS_IMPERSONATE)
+
+    with pytest.raises(AccessDenied) as caught:
+        db.impersonating("alice.smith").execute("SELECT 1")
+
+    assert "GRANT IMPERSONATE ON `alice.smith`" in caught.value.explanation
+
+
+def test_an_unknown_user_is_access_denied() -> None:
+    db, server = _database()
+    _queue_clickhouse_error(server, "192", _UNKNOWN_USER)
+
+    with pytest.raises(AccessDenied) as caught:
+        db.impersonating("alice.smith").execute("SELECT 1")
+
+    assert "no ClickHouse user `alice.smith`" in caught.value.explanation
+
+
+def test_impersonation_disabled_on_the_server_is_access_denied() -> None:
+    db, server = _database()
+    _queue_clickhouse_error(server, "344", _IMPERSONATION_DISABLED)
+
+    with pytest.raises(AccessDenied) as caught:
+        db.impersonating("alice.smith").execute("SELECT 1")
+
+    assert "allow_impersonate_user" in caught.value.explanation
+
+
+def test_access_errors_are_recognised_without_the_code_header() -> None:
+    """Some proxies strip the header; the error name in the body still counts."""
+    db, server = _database()
+    server.queue_error(403, _USER_LACKS_GRANT)
+
+    with pytest.raises(AccessDenied):
+        db.impersonating("alice.smith").execute("SELECT 1")
+
+
+def test_an_access_error_without_impersonation_stays_a_clickhouse_error() -> None:
+    """The stored user's own refusals keep the existing rewrite-and-retry path."""
+    db, server = _database()
+    _queue_clickhouse_error(server, "497", _USER_LACKS_GRANT)
+
+    with pytest.raises(ClickHouseError) as caught:
+        db.execute("SELECT 1")
+
+    assert not isinstance(caught.value, AccessDenied)
+
+
+def test_a_sql_error_under_impersonation_stays_a_clickhouse_error() -> None:
+    db, server = _database()
+    _queue_clickhouse_error(
+        server, "47", "Code: 47. DB::Exception: Unknown identifier nope."
+    )
+
+    with pytest.raises(ClickHouseError) as caught:
+        db.impersonating("alice.smith").execute("SELECT nope")
+
+    assert not isinstance(caught.value, AccessDenied)

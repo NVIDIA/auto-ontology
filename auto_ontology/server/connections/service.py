@@ -109,11 +109,13 @@ def _refresh_connection_caches() -> None:
     from auto_ontology.connectors.databricks_oauth import (
         invalidate_sso_federation_cache,
     )
+    from auto_ontology.connectors.execute_as import invalidate_execute_as_cache
 
     caches = (
         ("connectors", invalidate_connectors_cache),
         ("chat workers", refresh_chat_workers),
         ("SSO federation", invalidate_sso_federation_cache),
+        ("execute-as-user", invalidate_execute_as_cache),
     )
     for name, refresh in caches:
         try:
@@ -316,6 +318,44 @@ def set_sso_federation(*, database_name: str, enabled: bool) -> dict[str, Any]:
     _refresh_connection_caches()
 
     return {"database_name": database_name, "sso_federation": enabled}
+
+
+def set_execute_as_user(*, database_name: str, enabled: bool) -> dict[str, Any]:
+    """Toggle "run chat queries as the signed-in user" on a ClickHouse connection.
+
+    Narrow in the same way as :func:`set_sso_federation`: only the
+    ``execute_as_user`` flag is rewritten, and no re-ingest is triggered, since
+    ingestion always runs as the stored user.
+
+    Raises:
+        LookupError: there is no connection for *database_name*.
+        ValueError: the connection is not a ClickHouse one.
+    """
+    connection = _stored_connection(database_name)
+    if connection is None:
+        raise LookupError(f"No connection found for database {database_name!r}")
+    if str(connection.get("type") or "").strip().lower() != "clickhouse":
+        raise ValueError(
+            "Running chat queries as the signed-in user is only supported on "
+            "ClickHouse connections"
+        )
+
+    updated = {**connection, "execute_as_user": enabled}
+
+    if is_vault_configured():
+        write_secret(database_name, updated)
+    else:
+        insert_connection(
+            connection=json.dumps(updated),
+            database_name=database_name,
+        )
+
+    # The chat endpoint caches the flag and the workers hold connectors; the
+    # worker also re-reads the flag per question, so this is about prompt
+    # effect, not correctness.
+    _refresh_connection_caches()
+
+    return {"database_name": database_name, "execute_as_user": enabled}
 
 
 def delete_connection(database_name: str) -> dict[str, str] | None:

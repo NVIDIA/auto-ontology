@@ -9,16 +9,20 @@ import { EmptyState } from '@/common/EmptyState';
 import { IconName } from '@/common/icons';
 import { SkeletonCard } from '@/common/Skeleton';
 import { EmptyStateVariant } from '@/enums/emptyState';
-import type { Connection } from '@/types/connection';
+import type { Connection, ConnectionUserToggle } from '@/types/connection';
 
 type ConnectionsInfoCardViewProps = {
 	connections: Connection[];
 	loading?: boolean;
 	onEdit?: (connection: Connection) => void;
 	onDelete?: (databaseName: string) => void;
-	onSsoFederationChange?: (databaseName: string, enabled: boolean) => void;
-	/** Database name whose SSO-federation request is currently in flight. */
-	ssoFederationPending?: string | null;
+	onUserToggleChange?: (
+		databaseName: string,
+		toggle: ConnectionUserToggle,
+		enabled: boolean,
+	) => void;
+	/** Database name whose run-as-signed-in-user request is currently in flight. */
+	userTogglePending?: string | null;
 };
 
 export const ConnectionsInfoCardView = ({
@@ -26,8 +30,8 @@ export const ConnectionsInfoCardView = ({
 	loading = false,
 	onEdit,
 	onDelete,
-	onSsoFederationChange,
-	ssoFederationPending = null,
+	onUserToggleChange,
+	userTogglePending = null,
 }: ConnectionsInfoCardViewProps) => {
 	if (loading) {
 		return (
@@ -57,8 +61,8 @@ export const ConnectionsInfoCardView = ({
 					connection={connection}
 					onEdit={onEdit}
 					onDelete={onDelete}
-					onSsoFederationChange={onSsoFederationChange}
-					ssoFederationPending={ssoFederationPending === connection.database_name}
+					onUserToggleChange={onUserToggleChange}
+					userTogglePending={userTogglePending === connection.database_name}
 				/>
 			))}
 		</div>

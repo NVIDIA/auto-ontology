@@ -1155,6 +1155,13 @@ class SsoFederationState(ApiModel):
     sso_federation: bool
 
 
+class ExecuteAsUserState(ApiModel):
+    """The one flag ``PATCH /connections/{database_name}/execute-as-user`` sets."""
+
+    database_name: str
+    execute_as_user: bool
+
+
 # ---------------------------------------------------------------------------
 # Entity coverage
 # ---------------------------------------------------------------------------

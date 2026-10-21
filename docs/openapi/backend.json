@@ -1275,6 +1275,19 @@
         "title": "DataResponse[EntityCoverageResult]",
         "type": "object"
       },
+      "DataResponse_ExecuteAsUserState_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ExecuteAsUserState"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "DataResponse[ExecuteAsUserState]",
+        "type": "object"
+      },
       "DataResponse_ExplorationLinkPath_": {
         "additionalProperties": true,
         "properties": {
@@ -1768,6 +1781,39 @@
           "coverage"
         ],
         "title": "EntityCoverageResult",
+        "type": "object"
+      },
+      "ExecuteAsUserBody": {
+        "properties": {
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "ExecuteAsUserBody",
+        "type": "object"
+      },
+      "ExecuteAsUserState": {
+        "additionalProperties": true,
+        "description": "The one flag ``PATCH /connections/{database_name}/execute-as-user`` sets.",
+        "properties": {
+          "database_name": {
+            "title": "Database Name",
+            "type": "string"
+          },
+          "execute_as_user": {
+            "title": "Execute As User",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "database_name",
+          "execute_as_user"
+        ],
+        "title": "ExecuteAsUserState",
         "type": "object"
       },
       "ExplorationEdge": {
@@ -6315,7 +6361,7 @@
     },
     "/api/chat/completions": {
       "post": {
-        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits a ``sql`` event once the agent has a validated query, just before it\nexecutes, so callers can show the SQL while it runs. Emits the final SQL\nand formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).",
+        "description": "Run the text-to-SQL agent and stream OpenAI-style SSE frames back.\n\nEmits a ``sql`` event once the agent has a validated query, just before it\nexecutes, so callers can show the SQL while it runs. Emits the final SQL\nand formatted answer as a ``result`` event, then \u2014 if that\nanswer has an executed result \u2014 generates and persists the chart/table\nbubble itself and streams it back as a ``charts`` event before the stream\ncloses with ``[DONE]``. Callers that only care about the text/SQL answer\ncan still stop reading after ``result``; the chart step and its\npersistence happen server-side regardless of whether anyone keeps\nlistening (see ``_build_charts_event``).\n\nRequires a compiled semantic layer; without one the request is rejected with\n409 rather than run against a bare schema. ``conversation_id`` persists the\nturn and claims that conversation's single run slot \u2014 a second concurrent\nrequest for the same conversation gets 409 too. Omitting ``conversation_id``\nruns the question statelessly: no history, no persisted turn, and no chart\nstep (``_build_charts_event`` needs a conversation to save into).\n\nWhen a ClickHouse connection runs chat queries as the signed-in user, a\nrequest with no forwarded user is rejected with 401, and one whose user's\nemail cannot be resolved with 403, rather than run as the stored user.",
         "operationId": "chat_completions_api_chat_completions_post",
         "requestBody": {
           "content": {
@@ -6696,6 +6742,61 @@
           }
         },
         "summary": "Update Connection",
+        "tags": [
+          "connections"
+        ]
+      }
+    },
+    "/api/connections/{database_name}/execute-as-user": {
+      "patch": {
+        "description": "Toggle whether chat runs this ClickHouse connection's SQL as the signed-in user.\n\nWhen on, chat SQL is sent as ``EXECUTE AS <user>``, where ``<user>`` is the\nlocal part of the signed-in user's email; the stored user must hold\n``IMPERSONATE``. Only ClickHouse connections accept it (422 otherwise).",
+        "operationId": "set_execute_as_user_api_connections__database_name__execute_as_user_patch",
+        "parameters": [
+          {
+            "description": "Catalog database name, which doubles as the connection's identity.",
+            "in": "path",
+            "name": "database_name",
+            "required": true,
+            "schema": {
+              "description": "Catalog database name, which doubles as the connection's identity.",
+              "title": "Database Name",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ExecuteAsUserBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_ExecuteAsUserState_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set Execute As User",
         "tags": [
           "connections"
         ]

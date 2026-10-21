@@ -53,6 +53,29 @@ def get_user_role(user_id: str) -> str | None:
         return None
 
 
+def get_user_email(user_id: str) -> str | None:
+    """Return the Better Auth ``email`` for *user_id*.
+
+    ``None`` when the user does not exist or the database is unreachable. The
+    one caller -- choosing whose grants a chat query runs under -- refuses on
+    ``None``, so that fails closed as well.
+    """
+    try:
+        with psycopg.connect(
+            get_postgres_connection_string(), connect_timeout=3
+        ) as conn:
+            with conn.cursor(row_factory=dict_row) as cur:
+                cur.execute(
+                    f'SELECT email FROM {FRONTEND_SCHEMA}."user" WHERE id = %s',
+                    (user_id,),
+                )
+                row = cur.fetchone()
+                return row["email"] if row else None
+    except Exception:
+        logger.exception("Failed to fetch email for user %r from Postgres", user_id)
+        return None
+
+
 def is_admin(user_id: str) -> bool:
     """Return whether *user_id* currently has the ``admin`` role in Postgres."""
     return get_user_role(user_id) == GroupRole.ADMIN

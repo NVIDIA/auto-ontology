@@ -32,6 +32,7 @@ from auto_ontology.server.models import (
     DatabaseSummary,
     GlobalSearchItem,
     EntityCoverageResult,
+    ExecuteAsUserState,
     ExplorationEdge,
     ExplorationLinkPath,
     ExplorationRelatedNodes,
@@ -116,6 +117,7 @@ __all__ = [
     "SqlExpressionValidationResponse",
     "SqlValidationResponse",
     "SsoFederationResponse",
+    "ExecuteAsUserResponse",
     "StatusResponse",
     "TableColumnsPageResponse",
     "TableExplorationDetailsResponse",
@@ -360,6 +362,7 @@ TableZonesResponse = DataResponse[dict[str, list[ZoneChip]]]
 ConnectionResponse = DataResponse[PublicConnection]
 ConnectionListResponse = ListResponse[PublicConnection]
 SsoFederationResponse = DataResponse[SsoFederationState]
+ExecuteAsUserResponse = DataResponse[ExecuteAsUserState]
 
 # Metadata
 EntityCoverageResponse = DataResponse[EntityCoverageResult]

@@ -74,6 +74,58 @@ def test_a_bad_column_still_goes_round_the_reconstruction_loop(
     assert "unconstructable_explanation" not in result["path_state"]
 
 
+def test_access_denied_gives_up_with_its_own_explanation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Rewriting runs under the same user, so it cannot get past a missing grant."""
+    explanation = "Your ClickHouse account `alice` is not allowed to run this query."
+    monkeypatch.setattr(
+        "auto_ontology.retrieval.text_to_sql.agents.sql_execution._run_sql",
+        lambda sql, connector: QueryResponse(
+            result=None,
+            sliced=False,
+            error="Code: 497 (ACCESS_DENIED)",
+            access_denied=explanation,
+        ),
+    )
+
+    result = SQLExecutionAgent().execute(_state())
+
+    assert result["decision"] == "unconstructable"
+    assert result["path_state"]["unconstructable_explanation"] == explanation
+
+
+def test_access_denied_does_not_restart_the_whole_pipeline() -> None:
+    """The restart runs as the same user, so it only re-ran the refused query."""
+    from auto_ontology.retrieval.text_to_sql.main import (
+        _UNCONSTRUCTABLE_NODE,
+        _should_retry_full_pipeline,
+    )
+
+    final_state = {"restore_from": "x", "full_pipeline_attempt": 1, "path_state": {}}
+    assert _should_retry_full_pipeline(final_state, _UNCONSTRUCTABLE_NODE)
+
+    final_state["path_state"] = {"access_denied": True}
+    assert not _should_retry_full_pipeline(final_state, _UNCONSTRUCTABLE_NODE)
+
+
+def test_run_sql_carries_the_explanation_of_an_access_denied() -> None:
+    from auto_ontology.connectors.base import AccessDenied
+    from auto_ontology.retrieval.text_to_sql.agents.sql_execution import _run_sql
+
+    class _Refusing:
+        dialect = "clickhouse"
+        database_name = "shop"
+
+        def execute(self, sql: str) -> None:
+            raise AccessDenied("raw", explanation="ask for access")
+
+    response = _run_sql("SELECT 1", _Refusing())  # type: ignore[arg-type]
+
+    assert response.access_denied == "ask for access"
+    assert response.error == "raw"
+
+
 def test_router_honours_a_decision_to_give_up() -> None:
     """Without the pass-through, "not invalid_sql" was read as usable SQL."""
     state = _state(decision="unconstructable", path_state={})

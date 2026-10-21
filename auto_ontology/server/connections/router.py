@@ -19,6 +19,7 @@ from auto_ontology.server.responses import (
     ConnectionListResponse,
     ConnectionResponse,
     ConnectionTestResponse,
+    ExecuteAsUserResponse,
     SsoFederationResponse,
 )
 
@@ -178,6 +179,43 @@ def set_sso_federation(
             database_name=database_name, enabled=body.enabled
         )
     except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Failed to update connection: {exc}",
+        ) from exc
+
+    return {"data": row}
+
+
+class ExecuteAsUserBody(BaseModel):
+    enabled: bool
+
+
+@router.patch(
+    "/connections/{database_name}/execute-as-user",
+    response_model=ExecuteAsUserResponse,
+)
+def set_execute_as_user(
+    body: ExecuteAsUserBody,
+    database_name: str = Path(
+        description=(
+            "Catalog database name, which doubles as the connection's identity."
+        )
+    ),
+) -> dict:
+    """Toggle whether chat runs this ClickHouse connection's SQL as the signed-in user.
+
+    When on, chat SQL is sent as ``EXECUTE AS <user>``, where ``<user>`` is the
+    local part of the signed-in user's email; the stored user must hold
+    ``IMPERSONATE``. Only ClickHouse connections accept it (422 otherwise).
+    """
+    try:
+        row = service.set_execute_as_user(
+            database_name=database_name, enabled=body.enabled
+        )
+    except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(

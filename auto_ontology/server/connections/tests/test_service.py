@@ -368,3 +368,60 @@ def test_create_connection_drops_the_schema_shorthand() -> None:
     stored = json.loads(insert_connection.call_args.kwargs["connection"])
     assert "schema" not in stored
     assert stored["schemas"] == ["sales"]
+
+
+def _clickhouse_connection() -> dict[str, object]:
+    return {
+        "type": "clickhouse",
+        "host": "ch.example.com",
+        "user": "svc",
+        "password": "secret",
+        "database": "shop",
+    }
+
+
+def test_set_execute_as_user_rewrites_only_the_flag() -> None:
+    with (
+        patch.object(
+            service, "_stored_connection", return_value=_clickhouse_connection()
+        ),
+        patch.object(service, "is_vault_configured", return_value=False),
+        patch.object(service, "insert_connection") as insert_connection,
+        patch.object(service, "_refresh_connection_caches") as refresh,
+        patch.object(service, "trigger_ingest") as trigger_ingest,
+    ):
+        result = service.set_execute_as_user(database_name="shop", enabled=True)
+
+    stored = json.loads(insert_connection.call_args.kwargs["connection"])
+    assert stored == {**_clickhouse_connection(), "execute_as_user": True}
+    assert result == {"database_name": "shop", "execute_as_user": True}
+    refresh.assert_called_once()
+    # Ingestion always runs as the stored user, so nothing to re-ingest.
+    trigger_ingest.assert_not_called()
+
+
+def test_set_execute_as_user_refuses_other_engines() -> None:
+    with (
+        patch.object(
+            service, "_stored_connection", return_value=_snowflake_connection()
+        ),
+        patch.object(service, "insert_connection") as insert_connection,
+    ):
+        try:
+            service.set_execute_as_user(database_name="database", enabled=True)
+        except ValueError as exc:
+            assert "ClickHouse" in str(exc)
+        else:
+            raise AssertionError("expected a ValueError for a Snowflake connection")
+
+    insert_connection.assert_not_called()
+
+
+def test_set_execute_as_user_reports_an_unknown_database_as_missing() -> None:
+    with patch.object(service, "_stored_connection", return_value=None):
+        try:
+            service.set_execute_as_user(database_name="ghost", enabled=True)
+        except LookupError as exc:
+            assert "ghost" in str(exc)
+        else:
+            raise AssertionError("expected a LookupError for the unknown database")
