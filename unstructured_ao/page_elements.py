@@ -11,12 +11,10 @@ CPU, which is what makes it worth a second client.
 
 Host and key
 ------------
-The CV models are not on the embed gateway. They live only on
-``ai.api.nvidia.com`` and only authenticate with an ``nvapi-`` key; the
-``sk-`` gateway key returns 401 ("Invalid JWT serialization") and
-``inference-api.nvidia.com`` returns 404 for the same path even though it lists
-the model in ``/v1/models``. Hence a separate triplet rather than reusing
-``EMBED_*``.
+The hosted model is available through the inference gateway with the same
+``sk-`` key family as the other hosted models. Unlike the OpenAI-compatible
+chat and embedding routes, its model-specific URL ends in
+``/v1/page-elements``.
 
 Wire format
 -----------
@@ -84,16 +82,18 @@ class Box:
 def _resolved() -> tuple[str, str, str]:
     from auto_ontology.utils.model_config import resolve
 
-    endpoint = resolve(_PREFIX, "ENDPOINT").rstrip("/")
-    model = resolve(_PREFIX, "MODEL")
+    endpoint = resolve(_PREFIX, "ENDPOINT", use_shared_default=False).rstrip("/")
+    model = resolve(_PREFIX, "MODEL", use_shared_default=False).strip("/")
     key = resolve(_PREFIX, "API_KEY")
-    if not endpoint or not model:
-        raise RuntimeError(
-            f"{_PREFIX}_ENDPOINT and {_PREFIX}_MODEL must be set; the CV models "
-            "have no built-in default in model_config because they are neither "
-            "a chat nor an embed triplet."
-        )
     return endpoint, key, model
+
+
+def _inference_url(endpoint: str, model: str) -> str:
+    """Build the route for the selected hosted Page Elements gateway."""
+    base = f"{endpoint}/{model}"
+    if endpoint.endswith("/v1/ocr"):
+        return f"{base}/v1/page-elements"
+    return base
 
 
 class PageElementClient:
@@ -103,7 +103,7 @@ class PageElementClient:
         import httpx
 
         endpoint, self._api_key, model = _resolved()
-        self._url = f"{endpoint}/{model}"
+        self._url = _inference_url(endpoint, model)
         self._http = httpx.Client(timeout=_TIMEOUT)
 
     def _detect_batch(self, images_b64: list[str]) -> list[list[Box]]:

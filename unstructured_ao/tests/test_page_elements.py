@@ -15,11 +15,14 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from unstructured_ao.page_elements import (
     FIGURE_LABELS,
     Box,
     PageElementClient,
     _boxes_of,
+    _inference_url,
 )
 
 
@@ -28,6 +31,36 @@ def _client(batches: Any) -> PageElementClient:
     client = object.__new__(PageElementClient)
     client._detect_batch = batches  # type: ignore[method-assign]
     return client
+
+
+def test_client_builds_inference_gateway_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv(
+        "UNSTRUCTURED_PAGE_ELEMENTS_ENDPOINT",
+        "https://inference-api.nvidia.com/v1/ocr",
+    )
+    monkeypatch.setenv(
+        "UNSTRUCTURED_PAGE_ELEMENTS_MODEL",
+        "nvidia/nvidia/nemotron-page-elements-v3",
+    )
+    monkeypatch.setenv("UNSTRUCTURED_PAGE_ELEMENTS_API_KEY", "test-key")
+
+    client = PageElementClient()
+    try:
+        assert client._url == (
+            "https://inference-api.nvidia.com/v1/ocr/nvidia/nvidia/"
+            "nemotron-page-elements-v3/v1/page-elements"
+        )
+    finally:
+        client._http.close()
+
+
+def test_legacy_catalog_gateway_keeps_its_existing_route() -> None:
+    assert _inference_url(
+        "https://ai.api.nvidia.com/v1/cv/nvidia",
+        "nemotron-page-elements-v3",
+    ) == ("https://ai.api.nvidia.com/v1/cv/nvidia/nemotron-page-elements-v3")
 
 
 def test_boxes_scale_to_pixels() -> None:
