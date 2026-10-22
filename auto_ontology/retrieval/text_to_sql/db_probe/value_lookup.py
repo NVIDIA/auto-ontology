@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from sqlglot import exp
 
@@ -54,30 +54,30 @@ def lookup_text_value(
     table_name: str,
     column_name: str,
     value: str,
-) -> tuple[str, str] | None:
-    """Return ``(stored_value, kind)`` from one case-insensitive LIKE probe."""
+    match_kind: Literal["equal", "contains"],
+) -> str | None:
+    """Return the stored value from one case-insensitive equality or LIKE probe."""
     dialect = getattr(connector, "dialect", None)
     table_ref = connector.qualify(schema_name or None, table_name)
     column_ref = quoted_identifier(column_name, dialect)
     text_ref = _text_ref(column_ref, dialect)
-    escaped = value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
-    pattern = exp.Literal.string(f"%{escaped}%").sql(dialect=dialect or None)
-    stored_value = _run_value_probe(
+    if match_kind == "equal":
+        literal = exp.Literal.string(value).sql(dialect=dialect or None)
+        predicate = f"LOWER(TRIM({text_ref})) = LOWER(TRIM({literal}))"
+        purpose = "value_anchor_equal"
+    else:
+        escaped = value.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        pattern = exp.Literal.string(f"%{escaped}%").sql(dialect=dialect or None)
+        predicate = f"LOWER({text_ref}) LIKE LOWER({pattern}) ESCAPE '!'"
+        purpose = "value_anchor_contains"
+
+    return _run_value_probe(
         executor,
         table_ref=table_ref,
         column_ref=column_ref,
-        predicate=f"LOWER({text_ref}) LIKE LOWER({pattern}) ESCAPE '!'",
-        purpose="value_anchor_contains",
+        predicate=predicate,
+        purpose=purpose,
     )
-    if stored_value is None:
-        return None
-    kind = (
-        "value"
-        if " ".join(stored_value.split()).casefold()
-        == " ".join(value.split()).casefold()
-        else "contains"
-    )
-    return stored_value, kind
 
 
 __all__ = ["lookup_text_value"]

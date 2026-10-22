@@ -307,6 +307,8 @@ class ValueGroundingAgent(BaseAgent):
                 if not kept:
                     continue
                 seen_values.add(phrase_key)
+                suspect_rows: list[dict[str, Any]] = []
+                seen_suspect_columns: set[str] = set()
                 for suspect in candidate.suspected_columns:
                     row = by_key.get(
                         _column_key(
@@ -317,19 +319,36 @@ class ValueGroundingAgent(BaseAgent):
                     )
                     if row is None or not _is_textual_type(row.get("data_type")):
                         continue
-                    match = lookup_text_value(
-                        executor,
-                        connector,
-                        schema_name=str(row["table_schema"]),
-                        table_name=str(row["table_name"]),
-                        column_name=str(row["column_name"]),
-                        value=phrase,
-                    )
-                    if match is None:
+                    column_id = str(row["column_id"])
+                    if column_id not in seen_suspect_columns:
+                        suspect_rows.append(row)
+                        seen_suspect_columns.add(column_id)
+
+                matched: tuple[dict[str, Any], str, str] | None = None
+                for match_kind, anchor_kind in (
+                    ("equal", "value"),
+                    ("contains", "contains"),
+                ):
+                    for row in suspect_rows:
+                        stored_value = lookup_text_value(
+                            executor,
+                            connector,
+                            schema_name=str(row["table_schema"]),
+                            table_name=str(row["table_name"]),
+                            column_name=str(row["column_name"]),
+                            value=phrase,
+                            match_kind=match_kind,
+                        )
+                        if stored_value is not None:
+                            matched = (row, stored_value, anchor_kind)
+                            break
                         if executor.budget_left <= 0:
                             break
-                        continue
-                    stored_value, kind = match
+                    if matched is not None or executor.budget_left <= 0:
+                        break
+
+                if matched is not None:
+                    row, stored_value, kind = matched
                     anchors.append(
                         {
                             "phrase": phrase,
@@ -343,7 +362,6 @@ class ValueGroundingAgent(BaseAgent):
                             "column_id": row["column_id"],
                         }
                     )
-                    break
                 if executor.budget_left <= 0:
                     self.logger.info("Value grounding stopped at probe budget")
                     break

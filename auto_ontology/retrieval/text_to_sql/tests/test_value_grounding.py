@@ -95,7 +95,7 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, str] = {}
-    probes: list[str] = []
+    probes: list[tuple[str, str]] = []
     extraction = ValueGroundingExtraction(
         evidence_columns=[
             EvidenceColumnRef(
@@ -152,9 +152,9 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
         return extraction
 
     def fake_lookup(_executor, _connector, **kwargs):
-        probes.append(kwargs["column_name"])
-        if kwargs["column_name"] == "name":
-            return "Angel of Mercy", "value"
+        probes.append((kwargs["match_kind"], kwargs["column_name"]))
+        if kwargs["match_kind"] == "contains" and kwargs["column_name"] == "name":
+            return "Angel of Mercy card"
         return None
 
     monkeypatch.setattr(
@@ -188,14 +188,19 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
     assert '"samples":["Angel of Mercy","Counterspell"]' in captured["prompt"]
     assert "release_year" not in captured["prompt"]
     assert "data_type" not in captured["prompt"]
-    assert probes == ["type", "name"]
+    assert probes == [
+        ("equal", "type"),
+        ("equal", "name"),
+        ("contains", "type"),
+        ("contains", "name"),
+    ]
     assert result["value_anchors"] == [
         {
             "phrase": "Angel of Mercy",
-            "kind": "value",
+            "kind": "contains",
             "tbl": "cards",
             "col": "name",
-            "stored_value": "Angel of Mercy",
+            "stored_value": "Angel of Mercy card",
             "database_name": "card_games",
             "schema_name": "main",
             "table_id": "cards-table",
@@ -249,44 +254,56 @@ def _result(*values: str) -> dict:
     }
 
 
-def test_live_lookup_uses_one_like_probe_and_classifies_the_match() -> None:
+def test_live_lookup_supports_case_insensitive_equal_and_contains_probes() -> None:
     connector = SimpleNamespace(
         dialect="sqlite",
         qualify=lambda schema, table: f'"{schema}"."{table}"',
     )
     exact = _QueuedExecutor([_result("Active")])
-    assert lookup_text_value(
-        exact,
-        connector,
-        schema_name="main",
-        table_name="accounts",
-        column_name="status",
-        value="Active",
-    ) == ("Active", "value")
-    assert [purpose for purpose, _ in exact.calls] == ["value_anchor_contains"]
-    assert " LIKE " in exact.calls[0][1]
-    assert '"status" = ' not in exact.calls[0][1]
+    assert (
+        lookup_text_value(
+            exact,
+            connector,
+            schema_name="main",
+            table_name="accounts",
+            column_name="status",
+            value="Active",
+            match_kind="equal",
+        )
+        == "Active"
+    )
+    assert [purpose for purpose, _ in exact.calls] == ["value_anchor_equal"]
+    assert "LOWER(TRIM(" in exact.calls[0][1]
+    assert " = LOWER(TRIM(" in exact.calls[0][1]
 
     normalized = _QueuedExecutor([_result(" ACTIVE ")])
-    assert lookup_text_value(
-        normalized,
-        connector,
-        schema_name="main",
-        table_name="accounts",
-        column_name="status",
-        value="active",
-    ) == (" ACTIVE ", "value")
-    assert [purpose for purpose, _ in normalized.calls] == ["value_anchor_contains"]
+    assert (
+        lookup_text_value(
+            normalized,
+            connector,
+            schema_name="main",
+            table_name="accounts",
+            column_name="status",
+            value="active",
+            match_kind="equal",
+        )
+        == " ACTIVE "
+    )
+    assert [purpose for purpose, _ in normalized.calls] == ["value_anchor_equal"]
 
     contains = _QueuedExecutor([_result("North_100% Region")])
-    assert lookup_text_value(
-        contains,
-        connector,
-        schema_name="main",
-        table_name="accounts",
-        column_name="region",
-        value="North_100%",
-    ) == ("North_100% Region", "contains")
+    assert (
+        lookup_text_value(
+            contains,
+            connector,
+            schema_name="main",
+            table_name="accounts",
+            column_name="region",
+            value="North_100%",
+            match_kind="contains",
+        )
+        == "North_100% Region"
+    )
     assert [purpose for purpose, _ in contains.calls] == ["value_anchor_contains"]
     assert "!_" in contains.calls[-1][1]
     assert "!%" in contains.calls[-1][1]
