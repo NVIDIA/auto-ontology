@@ -46,6 +46,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     Column,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -435,6 +436,262 @@ conversation = Table(
         "turn_index",
     ),
 )
+
+# ---------------------------------------------------------------------------
+# Conversation semantic tier — one transcript's graph
+# ---------------------------------------------------------------------------
+
+#: What a node *is*, on the axis the benchmark's abilities run along.
+#:
+#: Multi-valued on the row, because a node is honestly more than one of these at
+#: once: a deadline is an ``event`` (it has a date) and a ``state`` (it moved),
+#: and forcing a single label means picking which question it is allowed to
+#: answer. The ``type`` column carries the other axis -- ``Person``,
+#: ``Technology``, ``Timestamp`` -- which is open vocabulary and names the
+#: domain rather than the use.
+#:
+#: ``object`` is the kind of a thing that asserts nothing. ``Flask`` is not a
+#: fact; "the project is built with Flask" is the fact, and that is an edge.
+#: Having an explicit kind for things rather than an empty list keeps the column
+#: non-empty, which makes "every node of this sort" a containment test instead
+#: of a null check.
+#:
+#: The other four are reverse-engineered from what a transcript gets asked:
+#:
+#: ``fact``
+#:     Asserted once and stable. The endpoint a project targets.
+#: ``preference``
+#:     A standing constraint on how the speaker wants things done, which should
+#:     still apply to a question asked later.
+#: ``event``
+#:     Something that happened, with a date. Ordering and interval questions are
+#:     answered from these and they are useless undated.
+#: ``state``
+#:     The current value of something that moves, with the previous value still
+#:     in the transcript. That is the difference between retrieving a quota and
+#:     retrieving the wrong quota.
+CONVERSATION_NODE_KINDS = (
+    "object",
+    "fact",
+    "preference",
+    "event",
+    "state",
+    "target",
+    "proposed",
+)
+
+#: The node type of a bare date. A leaf by construction: a date is something
+#: other nodes point at and never something that points. Keeping dates as nodes
+#: rather than as strings inside a sentence is what turns "how many days between
+#: X and Y" from reading comprehension into subtraction.
+CONVERSATION_NODE_TIMESTAMP = "Timestamp"
+
+#: The node type of the transcript's own root subject, one per conversation.
+CONVERSATION_NODE_SUBJECT = "Subject"
+
+#: The two layers of the graph, carried on every edge.
+#:
+#: ``knowledge`` is the domain relation an entity-relationship extraction
+#: produces: ``builds``, ``built_with``, ``has_component``, ``ends_at``. Its
+#: ``role`` is open vocabulary, and has to be -- the relation name *is* the
+#: content of the edge, and collapsing ``built_with`` and ``deployed_to`` into
+#: ``related_to`` throws away exactly what made it worth extracting.
+#:
+#: ``semantic`` is the layer above it: not how two things stand in the world,
+#: but how two *statements* stand to each other. Its ``role`` is closed, because
+#: that is a question with four answers rather than as many as the domain has
+#: verbs.
+CONVERSATION_EDGE_TYPES = ("knowledge", "semantic")
+
+#: The closed half of ``role``: how two statements of one transcript relate.
+#:
+#: Chosen against what the questions need rather than what a transcript
+#: contains. A plain "related" edge is cheap to extract and answers nothing: the
+#: costly failures are reading a superseded value as current and reading two
+#: statements of one thing as a contradiction, and those need the direction.
+#:
+#: ``supersedes`` and ``contradicts`` both join two statements that disagree and
+#: are kept apart because the right answer differs. A superseded value has one
+#: answer, the later one. A contradiction has no later one -- the speaker said
+#: both and never resolved it -- and the answer is to say so.
+#:
+#: ``unrelated`` is a verdict, not a relation. Candidates come from vector
+#: proximity, which cannot tell a superseded value from an unrelated one --
+#: "quota is 1,000" and "quota is 1,200" embed about as close as "coverage is
+#: 78%" and "coverage is 85%" -- so it is reached often, and storing it is what
+#: stops the next pass paying to reach it again.
+CONVERSATION_SEMANTIC_ROLES = (
+    "supersedes",
+    "contradicts",
+    "precedes",
+    "refines",
+    "unrelated",
+)
+
+#: Nodes of one transcript's graph: things, and the statements made about them.
+#:
+#: One table rather than an entity table and a statement table, because the
+#: edges have to join across the two and SQL cannot point one foreign key at
+#: two tables. That constraint turned out to be a feature: a ``semantic`` edge
+#: between a thing and a statement about a different thing is expressible here
+#: and is not in the split schema.
+#:
+#: Identity is the normalised name, not the id the extractor made up. A model
+#: reading window 3 and window 40 writes "OpenWeather API" both times when asked
+#: to, and ``uq_conversation_node_name`` is what makes the second one land on
+#: the first one's row instead of beside it.
+#:
+#: ``turn_indexes`` holds the provenance: the chunks a model read and cited for
+#: this node. An array on the row rather than a link table, which is what makes
+#: retrieval one indexed lookup -- node vectors come back from pgvector and the
+#: turns they point at are already on the row. Turn *indexes*, not row ids,
+#: because the index is what the extractor cites, what the time anchors are
+#: expressed in, and what ``conversation.store.fetch_turns`` takes as a span.
+conversation_node = Table(
+    "conversation_node",
+    METADATA,
+    _id(),
+    Column(
+        "database_id",
+        Text,
+        ForeignKey(catalog_database.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    # Which transcript. Matches `conversation.conversation_id` and is not a
+    # foreign key for the same reason that column is not: there is no
+    # conversation entity table, only turns carrying the id.
+    Column("conversation_id", Text, nullable=False),
+    Column("name", Text, nullable=False),
+    # Lowercased, punctuation-stripped `name`. Stored rather than computed in
+    # the unique index because the normalisation is Python's, not Postgres's,
+    # and the two must not be allowed to disagree.
+    Column("normalized_name", Text, nullable=False),
+    # Open vocabulary, the extractor's own word: Person, Project, Technology,
+    # Metric, Timestamp, Platform.
+    Column("type", Text, nullable=False),
+    Column("kinds", ARRAY(Text), nullable=False),
+    Column("description", Text, nullable=True),
+    # The property this node states, normalised, and the value it states.
+    #
+    # These are what make `supersedes` and `contradicts` derivable instead of
+    # adjudicated. Two nodes attached to one subject with one `attribute_key`
+    # and different `value`s are, by construction, two readings of one quantity
+    # -- no model has to be asked whether "the quota is 1,000" and "the quota is
+    # 1,200" are about the same thing. Which is current is then a question about
+    # their turn numbers, which is also not a judgement call.
+    #
+    # Separate from `name` because `name` is what a reader sees and drifts
+    # between windows ("Daily quota" / "API daily call quota"); the key is
+    # machine-facing and normalised so the two collapse.
+    Column("attribute_key", Text, nullable=True),
+    Column("value", Text, nullable=True),
+    Column("turn_indexes", ARRAY(Integer), nullable=True),
+    # A quote the extractor copied from one of those turns, kept because it is
+    # the one piece of attribution that cannot be wrong -- a cited turn index
+    # can be a hallucination, a verbatim string that appears in the turn cannot.
+    Column("evidence", Text, nullable=True),
+    # What the speaker treated as "now" when this was said, copied from the
+    # earliest turn cited.
+    Column("time_anchor", Text, nullable=True),
+    # When the event this node describes actually *happened*.
+    #
+    # Distinct from `time_anchor`, and the distinction cost a wrong answer
+    # before it existed: the anchor is when the speaker was talking, so an April
+    # turn recalling a March event anchors to April. Ordering by the anchor
+    # orders the telling, not the events. This column is parsed out of what the
+    # extractor read in the sentence itself, and ordering by it is a sort rather
+    # than a model call.
+    Column("occurred_on", Date, nullable=True),
+    *_edited(),
+    CheckConstraint(
+        "kinds <@ ARRAY["
+        f"{', '.join(repr(k) for k in CONVERSATION_NODE_KINDS)}"
+        "]::text[] AND array_length(kinds, 1) >= 1",
+        name="conversation_node_kinds_value",
+    ),
+    UniqueConstraint(
+        "database_id",
+        "conversation_id",
+        "normalized_name",
+        name="uq_conversation_node_name",
+    ),
+    Index(
+        "ix_conversation_node_database_conversation",
+        "database_id",
+        "conversation_id",
+    ),
+    # Reaching every node of one kind is what an aggregate question needs --
+    # "how many bugs did I fix" is a count over `event`, not a similarity
+    # search -- and GIN is what makes the containment test an index scan.
+    Index("ix_conversation_node_kinds", "kinds", postgresql_using="gin"),
+)
+
+#: Every edge of the graph, both layers, in one table.
+#:
+#: ``type`` says which layer and ``role`` says which relation within it. One
+#: table because the layers share endpoints and a reader wants them together:
+#: the knowledge edges say what the things are to each other, the semantic edges
+#: say which of the statements about them still holds, and answering a question
+#: usually needs both.
+#:
+#: Directed, and the direction is load-bearing: ``supersedes`` means source
+#: replaces target, ``precedes`` means source happened first, ``builds`` means
+#: source is the builder. A reader that ignores it inverts the answer.
+conversation_edge = Table(
+    "conversation_edge",
+    METADATA,
+    Column(
+        "source_id",
+        Text,
+        ForeignKey(conversation_node.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "target_id",
+        Text,
+        ForeignKey(conversation_node.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("type", Text, nullable=False, primary_key=True),
+    Column("role", Text, nullable=False, primary_key=True),
+    # The edge as a sentence. Rendered once, at write time, so that every
+    # reader of this row gets the same wording -- the document pipeline learned
+    # this the expensive way, by having three callers render relations
+    # separately until one of them printed the role raw and told the model
+    # nothing.
+    Column("statement", Text, nullable=True),
+    # Which turns asserted the edge, and a quote from one of them. An
+    # entity-relationship extraction normally keeps neither, and then a reader
+    # that doubts an edge has nothing to check it against.
+    Column("turn_indexes", ARRAY(Integer), nullable=True),
+    Column("evidence", Text, nullable=True),
+    Column("reason", Text, nullable=True),
+    # Whether this came from comparing fields or from a model call. Kept
+    # because the two have different failure modes and a reader auditing a
+    # surprising edge needs to know which one to doubt.
+    Column("derived", Boolean, nullable=False, server_default=text("false")),
+    # What proposed the pair, not what decided it. Kept so the candidate
+    # threshold can be re-tuned against its own recall.
+    Column("distance", Text, nullable=True),
+    CheckConstraint(
+        f"type IN ({', '.join(repr(t) for t in CONVERSATION_EDGE_TYPES)})",
+        name="conversation_edge_type_value",
+    ),
+    # Only the semantic half is closed. A knowledge role is whatever verb the
+    # transcript used, and constraining it would mean rejecting a correct edge
+    # for using a word this file had not thought of.
+    CheckConstraint(
+        "type <> 'semantic' OR role IN "
+        f"({', '.join(repr(r) for r in CONVERSATION_SEMANTIC_ROLES)})",
+        name="conversation_edge_semantic_role_value",
+    ),
+    # Reading every edge of the nodes a search matched is the query-time
+    # question, and it asks from both sides.
+    Index("ix_conversation_edge_source", "source_id"),
+    Index("ix_conversation_edge_target", "target_id"),
+    Index("ix_conversation_edge_type", "type"),
+)
+
 
 # ---------------------------------------------------------------------------
 # SQL statements and their table references

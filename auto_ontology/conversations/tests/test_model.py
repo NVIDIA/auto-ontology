@@ -205,3 +205,24 @@ def test_sessions_share_one_turn_sequence() -> None:
 def test_no_messages_is_no_turns() -> None:
     assert turns_from_messages([]) == []
     assert turns_from_sessions([]) == []
+
+
+def test_the_benchmarks_question_index_is_not_part_of_the_turn() -> None:
+    """``->-> 2,9`` is BEAM saying which question this turn feeds, and read as
+    content it became an ``error_rate`` of 2.9%."""
+    turns = turns_from_messages(
+        [
+            _msg("user", "I brought the error rate down from 12% to 1% ->-> 2,9"),
+            _msg("assistant", "Great progress. ->-> 2,10"),
+        ]
+    )
+
+    assert turns[0].question == "I brought the error rate down from 12% to 1%"
+    assert turns[0].answer == "Great progress."
+
+
+def test_an_arrow_that_is_not_a_question_index_survives() -> None:
+    """Transcripts are full of code, and the marker is only ever digits."""
+    turns = turns_from_messages([_msg("user", "the map is a -> b, see arr->len")])
+
+    assert turns[0].question == "the map is a -> b, see arr->len"
