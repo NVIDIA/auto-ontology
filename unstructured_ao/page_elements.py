@@ -5,9 +5,8 @@
 """Page-layout detection through NVIDIA's hosted CV model.
 
 Answers "where on this page are the paragraphs, titles, tables and charts" —
-the job Docling does with a local torch model, and NeMo Retriever does with this
-same service. Measured at **0.8s per page** against roughly two seconds of local
-CPU, which is what makes it worth a second client.
+the job Docling does with a local model. Measured at **0.8s per page** against
+roughly two seconds of local CPU, which is what makes it worth a second client.
 
 Host and key
 ------------
@@ -19,9 +18,9 @@ chat and embedding routes, its model-specific URL ends in
 Wire format
 -----------
 ``{"input": [{"type": "image_url", "url": "data:image/png;base64,..."}]}`` — the
-shape NeMo builds in ``yolox.py``, not the chat-completions contract. Boxes come
-back **normalised to 0-1**, so they must be scaled by the image's pixel size
-before cropping.
+page-elements contract, not the chat-completions contract. Boxes come back
+**normalised to 0-1**, so they must be scaled by the image's pixel size before
+cropping.
 """
 
 from __future__ import annotations
@@ -42,7 +41,7 @@ _PREFIX = "UNSTRUCTURED_PAGE_ELEMENTS"
 #: deliberately absent: their text is already in the PDF's text layer.
 FIGURE_LABELS: frozenset[str] = frozenset({"chart", "table", "infographic"})
 
-#: Pages per request.  Matches NeMo's ``page_elements_batch_size`` default.
+#: Pages per request.
 _BATCH = 24
 
 #: Requests in flight.  Detection is fast enough that this mostly hides
@@ -51,10 +50,8 @@ _WORKERS = 4
 
 _TIMEOUT = 180.0
 
-#: Below this the detection is more likely noise than a figure.  NeMo applies
-#: per-label thresholds in the same spirit (``YOLOX_PAGE_V2_FINAL_SCORE``); a
-#: single conservative floor is enough here because a missed figure costs only
-#: its own row.
+#: Below this the detection is more likely noise than a figure. A conservative
+#: floor is enough here because a missed figure costs only its own row.
 _MIN_CONFIDENCE = 0.30
 
 

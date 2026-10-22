@@ -51,11 +51,9 @@ def joinable(text: str) -> str:
     """A chunk's text reduced to what every store agrees on.
 
     Postgres keeps the chunk text as it was written, and a store need not.
-    Measured against the ``nemo`` extractor, which hands the same text back
-    with its whitespace normalised: one chunk in five differs by a single
-    doubled space, so comparing raw strings reports 80% agreement between
-    stores that agree completely, and a join on raw text silently drops that
-    same fifth.
+    An external store may hand the same text back with its whitespace
+    normalised. Comparing raw strings would then report disagreement between
+    stores that otherwise contain the same content.
     """
     return " ".join((text or "").split())
 

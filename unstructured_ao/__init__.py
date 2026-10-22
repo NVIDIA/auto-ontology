@@ -20,7 +20,6 @@ because it is what the comparison is against.
 
 End-to-end pipeline for a single document
 ------------------------------------------
-    import unstructured_ao.config  # Ray override — import before nemo_retriever
     from unstructured_ao.dal import get_document_chunks
     from unstructured_ao.ingest import ingest_file
     from unstructured_ao.windows import build_windows

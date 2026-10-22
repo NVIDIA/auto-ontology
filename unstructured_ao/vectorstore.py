@@ -12,10 +12,9 @@ Rows are keyed by ``unstructured_chunk.id``: ingest passes the same UUID as
 ``ids=`` when adding embeddings, which is what lets a vector hit be resolved
 back to its relational chunk row.
 
-Documents are embedded upstream — by ``embed_client`` for the ``hosted`` and
-``docling`` extractors, inside its own graph pass for ``nemo`` — and written
-here with ``add_embeddings``; the only embedding this module performs is of the
-query at search time.
+Documents are embedded upstream by ``embed_client`` and written here with
+``add_embeddings``; the only embedding this module performs is of the query at
+search time.
 """
 
 from __future__ import annotations

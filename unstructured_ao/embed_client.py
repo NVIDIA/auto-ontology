@@ -2,18 +2,11 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Embeddings and figure reading over plain HTTP, with no Ray cluster behind it.
+"""Embeddings and figure reading through the hosted inference API.
 
-What :mod:`unstructured_ao.ingest` needs from NeMo Retriever's 3,500-line embed
-stack is one POST.  This is it, for the Docling path.
-
-Verified against the library rather than guessed: embedding the same text and
-image through here and through the retriever's own embedder agrees to cosine
-0.9944-0.9961, where a text-only vector against the same reference scores
-0.8748.  The payload shape is the retriever's — see
-``_format_text_image_pair_input_string`` in
-``nemo_retriever/models/inference/main_text_embed.py`` — which matters because
-vectors written by either path have to share a space.
+The ingest pipeline uses this client to embed extracted text and to transcribe
+figures. Keeping request shaping here gives every extractor the same embedding
+space.
 
 Modality
 --------
@@ -111,9 +104,8 @@ class EmbedClient:
                 "input_type": input_type,
                 # The model's ceiling is 4096 tokens and a page can exceed it —
                 # one document in the evaluation corpus has a 5683-token page.
-                # NeMo can send "NONE" because its chunker never builds a row
-                # that long; a page-grained row sometimes does, and the gateway
-                # answers 422 for the whole batch rather than that one row.
+                # A page-grained row can exceed that limit, and the gateway
+                # answers 422 for the whole batch rather than only that row.
                 # Losing the tail of a long page beats losing the document.
                 "truncate": "END",
                 "modality": modality,

@@ -4,18 +4,14 @@
 
 """Extraction with nothing running locally: hosted layout, hosted vision.
 
-The third extractor, alongside NeMo Retriever's graph and Docling. Same record
-shape out as both (``text``, ``source_id``, ``element_type``, ``page_number``),
-so :func:`unstructured_ao.ingest.ingest_file` does not know which one ran.
+It returns the same record shape as Docling (``text``, ``source_id``,
+``element_type``, ``page_number``), so
+:func:`unstructured_ao.ingest.ingest_file` does not know which one ran.
 
 Why it exists
 -------------
-The other two each carry a cost this one does not:
-
-* NeMo needs a Ray cluster, and ``RAY_AUTH_MODE=disabled`` to start one.
-* Docling runs page layout on the local CPU — measured at roughly half the
-  wall-clock of a corpus ingest, and it crashes outright on Apple's MPS
-  backend, so it is pinned to CPU.
+Docling runs page layout on the local CPU and crashes on Apple's MPS backend,
+so it is pinned to CPU. The hosted route avoids that local model.
 
 Here the PDF is read with ``pypdfium2`` (text layer and page rasterisation, no
 model), layout comes from NVIDIA's hosted page-elements model at ~0.8s per page,

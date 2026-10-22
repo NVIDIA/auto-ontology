@@ -2,13 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Request shaping and row alignment, without a gateway.
-
-The wire format is checked here because vectors written through this client and
-through NeMo Retriever's embedder have to land in the same space: the shape is
-the retriever's, and a drift in it would show up as quietly worse retrieval
-rather than as an error.
-"""
+"""Request shaping and row alignment, without a gateway."""
 
 from __future__ import annotations
 
