@@ -56,6 +56,29 @@ def test_connected_components_keep_shared_parent_edges_together() -> None:
     assert [len(component) for component in components] == [3, 1]
 
 
+def test_role_prompt_requires_contextual_multi_hop_usage_patterns() -> None:
+    prompt = semantic_fk_roles._render_prompt(
+        "card_games",
+        [
+            _edge("cards", "sets"),
+            _edge("set-translations", "sets"),
+            _edge("foreign-data", "cards"),
+        ],
+        [],
+        tool_calls_remaining=4,
+    )
+
+    assert "entity/literal that may anchor the question" in prompt
+    assert "information requested" in prompt
+    assert "indirect multi-hop use" in prompt
+    assert "shared-parent sibling path" in prompt
+    assert "intermediate parent" in prompt
+    assert "An entity name by itself" in prompt
+    assert "enough to require every adjacent relationship" in prompt
+    assert '"source_table_name": "cards"' in prompt
+    assert '"source_table_name": "set-translations"' in prompt
+
+
 def test_agent_uses_bounded_tool_then_persists_known_edge(monkeypatch) -> None:
     edge = _edge("cards", "sets")
     actions = iter(

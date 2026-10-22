@@ -205,9 +205,22 @@ list is correct when the metadata is insufficient.
 For each proposal:
 - role: a short source-to-target relationship phrase;
 - how_to_use: source and target meaning/grain and what the traversal contributes;
-- when_to_use: concise question patterns that require this relationship;
+- when_to_use: concrete question patterns that require this relationship. Include
+  both the entity/literal that may anchor the question and the information requested.
+  Cover indirect multi-hop use when the anchor belongs to another table in this
+  connected component. For a shared-parent sibling path, spell out when a question
+  anchored on one child must traverse the parent to reach the other child;
 - avoid_when: confusing nearby intents that belong to another table/relationship;
 - evidence_ids: only supplied or observed catalog IDs supporting the guidance.
+
+Analyze the component as a whole before writing any proposal. Guidance must help a
+query planner choose the complete path, not merely describe the local FK. For
+example, if a question names an entity from one table but requests localized or
+historical information stored in a sibling table, mention that combined pattern and
+the intermediate parent in when_to_use/how_to_use. An entity name by itself is not
+enough to require every adjacent relationship: pair the anchor with the requested
+output or constraint. Use avoid_when to distinguish the closest competing sibling
+or similarly named entity.
 
 Database: {database_name}
 Tool calls remaining: {tool_calls_remaining}
