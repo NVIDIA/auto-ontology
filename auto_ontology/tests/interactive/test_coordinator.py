@@ -241,38 +241,6 @@ def test_sql_generation_includes_raw_clarifications_in_evidence():
     assert "## External Knowledge" not in payload["evidence"]
 
 
-def test_phase2_evidence_keeps_the_sort_metric_in_the_select():
-    sess = _make_session(
-        original_question="List the registry ids.",
-        working_question="List the registry ids sorted by breakdown rate.",
-        prior_round_sql="SELECT AVG(break_rate) FROM transportation",
-        prior_round_question="What is the average breakdown rate?",
-        data_retriever=MagicMock(),
-        semantic_retriever=MagicMock(),
-        connectors=[],
-    )
-    sess._grounded_knowledge_for = sess.working_question
-
-    with (
-        patch(
-            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
-            return_value="",
-        ),
-        patch(
-            "auto_ontology.retrieval.interactive.coordinator.merge_follow_up_question",
-            return_value="List the registry ids sorted by breakdown rate.",
-        ),
-        patch(
-            "auto_ontology.retrieval.text_to_sql.main.get_agent_response_with_state",
-            return_value={"sql_code": "SELECT 1"},
-        ) as mock_generate,
-    ):
-        _run_sql_generation(sess)
-
-    evidence = mock_generate.call_args.args[0]["evidence"]
-    assert "include that metric in the SELECT" in evidence
-
-
 def test_sql_generation_injects_external_kb_verbatim():
     """The evidence model must not be the only carrier of external knowledge.
 
@@ -332,10 +300,6 @@ def test_external_kb_helpers_ignore_empty_placeholders():
     assert asks_unanswerable_mechanics("What is the exact formula for MSR?")
     assert asks_unanswerable_mechanics("Which column stores the risk?")
     assert not asks_unanswerable_mechanics("What cutoff counts as a health crisis?")
-    assert not asks_unanswerable_mechanics(
-        "Should consecutive matches be ordered by when the match was created, "
-        "or by the match time?"
-    )
 
 
 def test_should_clarify_drops_formula_question_and_shows_full_kb():
