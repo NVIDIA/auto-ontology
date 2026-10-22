@@ -81,7 +81,10 @@ def _apply_debug_seed(
             "Address whichever of the following applies, or fix a different issue you identify:\n\n"
             "1. COMPOUND FILTER COMPLETENESS: Re-check the evidence and question for "
             "every condition they imply, not just the primary one. Common drops: an "
-            "IS NOT NULL guard on a column feeding an aggregate or ratio, a "
+            "entity/category/type filter stated in the original question (e.g. a specific "
+            "visa class, organ, facility, or group), an IS NOT NULL guard on a column "
+            "or JSONB field feeding a computed metric, aggregate, or ratio (so rows with "
+            "NULL metrics do not appear or float to the top of DESC sorts), a "
             "positivity/non-zero guard on a denominator, a second threshold in a "
             "compound AND/OR, an exact value or unit filter (e.g. status = 'Completed', "
             "unit = 'year'). If the evidence lists multiple conditions, verify all of "
@@ -91,8 +94,21 @@ def _apply_debug_seed(
             'recent"/"latest snapshot"/dedup logic is implied — an extra join or an '
             "extra GROUP BY column can silently fan out or split a group that should "
             'stay merged. If the question asks for top-N or "the one with the highest '
-            "X,\" add LIMIT N. Judge from the question's phrasing whether unmatched "
-            "primary-entity rows should still appear."
+            'X," add LIMIT N, but NEVER add LIMIT 1 to a multi-row or per-entity query. '
+            "Judge from the question's phrasing whether unmatched "
+            "primary-entity rows should still appear.\n\n"
+            "3. ORDER BY, PROJECTION, AND SCALE: Keep ORDER BY <primary_metric> DESC "
+            "(including for cost, fee, time, and count metrics) unless ascending order "
+            "is explicitly requested; do NOT drop a valid ORDER BY or add unrequested "
+            "secondary tie-breaker columns. Project only the requested columns (for "
+            "'basic info' or 'details', select only the entity's ID and name/title — "
+            "never dump all table columns or add an unrequested status label column). "
+            "If the knowledge base defines a percentage/proportion formula with `* 100`, "
+            "preserve `* 100`. If your existing query's filters, grain, projections, "
+            "and ordering already satisfy every requirement above, preserve the exact "
+            "same logical result rows and order (a wrong-result verdict can be caused "
+            "solely by SQL numeric type differences, which are retried automatically "
+            "when the result values stay unchanged)."
         )
         logger.info("Debug seed: wrong results — injecting targeted hints")
     # Preserve round 1's reconstruction lineage as read-only prompt context
@@ -448,6 +464,54 @@ def _values_digest_for(session: InteractiveSessionState, sql: str) -> str | None
     return path_state.get("result_values_digest")
 
 
+def _align_mixed_numeric_types(session: InteractiveSessionState, sql: str) -> str:
+    """When a query returns a mix of ``decimal`` and ``float`` columns, align the
+    ``float`` columns to ``numeric``.
+
+    A mixed result happens when one projection uses an explicit ``DECIMAL`` cast
+    and another touches a native ``float4``/``float8`` column without casting.
+    Unifying them to ``numeric`` avoids failing exact graders on the uncast
+    column while keeping ``first_submit_numeric_kind`` uniform if a debug retry
+    later needs to flip to ``double precision``.
+    """
+    kinds = _numeric_kinds_for(session, sql)
+    if not kinds or not ({"decimal", "float"} <= set(kinds)):
+        return sql
+
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    aligned = flip_numeric_output_types(
+        sql, getattr(connector, "dialect", None), kinds, "numeric"
+    )
+    if not aligned:
+        return sql
+    try:
+        df = execute_chat_sql(connector, aligned, kind="mixed numeric type alignment")
+    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
+        logger.warning(
+            "[%s] Mixed numeric type alignment did not run (%s); keeping the generated SQL",
+            session.task_id,
+            exc,
+        )
+        return sql
+    from auto_ontology.retrieval.text_to_sql.numeric_types import (
+        numeric_column_kinds,
+        result_values_digest,
+    )
+
+    session.path_state["result_numeric_kinds"] = numeric_column_kinds(df)
+    session.path_state["result_numeric_kinds_sql"] = aligned.strip()
+    session.path_state["result_values_digest"] = result_values_digest(df)
+    logger.info(
+        "[%s] Unified mixed decimal/float output columns to numeric",
+        session.task_id,
+    )
+    return aligned
+
+
 def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) -> str:
     """Re-submit *sql* with its numeric columns in the opposite type.
 
@@ -477,7 +541,7 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
             "[%s] Debug retry changed the answer's values; keeping its numeric types",
             session.task_id,
         )
-        return sql
+        return _align_mixed_numeric_types(session, sql)
 
     connector = resolve_connector_from_tables(
         session.path_state.get("relevant_tables") or [], session.connectors
@@ -718,6 +782,7 @@ def step(
         if turn_type == TurnType.DEBUG and debug_error is None:
             sql = _flip_numeric_types_for_retry(session, sql)
         elif turn_type != TurnType.DEBUG:
+            sql = _align_mixed_numeric_types(session, sql)
             session.first_submit_numeric_kind = dominant_kind(
                 _numeric_kinds_for(session, sql)
             )

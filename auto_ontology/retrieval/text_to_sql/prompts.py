@@ -41,6 +41,19 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
         "this only to one aggregate over alternatives; if separate results, a "
         "comparison, a per-category breakdown, or distinct metrics are explicitly "
         "requested, preserve those separate outputs.\n"
+        "- When the question asks for an entity's general 'basic information', "
+        "'details', or 'some info' without naming specific attributes in the "
+        "question or evidence, project only the entity's primary identifier and "
+        "name/title column(s) alongside the requested metrics — never dump all "
+        "descriptive columns of the table.\n"
+        "- When concatenating multiple labels or values into a comma-separated "
+        "string (via CONCAT_WS, STRING_AGG, or CASE), use ', ' (comma followed by "
+        "a space) as the delimiter unless an unspaced comma is explicitly requested.\n"
+        "- When computing a derived formula, ratio, score, or category from "
+        "nullable columns or JSONB fields, exclude rows where the required input "
+        "operands are NULL (unless the question explicitly asks to include all "
+        "rows even with missing data/gaps, in which case use ORDER BY ... DESC "
+        "NULLS LAST so NULLs never float to the top).\n"
     )
 
 

@@ -48,6 +48,28 @@ def test_float_cast_inside_an_expression_is_rewritten() -> None:
     assert "ratio" in rewritten
 
 
+def test_decimal_cast_combined_with_float_column_wraps_outer_projection() -> None:
+    rewritten = float_casts_to_numeric(
+        "SELECT AVG(CAST(cost_est AS NUMERIC) / NULLIF(qol_val * 8, 0)) AS avg_cer FROM t",
+        "postgres",
+    )
+    assert rewritten.startswith("SELECT CAST(AVG(")
+    assert rewritten.endswith("AS DECIMAL) AS avg_cer FROM t")
+
+
+def test_percent_rank_is_not_wrapped_when_flipping_to_numeric() -> None:
+    flipped = flip_numeric_output_types(
+        "SELECT spread_pct, PERCENT_RANK() OVER (ORDER BY spread_pct) AS rk FROM t",
+        "postgres",
+        ["float", "float"],
+        "numeric",
+    )
+    assert flipped == (
+        "SELECT CAST(spread_pct AS DECIMAL), "
+        "PERCENT_RANK() OVER (ORDER BY spread_pct) AS rk FROM t"
+    )
+
+
 def test_sql_without_a_float_cast_is_returned_untouched() -> None:
     sql = "SELECT  a::numeric,   CAST(b AS INTEGER) FROM t  -- keep as written"
     assert float_casts_to_numeric(sql, "postgres") is sql

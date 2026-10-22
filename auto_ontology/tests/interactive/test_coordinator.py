@@ -416,3 +416,43 @@ def test_first_submit_records_which_numeric_type_it_returned():
 
     assert sess.first_submit_numeric_kind == "float"
     assert sess.first_submit_values_digest == "digest"
+
+
+def test_first_submit_aligns_mixed_decimal_and_float_columns():
+    from decimal import Decimal
+    import pandas as pd
+
+    class _MixedConnector:
+        dialect = "postgres"
+        database_name = "alien"
+
+        def __init__(self) -> None:
+            self.executed: list[str] = []
+
+        def execute(self, sql: str, **_):
+            self.executed.append(sql)
+            return pd.DataFrame({"a": [Decimal("1.50")], "b": [Decimal("2.50")]})
+
+    connector = _MixedConnector()
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sql = "SELECT a, b FROM aliens"
+    sess.path_state["result_numeric_kinds"] = ["decimal", "float"]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "digest"
+    sess.path_state["relevant_tables"] = []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert action.sql == "SELECT a, CAST(b AS DECIMAL) FROM aliens"
+    assert sess.first_submit_numeric_kind == "decimal"
+    assert sess.path_state["result_numeric_kinds"] == ["decimal", "decimal"]

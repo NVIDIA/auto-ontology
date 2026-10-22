@@ -87,7 +87,7 @@ Formulas or conditions whose exact specification is still missing, ranked most-c
 STRICT RULES — follow every one of these exactly:
 1. NEVER ask where data is stored. Do not ask about or mention the words 'tables', 'columns', 'data', 'schema' or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. BAD: "Which column stores quality X?"  GOOD: or "What is the exact formula for quality X?". The user has explicit instructions to not "answer any questions about the underlying database schema (including table or column names)".
 2. Only ask for information not provided by the schema, relevant external knowledge, resolved schema mappings, history, or scientific tautologies: undefined terms, acronyms, or exact formulas missing from all four. A metric being NAMED in external knowledge does NOT mean its computation formula is known — if the exact formula for computing a metric from database columns is not explicitly stated anywhere, ask for it.
-3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output.
+3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results", "show basic information", "show some info", "show their details"), prioritize asking the user which specific metrics or fields they want in the output.
 4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). If no other unresolved terms or formulas persist, you MAY revisit an unanswered topic from a different angle — e.g. if asking for a formula went unanswered, try asking for a description of the concept instead. You MAY also ask follow-up questions on topics the user DID answer (e.g. when they say "X is calculated by combining Y and Z", you can ask for the exact formula for X).
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, or db_schema, ask about them one at a time.
 6. Suggested format for questions: "As a metric, what does [TERM] measure and what is its exact formula?" Always name the exact term from the ambiguity you are trying to resolve in your question.
@@ -127,16 +127,20 @@ _SORT_DIRECTION = re.compile(
 
 _DEFAULT_SORT_HINT = (
     "DefaultSort: a primary output metric is the metric most central to the query, "
-    "typically the one used in a filter condition or explicitly requested as the "
-    "main output value. Identify if such a metric exists for this Question. If it "
-    "exists and is itself a computed score or metric (not a categorical dimension"
-    "like a name, tier, or group/bucket label), prefer ORDER BY that metric DESC — "
-    "unless the question explicitly suggests ascending order, or the metric is one "
-    "where a lower value is the better or more important result (e.g. a cost, "
-    "error rate, time, or other quantity where smaller is preferable), in which "
-    "case use ASC instead. If no single metric is clearly primary, or the primary "
-    "output is a categorical dimension rather than a computed value, do not add an "
-    "ORDER BY."
+    "typically the one used in a filter condition, computed by a formula, or "
+    "aggregated in a breakdown (e.g. COUNT, SUM, AVG, ratio, score, cost, fee, or "
+    "duration). Identify if such a metric exists for this Question. If it exists, "
+    "prefer ORDER BY that metric DESC — unless the question explicitly requests "
+    "ascending/lowest-first order, orders by a rank number (1, 2, 3), or orders "
+    "chronologically by a date/year/month dimension, in which case use ASC. Do NOT "
+    "use ASC merely because the metric is a cost, fee, time, or error rate. Do NOT "
+    "add secondary tie-breaker columns to ORDER BY unless the question or evidence "
+    "explicitly specifies a tie-breaker. When ordering DESC by a computed or "
+    "nullable metric, filter out rows where the metric's required input columns are "
+    "NULL (or use DESC NULLS LAST if the question explicitly asks to include all "
+    "entities even with missing/gap data) so NULL values never appear at the top. "
+    "If no metric or aggregate is present and the output is only a flat list of "
+    "entity identifiers, order by the identifier ASC or omit ORDER BY."
 )
 
 

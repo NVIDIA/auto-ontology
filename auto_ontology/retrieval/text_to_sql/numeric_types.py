@@ -44,6 +44,32 @@ TargetType = Literal["numeric", "double"]
 
 _POSTGRES_DIALECTS = frozenset({"postgres", "postgresql"})
 _FLOAT_TYPES = frozenset({exp.DataType.Type.FLOAT, exp.DataType.Type.DOUBLE})
+_DECIMAL_TYPES = frozenset({exp.DataType.Type.DECIMAL})
+_ARITHMETIC_OR_AVG = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Avg)
+
+
+def _has_decimal_cast(node: exp.Expression) -> bool:
+    """Whether *node* contains an explicit ``CAST(.. AS NUMERIC/DECIMAL)``."""
+    for cast in node.find_all(exp.Cast, exp.TryCast):
+        target = cast.args.get("to")
+        if isinstance(target, exp.DataType) and target.this in _DECIMAL_TYPES:
+            return True
+    return False
+
+
+def _is_intrinsic_float_window(node: exp.Expression) -> bool:
+    """Whether *node* is ``PERCENT_RANK() OVER (..)`` or ``CUME_DIST() OVER (..)``."""
+    inner = node.this if isinstance(node, exp.Alias) else node
+    while isinstance(inner, exp.Paren):
+        inner = inner.this
+    if not isinstance(inner, exp.Window):
+        return False
+    func = inner.this
+    if func is None:
+        return False
+    return (
+        func.sql(dialect="postgres").upper().startswith(("PERCENT_RANK", "CUME_DIST"))
+    )
 
 
 def _is_postgres(dialect: Optional[str]) -> bool:
@@ -79,6 +105,35 @@ def float_casts_to_numeric(sql: str, dialect: Optional[str]) -> str:
         if isinstance(target, exp.DataType) and target.this in _FLOAT_TYPES:
             cast.set("to", exp.DataType.build("numeric"))
             changed = True
+
+    # In PostgreSQL, combining a NUMERIC operand with a native real/float8
+    # column (e.g. ``AVG(CAST(x AS NUMERIC) / float_col)`` or
+    # ``CAST(x AS DECIMAL) * float_col``) silently promotes the expression to
+    # double precision. When a top-level arithmetic or AVG projection already
+    # contains an explicit NUMERIC/DECIMAL cast inside it, wrap the outer
+    # expression in ``CAST(.. AS NUMERIC)`` so the intended numeric type is
+    # preserved.
+    if isinstance(tree, exp.Select):
+        for projection in tree.expressions:
+            inner = projection.this if isinstance(projection, exp.Alias) else projection
+            unwrapped = inner
+            while isinstance(unwrapped, exp.Paren):
+                unwrapped = unwrapped.this
+            if isinstance(unwrapped, _ARITHMETIC_OR_AVG) and _has_decimal_cast(
+                unwrapped
+            ):
+                numeric_type = exp.DataType.build("numeric")
+                if isinstance(projection, exp.Alias):
+                    projection.set(
+                        "this",
+                        exp.Cast(this=projection.this.copy(), to=numeric_type),
+                    )
+                else:
+                    projection.replace(
+                        exp.Cast(this=projection.copy(), to=numeric_type)
+                    )
+                changed = True
+
     return tree.sql(dialect="postgres") if changed else sql
 
 
@@ -218,6 +273,8 @@ def flip_numeric_output_types(
     converted = 0
     for projection, kind in zip(projections, kinds):
         if kind != convert_from:
+            continue
+        if target == "numeric" and _is_intrinsic_float_window(projection):
             continue
         if isinstance(projection, exp.Alias):
             projection.set(
