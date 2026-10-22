@@ -28,6 +28,33 @@ from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 logger = logging.getLogger(__name__)
 
 
+def _format_verified_grounding(state: AgentState) -> str:
+    """Compact facts produced by the optional text-to-SQL value-grounding node."""
+    path_state = state.get("path_state") or {}
+    evidence_columns = list(path_state.get("value_grounding_evidence_columns") or [])
+    anchors = list(state.get("value_anchors") or [])
+    if not evidence_columns and not anchors:
+        return ""
+    lines = [
+        "## Verified pre-extraction grounding",
+        "These are database-verified facts, not additional user requests. Preserve "
+        "their exact values and use their columns when interpreting evidence.",
+    ]
+    for column in evidence_columns:
+        lines.append(
+            "- Evidence column: "
+            f"{column.get('schema_name')}.{column.get('table_name')}."
+            f"{column.get('column_name')}"
+        )
+    for anchor in anchors:
+        lines.append(
+            f"- Value {anchor.get('phrase')!r} is stored as "
+            f"{anchor.get('stored_value')!r} in "
+            f"{anchor.get('schema_name')}.{anchor.get('tbl')}.{anchor.get('col')}"
+        )
+    return "\n".join(lines)
+
+
 def _filter_glossary_by_used_names(
     glossary: list[dict[str, str]],
     llm_names: list[str],
@@ -77,16 +104,16 @@ class QuestionExtractionAgent(BaseAgent):
         result: Dict[str, Any] = {"path_state": path_state, "glossary": []}
 
         try:
-            messages = [
-                SystemMessage(
-                    content=create_question_extraction_prompt(
-                        original_question,
-                        glossary,
-                        evidence=evidence,
-                        include_subject=self._include_subject,
-                    )
-                )
-            ]
+            prompt = create_question_extraction_prompt(
+                original_question,
+                glossary,
+                evidence=evidence,
+                include_subject=self._include_subject,
+            )
+            grounding = _format_verified_grounding(state)
+            if grounding:
+                prompt = f"{prompt}\n\n{grounding}"
+            messages = [SystemMessage(content=prompt)]
             schema = (
                 QuestionExtractionModel
                 if self._include_subject

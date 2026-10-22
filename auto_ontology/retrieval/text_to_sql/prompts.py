@@ -82,6 +82,7 @@ create_sql_user_prompt = (
     "Use ONLY the tables and columns listed below. "
     "Do NOT invent tables, schemas, or columns.\n\n"
     "{tables}\n\n"
+    "{grounded_evidence_columns}"
     "## Semantically Important Columns\n"
     "The columns below were matched directly to entities extracted from the "
     "question, so give them extra weight when resolving ambiguity.\n"

@@ -83,6 +83,7 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "calculation_subtype",
         "sql_template",
         "extracted_evidence",
+        "value_grounding_evidence_columns",
         "entities",
         "subject",
         "retrieved_column_attributes",
@@ -206,14 +207,12 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
     ]
     initial_evidence = payload.get("evidence") or ""
     initial_sql_examples = list(payload.get("sql_examples") or [])
-    initial_value_anchors = list(payload.get("value_anchors") or [])
     initial_glossary = list(acronyms or [])
     restore_from: RetryRestoreState = {
         "initial_question": submitted_question,
         "evidence": initial_evidence,
         "messages": list(messages),
         "sql_examples": list(initial_sql_examples),
-        "value_anchors": list(initial_value_anchors),
         "glossary": list(initial_glossary),
         "path_state": dict(initial_path_state),
     }
@@ -222,9 +221,10 @@ def _build_state(payload: TextToSQLPayload) -> AgentState:
         "llm": llm_client,
         "reasoning_llm": reasoning_llm_client,
         "initial_question": submitted_question,
+        "original_evidence": initial_evidence,
         "evidence": initial_evidence,
         "sql_examples": initial_sql_examples,
-        "value_anchors": initial_value_anchors,
+        "value_anchors": [],
         "calculation_only": calculation_only,
         "shorten_answer": payload.get("shorten_answer", False),
         "validate_sql_values": payload.get("validate_sql_values", False),
@@ -274,10 +274,11 @@ def _restore_for_full_pipeline_retry(state: AgentState) -> AgentState:
     restored.update(
         {
             "initial_question": restore_from["initial_question"],
+            "original_evidence": restore_from["evidence"],
             "evidence": restore_from["evidence"],
             "messages": list(restore_from["messages"]),
             "sql_examples": list(restore_from["sql_examples"]),
-            "value_anchors": list(restore_from["value_anchors"]),
+            "value_anchors": [],
             "glossary": list(restore_from["glossary"]),
             "path_state": restored_path_state,
             "decision": "",

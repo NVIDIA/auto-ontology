@@ -46,6 +46,7 @@ def test_build_state_treats_absent_or_empty_evidence_as_none(
     state = main_module._build_state(cast(TextToSQLPayload, payload))
 
     assert state["evidence"] == ""
+    assert state["original_evidence"] == ""
     assert state["initial_question"] == "How many accounts?"
     assert state["messages"][1].content == "How many accounts?"
 
@@ -89,6 +90,7 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
     )
 
     assert state["evidence"] == "active refers to accounts.status_code"
+    assert state["original_evidence"] == "active refers to accounts.status_code"
     assert state["initial_question"] == "How many accounts?"
     assert state["path_state"]["processing_question"] == "How many active accounts?"
     assert state["messages"][1].content == "How many active accounts?"
@@ -99,6 +101,27 @@ def test_build_state_keeps_evidence_separate_from_every_question_value(
         state["messages"][0].content,
         "How many active accounts?",
     ]
+
+
+def test_build_state_ignores_caller_supplied_value_anchors(
+    main_module: ModuleType,
+) -> None:
+    state = main_module._build_state(
+        cast(
+            TextToSQLPayload,
+            {
+                "question": "Show active accounts",
+                "value_anchors": [{"phrase": "caller supplied"}],
+                "data_retriever": object(),
+                "connectors": [
+                    SimpleNamespace(dialect="sqlite", database_name="db_test")
+                ],
+            },
+        )
+    )
+
+    assert state["value_anchors"] == []
+    assert "value_anchors" not in state["restore_from"]
 
 
 @pytest.mark.parametrize(

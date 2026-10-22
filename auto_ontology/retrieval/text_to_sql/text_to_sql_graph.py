@@ -34,6 +34,9 @@ from auto_ontology.retrieval.text_to_sql.agents.combined_precheck import (
 from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
     QuestionIntentAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.value_grounding import (
+    ValueGroundingAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.information_agent import (
     InformationAgent,
 )
@@ -337,6 +340,7 @@ def create_graph():
 
     # Routing agents
     question_intent_agent = QuestionIntentAgent()
+    value_grounding_agent = ValueGroundingAgent()
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
     information_agent = InformationAgent()
@@ -357,6 +361,9 @@ def create_graph():
 
     question_intent_node = _make_node(
         "question_intent", agent_wrapper(question_intent_agent)
+    )
+    value_grounding_node = _make_node(
+        "value_grounding", agent_wrapper(value_grounding_agent)
     )
     question_extraction_node = _make_node(
         "question_extraction", agent_wrapper(question_extraction_agent)
@@ -445,6 +452,7 @@ def create_graph():
 
     # Add only nodes instantiated above.
     graph.add_node("question_intent", question_intent_node)
+    graph.add_node("value_grounding", value_grounding_node)
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("information_agent", information_node)
@@ -463,7 +471,8 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
-    graph.add_edge("question_intent", "question_extraction")
+    graph.add_edge("question_intent", "value_grounding")
+    graph.add_edge("value_grounding", "question_extraction")
     graph.add_edge("question_extraction", "retrieve_candidates")
     graph.add_conditional_edges(
         "retrieve_candidates",

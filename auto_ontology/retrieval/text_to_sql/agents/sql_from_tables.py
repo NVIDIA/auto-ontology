@@ -27,7 +27,10 @@ from langchain_core.messages import AIMessage
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_grounded_evidence_columns_for_prompt,
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.message_utils import (
     build_focused_sql_messages,
 )
@@ -47,6 +50,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_dialect_rules,
     format_dual_question_block,
     format_projection_rules,
+    format_value_anchors_section,
 )
 from auto_ontology.retrieval.data_access.relevant_tables import get_relevant_tables
 
@@ -127,6 +131,12 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_general_prompt
 
         # Build user prompt with formatted tables
+        grounded_columns = format_grounded_evidence_columns_for_prompt(
+            path_state.get("value_grounding_evidence_columns"),
+            target_db=target_db,
+            dialect=dialect,
+        )
+        value_anchors = format_value_anchors_section(state.get("value_anchors"))
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
@@ -141,11 +151,14 @@ class SQLFromTablesAgent(BaseAgent):
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
             ),
+            grounded_evidence_columns=(
+                f"{grounded_columns}\n\n" if grounded_columns else ""
+            ),
             important_columns="No semantically matched columns.",
             join_paths="",
             custom_analyses="",
             glossary="",
-            value_anchors="",
+            value_anchors=f"{value_anchors}\n\n" if value_anchors else "",
             calculation_template="",
             target_sql_examples="",
             sql_examples="",

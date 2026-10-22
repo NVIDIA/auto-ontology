@@ -348,6 +348,36 @@ def format_important_columns_for_prompt(
     return "\n".join(lines) or "No semantically matched columns."
 
 
+def format_grounded_evidence_columns_for_prompt(
+    columns: list[dict[str, Any]] | None,
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render physical columns explicitly grounded from original evidence."""
+    if not columns:
+        return ""
+    lines = [
+        "## Evidence-Matched Schema Columns",
+        "The original evidence explicitly identified these physical columns. "
+        "Treat them as high-confidence mappings when the evidence rule applies.",
+    ]
+    seen: set[tuple[str, str]] = set()
+    for column in columns:
+        table = qualify_table(
+            str(column.get("database_name") or target_db or ""),
+            str(column.get("schema_name") or ""),
+            str(column.get("table_name") or ""),
+            dialect,
+        )
+        column_name = str(column.get("column_name") or "")
+        key = (table.casefold(), column_name.casefold())
+        if not table or not column_name or key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {table}.{column_name}")
+    return "\n".join(lines) if len(lines) > 2 else ""
+
+
 _TABLE_HEADERS = ["table", "label", "description", "primary key"]
 _COLUMN_HEADERS = [
     "column",

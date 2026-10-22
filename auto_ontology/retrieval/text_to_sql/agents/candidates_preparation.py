@@ -575,15 +575,31 @@ class CandidatePreparationAgent(BaseAgent):
         # force-include so the relevance filter sees them as candidates: most
         # anchor tables are not wanted, and deciding that is the filter's job.
         incoming_anchors = list(state.get("value_anchors") or [])
-        anchor_table_ids = [
+        evidence_columns = list(
+            path_state.get("value_grounding_evidence_columns") or []
+        )
+        grounded_table_ids = list(
+            dict.fromkeys(
+                str(table_id)
+                for item in [*incoming_anchors, *evidence_columns]
+                if (table_id := item.get("table_id"))
+            )
+        )
+        grounded_table_names = {
+            str(item.get("tbl") or item.get("table_name") or "").casefold()
+            for item in [*incoming_anchors, *evidence_columns]
+            if item.get("table_id")
+        }
+        anchor_table_ids = grounded_table_ids + [
             table_id
             for table_id in (
                 find_table_id_by_name(name, target_db)
                 for name in anchor_tables_missing_from_scope(
                     incoming_anchors, relevant_tables
                 )
+                if name.casefold() not in grounded_table_names
             )
-            if table_id
+            if table_id and table_id not in grounded_table_ids
         ]
         if anchor_table_ids:
             anchor_tables = fetch_tables_by_ids(anchor_table_ids)

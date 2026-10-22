@@ -560,6 +560,7 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
         "tbl": "race",
         "col": "race",
         "stored_value": "Human",
+        "table_id": "race",
     }
     judged: list[list[str]] = []
 
@@ -597,7 +598,9 @@ def test_the_table_an_anchor_points_at_reaches_the_relevance_filter(
     monkeypatch.setattr(
         candidates_preparation,
         "find_table_id_by_name",
-        lambda name, db=None: "race" if name == "race" else None,
+        lambda *_args, **_kwargs: pytest.fail(
+            "grounded table IDs must not be resolved by name"
+        ),
     )
     monkeypatch.setattr(
         candidates_preparation,

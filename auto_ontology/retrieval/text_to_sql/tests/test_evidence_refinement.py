@@ -722,6 +722,7 @@ def test_prediction_graph_can_bypass_refinement(
         for edge in create_graph().compile().get_graph().edges
     }
 
-    assert ("question_intent", "question_extraction", False) in edges
+    assert ("question_intent", "value_grounding", False) in edges
+    assert ("value_grounding", "question_extraction", False) in edges
     assert ("prepare_candidates", "prepare_prediction_graph", True) in edges
     assert ("prepare_candidates", "refine_evidence", True) in edges

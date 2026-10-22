@@ -41,7 +41,6 @@ class TextToSQLPayload(TypedDict):
     # are advisory and usually come from *other* databases, so they inform
     # query shape only — never identifiers or filter values.
     sql_examples: NotRequired[list[dict[str, str]]]
-    value_anchors: NotRequired[list[dict[str, str]]]
     # When true, intent preprocessing skips top-level type selection but still
     # classifies the calculation subtype and extracts inline evidence.
     calculation_only: NotRequired[bool]
@@ -75,7 +74,6 @@ class RetryRestoreState(TypedDict):
     evidence: str
     messages: list[BaseMessage]
     sql_examples: list[dict[str, str]]
-    value_anchors: list[dict[str, str]]
     glossary: list[dict[str, str]]
     path_state: dict
 
@@ -86,6 +84,7 @@ class AgentState(TypedDict):
     llm: ChatNVIDIA
     reasoning_llm: NotRequired[ChatNVIDIA]
     initial_question: str
+    original_evidence: NotRequired[str]
     evidence: NotRequired[str]
     sql_examples: NotRequired[list[dict[str, str]]]
     value_anchors: NotRequired[list[dict[str, str]]]

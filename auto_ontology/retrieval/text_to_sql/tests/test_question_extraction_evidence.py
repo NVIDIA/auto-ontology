@@ -91,6 +91,55 @@ def test_agent_forwards_state_evidence_without_changing_original_question(
     assert result["path_state"]["entities"] == ["loyalty points", "customer"]
 
 
+def test_agent_forwards_verified_value_and_evidence_column_grounding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_invoke(_llm, messages, _schema):
+        captured["prompt"] = messages[0].content
+        return QuestionExtractionLiteModel(
+            sanitized_question="Show Angel of Mercy",
+            required_entity_name=["Angel of Mercy"],
+        )
+
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    QuestionExtractionAgent(include_subject=False).execute(
+        {
+            "llm": MagicMock(),
+            "initial_question": "Show Angel of Mercy",
+            "evidence": "",
+            "value_anchors": [
+                {
+                    "phrase": "Angel of Mercy",
+                    "stored_value": "Angel of Mercy",
+                    "schema_name": "main",
+                    "tbl": "cards",
+                    "col": "name",
+                }
+            ],
+            "path_state": {
+                "value_grounding_evidence_columns": [
+                    {
+                        "schema_name": "main",
+                        "table_name": "cards",
+                        "column_name": "name",
+                    }
+                ]
+            },
+            "glossary": [],
+        }
+    )
+
+    assert "## Verified pre-extraction grounding" in captured["prompt"]
+    assert "main.cards.name" in captured["prompt"]
+    assert "'Angel of Mercy'" in captured["prompt"]
+
+
 def test_intent_rewrite_and_evidence_feed_question_extraction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

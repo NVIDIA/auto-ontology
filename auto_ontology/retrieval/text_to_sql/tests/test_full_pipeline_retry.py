@@ -32,6 +32,7 @@ def _initial_state() -> AgentState:
             "llm": object(),
             "reasoning_llm": object(),
             "initial_question": "original question",
+            "original_evidence": "original evidence",
             "evidence": "original evidence",
             "sql_examples": [{"question": "original", "sql": "SELECT 1"}],
             "value_anchors": [{"phrase": "active"}],
@@ -54,7 +55,6 @@ def _initial_state() -> AgentState:
                 "evidence": "original evidence",
                 "messages": list(base_messages),
                 "sql_examples": [{"question": "original", "sql": "SELECT 1"}],
-                "value_anchors": [{"phrase": "active"}],
                 "glossary": [{"name": "ARR"}],
                 "path_state": dict(baseline_path),
             },
@@ -165,12 +165,14 @@ def test_restore_discards_failed_attempt_mutations_and_messages() -> None:
 
     assert restored["full_pipeline_attempt"] == 2
     assert restored["initial_question"] == "original question"
+    assert restored["original_evidence"] == "original evidence"
     assert restored["evidence"] == "original evidence"
     assert [message.content for message in restored["messages"]] == [
         "base system",
         "original question",
     ]
     assert restored["sql_examples"] == [{"question": "original", "sql": "SELECT 1"}]
+    assert restored["value_anchors"] == []
     assert restored["glossary"] == [{"name": "ARR"}]
     assert restored["decision"] == ""
     assert restored["validate_sql_values"] is True

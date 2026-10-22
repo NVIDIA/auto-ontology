@@ -37,6 +37,7 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_grounded_evidence_columns_for_prompt,
     format_important_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
@@ -300,6 +301,13 @@ class SQLFromCandidatesAgent(BaseAgent):
                 main_question=main_question,
                 authoritative_evidence=authoritative_evidence_section,
                 tables=tables_section,
+                grounded_evidence_columns=prompt_section(
+                    format_grounded_evidence_columns_for_prompt(
+                        path_state.get("value_grounding_evidence_columns"),
+                        target_db=target_db,
+                        dialect=dialect,
+                    )
+                ),
                 important_columns=important_columns,
                 join_paths=join_paths,
                 glossary=prompt_section("\n\n".join(glossary_parts)),

@@ -75,6 +75,48 @@ def test_tables_agent_uses_state_evidence_as_authoritative_context(
     assert "events.duration LIKE '1:54%'" not in messages[1].content
 
 
+def test_tables_agent_uses_internally_grounded_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list = []
+    monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
+    monkeypatch.setattr(
+        sql_from_tables,
+        "resolve_connector_from_tables",
+        lambda *a, **k: SimpleNamespace(dialect="sqlite"),
+    )
+    monkeypatch.setattr(
+        sql_from_tables,
+        "invoke_with_structured_output",
+        lambda _llm, messages, _model: captured.extend(messages),
+    )
+
+    SQLFromTablesAgent().execute(
+        {
+            "llm": MagicMock(),
+            "initial_question": "Show active accounts",
+            "evidence": "",
+            "messages": [],
+            "connectors": [object()],
+            "data_retriever": object(),
+            "value_anchors": [
+                {
+                    "phrase": "active",
+                    "kind": "value",
+                    "tbl": "accounts",
+                    "col": "status",
+                    "stored_value": "ACTIVE",
+                }
+            ],
+            "path_state": {"relevant_tables": [{}]},
+        }
+    )
+
+    assert "## Verified Database Values" in captured[-1].content
+    assert 'accounts."status"' in captured[-1].content
+    assert "'ACTIVE'" in captured[-1].content
+
+
 def test_tables_agent_does_not_scan_question_for_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
