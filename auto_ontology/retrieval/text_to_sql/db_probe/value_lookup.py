@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Safe live lookup of one textual value in one catalog column."""
+"""Safe live lookup of one literal value in one catalog column."""
 
 from __future__ import annotations
 
@@ -24,8 +24,9 @@ def _first_value(result: dict[str, Any]) -> str | None:
 
 
 def _text_ref(column_ref: str, dialect: str | None) -> str:
-    """Make Postgres ENUM values usable by LOWER/TRIM without harming text."""
-    return f"{column_ref}::text" if dialect == "postgres" else column_ref
+    """Cast every physical type to comparable text in the active dialect."""
+    target_type = "STRING" if dialect in {"bigquery", "databricks", "spark"} else "TEXT"
+    return f"CAST({column_ref} AS {target_type})"
 
 
 def _run_value_probe(

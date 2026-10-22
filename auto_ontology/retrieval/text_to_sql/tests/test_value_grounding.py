@@ -53,31 +53,31 @@ def _rows() -> list[dict]:
             "column_id": "cards-year",
             "data_type": "INTEGER",
             "description": "Release year",
-            "sample_values": [2001],
+            "sample_values": "[2001]",
+        },
+        {
+            "database_name": "card_games",
+            "table_schema": "main",
+            "table_name": "cards",
+            "table_id": "cards-table",
+            "column_name": "released_at",
+            "column_id": "cards-released-at",
+            "data_type": "DATE",
+            "description": "Release date",
+            "sample_values": ["2001-01-01"],
+        },
+        {
+            "database_name": "card_games",
+            "table_schema": "main",
+            "table_name": "cards",
+            "table_id": "cards-table",
+            "column_name": "is_foil",
+            "column_id": "cards-is-foil",
+            "data_type": "BOOLEAN",
+            "description": "Whether the card is foil",
+            "sample_values": [True, False],
         },
     ]
-
-
-@pytest.mark.parametrize(
-    ("data_type", "expected"),
-    [
-        ("TEXT", True),
-        ("VARCHAR(255)", True),
-        ("STRING", True),
-        ("INTEGER", False),
-        ("DECIMAL(10,2)", False),
-        ("DATE", False),
-        ("TIMESTAMP", False),
-        ("BOOLEAN", False),
-        ("", False),
-        (None, False),
-    ],
-)
-def test_only_explicit_text_types_are_grounding_candidates(
-    data_type: str | None,
-    expected: bool,
-) -> None:
-    assert value_grounding._is_textual_type(data_type) is expected
 
 
 class _FakeProbeExecutor:
@@ -155,6 +155,8 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
         probes.append((kwargs["match_kind"], kwargs["column_name"]))
         if kwargs["match_kind"] == "contains" and kwargs["column_name"] == "name":
             return "Angel of Mercy card"
+        if kwargs["match_kind"] == "equal" and kwargs["column_name"] == "release_year":
+            return "2001"
         return None
 
     monkeypatch.setattr(
@@ -184,15 +186,23 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
     assert "cards.type identifies the card type" in captured["prompt"]
     assert "rewritten question" not in captured["prompt"]
     assert "rewritten evidence" not in captured["prompt"]
-    assert '"name":"name","description":"Printed card name"' in captured["prompt"]
-    assert '"samples":["Angel of Mercy","Counterspell"]' in captured["prompt"]
-    assert "release_year" not in captured["prompt"]
-    assert "data_type" not in captured["prompt"]
+    assert (
+        '"name":"name","data_type":"TEXT","description":"Printed card name"'
+        in captured["prompt"]
+    )
+    assert (
+        '"name":"release_year","data_type":"INTEGER",'
+        '"description":"Release year"' in captured["prompt"]
+    )
+    assert '"name":"released_at","data_type":"DATE"' in captured["prompt"]
+    assert '"name":"is_foil","data_type":"BOOLEAN"' in captured["prompt"]
+    assert '"samples"' not in captured["prompt"]
     assert probes == [
         ("equal", "type"),
         ("equal", "name"),
         ("contains", "type"),
         ("contains", "name"),
+        ("equal", "release_year"),
     ]
     assert result["value_anchors"] == [
         {
@@ -205,7 +215,18 @@ def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
             "schema_name": "main",
             "table_id": "cards-table",
             "column_id": "cards-name",
-        }
+        },
+        {
+            "phrase": "2001",
+            "kind": "value",
+            "tbl": "cards",
+            "col": "release_year",
+            "stored_value": "2001",
+            "database_name": "card_games",
+            "schema_name": "main",
+            "table_id": "cards-table",
+            "column_id": "cards-year",
+        },
     ]
     assert (
         result["path_state"]["value_grounding_evidence_columns"][0]["column_id"]
@@ -275,6 +296,7 @@ def test_live_lookup_supports_case_insensitive_equal_and_contains_probes() -> No
     assert [purpose for purpose, _ in exact.calls] == ["value_anchor_equal"]
     assert "LOWER(TRIM(" in exact.calls[0][1]
     assert " = LOWER(TRIM(" in exact.calls[0][1]
+    assert 'CAST("status" AS TEXT)' in exact.calls[0][1]
 
     normalized = _QueuedExecutor([_result(" ACTIVE ")])
     assert (
