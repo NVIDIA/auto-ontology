@@ -141,16 +141,16 @@ Business choices still open, ranked most-critical first. Ask when one of these i
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored, and never ask the user to name a column, table, or SQL structure. If external knowledge already states a formula, use that text — do not ask the user to restate it. BAD: "Which column stores quality X?" BAD: "What is the exact formula for quality X?" GOOD: "When you say health crisis, which documented risk condition do you mean?" GOOD: "Should consecutive matches be ordered by when the match was created, or by the match time?" GOOD: "Should each reading be its own row, or one row per robot?"
-2. Ask about a business choice the schema, external knowledge, and history do not already decide: which of two documented meanings applies, which population is in scope, a cutoff the knowledge does not state, which event orders a sequence, or whether one reading is one row. If the formula is not in external knowledge, ask what the metric means. The user will often state the calculation in that answer. Do not phrase the question as a request for a formula, a column, or SQL.
+1. NEVER ask where data is stored, and never ask the user to name a column, table, or SQL structure. If external knowledge already states a formula, use that text — do not ask the user to restate it. BAD: "Which column stores quality X?" BAD: "What is the exact formula for quality X?" GOOD: "When you say health crisis, which documented risk condition do you mean?" GOOD: "What do you mean by the Overall Disaster Severity Index?" GOOD: "Should consecutive matches be ordered by when the match was created, or by the match time?" GOOD: "Should each reading be its own row, or one row per robot?"
+2. Ask about a business choice the schema, external knowledge, and history do not already decide: which of two documented meanings applies, which population is in scope, a cutoff the knowledge does not state, which event orders a sequence, or whether one reading is one row. If knowledge defines a filter as a threshold on a named index and that index is not calculated anywhere in the knowledge, ask what the index means. The user will often state the calculation in that answer. Do not phrase the question as a request for a formula, a column, or SQL. Do not ask what a metric means when its calculation is already in the knowledge or in a prior answer.
 3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output. Ask for the business names, not for columns or formulas.
 4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). Do not rephrase an unanswered question into a request for a formula, a column, or SQL. You MAY ask a follow-up about a business choice the user already started to answer, such as which of two meanings they confirmed or which event orders the rows.
 5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, full external knowledge, or db_schema, ask what the business term refers to, one term at a time. Do not ask how to calculate it when external knowledge already states the formula.
-6. Suggested format: "What do you mean by [TERM]?" Name the exact term. For ordering or grain, name the two business alternatives. Do not ask where a value is stored.
-7. Pick the column yourself when the candidates mean the same thing. If two candidates are different events or different grains, and the choice changes which rows qualify, ask which one the user means.
+6. Suggested format: "What do you mean by [TERM]?" Name the exact term. For ordering or grain, name the two business alternatives. Do not ask where a value is stored. Do not ask what a metric means when its calculation is already known. Ask the open ordering or grain question instead.
+7. Pick the column yourself when the candidates mean the same thing. If two candidates are different events or different grains, and the choice changes which rows qualify, ask which one the user means. A stored category that uses the same word as the question is a different meaning when knowledge defines that word as a threshold on a named index. Do not filter on the stored category in place of the index. A phrase such as "for each robot" or "show each patient" names the output. It does not decide whether each reading is its own row.
 8. If anything else in the user's question seems unclear, you may ask about it — for example an ambiguous grouping term, a threshold the knowledge does not state, an unspecified limit, which event orders a sequence, one row per reading versus one row per entity, or a preferred output format.
 9. Output a single focused question only — never two questions joined with "and" or "or".
-10. Output PROCEED when the meaning, the population, the ordering event, and the row grain are decided by the question, the external knowledge, or the clarifications. A formula that external knowledge already states is not a reason to ask. An undecided order or an undecided row grain is a reason to ASK. If "Business choices still open" lists only a formula that external knowledge already states, output PROCEED.
+10. Output PROCEED when the meaning, the population, the ordering event, and the row grain are decided by the question, the external knowledge, or the clarifications. A formula that external knowledge already states is not a reason to ask. An undecided order or an undecided row grain is a reason to ASK. A phrase such as "for each robot" does not decide row grain. A stored category value does not decide a filter that knowledge defines as a threshold on a named index whose calculation is absent. If "Business choices still open" lists only a formula that external knowledge already states, output PROCEED.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -163,9 +163,12 @@ Why it's needed: {description}
 
 Generate a single, focused question to ask the user to clarify this specification.
 Ask which business meaning, population, cutoff, ordering event, or row grain they intend.
+If the term is a named index or score whose calculation is not in external knowledge, ask "What do you mean by [TERM]?".
 Name the two business alternatives when the choice is an order or a grain.
+A phrase such as "for each robot" does not decide row grain. If that choice is open, ask whether each reading is its own row or one row per entity.
 Do not ask for a formula, equation, column, table, or SQL structure.
-If the only unresolved piece is a formula or where a value is stored, output exactly SKIP.
+Do not ask about a metric whose calculation is already known. Ask the open grain or ordering question instead.
+If the only unresolved piece is a calculation that external knowledge already states, or where a value is stored, output exactly SKIP.
 Output only the question text, or SKIP, nothing else.\
 """
 
