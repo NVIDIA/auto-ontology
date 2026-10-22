@@ -579,6 +579,12 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
             target_column.c.name.label("target_column_name"),
             target_column.c.description.label("target_column_description"),
             s.column__semantic_fk.c.use_in_join_paths,
+            s.column__semantic_fk.c.role,
+            s.column__semantic_fk.c.how_to_use,
+            s.column__semantic_fk.c.when_to_use,
+            s.column__semantic_fk.c.avoid_when,
+            s.column__semantic_fk.c.guidance_source,
+            s.column__semantic_fk.c.guidance_certified,
         )
         .select_from(
             s.column__semantic_fk.join(
@@ -615,6 +621,35 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
         )
     )
     return [dict(row) for row in store().query_read(statement)]
+
+
+def _update_compiled_semantic_fk_guidance(
+    column_id: str,
+    attribute_id: str,
+    *,
+    role: str,
+    how_to_use: str,
+    when_to_use: list[str],
+    avoid_when: list[str],
+) -> bool:
+    """Update generated guidance without overwriting curated or certified text."""
+    rows = store().query_write(
+        update(s.column__semantic_fk)
+        .where(
+            s.column__semantic_fk.c.column_id == column_id,
+            s.column__semantic_fk.c.attribute_id == attribute_id,
+            s.column__semantic_fk.c.guidance_source == "compiled",
+            s.column__semantic_fk.c.guidance_certified.is_(False),
+        )
+        .values(
+            role=role,
+            how_to_use=how_to_use,
+            when_to_use=when_to_use,
+            avoid_when=avoid_when,
+        )
+        .returning(s.column__semantic_fk.c.column_id)
+    )
+    return bool(rows)
 
 
 def set_semantic_fk_join_default(

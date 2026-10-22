@@ -285,6 +285,35 @@ def test_export_carries_keys_joins_and_semantics(world) -> None:
     ] == [(world.customer_ref, world.attribute, True)]
 
 
+def test_export_carries_semantic_fk_role_guidance(world) -> None:
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id == world.customer_ref,
+            s.column__semantic_fk.c.attribute_id == world.attribute,
+        )
+        .values(
+            role="order belongs to customer",
+            how_to_use="Use the customer relation for customer properties.",
+            when_to_use=["an order question asks about its customer"],
+            avoid_when=["the question asks only about the order"],
+            guidance_source="curated",
+            guidance_certified=True,
+        )
+    )
+
+    semantic_fk = _document(world).semantic_layer.semantic_fks[0]
+
+    assert semantic_fk.role == "order belongs to customer"
+    assert semantic_fk.how_to_use == (
+        "Use the customer relation for customer properties."
+    )
+    assert semantic_fk.when_to_use == ["an order question asks about its customer"]
+    assert semantic_fk.avoid_when == ["the question asks only about the order"]
+    assert semantic_fk.guidance_source == "curated"
+    assert semantic_fk.guidance_certified is True
+
+
 def test_an_empty_id_list_exports_everything_not_nothing(world) -> None:
     """
 
@@ -372,6 +401,12 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
     document = _reid(_document(world), target)
     document.data_layer.databases[0].schemas[0].database_name = target
     document.semantic_layer.semantic_fks[0].use_in_join_paths = False
+    document.semantic_layer.semantic_fks[0].role = "order belongs to customer"
+    document.semantic_layer.semantic_fks[0].how_to_use = "Use customer properties."
+    document.semantic_layer.semantic_fks[0].when_to_use = ["customer details"]
+    document.semantic_layer.semantic_fks[0].avoid_when = ["order-only question"]
+    document.semantic_layer.semantic_fks[0].guidance_source = "curated"
+    document.semantic_layer.semantic_fks[0].guidance_certified = True
 
     try:
         summary = mi.apply_import_model(document, replace=False)
@@ -387,7 +422,15 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
         )
         assert copied
         copied_semantic_fk = store().query_read(
-            select(s.column__semantic_fk.c.use_in_join_paths)
+            select(
+                s.column__semantic_fk.c.use_in_join_paths,
+                s.column__semantic_fk.c.role,
+                s.column__semantic_fk.c.how_to_use,
+                s.column__semantic_fk.c.when_to_use,
+                s.column__semantic_fk.c.avoid_when,
+                s.column__semantic_fk.c.guidance_source,
+                s.column__semantic_fk.c.guidance_certified,
+            )
             .select_from(
                 s.column__semantic_fk.join(
                     s.catalog_column,
@@ -399,7 +442,17 @@ def test_importing_an_export_into_an_empty_store_recreates_it(world) -> None:
                 == document.semantic_layer.semantic_fks[0].column_id
             )
         )
-        assert copied_semantic_fk == [{"use_in_join_paths": False}]
+        assert copied_semantic_fk == [
+            {
+                "use_in_join_paths": False,
+                "role": "order belongs to customer",
+                "how_to_use": "Use customer properties.",
+                "when_to_use": ["customer details"],
+                "avoid_when": ["order-only question"],
+                "guidance_source": "curated",
+                "guidance_certified": True,
+            }
+        ]
     finally:
         _cleanup(f"{world.prefix}-copy")
 

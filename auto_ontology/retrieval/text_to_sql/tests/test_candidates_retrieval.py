@@ -305,10 +305,11 @@ def test_explicit_target_db_preserves_existing_search_behavior(
         _state(["revenue", "region"], target_db="db-a")
     )
 
-    assert len(calls) == 4
+    assert len(calls) == 5
     assert {database_name for _, _, database_name in calls} == {"db-a"}
     assert result["path_state"]["target_db"] == "db-a"
     assert len(result["path_state"]["retrieved_column_attributes"]) == 2
+    assert len(result["path_state"]["retrieved_semantic_relationships"]) == 1
 
 
 def test_full_evidence_adds_column_attribute_vector_results(

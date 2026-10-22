@@ -971,6 +971,48 @@ def test_merge_semantic_fk_is_idempotent(world) -> None:
     assert len(rows) == 1
 
 
+def test_compiled_guidance_does_not_overwrite_curated_edge(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.table("orders")
+    world.column("orders", "customer_id")
+    attr = world.attribute("customer-id", owner="customers.id")
+    column_id = world.columns["orders.customer_id"]
+    a.merge_semantic_fk(column_id, attr)
+    store().query_write(
+        s.column__semantic_fk.update()
+        .where(
+            s.column__semantic_fk.c.column_id == column_id,
+            s.column__semantic_fk.c.attribute_id == attr,
+        )
+        .values(
+            role="curated role",
+            guidance_source="curated",
+        )
+    )
+
+    updated = a._update_compiled_semantic_fk_guidance(
+        column_id,
+        attr,
+        role="compiled role",
+        how_to_use="compiled guidance",
+        when_to_use=["compiled condition"],
+        avoid_when=[],
+    )
+
+    assert updated is False
+    row = store().query_read(
+        select(
+            s.column__semantic_fk.c.role,
+            s.column__semantic_fk.c.how_to_use,
+        ).where(
+            s.column__semantic_fk.c.column_id == column_id,
+            s.column__semantic_fk.c.attribute_id == attr,
+        )
+    )
+    assert row == [{"role": "curated role", "how_to_use": None}]
+
+
 def test_merge_semantic_fk_refuses_a_cross_database_edge(world) -> None:
     """A column and attribute in different ingested databases must never link.
 

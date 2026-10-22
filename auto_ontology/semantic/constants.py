@@ -17,6 +17,7 @@ SQL_ATTR_SOURCE_BRIDGE = "bridgeTable"
 # Semantic node labels
 LABEL_TERM = "Term"
 LABEL_COLUMN_ATTRIBUTE = "ColumnAttribute"
+LABEL_SEMANTIC_RELATIONSHIP = "SemanticRelationship"
 LABEL_SQL_ATTRIBUTE = "SqlAttribute"
 LABEL_TEXT_ATTRIBUTE = "TextAttribute"
 LABEL_ANALYSIS = "Analysis"

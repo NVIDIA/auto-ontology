@@ -594,6 +594,35 @@ column__semantic_fk = Table(
         nullable=False,
         server_default=text("true"),
     ),
+    # Generated/curated semantic guidance explains when an existing edge is
+    # useful; it never creates an edge or overrides use_in_join_paths.
+    Column("role", Text, nullable=True),
+    Column("how_to_use", Text, nullable=True),
+    Column(
+        "when_to_use",
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'"),
+    ),
+    Column(
+        "avoid_when",
+        ARRAY(Text),
+        nullable=False,
+        server_default=text("'{}'"),
+    ),
+    Column(
+        "guidance_source",
+        Text,
+        nullable=False,
+        server_default=text("'compiled'"),
+    ),
+    _certified("guidance_certified"),
+    Column("guidance_modified", DateTime(timezone=True), nullable=True),
+    Column("guidance_modified_by", Text, nullable=True),
+    CheckConstraint(
+        "guidance_source IN ('compiled', 'curated')",
+        name="ck_column__semantic_fk_guidance_source",
+    ),
 )
 
 sql_attribute = Table(

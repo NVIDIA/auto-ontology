@@ -1020,6 +1020,17 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
         .limit(1)
         .scalar_subquery()
     )
+
+    def semantic_fk_guidance(column):
+        return (
+            select(column)
+            .where(s.column__semantic_fk.c.column_id == s.catalog_column.c.id)
+            .correlate(s.catalog_column)
+            .order_by(s.column__semantic_fk.c.attribute_id)
+            .limit(1)
+            .scalar_subquery()
+        )
+
     try:
         rows = store().query_read(
             select(
@@ -1036,6 +1047,18 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
                 semantic_fk_target.label("semantic_fk"),
+                semantic_fk_guidance(s.column__semantic_fk.c.role).label(
+                    "semantic_fk_role"
+                ),
+                semantic_fk_guidance(s.column__semantic_fk.c.how_to_use).label(
+                    "semantic_fk_how_to_use"
+                ),
+                semantic_fk_guidance(s.column__semantic_fk.c.when_to_use).label(
+                    "semantic_fk_when_to_use"
+                ),
+                semantic_fk_guidance(s.column__semantic_fk.c.avoid_when).label(
+                    "semantic_fk_avoid_when"
+                ),
             )
             .select_from(
                 _table_join().join(
@@ -1081,6 +1104,10 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
                     "semantic_fk": row["semantic_fk"],
+                    "semantic_fk_role": row["semantic_fk_role"],
+                    "semantic_fk_how_to_use": row["semantic_fk_how_to_use"],
+                    "semantic_fk_when_to_use": row["semantic_fk_when_to_use"] or [],
+                    "semantic_fk_avoid_when": row["semantic_fk_avoid_when"] or [],
                 }
             )
     return list(tables.values())

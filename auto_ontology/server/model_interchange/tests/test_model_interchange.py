@@ -219,6 +219,12 @@ def test_semantic_fk_without_join_path_flag_defaults_to_enabled() -> None:
     )
 
     assert semantic_fk.use_in_join_paths is True
+    assert semantic_fk.role == ""
+    assert semantic_fk.how_to_use == ""
+    assert semantic_fk.when_to_use == []
+    assert semantic_fk.avoid_when == []
+    assert semantic_fk.guidance_source == "compiled"
+    assert semantic_fk.guidance_certified is False
 
 
 def test_assemble_export_document_keeps_sample_value_types() -> None:

@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -116,6 +116,12 @@ class ModelSemanticFk(BaseModel):
     column_attribute_id: str
     column_id: str
     use_in_join_paths: bool = True
+    role: str = ""
+    how_to_use: str = ""
+    when_to_use: list[str] = Field(default_factory=list)
+    avoid_when: list[str] = Field(default_factory=list)
+    guidance_source: Literal["compiled", "curated"] = "compiled"
+    guidance_certified: bool = False
 
 
 class ModelSqlAttribute(BaseModel):

@@ -344,6 +344,12 @@ def _export_semantic_fks(database_ids: list[str]) -> list[dict[str, Any]]:
                 s.column__semantic_fk.c.column_id,
                 s.column__semantic_fk.c.attribute_id.label("column_attribute_id"),
                 s.column__semantic_fk.c.use_in_join_paths,
+                s.column__semantic_fk.c.role,
+                s.column__semantic_fk.c.how_to_use,
+                s.column__semantic_fk.c.when_to_use,
+                s.column__semantic_fk.c.avoid_when,
+                s.column__semantic_fk.c.guidance_source,
+                s.column__semantic_fk.c.guidance_certified,
             )
             .select_from(
                 _catalog_join().join(
@@ -528,6 +534,12 @@ def assemble_export_document(
             column_attribute_id=str(row["column_attribute_id"]),
             column_id=str(row["column_id"]),
             use_in_join_paths=bool(row.get("use_in_join_paths", True)),
+            role=row.get("role") or "",
+            how_to_use=row.get("how_to_use") or "",
+            when_to_use=list(row.get("when_to_use") or []),
+            avoid_when=list(row.get("avoid_when") or []),
+            guidance_source=row.get("guidance_source") or "compiled",
+            guidance_certified=bool(row.get("guidance_certified", False)),
         )
         for row in rows["semantic_fks"]
         if str(row.get("column_attribute_id") or "") in _attribute_ids
@@ -1508,6 +1520,12 @@ def _import_semantic_fks(
                 "column_id": column_id,
                 "attribute_id": attribute_id,
                 "use_in_join_paths": fk.use_in_join_paths,
+                "role": fk.role or None,
+                "how_to_use": fk.how_to_use or None,
+                "when_to_use": fk.when_to_use,
+                "avoid_when": fk.avoid_when,
+                "guidance_source": fk.guidance_source,
+                "guidance_certified": fk.guidance_certified,
             }
         )
     if rows:
@@ -1520,6 +1538,12 @@ def _import_semantic_fks(
                 ],
                 set_={
                     "use_in_join_paths": statement.excluded.use_in_join_paths,
+                    "role": statement.excluded.role,
+                    "how_to_use": statement.excluded.how_to_use,
+                    "when_to_use": statement.excluded.when_to_use,
+                    "avoid_when": statement.excluded.avoid_when,
+                    "guidance_source": statement.excluded.guidance_source,
+                    "guidance_certified": statement.excluded.guidance_certified,
                 },
             )
         )

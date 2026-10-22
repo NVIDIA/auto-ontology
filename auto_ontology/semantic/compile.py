@@ -15,6 +15,7 @@ from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
+from auto_ontology.semantic.semantic_fk_roles import enrich_semantic_fk_roles
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
 from auto_ontology.utils.llm_invoke import limit_inflight
@@ -71,7 +72,7 @@ def _run_semantic_compilation(
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    # The three stages below are the long tail — FK resolution alone has run
+    # The four stages below are the long tail — FK resolution alone has run
     # past 300s on one database — and none of them is required for the Terms
     # just written to be usable. A cancelled pass skips straight to the summary
     # rather than spending minutes on work nobody is waiting for.
@@ -91,6 +92,12 @@ def _run_semantic_compilation(
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
 
+    logger.info("=" * 60)
+    logger.info("Enriching semantic FK roles and usage guidance…")
+    logger.info("=" * 60)
+    role_count = enrich_semantic_fk_roles(database_name, embedder=embedder)
+    logger.info("Semantic FK edges enriched: %d", role_count)
+
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 
     logger.info("=" * 60)
@@ -109,15 +116,17 @@ def _run_semantic_compilation(
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means every stage completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
-        "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
+        "%d table(s), %d semantic FK edge(s), %d enriched edge(s), "
+        "%d SqlAttribute(s), "
         "%d bridge table(s) in %.1fs",
         database_name,
         count,
         fk_count,
+        role_count,
         attr_count,
         bridge_table_count,
         time.monotonic() - started,

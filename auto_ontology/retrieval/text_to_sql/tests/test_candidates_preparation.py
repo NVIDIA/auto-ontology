@@ -20,6 +20,29 @@ from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
 
+def test_relevance_summary_includes_semantic_relationship_role() -> None:
+    rendered = candidates_preparation._build_relevance_tables_summary(
+        [
+            {
+                "name": "cards",
+                "columns": [
+                    {
+                        "name": "setCode",
+                        "data_type": "text",
+                        "semantic_fk_role": "card belongs to card set",
+                        "semantic_fk_when_to_use": [
+                            "a card question needs set properties"
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert "relationship role: card belongs to card set" in rendered
+    assert "use relationship when: a card question needs set properties" in rendered
+
+
 def test_anchor_maps_evidence_to_schema_table_column(
     monkeypatch,
 ) -> None:
@@ -72,9 +95,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "schema.table.column physical references" in captured["prompt"]
 
 
-def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (
-    None
-):
+def test_column_metadata_backfill_requires_complete_semantic_fk_guidance() -> None:
     assert candidates_preparation._needs_column_metadata_backfill(
         {
             "columns": [
@@ -116,6 +137,10 @@ def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk()
                     "sample_values": ["open"],
                     "is_nullable": None,
                     "semantic_fk": None,
+                    "semantic_fk_role": None,
+                    "semantic_fk_how_to_use": None,
+                    "semantic_fk_when_to_use": None,
+                    "semantic_fk_avoid_when": None,
                 }
             ]
         }

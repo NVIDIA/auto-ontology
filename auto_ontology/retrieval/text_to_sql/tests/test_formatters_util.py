@@ -100,6 +100,38 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     assert "dw.dw." not in rendered
 
 
+def test_table_prompt_renders_semantic_fk_role_guidance() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "cards",
+                "columns": [
+                    {
+                        "name": "setCode",
+                        "data_type": "text",
+                        "semantic_fk": "main.sets.code",
+                        "semantic_fk_role": "card belongs to card set",
+                        "semantic_fk_how_to_use": (
+                            "Traverse from a card to its owning set."
+                        ),
+                        "semantic_fk_when_to_use": [
+                            "a card question needs set properties"
+                        ],
+                        "semantic_fk_avoid_when": [
+                            "the question asks only for the card name"
+                        ],
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert "role: card belongs to card set" in rendered
+    assert "how: Traverse from a card to its owning set." in rendered
+    assert "when: a card question needs set properties" in rendered
+    assert "avoid: the question asks only for the card name" in rendered
+
+
 def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None:
     rendered = format_used_schema_for_prompt(
         [

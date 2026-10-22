@@ -128,7 +128,36 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
     semantic_fk = column.get("semantic_fk")
     if semantic_fk:
         line += f" | foreign_key: {_plain_cell(semantic_fk)}"
+        guidance = _format_semantic_fk_guidance(column)
+        if guidance:
+            line += f" | relationship guidance: {guidance}"
     return line
+
+
+def _format_semantic_fk_guidance(column: dict[str, Any]) -> str:
+    """Render bounded generated/curated usage guidance for one FK edge."""
+    parts: list[str] = []
+    role = _plain_cell(column.get("semantic_fk_role"))
+    how_to_use = _plain_cell(column.get("semantic_fk_how_to_use"))
+    when_to_use = [
+        _plain_cell(item)
+        for item in list(column.get("semantic_fk_when_to_use") or [])[:5]
+        if _plain_cell(item)
+    ]
+    avoid_when = [
+        _plain_cell(item)
+        for item in list(column.get("semantic_fk_avoid_when") or [])[:5]
+        if _plain_cell(item)
+    ]
+    if role:
+        parts.append(f"role: {role}")
+    if how_to_use:
+        parts.append(f"how: {how_to_use}")
+    if when_to_use:
+        parts.append("when: " + "; ".join(when_to_use))
+    if avoid_when:
+        parts.append("avoid: " + "; ".join(avoid_when))
+    return " | ".join(parts)
 
 
 # Dialects whose connection does *not* bind the catalog, so a name has to carry
@@ -354,6 +383,7 @@ _COLUMN_HEADERS = [
     "type",
     "is_nullable",
     "foreign key",
+    "relationship guidance",
     "description",
     "sample values",
     "format",
@@ -383,6 +413,7 @@ def _column_row(column: Any) -> dict[str, str]:
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
         "foreign key": _plain_cell(column.get("semantic_fk")),
+        "relationship guidance": _format_semantic_fk_guidance(column),
         "description": description,
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))

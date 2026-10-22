@@ -409,6 +409,10 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
         s.column__semantic_fk,
         column_id=world.columns["orders.customer_id"],
         attribute_id=customer_ref,
+        role="order belongs to customer",
+        how_to_use="Traverse to customer properties.",
+        when_to_use=["an order question needs customer details"],
+        avoid_when=["the question asks only about an order"],
     )
     _link(
         s.column__has_attribute,
@@ -434,6 +438,17 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     assert columns["total"]["is_nullable"] is None
     assert columns["order_id"]["semantic_fk"] is None
     assert columns["customer_id"]["semantic_fk"] == "shop.customers.customer_id"
+    assert columns["customer_id"]["semantic_fk_role"] == "order belongs to customer"
+    assert (
+        columns["customer_id"]["semantic_fk_how_to_use"]
+        == "Traverse to customer properties."
+    )
+    assert columns["customer_id"]["semantic_fk_when_to_use"] == [
+        "an order question needs customer details"
+    ]
+    assert columns["customer_id"]["semantic_fk_avoid_when"] == [
+        "the question asks only about an order"
+    ]
     assert columns["total"]["semantic_fk"] is None
 
 

@@ -29,6 +29,7 @@ from auto_ontology.catalog.constants import Labels
 
 from auto_ontology.semantic.constants import (
     LABEL_COLUMN_ATTRIBUTE,
+    LABEL_SEMANTIC_RELATIONSHIP,
     LABEL_SQL_ATTRIBUTE,
     LABEL_TERM,
     SQL_ATTR_SOURCE_BRIDGE,
@@ -136,6 +137,7 @@ def _select_candidate_database(
     column_hits: list[dict],
     custom_hits: list[dict],
     sql_attribute_hits: list[dict],
+    relationship_hits: list[dict] | None = None,
 ) -> tuple[str | None, dict[str, dict[str, Any]]]:
     """Select the database that covers the most searched entities.
 
@@ -157,7 +159,7 @@ def _select_candidate_database(
         stats[database_name]["hit_count"] += 1
         stats[database_name]["score_total"] += _score(hit)
 
-    for hit in [*custom_hits, *sql_attribute_hits]:
+    for hit in [*custom_hits, *sql_attribute_hits, *(relationship_hits or [])]:
         database_name = _database_name(hit)
         if database_name is None:
             continue
@@ -424,13 +426,14 @@ def _build_column_attribute_spec(hit: dict) -> ColumnAttributeSpec | None:
 
 
 class CandidateRetrievalAgent(BaseAgent):
-    """Retrieve ColumnAttribute, CustomAnalysis, SqlAttribute, and subject Term candidates.
+    """Retrieve semantic candidates and one subject Term.
 
     - ColumnAttributes: searched per entity from the semantic VDB.
     - Evidence: the complete evidence text performs one additional
       ColumnAttribute search, and those hits are merged with entity hits.
     - CustomAnalysis: searched once with the full question from the semantic VDB.
     - SqlAttribute: searched once with the full question from the semantic VDB.
+    - SemanticRelationship: searched once with the full question.
     - Subject Term: searched once with ``path_state["subject"]`` (top-1 hit)
       when that key is a non-empty string; skipped when absent/None/blank.
 
@@ -440,6 +443,7 @@ class CandidateRetrievalAgent(BaseAgent):
       ``query_entities`` naming the extraction string(s) that retrieved it)
     - ``path_state["retrieved_custom_analyses"]``:   ``list[dict]``
     - ``path_state["retrieved_sql_attributes"]``:    ``list[dict]``
+    - ``path_state["retrieved_semantic_relationships"]``: ``list[dict]``
     - ``path_state["retrieved_subject_term"]``:      ``dict | None``
     """
 
@@ -481,6 +485,7 @@ class CandidateRetrievalAgent(BaseAgent):
         all_col_attr_hits: list[dict] = []
         all_custom_hits: list[dict] = []
         all_sql_attr_hits: list[dict] = []
+        all_relationship_hits: list[dict] = []
         subject_term_hits: list[dict] = []
 
         if semantic_retriever is not None:
@@ -516,6 +521,16 @@ class CandidateRetrievalAgent(BaseAgent):
                         semantic_retriever,
                         question,
                         LABEL_SQL_ATTRIBUTE,
+                        3,
+                        target_db,
+                    ),
+                ),
+                (
+                    "semantic_relationship",
+                    (
+                        semantic_retriever,
+                        question,
+                        LABEL_SEMANTIC_RELATIONSHIP,
                         3,
                         target_db,
                     ),
@@ -578,6 +593,8 @@ class CandidateRetrievalAgent(BaseAgent):
                         all_sql_attr_hits = result
                     elif key == "subject_term":
                         subject_term_hits = result
+                    elif key == "semantic_relationship":
+                        all_relationship_hits = result
                     elif key == "evidence_col_attr":
                         for hit in result:
                             tagged = dict(hit)
@@ -596,6 +613,7 @@ class CandidateRetrievalAgent(BaseAgent):
                     all_col_attr_hits,
                     all_custom_hits,
                     all_sql_attr_hits,
+                    all_relationship_hits,
                 )
                 if selected_database is None:
                     self.logger.warning(
@@ -603,17 +621,20 @@ class CandidateRetrievalAgent(BaseAgent):
                         "hits without database_name",
                         len(all_col_attr_hits)
                         + len(all_custom_hits)
-                        + len(all_sql_attr_hits),
+                        + len(all_sql_attr_hits)
+                        + len(all_relationship_hits),
                     )
                     all_col_attr_hits = []
                     all_custom_hits = []
                     all_sql_attr_hits = []
+                    all_relationship_hits = []
                 else:
                     target_db = selected_database
                     initial_hit_count = (
                         len(all_col_attr_hits)
                         + len(all_custom_hits)
                         + len(all_sql_attr_hits)
+                        + len(all_relationship_hits)
                     )
                     selected_stats = database_stats[selected_database]
                     self.logger.info(
@@ -634,10 +655,14 @@ class CandidateRetrievalAgent(BaseAgent):
                     all_sql_attr_hits = _filter_hits_to_database(
                         all_sql_attr_hits, selected_database
                     )
+                    all_relationship_hits = _filter_hits_to_database(
+                        all_relationship_hits, selected_database
+                    )
                     retained_hit_count = (
                         len(all_col_attr_hits)
                         + len(all_custom_hits)
                         + len(all_sql_attr_hits)
+                        + len(all_relationship_hits)
                     )
                     self.logger.info(
                         "Dropped %d semantic hits outside candidate database %r",
@@ -696,11 +721,13 @@ class CandidateRetrievalAgent(BaseAgent):
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)
+        deduped_relationships = _dedupe_best_score(all_relationship_hits)
         subject_term = subject_term_hits[0] if subject_term_hits else None
 
         path_state["retrieved_column_attributes"] = deduped_col_attr
         path_state["retrieved_custom_analyses"] = deduped_custom
         path_state["retrieved_sql_attributes"] = deduped_sql_attr
+        path_state["retrieved_semantic_relationships"] = deduped_relationships
         if subject:
             path_state["retrieved_subject_term"] = subject_term
         else:
@@ -714,11 +741,13 @@ class CandidateRetrievalAgent(BaseAgent):
 
         self.logger.info(
             "Retrieved %d ColumnAttributes, %d CustomAnalysis, "
-            "%d SqlAttribute candidates, and subject Term %s "
+            "%d SqlAttribute and %d SemanticRelationship candidates, "
+            "and subject Term %s "
             "(%d entities queried, subject=%r)",
             len(deduped_col_attr),
             len(deduped_custom),
             len(deduped_sql_attr),
+            len(deduped_relationships),
             (
                 f"id={subject_term.get('id')!r} score={subject_term.get('score')}"
                 if subject_term

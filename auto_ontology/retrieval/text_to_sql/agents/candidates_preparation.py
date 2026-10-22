@@ -159,6 +159,16 @@ def _format_relevance_filter_column(c: dict) -> str:
         extra = f" | JSONB keys: {', '.join(str(v) for v in sv[:12])}"
     if desc:
         extra = (extra + f" | {desc}") if extra else f" | {desc}"
+    role = str(c.get("semantic_fk_role") or "").strip()
+    when_to_use = [
+        str(item).strip()
+        for item in list(c.get("semantic_fk_when_to_use") or [])[:3]
+        if str(item).strip()
+    ]
+    if role:
+        extra += f" | relationship role: {role}"
+    if when_to_use:
+        extra += " | use relationship when: " + "; ".join(when_to_use)
     return f"    - {name} ({ctype}){extra}"
 
 
@@ -211,8 +221,16 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_nullability = bool(columns) and all(
         isinstance(column, dict) and "is_nullable" in column for column in columns
     )
+    semantic_fk_keys = {
+        "semantic_fk",
+        "semantic_fk_role",
+        "semantic_fk_how_to_use",
+        "semantic_fk_when_to_use",
+        "semantic_fk_avoid_when",
+    }
     has_complete_semantic_fks = bool(columns) and all(
-        isinstance(column, dict) and "semantic_fk" in column for column in columns
+        isinstance(column, dict) and semantic_fk_keys <= column.keys()
+        for column in columns
     )
     return (
         not has_samples or not has_complete_nullability or not has_complete_semantic_fks
@@ -262,7 +280,13 @@ class CandidatePreparationAgent(BaseAgent):
         has_col_attrs = bool(path_state.get("retrieved_column_attributes"))
         has_custom = bool(path_state.get("retrieved_custom_analyses"))
         has_sql_attrs = bool(path_state.get("retrieved_sql_attributes"))
-        if not has_col_attrs and not has_custom and not has_sql_attrs:
+        has_relationships = bool(path_state.get("retrieved_semantic_relationships"))
+        if (
+            not has_col_attrs
+            and not has_custom
+            and not has_sql_attrs
+            and not has_relationships
+        ):
             connectors = state.get("connectors") or []
             if path_state.get("target_db") or (
                 len(connectors) == 1 and getattr(connectors[0], "database_name", None)
@@ -298,6 +322,9 @@ class CandidatePreparationAgent(BaseAgent):
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
+        semantic_relationships = list(
+            path_state.get("retrieved_semantic_relationships") or []
+        )
         candidates = custom_analyses + column_attributes + sql_attributes_raw
 
         # --- 1. Custom analyses ---
@@ -477,6 +504,23 @@ class CandidatePreparationAgent(BaseAgent):
                     if tbl.get("id") not in existing_ids:
                         relevant_tables.append(tbl)
                         existing_ids.add(tbl.get("id"))
+
+            relationship_table_ids = list(
+                dict.fromkeys(
+                    str(table_id)
+                    for relationship in semantic_relationships
+                    for table_id in (
+                        relationship.get("source_table_id"),
+                        relationship.get("target_table_id"),
+                    )
+                    if table_id
+                )
+            )
+            if relationship_table_ids:
+                relevant_tables = _merge_tables(
+                    relevant_tables,
+                    fetch_tables_by_ids(relationship_table_ids),
+                )
 
             self.logger.info(
                 "Tables from candidates: %s", [t["name"] for t in relevant_tables]

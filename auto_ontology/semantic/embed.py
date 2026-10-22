@@ -16,6 +16,7 @@ from auto_ontology.utils.sample_values import stringify_sample_values
 from auto_ontology.vdb import get_semantic_vdb
 from auto_ontology.vdb.postgres import PostgresVDB
 from auto_ontology.vdb.records import write_embedded_rows
+from auto_ontology.semantic.constants import LABEL_SEMANTIC_RELATIONSHIP
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,28 @@ class SemanticEmbedder:
     def embed_column_attributes(self, attrs: list[dict[str, Any]]) -> int:
         """Embed only ColumnAttribute rows, without rewriting the parent Term row."""
         return self.embed_term({}, attrs)
+
+    def embed_semantic_relationships(
+        self,
+        relationships: list[dict[str, Any]],
+    ) -> int:
+        """Embed generated usage guidance for existing semantic-FK edges."""
+        rows = _build_relationship_rows(self.database_name, relationships)
+        if not rows:
+            return 0
+        embedded_df = batch_embed(rows, self.embed_params)
+        if embedded_df is None or embedded_df.empty:
+            logger.warning("Semantic relationship embed produced no rows")
+            return 0
+        with_embeddings = [
+            row
+            for row in embedded_df.to_dict(orient="records")
+            if (row.get("metadata") or {}).get("embedding")
+        ]
+        if not with_embeddings:
+            return 0
+        write_embedded_rows(self.vdb, with_embeddings)
+        return len(with_embeddings)
 
 
 def build_semantic_embedder(
@@ -287,4 +310,63 @@ def _build_rows(
             }
         )
 
+    return rows
+
+
+def _build_relationship_rows(
+    database_name: str,
+    relationships: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Build semantic VDB rows for relationship guidance."""
+    rows: list[dict[str, Any]] = []
+    for relationship in relationships:
+        column_id = str(relationship.get("source_column_id") or "")
+        attribute_id = str(relationship.get("target_attribute_id") or "")
+        role = str(relationship.get("role") or "").strip()
+        how_to_use = str(relationship.get("how_to_use") or "").strip()
+        when_to_use = [
+            str(item).strip()
+            for item in relationship.get("when_to_use") or []
+            if str(item).strip()
+        ]
+        avoid_when = [
+            str(item).strip()
+            for item in relationship.get("avoid_when") or []
+            if str(item).strip()
+        ]
+        if not column_id or not attribute_id or not (role or how_to_use or when_to_use):
+            continue
+        relationship_id = f"{column_id}:{attribute_id}"
+        path = f"semantic:relationship:{relationship_id}"
+        text = " ".join(
+            part
+            for part in (
+                f"Semantic relationship: {role}." if role else "",
+                how_to_use,
+                "Use when: " + "; ".join(when_to_use) + "." if when_to_use else "",
+                "Avoid when: " + "; ".join(avoid_when) + "." if avoid_when else "",
+            )
+            if part
+        )
+        fields = {
+            "id": relationship_id,
+            "label": LABEL_SEMANTIC_RELATIONSHIP,
+            "database_name": database_name,
+            "source_column_id": column_id,
+            "source_table_id": relationship.get("source_table_id"),
+            "source_table_name": relationship.get("source_table_name"),
+            "target_attribute_id": attribute_id,
+            "target_column_id": relationship.get("target_column_id"),
+            "target_table_id": relationship.get("target_table_id"),
+            "target_table_name": relationship.get("target_table_name"),
+            "source_path": path,
+        }
+        rows.append(
+            {
+                "text": text,
+                "path": path,
+                "page_number": -1,
+                "metadata": {**fields, "content_metadata": dict(fields)},
+            }
+        )
     return rows
