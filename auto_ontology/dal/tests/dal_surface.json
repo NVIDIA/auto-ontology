@@ -7,6 +7,7 @@
     "fetch_semantic_fk_join_groups": "(database_name: 'str') -> 'list[dict[str, Any]]'",
     "find_anchor_hub_siblings": "(anchor_table_id: 'str', max_siblings: 'int | None' = 6) -> 'tuple[list[dict], int]'",
     "find_column_attribute_by_column_id": "(column_id: 'str') -> 'str | None'",
+    "find_column_attributes_by_column_ids": "(column_ids: 'list[str]') -> 'dict[str, str]'",
     "find_connected_junction_tables": "(table_ids: 'list[str]') -> 'tuple[list[dict], list[list[dict]]]'",
     "find_join_path": "(anchor_col_id: 'str', dest_col_id: 'str') -> 'list[dict]'",
     "find_kept_table_bridges": "(table_ids: 'list[str]', allowed_table_ids: 'set[str] | None' = None, max_bridge_tables: 'int' = 5) -> 'tuple[list[dict], list[list[dict]], int]'",
@@ -15,7 +16,7 @@
     "find_unlinked_fk_columns": "(database_name: 'str | None' = None) -> 'list[dict[str, Any]]'",
     "merge_column_attribute": "(*, term_name: 'str', table_id: 'str', source_column: 'str', attr_name: 'str', datatype: 'str', description: 'str | None') -> 'str | None'",
     "merge_semantic_fk": "(src_column_id: 'str', tgt_attr_id: 'str') -> 'bool'",
-    "set_semantic_fk_join_default": "(source_table_id: 'str', target_attribute_id: 'str', selected_column_id: 'str') -> 'None'",
+    "set_semantic_fk_join_default": "(source_table_id: 'str', target_table_id: 'str', selected_column_id: 'str') -> 'None'",
     "update_column_attribute": "(attr_id: 'str', term_id: 'str', *, name: 'str | None' = None, description: 'str | None' = None, certified: 'bool | None' = None, modified_by: 'str | None' = None, touch: 'bool' = False) -> 'dict[str, Any] | None'"
   },
   "candidates": {

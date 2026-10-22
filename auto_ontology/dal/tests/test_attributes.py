@@ -692,6 +692,21 @@ def test_merge_creates_and_links(world) -> None:
     assert len(linked) == 1
 
 
+def test_find_column_attributes_by_column_ids_omits_unowned_columns(world) -> None:
+    world.table("customers")
+    world.column("customers", "id")
+    world.column("customers", "notes")
+    attr_id = world.attribute("customer-id", owner="customers.id")
+
+    assert a.find_column_attributes_by_column_ids(
+        [
+            world.columns["customers.id"],
+            world.columns["customers.notes"],
+            world.columns["customers.id"],
+        ]
+    ) == {world.columns["customers.id"]: attr_id}
+
+
 def test_merge_is_idempotent_and_preserves_a_curated_description(world) -> None:
     """A second merge with nothing to say must not erase what a human wrote."""
     world.table("customers")

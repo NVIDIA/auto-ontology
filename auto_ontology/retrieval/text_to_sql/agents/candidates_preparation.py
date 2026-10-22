@@ -32,6 +32,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
+    find_column_attributes_by_column_ids,
     find_anchor_hub_siblings,
     find_connected_junction_tables,
     find_join_path,
@@ -298,6 +299,35 @@ class CandidatePreparationAgent(BaseAgent):
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
+
+        # Value grounding has already resolved these columns against the live
+        # database and attached their catalog ids. Promote their semantic
+        # ColumnAttributes directly from Postgres: another vector search would
+        # be both redundant and capable of dropping the exact verified match.
+        incoming_anchors = list(state.get("value_anchors") or [])
+        evidence_columns = list(
+            path_state.get("value_grounding_evidence_columns") or []
+        )
+        grounded_items = [*incoming_anchors, *evidence_columns]
+        grounded_column_ids = list(
+            dict.fromkeys(
+                str(column_id)
+                for item in grounded_items
+                if (column_id := item.get("column_id"))
+            )
+        )
+        grounded_attributes_by_column = find_column_attributes_by_column_ids(
+            grounded_column_ids
+        )
+        grounded_attribute_ids = set(grounded_attributes_by_column.values())
+        existing_attribute_ids = {
+            str(hit["id"]) for hit in column_attributes if hit.get("id")
+        }
+        for attribute_id in grounded_attributes_by_column.values():
+            if attribute_id not in existing_attribute_ids:
+                column_attributes.append({"id": attribute_id})
+                existing_attribute_ids.add(attribute_id)
+
         candidates = custom_analyses + column_attributes + sql_attributes_raw
 
         # --- 1. Custom analyses ---
@@ -346,6 +376,9 @@ class CandidatePreparationAgent(BaseAgent):
                     attr_ids,
                     database_name=target_db,
                 )
+                for attribute_id in grounded_attribute_ids:
+                    if context := attr_contexts.get(attribute_id):
+                        context["value_grounded"] = True
                 self.logger.info(
                     "Fetched store context for %d/%d column attributes",
                     len(attr_contexts),
@@ -574,10 +607,6 @@ class CandidatePreparationAgent(BaseAgent):
         # discard anchors, never act on one. Added here rather than beside §5c's
         # force-include so the relevance filter sees them as candidates: most
         # anchor tables are not wanted, and deciding that is the filter's job.
-        incoming_anchors = list(state.get("value_anchors") or [])
-        evidence_columns = list(
-            path_state.get("value_grounding_evidence_columns") or []
-        )
         grounded_table_ids = list(
             dict.fromkeys(
                 str(table_id)
@@ -779,6 +808,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "custom_analyses_str": custom_analyses_str,
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
+                "retrieved_column_attributes": column_attributes,
                 "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
@@ -1255,6 +1285,11 @@ class CandidatePreparationAgent(BaseAgent):
 
         attrs_block = "\n".join(
             f"- id: {aid} | physical column: {_physical_column(ctx)}"
+            + (
+                " | verified by value/evidence grounding"
+                if ctx.get("value_grounded")
+                else ""
+            )
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
             for aid, ctx in contexts.items()
         )
@@ -1274,7 +1309,9 @@ class CandidatePreparationAgent(BaseAgent):
                     "Return the id of the single column attribute that best represents "
                     "the primary subject of the question. Map evidence concepts to "
                     "the listed schema.table.column physical references, not to "
-                    "semantic attribute names."
+                    "semantic attribute names. Treat verified grounding as a strong "
+                    "relevance signal, but select it only when that column is the best "
+                    "anchor for connecting the requested attributes."
                 )
             ),
         ]

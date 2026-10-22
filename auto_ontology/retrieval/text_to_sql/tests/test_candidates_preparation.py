@@ -50,6 +50,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
             "table_name": "frpm",
             "col_name": "frpm_count_k12",
             "attr_description": "Eligible meal-program students.",
+            "value_grounded": True,
         },
         "enrollment": {
             "attr_name": "Enrollment (K-12)",
@@ -70,6 +71,131 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "main.frpm.enrollment_k12" in captured["prompt"]
     assert "FRPM Count (K-12)" not in captured["prompt"]
     assert "schema.table.column physical references" in captured["prompt"]
+    assert "verified by value/evidence grounding" in captured["prompt"]
+    assert "strong relevance signal" in captured["prompt"]
+
+
+def test_grounded_column_attribute_participates_in_anchor_and_join_paths(
+    monkeypatch,
+) -> None:
+    selected_contexts: dict[str, dict] = {}
+    join_calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_filter_tables_by_relevance",
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            tables,
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_identify_anchor",
+        lambda self, state, question, contexts: (
+            selected_contexts.update(contexts) or "grounded-attr",
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_column_attributes_by_column_ids",
+        lambda column_ids: (
+            {"grounded-column": "grounded-attr"}
+            if column_ids == ["grounded-column"]
+            else {}
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_attr_column_contexts",
+        lambda ids, database_name=None: {
+            "retrieved-attr": {
+                "attr_name": "Revenue",
+                "col_name": "revenue",
+                "col_id": "revenue-column",
+                "table_id": "sales-table",
+                "table_name": "sales",
+                "schema_name": "main",
+                "database_name": "db",
+            },
+            "grounded-attr": {
+                "attr_name": "Status",
+                "col_name": "status",
+                "col_id": "grounded-column",
+                "table_id": "orders-table",
+                "table_name": "orders",
+                "schema_name": "main",
+                "database_name": "db",
+            },
+        },
+    )
+    monkeypatch.setattr(candidates_preparation, "fetch_term_synonyms", lambda ids: {})
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [],
+    )
+    monkeypatch.setattr(candidates_preparation, "fetch_tables_by_ids", lambda ids: [])
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_join_path",
+        lambda source, target: join_calls.append((source, target)) or [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_anchor_hub_siblings",
+        lambda table_id, max_siblings=None: ([], 0),
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "find_connected_junction_tables", lambda ids: ([], [])
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda kept_ids, candidate_ids: ([], [], 0),
+    )
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "Revenue for active orders",
+            "llm": object(),
+            "data_retriever": object(),
+            "value_anchors": [
+                {
+                    "phrase": "active",
+                    "kind": "value",
+                    "tbl": "orders",
+                    "col": "status",
+                    "stored_value": "ACTIVE",
+                    "table_id": "orders-table",
+                    "column_id": "grounded-column",
+                }
+            ],
+            "path_state": {
+                "target_db": "db",
+                "retrieved_column_attributes": [{"id": "retrieved-attr"}],
+            },
+        },
+    )
+
+    result = CandidatePreparationAgent().execute(state)["path_state"]
+
+    assert selected_contexts["grounded-attr"]["value_grounded"] is True
+    assert join_calls == [("grounded-column", "revenue-column")]
+    assert [item["id"] for item in result["retrieved_column_attributes"]] == [
+        "retrieved-attr",
+        "grounded-attr",
+    ]
 
 
 def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (

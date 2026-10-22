@@ -276,6 +276,46 @@ def find_column_attribute_by_column_id(column_id: str) -> str | None:
     return rows[0]["id"] if rows else None
 
 
+def find_column_attributes_by_column_ids(
+    column_ids: list[str],
+) -> dict[str, str]:
+    """Return each catalog column's deterministic semantic ColumnAttribute.
+
+    Columns without an owned semantic attribute are omitted.  Although the
+    physical link permits multiple attributes, callers need one stable
+    attribute per grounded column, matching
+    :func:`find_column_attribute_by_column_id`.
+    """
+    unique_ids = list(dict.fromkeys(column_id for column_id in column_ids if column_id))
+    if not unique_ids:
+        return {}
+
+    rows = store().query_read(
+        select(
+            s.column__has_attribute.c.column_id,
+            s.column_attribute.c.id.label("attribute_id"),
+        )
+        .select_from(
+            s.column__has_attribute.join(
+                s.column_attribute,
+                s.column_attribute.c.id == s.column__has_attribute.c.attribute_id,
+            )
+        )
+        .where(
+            s.column__has_attribute.c.column_id.in_(unique_ids),
+            s.column_attribute.c.source == SEMANTIC_SOURCE,
+        )
+        .order_by(
+            s.column__has_attribute.c.column_id,
+            s.column_attribute.c.id,
+        )
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        result.setdefault(str(row["column_id"]), str(row["attribute_id"]))
+    return result
+
+
 def fetch_attr_column_contexts(
     attr_ids: list[str],
     *,
