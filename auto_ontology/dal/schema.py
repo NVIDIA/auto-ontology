@@ -47,6 +47,7 @@ from sqlalchemy import (
     CheckConstraint,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -1084,6 +1085,215 @@ rule__tag = Table(
 )
 
 # ---------------------------------------------------------------------------
+# Unstructured document tier
+# ---------------------------------------------------------------------------
+
+#: One row per ingested file (PDF, DOCX, PPTX, …).
+unstructured_document = Table(
+    "unstructured_document",
+    METADATA,
+    _id(),
+    Column("name", Text, nullable=False),
+    Column("path", Text, nullable=False),
+    Column("file_type", Text, nullable=False),
+    Column("summary", Text, nullable=True),
+    Column("publication_date", Text, nullable=True),
+    Column(
+        "ingested_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    UniqueConstraint("path", name="uq_unstructured_document_path"),
+)
+
+#: One row per extracted chunk from a document.  Embeddings live in the
+#: vdb.unstructured_chunks vector table keyed by the same ``id`` value.
+unstructured_chunk = Table(
+    "unstructured_chunk",
+    METADATA,
+    _id(),
+    Column(
+        "document_id",
+        Text,
+        ForeignKey(unstructured_document.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("content", Text, nullable=False),
+    Column("content_type", Text, nullable=False),  # text / table / chart / infographic
+    Column("page_number", Integer, nullable=True),
+    Column("chunk_index", Integer, nullable=False),
+    Column("source_metadata", JSONB, nullable=True),
+)
+
+#: Exactly one term per document — the document's core concept / topic.
+unstructured_term = Table(
+    "unstructured_term",
+    METADATA,
+    _id(),
+    Column(
+        "document_id",
+        Text,
+        ForeignKey(unstructured_document.c.id, ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    ),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+)
+
+#: Attributes extracted per term.  ``sql`` attributes are reusable
+#: calculations; ``ref`` attributes are enumerated literal facts.
+unstructured_attribute = Table(
+    "unstructured_attribute",
+    METADATA,
+    _id(),
+    Column(
+        "term_id",
+        Text,
+        ForeignKey(unstructured_term.c.id, ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("name", Text, nullable=False),
+    Column("description", Text, nullable=True),
+    Column("attribute_type", Text, nullable=False),
+    CheckConstraint("attribute_type IN ('sql', 'ref')", name="attribute_type_value"),
+)
+
+#: Pointer table: each attribute points to the chunks that support it.
+#:
+#: A link is built one of two ways, and they are not equivalent evidence:
+#: ``source='llm'`` means the extractor read that chunk and cited it, while
+#: ``source='vector'`` means the chunk merely embeds close to the attribute.
+#: ``score`` is the vector-search distance and is null for llm links, so the
+#: provenance cannot be folded into it.
+unstructured_attribute__chunk = Table(
+    "unstructured_attribute__chunk",
+    METADATA,
+    Column(
+        "attribute_id",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "chunk_id",
+        Text,
+        ForeignKey(unstructured_chunk.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("score", Text, nullable=True),
+    Column("source", Text, nullable=False, server_default="vector"),
+    CheckConstraint("source IN ('llm', 'vector')", name="source_value"),
+)
+
+#: How two attributes relate, for the pairs a model was asked to adjudicate.
+#:
+#: Extraction yields attributes one window at a time, so a corpus that states
+#: an indicator in several reports yields several attributes for it, with no
+#: record that they are the same thing.  Answering from one of them as though
+#: it were the only reading is this pipeline's worst failure: the figures all
+#: look equally authoritative in isolation.
+#:
+#: Candidate pairs come from attribute-vector proximity, which is why the
+#: rejections are stored too.  Proximity alone merges ``Outflow of EU movers``
+#: with ``Inflow of EU movers`` and the employment *rate* with employment
+#: *growth*; ``inverse`` and ``related_but_distinct`` are what stop a later
+#: pass from re-proposing pairs already judged and dismissed.
+#:
+#: ``distance`` records what proposed the pair, not what decided it, and is
+#: kept so the candidate threshold can be re-tuned against its own recall.
+unstructured_attribute__attribute = Table(
+    "unstructured_attribute__attribute",
+    METADATA,
+    Column(
+        "attribute_id_a",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "attribute_id_b",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("relation", Text, nullable=False),
+    #: The shared measure, with whatever distinguishes the two sides removed.
+    Column("canonical", Text, nullable=True),
+    #: One sentence on why the relation holds, from the model that judged it.
+    Column("reason", Text, nullable=True),
+    #: What identifies each side: a country, a period, or a publication.
+    Column("qualifier_a", Text, nullable=True),
+    Column("qualifier_b", Text, nullable=True),
+    #: Which side is the whole.  Only meaningful for ``aggregate_and_part``,
+    #: the one relation here that is not symmetric.
+    Column("aggregate_side", Text, nullable=True),
+    Column("distance", Float, nullable=True),
+    Column("model", Text, nullable=False),
+    CheckConstraint(
+        "relation IN ('same_measure_different_place', "
+        "'same_measure_different_period', 'same_measure_different_source', "
+        "'aggregate_and_part', 'related_but_distinct', 'inverse', 'unrelated')",
+        name="relation_value",
+    ),
+    CheckConstraint(
+        "aggregate_side IS NULL OR aggregate_side IN ('a', 'b')",
+        name="aggregate_side_value",
+    ),
+    CheckConstraint(
+        "attribute_id_a < attribute_id_b",
+        name="ordered",
+    ),
+)
+
+#: A set of attributes judged to measure the same thing, with the label a
+#: reader needs to tell the members apart.
+#:
+#: Derived from the ``same_measure_*`` edges above, but not reducible to them:
+#: ``canonical``, ``note`` and each member's ``value`` are generated once over
+#: the whole family, which is the only point where every rival reading is
+#: visible at the same time.  ``dimension`` says what varies across members.
+unstructured_attribute_family = Table(
+    "unstructured_attribute_family",
+    METADATA,
+    _id(),
+    Column("canonical", Text, nullable=False),
+    Column("dimension", Text, nullable=True),
+    #: What a reader needs so one member's figure is not mistaken for
+    #: another's.  Null when the members do not actually conflict.
+    Column("note", Text, nullable=True),
+    Column("model", Text, nullable=False),
+    CheckConstraint(
+        "dimension IS NULL OR dimension IN ('place', 'period', 'source')",
+        name="dimension_value",
+    ),
+)
+
+#: Family membership, carrying the qualifier that identifies this member.
+unstructured_attribute_family__attribute = Table(
+    "unstructured_attribute_family__attribute",
+    METADATA,
+    Column(
+        "family_id",
+        Text,
+        ForeignKey(unstructured_attribute_family.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "attribute_id",
+        Text,
+        ForeignKey(unstructured_attribute.c.id, ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    #: The country, period or publication this member reports for.
+    Column("qualifier", Text, nullable=True),
+    #: The figure it asserts, as written, units included.  Null when the
+    #: attribute states a definition rather than a measurement.
+    Column("value", Text, nullable=True),
+)
+
+# ---------------------------------------------------------------------------
 # Service bookkeeping
 # ---------------------------------------------------------------------------
 
@@ -1201,6 +1411,24 @@ user_group__member = Table(
 # ---------------------------------------------------------------------------
 # Indexes for the read paths
 # ---------------------------------------------------------------------------
+
+Index("ix_unstructured_chunk_document_id", unstructured_chunk.c.document_id)
+Index("ix_unstructured_term_document_id", unstructured_term.c.document_id)
+Index("ix_unstructured_attribute_term_id", unstructured_attribute.c.term_id)
+Index(
+    "ix_unstructured_attribute__chunk_chunk_id",
+    unstructured_attribute__chunk.c.chunk_id,
+)
+# The primary key covers lookups from the a side; retrieval arrives holding
+# either id, so the b side needs its own index.
+Index(
+    "ix_unstructured_attribute__attribute_b",
+    unstructured_attribute__attribute.c.attribute_id_b,
+)
+Index(
+    "ix_unstructured_attribute_family__attribute_attribute_id",
+    unstructured_attribute_family__attribute.c.attribute_id,
+)
 
 Index("ix_catalog_schema_database_id", catalog_schema.c.database_id)
 Index("ix_catalog_table_schema_id", catalog_table.c.schema_id)
@@ -1428,4 +1656,12 @@ __all__ = [
     "GROUP_ROLE_VIEWER",
     "zone",
     "zone_target",
+    "unstructured_document",
+    "unstructured_chunk",
+    "unstructured_term",
+    "unstructured_attribute",
+    "unstructured_attribute__chunk",
+    "unstructured_attribute__attribute",
+    "unstructured_attribute_family",
+    "unstructured_attribute_family__attribute",
 ]

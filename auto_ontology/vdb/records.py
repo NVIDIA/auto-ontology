@@ -10,8 +10,7 @@ An embedded row is the dict the row builders produce (``text``, ``path``,
 retrieval reads hits' ``metadata["id"]``, ``label``, ``name`` and so on from
 there -- and adds ``content``, ``content_metadata`` and ``source_metadata``.
 
-The shape matches what ``nemo_retriever``'s ``to_client_vdb_records`` wrote
-for these rows, so rows written before and after it was replaced are
+The stable record shape keeps rows written by earlier pipeline versions
 indistinguishable in the store.
 """
 

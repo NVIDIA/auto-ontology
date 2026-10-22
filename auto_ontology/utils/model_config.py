@@ -4,13 +4,13 @@
 
 """Shared resolution of model-endpoint env var triplets.
 
-Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``) exposes
-three fields — ``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as
-``<PREFIX>_<FIELD>`` env vars. Any field left unset falls back to the
-corresponding ``DEFAULT_MODELS_<FIELD>``, so a single ``DEFAULT_MODELS_*`` triplet
-can supply the shared endpoint/key/model for all of them. Each field also falls
-back to its legacy pre-triplet env var name (``NVIDIA_API_KEY`` / ``BASE_URL`` /
-``MODEL_NAME``) for backward compatibility.
+Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``, and
+``UNSTRUCTURED_PAGE_ELEMENTS``) exposes three fields — ``ENDPOINT`` (URL),
+``API_KEY``, and ``MODEL`` — as ``<PREFIX>_<FIELD>`` env vars. Any field left
+unset normally falls back to the corresponding ``DEFAULT_MODELS_<FIELD>``, so a
+single ``DEFAULT_MODELS_*`` triplet can supply the shared endpoint/key/model for
+all of them. Each field also falls back to its legacy pre-triplet env var name
+(``NVIDIA_API_KEY`` / ``BASE_URL`` / ``MODEL_NAME``) for backward compatibility.
 
 When even ``DEFAULT_MODELS_<FIELD>`` is unset, a built-in default is used. There
 are two sets — one for ``sk-`` inference-api keys and one for ``nvapi-``
@@ -37,6 +37,10 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "EMBED_MODEL": "nvidia/nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",
         "RERANK_MODEL": "nvidia/nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "UNSTRUCTURED_PAGE_ELEMENTS_ENDPOINT": (
+            "https://inference-api.nvidia.com/v1/ocr"
+        ),
+        "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": ("nvidia/nvidia/nemotron-page-elements-v3"),
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
@@ -51,6 +55,10 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
             "llama-nemotron-rerank-vl-1b-v2/reranking"
         ),
         "RERANK_MODEL": "nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "UNSTRUCTURED_PAGE_ELEMENTS_ENDPOINT": (
+            "https://ai.api.nvidia.com/v1/cv/nvidia"
+        ),
+        "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": "nemotron-page-elements-v3",
     },
 }
 
@@ -89,12 +97,17 @@ def _builtin_default(prefix: str, key: str) -> str:
     return _DEFAULTS_BY_KEY_PREFIX[_FALLBACK_KEY_PREFIX].get(key, "")
 
 
-def resolve(prefix: str, field: str) -> str:
+def resolve(prefix: str, field: str, *, use_shared_default: bool = True) -> str:
     """Resolve one triplet field.
 
     Order of precedence: the ``<prefix>_<field>`` env var, then the shared
     ``DEFAULT_MODELS_<field>``, then a built-in default chosen by whether the
-    triplet's API key is an ``sk-`` or ``nvapi-`` key.
+    triplet's API key is an ``sk-`` or ``nvapi-`` key. Set
+    *use_shared_default* to false for specialized models whose endpoint and
+    model cannot inherit a generic chat-model default.
     """
     key = f"{prefix}_{field}"
-    return os.environ.get(key, "") or _default(field) or _builtin_default(prefix, key)
+    value = os.environ.get(key, "")
+    if not value and use_shared_default:
+        value = _default(field)
+    return value or _builtin_default(prefix, key)

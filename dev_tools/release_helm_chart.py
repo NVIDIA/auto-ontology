@@ -12,10 +12,9 @@ Catalog publishing copies the chart from nvstaging to nvidia byte for byte
 and rewrites nothing in it, so the images ``values.yaml`` names must already
 be their published paths (``--image-registry``, default nvcr.io/nvidia),
 not the nvstaging ones release-docker.yml pushes to -- a customer cannot pull
-from nvstaging. NeMo-Retriever's chart does the same. Before packaging, this
-checks that ``values.yaml`` names exactly ``<image-registry>/<image>:
-<app-version>``, so a release can't ship a chart that installs another build
-or a registry customers can't reach.
+from nvstaging. Before packaging, this checks that ``values.yaml`` names exactly
+``<image-registry>/<image>:<app-version>``, so a release can't ship a chart
+that installs another build or a registry customers can't reach.
 
 Usage (from the repo root)::
 
