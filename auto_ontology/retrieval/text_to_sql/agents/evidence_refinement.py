@@ -18,7 +18,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
-    format_selected_columns_for_prompt,
+    format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
@@ -617,6 +617,11 @@ class EvidenceRefinementAgent(BaseAgent):
         target_db = path_state.get("target_db")
         connector = resolve_connector_from_tables(tables, state.get("connectors") or [])
         dialect = getattr(connector, "dialect", None)
+        tables_block = format_tables_for_prompt(
+            tables,
+            target_db=target_db,
+            dialect=dialect,
+        )
         catalog_columns = _catalog_columns(tables, target_db, dialect, connector)
         qualified_columns_block = (
             "\n".join(
@@ -688,19 +693,6 @@ class EvidenceRefinementAgent(BaseAgent):
         # field references, and apply_evidence_repairs enforces that those field
         # references cannot change.
         value_anchors = list(state.get("value_anchors") or [])
-        anchor_columns = {
-            (str(anchor["tbl"]), str(anchor["col"]))
-            for anchor in value_anchors
-            if anchor.get("tbl") and anchor.get("col")
-        }
-        tables_block = format_selected_columns_for_prompt(
-            tables,
-            target_db=target_db,
-            dialect=dialect,
-            detail_text=f"{grounded_question}\n{grounded_evidence}",
-            detail_columns=anchor_columns,
-            max_details_per_table=12,
-        )
         numbered_evidence = "\n".join(
             f"{index}| {line}"
             for index, line in enumerate(grounded_evidence.splitlines(), 1)

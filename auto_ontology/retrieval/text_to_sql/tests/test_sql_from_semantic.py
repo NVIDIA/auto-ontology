@@ -223,11 +223,6 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
                                 "name": "target_account_id",
                                 "semantic_fk": "accounts.id",
                             },
-                            {
-                                "name": "audit_note",
-                                "data_type": "text",
-                                "description": "Verbose internal audit metadata.",
-                            },
                         ],
                     }
                 ],
@@ -267,8 +262,6 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
         invoked_messages[-1].content
     )
     assert "INTERNAL TABLE SELECTION REASONING" not in invoked_messages[-1].content
-    assert "audit_note (text)" in invoked_messages[-1].content
-    assert "Verbose internal audit metadata." not in invoked_messages[-1].content
     assert "multiple foreign-key columns referencing the same" in (
         invoked_messages[-1].content
     )

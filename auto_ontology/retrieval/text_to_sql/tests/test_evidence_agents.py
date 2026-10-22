@@ -24,9 +24,7 @@ def _run_sql_from_tables(
     relevant_tables: list[dict] | None = None,
 ) -> list:
     captured: list = []
-    monkeypatch.setattr(
-        sql_from_tables, "format_compact_tables_for_prompt", lambda *a, **k: ""
-    )
+    monkeypatch.setattr(sql_from_tables, "format_tables_for_prompt", lambda *a, **k: "")
     monkeypatch.setattr(
         sql_from_tables,
         "resolve_connector_from_tables",

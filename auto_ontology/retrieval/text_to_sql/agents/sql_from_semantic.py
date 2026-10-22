@@ -37,9 +37,9 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 )
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
-    format_compact_tables_for_prompt,
     format_important_columns_for_prompt,
     format_semantic_context,
+    format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.message_utils import (
     build_focused_sql_messages,
@@ -258,42 +258,6 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             target_db = path_state.get("target_db")
 
-            detail_columns: set[tuple[str, str]] = set()
-            for entry in [primary_attribute, *attribute_join_paths]:
-                if not isinstance(entry, dict):
-                    continue
-                table_name = entry.get("table_name")
-                column_name = entry.get("col_name")
-                if table_name and column_name:
-                    detail_columns.add((str(table_name), str(column_name)))
-                for hop in entry.get("path") or []:
-                    for table_key, column_key in (
-                        ("source_table", "source_column"),
-                        ("target_table", "target_column"),
-                    ):
-                        if hop.get(table_key) and hop.get(column_key):
-                            detail_columns.add(
-                                (str(hop[table_key]), str(hop[column_key]))
-                            )
-            for anchor in state.get("value_anchors") or []:
-                if anchor.get("tbl") and anchor.get("col"):
-                    detail_columns.add((str(anchor["tbl"]), str(anchor["col"])))
-
-            detail_text = "\n".join(
-                part
-                for part in (
-                    original_question,
-                    sanitized_question,
-                    evidence,
-                    "\n".join(str(query) for query in relevant_queries),
-                    "\n".join(
-                        str(item.get("sql") or item.get("description") or "")
-                        for item in [*custom_analyses, *sql_attributes]
-                    ),
-                )
-                if part
-            )
-
             # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
             if primary_attribute:
@@ -311,12 +275,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             # Build the available-tables schema section.
             tables_section = (
                 "AVAILABLE TABLES (schema context):\n"
-                + format_compact_tables_for_prompt(
-                    relevant_tables,
-                    target_db=target_db,
-                    dialect=dialect,
-                    detail_text=detail_text,
-                    detail_columns=detail_columns,
+                + format_tables_for_prompt(
+                    relevant_tables, target_db=target_db, dialect=dialect
                 )
                 if relevant_tables
                 else "No tables available."
