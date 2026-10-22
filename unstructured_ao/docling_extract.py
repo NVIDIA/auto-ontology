@@ -2,20 +2,21 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Docling extraction, shaped like NeMo Retriever's compact records.
+"""Docling extraction for the unstructured ingest pipeline.
 
 A drop-in alternative to the retriever's extract stage for
 :func:`unstructured_ao.ingest.ingest_file`: same dict shape out (``text``,
 ``source_id``, ``element_type``, ``page_number``), so everything downstream —
 ``content_type`` mapping, chunk rows, vector upload — is untouched.
 
-Rows are page-based, not chunk-based
-------------------------------------
+PDF rows are page-based, not chunk-based
+----------------------------------------
 Docling's ``HybridChunker`` splits on document structure, which cuts across
 pages: on a 52-page document it yielded 367 chunks averaging 511 characters
 where the retriever yielded 52 page rows. Page rows are kept instead because
 relevance here is judged per page, and because a chunk spanning two pages has no
-single page number to record.
+single page number to record. Formats without page provenance, such as DOCX and
+HTML, produce one text row per heading-delimited section with no page number.
 
 Charts need a second pass
 -------------------------
@@ -130,17 +131,22 @@ def _crop_b64(image: Any) -> str:
 
 
 def _page_rows(document: Any, source_id: str) -> list[dict[str, Any]]:
-    """One text row per page, headings and body in reading order."""
+    """Text grouped by page or section, depending on available provenance."""
     texts: dict[int, list[str]] = {}
-    for item, _level in document.iterate_items():
+    unpaged: list[tuple[Any, int]] = []
+    for item, level in document.iterate_items():
         label = getattr(getattr(item, "label", None), "value", None)
         if label in _FIGURE_LABELS or label == "table":
             continue  # these get their own rows
         text = (getattr(item, "text", "") or "").strip()
         page = _page_of(item)
-        if text and page is not None:
+        if not text:
+            continue
+        if page is None:
+            unpaged.append((item, level))
+        else:
             texts.setdefault(page, []).append(text)
-    return [
+    rows = [
         {
             "text": "\n".join(lines),
             "source_id": source_id,
@@ -149,6 +155,47 @@ def _page_rows(document: Any, source_id: str) -> list[dict[str, Any]]:
         }
         for page, lines in sorted(texts.items())
     ]
+    if unpaged:
+        rows.extend(_section_rows(unpaged, source_id))
+    return rows
+
+
+def _section_rows(items: list[tuple[Any, int]], source_id: str) -> list[dict[str, Any]]:
+    """One row per heading-delimited section, with ancestor headings included."""
+    rows: list[dict[str, Any]] = []
+    headings: dict[int, str] = {}
+    body: list[str] = []
+
+    def flush() -> None:
+        if not body:
+            return
+        parts = [headings[level] for level in sorted(headings)] + body
+        rows.append(
+            {
+                "text": "\n".join(parts),
+                "source_id": source_id,
+                "element_type": "text",
+                "page_number": None,
+            }
+        )
+        body.clear()
+
+    for item, level in items:
+        text = (getattr(item, "text", "") or "").strip()
+        label = getattr(getattr(item, "label", None), "value", None)
+        if label in {"title", "section_header"}:
+            flush()
+            headings = {
+                heading_level: heading
+                for heading_level, heading in headings.items()
+                if heading_level < level
+            }
+            headings[level] = text
+        else:
+            body.append(text)
+
+    flush()
+    return rows
 
 
 def _table_rows(document: Any, source_id: str) -> list[dict[str, Any]]:

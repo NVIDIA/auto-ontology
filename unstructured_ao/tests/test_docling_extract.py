@@ -39,6 +39,7 @@ class FakeItem:
     text: str = ""
     label_value: str = "text"
     page: int | None = 1
+    level: int = 1
 
     @property
     def label(self) -> FakeLabel:
@@ -76,7 +77,7 @@ class FakeDoc:
     pictures: list[Any] = field(default_factory=list)
 
     def iterate_items(self):
-        return ((item, 0) for item in self.items)
+        return ((item, item.level) for item in self.items)
 
 
 class FakeClient:
@@ -129,10 +130,41 @@ def test_page_rows_exclude_figures_and_tables() -> None:
     assert _page_rows(doc, "x")[0]["text"] == "Prose."
 
 
-def test_page_rows_skip_items_with_no_page() -> None:
-    """A row with no page number cannot be scored against page judgements."""
-    doc = FakeDoc(items=[FakeItem("Floating.", "text", None)])
-    assert _page_rows(doc, "x") == []
+def test_page_rows_keep_unpaged_document_text() -> None:
+    doc = FakeDoc(
+        items=[
+            FakeItem("Heading", "section_header", None),
+            FakeItem("Floating.", "text", None),
+        ]
+    )
+    assert _page_rows(doc, "x") == [
+        {
+            "text": "Heading\nFloating.",
+            "source_id": "x",
+            "element_type": "text",
+            "page_number": None,
+        }
+    ]
+
+
+def test_page_rows_split_unpaged_text_by_section_with_heading_context() -> None:
+    doc = FakeDoc(
+        items=[
+            FakeItem("Handbook", "title", None, 1),
+            FakeItem("Overview", "section_header", None, 2),
+            FakeItem("Overview body.", "text", None, 3),
+            FakeItem("Returns", "section_header", None, 2),
+            FakeItem("Return policy", "section_header", None, 3),
+            FakeItem("Thirty days.", "text", None, 4),
+        ]
+    )
+
+    rows = _page_rows(doc, "x")
+
+    assert [row["text"] for row in rows] == [
+        "Handbook\nOverview\nOverview body.",
+        "Handbook\nReturns\nReturn policy\nThirty days.",
+    ]
 
 
 def test_table_rows_use_markdown() -> None:
