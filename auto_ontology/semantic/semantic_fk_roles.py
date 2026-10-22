@@ -208,19 +208,33 @@ For each proposal:
 - when_to_use: concrete question patterns that require this relationship. Include
   both the entity/literal that may anchor the question and the information requested.
   Cover indirect multi-hop use when the anchor belongs to another table in this
-  connected component. For a shared-parent sibling path, spell out when a question
-  anchored on one child must traverse the parent to reach the other child;
+  connected component. For a shared-parent sibling pattern, spell out when a question
+  anchored on one child needs information from the other child, while distinguishing
+  that semantic need from whether the parent table must physically appear in SQL;
 - avoid_when: confusing nearby intents that belong to another table/relationship;
 - evidence_ids: only supplied or observed catalog IDs supporting the guidance.
 
 Analyze the component as a whole before writing any proposal. Guidance must help a
-query planner choose the complete path, not merely describe the local FK. For
+query planner choose the necessary tables, not merely describe the local FK. For
 example, if a question names an entity from one table but requests localized or
 historical information stored in a sibling table, mention that combined pattern and
-the intermediate parent in when_to_use/how_to_use. An entity name by itself is not
+the shared parent key in when_to_use/how_to_use. An entity name by itself is not
 enough to require every adjacent relationship: pair the anchor with the requested
-output or constraint. Use avoid_when to distinguish the closest competing sibling
-or similarly named entity.
+output or constraint.
+
+Do not treat a semantic FK as an instruction to materialize its target table:
+- Use the source FK column directly when it already provides the requested parent
+  identifier.
+- When sibling child tables carry FKs to the same parent attribute, they may join
+  directly on those FK columns if no parent attributes or filters are needed. Do not
+  route through the physical parent merely to connect them.
+- Join the parent table only when its own attributes, filters, or grain are required.
+- State this distinction in how_to_use and include unnecessary parent materialization
+  in avoid_when when it is a plausible mistake.
+
+Use avoid_when to distinguish the closest competing sibling or similarly named
+entity. Never recommend a longer child -> parent -> sibling path when direct matching
+of the two child FK columns answers the question without parent data.
 
 Database: {database_name}
 Tool calls remaining: {tool_calls_remaining}

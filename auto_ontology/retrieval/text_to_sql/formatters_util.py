@@ -193,8 +193,12 @@ def format_semantic_fk_guidance_for_prompt(
     return (
         "## Semantic Relationship Guidance\n"
         "These database-specific instructions define the intended role of each "
-        "relationship. Use them to choose between plausible joins and tables.\n\n"
-        + "\n\n".join(relationships)
+        "relationship. Use them to choose between plausible joins and tables. "
+        "They do not make the referenced parent table mandatory. Use the source "
+        "foreign-key column directly when it already provides the requested "
+        "identifier or can join directly to another required table on the same "
+        "parent key. Join the parent table only when its own attributes or filters "
+        "are required.\n\n" + "\n\n".join(relationships)
     )
 
 

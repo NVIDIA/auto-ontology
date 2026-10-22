@@ -132,6 +132,9 @@ def test_semantic_fk_guidance_is_separate_from_table_schema() -> None:
     assert "relationship guidance" not in schema
     assert "card belongs to card set" not in schema
     assert "## Semantic Relationship Guidance" in guidance
+    assert "They do not make the referenced parent table mandatory." in guidance
+    assert "Use the source foreign-key column directly" in guidance
+    assert "Join the parent table only when its own attributes" in guidance
     assert "Relationship: main.cards.setCode -> main.sets.code" in guidance
     assert "Role: card belongs to card set" in guidance
     assert "How to use: Traverse from a card to its owning set." in guidance

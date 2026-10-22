@@ -56,7 +56,7 @@ def test_connected_components_keep_shared_parent_edges_together() -> None:
     assert [len(component) for component in components] == [3, 1]
 
 
-def test_role_prompt_requires_contextual_multi_hop_usage_patterns() -> None:
+def test_role_prompt_requires_contextual_usage_without_forcing_parent_join() -> None:
     prompt = semantic_fk_roles._render_prompt(
         "card_games",
         [
@@ -71,10 +71,15 @@ def test_role_prompt_requires_contextual_multi_hop_usage_patterns() -> None:
     assert "entity/literal that may anchor the question" in prompt
     assert "information requested" in prompt
     assert "indirect multi-hop use" in prompt
-    assert "shared-parent sibling path" in prompt
-    assert "intermediate parent" in prompt
+    assert "shared-parent sibling pattern" in prompt
+    assert "shared parent key" in prompt
     assert "An entity name by itself" in prompt
     assert "enough to require every adjacent relationship" in prompt
+    assert "Use the source FK column directly" in prompt
+    assert "directly on those FK columns" in prompt
+    assert "Join the parent table only when its own attributes" in prompt
+    assert "Do not treat a semantic FK as an instruction to materialize" in prompt
+    assert "Never recommend a longer child -> parent -> sibling path" in prompt
     assert '"source_table_name": "cards"' in prompt
     assert '"source_table_name": "set-translations"' in prompt
 
