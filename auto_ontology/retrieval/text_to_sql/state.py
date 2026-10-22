@@ -107,7 +107,7 @@ class AgentState(TypedDict):
     domain_rules: list[dict[str, str]]
     # User-curated Glossary definitions (the ``acronyms`` table), kept apart from
     # domain_rules so prompts can inject them without the custom-analysis SQL.
-    # After ``question_extraction``, this is narrowed to the entries the LLM used.
+    # After semantic preparation, this is narrowed to entries the LLM used.
     glossary: NotRequired[list[dict[str, str]]]
     restore_from: RetryRestoreState
     full_pipeline_attempt: int
@@ -138,7 +138,7 @@ def get_question_for_processing(state: AgentState) -> str:
     """
     Question string for retrieval and semantic search.
 
-    Uses ``path_state["normalized_question"]`` when set (e.g. after extraction),
+    Uses ``path_state["normalized_question"]`` when set (e.g. after preparation),
     otherwise falls back to the standalone question.
     """
     path_state = state.get("path_state", {})

@@ -13,15 +13,6 @@ from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_question_for_processing,
 )
-from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
-    CandidatePreparationAgent,
-)
-from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
-    CandidateRetrievalAgent,
-)
-from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
-    QuestionExtractionAgent,
-)
 from auto_ontology.retrieval.text_to_sql.agents.empty_result_value_repair import (
     EmptyResultValueRepairAgent,
 )
@@ -47,6 +38,9 @@ from auto_ontology.retrieval.text_to_sql.agents.empty_like_result_check import (
     EmptyLikeResultCheckAgent,
 )
 from auto_ontology.retrieval.text_to_sql.agents.response import ResponseAgent
+from auto_ontology.retrieval.text_to_sql.agents.semantic_preparation_agent import (
+    SemanticPreparationAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -256,11 +250,19 @@ def route_question_type_or_evidence(state: AgentState) -> str:
     return route_evidence_refinement(state)
 
 
-def route_after_candidate_retrieval(state: AgentState) -> str:
-    """Send information requests to metadata answering before SQL preparation."""
+def route_after_semantic_preparation(state: AgentState) -> str:
+    """Route a fully prepared request to information, prediction, or SQL."""
+    question_type = state.get("path_state", {}).get("question_type")
+    if question_type == "information":
+        return "information"
+    return route_question_type_or_evidence(state)
+
+
+def route_after_semantic_preparation_without_prediction(state: AgentState) -> str:
+    """Route prepared requests when the optional prediction branch is disabled."""
     if state.get("path_state", {}).get("question_type") == "information":
         return "information"
-    return "prepare_candidates"
+    return route_evidence_refinement(state)
 
 
 def _make_node(name, fn):
@@ -337,10 +339,8 @@ def create_graph():
 
     # Routing agents
     question_intent_agent = QuestionIntentAgent()
-    question_extraction_agent = QuestionExtractionAgent()
-    retrieval_agent = CandidateRetrievalAgent()
+    semantic_preparation_agent = SemanticPreparationAgent()
     information_agent = InformationAgent()
-    candidate_preparation_agent = CandidatePreparationAgent()
     evidence_refinement_agent = EvidenceRefinementAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
@@ -358,16 +358,11 @@ def create_graph():
     question_intent_node = _make_node(
         "question_intent", agent_wrapper(question_intent_agent)
     )
-    question_extraction_node = _make_node(
-        "question_extraction", agent_wrapper(question_extraction_agent)
-    )
-    retrieve_candidates_node = _make_node(
-        "retrieve_candidates", agent_wrapper(retrieval_agent)
+    semantic_preparation_node = _make_node(
+        "prepare_semantic_context",
+        agent_wrapper(semantic_preparation_agent),
     )
     information_node = _make_node("information_agent", agent_wrapper(information_agent))
-    prepare_candidates_node = _make_node(
-        "prepare_candidates", agent_wrapper(candidate_preparation_agent)
-    )
     refine_evidence_node = _make_node(
         "refine_evidence", agent_wrapper(evidence_refinement_agent)
     )
@@ -445,10 +440,8 @@ def create_graph():
 
     # Add only nodes instantiated above.
     graph.add_node("question_intent", question_intent_node)
-    graph.add_node("question_extraction", question_extraction_node)
-    graph.add_node("retrieve_candidates", retrieve_candidates_node)
+    graph.add_node("prepare_semantic_context", semantic_preparation_node)
     graph.add_node("information_agent", information_node)
-    graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("refine_evidence", refine_evidence_node)
     graph.add_node("check_value_repair", value_repair_node)
     if combined_precheck_node is not None:
@@ -463,16 +456,7 @@ def create_graph():
     graph.add_node("unconstructable_sql_response", unconstructable_sql_response_node)
 
     # Minimal flow using only the defined nodes.
-    graph.add_edge("question_intent", "question_extraction")
-    graph.add_edge("question_extraction", "retrieve_candidates")
-    graph.add_conditional_edges(
-        "retrieve_candidates",
-        route_after_candidate_retrieval,
-        {
-            "information": "information_agent",
-            "prepare_candidates": "prepare_candidates",
-        },
-    )
+    graph.add_edge("question_intent", "prepare_semantic_context")
     graph.add_edge("information_agent", END)
 
     if prediction_enabled:
@@ -494,9 +478,10 @@ def create_graph():
         )
 
         graph.add_conditional_edges(
-            "prepare_candidates",
-            route_question_type_or_evidence,
+            "prepare_semantic_context",
+            route_after_semantic_preparation,
             {
+                "information": "information_agent",
                 "prediction": "prepare_prediction_graph",
                 "refine_evidence": "refine_evidence",
                 "construct_sql_from_candidates": "construct_sql_from_candidates",
@@ -513,9 +498,10 @@ def create_graph():
         graph.add_edge("kumo_predict", END)
     else:
         graph.add_conditional_edges(
-            "prepare_candidates",
-            route_evidence_refinement,
+            "prepare_semantic_context",
+            route_after_semantic_preparation_without_prediction,
             {
+                "information": "information_agent",
                 "refine_evidence": "refine_evidence",
                 "construct_sql_from_candidates": "construct_sql_from_candidates",
             },
@@ -621,6 +607,7 @@ __all__ = [
     "AgentState",
     "create_graph",
     "get_question_for_processing",
-    "route_after_candidate_retrieval",
+    "route_after_semantic_preparation",
+    "route_after_semantic_preparation_without_prediction",
     "route_sql_execution",
 ]

@@ -20,6 +20,7 @@ from __future__ import annotations
 NODE_LABELS: dict[str, str] = {
     "question_intent": "Classifying the question",
     "question_extraction": "Understanding the question",
+    "prepare_semantic_context": "Preparing semantic context",
     "prepare_prediction_graph": "Preparing prediction",
     "kumo_predict": "Preparing prediction",
     "retrieve_candidates": "Retrieving candidates",

@@ -708,8 +708,12 @@ def test_graph_wires_refinement_before_sql_construction(
         for edge in create_graph().compile().get_graph().edges
     }
 
-    assert ("prepare_candidates", "refine_evidence", True) in edges
-    assert ("prepare_candidates", "construct_sql_from_candidates", True) in edges
+    assert ("prepare_semantic_context", "refine_evidence", True) in edges
+    assert (
+        "prepare_semantic_context",
+        "construct_sql_from_candidates",
+        True,
+    ) in edges
     assert ("refine_evidence", "construct_sql_from_candidates", False) in edges
 
 
@@ -722,6 +726,6 @@ def test_prediction_graph_can_bypass_refinement(
         for edge in create_graph().compile().get_graph().edges
     }
 
-    assert ("question_intent", "question_extraction", False) in edges
-    assert ("prepare_candidates", "prepare_prediction_graph", True) in edges
-    assert ("prepare_candidates", "refine_evidence", True) in edges
+    assert ("question_intent", "prepare_semantic_context", False) in edges
+    assert ("prepare_semantic_context", "prepare_prediction_graph", True) in edges
+    assert ("prepare_semantic_context", "refine_evidence", True) in edges

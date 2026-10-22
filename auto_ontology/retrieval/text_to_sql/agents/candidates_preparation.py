@@ -299,6 +299,14 @@ class CandidatePreparationAgent(BaseAgent):
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
         candidates = custom_analyses + column_attributes + sql_attributes_raw
+        deep_selected_table_ids = list(
+            dict.fromkeys(path_state.get("semantic_preparation_table_ids") or [])
+        )
+        thought_node_name = (
+            "prepare_semantic_context"
+            if "semantic_preparation_table_ids" in path_state
+            else _GRAPH_NODE_NAME
+        )
 
         # --- 1. Custom analyses ---
         self.logger.info("Retrieved %d custom analyses", len(custom_analyses))
@@ -315,13 +323,19 @@ class CandidatePreparationAgent(BaseAgent):
         # of the anchor-column LLM/join-path work below. Kick it off in the
         # background so the two multi-second steps overlap instead of stacking.
         extra_pool = ThreadPoolExecutor(max_workers=1)
-        extra_future = extra_pool.submit(
-            self._retrieve_additional_tables,
-            state.get("data_retriever"),
-            question,
-            path_state.get("entities") or [],
-            target_db,
-        )
+        if "semantic_preparation_table_ids" in path_state:
+            extra_future = extra_pool.submit(
+                fetch_tables_by_ids,
+                deep_selected_table_ids,
+            )
+        else:
+            extra_future = extra_pool.submit(
+                self._retrieve_additional_tables,
+                state.get("data_retriever"),
+                question,
+                path_state.get("entities") or [],
+                target_db,
+            )
 
         # --- 2. Enrich ColumnAttributes with store context and build join paths ---
         primary_attribute: dict | None = None
@@ -354,12 +368,22 @@ class CandidatePreparationAgent(BaseAgent):
                 term_synonyms = fetch_term_synonyms(attr_ids)
                 self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
-                anchor_id, anchor_reasoning = self._identify_anchor(
-                    state, question, attr_contexts
+                selected_anchor_id = path_state.get(
+                    "semantic_preparation_primary_attribute_id"
                 )
+                if selected_anchor_id in attr_contexts:
+                    anchor_id = selected_anchor_id
+                    anchor_reasoning = (
+                        "The semantic preparation agent selected this anchor after "
+                        "reviewing its tool observations."
+                    )
+                else:
+                    anchor_id, anchor_reasoning = self._identify_anchor(
+                        state, question, attr_contexts
+                    )
                 self.logger.info("Anchor attribute id: %s", anchor_id)
                 if anchor_reasoning:
-                    record_thought(path_state, _GRAPH_NODE_NAME, anchor_reasoning)
+                    record_thought(path_state, thought_node_name, anchor_reasoning)
 
                 if anchor_id and anchor_id in attr_contexts:
                     anchor_ctx = attr_contexts[anchor_id]
@@ -636,20 +660,39 @@ class CandidatePreparationAgent(BaseAgent):
         pre_filter_candidate_ids = {t["id"] for t in relevant_tables if t.get("id")}
 
         # --- 5. Filter tables by relevance ---
-        relevant_tables, table_relevance_reasoning = self._filter_tables_by_relevance(
-            state,
-            question,
-            relevant_tables,
-            custom_analyses,
-            attribute_join_paths,
-        )
+        if "semantic_preparation_table_ids" in path_state:
+            selected_ids = set(deep_selected_table_ids)
+            selected_ids.update(
+                str(context["table_id"])
+                for context in attr_contexts.values()
+                if context.get("table_id")
+            )
+            relevant_tables = [
+                table
+                for table in relevant_tables
+                if str(table.get("id")) in selected_ids
+            ]
+            table_relevance_reasoning = (
+                "Tables were selected by the semantic preparation agent from "
+                "validated tool observations."
+            )
+        else:
+            relevant_tables, table_relevance_reasoning = (
+                self._filter_tables_by_relevance(
+                    state,
+                    question,
+                    relevant_tables,
+                    custom_analyses,
+                    attribute_join_paths,
+                )
+            )
         self.logger.debug(
             "Kept %d relevant tables (after relevance filter): %s",
             len(relevant_tables),
             [_qualified_name(t) for t in relevant_tables],
         )
         if table_relevance_reasoning:
-            record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
+            record_thought(path_state, thought_node_name, table_relevance_reasoning)
 
         # --- 5b. One-hop junction-table expansion ---
         # Junction tables are join structure, not relevance candidates: once

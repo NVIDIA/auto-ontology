@@ -24,7 +24,7 @@ from auto_ontology.retrieval.text_to_sql.agents.question_intent import (
 )
 from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
     _entry_router_fn,
-    route_after_candidate_retrieval,
+    route_after_semantic_preparation,
     route_question_type_or_evidence,
 )
 
@@ -433,13 +433,13 @@ def test_non_prediction_types_follow_sql_evidence_route(
     ("question_type", "route"),
     [
         ("information", "information"),
-        ("calculation", "prepare_candidates"),
-        ("prediction", "prepare_candidates"),
+        ("calculation", "construct_sql_from_candidates"),
+        ("prediction", "prediction"),
     ],
 )
-def test_information_routes_before_candidate_preparation(
+def test_semantic_preparation_routes_by_question_type(
     question_type: str, route: str
 ) -> None:
     state = {"path_state": {"question_type": question_type}}
 
-    assert route_after_candidate_retrieval(state) == route
+    assert route_after_semantic_preparation(state) == route
