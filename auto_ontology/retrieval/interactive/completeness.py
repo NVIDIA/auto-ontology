@@ -43,13 +43,22 @@ Your task — produce a FRESH updated list:
      stated in the user's answer or the external knowledge
    - A threshold or classification condition expressed as a choice between meanings, \
      where the knowledge does not say which meaning applies
+   - A named score, index, or rate the question computes, when its equation \
+     (operators and constants) is not written in the external knowledge and not \
+     written in the user's answer. The missing text must be exactly \
+     "calculation not stated"
+   - A value the question asks to show or filter on, when neither the external \
+     knowledge nor the user's answer says what that value is. The missing text \
+     must be exactly "value not stated"
    - A KB condition or user answer using hedged language (e.g. "typically", "often",\
     "approximately", "things like") that leaves which cases qualify undecided
  
 Do NOT flag:
-- A missing formula, equation, operator, constant, or column binding. Those are \
-  taken from external knowledge and the schema at SQL generation time. Do not ask \
-  the user for them, even when the formula names concepts rather than schema columns.
+- A calculation whose equation is already written in the external knowledge or \
+  in the user's answer, even when that equation uses business names.
+- A column binding, a table name, or where a value is stored.
+- A stored quantity such as a count, an identifier, or a field the schema can \
+  resolve without an equation.
 - Business context or motivation that does not affect which rows or values qualify
 - Terms fully defined by an explicit formula in the answer or KB
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
@@ -86,20 +95,126 @@ Identify gaps in either of the following categories:
    - Expressed with hedged language ("typically", "often", "approximately", "things like") \
      so which cases qualify is undecided
    - Two documented meanings and no indication which one applies
+   - A named score, index, or rate the question computes, when its equation is not \
+     written anywhere in the external knowledge. The missing text must be exactly \
+     "calculation not stated"
+   - A value the question asks to show or filter on that the external knowledge \
+     does not identify. The missing text must be exactly "value not stated"
 2. Do NOT flag a schema entity just because its formula is not written next to a \
    column name. A formula stated anywhere in external knowledge is complete. \
    Standard aggregations (SUM, AVG, COUNT) are not gaps.
 
 A gap is only significant if the user must choose a meaning, population, or cutoff \
-that the knowledge does not decide.
+that the knowledge does not decide, or a named calculation or value is not written \
+in the knowledge.
 
 Do NOT flag:
-- A missing formula, equation, operator, or column name. Column binding is not a \
-  question for the user.
-- Terms fully defined with an explicit formula in external knowledge, even when \
-  that formula uses business names rather than schema column names.
+- A calculation whose equation is already written in the external knowledge, even \
+  when that equation uses business names rather than schema column names.
+- A column name, or where a value is stored. Column binding is not a question \
+  for the user.
+- A stored quantity such as a count, an identifier, or a field the schema can \
+  resolve without an equation.
 - Terms already resolved to a specific column above (schema columns already resolved by VDB).
 - Business context that does not affect which rows or values qualify
+- Minor ambiguities a SQL generator can resolve on its own
+
+Output one line per gap found, ordered from most to least critical:
+  INCOMPLETE: <term> | <what is still missing>
+
+If everything is clearly defined for SQL generation, output:
+  COMPLETE"""
+
+# Specific questions still flag every missing formula. A high-level question flags
+# a calculation only when its equation is absent from the visible knowledge.
+_COMPLETENESS_PROMPT_SPECIFIC = """\
+You are managing a list of formulas and conditions that are still incompletely specified \
+for SQL generation purposes.
+
+Working question (for context on what SQL operations are needed):
+{working_question}
+
+Previously flagged gaps (may be empty):
+{prior_gaps}
+
+User's answer to the last clarification question:
+Q: {last_q}
+A: {last_a}
+
+Relevant external knowledge (may contain partial or ambiguous definitions):
+{relevant_knowledge}
+
+Schema columns already resolved by VDB (drop a gap only if the description directly resolves it):
+{resolved_schema_terms}
+
+Your task — produce a FRESH updated list:
+1. DROP any prior gap that is now fully resolved by the user's answer above \
+   (exact operators and constants given for every part of it, all column names considered resolved).\
+2. UPDATE a prior gap if the user's answer, relevant knowledge, or the working question provides \
+    information which requires a change in the gap's description (e.g, narrowing the gap in light \
+    of additional information).
+2. KEEP any prior gap that the answer did not fully resolve and does not require an update.
+4. ADD any new gap introduced by the answer or the external knowledge that would \
+   prevent writing correct SQL — for example:
+   - A formula whose exact operators, constants, or column combinations are still unknown
+   - A threshold or classification condition expressed vaguely or in natural language \
+     with no mapping to a specific column value
+   - A KB condition or user answer using hedged language (e.g. "typically", "often",\
+    "approximately", "things like") or referencing an undefined sub-condition
+   - A composite formula whose aggregation semantics are unspecified — i.e. the formula \
+     combines multiple columns non-linearly and it is unclear at which level it should \
+     be evaluated before grouping
+   - A natural language formula description that does not map to a unique equation — \
+     e.g. "adjusted by X", "modified with Y", "compensated for Z" where different \
+     placements of the adjustment (inside a fraction vs. outside, numerator vs. denominator) \
+     produce different values; include the user's exact phrase in the description
+ 
+Do NOT flag:
+- Business context or motivation that does not affect SQL structure
+- Terms fully defined by an explicit formula in the answer or KB
+- Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
+  handling, boundary operators)
+
+Output one line per remaining gap, ordered from most to least critical for SQL correctness, \
+by considering the working question (e.g. a missing core formula blocks SQL entirely; a missing \
+secondary threshold is lower priority):
+  INCOMPLETE: <term> | <what is still missing>
+
+If no gaps remain, output:
+  COMPLETE"""
+
+_COMPLETENESS_PROMPT_KB_ONLY_SPECIFIC = """\
+You are scanning for formulas or conditions that are missing or ambiguously defined \
+and would prevent writing correct SQL.
+
+Working question (for context on what SQL operations are needed):
+{working_question}
+
+Relevant external knowledge:
+{relevant_knowledge}
+
+Schema entities found in the database but with NO formula in the external knowledge base \
+(the question may or may not require computing a formula for these — check each one):
+{vdb_only_section}
+
+Schema columns already resolved by VDB (drop a gap only if the description directly resolves it):
+{resolved_schema_terms}
+
+Identify gaps in either of the following categories:
+1. Terms in the external knowledge that are ambiguously defined:
+   - Expressed with hedged language ("typically", "often", "approximately", "things like")
+   - Reference sub-conditions not mapped to specific column values
+   - Use natural language that does not map to a unique equation
+2. Schema entities (listed above) that the working question asks to CALCULATE using a \
+   specific formula, where no formula exists anywhere — flag only if a SQL generator \
+   would have to invent the computation. Standard aggregations (SUM, AVG, COUNT) do NOT count.
+
+A gap is only significant if it would prevent writing correct SQL.
+
+Do NOT flag:
+- Terms fully defined with exact operators and all relevant column names found in the schema entities.
+- Terms already resolved to a specific column above (schema columns already resolved by VDB).
+- Business context that does not affect SQL structure
 - Minor ambiguities a SQL generator can resolve on its own
 
 Output one line per gap found, ordered from most to least critical:
@@ -147,6 +262,7 @@ def detect_incomplete_formulas(
     llm,
     vdb_only_entities: list[str] | None = None,
     resolved_schema_terms: str = "",
+    high_level: bool = False,
 ) -> list[tuple[str, str]]:
     """Return an updated (term, what_is_missing) gap list.
 
@@ -157,14 +273,21 @@ def detect_incomplete_formulas(
     dropping resolved terms, keeping unresolved ones, adding new gaps.
     resolved_schema_terms: pre-formatted VDB hit descriptions (entity → description)
     used to close gaps whose column semantics are already known from the schema.
+    high_level selects the prompt that does not ask the user for a formula.
     """
+    if high_level:
+        answered_prompt = _COMPLETENESS_PROMPT
+        scan_prompt = _COMPLETENESS_PROMPT_KB_ONLY
+    else:
+        answered_prompt = _COMPLETENESS_PROMPT_SPECIFIC
+        scan_prompt = _COMPLETENESS_PROMPT_KB_ONLY_SPECIFIC
     if last_turn is None:
         vdb_section = (
             "\n".join(f"- {e}" for e in vdb_only_entities)
             if vdb_only_entities
             else "None"
         )
-        prompt = _COMPLETENESS_PROMPT_KB_ONLY.format(
+        prompt = scan_prompt.format(
             working_question=working_question,
             relevant_knowledge=relevant_knowledge or "None",
             vdb_only_section=vdb_section,
@@ -176,7 +299,7 @@ def detect_incomplete_formulas(
             if current_gaps
             else "None"
         )
-        prompt = _COMPLETENESS_PROMPT.format(
+        prompt = answered_prompt.format(
             working_question=working_question,
             prior_gaps=prior_text,
             last_q=last_turn["q"],

@@ -16,10 +16,10 @@ from .clarify import (
     should_clarify,
     refresh_grounded_knowledge,
     prune_resolved_terms,
-    _STUCK_PHRASES,
     external_kb_text,
     knowledge_for_user_decisions,
     should_inject_default_sort,
+    stuck_phrases,
     _DEFAULT_SORT_HINT,
     _format_resolved_schema_terms,
 )
@@ -259,7 +259,9 @@ def _format_user_clarifications(session: InteractiveSessionState) -> str:
     for turn in session.clarify_history:
         question = str(turn.get("q") or "").strip()
         answer = str(turn.get("a") or "").strip()
-        if not answer or any(phrase in answer.lower() for phrase in _STUCK_PHRASES):
+        if not answer or any(
+            phrase in answer.lower() for phrase in stuck_phrases(session.high_level)
+        ):
             continue
         number = len(clarifications) + 1
         clarifications.append(
@@ -352,7 +354,9 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
             f"formulas from this SQL where applicable)\n{p1_sql}\n\n"
         )
     user_clarifications_note = _format_user_clarifications(session)
-    external_kb_note = _verbatim_external_knowledge(session.external_kb)
+    external_kb_note = (
+        _verbatim_external_knowledge(session.external_kb) if session.high_level else ""
+    )
 
     resolved_terms_section = build_grounded_terms_hint(session)
     evidence = generate_evidence(
@@ -579,6 +583,7 @@ def create_session(
     external_kb_children_map: dict | None = None,
     skip_evidence_refinement: bool = False,
     numeric_type_alignment: bool = False,
+    high_level: bool = False,
 ) -> InteractiveSessionState:
     return InteractiveSessionState(
         session_id=session_id,
@@ -592,6 +597,7 @@ def create_session(
         external_kb_children_map=external_kb_children_map or {},
         skip_evidence_refinement=skip_evidence_refinement,
         numeric_type_alignment=numeric_type_alignment,
+        high_level=high_level,
         data_retriever=data_retriever,
         semantic_retriever=semantic_retriever,
         connectors=connectors,
@@ -760,16 +766,21 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
         session.clarify_history.append({"q": session._pending_question, "a": answer})
         session._pending_question = None
     answer_lower = answer.lower()
-    user_could_not_answer = any(phrase in answer_lower for phrase in _STUCK_PHRASES)
+    user_could_not_answer = any(
+        phrase in answer_lower for phrase in stuck_phrases(session.high_level)
+    )
     if not user_could_not_answer and session.clarify_history:
         last_turn = session.clarify_history[-1]
         relevant_knowledge = session._grounded_knowledge or ""
-        # Completeness sees the full external knowledge so a formula the
-        # coverage filter did not attach is not flagged as something to ask.
-        # Merge stays on the grounded slice: the working question should record
-        # what the user said, not a copy of the whole knowledge base.
-        decision_knowledge = knowledge_for_user_decisions(
-            relevant_knowledge, session.external_kb
+        # On a high-level question, completeness sees the full external
+        # knowledge so a formula the coverage filter did not attach is not
+        # flagged as something to ask. A specific question keeps the grounded
+        # slice, and a missing formula stays a gap. Merge always stays on the
+        # grounded slice: the working question records what the user said.
+        decision_knowledge = (
+            knowledge_for_user_decisions(relevant_knowledge, session.external_kb)
+            if session.high_level
+            else relevant_knowledge
         )
 
         with ThreadPoolExecutor(max_workers=3) as pool:
@@ -789,6 +800,7 @@ def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:
                 _get_llm(),
                 None,
                 _format_resolved_schema_terms(session._cached_resolved_hits or []),
+                session.high_level,
             )
             prune_future = pool.submit(
                 prune_resolved_terms,

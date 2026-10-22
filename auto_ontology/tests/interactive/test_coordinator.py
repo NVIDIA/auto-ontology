@@ -250,6 +250,7 @@ def test_sql_generation_injects_external_kb_verbatim():
     formula = "medical_personnel / (casualties + injured)"
     sess = _make_session(
         external_kb=f"- MSR\n  Definition: {formula}",
+        high_level=True,
         original_question="Which sites are in a health crisis?",
         working_question="Which sites are in a health crisis?",
         data_retriever=MagicMock(),
@@ -306,7 +307,8 @@ def test_should_clarify_drops_formula_question_and_shows_full_kb():
     from auto_ontology.retrieval.interactive.clarify import should_clarify
 
     sess = _make_session(
-        external_kb="- MSR\n  Definition: medical / (casualties + injured)"
+        external_kb="- MSR\n  Definition: medical / (casualties + injured)",
+        high_level=True,
     )
     sess._cached_unresolvable_for = sess.working_question
     sess._cached_unresolvable = []
@@ -330,6 +332,51 @@ def test_should_clarify_drops_formula_question_and_shows_full_kb():
     assert "never ask the user to repeat" in seen[0]
 
 
+def test_high_level_asks_once_when_the_calculation_is_not_stated():
+    from auto_ontology.retrieval.interactive.clarify import should_clarify
+
+    sess = _make_session(
+        high_level=True, external_kb="- ESI\n  Definition: a suitability index."
+    )
+    sess._cached_unresolvable_for = sess.working_question
+    sess._cached_unresolvable = []
+    sess.incomplete_formula_terms = [
+        ("Environmental Suitability Index", "calculation not stated")
+    ]
+    sess.clarify_history = [
+        {
+            "q": "Do you mean the Environmental Suitability Index (ESI)?",
+            "a": "Yes, that is the index.",
+        }
+    ]
+
+    with patch(
+        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
+        return_value="PROCEED",
+    ) as mock_llm:
+        ask, question = should_clarify(sess, MagicMock())
+
+    assert ask is True
+    assert question == "What do you mean by Environmental Suitability Index?"
+    assert mock_llm.call_count == 1
+
+    again_sess = _make_session(high_level=True, external_kb=sess.external_kb)
+    again_sess._cached_unresolvable_for = again_sess.working_question
+    again_sess._cached_unresolvable = []
+    again_sess.incomplete_formula_terms = list(sess.incomplete_formula_terms)
+    again_sess.clarify_history = [
+        {"q": question, "a": "It starts at 100 and subtracts the temperature penalty."}
+    ]
+    with patch(
+        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
+        return_value="PROCEED",
+    ):
+        ask_again, again = should_clarify(again_sess, MagicMock())
+
+    assert ask_again is False
+    assert again is None
+
+
 def test_should_clarify_asks_a_business_cutoff():
     from auto_ontology.retrieval.interactive.clarify import should_clarify
 
@@ -347,7 +394,7 @@ def test_should_clarify_asks_a_business_cutoff():
 
 
 def test_format_user_clarifications_excludes_formula_refusal():
-    sess = _make_session()
+    sess = _make_session(high_level=True)
     sess.clarify_history = [
         {
             "q": "What is the formula?",
@@ -521,6 +568,72 @@ def test_create_session_leaves_alignment_off_by_default():
 
 def test_create_session_can_opt_in_to_alignment():
     assert _new_session(numeric_type_alignment=True).numeric_type_alignment is True
+
+
+def test_create_session_leaves_high_level_off_by_default():
+    assert _new_session().high_level is False
+
+
+def test_create_session_can_opt_in_to_high_level():
+    assert _new_session(high_level=True).high_level is True
+
+
+def test_specific_question_does_not_inject_external_kb():
+    formula = "medical_personnel / (casualties + injured)"
+    sess = _make_session(
+        external_kb=f"- MSR\n  Definition: {formula}",
+        high_level=False,
+        original_question="Which sites are in a health crisis?",
+        working_question="Which sites are in a health crisis?",
+        data_retriever=MagicMock(),
+        semantic_retriever=MagicMock(),
+        connectors=[],
+    )
+    sess._grounded_knowledge_for = sess.working_question
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.generate_evidence",
+            return_value="MSR = 1 - medical / total",
+        ),
+        patch(
+            "auto_ontology.retrieval.text_to_sql.main.get_agent_response_with_state",
+            return_value={"sql_code": "SELECT 1"},
+        ) as mock_generate,
+    ):
+        _run_sql_generation(sess)
+
+    evidence = mock_generate.call_args.args[0]["evidence"]
+    assert formula not in evidence
+    assert "## External Knowledge" not in evidence
+
+
+def test_specific_question_keeps_a_formula_question():
+    from auto_ontology.retrieval.interactive.clarify import should_clarify
+
+    sess = _make_session(
+        external_kb="- MSR\n  Definition: medical / (casualties + injured)",
+        high_level=False,
+    )
+    sess._cached_unresolvable_for = sess.working_question
+    sess._cached_unresolvable = []
+    sess.incomplete_formula_terms = [("MSR", "exact formula missing")]
+    seen: list[str] = []
+
+    def _invoke(_llm, prompt: str) -> str:
+        seen.append(prompt)
+        return "ASK: What is the exact formula for MSR?"
+
+    with patch(
+        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
+        side_effect=_invoke,
+    ):
+        ask, question = should_clarify(sess, MagicMock())
+
+    assert ask is True
+    assert question == "What is the exact formula for MSR?"
+    assert "never ask the user to repeat" not in seen[0]
+    assert "exact formula" in seen[0]
 
 
 def test_first_submit_records_which_numeric_type_it_returned():

@@ -127,6 +127,9 @@ class InteractiveSessionState:
     # ``==`` (BIRD-Interact): keep float casts on the numeric side and let the one
     # debug retry switch float <-> numeric output. Off for everyone else.
     numeric_type_alignment: bool = False
+    # BIRD-Interact Full sets this on a vague question. The verbatim knowledge
+    # block and the "do not ask for a formula" clarify path apply only then.
+    high_level: bool = False
     # Callers that already refine evidence can disable the text-to-SQL graph's
     # second evidence-refinement pass.
     skip_evidence_refinement: bool = False
