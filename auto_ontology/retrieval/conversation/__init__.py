@@ -22,5 +22,9 @@ not the order a similarity search returns them in.
 from __future__ import annotations
 
 from auto_ontology.retrieval.conversation.search import TurnHit, search_turns
+from auto_ontology.retrieval.conversation.semantic_search import (
+    SemanticHits,
+    search_semantic,
+)
 
-__all__ = ["TurnHit", "search_turns"]
+__all__ = ["SemanticHits", "TurnHit", "search_semantic", "search_turns"]

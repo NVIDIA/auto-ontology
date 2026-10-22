@@ -13,6 +13,7 @@ of the package never learns where the text came from.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Any
@@ -38,6 +39,22 @@ ASSISTANT_ROLES = frozenset({"assistant", "ai", "bot", "model", "agent"})
 # become one side of a pair. A blank line, so the seam stays visible to a model
 # reading the text back.
 _RUN_SEPARATOR = "\n\n"
+
+#: Benchmark bookkeeping that rides along in the message text, removed here so
+#: that no later stage has to know about it.
+#:
+#: BEAM appends ``->-> 2,9`` -- session two, question nine -- to the turns its
+#: questions are drawn from, 83 times in one transcript. Nobody said it, and
+#: left in place it is read as content: the extractor turned
+#: ``"brought it down from 12% to 1% ->-> 2,9"`` into ``error_rate = 2.9%``,
+#: derivation built a revision chain on the invented figure, and the note
+#: reported it as established fact. It also reaches the reader verbatim, since
+#: retrieval hands back whole turns.
+#:
+#: Stripped at the parse rather than at each consumer because this is the one
+#: place a turn's text is assembled, and the alternative is three stages each
+#: carrying a regex for a dialect of someone else's dataset.
+_METADATA_MARKERS = re.compile(r"\s*->->\s*\d+\s*,\s*\d+\s*")
 
 
 @dataclass(frozen=True)
@@ -147,7 +164,7 @@ def turns_from_messages(
         role = _role_of(message, user_roles, assistant_roles)
         if role is None:
             continue
-        content = str(message.get("content") or "")
+        content = _METADATA_MARKERS.sub(" ", str(message.get("content") or ""))
 
         if role == "user":
             # A user message after an answer closes the previous turn.
