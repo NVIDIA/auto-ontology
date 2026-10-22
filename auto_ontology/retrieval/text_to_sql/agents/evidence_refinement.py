@@ -73,6 +73,15 @@ Also return corrected_question as the complete supplied sanitized question with
 the same proven scalar/operator corrections applied wherever those values occur in
 its grounded rules. If no repair applies to the question, copy it unchanged.
 
+VALUE AUTHORITY:
+- An explicit value in the sanitized question is the user's requested value and
+  overrides a clearly different value in evidence for the same field. Repair the
+  evidence to the question's value; never replace the question's value with the
+  conflicting evidence value.
+- A casing, spacing, quoting, or minor spelling difference that plausibly names
+  the same value is not a distinct user value. In that case use the verified
+  value anchor (or fallback sample) to apply the stored representation to both.
+
 Allowed repairs:
 1. string_representation: fix a string value or its casing only when one value
    anchor, or as a fallback one sample value, for the named table and column proves
@@ -104,10 +113,15 @@ STRICT SCOPE:
   physical field on the right-hand side.
 - In grounded_question, search case-insensitively for that concept label or its
   semantic equivalent. If present, you MUST replace the minimal matching question
-  phrase with the complete grounded rule from evidence: the physical column AND
-  its operator, value, formula, or condition. Copy those rule inputs unchanged at
-  this phase; value correction happens later. Never leave that question concept in
-  natural language after grounding its evidence.
+  phrase with the physical column and the applicable rule. The question is
+  authoritative for every scalar value it states explicitly: if its value is
+  clearly different from the evidence value for the same concept, preserve the
+  question value and operator while grounding the field. Do NOT copy the
+  conflicting evidence value into the question. Leave the evidence value unchanged
+  in this phase; value correction happens next. A mere casing, spacing, quoting, or
+  minor spelling difference may be the same intended value and must also be left
+  for verified value correction. Never leave that question concept in natural
+  language after grounding its evidence.
   The question phrase does NOT need to match the evidence wording exactly:
   account for capitalization, singular/plural forms, inflections, and ordinary
   paraphrases. Preserve surrounding qualifiers and all unrelated wording. If the
@@ -131,9 +145,10 @@ class EvidenceGroundingResult(StrictLLMOutputModel):
     grounded_question: str = Field(
         description=(
             "Complete question with the minimal semantic phrase corresponding to "
-            "each evidence-described field replaced by its complete grounded rule "
-            "(physical field plus operator/value/formula), even when wording "
-            "differs; every other part must be unchanged."
+            "each evidence-described field replaced by its grounded physical "
+            "reference and applicable rule. Explicit question values override "
+            "clearly different evidence values and must remain unchanged; every "
+            "other part must be unchanged."
         )
     )
     grounded_evidence: str = Field(

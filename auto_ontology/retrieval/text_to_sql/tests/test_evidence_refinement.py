@@ -570,6 +570,56 @@ def test_agent_grounds_schema_before_value_anchor_repair(
     assert len(result["path_state"]["evidence_repairs_applied"]) == 1
 
 
+def test_question_value_overrides_distinct_evidence_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+    physical = next(
+        entry["physical"]
+        for entry in evidence_refinement._catalog_columns(_tables(), None, None)
+        if entry["column"] == "amount"
+    )
+    original_evidence = "large amount refers to amount > 10"
+    grounded_evidence = f"large amount refers to {physical} > 10"
+    grounded_question = f"Show accounts with {physical} > 100"
+
+    def _invoke(messages, schema):
+        prompts.append("\n".join(message.content for message in messages))
+        if schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                grounded_question=grounded_question,
+                grounded_evidence=grounded_evidence,
+            )
+        return EvidenceRefinementResult(
+            repairs=[
+                _repair(
+                    original_line=grounded_evidence,
+                    corrected_line=grounded_evidence.replace("> 10", "> 100"),
+                    corrected_value="100",
+                    kind="constant_value",
+                    table_name="accounts",
+                    column_name="amount",
+                )
+            ],
+            corrected_question=grounded_question,
+        )
+
+    monkeypatch.setattr(evidence_refinement, "safe_invoke_structured_nr", _invoke)
+    state = {
+        "initial_question": "Show accounts with a large amount above 100",
+        "evidence": original_evidence,
+        "path_state": {"relevant_tables": _tables()},
+    }
+
+    result = EvidenceRefinementAgent().execute(state)
+
+    assert "do not copy the" in prompts[0].lower()
+    assert "evidence value into the question" in prompts[0].lower()
+    assert "overrides a clearly different value in evidence" in prompts[1].lower()
+    assert result["evidence"] == grounded_evidence.replace("> 10", "> 100")
+    assert result["path_state"]["normalized_question"] == grounded_question
+
+
 def test_value_repair_cannot_change_grounded_field_reference() -> None:
     original = (
         'premium accounts refers to "main"."account_flags".'
