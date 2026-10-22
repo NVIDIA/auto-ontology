@@ -132,6 +132,13 @@ def test_semantic_fk_guidance_is_separate_from_table_schema() -> None:
     assert "relationship guidance" not in schema
     assert "card belongs to card set" not in schema
     assert "## Semantic Relationship Guidance" in guidance
+    assert (
+        "Treat it as decision support, not as an authoritative join plan." in guidance
+    )
+    assert "a matching Avoid condition overrides" in guidance
+    assert "Prefer the shortest valid query" in guidance
+    assert "It does not override authoritative evidence" in guidance
+    assert "If you select a verified join path" in guidance
     assert "They do not make the referenced parent table mandatory." in guidance
     assert "Use the source foreign-key column directly" in guidance
     assert "Join the parent table only when its own attributes" in guidance
