@@ -11,10 +11,10 @@ leaves in Postgres.
 
 Pipeline per file
 -----------------
-1. The extractor named by ``config.EXTRACTOR`` turns the file into chunks of
-   text, tables, charts and infographics.  ``hosted`` and ``docling`` return
-   text only and are embedded in step 3; ``nemo`` embeds inside its own graph
-   pass and skips it.
+1. The extractor selected by ``config.EXTRACTOR`` turns the file into chunks of
+   text, tables, charts and infographics.  ``auto`` routes PDFs to the hosted
+   extractor, office/HTML files to Docling, and TXT files to the plain-text
+   reader.
 2. Each chunk is written to ``unstructured_chunk`` (relational) with a
    pre-generated UUID that is also used as the vector-store row key.
 3. The embeddings are uploaded to the chunk vector store under those same ids,
@@ -22,19 +22,11 @@ Pipeline per file
 
 Usage
 -----
-    from unstructured_ao import config  # must be imported first (Ray override)
     from unstructured_ao.ingest import ingest_directory
 
     with engine.begin() as conn:
         for doc_id in ingest_directory("/path/to/documents", conn):
             print(f"Ingested document {doc_id}")
-
-The ``nemo`` extractor additionally needs ``RAY_AUTH_MODE=disabled`` in the
-environment.  It runs its stages as Ray actors, and without that the raylet
-spends ~80s on auth setup before giving up with "The current node timed out
-during startup"; with it Ray is up in about 7.  It is not set in ``config.py``
-on purpose — it turns off a security feature, which is a call for whoever runs
-the pipeline to make, not a default to inherit.
 
 Terms and attributes come afterwards, from
 ``unstructured_ao.extract.run_extraction``.
@@ -49,7 +41,7 @@ from typing import Any
 
 from sqlalchemy import Connection
 
-import unstructured_ao.config as config  # noqa: F401  — Ray override must run first
+import unstructured_ao.config as config
 from unstructured_ao.dal import (
     get_document_by_path,
     insert_chunk,
@@ -58,7 +50,7 @@ from unstructured_ao.dal import (
 
 logger = logging.getLogger(__name__)
 
-#: NeMo Retriever element types → our canonical ``content_type`` values.
+#: Extractor element types → our canonical ``content_type`` values.
 _CONTENT_TYPE_MAP: dict[str, str] = {
     "text": "text",
     "structured": "table",
@@ -69,72 +61,80 @@ _CONTENT_TYPE_MAP: dict[str, str] = {
 }
 
 
-def _embed_params():
-    """NeMo Retriever ``EmbedParams`` for the chunk embeddings, ``text_image``.
-
-    Reads the same ``EMBED_*`` triplet as the tabular ingest and the retriever,
-    through auto-ontology's ``resolve``, so one set of env vars configures
-    every embed path.  It does not reuse ``get_embed_params``: since #376 that
-    returns auto-ontology's own dataclass for its in-repo embed client, and the
-    extract graph needs the library's model.
-
-    ``text_image`` rather than ``text`` because half of what the extract stage
-    yields here is charts, tables and infographics, and ``EMBED_MODEL`` is a
-    vision-language model that can read them as images.
-
-    Changing modality invalidates the vectors already in the store and requires
-    re-ingesting the corpus.
-    """
-    from nemo_retriever.common.params.models import EmbedParams
-
-    from auto_ontology.utils.model_config import resolve
-
-    return EmbedParams(
-        embed_invoke_url=resolve("EMBED", "ENDPOINT"),
-        model_name=resolve("EMBED", "MODEL"),
-        api_key=resolve("EMBED", "API_KEY"),
-        embed_modality="text_image",
-    )
-
-
 def _extract_chunks_from_file(file_path: str) -> list[dict[str, Any]]:
     """Extract and embed *file_path* with whichever extractor is configured.
 
-    ``config.EXTRACTOR`` picks between NeMo Retriever's graph, Docling, and the
-    fully hosted path.  All three return the same record shape with an
-    ``embedding`` attached, so nothing downstream of here knows which one ran.
+    ``config.EXTRACTOR`` either selects one extractor or lets ``auto`` route by
+    extension.  Every extractor returns the same record shape with an embedding
+    attached, so nothing downstream of here knows which one ran.
     """
-    if config.EXTRACTOR == "nemo":
-        return _extract_with_nemo(file_path)
-    if config.EXTRACTOR in _LIBRARY_EXTRACTORS:
-        return _extract_with_library(file_path)
+    extractor = _extractor_for_file(file_path)
+    if extractor in _LIBRARY_EXTRACTORS:
+        return _extract_with_library(file_path, extractor)
     raise ValueError(
-        f"Unknown EXTRACTOR {config.EXTRACTOR!r}; expected one of "
-        f"'nemo', {', '.join(repr(name) for name in sorted(_LIBRARY_EXTRACTORS))}."
+        f"Unknown EXTRACTOR {extractor!r}; expected one of "
+        f"{', '.join(repr(name) for name in sorted(_LIBRARY_EXTRACTORS))}."
     )
 
 
-#: Extractors that hand back rows without embedding them, keyed to the module
-#: holding their ``extract_chunks``.  Unlike NeMo's graph these do not embed, so
-#: ``ingest`` does it in a second pass: extraction stays testable without an
-#: endpoint, and a re-embed does not re-extract.
-_LIBRARY_EXTRACTORS: dict[str, str] = {
-    "docling": "unstructured_ao.docling_extract",
-    "hosted": "unstructured_ao.hosted_extract",
+_AUTO_EXTRACTORS: dict[str, str] = {
+    ".pdf": "hosted",
+    ".docx": "docling",
+    ".pptx": "docling",
+    ".html": "docling",
+    ".txt": "text",
+}
+
+_EXTRACTOR_EXTENSIONS: dict[str, frozenset[str]] = {
+    "auto": frozenset(_AUTO_EXTRACTORS),
+    "hosted": frozenset({".pdf"}),
+    "docling": frozenset({".pdf", ".docx", ".pptx", ".html"}),
 }
 
 
-def _extract_with_library(file_path: str) -> list[dict[str, Any]]:
-    """Extract with a library extractor, then embed the rows.
+def _extractor_for_file(file_path: str | Path) -> str:
+    """Resolve and validate the extractor for *file_path*."""
+    extension = Path(file_path).suffix.lower()
+    configured = config.EXTRACTOR
+    if configured == "auto":
+        extractor = _AUTO_EXTRACTORS.get(extension)
+        if extractor is None:
+            raise ValueError(
+                f"Unsupported file extension for auto mode: {extension!r}."
+            )
+        return extractor
 
-    Embedding is ``text`` only — measured better than ``text_image`` on this
-    corpus, see :func:`_embed_params`.
-    """
+    supported = _EXTRACTOR_EXTENSIONS.get(configured)
+    if supported is None:
+        expected = ", ".join(repr(name) for name in sorted(_EXTRACTOR_EXTENSIONS))
+        raise ValueError(
+            f"Unknown EXTRACTOR {configured!r}; expected one of {expected}."
+        )
+    if extension not in supported:
+        raise ValueError(
+            f"The {configured!r} extractor does not support {extension!r} files."
+        )
+    return configured
+
+
+#: Extractors that hand back rows without embedding them, keyed to the module
+#: holding their ``extract_chunks``. ``ingest`` embeds their output in a second
+#: pass so extraction stays testable without an endpoint and a re-embed does not
+#: re-extract.
+_LIBRARY_EXTRACTORS: dict[str, str] = {
+    "docling": "unstructured_ao.docling_extract",
+    "hosted": "unstructured_ao.hosted_extract",
+    "text": "unstructured_ao.text_extract",
+}
+
+
+def _extract_with_library(file_path: str, extractor: str) -> list[dict[str, Any]]:
+    """Extract with a library extractor, then embed the rows as text."""
     from importlib import import_module
 
     from unstructured_ao.embed_client import get_embed_client
 
-    module = import_module(_LIBRARY_EXTRACTORS[config.EXTRACTOR])
+    module = import_module(_LIBRARY_EXTRACTORS[extractor])
     client = get_embed_client()
     chunks = module.extract_chunks(file_path, client=client)
     if not chunks:
@@ -143,80 +143,6 @@ def _extract_with_library(file_path: str) -> list[dict[str, Any]]:
     for chunk, vector in zip(chunks, vectors):
         chunk["embedding"] = vector
     return chunks
-
-
-def _extract_with_nemo(file_path: str) -> list[dict[str, Any]]:
-    """Extract and embed *file_path* in one NeMo Retriever pass.
-
-    Each returned dict is one element of a page, in the library's compact
-    result shape — ``text``, ``source_id``, ``element_type``, ``page_number``
-    — plus the ``embedding`` this function attaches.
-
-    ``ingest`` itself hands back the full pipeline frame, one row per element
-    and some thirty columns wide, most of which are stage bookkeeping and
-    base64 page images.  ``dataframe_to_transport_records`` is the library's own
-    projection down to the public fields, so the column names the stages happen
-    to use stay the library's business rather than something we read directly.
-    The one exception is the embedding, which that projection drops; see
-    :func:`_embeddings_from_frame`.
-
-    Embedding is part of the graph rather than a second pass so each chunk is
-    embedded by the same VL model that read it, and so the retry and batching
-    policy is the library's rather than ours.  ``vdb_upload`` is deliberately
-    not in the chain: the vectors are written separately under ids we choose,
-    which is what lets a search hit resolve back to its ``unstructured_chunk``
-    row.
-    """
-    from nemo_retriever import create_ingestor
-    from nemo_retriever.ingestor.results import dataframe_to_transport_records
-
-    params = _embed_params()
-    ingestor = (
-        create_ingestor(run_mode="batch")
-        .files([file_path])
-        .extract(
-            extract_text=True,
-            extract_tables=True,
-            extract_charts=True,
-            extract_infographics=True,
-        )
-        .embed(params)
-    )
-    frame = ingestor.ingest()
-    chunks = dataframe_to_transport_records(frame, result_schema="compact")
-    for chunk, embedding in zip(chunks, _embeddings_from_frame(frame, params)):
-        chunk["embedding"] = embedding
-    return chunks
-
-
-def _embeddings_from_frame(frame: Any, params: Any) -> list[list[float] | None]:
-    """The embed stage's vectors, in the frame's row order.
-
-    Taken off the frame rather than out of the transport records because
-    ``compact_result_record`` has no embedding field at all: the
-    ``return_embeddings`` flag applies only to ``result_schema="legacy"``.
-    Legacy is not an alternative here — it keeps every column, base64 page
-    images included, and ``_source_metadata`` would write those into Postgres.
-    Column names come from the same params the stage was configured with, so a
-    change of embed model does not strand this on a stale column.
-    """
-    column = params.output_column
-    if column not in frame.columns:
-        return [None] * len(frame)
-    flag = params.has_embedding_column
-
-    def vector(row: Any) -> list[float] | None:
-        if flag in frame.columns and not row[flag]:
-            return None
-        cell = row[column]
-        # The stage reports a per-row embed failure in ``info_msg`` alongside
-        # the vector, so a dict here is the success shape, not a wrapper to
-        # unwrap defensively.
-        if isinstance(cell, dict):
-            cell = cell.get("embedding")
-        return None if cell is None else list(cell)
-
-    return [vector(row) for _, row in frame.iterrows()]
 
 
 def _resolve_content_type(chunk: dict[str, Any]) -> str:
@@ -376,7 +302,12 @@ def ingest_directory(
     if not data_dir.exists():
         raise FileNotFoundError(f"Data directory not found: {data_dir}.")
 
-    supported = (".pdf", ".docx", ".pptx", ".txt", ".html")
+    supported = _EXTRACTOR_EXTENSIONS.get(config.EXTRACTOR)
+    if supported is None:
+        expected = ", ".join(repr(name) for name in sorted(_EXTRACTOR_EXTENSIONS))
+        raise ValueError(
+            f"Unknown EXTRACTOR {config.EXTRACTOR!r}; expected one of {expected}."
+        )
     files = sorted(p for p in data_dir.rglob("*") if p.suffix.lower() in supported)
     if not files:
         logger.warning("No supported files found in %s.", data_dir)

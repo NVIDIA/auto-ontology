@@ -2,28 +2,17 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Shared settings for the unstructured ingest pipeline.
-
-Import this module before nemo_retriever so that the Ray resource override is
-in place before Ray initialises.  Apple Silicon advertises as a GPU; the
-override forces Ray to plan for CPU-only NIM endpoints instead.  Only the
-``nemo`` extractor touches Ray, but the override is set unconditionally because
-it has to land before any import that might start a cluster.
-"""
+"""Shared settings for the unstructured ingest pipeline."""
 
 from __future__ import annotations
 
-import json
 import os
 
-os.environ.setdefault(
-    "RAY_OVERRIDE_RESOURCES",
-    json.dumps({"GPU": 0, "CPU": max(16, os.cpu_count() or 8)}),
-)
-
-#: Which document extractor ``ingest`` runs: ``"hosted"``, ``"docling"``, or
-#: ``"nemo"``.
+#: Which document extractor ``ingest`` runs: ``"auto"``, ``"hosted"``,
+#: or ``"docling"``.
 #:
+#: - ``auto`` uses hosted extraction for PDF, Docling for DOCX/PPTX/HTML, and
+#:   the built-in plain-text reader for TXT.
 #: - ``hosted`` runs no model locally.  Layout comes from NVIDIA's page-elements
 #:   service and figures from the gateway's vision model, so the only local work
 #:   is parsing and rasterising the PDF.  1.70 s/page.  Needs the
@@ -32,9 +21,6 @@ os.environ.setdefault(
 #: - ``docling`` runs page layout on the local CPU, which costs 3.0GB of torch
 #:   and CUDA wheels on linux-x86_64 and crashes on Apple's MPS backend, so it
 #:   is pinned to CPU.  2.05 s/page.  Install the ``unstructured-docling`` extra.
-#: - ``nemo`` is NeMo Retriever's extract + embed graph.  Fastest at 0.76 s/page,
-#:   but needs a Ray cluster and ``RAY_AUTH_MODE=disabled`` to start.  Install
-#:   the ``unstructured-nemo`` extra.
 #:
 #: ``hosted`` takes text from the PDF's own text layer, so an image-only page
 #: yields nothing unless a figure is detected on it.  A scanned corpus needs OCR
@@ -43,7 +29,7 @@ os.environ.setdefault(
 #: They write the same chunk shape but not the same chunks, so switching this
 #: against an already-populated table mixes two corpora.  Point ``CHUNK_TABLE``
 #: somewhere else when comparing them.
-EXTRACTOR = os.environ.get("UNSTRUCTURED_EXTRACTOR", "hosted")
+EXTRACTOR = os.environ.get("UNSTRUCTURED_EXTRACTOR", "auto")
 
 #: Table holding unstructured chunk embeddings, written by the v2
 #: ``PGVectorStore`` API.  Must be stable across ingest and retrieve runs — a

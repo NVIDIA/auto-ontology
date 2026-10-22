@@ -15,8 +15,7 @@ dependencies = [
     "langchain-openai>=1.3.0,<1.3.5",
     "langgraph>=1.2.11",
     "pydantic>=2.13.5",
-    # Kept below 3 until the code is tested against pandas 3. The `unstructured`
-    # extra also forces it: nemo-retriever 26.8.1 requires `pandas>=2.0,<3`.
+    # Kept below 3 until the code is tested against pandas 3.
     "pandas>=2.3.3,<3",
     "psycopg-pool>=3.3.1",
     "psycopg[binary]>=3.3.4",
@@ -51,8 +50,7 @@ dependencies = [
     "openai==2.44.0",
     # Imported directly but previously only installed transitively. Declared so
     # dropping whatever carried them cannot break an import the way pyheavydb's
-    # importlib-metadata did; langchain-nvidia-ai-endpoints arrived solely via
-    # nemo-retriever.
+    # importlib-metadata did.
     "langchain-nvidia-ai-endpoints>=1.4.3",
     "langchain-core>=1.6.1",
     "sqlglot>=30.17.0",
@@ -67,34 +65,17 @@ dependencies = [
 
 [project.optional-dependencies]
 kumo = ["kumo-relational-client[relational]>=1.0.0,<2"]
-# Only `unstructured_ao/` imports these.  Split by extractor, because the three
-# extractors `config.EXTRACTOR` selects differ enormously in what they install
-# and all three scored the same.
+# Only `unstructured_ao/` imports these.
 #
-# `unstructured` is the default extractor ("hosted") and needs nothing but a PDF
-# parser: layout comes from NVIDIA's page-elements service and figures from the
-# gateway's vision model, so no ML runs locally.  pypdfium2 is declared here
-# rather than inherited from docling or nemo-retriever, which this extra no
-# longer installs.
+# `unstructured` provides the default automatic route: hosted extraction for
+# PDF, Docling for DOCX/PPTX/HTML, and the built-in reader for TXT.
 unstructured = [
+    "docling>=2.140.0",
     "pypdfium2>=4.30.0",
 ]
-# Docling scored the same as hosted (nDCG@5 0.2219 vs 0.2237, difference not
-# significant over 318 queries) and runs 20% slower, but pays 3.0GB of torch and
-# nvidia-* CUDA wheels on linux-x86_64 for a layout model it runs on the CPU
-# anyway.  Kept as a fallback for the two things it alone offers: layout without
-# network access, and correct reading order on multi-column pages.  It cannot
-# read the inside of a chart on its own — see `unstructured_ao/docling_extract.py`
-# for how that gap is filled.  `docling-slim[models-onnxruntime]` drops torch and
-# is the first thing to try if this extra is ever needed in an image.
+# Install this smaller extra when only explicit Docling mode is needed.
 unstructured-docling = [
     "docling>=2.140.0",
-]
-# The original extractor, kept so its numbers stay reproducible.  Needs a Ray
-# cluster to ingest anything.  The pin is exact because 26.8.2 rejects the
-# inference-api embed model id ("not revision-pinned") and fails every ingest.
-unstructured-nemo = [
-    "nemo-retriever==26.8.1",
 ]
 
 [build-system]
@@ -111,23 +92,13 @@ allow-direct-references = true
 package = true
 # Patched versions of transitive dependencies flagged by nSpect.
 # PyJWT is a constraint, so its dependents' upper bounds still apply. urllib3
-# is an override because nemo-retriever pins urllib3==2.7.0 exactly; an
-# override replaces every other range, so it keeps the <3 bound requests and
-# botocore declare.
+# remains overridden to a patched release while preserving the <3 bound that
+# requests and botocore declare.
 constraint-dependencies = [
     "pyjwt>=2.15.1",  # BDSA-2026-35552 (via databricks/snowflake connectors)
-    "virtualenv>=21.14.2",  # CVE-2026-102930 (via ray)
 ]
 override-dependencies = [
-    "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864 (via requests, botocore, nemo-retriever)
-]
-# Excluded to fix a critical vulnerability (CVE-2026-55203) in the HAProxy binary
-# bundled with ray-haproxy. We don't depend on it directly: nemo-retriever pulls
-# it in through ray[serve] (nemo-retriever -> ray[data,serve] -> ray-haproxy).
-# No patched ray-haproxy release exists yet, so it is removed instead of upgraded.
-# Nothing in this project starts Ray Serve, so the binary is never used.
-exclude-dependencies = [
-    "ray-haproxy",
+    "urllib3>=2.8.0,<3",  # BDSA-2026-35861, BDSA-2026-35864
 ]
 
 [[tool.uv.index]]
