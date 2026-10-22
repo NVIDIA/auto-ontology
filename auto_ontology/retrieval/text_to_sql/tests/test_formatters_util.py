@@ -159,6 +159,30 @@ def test_collapses_for_a_dialect_that_binds_its_database() -> None:
     assert qualify_table("dw", "dw", "orders", "databricks") == "dw.orders"
 
 
+def test_sqlite_omits_catalog_database_from_table_name() -> None:
+    assert (
+        qualify_table("european_football_2", "main", "Country", "sqlite")
+        == "main.Country"
+    )
+
+
+def test_compact_sqlite_schema_uses_valid_two_part_table_name() -> None:
+    rendered = format_compact_tables_for_prompt(
+        [
+            {
+                "database_name": "european_football_2",
+                "schema_name": "main",
+                "name": "Country",
+                "columns": [{"name": "id", "data_type": "integer"}],
+            }
+        ],
+        dialect="sqlite",
+    )
+
+    assert "TABLE main.Country" in rendered
+    assert "european_football_2.main.Country" not in rendered
+
+
 def test_distinct_schema_is_unaffected_by_dialect() -> None:
     assert qualify_table("mydb", "public", "orders", "spark") == "mydb.public.orders"
 

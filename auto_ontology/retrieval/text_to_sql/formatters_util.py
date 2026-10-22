@@ -148,11 +148,11 @@ def qualify_table(
 ) -> str:
     """Build the qualified identifier the model is expected to copy verbatim.
 
-    Two-level dialects (MySQL/MariaDB) have no schema namespace: the catalog
-    reports ``TABLE_SCHEMA`` as the database itself, so naively joining all
-    three parts yields ``db.db.table``, which is a syntax error. The duplicate
-    is collapsed for those, and for engines whose connection binds the database
-    so that ``schema.table`` still resolves.
+    SQLite accepts at most ``schema.table``; its catalog database name is not
+    an SQL namespace, so it is omitted. Two-level dialects (MySQL/MariaDB) have
+    no schema namespace: the catalog reports ``TABLE_SCHEMA`` as the database
+    itself, so naively joining all three parts yields ``db.db.table``, which is
+    a syntax error. The duplicate is collapsed for those.
 
     It must *not* be collapsed on a dialect in
     :data:`_CATALOG_QUALIFIED_DIALECTS`. There the catalog and the schema are
@@ -165,8 +165,12 @@ def qualify_table(
     Spark rejects ``USE CATALOG``, and ``SET CATALOG`` leaves
     ``current_schema()`` empty so the two-part name still does not resolve.
     """
+    normalized_dialect = (dialect or "").lower()
+    if normalized_dialect == "sqlite":
+        return ".".join(part for part in (schema_name, table_name) if part)
+
     parts = [database_name, schema_name, table_name]
-    collapsible = (dialect or "").lower() not in _CATALOG_QUALIFIED_DIALECTS
+    collapsible = normalized_dialect not in _CATALOG_QUALIFIED_DIALECTS
     if (
         collapsible
         and database_name
