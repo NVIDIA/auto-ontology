@@ -243,6 +243,8 @@ def fetch_schemas_by_ids(
         s.catalog_database.c.name.label("database_name"),
         s.catalog_schema.c.name.label("table_schema"),
         s.catalog_column.c.data_type,
+        s.catalog_column.c.description,
+        s.catalog_column.c.sample_values,
     ).select_from(_catalog_join())
 
     if schema_ids:

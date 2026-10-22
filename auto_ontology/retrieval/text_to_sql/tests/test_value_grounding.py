@@ -30,6 +30,8 @@ def _rows() -> list[dict]:
             "column_name": "name",
             "column_id": "cards-name",
             "data_type": "TEXT",
+            "description": "Printed card name",
+            "sample_values": ["Angel of Mercy", "Counterspell"],
         },
         {
             "database_name": "card_games",
@@ -39,6 +41,8 @@ def _rows() -> list[dict]:
             "column_name": "type",
             "column_id": "cards-type",
             "data_type": "TEXT",
+            "description": "Card type",
+            "sample_values": ["Creature"],
         },
         {
             "database_name": "card_games",
@@ -48,8 +52,32 @@ def _rows() -> list[dict]:
             "column_name": "release_year",
             "column_id": "cards-year",
             "data_type": "INTEGER",
+            "description": "Release year",
+            "sample_values": [2001],
         },
     ]
+
+
+@pytest.mark.parametrize(
+    ("data_type", "expected"),
+    [
+        ("TEXT", True),
+        ("VARCHAR(255)", True),
+        ("STRING", True),
+        ("INTEGER", False),
+        ("DECIMAL(10,2)", False),
+        ("DATE", False),
+        ("TIMESTAMP", False),
+        ("BOOLEAN", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_only_explicit_text_types_are_grounding_candidates(
+    data_type: str | None,
+    expected: bool,
+) -> None:
+    assert value_grounding._is_textual_type(data_type) is expected
 
 
 class _FakeProbeExecutor:
@@ -63,7 +91,7 @@ class _FakeProbeExecutor:
         return None
 
 
-def test_agent_uses_original_inputs_names_only_and_first_matching_suspect(
+def test_agent_uses_original_inputs_schema_hints_and_first_matching_suspect(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     captured: dict[str, str] = {}
@@ -156,10 +184,9 @@ def test_agent_uses_original_inputs_names_only_and_first_matching_suspect(
     assert "cards.type identifies the card type" in captured["prompt"]
     assert "rewritten question" not in captured["prompt"]
     assert "rewritten evidence" not in captured["prompt"]
-    assert (
-        '"schema":"main","table":"cards","columns":["name","release_year","type"]'
-        in captured["prompt"]
-    )
+    assert '"name":"name","description":"Printed card name"' in captured["prompt"]
+    assert '"samples":["Angel of Mercy","Counterspell"]' in captured["prompt"]
+    assert "release_year" not in captured["prompt"]
     assert "data_type" not in captured["prompt"]
     assert probes == ["type", "name"]
     assert result["value_anchors"] == [
@@ -222,7 +249,7 @@ def _result(*values: str) -> dict:
     }
 
 
-def test_live_lookup_prefers_exact_then_normalized_then_contains() -> None:
+def test_live_lookup_uses_one_like_probe_and_classifies_the_match() -> None:
     connector = SimpleNamespace(
         dialect="sqlite",
         qualify=lambda schema, table: f'"{schema}"."{table}"',
@@ -236,9 +263,11 @@ def test_live_lookup_prefers_exact_then_normalized_then_contains() -> None:
         column_name="status",
         value="Active",
     ) == ("Active", "value")
-    assert [purpose for purpose, _ in exact.calls] == ["value_anchor_exact"]
+    assert [purpose for purpose, _ in exact.calls] == ["value_anchor_contains"]
+    assert " LIKE " in exact.calls[0][1]
+    assert '"status" = ' not in exact.calls[0][1]
 
-    normalized = _QueuedExecutor([_result(), _result("ACTIVE")])
+    normalized = _QueuedExecutor([_result(" ACTIVE ")])
     assert lookup_text_value(
         normalized,
         connector,
@@ -246,13 +275,10 @@ def test_live_lookup_prefers_exact_then_normalized_then_contains() -> None:
         table_name="accounts",
         column_name="status",
         value="active",
-    ) == ("ACTIVE", "value")
-    assert [purpose for purpose, _ in normalized.calls] == [
-        "value_anchor_exact",
-        "value_anchor_normalized",
-    ]
+    ) == (" ACTIVE ", "value")
+    assert [purpose for purpose, _ in normalized.calls] == ["value_anchor_contains"]
 
-    contains = _QueuedExecutor([_result(), _result(), _result("North_100% Region")])
+    contains = _QueuedExecutor([_result("North_100% Region")])
     assert lookup_text_value(
         contains,
         connector,
@@ -261,10 +287,7 @@ def test_live_lookup_prefers_exact_then_normalized_then_contains() -> None:
         column_name="region",
         value="North_100%",
     ) == ("North_100% Region", "contains")
-    assert [purpose for purpose, _ in contains.calls] == [
-        "value_anchor_exact",
-        "value_anchor_normalized",
-        "value_anchor_contains",
-    ]
-    assert "\\_" in contains.calls[-1][1]
-    assert "\\%" in contains.calls[-1][1]
+    assert [purpose for purpose, _ in contains.calls] == ["value_anchor_contains"]
+    assert "!_" in contains.calls[-1][1]
+    assert "!%" in contains.calls[-1][1]
+    assert "ESCAPE '!'" in contains.calls[-1][1]
