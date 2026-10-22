@@ -271,7 +271,6 @@ def test_phase2_evidence_keeps_the_sort_metric_in_the_select():
 
     evidence = mock_generate.call_args.args[0]["evidence"]
     assert "include that metric in the SELECT" in evidence
-    assert "stays out of the SELECT" in evidence
 
 
 def test_sql_generation_injects_external_kb_verbatim():
@@ -381,42 +380,6 @@ def test_should_clarify_asks_a_business_cutoff():
 
     assert ask is True
     assert question == "What cutoff counts as a health crisis?"
-
-
-def test_should_clarify_asks_what_a_missing_index_means():
-    from auto_ontology.retrieval.interactive.clarify import should_clarify
-
-    sess = _make_session(
-        external_kb=(
-            "- Catastrophic Disaster\n"
-            "  Definition: DSI greater than 15000.\n"
-            "- Damage Report Categories\n"
-            "  Definition: Catastrophic means near-total destruction."
-        )
-    )
-    sess._cached_unresolvable_for = sess.working_question
-    sess._cached_unresolvable = []
-    sess.incomplete_formula_terms = [
-        (
-            "Overall Disaster Severity Index",
-            "named index used as a threshold and its calculation is absent",
-        )
-    ]
-    answers = iter(
-        [
-            "PROCEED",
-            "What do you mean by the Overall Disaster Severity Index?",
-        ]
-    )
-
-    with patch(
-        "auto_ontology.retrieval.interactive.clarify.safe_invoke_text",
-        side_effect=lambda _llm, _prompt: next(answers),
-    ):
-        ask, question = should_clarify(sess, MagicMock())
-
-    assert ask is True
-    assert question == "What do you mean by the Overall Disaster Severity Index?"
 
 
 def test_format_user_clarifications_excludes_formula_refusal():

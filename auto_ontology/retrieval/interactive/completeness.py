@@ -46,20 +46,14 @@ Your task — produce a FRESH updated list:
    - Which event orders a sequence when two different times would change which \
      rows qualify, and neither the question nor the answer decides it
    - Whether the result is one row per reading or one row per entity, when that \
-     choice changes the grain and neither the question nor the answer decides it. \
-     "for each <entity>" names the output and does not close this gap
-   - A qualifying label defined as a threshold on a named index, when that index \
-     is not calculated anywhere in the knowledge. A stored category that uses the \
-     same word does not close this gap
+     choice changes the grain and neither the question nor the answer decides it
    - A KB condition or user answer using hedged language (e.g. "typically", "often",\
     "approximately", "things like") that leaves which cases qualify undecided
  
 Do NOT flag:
-- A formula, equation, operator, or constant that external knowledge already \
-  states. Do not ask the user to restate it.
-- A column binding. Do not ask the user to name a column.
-- A named index only when its calculation is already written in the knowledge. \
-  When the calculation is absent and a threshold depends on the index, flag the index.
+- A missing formula, equation, operator, constant, or column binding. Those are \
+  taken from external knowledge and the schema at SQL generation time. Do not ask \
+  the user for them, even when the formula names concepts rather than schema columns.
 - Business context or motivation that does not affect which rows or values qualify
 - Terms fully defined by an explicit formula in the answer or KB
 - Minor stylistic ambiguities a SQL generator can resolve on its own (e.g. sign \
@@ -97,23 +91,17 @@ Identify gaps in either of the following categories:
      so which cases qualify is undecided
    - Two documented meanings and no indication which one applies
    - Two events that could order a sequence, when the choice changes which rows qualify
-   - One row per reading versus one row per entity, when the choice changes the grain. \
-     "for each <entity>" names the output and does not close this gap
-   - A qualifying label defined as a threshold on a named index, when that index \
-     is not calculated anywhere in the knowledge. A stored category that uses the \
-     same word does not close this gap
+   - One row per reading versus one row per entity, when the choice changes the grain
 2. Do NOT flag a schema entity just because its formula is not written next to a \
    column name. A formula stated anywhere in external knowledge is complete. \
    Standard aggregations (SUM, AVG, COUNT) are not gaps.
 
 A gap is only significant if the user must choose a meaning, population, cutoff, \
-ordering event, or row grain that the knowledge does not decide, or a named index \
-whose calculation is absent and a threshold depends on it.
+ordering event, or row grain that the knowledge does not decide.
 
 Do NOT flag:
-- A formula, equation, or operator that external knowledge already states, or a \
-  column name. Column binding is not a question for the user.
-- A named index whose calculation is already written in the knowledge.
+- A missing formula, equation, operator, or column name. Column binding is not a \
+  question for the user.
 - Terms fully defined with an explicit formula in external knowledge, even when \
   that formula uses business names rather than schema column names.
 - Terms already resolved to a specific column above (schema columns already resolved by VDB).
