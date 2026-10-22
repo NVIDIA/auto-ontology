@@ -135,22 +135,22 @@ Topics already asked about that went UNANSWERED:
 Terms not found in the database schema or external knowledge (ask the user to define these):
 {unresolvable_terms}
 
-Business choices still open, ranked most-critical first. Ask only when one of these is a meaning, population, or cutoff that external knowledge does not decide. Never ask about a formula, column, or SQL structure:
+Business choices still open, ranked most-critical first. Ask when one of these is a meaning, a population, a cutoff, which event orders a sequence, or whether the result is one row per reading or one row per entity. Do not ask the user to restate a formula that external knowledge already contains, and do not ask them to name a column or table:
 {incomplete_formulas_note}
 
 {sort_direction_note}
 
 STRICT RULES — follow every one of these exactly:
-1. NEVER ask where data is stored, and never ask for a formula, equation, column, table, or SQL structure. If a term from history or external knowledge maps to a schema column by name or meaning (column names may differ in casing), resolve it from the schema without asking. If external knowledge states a formula or definition, that text is complete — use it, do not ask the user to restate it. BAD: "Which column stores quality X?" BAD: "What is the exact formula for quality X?" GOOD: "When you say health crisis, which documented risk condition do you mean?" The user will not answer questions about schema, columns, formulas, or how to write the query.
-2. Only ask about a business ambiguity that the schema, external knowledge, resolved schema mappings, and history do not already resolve: which of two documented meanings applies, which population is in scope, or a cutoff the knowledge does not state. Do not ask the user to supply a formula that is missing from the text you see. SQL generation receives the external knowledge separately and uses the formula written there.
+1. NEVER ask where data is stored, and never ask the user to name a column, table, or SQL structure. If external knowledge already states a formula, use that text — do not ask the user to restate it. BAD: "Which column stores quality X?" BAD: "What is the exact formula for quality X?" GOOD: "When you say health crisis, which documented risk condition do you mean?" GOOD: "Should consecutive matches be ordered by when the match was created, or by the match time?" GOOD: "Should each reading be its own row, or one row per robot?"
+2. Ask about a business choice the schema, external knowledge, and history do not already decide: which of two documented meanings applies, which population is in scope, a cutoff the knowledge does not state, which event orders a sequence, or whether one reading is one row. If the formula is not in external knowledge, ask what the metric means. The user will often state the calculation in that answer. Do not phrase the question as a request for a formula, a column, or SQL.
 3. If the question is vague about what to output (e.g., "show relevant metrics", "summarize your findings", "show the top results"), prioritize asking the user which specific metrics or fields they want in the output. Ask for the business names, not for columns or formulas.
-4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). Do not rephrase an unanswered question into a request for a formula, a column, or SQL. You MAY ask a follow-up about a business choice the user already started to answer, such as which of two meanings they confirmed.
-5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, full external knowledge, or db_schema, ask what the business term refers to, one term at a time. Do not ask how to calculate it.
-6. Suggested format: "What do you mean by [TERM]?" Name the exact term. Do not ask what it measures as a formula and do not ask where it is stored.
-7. Pick the most semantically appropriate column yourself when the schema has similar options — do not ask the user to choose.
-8. If anything else in the user's question seems unclear, you may ask about it — for example an ambiguous grouping term, a threshold the knowledge does not state, an unspecified limit, or a preferred output format.
+4. Do not ask the exact same question about a topic the user could not answer (listed under "Topics already asked about that went UNANSWERED"). Do not rephrase an unanswered question into a request for a formula, a column, or SQL. You MAY ask a follow-up about a business choice the user already started to answer, such as which of two meanings they confirmed or which event orders the rows.
+5. If there are potentially unresolvable terms which do not have satisfactory definitions in the prior clarifications, relevant knowledge, full external knowledge, or db_schema, ask what the business term refers to, one term at a time. Do not ask how to calculate it when external knowledge already states the formula.
+6. Suggested format: "What do you mean by [TERM]?" Name the exact term. For ordering or grain, name the two business alternatives. Do not ask where a value is stored.
+7. Pick the column yourself when the candidates mean the same thing. If two candidates are different events or different grains, and the choice changes which rows qualify, ask which one the user means.
+8. If anything else in the user's question seems unclear, you may ask about it — for example an ambiguous grouping term, a threshold the knowledge does not state, an unspecified limit, which event orders a sequence, one row per reading versus one row per entity, or a preferred output format.
 9. Output a single focused question only — never two questions joined with "and" or "or".
-10. Output PROCEED when you can write the query from the schema, the external knowledge, and the clarifications. A missing formula, column name, or SQL detail is not a reason to ask. ASK only about the most critical business choice that is still open: a meaning, a population, or a cutoff the knowledge does not decide. If "Business choices still open" lists only formula or column gaps, output PROCEED.
+10. Output PROCEED when the meaning, the population, the ordering event, and the row grain are decided by the question, the external knowledge, or the clarifications. A formula that external knowledge already states is not a reason to ask. An undecided order or an undecided row grain is a reason to ASK. If "Business choices still open" lists only a formula that external knowledge already states, output PROCEED.
 
 Output PROCEED or ASK: <question>:"""
 
@@ -162,7 +162,8 @@ Term: {term}
 Why it's needed: {description}
 
 Generate a single, focused question to ask the user to clarify this specification.
-Ask which business meaning, population, or cutoff they intend.
+Ask which business meaning, population, cutoff, ordering event, or row grain they intend.
+Name the two business alternatives when the choice is an order or a grain.
 Do not ask for a formula, equation, column, table, or SQL structure.
 If the only unresolved piece is a formula or where a value is stored, output exactly SKIP.
 Output only the question text, or SKIP, nothing else.\

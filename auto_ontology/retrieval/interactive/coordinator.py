@@ -349,7 +349,10 @@ def _run_sql_generation(session: InteractiveSessionState) -> str:
     if p1_sql and p1_question:
         phase1_sql_reference_note = (
             "## Phase 1 SQL Reference (use exact column names, thresholds, and "
-            f"formulas from this SQL where applicable)\n{p1_sql}\n\n"
+            "formulas from this SQL where applicable)\n"
+            f"{p1_sql}\n\n"
+            "If the follow-up asks to sort by a metric, include that metric in "
+            "the SELECT together with the identifiers it asks to list.\n\n"
         )
     user_clarifications_note = _format_user_clarifications(session)
     external_kb_note = _verbatim_external_knowledge(session.external_kb)

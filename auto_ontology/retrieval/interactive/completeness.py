@@ -43,6 +43,10 @@ Your task — produce a FRESH updated list:
      stated in the user's answer or the external knowledge
    - A threshold or classification condition expressed as a choice between meanings, \
      where the knowledge does not say which meaning applies
+   - Which event orders a sequence when two different times would change which \
+     rows qualify, and neither the question nor the answer decides it
+   - Whether the result is one row per reading or one row per entity, when that \
+     choice changes the grain and neither the question nor the answer decides it
    - A KB condition or user answer using hedged language (e.g. "typically", "often",\
     "approximately", "things like") that leaves which cases qualify undecided
  
@@ -86,12 +90,14 @@ Identify gaps in either of the following categories:
    - Expressed with hedged language ("typically", "often", "approximately", "things like") \
      so which cases qualify is undecided
    - Two documented meanings and no indication which one applies
+   - Two events that could order a sequence, when the choice changes which rows qualify
+   - One row per reading versus one row per entity, when the choice changes the grain
 2. Do NOT flag a schema entity just because its formula is not written next to a \
    column name. A formula stated anywhere in external knowledge is complete. \
    Standard aggregations (SUM, AVG, COUNT) are not gaps.
 
-A gap is only significant if the user must choose a meaning, population, or cutoff \
-that the knowledge does not decide.
+A gap is only significant if the user must choose a meaning, population, cutoff, \
+ordering event, or row grain that the knowledge does not decide.
 
 Do NOT flag:
 - A missing formula, equation, operator, or column name. Column binding is not a \
