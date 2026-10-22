@@ -39,6 +39,7 @@ from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_sect
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_semantic_context,
+    format_semantic_fk_guidance_for_prompt,
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.message_utils import (
@@ -300,6 +301,13 @@ class SQLFromCandidatesAgent(BaseAgent):
                 main_question=main_question,
                 authoritative_evidence=authoritative_evidence_section,
                 tables=tables_section,
+                semantic_fk_guidance=prompt_section(
+                    format_semantic_fk_guidance_for_prompt(
+                        relevant_tables,
+                        target_db=target_db,
+                        dialect=dialect,
+                    )
+                ),
                 important_columns=important_columns,
                 join_paths=join_paths,
                 glossary=prompt_section("\n\n".join(glossary_parts)),

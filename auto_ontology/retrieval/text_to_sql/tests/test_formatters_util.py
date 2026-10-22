@@ -4,6 +4,7 @@
 
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
+    format_semantic_fk_guidance_for_prompt,
     format_tables_for_prompt,
     format_used_schema_for_prompt,
     qualify_table,
@@ -100,36 +101,44 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     assert "dw.dw." not in rendered
 
 
-def test_table_prompt_renders_semantic_fk_role_guidance() -> None:
-    rendered = format_tables_for_prompt(
-        [
-            {
-                "name": "cards",
-                "columns": [
-                    {
-                        "name": "setCode",
-                        "data_type": "text",
-                        "semantic_fk": "main.sets.code",
-                        "semantic_fk_role": "card belongs to card set",
-                        "semantic_fk_how_to_use": (
-                            "Traverse from a card to its owning set."
-                        ),
-                        "semantic_fk_when_to_use": [
-                            "a card question needs set properties"
-                        ],
-                        "semantic_fk_avoid_when": [
-                            "the question asks only for the card name"
-                        ],
-                    }
-                ],
-            }
-        ]
-    )
+def test_semantic_fk_guidance_is_separate_from_table_schema() -> None:
+    tables = [
+        {
+            "name": "cards",
+            "schema_name": "main",
+            "columns": [
+                {
+                    "name": "setCode",
+                    "data_type": "text",
+                    "semantic_fk": "main.sets.code",
+                    "semantic_fk_role": "card belongs to card set",
+                    "semantic_fk_how_to_use": (
+                        "Traverse from a card to its owning set."
+                    ),
+                    "semantic_fk_when_to_use": ["a card question needs set properties"],
+                    "semantic_fk_avoid_when": [
+                        "the question asks only for the card name"
+                    ],
+                }
+            ],
+        }
+    ]
 
-    assert "role: card belongs to card set" in rendered
-    assert "how: Traverse from a card to its owning set." in rendered
-    assert "when: a card question needs set properties" in rendered
-    assert "avoid: the question asks only for the card name" in rendered
+    schema = format_tables_for_prompt(tables)
+    guidance = format_semantic_fk_guidance_for_prompt(tables)
+
+    assert "foreign key" in schema
+    assert "main.sets.code" in schema
+    assert "relationship guidance" not in schema
+    assert "card belongs to card set" not in schema
+    assert "## Semantic Relationship Guidance" in guidance
+    assert "Relationship: main.cards.setCode -> main.sets.code" in guidance
+    assert "Role: card belongs to card set" in guidance
+    assert "How to use: Traverse from a card to its owning set." in guidance
+    assert "Use this relationship when:" in guidance
+    assert "- a card question needs set properties" in guidance
+    assert "Avoid this relationship when:" in guidance
+    assert "- the question asks only for the card name" in guidance
 
 
 def test_used_schema_context_keeps_details_only_for_referenced_columns() -> None:

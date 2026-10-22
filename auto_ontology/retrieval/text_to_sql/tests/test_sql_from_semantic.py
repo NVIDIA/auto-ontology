@@ -218,6 +218,16 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
                             {
                                 "name": "source_account_id",
                                 "semantic_fk": "main.accounts.id",
+                                "semantic_fk_role": "source side of the relationship",
+                                "semantic_fk_how_to_use": (
+                                    "Join to the account that initiated the relationship."
+                                ),
+                                "semantic_fk_when_to_use": [
+                                    "the initiating account is requested"
+                                ],
+                                "semantic_fk_avoid_when": [
+                                    "the receiving account is requested"
+                                ],
                             },
                             {
                                 "name": "target_account_id",
@@ -264,6 +274,16 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert "INTERNAL TABLE SELECTION REASONING" not in invoked_messages[-1].content
     assert "multiple foreign-key columns referencing the same" in (
         invoked_messages[-1].content
+    )
+    prompt = invoked_messages[-1].content
+    assert "## Semantic Relationship Guidance" in prompt
+    assert "Use this relationship when:" in prompt
+    assert "Avoid this relationship when:" in prompt
+    assert prompt.index("## Semantic Relationship Guidance") > prompt.index(
+        "## Available Schema"
+    )
+    assert prompt.index("## Semantic Relationship Guidance") < prompt.index(
+        "## Semantically Important Columns"
     )
 
 

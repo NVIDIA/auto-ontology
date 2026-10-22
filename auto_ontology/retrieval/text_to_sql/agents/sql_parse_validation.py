@@ -45,6 +45,7 @@ from auto_ontology.retrieval.data_access.graph_schemas import (
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
+    format_semantic_fk_guidance_for_prompt,
     format_used_schema_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
@@ -989,6 +990,11 @@ class SQLValidationAgent(BaseAgent):
             target_db=path_state.get("target_db"),
             dialect=dialect,
         )
+        semantic_fk_guidance = format_semantic_fk_guidance_for_prompt(
+            relevant_tables,
+            target_db=path_state.get("target_db"),
+            dialect=dialect,
+        )
 
         join_paths = ""
         if not _JOINS_VALIDATED_ELSEWHERE:
@@ -1017,6 +1023,7 @@ class SQLValidationAgent(BaseAgent):
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
             has_evidence=bool(evidence),
             used_schema_context=used_schema_context,
+            semantic_fk_guidance=semantic_fk_guidance,
             shorten_answer=state.get("shorten_answer", False),
         )
         system_prompt = (

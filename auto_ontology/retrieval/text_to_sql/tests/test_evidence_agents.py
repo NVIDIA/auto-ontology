@@ -75,6 +75,43 @@ def test_tables_agent_uses_state_evidence_as_authoritative_context(
     assert "events.duration LIKE '1:54%'" not in messages[1].content
 
 
+def test_tables_agent_uses_standalone_semantic_relationship_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    messages = _run_sql_from_tables(
+        monkeypatch,
+        question="Which set contains this card?",
+        evidence="",
+        relevant_tables=[
+            {
+                "name": "cards",
+                "schema_name": "main",
+                "columns": [
+                    {
+                        "name": "setCode",
+                        "semantic_fk": "main.sets.code",
+                        "semantic_fk_role": "card belongs to set",
+                        "semantic_fk_when_to_use": [
+                            "a card question needs set properties"
+                        ],
+                        "semantic_fk_avoid_when": [
+                            "only card properties are requested"
+                        ],
+                    }
+                ],
+            }
+        ],
+    )
+
+    prompt = messages[-1].content
+    assert "## Semantic Relationship Guidance" in prompt
+    assert "Use this relationship when:" in prompt
+    assert "Avoid this relationship when:" in prompt
+    assert prompt.index("## Semantic Relationship Guidance") < prompt.index(
+        "## Semantically Important Columns"
+    )
+
+
 def test_tables_agent_does_not_scan_question_for_evidence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

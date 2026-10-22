@@ -35,7 +35,10 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_semantic_fk_guidance_for_prompt,
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -622,6 +625,7 @@ class SQLReconstructionAgent(BaseAgent):
         dialect = getattr(connector, "dialect", None)
 
         tables_section = ""
+        semantic_fk_guidance_section = ""
         if relevant_tables:
             formatted_tables = format_tables_for_prompt(
                 relevant_tables,
@@ -632,6 +636,13 @@ class SQLReconstructionAgent(BaseAgent):
                 "\nAvailable tables and columns (use ONLY these):\n\n"
                 f"{formatted_tables}\n\n"
             )
+            semantic_fk_guidance = format_semantic_fk_guidance_for_prompt(
+                relevant_tables,
+                target_db=path_state.get("target_db"),
+                dialect=dialect,
+            )
+            if semantic_fk_guidance:
+                semantic_fk_guidance_section = f"\n{semantic_fk_guidance}\n\n"
 
         history_section = ""
         # Round 1's own reconstruction lineage, carried forward read-only by
@@ -703,6 +714,7 @@ class SQLReconstructionAgent(BaseAgent):
             "Do not explain how you corrected the sql, like you were "
             "never wrong.\n"
             f"{tables_section}"
+            f"{semantic_fk_guidance_section}"
             f"{known_columns_section}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"

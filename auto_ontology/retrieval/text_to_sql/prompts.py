@@ -82,6 +82,7 @@ create_sql_user_prompt = (
     "Use ONLY the tables and columns listed below. "
     "Do NOT invent tables, schemas, or columns.\n\n"
     "{tables}\n\n"
+    "{semantic_fk_guidance}"
     "## Semantically Important Columns\n"
     "The columns below were matched directly to entities extracted from the "
     "question, so give them extra weight when resolving ambiguity.\n"
@@ -912,6 +913,7 @@ def create_intent_validation_prompt(
     joins_validated_elsewhere: bool = False,
     has_evidence: bool = False,
     used_schema_context: str = "",
+    semantic_fk_guidance: str = "",
     shorten_answer: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
@@ -972,10 +974,14 @@ def create_intent_validation_prompt(
         "(catalog metadata only for tables and columns referenced by the query):\n"
         f"{used_schema_context}\n"
     )
+    semantic_fk_guidance_block = (
+        f"\n{semantic_fk_guidance}\n" if semantic_fk_guidance.strip() else ""
+    )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
 {join_paths_block}
+{semantic_fk_guidance_block}
 {parsed_usage_block}
 Generated SQL Query:
 ```sql

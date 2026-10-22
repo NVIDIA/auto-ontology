@@ -69,6 +69,17 @@ def test_intent_validation_keeps_authoritative_attribute_join(
                         "data_type": "integer",
                         "description": "Customer placing the order.",
                         "sample_values": [10, 20],
+                        "semantic_fk": "public.customers.id",
+                        "semantic_fk_role": "order belongs to customer",
+                        "semantic_fk_how_to_use": (
+                            "Join an order to the customer who placed it."
+                        ),
+                        "semantic_fk_when_to_use": [
+                            "customer properties are needed for an order"
+                        ],
+                        "semantic_fk_avoid_when": [
+                            "only order properties are requested"
+                        ],
                     },
                     {
                         "name": "internal_note",
@@ -120,6 +131,12 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     assert "public.customers.name (text) - Display name." in prompt
     assert "sample values: Ada, Grace" in prompt
     assert "internal_note" not in prompt
+    assert "## Semantic Relationship Guidance" in prompt
+    assert "Use this relationship when:" in prompt
+    assert "Avoid this relationship when:" in prompt
+    assert prompt.index("## Semantic Relationship Guidance") < prompt.index(
+        "USED SQL OBJECTS"
+    )
 
 
 @patch(

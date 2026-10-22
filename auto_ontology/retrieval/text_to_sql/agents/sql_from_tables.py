@@ -27,7 +27,10 @@ from langchain_core.messages import AIMessage
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_semantic_fk_guidance_for_prompt,
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.message_utils import (
     build_focused_sql_messages,
 )
@@ -127,6 +130,11 @@ class SQLFromTablesAgent(BaseAgent):
             system_prompt = create_sql_general_prompt
 
         # Build user prompt with formatted tables
+        semantic_fk_guidance = format_semantic_fk_guidance_for_prompt(
+            relevant_tables,
+            target_db=path_state.get("target_db"),
+            dialect=dialect,
+        )
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
             dialect_rules=format_dialect_rules(dialect),
@@ -140,6 +148,9 @@ class SQLFromTablesAgent(BaseAgent):
                 relevant_tables,
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
+            ),
+            semantic_fk_guidance=(
+                f"{semantic_fk_guidance}\n\n" if semantic_fk_guidance else ""
             ),
             important_columns="No semantically matched columns.",
             join_paths="",

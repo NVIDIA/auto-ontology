@@ -72,6 +72,11 @@ def test_reconstruction_uses_evidence_from_state(
         "invoke_with_structured_output",
         fake_invoke,
     )
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "resolve_connector_from_tables",
+        lambda *_args, **_kwargs: SimpleNamespace(dialect="sqlite"),
+    )
     state = cast(
         AgentState,
         {
@@ -93,6 +98,25 @@ def test_reconstruction_uses_evidence_from_state(
             "path_state": {
                 "error": "invalid time filter",
                 "error_analysis_done": True,
+                "relevant_tables": [
+                    {
+                        "name": "events",
+                        "schema_name": "main",
+                        "columns": [
+                            {
+                                "name": "venue_id",
+                                "semantic_fk": "main.venues.id",
+                                "semantic_fk_role": "event occurs at venue",
+                                "semantic_fk_when_to_use": [
+                                    "the event venue is requested"
+                                ],
+                                "semantic_fk_avoid_when": [
+                                    "only event timing is requested"
+                                ],
+                            }
+                        ],
+                    }
+                ],
                 "sql_generation_result": SimpleNamespace(
                     sql_code="SELECT 1",
                     thought="",
@@ -117,6 +141,12 @@ def test_reconstruction_uses_evidence_from_state(
     )
     assert "The time refers to" not in prompt
     assert "events.duration LIKE '1:54%'" not in prompt
+    assert "## Semantic Relationship Guidance" in prompt
+    assert "Use this relationship when:" in prompt
+    assert "Avoid this relationship when:" in prompt
+    assert prompt.index("Available tables and columns") < prompt.index(
+        "## Semantic Relationship Guidance"
+    )
 
 
 def test_reconstruction_drops_prior_repair_turns(

@@ -128,36 +128,74 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
     semantic_fk = column.get("semantic_fk")
     if semantic_fk:
         line += f" | foreign_key: {_plain_cell(semantic_fk)}"
-        guidance = _format_semantic_fk_guidance(column)
-        if guidance:
-            line += f" | relationship guidance: {guidance}"
     return line
 
 
-def _format_semantic_fk_guidance(column: dict[str, Any]) -> str:
-    """Render bounded generated/curated usage guidance for one FK edge."""
-    parts: list[str] = []
-    role = _plain_cell(column.get("semantic_fk_role"))
-    how_to_use = _plain_cell(column.get("semantic_fk_how_to_use"))
-    when_to_use = [
-        _plain_cell(item)
-        for item in list(column.get("semantic_fk_when_to_use") or [])[:5]
-        if _plain_cell(item)
-    ]
-    avoid_when = [
-        _plain_cell(item)
-        for item in list(column.get("semantic_fk_avoid_when") or [])[:5]
-        if _plain_cell(item)
-    ]
-    if role:
-        parts.append(f"role: {role}")
-    if how_to_use:
-        parts.append(f"how: {how_to_use}")
-    if when_to_use:
-        parts.append("when: " + "; ".join(when_to_use))
-    if avoid_when:
-        parts.append("avoid: " + "; ".join(avoid_when))
-    return " | ".join(parts)
+def format_semantic_fk_guidance_for_prompt(
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render semantic-FK usage guidance as a prominent standalone section."""
+    relationships: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
+    for table in tables:
+        table_name = _plain_cell(table.get("name", "UNKNOWN"))
+        source_table = qualify_table(
+            _plain_cell(table.get("database_name") or target_db),
+            _plain_cell(table.get("schema_name")),
+            table_name,
+            dialect,
+        )
+        columns = table.get("columns")
+        if not isinstance(columns, list):
+            continue
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            target = _plain_cell(column.get("semantic_fk"))
+            source_column = _plain_cell(column.get("name", "UNKNOWN"))
+            if not target:
+                continue
+            role = _plain_cell(column.get("semantic_fk_role"))
+            how_to_use = _plain_cell(column.get("semantic_fk_how_to_use"))
+            when_to_use = [
+                _plain_cell(item)
+                for item in list(column.get("semantic_fk_when_to_use") or [])[:5]
+                if _plain_cell(item)
+            ]
+            avoid_when = [
+                _plain_cell(item)
+                for item in list(column.get("semantic_fk_avoid_when") or [])[:5]
+                if _plain_cell(item)
+            ]
+            if not any((role, how_to_use, when_to_use, avoid_when)):
+                continue
+            key = (source_table, source_column, target)
+            if key in seen:
+                continue
+            seen.add(key)
+            lines = [f"Relationship: {source_table}.{source_column} -> {target}"]
+            if role:
+                lines.append(f"Role: {role}")
+            if how_to_use:
+                lines.append(f"How to use: {how_to_use}")
+            if when_to_use:
+                lines.append("Use this relationship when:")
+                lines.extend(f"- {item}" for item in when_to_use)
+            if avoid_when:
+                lines.append("Avoid this relationship when:")
+                lines.extend(f"- {item}" for item in avoid_when)
+            relationships.append("\n".join(lines))
+
+    if not relationships:
+        return ""
+    return (
+        "## Semantic Relationship Guidance\n"
+        "These database-specific instructions define the intended role of each "
+        "relationship. Use them to choose between plausible joins and tables.\n\n"
+        + "\n\n".join(relationships)
+    )
 
 
 # Dialects whose connection does *not* bind the catalog, so a name has to carry
@@ -383,7 +421,6 @@ _COLUMN_HEADERS = [
     "type",
     "is_nullable",
     "foreign key",
-    "relationship guidance",
     "description",
     "sample values",
     "format",
@@ -413,7 +450,6 @@ def _column_row(column: Any) -> dict[str, str]:
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
         "foreign key": _plain_cell(column.get("semantic_fk")),
-        "relationship guidance": _format_semantic_fk_guidance(column),
         "description": description,
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))
