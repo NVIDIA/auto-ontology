@@ -27,7 +27,9 @@ from langchain_core.messages import AIMessage
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_compact_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.message_utils import (
     build_focused_sql_messages,
 )
@@ -136,10 +138,11 @@ class SQLFromTablesAgent(BaseAgent):
             ),
             main_question=main_question,
             authoritative_evidence=format_authoritative_evidence(evidence),
-            tables=format_tables_for_prompt(
+            tables=format_compact_tables_for_prompt(
                 relevant_tables,
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
+                detail_text=f"{main_question}\n{evidence}",
             ),
             important_columns="No semantically matched columns.",
             join_paths="",

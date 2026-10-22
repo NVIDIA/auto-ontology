@@ -3,11 +3,123 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_compact_tables_for_prompt,
+    format_selected_columns_for_prompt,
     format_semantic_context,
     format_tables_for_prompt,
     format_used_schema_for_prompt,
     qualify_table,
 )
+
+
+def test_compact_schema_keeps_all_names_but_details_only_matching_columns() -> None:
+    rendered = format_compact_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "pk": ["id"],
+                "columns": [
+                    {
+                        "name": "id",
+                        "data_type": "integer",
+                        "description": "Internal row identifier.",
+                    },
+                    {
+                        "name": "status",
+                        "data_type": "text",
+                        "description": "Order lifecycle status.",
+                        "sample_values": ["open", "closed"],
+                    },
+                    {
+                        "name": "customer_id",
+                        "data_type": "integer",
+                        "semantic_fk": "public.customers.id",
+                        "description": "Customer placing the order.",
+                    },
+                ],
+            }
+        ],
+        detail_text="Count open orders by status",
+    )
+
+    assert "TABLE public.orders | primary key: id" in rendered
+    assert "id (integer)" in rendered
+    assert "status (text)" in rendered
+    assert "customer_id (integer) -> public.customers.id" in rendered
+    assert "status (text) - Order lifecycle status." in rendered
+    assert "sample values: open, closed" in rendered
+    assert "Internal row identifier." not in rendered
+    assert "Customer placing the order." not in rendered
+
+
+def test_compact_schema_keeps_explicit_join_column_details() -> None:
+    rendered = format_compact_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "columns": [
+                    {
+                        "name": "customer_id",
+                        "data_type": "integer",
+                        "description": "Customer join key.",
+                    }
+                ],
+            }
+        ],
+        detail_columns={("orders", "customer_id")},
+    )
+
+    assert "SELECTED COLUMN DETAILS:" in rendered
+    assert "Customer join key." in rendered
+
+
+def test_compact_schema_matches_camel_case_and_acronym_tokens() -> None:
+    rendered = format_compact_tables_for_prompt(
+        [
+            {
+                "name": "players",
+                "columns": [
+                    {
+                        "name": "playerFIFAIdentifier",
+                        "data_type": "integer",
+                        "description": "External player identifier.",
+                    }
+                ],
+            }
+        ],
+        detail_text="Find the FIFA player identifier",
+    )
+
+    assert "External player identifier." in rendered
+
+
+def test_selected_schema_omits_unrelated_columns_and_tables() -> None:
+    rendered = format_selected_columns_for_prompt(
+        [
+            {
+                "name": "orders",
+                "columns": [
+                    {
+                        "name": "status",
+                        "data_type": "text",
+                        "sample_values": ["open"],
+                    },
+                    {"name": "notes", "data_type": "text"},
+                ],
+            },
+            {
+                "name": "customers",
+                "columns": [{"name": "email", "data_type": "text"}],
+            },
+        ],
+        detail_text="orders.status = 'open'",
+    )
+
+    assert "status" in rendered
+    assert "status | text | unknown | open" in rendered
+    assert "notes" not in rendered
+    assert "customers" not in rendered
 
 
 def test_collapses_duplicate_database_and_schema() -> None:

@@ -35,7 +35,9 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_compact_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -623,10 +625,21 @@ class SQLReconstructionAgent(BaseAgent):
 
         tables_section = ""
         if relevant_tables:
-            formatted_tables = format_tables_for_prompt(
+            detail_context = "\n".join(
+                (
+                    question_block,
+                    evidence,
+                    sql_code,
+                    error,
+                    json.dumps(path_state.get("primary_attribute") or {}),
+                    json.dumps(path_state.get("attribute_join_paths") or []),
+                )
+            )
+            formatted_tables = format_compact_tables_for_prompt(
                 relevant_tables,
                 target_db=path_state.get("target_db"),
                 dialect=dialect,
+                detail_text=detail_context,
             )
             tables_section = (
                 "\nAvailable tables and columns (use ONLY these):\n\n"

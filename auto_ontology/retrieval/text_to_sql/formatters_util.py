@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -444,6 +445,239 @@ def format_tables_for_prompt(
         formatted_tables.append("\n".join(block for block in blocks if block))
 
     return "\n\n".join(formatted_tables)
+
+
+_DETAIL_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "api",
+        "as",
+        "at",
+        "by",
+        "code",
+        "column",
+        "data",
+        "date",
+        "for",
+        "from",
+        "id",
+        "in",
+        "is",
+        "key",
+        "of",
+        "on",
+        "or",
+        "record",
+        "row",
+        "table",
+        "the",
+        "to",
+        "value",
+        "with",
+    }
+)
+
+
+def _split_identifier(value: Any) -> list[str]:
+    """Split prose and snake/camel identifiers without regular expressions."""
+    text = str(value or "")
+    tokens: list[str] = []
+    current: list[str] = []
+
+    for index, char in enumerate(text):
+        if not char.isascii() or not char.isalnum():
+            if current:
+                tokens.append("".join(current))
+                current = []
+            continue
+
+        if current:
+            previous = current[-1]
+            next_char = text[index + 1] if index + 1 < len(text) else ""
+            letter_digit_boundary = previous.isalpha() != char.isalpha()
+            lower_upper_boundary = previous.islower() and char.isupper()
+            acronym_word_boundary = (
+                previous.isupper()
+                and char.isupper()
+                and next_char.isascii()
+                and next_char.islower()
+            )
+            if letter_digit_boundary or lower_upper_boundary or acronym_word_boundary:
+                tokens.append("".join(current))
+                current = []
+
+        current.append(char)
+
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _identifier_tokens(value: Any) -> set[str]:
+    """Normalize prose and snake/camel identifiers into matching tokens."""
+    return {
+        token.casefold()
+        for token in _split_identifier(value)
+        if token.casefold() not in _DETAIL_STOPWORDS
+    }
+
+
+def select_prompt_detail_columns(
+    tables: list[dict],
+    *,
+    text: str = "",
+    explicit_columns: Iterable[tuple[str, str]] = (),
+    max_per_table: int = 8,
+) -> set[tuple[str, str]]:
+    """Select columns that deserve rich metadata in a compact schema prompt.
+
+    Every column still appears in the compact inventory. This selector controls
+    only descriptions, samples, nullability and formats. Explicit semantic/join
+    references always win; remaining slots go to columns whose names or
+    descriptions overlap the request context.
+    """
+    explicit = {
+        (
+            str(table_name or "").split(".")[-1].strip('"`[]').casefold(),
+            str(column_name or "").split(".")[-1].strip('"`[]').casefold(),
+        )
+        for table_name, column_name in explicit_columns
+        if table_name and column_name
+    }
+    text_tokens = _identifier_tokens(text)
+    selected: set[tuple[str, str]] = set()
+
+    for table in tables:
+        table_name = str(table.get("name") or "")
+        table_key = table_name.casefold()
+        ranked: list[tuple[int, int, str]] = []
+        for position, column in enumerate(table.get("columns") or []):
+            if not isinstance(column, dict):
+                continue
+            column_name = str(column.get("name") or "")
+            if not column_name:
+                continue
+            column_key = column_name.casefold()
+            key = (table_key, column_key)
+            if key in explicit:
+                selected.add(key)
+                continue
+
+            name_overlap = len(_identifier_tokens(column_name) & text_tokens)
+            description_overlap = len(
+                _identifier_tokens(column.get("description")) & text_tokens
+            )
+            score = name_overlap * 4
+            if description_overlap >= 2:
+                score += description_overlap
+            if score:
+                ranked.append((-score, position, column_key))
+
+        remaining = max(
+            0, max_per_table - sum(1 for key in selected if key[0] == table_key)
+        )
+        for _score, _position, column_key in sorted(ranked)[:remaining]:
+            selected.add((table_key, column_key))
+
+    return selected
+
+
+def format_compact_tables_for_prompt(
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+    *,
+    detail_text: str = "",
+    detail_columns: Iterable[tuple[str, str]] = (),
+    max_details_per_table: int = 8,
+) -> str:
+    """Render complete names/types/FKs plus rich details for selected columns."""
+    if not tables:
+        return "No tables available"
+
+    selected = select_prompt_detail_columns(
+        tables,
+        text=detail_text,
+        explicit_columns=detail_columns,
+        max_per_table=max_details_per_table,
+    )
+    blocks: list[str] = []
+    for table in tables:
+        table_name = str(table.get("name") or "UNKNOWN")
+        table_key = table_name.casefold()
+        full_name = qualify_table(
+            table.get("database_name") or target_db or "",
+            table.get("schema_name") or "",
+            table_name,
+            dialect,
+        )
+        heading = f"TABLE {full_name}"
+        label = table.get("label")
+        if label and label != table_name:
+            heading += f" | label: {_plain_cell(label)}"
+        if table.get("pk"):
+            heading += f" | primary key: {_plain_cell(table['pk'])}"
+        if table.get("description"):
+            heading += f" | {_plain_cell(table['description'])}"
+
+        column_entries: list[str] = []
+        detail_lines: list[str] = []
+        for column in table.get("columns") or []:
+            if not isinstance(column, dict):
+                column_entries.append(_plain_cell(column))
+                continue
+            column_name = str(column.get("name") or "UNKNOWN")
+            entry = (
+                f"{_plain_cell(column_name)} "
+                f"({_plain_cell(column.get('data_type') or 'UNKNOWN')})"
+            )
+            semantic_fk = _plain_cell(column.get("semantic_fk"))
+            if semantic_fk:
+                entry += f" -> {semantic_fk}"
+            column_entries.append(entry)
+            if (table_key, column_name.casefold()) in selected:
+                detail_lines.append(_format_column_for_prompt(column))
+
+        table_lines = [heading, "COLUMNS: " + "; ".join(column_entries)]
+        if detail_lines:
+            table_lines.extend(["SELECTED COLUMN DETAILS:", *detail_lines])
+        blocks.append("\n".join(table_lines))
+
+    return "\n\n".join(blocks)
+
+
+def format_selected_columns_for_prompt(
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+    *,
+    detail_text: str = "",
+    detail_columns: Iterable[tuple[str, str]] = (),
+    max_details_per_table: int = 8,
+) -> str:
+    """Render only rich metadata selected for a narrow evidence/repair task."""
+    selected = select_prompt_detail_columns(
+        tables,
+        text=detail_text,
+        explicit_columns=detail_columns,
+        max_per_table=max_details_per_table,
+    )
+    narrowed: list[dict] = []
+    for table in tables:
+        table_key = str(table.get("name") or "").casefold()
+        columns = [
+            column
+            for column in table.get("columns") or []
+            if isinstance(column, dict)
+            and (table_key, str(column.get("name") or "").casefold()) in selected
+        ]
+        if columns:
+            narrowed.append({**table, "columns": columns})
+    if not narrowed:
+        return "No matching columns."
+    return format_tables_for_prompt(narrowed, target_db=target_db, dialect=dialect)
 
 
 def format_used_schema_for_prompt(

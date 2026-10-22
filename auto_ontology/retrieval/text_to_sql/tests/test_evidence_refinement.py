@@ -663,6 +663,56 @@ def test_agent_supplies_value_anchors_before_fallback_samples(
     assert "race.\"race\" has stored value 'Human'" in prompt
 
 
+def test_agent_sends_only_evidence_related_column_details(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict = {}
+
+    def _invoke(messages, schema):
+        if schema is EvidenceGroundingResult:
+            return EvidenceGroundingResult(
+                grounded_question="Show open orders",
+                grounded_evidence="orders.status = 'open'",
+            )
+        captured["prompt"] = messages[1].content
+        return EvidenceRefinementResult()
+
+    monkeypatch.setattr(evidence_refinement, "safe_invoke_structured_nr", _invoke)
+    state = {
+        "initial_question": "Show open orders",
+        "evidence": "orders.status = 'open'",
+        "value_anchors": [],
+        "connectors": [],
+        "path_state": {
+            "relevant_tables": [
+                {
+                    "name": "orders",
+                    "columns": [
+                        {
+                            "name": "status",
+                            "data_type": "text",
+                            "sample_values": ["open", "closed"],
+                        },
+                        {
+                            "name": "internal_notes",
+                            "data_type": "text",
+                            "description": "Unrelated internal notes.",
+                            "sample_values": ["private"],
+                        },
+                    ],
+                }
+            ]
+        },
+    }
+
+    EvidenceRefinementAgent().execute(state)
+
+    prompt = captured["prompt"]
+    assert "status | text | unknown | open, closed" in prompt
+    assert "internal_notes" not in prompt
+    assert "private" not in prompt
+
+
 def test_evidence_routing_runs_only_on_evidence_bearing_sql_paths() -> None:
     assert route_evidence_refinement({"evidence": " status = 'Active' "}) == (
         "refine_evidence"
