@@ -226,7 +226,7 @@ def _entity_specs(raw_entities: Any) -> list[dict[str, str]]:
         entity_type = str(raw.get("type") or "")
         original_text = str(raw.get("original_text") or "").strip()
         meaning = str(raw.get("meaning") or "").strip()
-        if entity_type in {"field", "value"} and original_text and meaning:
+        if entity_type in {"field", "exact_value"} and original_text and meaning:
             specs.append(
                 {
                     "type": entity_type,
@@ -591,7 +591,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity["meaning"],
                             LABEL_COLUMN_ATTRIBUTE,
-                            4 if entity["type"] == "value" else 2,
+                            4 if entity["type"] == "exact_value" else 2,
                             target_db,
                         ),
                     )
@@ -713,7 +713,7 @@ class CandidateRetrievalAgent(BaseAgent):
                                     semantic_retriever,
                                     entity["meaning"],
                                     LABEL_COLUMN_ATTRIBUTE,
-                                    4 if entity["type"] == "value" else 2,
+                                    4 if entity["type"] == "exact_value" else 2,
                                     selected_database,
                                 ): entity
                                 for entity in uncovered_entities

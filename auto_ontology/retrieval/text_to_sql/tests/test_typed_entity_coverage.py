@@ -20,7 +20,7 @@ def test_typed_entity_coverage_uses_original_text() -> None:
                 "meaning": "card artist",
             },
             {
-                "type": "value",
+                "type": "exact_value",
                 "original_text": "Angel of Mercy",
                 "meaning": "card name",
             },

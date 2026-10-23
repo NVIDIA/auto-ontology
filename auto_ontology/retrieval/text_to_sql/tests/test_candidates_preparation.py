@@ -25,7 +25,7 @@ from auto_ontology.retrieval.text_to_sql.state import AgentState
 def _value_hit(attribute_id: str, *, also_field: bool = False) -> dict[str, Any]:
     specs = [
         {
-            "type": "value",
+            "type": "exact_value",
             "original_text": "The Lion King",
             "meaning": "movie",
         }
@@ -100,7 +100,7 @@ def test_value_probe_checks_all_equal_then_contains_and_narrows(
             "path_state": {
                 "entities": [
                     {
-                        "type": "value",
+                        "type": "exact_value",
                         "original_text": "The Lion King",
                         "meaning": "movie",
                     },
@@ -171,7 +171,7 @@ def test_unmatched_value_keeps_all_semantic_candidates(
             "path_state": {
                 "entities": [
                     {
-                        "type": "value",
+                        "type": "exact_value",
                         "original_text": "The Lion King",
                         "meaning": "movie",
                     }

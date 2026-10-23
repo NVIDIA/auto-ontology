@@ -114,7 +114,7 @@ def _typed_entities(raw_entities: Any) -> list[dict[str, str]]:
         entity_type = str(raw.get("type") or "")
         original_text = str(raw.get("original_text") or "").strip()
         meaning = str(raw.get("meaning") or "").strip()
-        if entity_type in {"field", "value"} and original_text and meaning:
+        if entity_type in {"field", "exact_value"} and original_text and meaning:
             result.append(
                 {
                     "type": entity_type,
@@ -303,7 +303,7 @@ def _probe_value_entities(
     value_entities = [
         entity
         for entity in _typed_entities(state.get("path_state", {}).get("entities"))
-        if entity["type"] == "value"
+        if entity["type"] == "exact_value"
     ]
     connector = _connector_for_value_probe(state, target_db)
     if not value_entities or connector is None:
@@ -315,7 +315,7 @@ def _probe_value_entities(
     for hit in column_attributes:
         for entity in _hit_entity_specs(hit):
             key = _value_entity_key(entity)
-            if entity["type"] == "value" and key in hits_by_value:
+            if entity["type"] == "exact_value" and key in hits_by_value:
                 hits_by_value[key].append(hit)
 
     matched_attribute_by_value: dict[tuple[str, str], str] = {}

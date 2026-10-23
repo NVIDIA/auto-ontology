@@ -47,10 +47,10 @@ def format_evidence_section(evidence: str | None) -> str:
     """Render narrowly scoped evidence guidance for question sanitization."""
     if not evidence:
         return ""
-    return f"""## Evidence for sanitization
+    return f"""## Evidence for sanitization and entity meaning
 
-Use this evidence only to disambiguate the domain meaning of the input while producing
-`sanitized_question`.
+Use this evidence to disambiguate the domain meaning of the input while producing
+`sanitized_question` and the `meaning` of entities already present in that question.
 
 Rules:
 - Add at most one concise disambiguating qualifier to the sanitized question, and only
@@ -58,9 +58,13 @@ Rules:
 - Do not append or summarize the evidence.
 - Do not copy background, explanations, formulas, SQL, values, unrelated terms, or
   inventories of tables or columns into the sanitized question.
+- When evidence explicitly identifies the physical or semantic field meant by words in
+  the question, use that hint in the matching entity's `meaning`.
+- Evidence may refine an entity's `meaning`; it must never create an entity whose
+  `original_text` is absent from the sanitized question.
 - Evidence must not add a second interpretation or broaden the user's request.
-- Part 2 must derive entities only from the completed sanitized question, never directly
-  from this evidence section.
+- Part 2 must derive entity spans only from the completed sanitized question. Evidence
+  may refine their meanings but must not supply additional spans or literal values.
 
 {evidence}
 
@@ -90,21 +94,28 @@ sanitized_question: How many shipments were delivered last month?
 ## Part 2 — required_entity_name
 
 Populate "required_entity_name" with 1–{_MAX_ENTITIES} objects. Every object has:
-- `type`: `field` for a requested schema concept, or `value` for a literal that can
-  be compared with a database field.
+- `type`: `field` for a requested schema concept, or `exact_value` for a literal that
+  should be looked up in a database field.
 - `original_text`: the exact words from the completed sanitized question.
 - `meaning`: the schema-oriented concept to use for semantic retrieval.
 
 Extract only from the completed sanitized intent, never directly from Glossary or
 Evidence sections. Preserve the exact casing in `original_text`.
 
-Identify complete VALUE spans before FIELD entities:
-- Values include names, titles, labels, categories, statuses, alphanumeric codes,
-  booleans, numbers, percentages, and dates used as filter constants.
+Identify complete EXACT_VALUE spans before FIELD entities:
+- Exact values include names, titles, labels, categories, statuses, alphanumeric codes,
+  booleans, numbers, percentages, and dates used as exact filter constants.
 - Keep the complete literal in `original_text`; do not split it.
 - Set `meaning` to the kind of field likely to contain the value, not to the literal.
 - A word belonging to a value span MUST NOT appear in any other entity. In particular,
   do not also emit a field made from a noun inside a value.
+- Do NOT emit an `exact_value` for an ordered or range comparison: "over", "under",
+  "above", "below", "more than", "less than", "greater than", "fewer than",
+  "at least", "at most", "before", "after", "between", `>`, `<`, `>=`, or `<=`.
+  Emit only the comparison's field entity; the SQL model receives the numeric/date
+  threshold directly from the question.
+- If an exact value and a field would have the same `meaning`, return only the
+  `exact_value`; it already retrieves and grounds that field.
 
 Field entities include requested outputs, metrics, dimensions, subjects, and
 relationships. For a field, `meaning` should be a concise schema concept. Resolve
@@ -115,6 +126,9 @@ The existing semantic-entity rules still apply to FIELD entities:
 - Include subject nouns and domain terms ("invoice", "customer", "shipment").
 - Include qualified phrases that combine a subject with its relevant action or
   attribute ("order shipment", "employee hire", "ticket resolution").
+- When a base subject only supplies context for a more specific requested field, emit
+  only the qualified field, not separate base-subject and qualified-field entities.
+  Keep both only when the question independently requests both.
 - Aggregation-qualified metric rule: when "count", "total", "average", "sum", "min",
   or "max" is attached to a domain noun as the name of a requested metric or column,
   keep it as one field meaning. When the aggregation is only question framing, such as
@@ -152,21 +166,6 @@ Existing exclusions still apply to FIELD entities:
   "pk", and "fk".
 
 Examples:
-  Q: "Did class 2 see The Lion King?"
-  → required_entity_name:
-    [
-      {{"type": "value", "original_text": "class 2", "meaning": "class"}},
-      {{"type": "value", "original_text": "The Lion King", "meaning": "movie"}}
-    ]
-  Do not additionally emit a `class` field: "class" is inside the value "class 2".
-
-  Q: "Which artist illustrated the card Angel of Mercy?"
-  → required_entity_name:
-    [
-      {{"type": "field", "original_text": "artist", "meaning": "card artist"}},
-      {{"type": "value", "original_text": "Angel of Mercy", "meaning": "card name"}}
-    ]
-
   Q: "How many shipments were delivered last month?"
   → required_entity_name:
     [
@@ -227,8 +226,8 @@ def create_question_extraction_prompt(
     """Sanitize and extract entity noun phrases; optionally also name subject/acronyms.
 
     Glossary is always injected so the model can resolve abbreviations. Evidence,
-    when provided, is restricted to refining the sanitized question before entity
-    extraction, including when ``include_subject`` is False.
+    when provided, may refine the sanitized question and the meaning of matching
+    question-derived entities, including when ``include_subject`` is False.
     """
     glossary_section = format_glossary_section(glossary)
     evidence_section = format_evidence_section(evidence)

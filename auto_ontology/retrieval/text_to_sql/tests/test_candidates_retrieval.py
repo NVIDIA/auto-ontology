@@ -88,7 +88,7 @@ def test_typed_entities_search_by_meaning_and_preserve_original_text(
     entities = [
         {"type": "field", "original_text": "artist", "meaning": "card artist"},
         {
-            "type": "value",
+            "type": "exact_value",
             "original_text": "The Lion King",
             "meaning": "movie",
         },
@@ -104,7 +104,7 @@ def test_typed_entities_search_by_meaning_and_preserve_original_text(
     assert hits["attr-movie"]["query_entities"] == ["The Lion King"]
     assert hits["attr-movie"]["query_entity_specs"] == [
         {
-            "type": "value",
+            "type": "exact_value",
             "original_text": "The Lion King",
             "meaning": "movie",
         }

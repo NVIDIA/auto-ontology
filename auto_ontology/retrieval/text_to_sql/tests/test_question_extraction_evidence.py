@@ -35,7 +35,9 @@ def test_prompt_limits_evidence_to_sanitized_question_disambiguation() -> None:
     assert "## Evidence for sanitization" in prompt
     assert "at most one concise disambiguating qualifier" in prompt
     assert "Do not append or summarize the evidence" in prompt
-    assert "derive entities only from the completed sanitized question" in prompt
+    assert "derive entity spans only from the completed sanitized question" in prompt
+    assert "use that hint in the matching entity's `meaning`" in prompt
+    assert "must never create an entity" in prompt
     assert "Points earned refers to loyalty_points" in prompt
     assert "AVAILABLE TABLES" not in prompt
 
@@ -67,7 +69,10 @@ def test_typed_entity_prompt_preserves_existing_field_rules() -> None:
     assert "Do not emit bare action verbs" in prompt
     assert "extension of the field" in prompt
     assert "not a replacement for them" in prompt
-    assert '"type": "value"' in prompt
+    assert "`exact_value`" in prompt
+    assert "The Lion King" not in prompt
+    assert "Angel of Mercy" not in prompt
+    assert "total enrollment of over 500" not in prompt
 
 
 def test_agent_forwards_state_evidence_without_changing_original_question(
@@ -200,7 +205,7 @@ def test_value_words_are_not_reused_by_field_entities(
             sanitized_question="Did class 2 see The Lion King?",
             required_entity_name=[
                 ExtractedEntity(
-                    type="value",
+                    type="exact_value",
                     original_text="class 2",
                     meaning="class",
                 ),
@@ -210,7 +215,7 @@ def test_value_words_are_not_reused_by_field_entities(
                     meaning="class",
                 ),
                 ExtractedEntity(
-                    type="value",
+                    type="exact_value",
                     original_text="The Lion King",
                     meaning="movie",
                 ),
@@ -227,10 +232,105 @@ def test_value_words_are_not_reused_by_field_entities(
     result = QuestionExtractionAgent(include_subject=False).execute(state)
 
     assert result["path_state"]["entities"] == [
-        {"type": "value", "original_text": "class 2", "meaning": "class"},
+        {"type": "exact_value", "original_text": "class 2", "meaning": "class"},
         {
-            "type": "value",
+            "type": "exact_value",
             "original_text": "The Lion King",
             "meaning": "movie",
         },
+    ]
+
+
+def test_ordered_comparison_threshold_is_not_an_exact_value(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionExtractionLiteModel(
+            sanitized_question=(
+                "List the codes of schools with a total enrollment of over 500."
+            ),
+            required_entity_name=[
+                ExtractedEntity(
+                    type="field",
+                    original_text="schools",
+                    meaning="school",
+                ),
+                ExtractedEntity(
+                    type="field",
+                    original_text="codes",
+                    meaning="school code",
+                ),
+                ExtractedEntity(
+                    type="field",
+                    original_text="total enrollment",
+                    meaning="total enrollment",
+                ),
+                ExtractedEntity(
+                    type="exact_value",
+                    original_text="500",
+                    meaning="total enrollment",
+                ),
+            ],
+        ),
+    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": (
+            "Please list the codes of the schools with a total enrollment of over 500."
+        ),
+        "path_state": {},
+        "glossary": [],
+    }
+
+    result = QuestionExtractionAgent(include_subject=False).execute(state)
+
+    assert result["path_state"]["entities"] == [
+        {"type": "field", "original_text": "codes", "meaning": "school code"},
+        {
+            "type": "field",
+            "original_text": "total enrollment",
+            "meaning": "total enrollment",
+        },
+    ]
+
+
+def test_exact_value_replaces_duplicate_field_meaning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionExtractionLiteModel(
+            sanitized_question="Find the school named Lincoln High.",
+            required_entity_name=[
+                ExtractedEntity(
+                    type="field",
+                    original_text="school",
+                    meaning="school name",
+                ),
+                ExtractedEntity(
+                    type="exact_value",
+                    original_text="Lincoln High",
+                    meaning="school name",
+                ),
+            ],
+        ),
+    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Find the school named Lincoln High.",
+        "path_state": {},
+        "glossary": [],
+    }
+
+    result = QuestionExtractionAgent(include_subject=False).execute(state)
+
+    assert result["path_state"]["entities"] == [
+        {
+            "type": "exact_value",
+            "original_text": "Lincoln High",
+            "meaning": "school name",
+        }
     ]

@@ -16,7 +16,7 @@ from auto_ontology.utils.llm_invoke import StrictLLMOutputModel
 class ExtractedEntity(StrictLLMOutputModel):
     """One user-text span and the schema concept used to retrieve it."""
 
-    type: Literal["value", "field"]
+    type: Literal["exact_value", "field"]
     original_text: str = Field(
         ...,
         description="Exact text from the sanitized question represented by this entity.",
@@ -24,8 +24,8 @@ class ExtractedEntity(StrictLLMOutputModel):
     meaning: str = Field(
         ...,
         description=(
-            "Schema-oriented meaning to use for semantic retrieval. For a value, "
-            "name the kind of field likely to contain it, not the literal itself."
+            "Schema-oriented meaning to use for semantic retrieval. For an exact "
+            "value, name the kind of field likely to contain it, not the literal."
         ),
     )
 
