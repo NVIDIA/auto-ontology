@@ -175,6 +175,10 @@ class CombinedCandidateFilterModel(BaseModel):
         ...,
         description="IDs of SQL attributes to KEEP. Empty list if none are relevant.",
     )
+    column_attribute_ids: list[str] = Field(
+        ...,
+        description="One selected ColumnAttribute ID per ambiguous field group. Empty when no groups are provided.",
+    )
 
 
 class AnchorColumnModel(BaseModel):
