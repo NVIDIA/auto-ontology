@@ -38,6 +38,7 @@ from auto_ontology.retrieval.data_access.custom_analyses import (
 from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_section
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
+    format_junction_table_guidance,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -265,7 +266,7 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
-            if primary_attribute:
+            if primary_attribute or attribute_join_paths:
                 join_paths = (
                     "## Semantic Hints & Join Paths\n"
                     + format_semantic_context(
@@ -308,6 +309,12 @@ class SQLFromCandidatesAgent(BaseAgent):
                 tables=tables_section,
                 important_columns=important_columns,
                 join_paths=join_paths,
+                junction_guidance=format_junction_table_guidance(
+                    relevant_tables,
+                    attribute_join_paths,
+                    target_db=target_db,
+                    dialect=dialect,
+                ),
                 custom_analyses=ca_section + sa_section,
             )
 

@@ -3,11 +3,76 @@
 # SPDX-License-Identifier: Apache-2.0
 
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_junction_table_guidance,
     format_semantic_context,
     format_tables_for_prompt,
     format_used_schema_for_prompt,
     qualify_table,
 )
+
+
+def test_junction_guidance_is_absent_without_selected_junctions() -> None:
+    assert format_junction_table_guidance([], []) == ""
+
+
+def test_junction_guidance_includes_role_paths_and_use_boundaries() -> None:
+    tables = [
+        {
+            "name": "entity_link",
+            "schema_name": "main",
+            "database_name": "db",
+            "is_junction_table": True,
+            "junction_table_kind": "association",
+            "junction_table_rationale": "Each row records an association.",
+        }
+    ]
+    paths = [
+        {
+            "path": [
+                {
+                    "source_schema": "main",
+                    "source_table": "entity_link",
+                    "source_column": "left_id",
+                    "target_schema": "main",
+                    "target_table": "entity",
+                    "target_column": "id",
+                }
+            ]
+        }
+    ]
+
+    rendered = format_junction_table_guidance(
+        tables,
+        paths,
+        target_db="db",
+    )
+
+    assert "## Junction Tables" in rendered
+    assert "only when the question requires the association" in rendered
+    assert "presence in the schema is not by itself a reason" in rendered
+    assert "db.main.entity_link.left_id = db.main.entity.id" in rendered
+
+
+def test_structural_join_paths_render_without_primary_attribute() -> None:
+    rendered = format_semantic_context(
+        None,
+        [
+            {
+                "path": [
+                    {
+                        "source_table": "entity_link",
+                        "source_column": "left_id",
+                        "target_table": "entity",
+                        "target_column": "id",
+                    }
+                ]
+            }
+        ],
+        target_db="db",
+    )
+
+    assert "JOIN PATHS (VERIFIED OPTIONS" in rendered
+    assert "db.entity_link.left_id = db.entity.id" in rendered
 
 
 def test_collapses_duplicate_database_and_schema() -> None:

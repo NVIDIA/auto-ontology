@@ -168,6 +168,12 @@ def _build_relevance_tables_summary(tables: list[dict]) -> str:
         lines.append(
             f"- {_qualified_name(t)}: {t.get('description', '(no description)')}"
         )
+        if t.get("is_junction_table"):
+            lines.append(
+                "  Junction table"
+                f" ({t.get('junction_table_kind') or 'association'}): "
+                f"{t.get('junction_table_rationale') or '(no rationale)'}"
+            )
         cols = t.get("columns") or []
         if cols:
             lines.append("  Columns:")
@@ -627,6 +633,27 @@ class CandidatePreparationAgent(BaseAgent):
                 len(metadata_incomplete_ids),
             )
 
+        # --- 4f. Offer connected junctions to the relevance filter ---
+        # Junctions are optional relationship candidates, not unconditional
+        # join structure. Surface their semantic rationale and verified roles
+        # before filtering so question intent can decide whether the
+        # association is needed.
+        candidate_ids = [t["id"] for t in relevant_tables if t.get("id")]
+        connected_junctions, connected_junction_paths = find_connected_junction_tables(
+            candidate_ids
+        )
+        junction_candidate_ids = {
+            str(table["id"]) for table in connected_junctions if table.get("id")
+        }
+        if junction_candidate_ids:
+            junction_tables = fetch_tables_by_ids(list(junction_candidate_ids))
+            relevant_tables = _merge_tables(relevant_tables, junction_tables)
+            self.logger.info(
+                "Offered %d connected junction table(s) to relevance filtering: %s",
+                len(junction_tables),
+                [table["name"] for table in junction_tables],
+            )
+
         # Snapshot the candidate pool BEFORE the relevance filter runs. §5c's
         # bridge reconciliation must only ever restore a table that was
         # already a candidate here (and that the filter had a chance to see)
@@ -641,7 +668,10 @@ class CandidatePreparationAgent(BaseAgent):
             question,
             relevant_tables,
             custom_analyses,
-            attribute_join_paths,
+            [
+                *attribute_join_paths,
+                *({"path": hops} for hops in connected_junction_paths),
+            ],
         )
         self.logger.debug(
             "Kept %d relevant tables (after relevance filter): %s",
@@ -651,29 +681,29 @@ class CandidatePreparationAgent(BaseAgent):
         if table_relevance_reasoning:
             record_thought(path_state, _GRAPH_NODE_NAME, table_relevance_reasoning)
 
-        # --- 5b. One-hop junction-table expansion ---
-        # Junction tables are join structure, not relevance candidates: once
-        # the filter has chosen a table, include every catalog-classified
-        # junction whose FK columns point into it. This intentionally discovers
-        # tables that were not in the pre-filter candidate pool.
-        kept_ids = [t["id"] for t in relevant_tables if t.get("id")]
-        connected_junctions, connected_junction_paths = find_connected_junction_tables(
-            kept_ids
-        )
-        if connected_junctions:
-            forced_table_ids.update(t["id"] for t in connected_junctions)
-            self.logger.info(
-                "Connected-junction expansion added %d table(s): %s",
-                len(connected_junctions),
-                [t["name"] for t in connected_junctions],
+        # --- 5b. Retain verified roles only for selected junctions ---
+        selected_junction_keys = {
+            (str(table.get("schema_name") or ""), str(table.get("name") or ""))
+            for table in relevant_tables
+            if table.get("is_junction_table")
+        }
+        selected_junction_paths = [
+            hops
+            for hops in connected_junction_paths
+            if hops
+            and (
+                str(hops[0].get("source_schema") or ""),
+                str(hops[0].get("source_table") or ""),
             )
-        if connected_junction_paths:
+            in selected_junction_keys
+        ]
+        if selected_junction_paths:
             attribute_join_paths.extend(
-                {"path": hops} for hops in connected_junction_paths
+                {"path": hops} for hops in selected_junction_paths
             )
             self.logger.info(
-                "Connected-junction expansion added %d one-hop join path(s)",
-                len(connected_junction_paths),
+                "Selected junctions contributed %d verified role path(s)",
+                len(selected_junction_paths),
             )
 
         # --- 5c. Deterministic bridge-table reconciliation ---
@@ -1009,7 +1039,13 @@ class CandidatePreparationAgent(BaseAgent):
         attribute_join_paths: list[dict] | None = None,
     ) -> tuple[list[dict], str]:
         """Use the LLM to decide which candidate tables are actually needed."""
-        if len(tables) <= _RELEVANCE_FILTER_BYPASS_MAX_TABLES:
+        contains_junction_candidate = any(
+            table.get("is_junction_table") for table in tables
+        )
+        if (
+            not contains_junction_candidate
+            and len(tables) <= _RELEVANCE_FILTER_BYPASS_MAX_TABLES
+        ):
             self.logger.info(
                 "Relevance filter bypassed: %d candidate table(s) <= bypass max %d",
                 len(tables),

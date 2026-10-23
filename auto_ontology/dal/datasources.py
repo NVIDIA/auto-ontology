@@ -344,6 +344,26 @@ def fetch_table_by_name(name: str) -> dict[str, Any] | None:
     return _table_row(rows[0]) if rows else None
 
 
+def fetch_table_headers_for_database(database_name: str) -> list[dict[str, Any]]:
+    """Return table identity and compiled junction metadata for one database."""
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.name,
+            s.catalog_table.c.description,
+            s.catalog_table.c.pk,
+            s.catalog_table.c.is_junction_table,
+            s.catalog_table.c.junction_table_kind,
+            s.catalog_table.c.junction_table_rationale,
+            s.catalog_schema.c.name.label("schema_name"),
+        )
+        .select_from(_table_join())
+        .where(s.catalog_database.c.name == database_name)
+        .order_by(s.catalog_schema.c.name, s.catalog_table.c.name)
+    )
+    return [dict(row) for row in rows]
+
+
 def fetch_join_neighbors(table_id: str) -> list[dict[str, Any]]:
     """Tables joined to this one, in either direction.
 
@@ -545,16 +565,75 @@ def store_column_date_formats(table_id: str, date_formats: dict[str, str]) -> No
 # ---------------------------------------------------------------------------
 
 
-def mark_table_as_junction(table_id: str) -> None:
-    """Promote a catalog table to a junction table without ever clearing it."""
+def mark_table_as_junction(
+    table_id: str,
+    *,
+    kind: str = "bridge",
+    rationale: str | None = None,
+) -> None:
+    """Mark one table as a junction while preserving compatibility callers."""
+    if kind not in {"bridge", "association"}:
+        raise ValueError(f"Unsupported junction table kind: {kind}")
     store().query_write(
         update(s.catalog_table)
-        .where(
-            s.catalog_table.c.id == table_id,
-            ~s.catalog_table.c.is_junction_table,
+        .where(s.catalog_table.c.id == table_id)
+        .values(
+            is_junction_table=True,
+            junction_table_kind=kind,
+            junction_table_rationale=rationale,
         )
-        .values(is_junction_table=True)
     )
+
+
+def replace_junction_table_classifications(
+    database_name: str,
+    classifications: list[dict[str, Any]],
+) -> None:
+    """Replace compiled junction metadata for every table in one database."""
+    table_ids = (
+        select(s.catalog_table.c.id)
+        .select_from(_table_join())
+        .where(s.catalog_database.c.name == database_name)
+    )
+    normalized: list[dict[str, str | None]] = []
+    for classification in classifications:
+        kind = str(classification.get("kind") or "")
+        if kind not in {"bridge", "association"}:
+            raise ValueError(f"Unsupported junction table kind: {kind}")
+        table_id = str(classification.get("table_id") or "")
+        if not table_id:
+            raise ValueError("Junction classification is missing table_id")
+        normalized.append(
+            {
+                "table_id": table_id,
+                "kind": kind,
+                "rationale": str(classification.get("rationale") or "") or None,
+            }
+        )
+
+    with write_transaction():
+        store().query_write(
+            update(s.catalog_table)
+            .where(s.catalog_table.c.id.in_(table_ids))
+            .values(
+                is_junction_table=False,
+                junction_table_kind=None,
+                junction_table_rationale=None,
+            )
+        )
+        for classification in normalized:
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    s.catalog_table.c.id == classification["table_id"],
+                    s.catalog_table.c.id.in_(table_ids),
+                )
+                .values(
+                    is_junction_table=True,
+                    junction_table_kind=classification["kind"],
+                    junction_table_rationale=classification["rationale"],
+                )
+            )
 
 
 def apply_metadata_batch(
@@ -1027,6 +1106,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.name,
                 s.catalog_table.c.description,
                 s.catalog_table.c.pk,
+                s.catalog_table.c.is_junction_table,
+                s.catalog_table.c.junction_table_kind,
+                s.catalog_table.c.junction_table_rationale,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
@@ -1066,6 +1148,9 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 # which costs it every edge and makes it unusable in
                 # `FOR EACH`. It has to survive every path to relevant_tables.
                 "pk": row.get("pk") or [],
+                "is_junction_table": bool(row["is_junction_table"]),
+                "junction_table_kind": row["junction_table_kind"],
+                "junction_table_rationale": row["junction_table_rationale"] or "",
                 "columns": [],
             },
         )

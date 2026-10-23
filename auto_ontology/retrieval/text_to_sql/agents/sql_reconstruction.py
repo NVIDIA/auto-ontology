@@ -34,7 +34,10 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
     get_relevant_tables,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_junction_table_guidance,
+    format_tables_for_prompt,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -626,6 +629,14 @@ class SQLReconstructionAgent(BaseAgent):
             path_state.get("primary_attribute"),
             path_state.get("attribute_join_paths"),
         )
+        junction_guidance = format_junction_table_guidance(
+            relevant_tables,
+            path_state.get("attribute_join_paths") or [],
+            target_db=path_state.get("target_db"),
+            dialect=dialect,
+        )
+        if junction_guidance:
+            junction_guidance = f"\n{junction_guidance}\n"
 
         # Anchor ambiguous-term interpretation across repair attempts: without
         # this, each reconstruction call independently re-derives things like
@@ -670,6 +681,7 @@ class SQLReconstructionAgent(BaseAgent):
             "never wrong.\n"
             f"{tables_section}"
             f"{known_columns_section}"
+            f"{junction_guidance}"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "

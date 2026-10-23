@@ -119,6 +119,12 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
     # dropped by the second pass, which reads the input under the old name.
     if table.get("pk") is not None:
         entry["pk"] = table["pk"]
+    if table.get("is_junction_table") is not None:
+        entry["is_junction_table"] = bool(table["is_junction_table"])
+    if table.get("junction_table_kind") is not None:
+        entry["junction_table_kind"] = table["junction_table_kind"]
+    if table.get("junction_table_rationale") is not None:
+        entry["junction_table_rationale"] = table["junction_table_rationale"]
     if not isinstance(entry.get("columns"), list):
         entry["columns"] = []
     return entry

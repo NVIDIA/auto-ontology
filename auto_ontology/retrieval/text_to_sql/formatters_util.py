@@ -152,7 +152,7 @@ def _hop_column(
 
 
 def format_semantic_context(
-    primary_attribute: dict,
+    primary_attribute: dict | None,
     attribute_join_paths: list[dict],
     target_db: str | None = None,
     dialect: str | None = None,
@@ -165,25 +165,35 @@ def format_semantic_context(
     model may copy into SQL — on a catalog-qualified engine, dropping the catalog
     makes it unresolvable.
     """
-    anchor_schema = primary_attribute.get("schema_name", "")
-    anchor_table = primary_attribute.get("table_name", "")
-    anchor_col = primary_attribute.get("col_name", "")
-    anchor_name = primary_attribute.get("attr_name", "")
-    anchor_database = primary_attribute.get("database_name") or target_db or ""
-    anchor_full = qualify_table(anchor_database, anchor_schema, anchor_table, dialect)
-    # Only present on attrs (re-)ingested since this field was added — older
-    # rows just omit the tag.
-    anchor_datatype = primary_attribute.get("datatype") or ""
-    anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
-
-    lines: list[str] = [
-        "SEMANTIC HINT — likely starting table (use as a strong hint, not a mandate):",
-        f"  Table: {anchor_full}",
-        f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
-    ]
+    lines: list[str] = []
+    if primary_attribute:
+        anchor_schema = primary_attribute.get("schema_name", "")
+        anchor_table = primary_attribute.get("table_name", "")
+        anchor_col = primary_attribute.get("col_name", "")
+        anchor_name = primary_attribute.get("attr_name", "")
+        anchor_database = primary_attribute.get("database_name") or target_db or ""
+        anchor_full = qualify_table(
+            anchor_database,
+            anchor_schema,
+            anchor_table,
+            dialect,
+        )
+        # Only present on attrs (re-)ingested since this field was added —
+        # older rows just omit the tag.
+        anchor_datatype = primary_attribute.get("datatype") or ""
+        anchor_datatype_tag = f" [{anchor_datatype}]" if anchor_datatype else ""
+        lines.extend(
+            [
+                "SEMANTIC HINT — likely starting table "
+                "(use as a strong hint, not a mandate):",
+                f"  Table: {anchor_full}",
+                f"  Column: {anchor_col}  ({anchor_name}){anchor_datatype_tag}",
+            ]
+        )
 
     if attribute_join_paths:
-        lines.append("")
+        if lines:
+            lines.append("")
         lines.append(
             "JOIN PATHS (VERIFIED OPTIONS — derived from the semantic model). "
             "These paths show how available tables can join; they are not a plan "
@@ -219,6 +229,68 @@ def format_semantic_context(
                     lines.append(f"      {left} = {right}")
 
     return "\n".join(lines)
+
+
+def format_junction_table_guidance(
+    tables: list[dict],
+    attribute_join_paths: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render selected junction semantics and their verified FK roles."""
+    junctions = [table for table in tables if table.get("is_junction_table")]
+    if not junctions:
+        return ""
+
+    lines = [
+        "## Junction Tables",
+        "Use a listed junction only when the question requires the association "
+        "between its endpoint roles, a relationship property stored on it, or "
+        "a filter or aggregate across those roles.",
+        "Avoid a junction when the requested data is already available through "
+        "a direct relationship or on one required table. Its presence in the "
+        "schema is not by itself a reason to join it.",
+        "When a junction is needed, traverse its verified role joins. Once a "
+        "listed path is selected, include every hop; do not replace it with a "
+        "direct endpoint join.",
+    ]
+    for table in junctions:
+        database = str(table.get("database_name") or target_db or "")
+        schema = str(table.get("schema_name") or "")
+        name = str(table.get("name") or "")
+        qualified = qualify_table(database, schema, name, dialect)
+        kind = str(table.get("junction_table_kind") or "association")
+        rationale = str(table.get("junction_table_rationale") or "").strip()
+        lines.append("")
+        lines.append(f"- {qualified} ({kind})")
+        if rationale:
+            lines.append(f"  Meaning: {rationale}")
+
+        joins: list[str] = []
+        seen: set[str] = set()
+        for entry in attribute_join_paths:
+            for hop in entry.get("path") or []:
+                source_key = (
+                    str(hop.get("source_schema") or ""),
+                    str(hop.get("source_table") or ""),
+                )
+                target_key = (
+                    str(hop.get("target_schema") or ""),
+                    str(hop.get("target_table") or ""),
+                )
+                if (schema, name) not in {source_key, target_key}:
+                    continue
+                join = (
+                    f"{_hop_column(hop, 'source', target_db, dialect)} = "
+                    f"{_hop_column(hop, 'target', target_db, dialect)}"
+                )
+                if join not in seen:
+                    seen.add(join)
+                    joins.append(join)
+        if joins:
+            lines.append("  Verified roles:")
+            lines.extend(f"    - {join}" for join in joins)
+    return "\n".join(lines) + "\n"
 
 
 def format_important_columns_for_prompt(

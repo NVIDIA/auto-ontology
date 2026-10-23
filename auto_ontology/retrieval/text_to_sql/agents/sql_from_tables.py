@@ -24,10 +24,14 @@ import logging
 from typing import Any, Dict
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from auto_ontology.dal.datasources import fetch_tables_by_ids
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
-from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_junction_table_guidance,
+    format_tables_for_prompt,
+)
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -45,7 +49,10 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_dual_question_block,
     format_projection_rules,
 )
-from auto_ontology.retrieval.data_access.relevant_tables import get_relevant_tables
+from auto_ontology.retrieval.data_access.relevant_tables import (
+    dedupe_merge_relevant_tables,
+    get_relevant_tables,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +116,15 @@ class SQLFromTablesAgent(BaseAgent):
                 question,
                 database_name=path_state.get("target_db"),
             )
+        table_ids = [
+            str(table["id"])
+            for table in relevant_tables
+            if isinstance(table, dict) and table.get("id")
+        ]
+        if table_ids:
+            relevant_tables = dedupe_merge_relevant_tables(
+                [*relevant_tables, *fetch_tables_by_ids(table_ids)]
+            )
         similar_questions = []
 
         connector = resolve_connector_from_tables(relevant_tables, connectors)
@@ -143,6 +159,12 @@ class SQLFromTablesAgent(BaseAgent):
             ),
             important_columns="No semantically matched columns.",
             join_paths="",
+            junction_guidance=format_junction_table_guidance(
+                relevant_tables,
+                [],
+                target_db=target_db,
+                dialect=dialect,
+            ),
             qa_from_conversations=similar_questions,
             custom_analyses="",
         )

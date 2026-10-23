@@ -19,10 +19,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ConfigDict
 
-from auto_ontology.dal.datasources import (
-    fetch_bridge_table_candidates,
-    mark_table_as_junction,
-)
+from auto_ontology.dal.datasources import fetch_bridge_table_candidates
 from auto_ontology.dal.sql_attributes import (
     SqlAttributeExpressionConflict,
     SqlAttributeNameConflict,
@@ -228,12 +225,6 @@ def build_bridge_tables_sql_attributes(database_name: str) -> int:
         len(candidates),
         database_name,
     )
-
-    # Structural qualification is sufficient evidence for the catalog flag.
-    # Do this before optional Term lookup and LLM SQL generation so those
-    # downstream failures cannot lose a valid junction classification.
-    for candidate in candidates:
-        mark_table_as_junction(candidate["table_id"])
 
     created = 0
     for candidate in candidates:

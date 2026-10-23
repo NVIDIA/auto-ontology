@@ -241,11 +241,18 @@ catalog_table = Table(
     # pk column", and a join table would make every read a second query.
     Column("pk", ARRAY(Text), nullable=True),
     Column("table_type", Text, nullable=True),
-    # Promoted by semantic compilation when a table's row grain is an
-    # association between entity roles. Compilation deliberately never clears
-    # the flag: a later uncertain LLM response must not erase prior evidence.
+    # Set by semantic compilation when a table's row grain is an association
+    # between entity roles. The kind separates a structural all-key bridge from
+    # a relationship row that carries payload columns.
     Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
+    Column("junction_table_kind", Text, nullable=True),
+    Column("junction_table_rationale", Text, nullable=True),
     _imported_id(),
+    CheckConstraint(
+        "junction_table_kind IS NULL OR "
+        "junction_table_kind IN ('bridge', 'association')",
+        name="junction_table_kind_value",
+    ),
     UniqueConstraint("schema_id", "name", name="uq_catalog_table_schema_name"),
 )
 

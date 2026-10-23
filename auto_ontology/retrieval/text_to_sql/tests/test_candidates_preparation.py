@@ -383,7 +383,7 @@ def test_additional_table_retrieve_starts_before_anchor_returns(monkeypatch) -> 
     assert "extra" in names
 
 
-def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> None:
+def test_connected_junctions_are_filtered_then_kept_with_join_hops(monkeypatch) -> None:
     base = {
         "id": "base",
         "name": "orders",
@@ -396,6 +396,9 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
         "name": "order_tag",
         "schema_name": "public",
         "database_name": "db",
+        "is_junction_table": True,
+        "junction_table_kind": "bridge",
+        "junction_table_rationale": "Associates the endpoint roles.",
         "columns": [],
     }
     hop = {
@@ -441,6 +444,11 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
         "find_connected_junction_tables",
         lambda ids: ([{"id": "junction", "name": "order_tag"}], [[hop]]),
     )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda kept_ids, candidate_ids: ([], [], 0),
+    )
 
     state = cast(
         AgentState,
@@ -461,6 +469,92 @@ def test_connected_junctions_are_forced_in_with_their_join_hops(monkeypatch) -> 
         "junction",
     ]
     assert {"path": [hop]} in result["attribute_join_paths"]
+
+
+def test_unneeded_connected_junction_is_removed_before_sql_generation(
+    monkeypatch,
+) -> None:
+    base = {
+        "id": "base",
+        "name": "orders",
+        "schema_name": "public",
+        "database_name": "db",
+        "columns": [{"name": "id", "sample_values": [1]}],
+    }
+    junction = {
+        "id": "junction",
+        "name": "order_tag",
+        "schema_name": "public",
+        "database_name": "db",
+        "is_junction_table": True,
+        "junction_table_kind": "bridge",
+        "junction_table_rationale": "Associates the endpoint roles.",
+        "columns": [],
+    }
+    hop = {
+        "source_schema": "public",
+        "source_table": "order_tag",
+        "source_column": "order_id",
+        "target_schema": "public",
+        "target_table": "orders",
+        "target_column": "id",
+    }
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_retrieve_additional_tables",
+        lambda self, retriever, question, entities, target_db: [],
+    )
+    monkeypatch.setattr(
+        CandidatePreparationAgent,
+        "_filter_tables_by_relevance",
+        lambda self, state, question, tables, custom_analyses=None, attribute_join_paths=None: (
+            [table for table in tables if table["id"] != "junction"],
+            "The association is not requested.",
+        ),
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_custom_analyses_with_sql", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation, "fetch_tables_from_custom_analyses", lambda ids: []
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "get_relevant_tables_from_candidates",
+        lambda candidates: [base],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda ids: [junction] if ids == ["junction"] else [],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda ids: ([{"id": "junction", "name": "order_tag"}], [[hop]]),
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda kept_ids, candidate_ids: ([], [], 0),
+    )
+
+    state = cast(
+        AgentState,
+        {
+            "initial_question": "Count orders",
+            "data_retriever": object(),
+            "path_state": {
+                "target_db": "db",
+                "retrieved_custom_analyses": [{"id": "analysis"}],
+            },
+        },
+    )
+
+    result = CandidatePreparationAgent().execute(state)["path_state"]
+
+    assert [table["id"] for table in result["relevant_tables"]] == ["base"]
+    assert {"path": [hop]} not in result["attribute_join_paths"]
 
 
 def test_anchors_naming_a_column_in_scope_are_dropped(monkeypatch) -> None:

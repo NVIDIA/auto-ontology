@@ -173,6 +173,24 @@ class PotentialFkResult(BaseModel):
     )
 
 
+class JunctionTableDecision(BaseModel):
+    """Post-FK table-grain decision for one possible junction."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    table_id: str
+    is_junction_table: bool
+    rationale: str = ""
+
+
+class JunctionTableDecisions(BaseModel):
+    """Batched post-FK junction-table decisions."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    decisions: list[JunctionTableDecision] = Field(default_factory=list)
+
+
 class FkAndPkResult(BaseModel):
     """LLM output: FK/PK suggestions plus table-grain classification."""
 

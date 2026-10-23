@@ -100,6 +100,7 @@ create_sql_user_prompt = (
     "bridge table, skipping a hop, or replacing the path with a direct endpoint "
     "join is forbidden, even when the bridge contributes no projected column.\n\n"
     "{join_paths}\n\n"
+    "{junction_guidance}\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "
@@ -1070,6 +1071,10 @@ Rules:
   remove any table in the join chain (A, B, C, or D). The join paths below
   show real table connections. Keep the full bridges between tables that
   you deem relevant.
+- A table marked as a junction is an optional relationship candidate. Keep it
+  only when the question needs the association, one of its relationship
+  properties, or a path between required endpoint roles. Do not keep it merely
+  because it connects to one otherwise relevant table.
 - If a selected custom analysis references a table in its SQL, do NOT
   remove that table.
 - When in doubt, do NOT remove — it is safer to include an extra table

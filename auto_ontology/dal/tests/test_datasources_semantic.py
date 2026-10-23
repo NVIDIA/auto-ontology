@@ -551,7 +551,7 @@ def test_node_ids_uses_the_fallback_for_columns_but_not_tables(world) -> None:
 # --------------------------------------------------------------------------
 
 
-def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
+def test_mark_table_as_junction_persists_semantics(world) -> None:
     table_id = world.tables["order_tag"]
     before = store().query_read(
         select(s.catalog_table.c.is_junction_table).where(
@@ -560,15 +560,52 @@ def test_mark_table_as_junction_is_idempotent_and_promote_only(world) -> None:
     )
     assert before[0]["is_junction_table"] is False
 
-    d.mark_table_as_junction(table_id)
-    d.mark_table_as_junction(table_id)
+    d.mark_table_as_junction(
+        table_id,
+        kind="association",
+        rationale="Relationship row grain.",
+    )
 
     after = store().query_read(
-        select(s.catalog_table.c.is_junction_table).where(
-            s.catalog_table.c.id == table_id
-        )
+        select(
+            s.catalog_table.c.is_junction_table,
+            s.catalog_table.c.junction_table_kind,
+            s.catalog_table.c.junction_table_rationale,
+        ).where(s.catalog_table.c.id == table_id)
     )
     assert after[0]["is_junction_table"] is True
+    assert after[0]["junction_table_kind"] == "association"
+    assert after[0]["junction_table_rationale"] == "Relationship row grain."
+
+
+def test_replace_junction_classifications_clears_stale_values(world) -> None:
+    old_id = world.tables["order_tag"]
+    replacement_id = world.tables["tags"]
+    d.mark_table_as_junction(old_id)
+
+    d.replace_junction_table_classifications(
+        world.prefix,
+        [
+            {
+                "table_id": replacement_id,
+                "kind": "association",
+                "rationale": "Compiled relationship row.",
+            }
+        ],
+    )
+
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.is_junction_table,
+            s.catalog_table.c.junction_table_kind,
+        ).where(s.catalog_table.c.id.in_([old_id, replacement_id]))
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id[old_id]["is_junction_table"] is False
+    assert by_id[old_id]["junction_table_kind"] is None
+    assert by_id[replacement_id]["is_junction_table"] is True
+    assert by_id[replacement_id]["junction_table_kind"] == "association"
 
 
 def test_a_pure_junction_table_is_a_candidate(world) -> None:

@@ -9,7 +9,7 @@ from unittest.mock import patch
 from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attributes
 
 
-def test_structural_bridge_is_marked_before_downstream_skip() -> None:
+def test_bridge_attribute_generation_skips_without_target_terms() -> None:
     candidate = {
         "table_id": "bridge-id",
         "table_name": "order_product",
@@ -23,9 +23,6 @@ def test_structural_bridge_is_marked_before_downstream_skip() -> None:
             return_value=[candidate],
         ),
         patch(
-            "auto_ontology.semantic.bridge_tables.mark_table_as_junction"
-        ) as mock_mark,
-        patch(
             "auto_ontology.semantic.bridge_tables._target_terms_for_bridge",
             return_value=[],
         ),
@@ -36,5 +33,4 @@ def test_structural_bridge_is_marked_before_downstream_skip() -> None:
         created = build_bridge_tables_sql_attributes("warehouse")
 
     assert created == 0
-    mock_mark.assert_called_once_with("bridge-id")
     generate.assert_not_called()

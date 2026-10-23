@@ -14,6 +14,7 @@ from auto_ontology.semantic.bridge_tables import build_bridge_tables_sql_attribu
 from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
+from auto_ontology.semantic.junction_classifier import classify_junction_tables
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -71,7 +72,7 @@ def _run_semantic_compilation(
     logger.info("Semantic compilation finished — %d table visits", count)
     logger.info("=" * 60)
 
-    # The three stages below are the long tail — FK resolution alone has run
+    # The stages below are the long tail — FK resolution alone has run
     # past 300s on one database — and none of them is required for the Terms
     # just written to be usable. A cancelled pass skips straight to the summary
     # rather than spending minutes on work nobody is waiting for.
@@ -91,6 +92,11 @@ def _run_semantic_compilation(
     fk_count = resolve_semantic_fks(database_name)
     logger.info("Semantic FK edges created: %d", fk_count)
 
+    logger.info("=" * 60)
+    logger.info("Classifying junction tables…")
+    logger.info("=" * 60)
+    junction_table_count = classify_junction_tables(database_name)
+
     from auto_ontology.semantic.sql_attribute_suggester import suggest_sql_attributes
 
     logger.info("=" * 60)
@@ -102,24 +108,25 @@ def _run_semantic_compilation(
     logger.info("=" * 60)
     logger.info("Building bridge tables sql attributes")
     logger.info("=" * 60)
-    bridge_table_count = build_bridge_tables_sql_attributes(database_name)
-    logger.info("Bridge tables built: %d", bridge_table_count)
+    bridge_attribute_count = build_bridge_tables_sql_attributes(database_name)
+    logger.info("Bridge SqlAttributes built: %d", bridge_attribute_count)
 
     # One line carrying every stage's result. Until now the last thing a
     # completed compilation logged was the bridge-table count, which is a stage
     # result and not a verdict — there was no way to tell a finished run from one
     # that died after the bridge-table stage. Every stage above propagates its
-    # exceptions, so reaching this means all four stages completed.
+    # exceptions, so reaching this means every stage completed.
     logger.info("=" * 60)
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d bridge table(s) in %.1fs",
+        "%d junction table(s), %d bridge SqlAttribute(s) in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
-        bridge_table_count,
+        junction_table_count,
+        bridge_attribute_count,
         time.monotonic() - started,
     )
     logger.info("=" * 60)

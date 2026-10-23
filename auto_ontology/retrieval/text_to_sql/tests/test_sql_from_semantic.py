@@ -169,6 +169,68 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert "## Authoritative Evidence" in invoked_messages[-1].content
 
 
+def test_sql_generation_includes_selected_junction_guidance(monkeypatch) -> None:
+    invoked_messages: list = []
+
+    def fake_invoke(_llm, messages, _schema):
+        invoked_messages.extend(messages)
+        return SQLGenerationModel(
+            thought="Use the selected association.",
+            sql_code="SELECT 1",
+            response="Generated SQL.",
+        )
+
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "safe_invoke_with_structured_output",
+        fake_invoke,
+    )
+    SQLFromCandidatesAgent().execute(
+        {
+            "llm": object(),
+            "reasoning_llm": object(),
+            "initial_question": "Use the relationship",
+            "evidence": "",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "attribute_join_paths": [
+                    {
+                        "path": [
+                            {
+                                "source_schema": "main",
+                                "source_table": "entity_link",
+                                "source_column": "entity_id",
+                                "target_schema": "main",
+                                "target_table": "entity",
+                                "target_column": "id",
+                            }
+                        ]
+                    }
+                ],
+                "relevant_tables": [
+                    {
+                        "name": "entity_link",
+                        "schema_name": "main",
+                        "database_name": "db",
+                        "is_junction_table": True,
+                        "junction_table_kind": "bridge",
+                        "junction_table_rationale": "Associates endpoint roles.",
+                        "columns": [{"name": "entity_id", "data_type": "integer"}],
+                    }
+                ],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    prompt = invoked_messages[-1].content
+    assert "## Junction Tables" in prompt
+    assert "Associates endpoint roles." in prompt
+    assert "JOIN PATHS (VERIFIED OPTIONS" in prompt
+
+
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:
     rendered = format_important_columns_for_prompt(
         {
