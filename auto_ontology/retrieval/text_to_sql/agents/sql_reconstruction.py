@@ -44,6 +44,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     format_authoritative_evidence,
     format_dual_question_block,
 )
@@ -682,6 +683,7 @@ class SQLReconstructionAgent(BaseAgent):
             f"{tables_section}"
             f"{known_columns_section}"
             f"{junction_guidance}"
+            f"\n{DIRECT_ANSWER_FIELD_RULES}\n"
             f"The user's question was:\n{question_block}\n"
             "You must include corrected sql in your final answer.\n"
             "Follow the rules defined in the previous messages for "

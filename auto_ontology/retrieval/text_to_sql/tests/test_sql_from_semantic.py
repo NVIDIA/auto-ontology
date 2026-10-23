@@ -16,6 +16,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_projection_rules,
@@ -167,6 +168,19 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    direct_answer_messages = [
+        message
+        for message in invoked_messages
+        if message.content == DIRECT_ANSWER_FIELD_RULES
+    ]
+    assert len(direct_answer_messages) == 1
+    assert invoked_messages.index(direct_answer_messages[0]) < len(invoked_messages) - 1
+    assert "project that column unchanged" in DIRECT_ANSWER_FIELD_RULES
+    assert "explicitly requests a normalized representation" in (
+        DIRECT_ANSWER_FIELD_RULES
+    )
+    normalized_rules = " ".join(DIRECT_ANSWER_FIELD_RULES.split())
+    assert "only when no direct answer field exists" in normalized_rules
 
 
 def test_sql_generation_includes_selected_junction_guidance(monkeypatch) -> None:

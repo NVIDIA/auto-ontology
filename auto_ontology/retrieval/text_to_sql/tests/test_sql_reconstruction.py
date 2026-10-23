@@ -13,6 +13,7 @@ from auto_ontology.retrieval.text_to_sql.agents import sql_reconstruction
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
     SQLReconstructionAgent,
 )
+from auto_ontology.retrieval.text_to_sql.prompts import DIRECT_ANSWER_FIELD_RULES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
 
 
@@ -96,6 +97,9 @@ def test_reconstruction_uses_evidence_from_state(
     assert evidence_message.endswith("The time refers to events.duration LIKE 'M:SS%'.")
     assert "The time refers to" not in prompt
     assert "events.duration LIKE '1:54%'" not in prompt
+    assert DIRECT_ANSWER_FIELD_RULES in prompt
+    assert "explicitly requests a normalized representation" in prompt
+    assert "only when no direct answer field exists" in " ".join(prompt.split())
 
 
 def test_reconstruction_drops_prior_repair_turns(

@@ -48,6 +48,7 @@ from auto_ontology.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_authoritative_evidence,
@@ -326,6 +327,7 @@ class SQLFromCandidatesAgent(BaseAgent):
             )
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
+            messages.append(SystemMessage(content=DIRECT_ANSWER_FIELD_RULES))
             if authoritative_evidence_section:
                 messages.append(SystemMessage(content=authoritative_evidence_section))
             if calculation_template_section:
