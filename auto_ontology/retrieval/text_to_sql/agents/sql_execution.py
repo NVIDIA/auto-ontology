@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    cast_jsonb_numeric_projections,
     numeric_column_kinds,
     result_values_digest,
 )
@@ -106,6 +107,18 @@ def _run_sql(
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
         df = execute_chat_sql(connector, sql)
+        if record_numeric_kinds:
+            rewritten = cast_jsonb_numeric_projections(sql, dialect, df)
+            if rewritten:
+                try:
+                    df = execute_chat_sql(
+                        connector, rewritten, kind="jsonb numeric projection cast"
+                    )
+                    sql = rewritten
+                except Exception:  # noqa: BLE001 — keep original df and sql
+                    logger.warning(
+                        "JSONB numeric projection cast did not run; keeping original SQL"
+                    )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
@@ -223,9 +236,15 @@ class SQLExecutionAgent(BaseAgent):
             "sql_response_from_db": response_from_db.result,
         }
         if record_kinds:
-            # Numeric types of what ``sql_code`` just returned, tagged with the
+            executed_sql = (response_from_db.statement or sql_code).strip()
+            if executed_sql != str(sql_code).strip():
+                updated_path_state["sql_code"] = executed_sql
+                llm_res = updated_path_state.get("sql_generation_result")
+                if llm_res is not None and hasattr(llm_res, "sql_code"):
+                    llm_res.sql_code = executed_sql
+            # Numeric types of what ``executed_sql`` just returned, tagged with the
             # SQL they belong to so a reader can tell when they are stale.
             updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
-            updated_path_state["result_numeric_kinds_sql"] = str(sql_code).strip()
+            updated_path_state["result_numeric_kinds_sql"] = executed_sql
             updated_path_state["result_values_digest"] = response_from_db.values_digest
         return {"decision": "valid_sql", "path_state": updated_path_state}

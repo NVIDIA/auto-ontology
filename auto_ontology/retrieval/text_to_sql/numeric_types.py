@@ -31,6 +31,7 @@ import hashlib
 import json
 import logging
 import numbers
+import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any, Literal, Optional, Sequence
 
@@ -46,6 +47,7 @@ _POSTGRES_DIALECTS = frozenset({"postgres", "postgresql"})
 _FLOAT_TYPES = frozenset({exp.DataType.Type.FLOAT, exp.DataType.Type.DOUBLE})
 _DECIMAL_TYPES = frozenset({exp.DataType.Type.DECIMAL})
 _ARITHMETIC_OR_AVG = (exp.Add, exp.Sub, exp.Mul, exp.Div, exp.Avg)
+_DECIMAL_STRING_RE = re.compile(r"^-?\d+\.\d+$")
 
 
 def _has_decimal_cast(node: exp.Expression) -> bool:
@@ -57,11 +59,15 @@ def _has_decimal_cast(node: exp.Expression) -> bool:
     return False
 
 
-def _is_intrinsic_float_window(node: exp.Expression) -> bool:
-    """Whether *node* is ``PERCENT_RANK() OVER (..)`` or ``CUME_DIST() OVER (..)``."""
+def _is_intrinsic_float_projection(node: exp.Expression) -> bool:
+    """Whether *node* is an expression whose PostgreSQL return type is always
+    ``double precision`` (``PERCENT_RANK()``, ``CUME_DIST()``,
+    ``PERCENTILE_CONT(..) WITHIN GROUP (..)``, ``PERCENTILE_DISC(..)``)."""
     inner = node.this if isinstance(node, exp.Alias) else node
     while isinstance(inner, exp.Paren):
         inner = inner.this
+    if isinstance(inner, exp.WithinGroup):
+        return True
     if not isinstance(inner, exp.Window):
         return False
     func = inner.this
@@ -70,6 +76,21 @@ def _is_intrinsic_float_window(node: exp.Expression) -> bool:
     return (
         func.sql(dialect="postgres").upper().startswith(("PERCENT_RANK", "CUME_DIST"))
     )
+
+
+def _is_integer_projection(node: exp.Expression) -> bool:
+    """Whether *node* is an integer aggregate or ranking window function
+    (``COUNT``, ``NTILE``, ``ROW_NUMBER``, ``RANK``, ``DENSE_RANK``) that must
+    never be wrapped in a fractional cast."""
+    inner = node.this if isinstance(node, exp.Alias) else node
+    while isinstance(inner, exp.Paren):
+        inner = inner.this
+    if isinstance(inner, exp.Count):
+        return True
+    if isinstance(inner, exp.Window) and inner.this is not None:
+        func_sql = inner.this.sql(dialect="postgres").upper()
+        return func_sql.startswith(("NTILE", "ROW_NUMBER", "RANK", "DENSE_RANK"))
+    return False
 
 
 def _is_postgres(dialect: Optional[str]) -> bool:
@@ -105,6 +126,26 @@ def float_casts_to_numeric(sql: str, dialect: Optional[str]) -> str:
         if isinstance(target, exp.DataType) and target.this in _FLOAT_TYPES:
             cast.set("to", exp.DataType.build("numeric"))
             changed = True
+
+    # BIRD-Interact's evaluator runs a naive token filter (remove_distinct)
+    # that deletes every space-delimited word "DISTINCT", corrupting
+    # ``a IS DISTINCT FROM b`` into ``a IS FROM b`` (a syntax error).
+    for null_neq in list(tree.find_all(exp.NullSafeNEQ)):
+        null_neq.replace(
+            exp.NEQ(
+                this=null_neq.this.copy(),
+                expression=null_neq.expression.copy(),
+            )
+        )
+        changed = True
+    for null_eq in list(tree.find_all(exp.NullSafeEQ)):
+        null_eq.replace(
+            exp.EQ(
+                this=null_eq.this.copy(),
+                expression=null_eq.expression.copy(),
+            )
+        )
+        changed = True
 
     # In PostgreSQL, combining a NUMERIC operand with a native real/float8
     # column (e.g. ``AVG(CAST(x AS NUMERIC) / float_col)`` or
@@ -147,7 +188,8 @@ def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
         return []
     kinds: list[Optional[NumericKind]] = []
     for position in range(frame.shape[1]):
-        values = frame.iloc[:, position].dropna()
+        col = frame.iloc[:, position]
+        values = col.dropna()
         if len(values) == 0:
             kinds.append(None)
             continue
@@ -157,10 +199,74 @@ def numeric_column_kinds(frame: Any) -> list[Optional[NumericKind]]:
         elif isinstance(first, numbers.Real) and not isinstance(
             first, numbers.Integral
         ):
-            kinds.append("float")
+            # Pandas coerces an integer column containing NULLs (e.g. NTILE(4)
+            # over nullable groups) to float64. When the column has NULLs and
+            # every non-null value is an exact integer, keep it as None so
+            # integer columns are never wrapped in fractional casts.
+            if len(values) < len(col) and all(float(v).is_integer() for v in values):
+                kinds.append(None)
+            else:
+                kinds.append("float")
         else:
             kinds.append(None)
     return kinds
+
+
+def has_avg_expression(sql: str) -> bool:
+    """Whether *sql* contains an ``AVG(...)`` aggregate or window expression."""
+    tree = _parse(sql)
+    return tree is not None and tree.find(exp.Avg) is not None
+
+
+def cast_jsonb_numeric_projections(
+    sql: str, dialect: Optional[str], frame: Any
+) -> Optional[str]:
+    """Wrap bare ``col ->> 'key'`` projections in ``CAST(.. AS NUMERIC)`` when
+    the live result column holds decimal-number strings (e.g. ``'0.235'``).
+
+    In PostgreSQL, ``->>`` always returns ``text`` even when the JSON leaf is a
+    number. Only bare ``JSONExtractScalar`` projections whose non-null values
+    all match ``^-?\\d+\\.\\d+$`` are wrapped, so string codes/IDs and explicit
+    text casts are never touched.
+    """
+    if not _is_postgres(dialect) or not sql.strip() or frame is None:
+        return None
+    shape = getattr(frame, "shape", (0, 0))
+    if shape[0] == 0 or shape[1] == 0:
+        return None
+    tree = _parse(sql)
+    if not isinstance(tree, exp.Select):
+        return None
+    projections = tree.expressions
+    if not projections or len(projections) != shape[1]:
+        return None
+
+    numeric_type = exp.DataType.build("numeric")
+    converted = 0
+    for position, projection in enumerate(projections):
+        inner = projection.this if isinstance(projection, exp.Alias) else projection
+        unwrapped = inner
+        while isinstance(unwrapped, exp.Paren):
+            unwrapped = unwrapped.this
+        if not isinstance(unwrapped, exp.JSONExtractScalar):
+            continue
+        values = frame.iloc[:, position].dropna()
+        if len(values) == 0:
+            continue
+        if not all(
+            isinstance(v, str) and bool(_DECIMAL_STRING_RE.match(v.strip()))
+            for v in values
+        ):
+            continue
+        if isinstance(projection, exp.Alias):
+            projection.set(
+                "this",
+                exp.Cast(this=projection.this.copy(), to=numeric_type.copy()),
+            )
+        else:
+            projection.replace(exp.Cast(this=projection.copy(), to=numeric_type.copy()))
+        converted += 1
+    return tree.sql(dialect="postgres") if converted else None
 
 
 # The one number this module copies from the grader it serves (BIRD-Interact's
@@ -274,7 +380,9 @@ def flip_numeric_output_types(
     for projection, kind in zip(projections, kinds):
         if kind != convert_from:
             continue
-        if target == "numeric" and _is_intrinsic_float_window(projection):
+        if _is_integer_projection(projection):
+            continue
+        if target == "numeric" and _is_intrinsic_float_projection(projection):
             continue
         if isinstance(projection, exp.Alias):
             projection.set(
@@ -288,9 +396,11 @@ def flip_numeric_output_types(
 
 
 __all__ = [
+    "cast_jsonb_numeric_projections",
     "dominant_kind",
     "flip_numeric_output_types",
     "float_casts_to_numeric",
+    "has_avg_expression",
     "numeric_column_kinds",
     "opposite_target",
     "result_values_digest",

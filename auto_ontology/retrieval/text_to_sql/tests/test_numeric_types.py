@@ -12,9 +12,11 @@ import pytest
 from auto_ontology.retrieval.text_to_sql.agents import sql_execution
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    cast_jsonb_numeric_projections,
     dominant_kind,
     flip_numeric_output_types,
     float_casts_to_numeric,
+    has_avg_expression,
     numeric_column_kinds,
     opposite_target,
     result_values_digest,
@@ -68,6 +70,71 @@ def test_percent_rank_is_not_wrapped_when_flipping_to_numeric() -> None:
         "SELECT CAST(spread_pct AS DECIMAL), "
         "PERCENT_RANK() OVER (ORDER BY spread_pct) AS rk FROM t"
     )
+
+
+def test_percentile_cont_and_ntile_are_not_wrapped_when_flipping_to_numeric() -> None:
+    flipped = flip_numeric_output_types(
+        "SELECT AVG(x) AS avg_x, "
+        "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) AS med_x, "
+        "NTILE(4) OVER (ORDER BY AVG(x)) AS q FROM t",
+        "postgres",
+        ["float", "float", "float"],
+        "numeric",
+    )
+    assert flipped == (
+        "SELECT CAST(AVG(x) AS DECIMAL) AS avg_x, "
+        "PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY x) AS med_x, "
+        "NTILE(4) OVER (ORDER BY AVG(x)) AS q FROM t"
+    )
+
+
+def test_is_distinct_from_is_rewritten_to_standard_operators() -> None:
+    rewritten = float_casts_to_numeric(
+        "SELECT COUNT(CASE WHEN a IS DISTINCT FROM b THEN 1 END) FROM t "
+        "WHERE c IS NOT DISTINCT FROM d",
+        "postgres",
+    )
+    assert "DISTINCT" not in rewritten.upper()
+    assert "a <> b" in rewritten
+    assert "c = d" in rewritten
+
+
+def test_nullable_integer_column_coerced_by_pandas_is_not_classified_as_float() -> None:
+    frame = pd.DataFrame(
+        {"quartile": [4, 3, 2, 1, None], "score": [1.25, 2.5, 3.75, 4.0, None]}
+    )
+    assert numeric_column_kinds(frame) == [None, "float"]
+
+
+def test_cast_jsonb_numeric_projections_wraps_bare_jsonb_decimal_strings() -> None:
+    frame = pd.DataFrame(
+        {
+            "pair": ["BTC-USD", "ETH-USD"],
+            "buy_force": ["0.235", "0.574"],
+            "code": ["OR123", "OR456"],
+        }
+    )
+    sql = (
+        "SELECT mkt AS pair, "
+        "indicator_bundle -> 'order_flow' ->> 'buy_pressure' AS buy_force, "
+        "meta ->> 'code' AS code FROM t"
+    )
+    rewritten = cast_jsonb_numeric_projections(sql, "postgres", frame)
+    assert rewritten is not None
+    assert (
+        "CAST(indicator_bundle -> 'order_flow' ->> 'buy_pressure' AS DECIMAL) AS buy_force"
+        in rewritten
+    )
+    assert "CAST(meta" not in rewritten
+
+
+def test_has_avg_expression_detects_aggregate_and_window_avg() -> None:
+    assert has_avg_expression("SELECT AVG(x) FROM t") is True
+    assert (
+        has_avg_expression("SELECT f.a FROM (SELECT AVG(x) OVER () AS a FROM t) f")
+        is True
+    )
+    assert has_avg_expression("SELECT SUM(x) FROM t") is False
 
 
 def test_sql_without_a_float_cast_is_returned_untouched() -> None:
