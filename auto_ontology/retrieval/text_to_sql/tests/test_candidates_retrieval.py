@@ -145,98 +145,6 @@ def test_primary_key_preference_does_not_prune_exact_value_suspects(
     )
 
 
-def test_ambiguous_non_primary_fields_use_full_question_context(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entity = {
-        "type": "field",
-        "original_text": "location",
-        "meaning": "location",
-    }
-    hits = [
-        {
-            **_hit("generic", "db-a", 0.1),
-            "text": "general location",
-            "query_entity_spec": entity,
-        },
-        {
-            **_hit("contextual", "db-a", 0.2),
-            "text": "fulfillment location",
-            "query_entity_spec": entity,
-        },
-    ]
-    captured: dict[str, Any] = {}
-
-    def fake_invoke(
-        _llm: object,
-        messages: list[Any],
-        schema: type,
-    ) -> Any:
-        captured["prompt"] = messages[0].content
-        captured["schema"] = schema
-        return schema(
-            custom_analysis_ids=[],
-            sql_attribute_ids=[],
-            column_attribute_ids=["contextual"],
-        )
-
-    monkeypatch.setattr(
-        candidates_retrieval,
-        "invoke_with_structured_output",
-        fake_invoke,
-    )
-
-    _, _, result = candidates_retrieval._llm_filter_both(
-        object(),
-        "Find the fulfillment location",
-        [],
-        [],
-        hits,
-        evidence="",
-    )
-
-    assert result == [hits[1]]
-    assert "Find the fulfillment location" in captured["prompt"]
-    assert "most generic, broadly applicable column" in " ".join(
-        captured["prompt"].split()
-    )
-    assert captured["schema"] is candidates_retrieval.CombinedCandidateFilterModel
-
-
-def test_evidence_skips_field_disambiguation(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    entity = {
-        "type": "field",
-        "original_text": "location",
-        "meaning": "location",
-    }
-    hits = [
-        {
-            **_hit("generic", "db-a", 0.1),
-            "query_entity_spec": entity,
-        },
-        {
-            **_hit("contextual", "db-a", 0.2),
-            "query_entity_spec": entity,
-        },
-    ]
-    monkeypatch.setattr(
-        candidates_retrieval,
-        "invoke_with_structured_output",
-        lambda *_args, **_kwargs: pytest.fail("LLM should not be called"),
-    )
-
-    assert candidates_retrieval._llm_filter_both(
-        object(),
-        "question",
-        [],
-        [],
-        hits,
-        evidence="grounding evidence",
-    ) == ([], [], hits)
-
-
 def test_typed_entities_search_by_meaning_and_preserve_original_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -258,11 +166,7 @@ def test_typed_entities_search_by_meaning_and_preserve_original_text(
     monkeypatch.setattr(
         candidates_retrieval,
         "_llm_filter_both",
-        lambda _llm, _question, custom, sql, columns, **_kwargs: (
-            custom,
-            sql,
-            columns,
-        ),
+        lambda _llm, _question, custom, sql: (custom, sql),
     )
     monkeypatch.setattr(
         candidates_retrieval,
@@ -399,12 +303,10 @@ def test_unscoped_retrieval_filters_database_and_backfills_entities(
         _question: str,
         custom_hits: list[dict],
         sql_hits: list[dict],
-        column_hits: list[dict],
-        **_kwargs: Any,
-    ) -> tuple[list[dict], list[dict], list[dict]]:
+    ) -> tuple[list[dict], list[dict]]:
         filtered_inputs["custom"] = custom_hits
         filtered_inputs["sql"] = sql_hits
-        return custom_hits, sql_hits, column_hits
+        return custom_hits, sql_hits
 
     monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
     monkeypatch.setattr(candidates_retrieval, "_llm_filter_both", fake_filter)
@@ -493,7 +395,7 @@ def test_bridge_sourced_sql_attrs_are_excluded_from_combined_filter(
     monkeypatch.setattr(
         candidates_retrieval,
         "_llm_filter_both",
-        lambda *args, **_kwargs: both_calls.append(args) or (args[2], args[3], args[4]),
+        lambda *args: both_calls.append(args) or (args[2], args[3]),
     )
 
     result = CandidateRetrievalAgent().execute(_state(["revenue"], target_db="db-a"))
@@ -524,11 +426,7 @@ def test_explicit_target_db_preserves_existing_search_behavior(
     monkeypatch.setattr(
         candidates_retrieval,
         "_llm_filter_both",
-        lambda _llm, _question, custom, sql, columns, **_kwargs: (
-            custom,
-            sql,
-            columns,
-        ),
+        lambda _llm, _question, custom, sql: (custom, sql),
     )
     monkeypatch.setattr(candidates_retrieval, "custom_analysis_exists", lambda *_: True)
 
@@ -565,11 +463,7 @@ def test_full_evidence_adds_column_attribute_vector_results(
     monkeypatch.setattr(
         candidates_retrieval,
         "_llm_filter_both",
-        lambda _llm, _question, custom, sql, columns, **_kwargs: (
-            custom,
-            sql,
-            columns,
-        ),
+        lambda _llm, _question, custom, sql: (custom, sql),
     )
     monkeypatch.setattr(
         candidates_retrieval, "custom_analysis_exists", lambda *_: False

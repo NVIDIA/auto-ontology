@@ -338,14 +338,17 @@ def fetch_attr_column_contexts(
             s.column_attribute.c.datatype.label("datatype"),
             s.catalog_column.c.id.label("col_id"),
             s.catalog_column.c.name.label("col_name"),
+            s.catalog_column.c.description.label("col_description"),
             (s.catalog_column.c.name == any_(s.catalog_table.c.pk)).label(
                 "is_primary_key"
             ),
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
+            s.catalog_table.c.description.label("table_description"),
             s.catalog_schema.c.name.label("schema_name"),
             s.catalog_database.c.name.label("database_name"),
             s.term.c.name.label("term_name"),
+            s.term.c.description.label("term_description"),
         )
         .select_from(
             s.column_attribute.outerjoin(
@@ -388,12 +391,15 @@ def fetch_attr_column_contexts(
                 "attr_description": row["attr_description"] or "",
                 "col_id": row["col_id"],
                 "col_name": row["col_name"] or "",
+                "col_description": row["col_description"] or "",
                 "is_primary_key": bool(row["is_primary_key"]),
                 "table_id": row["table_id"],
                 "table_name": row["table_name"] or "",
+                "table_description": row["table_description"] or "",
                 "schema_name": row["schema_name"] or "",
                 "database_name": row["database_name"] or "",
                 "term_name": row["term_name"] or "",
+                "term_description": row["term_description"] or "",
                 "datatype": row["datatype"] or "",
             },
         )
@@ -556,8 +562,20 @@ def merge_semantic_fk(src_column_id: str, tgt_attr_id: str) -> bool:
     return True
 
 
-def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
-    """Return semantic FKs with the context needed to choose one join default."""
+def fetch_semantic_fk_join_groups(
+    database_name: str,
+    *,
+    attribute_ids: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Return semantic FKs with the context needed to choose one join default.
+
+    ``attribute_ids`` narrows the result to relationships targeting those
+    ColumnAttributes. ``None`` preserves the compilation-time full-database
+    scan; an empty list returns immediately.
+    """
+    if attribute_ids == []:
+        return []
+
     source_column = s.catalog_column.alias("join_default_source_column")
     source_table = s.catalog_table.alias("join_default_source_table")
     source_schema = s.catalog_schema.alias("join_default_source_schema")
@@ -610,7 +628,14 @@ def fetch_semantic_fk_join_groups(database_name: str) -> list[dict[str, Any]]:
             )
             .join(target_table, target_table.c.id == target_column.c.table_id)
         )
-        .where(source_database.c.name == database_name)
+        .where(
+            source_database.c.name == database_name,
+            *(
+                [s.column__semantic_fk.c.attribute_id.in_(attribute_ids)]
+                if attribute_ids is not None
+                else []
+            ),
+        )
         .order_by(
             source_table.c.id,
             s.column__semantic_fk.c.attribute_id,

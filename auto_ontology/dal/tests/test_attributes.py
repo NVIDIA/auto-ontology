@@ -312,6 +312,35 @@ def test_setting_join_default_disables_every_other_group_member(world) -> None:
     }
 
 
+def test_semantic_fk_join_groups_can_be_filtered_by_attribute(world) -> None:
+    world.table("customers", pk=["id"])
+    world.column("customers", "id")
+    world.column("customers", "region_id", 2)
+    world.attribute("customer-id", owner="customers.id")
+    world.attribute("region-id", owner="customers.region_id")
+    world.table("orders")
+    world.column("orders", "customer_id", 1)
+    world.column("orders", "region_id", 2)
+    world.references("orders.customer_id", "customer-id")
+    world.references("orders.region_id", "region-id")
+
+    rows = a.fetch_semantic_fk_join_groups(
+        f"{world.prefix}-shopdb",
+        attribute_ids=[world.attributes["region-id"]],
+    )
+
+    assert [row["target_attribute_id"] for row in rows] == [
+        world.attributes["region-id"]
+    ]
+    assert (
+        a.fetch_semantic_fk_join_groups(
+            f"{world.prefix}-shopdb",
+            attribute_ids=[],
+        )
+        == []
+    )
+
+
 def test_setting_join_default_spans_target_attributes_on_same_table(world) -> None:
     world.table("players")
     world.column("players", "player_api_id", 1)

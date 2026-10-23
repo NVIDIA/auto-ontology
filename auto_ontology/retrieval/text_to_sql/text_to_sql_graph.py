@@ -19,6 +19,9 @@ from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
 from auto_ontology.retrieval.text_to_sql.agents.candidates_retrieval import (
     CandidateRetrievalAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.column_ambiguity_resolver import (
+    ColumnAmbiguityResolverAgent,
+)
 from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
 )
@@ -260,7 +263,7 @@ def route_after_candidate_retrieval(state: AgentState) -> str:
     """Send information requests to metadata answering before SQL preparation."""
     if state.get("path_state", {}).get("question_type") == "information":
         return "information"
-    return "prepare_candidates"
+    return "resolve_column_ambiguity"
 
 
 def _make_node(name, fn):
@@ -339,6 +342,7 @@ def create_graph():
     question_intent_agent = QuestionIntentAgent()
     question_extraction_agent = QuestionExtractionAgent()
     retrieval_agent = CandidateRetrievalAgent()
+    column_ambiguity_resolver_agent = ColumnAmbiguityResolverAgent()
     information_agent = InformationAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     evidence_refinement_agent = EvidenceRefinementAgent()
@@ -363,6 +367,10 @@ def create_graph():
     )
     retrieve_candidates_node = _make_node(
         "retrieve_candidates", agent_wrapper(retrieval_agent)
+    )
+    resolve_column_ambiguity_node = _make_node(
+        "resolve_column_ambiguity",
+        agent_wrapper(column_ambiguity_resolver_agent),
     )
     information_node = _make_node("information_agent", agent_wrapper(information_agent))
     prepare_candidates_node = _make_node(
@@ -447,6 +455,7 @@ def create_graph():
     graph.add_node("question_intent", question_intent_node)
     graph.add_node("question_extraction", question_extraction_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
+    graph.add_node("resolve_column_ambiguity", resolve_column_ambiguity_node)
     graph.add_node("information_agent", information_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("refine_evidence", refine_evidence_node)
@@ -470,10 +479,11 @@ def create_graph():
         route_after_candidate_retrieval,
         {
             "information": "information_agent",
-            "prepare_candidates": "prepare_candidates",
+            "resolve_column_ambiguity": "resolve_column_ambiguity",
         },
     )
     graph.add_edge("information_agent", END)
+    graph.add_edge("resolve_column_ambiguity", "prepare_candidates")
 
     if prediction_enabled:
         # The intent node classified the question before extraction. Routing waits

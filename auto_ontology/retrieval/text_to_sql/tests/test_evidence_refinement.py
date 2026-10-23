@@ -708,6 +708,8 @@ def test_graph_wires_refinement_before_sql_construction(
         for edge in create_graph().compile().get_graph().edges
     }
 
+    assert ("retrieve_candidates", "resolve_column_ambiguity", True) in edges
+    assert ("resolve_column_ambiguity", "prepare_candidates", False) in edges
     assert ("prepare_candidates", "refine_evidence", True) in edges
     assert ("prepare_candidates", "construct_sql_from_candidates", True) in edges
     assert ("refine_evidence", "construct_sql_from_candidates", False) in edges

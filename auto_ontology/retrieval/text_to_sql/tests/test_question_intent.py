@@ -433,8 +433,8 @@ def test_non_prediction_types_follow_sql_evidence_route(
     ("question_type", "route"),
     [
         ("information", "information"),
-        ("calculation", "prepare_candidates"),
-        ("prediction", "prepare_candidates"),
+        ("calculation", "resolve_column_ambiguity"),
+        ("prediction", "resolve_column_ambiguity"),
     ],
 )
 def test_information_routes_before_candidate_preparation(

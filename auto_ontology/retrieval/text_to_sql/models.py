@@ -175,9 +175,34 @@ class CombinedCandidateFilterModel(BaseModel):
         ...,
         description="IDs of SQL attributes to KEEP. Empty list if none are relevant.",
     )
-    column_attribute_ids: list[str] = Field(
+
+
+class ColumnAmbiguitySelection(BaseModel):
+    """One reasoning-LLM decision for an ambiguous field entity."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    group_id: str = Field(
+        ..., description="Candidate-group identifier from the prompt."
+    )
+    selected_attribute_id: str | None = Field(
         ...,
-        description="One selected ColumnAttribute ID per ambiguous field group. Empty when no groups are provided.",
+        description="Selected ColumnAttribute ID, or null when the field is unresolved.",
+    )
+    reasoning: str = Field(
+        ...,
+        description="Brief explanation grounded in evidence, question intent, and semantic context.",
+    )
+
+
+class ColumnAmbiguityResolutionModel(BaseModel):
+    """Batched reasoning-LLM decisions for ambiguous field entities."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selections: list[ColumnAmbiguitySelection] = Field(
+        ...,
+        description="One decision for every ambiguous field group.",
     )
 
 

@@ -5,15 +5,17 @@
 """
 Candidate Retrieval Agent
 
-Searches both VDBs per extracted entity, applies an LLM intent filter on each
-entity's raw hits, and stores typed results in path_state.
+Searches semantic candidates per extracted entity, filters analytical
+candidates by intent, and stores typed results in path_state.
 
 Responsibilities:
 - Search the semantic VDB (ontology_retriever) for ColumnAttribute candidates.
 - Search ColumnAttributes with the complete evidence text when evidence is present.
 - Search the semantic VDB (semantic_retriever) for CustomAnalysis candidates.
 - Search the semantic VDB for one Term hit using path_state["subject"].
-- Filter each entity's hits by intent using the LLM (full question, not entity).
+- Filter CustomAnalysis and SqlAttribute hits by full-question intent.
+- Prefer primary-key ColumnAttributes deterministically; contextual field
+  ambiguity is handled by the next graph agent.
 - Deduplicate across entities and store results in path_state.
 """
 
@@ -303,68 +305,6 @@ def _tag_entity_hit(hit: dict, entity: dict[str, str]) -> dict:
     return tagged
 
 
-def _ambiguous_field_groups(
-    hits: list[dict],
-    *,
-    evidence: str,
-) -> dict[tuple[str, str, str], list[dict]]:
-    """Return non-PK field groups that still need contextual selection."""
-    if evidence.strip():
-        return {}
-
-    grouped: dict[tuple[str, str, str], list[dict]] = defaultdict(list)
-    for hit in hits:
-        group = _entity_group_key(hit)
-        if group is not None and group[0] == "field":
-            grouped[group].append(hit)
-    return {
-        group: group_hits
-        for group, group_hits in grouped.items()
-        if len({str(hit.get("id")) for hit in group_hits if hit.get("id")}) > 1
-    }
-
-
-def _format_ambiguous_field_groups(
-    ambiguous_groups: dict[tuple[str, str, str], list[dict]],
-) -> str:
-    """Format grouped ColumnAttributes for the combined candidate filter."""
-    group_blocks: list[str] = []
-    for index, (group, group_hits) in enumerate(ambiguous_groups.items(), start=1):
-        _, original_text, meaning = group
-        candidates = "\n".join(
-            f"  - id: {hit.get('id')} | {hit.get('text', '')}"
-            for hit in group_hits
-            if hit.get("id")
-        )
-        group_blocks.append(
-            f"Group {index} | requested text: {original_text} | meaning: {meaning}\n"
-            f"{candidates}"
-        )
-    return "\n\n".join(group_blocks) if group_blocks else "(none)"
-
-
-def _apply_ambiguous_field_selections(
-    hits: list[dict],
-    ambiguous_groups: dict[tuple[str, str, str], list[dict]],
-    selected_ids: list[str],
-) -> list[dict]:
-    """Apply valid one-per-group selections, retaining unresolved groups."""
-    selected_id_set = set(selected_ids)
-    resolved_groups: dict[tuple[str, str, str], str] = {}
-    for group, group_hits in ambiguous_groups.items():
-        valid_ids = {str(hit["id"]) for hit in group_hits if hit.get("id") is not None}
-        selected_for_group = valid_ids & selected_id_set
-        if len(selected_for_group) == 1:
-            resolved_groups[group] = selected_for_group.pop()
-
-    return [
-        hit
-        for hit in hits
-        if (group := _entity_group_key(hit)) not in resolved_groups
-        or str(hit.get("id")) == resolved_groups[group]
-    ]
-
-
 # ---------------------------------------------------------------------------
 # LLM intent filter
 # ---------------------------------------------------------------------------
@@ -429,7 +369,7 @@ Return the list of IDs to KEEP. If none are relevant, return an empty list.
 """
 
 _COMBINED_FILTER_PROMPT = """\
-You are filtering candidates for relevance to a user question.
+You are filtering two sets of candidates for relevance to a user question.
 Keep only candidates that could meaningfully contribute to answering the question.
 Remove any that share no common domain, idea, or intent with the question.
 
@@ -441,20 +381,7 @@ Custom analyses:
 SQL attributes:
 {sql_attr_block}
 
-Ambiguous ColumnAttribute groups:
-{column_attribute_groups}
-
-For each ColumnAttribute group, select exactly one candidate. Always default to
-the most generic, broadly applicable column on the primary subject. Select a
-specialized or role-specific column only when the question explicitly asks for
-that exact role or meaning. General topic context, likely usage, or a separate
-condition elsewhere in the question is not enough to justify a specialized
-column. Prefer a direct attribute of the primary subject over a similar
-attribute on a related or supporting entity that would require an additional
-join. When uncertain, select the generic candidate.
-
-Return the IDs to KEEP for each candidate set and one ColumnAttribute ID per
-ambiguous group. Use empty lists for candidate types or groups that are absent.
+Return the IDs to KEEP for each set separately. Use empty lists if none are relevant.
 """
 
 
@@ -503,18 +430,13 @@ def _llm_filter_both(
     question: str,
     custom_hits: list[dict],
     sql_attr_hits: list[dict],
-    column_hits: list[dict] | None = None,
-    *,
-    evidence: str = "",
-) -> tuple[list[dict], list[dict], list[dict]]:
-    """Filter all candidate types in a single LLM call.
+) -> tuple[list[dict], list[dict]]:
+    """Filter custom analyses and SQL attributes in a single LLM call.
 
     Falls back to the original lists on LLM failure.
     """
-    column_hits = column_hits or []
-    ambiguous_groups = _ambiguous_field_groups(column_hits, evidence=evidence)
-    if not custom_hits and not sql_attr_hits and not ambiguous_groups:
-        return [], [], column_hits
+    if not custom_hits and not sql_attr_hits:
+        return [], []
 
     def _fmt(candidates: list[dict]) -> str:
         lines = [
@@ -530,37 +452,27 @@ def _llm_filter_both(
                 question=question,
                 custom_block=_fmt(custom_hits),
                 sql_attr_block=_fmt(sql_attr_hits),
-                column_attribute_groups=_format_ambiguous_field_groups(
-                    ambiguous_groups
-                ),
             )
         )
     ]
 
     result = invoke_with_structured_output(llm, messages, CombinedCandidateFilterModel)
     if result is None:
-        return custom_hits, sql_attr_hits, column_hits
+        return custom_hits, sql_attr_hits
 
     kept_custom = set(result.custom_analysis_ids)
     kept_sql = set(result.sql_attribute_ids)
     filtered_custom = [c for c in custom_hits if str(c.get("id") or "") in kept_custom]
     filtered_sql = [c for c in sql_attr_hits if str(c.get("id") or "") in kept_sql]
-    filtered_columns = _apply_ambiguous_field_selections(
-        column_hits,
-        ambiguous_groups,
-        result.column_attribute_ids,
-    )
 
     logger.debug(
-        "combined filter: custom %d→%d, sql_attr %d→%d, column_attr %d→%d",
+        "combined filter: custom %d→%d, sql_attr %d→%d",
         len(custom_hits),
         len(filtered_custom),
         len(sql_attr_hits),
         len(filtered_sql),
-        len(column_hits),
-        len(filtered_columns),
     )
-    return filtered_custom, filtered_sql, filtered_columns
+    return filtered_custom, filtered_sql
 
 
 def _all_bridge_sourced(sql_attr_hits: list[dict]) -> bool:
@@ -860,7 +772,7 @@ class CandidateRetrievalAgent(BaseAgent):
                                     semantic_retriever,
                                     entity["meaning"],
                                     LABEL_COLUMN_ATTRIBUTE,
-                                    4 if entity["type"] == "exact_value" else 2,
+                                    4,
                                     selected_database,
                                 ): entity
                                 for entity in uncovered_entities
@@ -882,17 +794,11 @@ class CandidateRetrievalAgent(BaseAgent):
         sql_attributes_to_filter = (
             [] if bridge_only_sql_attributes else all_sql_attr_hits
         )
-        (
-            all_custom_hits,
-            filtered_sql_attributes,
-            all_col_attr_hits,
-        ) = _llm_filter_both(
+        all_custom_hits, filtered_sql_attributes = _llm_filter_both(
             llm,
             question,
             all_custom_hits,
             sql_attributes_to_filter,
-            all_col_attr_hits,
-            evidence=evidence,
         )
         if not bridge_only_sql_attributes:
             all_sql_attr_hits = filtered_sql_attributes

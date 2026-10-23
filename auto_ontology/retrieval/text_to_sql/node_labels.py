@@ -23,6 +23,7 @@ NODE_LABELS: dict[str, str] = {
     "prepare_prediction_graph": "Preparing prediction",
     "kumo_predict": "Preparing prediction",
     "retrieve_candidates": "Retrieving candidates",
+    "resolve_column_ambiguity": "Resolving field meanings",
     "information_agent": "Answering from metadata",
     "prepare_candidates": "Preparing candidates",
     "refine_evidence": "Refining evidence",
