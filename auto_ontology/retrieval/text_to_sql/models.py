@@ -211,10 +211,20 @@ class SQLGenerationModel(StrictModel):
     This model is used by SQL generation agents to return structured SQL data.
     Formatting is handled separately by SQLResponseFormattingAgent.
 
-    Field order matters: the LLM fills fields sequentially, so ``thought``
-    comes first to drain reasoning before it writes the clean output fields.
+    Field order matters: the LLM fills fields sequentially, so ``plan`` establishes
+    the query structure and ``thought`` records interpretation assumptions before
+    it writes the clean output fields.
     """
 
+    plan: str = Field(
+        ...,
+        description=(
+            "Brief query-construction plan written before the SQL. Identify the "
+            "tables to use, the exact join-key pairs between them, the grain of "
+            "each result row, the requested projection, and any filters or "
+            "aggregations. Do not include SQL."
+        ),
+    )
     thought: str = Field(
         ...,
         description=(

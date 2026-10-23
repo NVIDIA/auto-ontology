@@ -27,6 +27,7 @@ from auto_ontology.retrieval.text_to_sql.text_to_sql_graph import (
 
 def _generation(sql: str) -> SQLGenerationModel:
     return SQLGenerationModel(
+        plan="Use the referenced table and preserve the requested result grain.",
         thought="No assumptions.",
         sql_code=sql,
         response="Account rows are returned.",
