@@ -6,11 +6,28 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from auto_ontology.utils.llm_invoke import StrictLLMOutputModel
+
+
+class ExtractedEntity(StrictLLMOutputModel):
+    """One user-text span and the schema concept used to retrieve it."""
+
+    type: Literal["value", "field"]
+    original_text: str = Field(
+        ...,
+        description="Exact text from the sanitized question represented by this entity.",
+    )
+    meaning: str = Field(
+        ...,
+        description=(
+            "Schema-oriented meaning to use for semantic retrieval. For a value, "
+            "name the kind of field likely to contain it, not the literal itself."
+        ),
+    )
 
 
 class QuestionExtractionLiteModel(StrictLLMOutputModel):
@@ -23,15 +40,12 @@ class QuestionExtractionLiteModel(StrictLLMOutputModel):
             "Preserve factual constraints and remove narrative fluff."
         ),
     )
-    required_entity_name: list[str] = Field(
+    required_entity_name: list[ExtractedEntity] = Field(
         ...,
         description=(
-            "Concepts present in the completed sanitized question that refer to "
-            "database entities. Do not extract directly from supporting context. "
-            "When words describe a single filterable item, keep them in one "
-            "phrase instead of splitting. Keep brand names, product names, and "
-            "descriptive named constants; omit numeric literals, dates, and "
-            "number-based thresholds."
+            "Typed field concepts and literal values present in the completed "
+            "sanitized question. Search uses meaning; value probing uses "
+            "original_text."
         ),
     )
 
@@ -74,6 +88,7 @@ class EntityCoverageResponse(BaseModel):
 
 
 __all__ = [
+    "ExtractedEntity",
     "QuestionExtractionLiteModel",
     "QuestionExtractionModel",
     "EntityCoverageResponse",

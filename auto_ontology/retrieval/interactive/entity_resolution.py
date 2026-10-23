@@ -1163,7 +1163,13 @@ def _find_unresolvable_entities(
     if not ec_path_state:
         return [], [], "", set(), {}, set(), []
 
-    raw_entities: list[str] = list(ec_path_state.get("entities") or [])
+    raw_entities = [
+        str(entity.get("original_text") or "").strip()
+        if isinstance(entity, dict)
+        else str(entity or "").strip()
+        for entity in ec_path_state.get("entities") or []
+    ]
+    raw_entities = [entity for entity in raw_entities if entity]
     if not raw_entities:
         return [], [], "", set(), {}, set(), []
 

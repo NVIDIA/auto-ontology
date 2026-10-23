@@ -54,6 +54,11 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
 )
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
+from auto_ontology.retrieval.text_to_sql.connector_routing import (
+    resolve_target_database_name,
+)
+from auto_ontology.retrieval.text_to_sql.db_probe.executor import ProbeExecutor
+from auto_ontology.retrieval.text_to_sql.db_probe.value_lookup import lookup_text_value
 from auto_ontology.retrieval.text_to_sql.formatters_util import qualify_table
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
@@ -93,6 +98,43 @@ def _qualified_name(t: dict) -> str:
         t.get("schema_name", ""),
         t.get("name", ""),
     )
+
+
+def _typed_entities(raw_entities: Any) -> list[dict[str, str]]:
+    """Return valid typed entities, accepting legacy strings as fields."""
+    result: list[dict[str, str]] = []
+    for raw in raw_entities if isinstance(raw_entities, list) else []:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
+                result.append({"type": "field", "original_text": text, "meaning": text})
+            continue
+        if not isinstance(raw, dict):
+            continue
+        entity_type = str(raw.get("type") or "")
+        original_text = str(raw.get("original_text") or "").strip()
+        meaning = str(raw.get("meaning") or "").strip()
+        if entity_type in {"field", "value"} and original_text and meaning:
+            result.append(
+                {
+                    "type": entity_type,
+                    "original_text": original_text,
+                    "meaning": meaning,
+                }
+            )
+    return result
+
+
+def _entity_meanings(raw_entities: Any) -> list[str]:
+    return [entity["meaning"] for entity in _typed_entities(raw_entities)]
+
+
+def _hit_entity_specs(hit: dict) -> list[dict[str, str]]:
+    raw_specs = hit.get("query_entity_specs")
+    if not isinstance(raw_specs, list):
+        raw_spec = hit.get("query_entity_spec")
+        raw_specs = [raw_spec] if isinstance(raw_spec, dict) else []
+    return _typed_entities(raw_specs)
 
 
 # The relevance filter sees each table's columns, with sample values for
@@ -221,6 +263,154 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
 
 logger = logging.getLogger(__name__)
 
+
+def _value_entity_key(entity: dict[str, str]) -> tuple[str, str]:
+    return (
+        entity["original_text"].casefold(),
+        entity["meaning"].casefold(),
+    )
+
+
+def _connector_for_value_probe(
+    state: AgentState,
+    target_db: str | None,
+) -> Any | None:
+    connectors = state.get("connectors") or []
+    if target_db:
+        try:
+            resolved = resolve_target_database_name(target_db, connectors)
+        except ValueError:
+            return None
+        return next(
+            (
+                connector
+                for connector in connectors
+                if str(getattr(connector, "database_name", "")) == resolved
+            ),
+            None,
+        )
+    return connectors[0] if len(connectors) == 1 else None
+
+
+def _probe_value_entities(
+    state: AgentState,
+    *,
+    target_db: str | None,
+    column_attributes: list[dict],
+    attr_contexts: dict[str, dict],
+) -> tuple[list[dict], list[dict], set[str]]:
+    """Ground value entities in ordered candidate columns and narrow their hits."""
+    value_entities = [
+        entity
+        for entity in _typed_entities(state.get("path_state", {}).get("entities"))
+        if entity["type"] == "value"
+    ]
+    connector = _connector_for_value_probe(state, target_db)
+    if not value_entities or connector is None:
+        return column_attributes, [], set()
+
+    hits_by_value: dict[tuple[str, str], list[dict]] = {
+        _value_entity_key(entity): [] for entity in value_entities
+    }
+    for hit in column_attributes:
+        for entity in _hit_entity_specs(hit):
+            key = _value_entity_key(entity)
+            if entity["type"] == "value" and key in hits_by_value:
+                hits_by_value[key].append(hit)
+
+    matched_attribute_by_value: dict[tuple[str, str], str] = {}
+    anchors: list[dict] = []
+    with ProbeExecutor(connector) as executor:
+        for entity in value_entities:
+            key = _value_entity_key(entity)
+            suspects: list[tuple[str, dict]] = []
+            seen_attributes: set[str] = set()
+            for hit in hits_by_value.get(key, []):
+                attribute_id = str(hit.get("id") or "")
+                context = attr_contexts.get(attribute_id)
+                if (
+                    not attribute_id
+                    or context is None
+                    or attribute_id in seen_attributes
+                ):
+                    continue
+                seen_attributes.add(attribute_id)
+                suspects.append((attribute_id, context))
+
+            matched: tuple[str, dict, str, str] | None = None
+            for match_kind, anchor_kind in (
+                ("equal", "value"),
+                ("contains", "contains"),
+            ):
+                for attribute_id, context in suspects:
+                    stored_value = lookup_text_value(
+                        executor,
+                        connector,
+                        schema_name=str(context.get("schema_name") or ""),
+                        table_name=str(context.get("table_name") or ""),
+                        column_name=str(context.get("col_name") or ""),
+                        value=entity["original_text"],
+                        match_kind=match_kind,
+                    )
+                    if stored_value is not None:
+                        matched = (
+                            attribute_id,
+                            context,
+                            stored_value,
+                            anchor_kind,
+                        )
+                        break
+                    if executor.budget_left <= 0:
+                        break
+                if matched is not None or executor.budget_left <= 0:
+                    break
+
+            if matched is not None:
+                attribute_id, context, stored_value, anchor_kind = matched
+                matched_attribute_by_value[key] = attribute_id
+                anchors.append(
+                    {
+                        "phrase": entity["original_text"],
+                        "kind": anchor_kind,
+                        "tbl": context.get("table_name") or "",
+                        "col": context.get("col_name") or "",
+                        "stored_value": stored_value,
+                        "database_name": context.get("database_name")
+                        or target_db
+                        or "",
+                        "schema_name": context.get("schema_name") or "",
+                        "table_id": context.get("table_id") or "",
+                        "column_id": context.get("col_id") or "",
+                        "column_attribute_id": attribute_id,
+                    }
+                )
+            if executor.budget_left <= 0:
+                logger.info("Typed-entity value probing stopped at probe budget")
+                break
+
+    if not matched_attribute_by_value:
+        return column_attributes, [], set()
+
+    narrowed: list[dict] = []
+    for hit in column_attributes:
+        attribute_id = str(hit.get("id") or "")
+        specs = _hit_entity_specs(hit)
+        keep = not specs
+        for entity in specs:
+            if entity["type"] == "field":
+                keep = True
+                break
+            matched_id = matched_attribute_by_value.get(_value_entity_key(entity))
+            if matched_id is None or matched_id == attribute_id:
+                keep = True
+                break
+        if keep:
+            narrowed.append(hit)
+
+    grounded_ids = set(matched_attribute_by_value.values())
+    return narrowed, anchors, grounded_ids
+
+
 # Graph node name this agent is registered under in ``text_to_sql_graph.create_graph``
 # (NOT ``self.agent_name``, which is a separate internal/logging name) — must match
 # so ``stream_agent_response`` can attribute this agent's recorded thoughts to the
@@ -295,6 +485,8 @@ class CandidatePreparationAgent(BaseAgent):
             connectors = state.get("connectors") or []
             if len(connectors) == 1:
                 target_db = getattr(connectors[0], "database_name", None)
+        entity_meanings = _entity_meanings(path_state.get("entities"))
+        incoming_anchors = list(state.get("value_anchors") or [])
         custom_analyses = list(path_state.get("retrieved_custom_analyses") or [])
         column_attributes = list(path_state.get("retrieved_column_attributes") or [])
         sql_attributes_raw = list(path_state.get("retrieved_sql_attributes") or [])
@@ -319,7 +511,7 @@ class CandidatePreparationAgent(BaseAgent):
             self._retrieve_additional_tables,
             state.get("data_retriever"),
             question,
-            path_state.get("entities") or [],
+            entity_meanings,
             target_db,
         )
 
@@ -351,6 +543,30 @@ class CandidatePreparationAgent(BaseAgent):
                     len(attr_contexts),
                     len(attr_ids),
                 )
+                (
+                    column_attributes,
+                    grounded_anchors,
+                    grounded_attribute_ids,
+                ) = _probe_value_entities(
+                    state,
+                    target_db=target_db,
+                    column_attributes=column_attributes,
+                    attr_contexts=attr_contexts,
+                )
+                incoming_anchors.extend(grounded_anchors)
+                kept_attribute_ids = {
+                    str(hit["id"]) for hit in column_attributes if hit.get("id")
+                }
+                attr_contexts = {
+                    attribute_id: context
+                    for attribute_id, context in attr_contexts.items()
+                    if attribute_id in kept_attribute_ids
+                }
+                for attribute_id in grounded_attribute_ids:
+                    if context := attr_contexts.get(attribute_id):
+                        context["value_grounded"] = True
+                attr_ids = list(attr_contexts)
+                candidates = custom_analyses + column_attributes + sql_attributes_raw
                 term_synonyms = fetch_term_synonyms(attr_ids)
                 self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
@@ -435,7 +651,7 @@ class CandidatePreparationAgent(BaseAgent):
                         hub_sibling_hops, hub_sibling_truncated = (
                             self._rank_and_cap_hub_siblings(
                                 state,
-                                path_state.get("entities") or [],
+                                entity_meanings,
                                 target_db,
                                 hub_sibling_hops,
                                 cap=_HUB_SIBLING_CAP,
@@ -574,7 +790,6 @@ class CandidatePreparationAgent(BaseAgent):
         # discard anchors, never act on one. Added here rather than beside §5c's
         # force-include so the relevance filter sees them as candidates: most
         # anchor tables are not wanted, and deciding that is the filter's job.
-        incoming_anchors = list(state.get("value_anchors") or [])
         anchor_table_ids = [
             table_id
             for table_id in (
@@ -763,6 +978,7 @@ class CandidatePreparationAgent(BaseAgent):
                 "custom_analyses_str": custom_analyses_str,
                 "sql_attributes": sql_attributes,
                 "sql_attributes_str": sql_attributes_str,
+                "retrieved_column_attributes": column_attributes,
                 "table_relevance_reasoning": table_relevance_reasoning,
                 "primary_attribute": primary_attribute,
                 "attribute_join_paths": attribute_join_paths,
@@ -1239,6 +1455,7 @@ class CandidatePreparationAgent(BaseAgent):
 
         attrs_block = "\n".join(
             f"- id: {aid} | physical column: {_physical_column(ctx)}"
+            + (" | verified by value grounding" if ctx.get("value_grounded") else "")
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
             for aid, ctx in contexts.items()
         )
@@ -1258,7 +1475,9 @@ class CandidatePreparationAgent(BaseAgent):
                     "Return the id of the single column attribute that best represents "
                     "the primary subject of the question. Map evidence concepts to "
                     "the listed schema.table.column physical references, not to "
-                    "semantic attribute names."
+                    "semantic attribute names. Treat verified grounding as a strong "
+                    "relevance signal, but select it only when that column is the best "
+                    "anchor for connecting the requested attributes."
                 )
             ),
         ]

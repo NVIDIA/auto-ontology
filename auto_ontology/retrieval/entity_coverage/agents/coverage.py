@@ -47,6 +47,19 @@ def _entity_keys_for_hit(hit: dict[str, Any]) -> set[str]:
     return keys
 
 
+def _entity_original_texts(entities: list[Any]) -> list[str]:
+    """Return stable user-text identities from typed or legacy entities."""
+    result: list[str] = []
+    for entity in entities:
+        if isinstance(entity, dict):
+            text = str(entity.get("original_text") or "").strip()
+        else:
+            text = str(entity or "").strip()
+        if text:
+            result.append(text)
+    return result
+
+
 def _covered_entities(
     entities: list[str],
     col_attr_hits: list[dict[str, Any]],
@@ -171,7 +184,7 @@ class CoverageGradeAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
-        entities: list[str] = list(path_state.get("entities") or [])
+        entities = _entity_original_texts(list(path_state.get("entities") or []))
         max_distance = float(path_state.get("max_distance", DEFAULT_MAX_DISTANCE))
 
         col_hits = _filter_by_distance(

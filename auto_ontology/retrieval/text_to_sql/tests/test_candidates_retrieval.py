@@ -38,7 +38,7 @@ def _hit(
 
 
 def _state(
-    entities: list[str],
+    entities: list[Any],
     *,
     target_db: str | None = None,
     evidence: str | None = None,
@@ -55,6 +55,60 @@ def _state(
     if evidence is not None:
         state["evidence"] = evidence
     return cast(AgentState, state)
+
+
+def test_typed_entities_search_by_meaning_and_preserve_original_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[str, str, int, str | None]] = []
+
+    def fake_search(
+        _retriever: object,
+        query: str,
+        label: str,
+        k: int,
+        database_name: str | None = None,
+    ) -> list[dict]:
+        calls.append((query, label, k, database_name))
+        if label == LABEL_COLUMN_ATTRIBUTE:
+            return [_hit(f"attr-{query}", "db-a", 0.1)]
+        return []
+
+    monkeypatch.setattr(candidates_retrieval, "_search_by_label", fake_search)
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "_llm_filter_both",
+        lambda _llm, _question, custom, sql: (custom, sql),
+    )
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "custom_analysis_exists",
+        lambda *_args: False,
+    )
+    entities = [
+        {"type": "field", "original_text": "artist", "meaning": "card artist"},
+        {
+            "type": "value",
+            "original_text": "The Lion King",
+            "meaning": "movie",
+        },
+    ]
+
+    result = CandidateRetrievalAgent().execute(_state(entities, target_db="db-a"))
+
+    assert ("card artist", LABEL_COLUMN_ATTRIBUTE, 2, "db-a") in calls
+    assert ("movie", LABEL_COLUMN_ATTRIBUTE, 4, "db-a") in calls
+    hits = {
+        hit["id"]: hit for hit in result["path_state"]["retrieved_column_attributes"]
+    }
+    assert hits["attr-movie"]["query_entities"] == ["The Lion King"]
+    assert hits["attr-movie"]["query_entity_specs"] == [
+        {
+            "type": "value",
+            "original_text": "The Lion King",
+            "meaning": "movie",
+        }
+    ]
 
 
 def test_selects_database_by_entity_coverage_before_total_hits() -> None:

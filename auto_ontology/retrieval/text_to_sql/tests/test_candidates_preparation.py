@@ -3,13 +3,15 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import threading
-from typing import cast
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
 from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
+    _probe_value_entities,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
@@ -18,6 +20,176 @@ from auto_ontology.retrieval.text_to_sql.models import (
 )
 from auto_ontology.retrieval.text_to_sql.prompts import SQL_GEN_MAX_ENTITIES
 from auto_ontology.retrieval.text_to_sql.state import AgentState
+
+
+def _value_hit(attribute_id: str, *, also_field: bool = False) -> dict[str, Any]:
+    specs = [
+        {
+            "type": "value",
+            "original_text": "The Lion King",
+            "meaning": "movie",
+        }
+    ]
+    if also_field:
+        specs.append(
+            {
+                "type": "field",
+                "original_text": "title",
+                "meaning": "movie title",
+            }
+        )
+    return {
+        "id": attribute_id,
+        "score": float(attribute_id[-1]),
+        "query_entity_specs": specs,
+    }
+
+
+def test_value_probe_checks_all_equal_then_contains_and_narrows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeExecutor:
+        budget_left = 20
+
+        def __init__(self, _connector: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    calls: list[tuple[str, str]] = []
+
+    def lookup(
+        _executor: object,
+        _connector: object,
+        *,
+        column_name: str,
+        match_kind: str,
+        **_kwargs: object,
+    ) -> str | None:
+        calls.append((column_name, match_kind))
+        if column_name == "candidate_2" and match_kind == "contains":
+            return "The Lion King (1994)"
+        return None
+
+    monkeypatch.setattr(candidates_preparation, "ProbeExecutor", FakeExecutor)
+    monkeypatch.setattr(candidates_preparation, "lookup_text_value", lookup)
+    attributes = [
+        _value_hit("attr-1", also_field=True),
+        _value_hit("attr-2"),
+        _value_hit("attr-3"),
+    ]
+    contexts = {
+        f"attr-{index}": {
+            "database_name": "movies",
+            "schema_name": "main",
+            "table_name": "films",
+            "table_id": "table-films",
+            "col_name": f"candidate_{index}",
+            "col_id": f"column-{index}",
+        }
+        for index in range(1, 4)
+    }
+    state = cast(
+        AgentState,
+        {
+            "connectors": [SimpleNamespace(database_name="movies", dialect="sqlite")],
+            "path_state": {
+                "entities": [
+                    {
+                        "type": "value",
+                        "original_text": "The Lion King",
+                        "meaning": "movie",
+                    },
+                    {
+                        "type": "field",
+                        "original_text": "title",
+                        "meaning": "movie title",
+                    },
+                ]
+            },
+        },
+    )
+
+    narrowed, anchors, grounded_ids = _probe_value_entities(
+        state,
+        target_db="movies",
+        column_attributes=attributes,
+        attr_contexts=contexts,
+    )
+
+    assert calls == [
+        ("candidate_1", "equal"),
+        ("candidate_2", "equal"),
+        ("candidate_3", "equal"),
+        ("candidate_1", "contains"),
+        ("candidate_2", "contains"),
+    ]
+    assert [hit["id"] for hit in narrowed] == ["attr-1", "attr-2"]
+    assert grounded_ids == {"attr-2"}
+    assert anchors[0]["stored_value"] == "The Lion King (1994)"
+    assert anchors[0]["column_attribute_id"] == "attr-2"
+
+
+def test_unmatched_value_keeps_all_semantic_candidates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeExecutor:
+        budget_left = 20
+
+        def __init__(self, _connector: object) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            pass
+
+    monkeypatch.setattr(candidates_preparation, "ProbeExecutor", FakeExecutor)
+    monkeypatch.setattr(
+        candidates_preparation,
+        "lookup_text_value",
+        lambda *_args, **_kwargs: None,
+    )
+    attributes = [_value_hit("attr-1"), _value_hit("attr-2")]
+    contexts = {
+        f"attr-{index}": {
+            "schema_name": "main",
+            "table_name": "films",
+            "col_name": f"candidate_{index}",
+        }
+        for index in range(1, 3)
+    }
+    state = cast(
+        AgentState,
+        {
+            "connectors": [SimpleNamespace(database_name="movies")],
+            "path_state": {
+                "entities": [
+                    {
+                        "type": "value",
+                        "original_text": "The Lion King",
+                        "meaning": "movie",
+                    }
+                ]
+            },
+        },
+    )
+
+    narrowed, anchors, grounded_ids = _probe_value_entities(
+        state,
+        target_db="movies",
+        column_attributes=attributes,
+        attr_contexts=contexts,
+    )
+
+    assert narrowed == attributes
+    assert anchors == []
+    assert grounded_ids == set()
 
 
 def test_anchor_maps_evidence_to_schema_table_column(
@@ -50,6 +222,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
             "table_name": "frpm",
             "col_name": "frpm_count_k12",
             "attr_description": "Eligible meal-program students.",
+            "value_grounded": True,
         },
         "enrollment": {
             "attr_name": "Enrollment (K-12)",
@@ -70,6 +243,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "main.frpm.enrollment_k12" in captured["prompt"]
     assert "FRPM Count (K-12)" not in captured["prompt"]
     assert "schema.table.column physical references" in captured["prompt"]
+    assert "verified by value grounding" in captured["prompt"]
 
 
 def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (

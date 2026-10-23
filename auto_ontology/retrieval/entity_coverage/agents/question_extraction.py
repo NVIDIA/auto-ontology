@@ -12,6 +12,7 @@ from typing import Any, Dict
 from langchain_core.messages import SystemMessage
 
 from auto_ontology.retrieval.entity_coverage.models import (
+    ExtractedEntity,
     QuestionExtractionLiteModel,
     QuestionExtractionModel,
 )
@@ -26,6 +27,56 @@ from auto_ontology.retrieval.text_to_sql.state import (
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 
 logger = logging.getLogger(__name__)
+
+
+def _word_tokens(text: str) -> set[str]:
+    """Case-insensitive alphanumeric words without regex-specific semantics."""
+    normalized = "".join(
+        character.casefold() if character.isalnum() else " " for character in text
+    )
+    return {token for token in normalized.split() if token}
+
+
+def normalize_extracted_entities(
+    entities: list[ExtractedEntity],
+) -> list[dict[str, str]]:
+    """Deduplicate entities and keep value-span words out of field entities."""
+    cleaned: list[ExtractedEntity] = []
+    seen: set[tuple[str, str, str]] = set()
+    for entity in entities:
+        original_text = " ".join(entity.original_text.split()).strip()
+        meaning = " ".join(entity.meaning.split()).strip()
+        key = (entity.type, original_text.casefold(), meaning.casefold())
+        if not original_text or not meaning or key in seen:
+            continue
+        seen.add(key)
+        cleaned.append(
+            ExtractedEntity(
+                type=entity.type,
+                original_text=original_text,
+                meaning=meaning,
+            )
+        )
+
+    value_tokens: set[str] = set()
+    for entity in cleaned:
+        if entity.type == "value":
+            value_tokens.update(_word_tokens(entity.original_text))
+
+    return [
+        entity.model_dump()
+        for entity in cleaned
+        if entity.type == "value"
+        or not (_word_tokens(entity.original_text) & value_tokens)
+    ]
+
+
+def _fallback_entity(text: str) -> dict[str, str]:
+    return {
+        "type": "field",
+        "original_text": text,
+        "meaning": text,
+    }
 
 
 def _filter_glossary_by_used_names(
@@ -99,7 +150,7 @@ class QuestionExtractionAgent(BaseAgent):
                     "Question extraction returned None, using original question"
                 )
                 path_state["normalized_question"] = original_question
-                path_state["entities"] = [original_question]
+                path_state["entities"] = [_fallback_entity(original_question)]
                 if self._include_subject:
                     path_state["subject"] = original_question
                 return result
@@ -111,12 +162,14 @@ class QuestionExtractionAgent(BaseAgent):
                 )
                 sanitized = original_question
 
-            entities = extraction.required_entity_name or []
+            entities = normalize_extracted_entities(
+                extraction.required_entity_name or []
+            )
             if not entities:
                 self.logger.warning(
                     "Question extraction returned empty entities — using question"
                 )
-                entities = [sanitized]
+                entities = [_fallback_entity(sanitized)]
 
             path_state["normalized_question"] = sanitized
             path_state["entities"] = entities
@@ -157,8 +210,14 @@ class QuestionExtractionAgent(BaseAgent):
                 exc,
             )
             path_state["normalized_question"] = original_question
-            path_state["entities"] = [original_question]
+            path_state["entities"] = [_fallback_entity(original_question)]
             if self._include_subject:
                 path_state["subject"] = original_question
 
         return result
+
+
+__all__ = [
+    "QuestionExtractionAgent",
+    "normalize_extracted_entities",
+]

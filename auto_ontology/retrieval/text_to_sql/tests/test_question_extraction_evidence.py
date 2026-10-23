@@ -12,6 +12,7 @@ from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
     QuestionExtractionAgent,
 )
 from auto_ontology.retrieval.entity_coverage.models import QuestionExtractionLiteModel
+from auto_ontology.retrieval.entity_coverage.models import ExtractedEntity
 from auto_ontology.retrieval.entity_coverage.prompts import (
     create_question_extraction_prompt,
 )
@@ -52,6 +53,23 @@ def test_prompt_omits_evidence_section_when_not_provided(
     assert "## Evidence for sanitization" not in prompt
 
 
+def test_typed_entity_prompt_preserves_existing_field_rules() -> None:
+    prompt = create_question_extraction_prompt(
+        "Find a waterproof hiking tent for family camping.",
+        include_subject=False,
+    )
+
+    assert "Aggregation-qualified metric rule" in prompt
+    assert "Filter-item rule" in prompt
+    assert "For interrogative words" in prompt
+    assert "Date-field rule" in prompt
+    assert "Glossary rule" in prompt
+    assert "Do not emit bare action verbs" in prompt
+    assert "extension of the field" in prompt
+    assert "not a replacement for them" in prompt
+    assert '"type": "value"' in prompt
+
+
 def test_agent_forwards_state_evidence_without_changing_original_question(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -65,7 +83,18 @@ def test_agent_forwards_state_evidence_without_changing_original_question(
         captured_messages.extend(messages)
         return QuestionExtractionLiteModel(
             sanitized_question="Show loyalty points earned by customers",
-            required_entity_name=["loyalty points", "customer"],
+            required_entity_name=[
+                ExtractedEntity(
+                    type="field",
+                    original_text="loyalty points",
+                    meaning="loyalty points",
+                ),
+                ExtractedEntity(
+                    type="field",
+                    original_text="customers",
+                    meaning="customer",
+                ),
+            ],
         )
 
     monkeypatch.setattr(
@@ -88,7 +117,18 @@ def test_agent_forwards_state_evidence_without_changing_original_question(
     assert result["path_state"]["normalized_question"] == (
         "Show loyalty points earned by customers"
     )
-    assert result["path_state"]["entities"] == ["loyalty points", "customer"]
+    assert result["path_state"]["entities"] == [
+        {
+            "type": "field",
+            "original_text": "loyalty points",
+            "meaning": "loyalty points",
+        },
+        {
+            "type": "field",
+            "original_text": "customers",
+            "meaning": "customer",
+        },
+    ]
 
 
 def test_intent_rewrite_and_evidence_feed_question_extraction(
@@ -124,7 +164,13 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
         captured_messages.extend(messages)
         return QuestionExtractionLiteModel(
             sanitized_question="find revenue",
-            required_entity_name=["revenue"],
+            required_entity_name=[
+                ExtractedEntity(
+                    type="field",
+                    original_text="revenue",
+                    meaning="revenue",
+                )
+            ],
         )
 
     monkeypatch.setattr(
@@ -142,3 +188,49 @@ def test_intent_rewrite_and_evidence_feed_question_extraction(
     assert state["path_state"]["target_db"] == "test_dataset"
     assert state["initial_question"] == "find revenue in test_dataset dataset"
     assert result["path_state"]["normalized_question"] == "find revenue"
+
+
+def test_value_words_are_not_reused_by_field_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        question_extraction,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionExtractionLiteModel(
+            sanitized_question="Did class 2 see The Lion King?",
+            required_entity_name=[
+                ExtractedEntity(
+                    type="value",
+                    original_text="class 2",
+                    meaning="class",
+                ),
+                ExtractedEntity(
+                    type="field",
+                    original_text="class",
+                    meaning="class",
+                ),
+                ExtractedEntity(
+                    type="value",
+                    original_text="The Lion King",
+                    meaning="movie",
+                ),
+            ],
+        ),
+    )
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Did class 2 see The Lion King?",
+        "path_state": {},
+        "glossary": [],
+    }
+
+    result = QuestionExtractionAgent(include_subject=False).execute(state)
+
+    assert result["path_state"]["entities"] == [
+        {"type": "value", "original_text": "class 2", "meaning": "class"},
+        {
+            "type": "value",
+            "original_text": "The Lion King",
+            "meaning": "movie",
+        },
+    ]

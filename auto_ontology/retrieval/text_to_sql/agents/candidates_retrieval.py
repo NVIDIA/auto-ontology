@@ -88,6 +88,7 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
     """
     best: dict[str, dict] = {}
     entities_by_id: dict[str, set[str]] = {}
+    entity_specs_by_id: dict[str, dict[tuple[str, str, str], dict]] = {}
     evidence_by_id: dict[str, str] = {}
     for hit in hits:
         hid = hit.get("id")
@@ -97,6 +98,14 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         qe = hit.get("query_entity")
         if qe:
             entities_by_id.setdefault(key, set()).add(str(qe))
+        query_spec = hit.get("query_entity_spec")
+        if isinstance(query_spec, dict):
+            spec_key = (
+                str(query_spec.get("type") or ""),
+                str(query_spec.get("original_text") or "").casefold(),
+                str(query_spec.get("meaning") or "").casefold(),
+            )
+            entity_specs_by_id.setdefault(key, {})[spec_key] = dict(query_spec)
         evidence_query = hit.get("query_evidence")
         if evidence_query:
             evidence_by_id[key] = str(evidence_query)
@@ -111,6 +120,16 @@ def _dedupe_best_score(hits: list[dict]) -> list[dict]:
         ents = entities_by_id.get(key)
         if ents:
             out["query_entities"] = sorted(ents)
+        specs = entity_specs_by_id.get(key)
+        if specs:
+            out["query_entity_specs"] = sorted(
+                specs.values(),
+                key=lambda spec: (
+                    str(spec.get("original_text") or "").casefold(),
+                    str(spec.get("type") or ""),
+                    str(spec.get("meaning") or "").casefold(),
+                ),
+            )
         if key in evidence_by_id:
             out["query_evidence"] = evidence_by_id[key]
         result.append(out)
@@ -191,6 +210,40 @@ def _covered_entities(column_hits: list[dict]) -> set[str]:
         for hit in column_hits
         if str(hit.get("query_entity") or "").strip()
     }
+
+
+def _entity_specs(raw_entities: Any) -> list[dict[str, str]]:
+    """Normalize typed entities, retaining legacy strings as field entities."""
+    specs: list[dict[str, str]] = []
+    for raw in raw_entities if isinstance(raw_entities, list) else []:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if text:
+                specs.append({"type": "field", "original_text": text, "meaning": text})
+            continue
+        if not isinstance(raw, dict):
+            continue
+        entity_type = str(raw.get("type") or "")
+        original_text = str(raw.get("original_text") or "").strip()
+        meaning = str(raw.get("meaning") or "").strip()
+        if entity_type in {"field", "value"} and original_text and meaning:
+            specs.append(
+                {
+                    "type": entity_type,
+                    "original_text": original_text,
+                    "meaning": meaning,
+                }
+            )
+    return specs
+
+
+def _tag_entity_hit(hit: dict, entity: dict[str, str]) -> dict:
+    tagged = dict(hit)
+    tagged["query_entity"] = entity["original_text"]
+    tagged["query_entity_meaning"] = entity["meaning"]
+    tagged["query_entity_type"] = entity["type"]
+    tagged["query_entity_spec"] = dict(entity)
+    return tagged
 
 
 # ---------------------------------------------------------------------------
@@ -456,12 +509,7 @@ class CandidateRetrievalAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         question = get_question_for_processing(state)
-        raw_entities = path_state.get("entities")
-        entities: list[str] = [
-            e.strip()
-            for e in (raw_entities if isinstance(raw_entities, list) else [])
-            if isinstance(e, str) and e.strip()
-        ]
+        entities = _entity_specs(path_state.get("entities"))
         raw_subject = path_state.get("subject")
         subject = (
             raw_subject.strip()
@@ -538,16 +586,16 @@ class CandidateRetrievalAgent(BaseAgent):
                 ),
                 *[
                     (
-                        f"col_attr:{entity}",
+                        f"col_attr:{index}",
                         (
                             semantic_retriever,
-                            entity,
+                            entity["meaning"],
                             LABEL_COLUMN_ATTRIBUTE,
-                            2,
+                            4 if entity["type"] == "value" else 2,
                             target_db,
                         ),
                     )
-                    for entity in clean_entities
+                    for index, entity in enumerate(clean_entities)
                 ],
             ]
             if subject:
@@ -584,12 +632,10 @@ class CandidateRetrievalAgent(BaseAgent):
                             tagged["query_evidence"] = evidence
                             all_col_attr_hits.append(tagged)
                     else:
-                        # key is "col_attr:{entity}" — tag each hit for coverage.
-                        entity = key.split(":", 1)[1]
+                        # key is "col_attr:{index}" — preserve the source entity.
+                        entity = clean_entities[int(key.split(":", 1)[1])]
                         for hit in result:
-                            tagged = dict(hit)
-                            tagged["query_entity"] = entity
-                            all_col_attr_hits.append(tagged)
+                            all_col_attr_hits.append(_tag_entity_hit(hit, entity))
 
             if target_db is None:
                 selected_database, database_stats = _select_candidate_database(
@@ -649,7 +695,7 @@ class CandidateRetrievalAgent(BaseAgent):
                     uncovered_entities = [
                         entity
                         for entity in clean_entities
-                        if entity not in covered_entities
+                        if entity["original_text"] not in covered_entities
                     ]
                     if uncovered_entities:
                         self.logger.info(
@@ -665,9 +711,9 @@ class CandidateRetrievalAgent(BaseAgent):
                                 pool.submit(
                                     _search_by_label,
                                     semantic_retriever,
-                                    entity,
+                                    entity["meaning"],
                                     LABEL_COLUMN_ATTRIBUTE,
-                                    2,
+                                    4 if entity["type"] == "value" else 2,
                                     selected_database,
                                 ): entity
                                 for entity in uncovered_entities
@@ -677,9 +723,9 @@ class CandidateRetrievalAgent(BaseAgent):
                                 for hit in _filter_hits_to_database(
                                     future.result(), selected_database
                                 ):
-                                    tagged = dict(hit)
-                                    tagged["query_entity"] = entity
-                                    all_col_attr_hits.append(tagged)
+                                    all_col_attr_hits.append(
+                                        _tag_entity_hit(hit, entity)
+                                    )
 
         if _all_bridge_sourced(all_sql_attr_hits):
             # All hits are structural bridge-table joins — nothing to judge

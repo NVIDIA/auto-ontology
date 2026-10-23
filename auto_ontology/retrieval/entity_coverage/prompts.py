@@ -89,65 +89,99 @@ sanitized_question: How many shipments were delivered last month?
 
 ## Part 2 — required_entity_name
 
-Populate "required_entity_name" with 1–{_MAX_ENTITIES} noun phrases that correspond to database \
-tables, columns, or relationships. Extract only from the completed sanitized intent. \
-Do not extract entities directly from Glossary or Evidence sections.
+Populate "required_entity_name" with 1–{_MAX_ENTITIES} objects. Every object has:
+- `type`: `field` for a requested schema concept, or `value` for a literal that can
+  be compared with a database field.
+- `original_text`: the exact words from the completed sanitized question.
+- `meaning`: the schema-oriented concept to use for semantic retrieval.
 
-Preserve the exact casing of terms as they appear in the completed sanitized question.
-Do not lowercase, uppercase, or normalize them.
+Extract only from the completed sanitized intent, never directly from Glossary or
+Evidence sections. Preserve the exact casing in `original_text`.
 
-Glossary rule: when a word or phrase in the question matches a Glossary entry — an
-abbreviation, a shortcut, or internal jargon — resolve it in place using that entry's
-definition instead of emitting the raw shortcut. Resolving rewrites an existing entry;
-it never adds an extra one, so the number of entries stays what it would have been
-without the Glossary. Leave a phrase untouched when no Glossary entry applies.
-  Example (Glossary: "MRR" = "monthly recurring revenue"):
-  "show MRR by region" → ["monthly recurring revenue", "region"], not ["MRR", "region"]
+Identify complete VALUE spans before FIELD entities:
+- Values include names, titles, labels, categories, statuses, alphanumeric codes,
+  booleans, numbers, percentages, and dates used as filter constants.
+- Keep the complete literal in `original_text`; do not split it.
+- Set `meaning` to the kind of field likely to contain the value, not to the literal.
+- A word belonging to a value span MUST NOT appear in any other entity. In particular,
+  do not also emit a field made from a noun inside a value.
 
-Guidelines for what to include in required_entity_name:
-- Subject nouns and domain terms ("invoice", "customer", "shipment")
-- Qualified entity phrases that combine a subject with its relevant action or attribute
-  ("order shipment", "employee hire", "ticket resolution")
+Field entities include requested outputs, metrics, dimensions, subjects, and
+relationships. For a field, `meaning` should be a concise schema concept. Resolve
+Glossary abbreviations and internal jargon in `meaning`, while `original_text` remains
+the words used by the question.
+
+The existing semantic-entity rules still apply to FIELD entities:
+- Include subject nouns and domain terms ("invoice", "customer", "shipment").
+- Include qualified phrases that combine a subject with its relevant action or
+  attribute ("order shipment", "employee hire", "ticket resolution").
 - Aggregation-qualified metric rule: when "count", "total", "average", "sum", "min",
   or "max" is attached to a domain noun as the name of a requested metric or column,
-  keep it as one entity phrase. This does not
-  apply when the aggregation is only how the user asks a question, such as
-  "How many shipments..."; in that case, extract the subject entity "shipment".
-- Filter-item rule: when several words together describe a single item the user wants to
-  filter or search for, keep them in one phrase. Do not split modifier, noun, and purpose
-  of the same filter item into separate entries.
-  Example: "waterproof hiking tent for family camping" → \
-["waterproof hiking tent for family camping"],
-  not ["waterproof hiking tent", "family camping"].
-- Keep names and descriptive text that identify something: brand names, product names,
-  vendor names, categories, and other named constants (e.g. "Salomon Speedcross").
-- For interrogative words (who/what/which/whose), resolve to the implied entity type
-  AND, if the question contains a qualifying descriptor, include it twice: once alone
-  and once combined with the resolved type.
-  Example: "who are the active assignees" → ["assignee", "active assignee"]
+  keep it as one field meaning. When the aggregation is only question framing, such as
+  "How many shipments", emit the subject field meaning "shipment".
+- Filter-item rule: when several words together describe one item the user wants to
+  filter or search for, keep them in one complete entity instead of splitting modifier,
+  noun, and purpose. For example, keep "waterproof hiking tent for family camping" as
+  one field entity.
+- For interrogative words (who/what/which/whose), resolve the implied entity type. If
+  the question contains a qualifying descriptor, include the base field and the
+  qualified field. Example: "who are the active assignees" produces field meanings
+  "assignee" and "active assignee".
+- Date-field rule: when a time qualifier modifies an event rather than naming a stored
+  literal date, collapse subject + action + granularity into a compact field meaning
+  ending with "date". Examples: "invoices closed in Q2" includes "invoice closure
+  quarter date"; "orders placed last year" includes "order placement date".
 
-Guidelines for what to exclude from required_entity_name:
-- Bare action verbs ("submitted", "approved", "closed", "assigned")
-- Numeric values: counts, amounts, prices, years, and other number literals
-- Date/time values when they are numeric or calendar literals
-- Aggregation indicators ("count", "total", "average", "sum", "min", "max")
-  when standing alone; preserve them when the aggregation-qualified metric rule applies
-- Status and filter adjectives when standing alone ("open", "active", "high-priority")
-- Bare schema-generic words with no domain meaning on their own: "id", "name",
-  "type", "code", "key", "value", "description", "label", "title", "flag",
-  "uuid", "pk", "fk". Do not emit these as standalone entities.
+Glossary rule: when a question phrase matches a Glossary abbreviation, shortcut, or
+internal term, keep the user's phrase in `original_text` and resolve its definition in
+the field's `meaning`. Resolution replaces the meaning; it does not add an extra entity.
+Example (Glossary: "MRR" = "monthly recurring revenue"):
+  "show MRR by region" produces field meanings "monthly recurring revenue" and "region",
+  not an additional duplicate "MRR" meaning.
 
-Date rule: When a question references a time-qualified event, collapse subject + action
-+ granularity into one compact phrase ending with "date".
-  Example: "invoices closed in Q2" → ["invoice", "invoice closure quarter date"]
-  Example: "orders placed last year" → ["order", "order placement date"]
+Existing exclusions still apply to FIELD entities:
+- Do not emit bare action verbs ("submitted", "approved", "closed", "assigned").
+- Do not emit aggregation indicators by themselves.
+- Do not emit status/filter adjectives by themselves as fields.
+- Do not emit numeric values, date literals, thresholds, names, brands, product names,
+  categories, or other named constants as fields. They are now emitted as VALUE
+  entities when they are explicit filter constants; this is an extension of the field
+  rules, not a replacement for them.
+- Exclude schema-generic words with no domain meaning on their own: "id", "name",
+  "type", "code", "key", "value", "description", "label", "title", "flag", "uuid",
+  "pk", and "fk".
 
 Examples:
+  Q: "Did class 2 see The Lion King?"
+  → required_entity_name:
+    [
+      {{"type": "value", "original_text": "class 2", "meaning": "class"}},
+      {{"type": "value", "original_text": "The Lion King", "meaning": "movie"}}
+    ]
+  Do not additionally emit a `class` field: "class" is inside the value "class 2".
+
+  Q: "Which artist illustrated the card Angel of Mercy?"
+  → required_entity_name:
+    [
+      {{"type": "field", "original_text": "artist", "meaning": "card artist"}},
+      {{"type": "value", "original_text": "Angel of Mercy", "meaning": "card name"}}
+    ]
+
   Q: "How many shipments were delivered last month?"
-  → required_entity_name: ["shipment", "shipment delivery month date"]
+  → required_entity_name:
+    [
+      {{"type": "field", "original_text": "shipments", "meaning": "shipment"}},
+      {{"type": "field", "original_text": "delivered last month",
+        "meaning": "shipment delivery month date"}}
+    ]
 
   Q: "Find a waterproof hiking tent for family camping."
-  → required_entity_name: ["waterproof hiking tent for family camping"]
+  → required_entity_name:
+    [
+      {{"type": "field",
+        "original_text": "waterproof hiking tent for family camping",
+        "meaning": "waterproof hiking tent for family camping"}}
+    ]
 """
 
 _SUBJECT_AND_ACRONYMS = """## Part 3 — subject
