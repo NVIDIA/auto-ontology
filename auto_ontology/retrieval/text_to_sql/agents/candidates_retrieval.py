@@ -444,10 +444,15 @@ SQL attributes:
 Ambiguous ColumnAttribute groups:
 {column_attribute_groups}
 
-For each ColumnAttribute group, select exactly one candidate. Use the full
-question to resolve contextual meaning. Prefer a context-specific column only
-when the question supports that context. Otherwise select the most generic,
-broadly applicable column in the group.
+For each ColumnAttribute group, select exactly one candidate. Determine which
+entity or subject the requested field describes and the role in which that
+specific field is used. A context-specific candidate is relevant only when the
+wording attached to the requested field supports that role; do not transfer
+context from a separate condition elsewhere in the question. Prefer a direct
+attribute of the subject over a similar attribute on a related or supporting
+entity that would require an unnecessary join. When the requested field has no
+clear role-specific qualifier, select the most generic, broadly applicable
+column on the subject.
 
 Return the IDs to KEEP for each candidate set and one ColumnAttribute ID per
 ambiguous group. Use empty lists for candidate types or groups that are absent.
