@@ -848,6 +848,22 @@ def test_contexts_are_empty_for_an_empty_list() -> None:
     assert a.fetch_attr_column_contexts([], database_name=None) == {}
 
 
+def test_context_identifies_primary_key_column(world) -> None:
+    world.table("records", pk=["record_id"])
+    world.column("records", "record_id")
+    world.column("records", "label", 2)
+    primary = world.attribute("record-id", owner="records.record_id")
+    non_primary = world.attribute("label", owner="records.label")
+
+    contexts = a.fetch_attr_column_contexts(
+        [primary, non_primary],
+        database_name=None,
+    )
+
+    assert contexts[primary]["is_primary_key"] is True
+    assert contexts[non_primary]["is_primary_key"] is False
+
+
 def test_an_attribute_with_no_columns_still_gets_an_entry(world) -> None:
     """Nulls become empty strings; the attribute does not vanish."""
     orphan = world.attribute("orphan")

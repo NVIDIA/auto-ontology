@@ -57,6 +57,94 @@ def _state(
     return cast(AgentState, state)
 
 
+@pytest.fixture(autouse=True)
+def _column_contexts_without_primary_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "fetch_attr_column_contexts",
+        lambda attr_ids, *, database_name: {
+            attr_id: {"is_primary_key": False} for attr_id in attr_ids
+        },
+    )
+
+
+def test_primary_key_candidate_replaces_better_scoring_field_candidate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hits = [
+        {
+            **_hit("descriptive", "db-a", 0.1),
+            "query_entity_spec": {
+                "type": "field",
+                "original_text": "identifier",
+                "meaning": "record identifier",
+            },
+        },
+        {
+            **_hit("primary", "db-a", 0.8),
+            "query_entity_spec": {
+                "type": "field",
+                "original_text": "identifier",
+                "meaning": "record identifier",
+            },
+        },
+    ]
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "fetch_attr_column_contexts",
+        lambda _ids, *, database_name: {
+            "descriptive": {"is_primary_key": False},
+            "primary": {"is_primary_key": True},
+        },
+    )
+
+    assert candidates_retrieval._prefer_primary_key_field_hits(
+        hits,
+        database_name="db-a",
+    ) == [hits[1]]
+
+
+def test_primary_key_preference_does_not_prune_exact_value_suspects(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hits = [
+        {
+            **_hit("value-column", "db-a", 0.1),
+            "query_entity_spec": {
+                "type": "exact_value",
+                "original_text": "requested value",
+                "meaning": "record",
+            },
+        },
+        {
+            **_hit("primary", "db-a", 0.2),
+            "query_entity_spec": {
+                "type": "exact_value",
+                "original_text": "requested value",
+                "meaning": "record",
+            },
+        },
+    ]
+    monkeypatch.setattr(
+        candidates_retrieval,
+        "fetch_attr_column_contexts",
+        lambda _ids, *, database_name: {
+            "value-column": {"is_primary_key": False},
+            "primary": {"is_primary_key": True},
+        },
+    )
+
+    assert (
+        candidates_retrieval._prefer_primary_key_field_hits(
+            hits,
+            database_name="db-a",
+        )
+        == hits
+    )
+
+
 def test_typed_entities_search_by_meaning_and_preserve_original_text(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -96,7 +184,7 @@ def test_typed_entities_search_by_meaning_and_preserve_original_text(
 
     result = CandidateRetrievalAgent().execute(_state(entities, target_db="db-a"))
 
-    assert ("card artist", LABEL_COLUMN_ATTRIBUTE, 2, "db-a") in calls
+    assert ("card artist", LABEL_COLUMN_ATTRIBUTE, 4, "db-a") in calls
     assert ("movie", LABEL_COLUMN_ATTRIBUTE, 4, "db-a") in calls
     hits = {
         hit["id"]: hit for hit in result["path_state"]["retrieved_column_attributes"]

@@ -35,6 +35,7 @@ from auto_ontology.semantic.constants import (
 )
 
 from auto_ontology.dal.custom_analyses import custom_analysis_exists
+from auto_ontology.dal.attributes import fetch_attr_column_contexts
 from auto_ontology.retrieval.data_access.semantic_search import search_semantic_index
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
@@ -210,6 +211,62 @@ def _covered_entities(column_hits: list[dict]) -> set[str]:
         for hit in column_hits
         if str(hit.get("query_entity") or "").strip()
     }
+
+
+def _entity_group_key(hit: dict) -> tuple[str, str, str] | None:
+    """Return the typed entity that produced a ColumnAttribute hit."""
+    spec = hit.get("query_entity_spec")
+    if isinstance(spec, dict):
+        entity_type = str(spec.get("type") or "")
+        original_text = str(spec.get("original_text") or "").casefold()
+        meaning = str(spec.get("meaning") or "").casefold()
+        if entity_type and original_text and meaning:
+            return entity_type, original_text, meaning
+
+    query_entity = str(hit.get("query_entity") or "").strip()
+    if query_entity:
+        return "field", query_entity.casefold(), query_entity.casefold()
+    return None
+
+
+def _prefer_primary_key_field_hits(
+    hits: list[dict],
+    *,
+    database_name: str | None,
+) -> list[dict]:
+    """Keep only PK-backed candidates for a field when one was retrieved.
+
+    Exact-value entities retain all suspects because candidate preparation must
+    probe their values before it can know which column is correct. Evidence-only
+    hits are also left unchanged.
+    """
+    attr_ids = list(
+        dict.fromkeys(str(hit["id"]) for hit in hits if hit.get("id") is not None)
+    )
+    if not attr_ids:
+        return hits
+
+    contexts = fetch_attr_column_contexts(
+        attr_ids,
+        database_name=database_name,
+    )
+    primary_key_groups = {
+        group
+        for hit in hits
+        if (group := _entity_group_key(hit)) is not None
+        and group[0] == "field"
+        and contexts.get(str(hit.get("id")), {}).get("is_primary_key") is True
+    }
+    if not primary_key_groups:
+        return hits
+
+    return [
+        hit
+        for hit in hits
+        if (group := _entity_group_key(hit)) is None
+        or group not in primary_key_groups
+        or contexts.get(str(hit.get("id")), {}).get("is_primary_key") is True
+    ]
 
 
 def _entity_specs(raw_entities: Any) -> list[dict[str, str]]:
@@ -591,7 +648,7 @@ class CandidateRetrievalAgent(BaseAgent):
                             semantic_retriever,
                             entity["meaning"],
                             LABEL_COLUMN_ATTRIBUTE,
-                            4 if entity["type"] == "exact_value" else 2,
+                            4,
                             target_db,
                         ),
                     )
@@ -739,6 +796,10 @@ class CandidateRetrievalAgent(BaseAgent):
                 llm, question, all_custom_hits, all_sql_attr_hits
             )
 
+        all_col_attr_hits = _prefer_primary_key_field_hits(
+            all_col_attr_hits,
+            database_name=target_db,
+        )
         deduped_col_attr = _dedupe_best_score(all_col_attr_hits)
         deduped_custom = _dedupe_best_score(all_custom_hits)
         deduped_sql_attr = _dedupe_best_score(all_sql_attr_hits)

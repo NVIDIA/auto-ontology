@@ -338,6 +338,9 @@ def fetch_attr_column_contexts(
             s.column_attribute.c.datatype.label("datatype"),
             s.catalog_column.c.id.label("col_id"),
             s.catalog_column.c.name.label("col_name"),
+            (s.catalog_column.c.name == any_(s.catalog_table.c.pk)).label(
+                "is_primary_key"
+            ),
             s.catalog_table.c.id.label("table_id"),
             s.catalog_table.c.name.label("table_name"),
             s.catalog_schema.c.name.label("schema_name"),
@@ -385,6 +388,7 @@ def fetch_attr_column_contexts(
                 "attr_description": row["attr_description"] or "",
                 "col_id": row["col_id"],
                 "col_name": row["col_name"] or "",
+                "is_primary_key": bool(row["is_primary_key"]),
                 "table_id": row["table_id"],
                 "table_name": row["table_name"] or "",
                 "schema_name": row["schema_name"] or "",
