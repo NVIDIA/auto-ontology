@@ -16,6 +16,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_tables_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    DIRECT_ANSWER_FIELD_RULES,
     create_intent_validation_prompt,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
@@ -130,6 +131,21 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert combined_aggregate_rule in format_projection_rules(True)
 
 
+def test_sql_generation_plans_query_structure_before_sql() -> None:
+    field_order = list(SQLGenerationModel.model_fields)
+    assert field_order[:3] == ["plan", "thought", "sql_code"]
+
+    prompt = create_sql_from_candidates_prompt()
+    plan_position = prompt.index("- plan:")
+    thought_position = prompt.index("- thought:")
+    sql_position = prompt.index("- sql_code:")
+    assert plan_position < thought_position < sql_position
+    assert "exact join-key pairs" in prompt
+    assert "result-row grain" in prompt
+    assert "Do not include SQL in this field" in prompt
+    assert "\nExample:\n" not in prompt
+
+
 def test_calculation_sql_template_is_structural_guidance() -> None:
     rendered = format_calculation_sql_template(
         {
@@ -156,6 +172,7 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
         invoked_with.append(llm)
         invoked_messages.extend(messages)
         return SQLGenerationModel(
+            plan="Use the accounts table and return one aggregate row.",
             thought="No assumptions.",
             sql_code="SELECT COUNT(*) FROM accounts",
             response="Counts all accounts.",
@@ -187,6 +204,24 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    direct_answer_messages = [
+        message
+        for message in invoked_messages
+        if message.content == DIRECT_ANSWER_FIELD_RULES
+    ]
+    assert len(direct_answer_messages) == 1
+    assert invoked_messages.index(direct_answer_messages[0]) < len(invoked_messages) - 1
+    assert "project that column unchanged" in DIRECT_ANSWER_FIELD_RULES
+    assert "explicitly requests a normalized representation" in (
+        DIRECT_ANSWER_FIELD_RULES
+    )
+    normalized_rules = " ".join(DIRECT_ANSWER_FIELD_RULES.split())
+    assert "only when no direct answer field exists" in normalized_rules
+    assert "including a field named with a synonym" in normalized_rules
+    assert "Apply an outer aggregation only when the question explicitly requests" in (
+        normalized_rules
+    )
+    assert "only when no matching direct field exists" in normalized_rules
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

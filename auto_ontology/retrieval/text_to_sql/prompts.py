@@ -7,6 +7,25 @@ import os
 # Controls how many entity noun phrases are extracted for SQL generation.
 SQL_GEN_MAX_ENTITIES: int = int(os.environ.get("SQL_GEN_MAX_ENTITIES", "5"))
 
+DIRECT_ANSWER_FIELD_RULES = """## Direct Answer Fields
+
+For a yes/no question, when an available text or boolean column directly stores
+the requested property or state, project that column unchanged as the answer.
+Do not wrap the column in CASE, compare it merely to translate its stored value,
+cast it, or otherwise normalize it to YES/NO. Transform it only when the question
+or Authoritative Evidence explicitly requests a normalized representation.
+Computed boolean or conditional output is appropriate only when no direct answer
+field exists and the answer must be derived.
+
+Before deriving a measure with COUNT, SUM, AVG, or row-level arithmetic, inspect
+the semantically important and available columns for a field that directly stores
+the requested measure at the required grain, including a field named with a
+synonym of the question's wording. Prefer that field when its description and
+semantic context match the requested meaning. Apply an outer aggregation only
+when the question explicitly requests one over that stored measure. Derive the
+measure from underlying rows only when no matching direct field exists.
+"""
+
 _PROJECTION_RULES = (
     "**Projection**\n"
     "- SELECT only the columns explicitly asked; extra columns make the result "
@@ -238,6 +257,9 @@ _POSTGRES_DIALECT_RULES = (
 # Shared output-field spec for SQL-generation prompts (candidates-based and
 # table-based) — kept as a single source so the two call sites can't drift.
 _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
+- plan: briefly identify the tables, exact join-key pairs, result-row grain,
+  requested projection, and filters or aggregations. Plan the query structure
+  before writing SQL. Do not include SQL in this field.
 - thought: briefly explain your approach and state every assumption the
   request or schema doesn't uniquely determine. For each that applies,
   state the choice AND the reason ("X, because Y"): zero/missing values
@@ -293,12 +315,6 @@ def create_sql_from_candidates_prompt(
             "(unqualified — do NOT add a schema or database prefix).\n"
         )
         join_template = "    JOIN target_table ON source_table.source_column = target_table.target_column"
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM sales AS s
-JOIN customers AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN '2024-01-01' AND '2024-03-31'
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
     else:
         table_name_rule = (
             "- Use table names exactly as shown in AVAILABLE TABLES, INCLUDING the "
@@ -309,14 +325,6 @@ ORDER BY total_sales DESC;"""
             "    JOIN target_schema.target_table ON source_schema.source_table.source_column\n"
             "         = target_schema.target_table.target_column"
         )
-        example_sql = """SELECT c.country_name, SUM(s.sales_amount) AS total_sales
-FROM PUBLIC.SALES AS s
-JOIN PUBLIC.CUSTOMERS AS c ON s.customer_id = c.customer_id
-WHERE s.order_date BETWEEN
-  DATE_TRUNC('quarter', ADD_MONTHS(CURRENT_DATE, -3))
-  AND LAST_DAY(ADD_MONTHS(DATE_TRUNC('quarter', CURRENT_DATE), -1))
-GROUP BY c.country_name
-ORDER BY total_sales DESC;"""
 
     # Solved question/SQL pairs retrieved by question wording from a labelled
     # corpus of other databases. Two failure modes need heading off: borrowing
@@ -415,23 +423,6 @@ ORDER BY total_sales DESC;"""
   do NOT include that column in SELECT — it adds no information since every row has the same value.
 
 {_SQL_GENERATION_OUTPUT_SPEC}
-
-Example:
-
-thought:
-Join sales and customers, filter last full quarter, aggregate by country.
-"Total sales" means gross SUM(sales_amount), with no refund adjustment
-since the question didn't ask for one.
-
-sql_code:
-{example_sql}
-
-response:
-This calculates total sales revenue per country for the most recently completed
-calendar quarter. It combines the sales records with the customers list so each
-sale is attributed to a country, sums the sales amounts within that quarter,
-and then groups the results by country and orders them from highest to lowest
-total sales.
 """
 
 
