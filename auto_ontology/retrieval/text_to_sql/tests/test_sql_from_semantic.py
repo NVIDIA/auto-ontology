@@ -127,7 +127,8 @@ def test_sql_generation_plans_query_structure_before_sql() -> None:
     assert "Do not include SQL in this field" in " ".join(prompt.split())
     assert "\nExample:\n" not in prompt
     assert "Every projected field and JOIN must be required" in create_sql_user_prompt
-    assert "evidence-defined comparison operand" in create_sql_user_prompt
+    assert "prevent integer truncation in division is valid" in create_sql_user_prompt
+    assert "evidence-defined direct comparison operand" in create_sql_user_prompt
 
 
 def test_calculation_sql_template_is_structural_guidance() -> None:

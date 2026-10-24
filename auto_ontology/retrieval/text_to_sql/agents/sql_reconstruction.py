@@ -585,6 +585,7 @@ class SQLReconstructionAgent(BaseAgent):
                     state, question_block, error_context, relevant_tables
                 )
                 path_state["error_type"] = analysis.error_type.value
+                path_state["error_analysis_explanation"] = analysis.explanation
                 self.logger.info(
                     "Error analysis: %s — %s",
                     analysis.error_type.value,
@@ -698,10 +699,22 @@ class SQLReconstructionAgent(BaseAgent):
                 "available schema, or validation error.\n\n"
             )
 
+        analysis_guidance = (path_state.get("error_analysis_explanation") or "").strip()
+        analysis_section = ""
+        if analysis_guidance:
+            analysis_section = (
+                "\nROOT-CAUSE ANALYSIS FROM THE PREVIOUS STEP:\n"
+                f"{analysis_guidance}\n"
+                "Preserve every corrective requirement identified here unless it "
+                "conflicts with the question, Authoritative Evidence, or available "
+                "schema. Do not silently discard it while rewriting the SQL.\n\n"
+            )
+
         error_prompt = (
             f"{_REPAIR_TURN_PREFIX}\n\n"
             f"```sql\n{sql_code}\n```\n\n"
             f"Validation failed with the following message:\n{error}\n\n"
+            f"{analysis_section}"
             f"{history_section}"
             f"{prior_interpretation_section}"
             "Please correct the SQL. Do not return the same SQL — "

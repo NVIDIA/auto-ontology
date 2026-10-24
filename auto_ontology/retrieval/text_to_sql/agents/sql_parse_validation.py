@@ -124,9 +124,11 @@ class IntentValidationModel(BaseModel):
         default_factory=list,
         description=(
             "List every unsupported DISTINCT or CAST. Each must be justified by "
-            "the question, Authoritative Evidence, schema, dialect, requested "
-            "result grain, or unavoidable join fan-out. Leave EMPTY [] when every "
-            "DISTINCT and CAST has a concrete basis."
+            "the operation, question, Authoritative Evidence, schema, dialect, "
+            "requested result grain, or unavoidable join fan-out. A coercion needed "
+            "to prevent integer truncation is supported even when the evidence gives "
+            "only the conceptual arithmetic. Leave EMPTY [] when every DISTINCT and "
+            "CAST has a concrete basis."
         ),
     )
     projection_issues: list[str] = Field(

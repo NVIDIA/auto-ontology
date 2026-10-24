@@ -167,9 +167,10 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     assert "literal values, operators, and scaling factors exactly" in (
         messages[1].content
     )
-    assert "do not add a cast around an evidence-defined comparison operand" in (
+    assert "a cast needed to prevent integer truncation does not change" in (
         messages[1].content
     )
+    assert "evidence-defined direct comparison operand" in messages[1].content
     assert sum(evidence in message.content for message in messages) == 2
     assert "AUTHORITATIVE EVIDENCE TO VALIDATE AGAINST" in messages[2].content
     assert messages[2].content.count(evidence) == 1
@@ -353,9 +354,10 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     assert "STRICT PROJECTION CHECK" not in messages[1].content
     assert "Every outermost projected field must be requested" in messages[1].content
     assert "Defensive DISTINCT is invalid" in messages[1].content
-    assert "A cast around an evidence-defined comparison operand" in (
+    assert "A cast around an evidence-defined direct comparison operand" in (
         messages[1].content
     )
+    assert "coercion needed to prevent integer truncation" in messages[1].content
 
 
 @patch(

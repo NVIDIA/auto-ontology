@@ -173,7 +173,9 @@ def test_dictionary_error_is_normalized_before_classification(
         if model is ErrorAnalysis:
             return ErrorAnalysis(
                 error_type=ErrorType.FIXABLE,
-                explanation="The existing SQL can be repaired.",
+                explanation=(
+                    "Preserve real-valued division to avoid integer truncation."
+                ),
             )
         return None
 
@@ -210,8 +212,17 @@ def test_dictionary_error_is_normalized_before_classification(
     assert result["path_state"]["error"] == normalized
     assert result["path_state"]["error_details"] == structured_error
     assert result["path_state"]["failed_attempts"][0]["error"] == normalized
+    assert result["path_state"]["error_analysis_explanation"] == (
+        "Preserve real-valued division to avoid integer truncation."
+    )
     assert normalized in captured_messages[0][0].content
     assert normalized in captured_messages[1][-1].content
+    assert "ROOT-CAUSE ANALYSIS FROM THE PREVIOUS STEP" in (
+        captured_messages[1][-1].content
+    )
+    assert "Preserve real-valued division to avoid integer truncation." in (
+        captured_messages[1][-1].content
+    )
 
 
 def test_historical_dictionary_errors_are_rendered_safely() -> None:
