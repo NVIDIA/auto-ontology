@@ -608,6 +608,40 @@ def test_replace_junction_classifications_clears_stale_values(world) -> None:
     assert by_id[replacement_id]["junction_table_kind"] == "association"
 
 
+def test_replace_relationship_semantics_clears_stale_values(world) -> None:
+    old_id = world.tables["order_tag"]
+    replacement_id = world.tables["tags"]
+    old_fact = {
+        "relationship_type": "reciprocal_undirected_edge",
+        "endpoint_columns": ["left_id", "right_id"],
+        "edge_key_columns": ["edge_id"],
+        "reciprocal_rows_verified": True,
+    }
+    store().query_write(
+        s.catalog_table.update()
+        .where(s.catalog_table.c.id == old_id)
+        .values(relationship_semantics=[old_fact])
+    )
+    replacement_fact = {**old_fact, "edge_key_columns": ["relationship_id"]}
+
+    d.replace_relationship_semantics(
+        world.prefix,
+        {replacement_id: [replacement_fact]},
+    )
+
+    rows = store().query_read(
+        select(
+            s.catalog_table.c.id,
+            s.catalog_table.c.relationship_semantics,
+        ).where(s.catalog_table.c.id.in_([old_id, replacement_id]))
+    )
+    by_id = {row["id"]: row for row in rows}
+    assert by_id[old_id]["relationship_semantics"] == []
+    assert by_id[replacement_id]["relationship_semantics"] == [replacement_fact]
+    fetched = d.fetch_tables_by_ids([replacement_id])
+    assert fetched[0]["relationship_semantics"] == [replacement_fact]
+
+
 def test_a_pure_junction_table_is_a_candidate(world) -> None:
     rows = d.fetch_bridge_table_candidates(world.prefix)
     assert [r["table_name"] for r in rows] == ["order_tag"]

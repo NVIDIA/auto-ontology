@@ -293,6 +293,62 @@ def format_junction_table_guidance(
     return "\n".join(lines) + "\n"
 
 
+def format_reciprocal_edge_guidance(
+    tables: list[dict],
+    target_db: str | None = None,
+    dialect: str | None = None,
+) -> str:
+    """Render deterministically verified reciprocal-row relationship facts."""
+    entries: list[tuple[dict, dict]] = []
+    for table in tables:
+        for fact in table.get("relationship_semantics") or []:
+            if (
+                fact.get("relationship_type") == "reciprocal_undirected_edge"
+                and fact.get("reciprocal_rows_verified") is True
+            ):
+                entries.append((table, fact))
+    if not entries:
+        return ""
+
+    lines = [
+        "## Verified Reciprocal-Row Relationships",
+        "Each listed table stores an undirected relationship twice: once in each "
+        "endpoint orientation. This is a verified database fact, not an inference.",
+        "- To list all participating entities, project or join one endpoint column; "
+        "the reciprocal rows already enumerate entities from both roles.",
+        "- To count participating entities, count distinct IDs from one endpoint.",
+        "- To count relationships, count distinct edge keys or canonical unordered "
+        "endpoint pairs, never physical reciprocal rows.",
+        "- For neighbors, constrain one endpoint and return the opposite endpoint.",
+        "- For unordered relationship pairs, canonicalize or deduplicate reversed "
+        "orientations.",
+        "- Use both endpoint columns as separate outputs only when the question "
+        "explicitly requests both roles, an ordered pair, source and target, or "
+        "equivalent separate fields.",
+    ]
+    for table, fact in entries:
+        qualified = qualify_table(
+            str(table.get("database_name") or target_db or ""),
+            str(table.get("schema_name") or ""),
+            str(table.get("name") or ""),
+            dialect,
+        )
+        endpoints = ", ".join(str(v) for v in fact.get("endpoint_columns") or [])
+        edge_keys = ", ".join(str(v) for v in fact.get("edge_key_columns") or [])
+        target_table = str(fact.get("target_table") or "")
+        target_column = str(fact.get("target_column") or "")
+        lines.extend(
+            [
+                "",
+                f"- Table: {qualified}",
+                f"  Endpoint columns: {endpoints}",
+                f"  Edge key columns: {edge_keys}",
+                f"  Endpoint entity key: {target_table}.{target_column}",
+            ]
+        )
+    return "\n".join(lines) + "\n"
+
+
 def format_important_columns_for_prompt(
     primary_attribute: dict | None,
     attribute_join_paths: list[dict],

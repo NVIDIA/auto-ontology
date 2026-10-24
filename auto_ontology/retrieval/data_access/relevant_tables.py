@@ -125,6 +125,8 @@ def _normalize_table_to_relevant_shape(table: dict) -> dict:
         entry["junction_table_kind"] = table["junction_table_kind"]
     if table.get("junction_table_rationale") is not None:
         entry["junction_table_rationale"] = table["junction_table_rationale"]
+    if table.get("relationship_semantics") is not None:
+        entry["relationship_semantics"] = table["relationship_semantics"]
     if not isinstance(entry.get("columns"), list):
         entry["columns"] = []
     return entry

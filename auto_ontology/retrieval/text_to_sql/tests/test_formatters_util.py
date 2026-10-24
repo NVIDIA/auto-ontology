@@ -4,11 +4,40 @@
 
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_junction_table_guidance,
+    format_reciprocal_edge_guidance,
     format_semantic_context,
     format_tables_for_prompt,
     format_used_schema_for_prompt,
     qualify_table,
 )
+
+
+def test_reciprocal_edge_guidance_includes_verified_roles_and_boundaries() -> None:
+    rendered = format_reciprocal_edge_guidance(
+        [
+            {
+                "name": "relationships",
+                "schema_name": "main",
+                "database_name": "db",
+                "relationship_semantics": [
+                    {
+                        "relationship_type": "reciprocal_undirected_edge",
+                        "endpoint_columns": ["left_ref", "right_ref"],
+                        "edge_key_columns": ["edge_key"],
+                        "target_table": "entities",
+                        "target_column": "entity_id",
+                        "reciprocal_rows_verified": True,
+                    }
+                ],
+            }
+        ]
+    )
+
+    assert "## Verified Reciprocal-Row Relationships" in rendered
+    assert "db.main.relationships" in rendered
+    assert "left_ref, right_ref" in rendered
+    assert "count distinct edge keys" in rendered
+    assert "explicitly requests both roles" in rendered
 
 
 def test_junction_guidance_is_absent_without_selected_junctions() -> None:

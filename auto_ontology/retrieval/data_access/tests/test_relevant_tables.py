@@ -112,6 +112,27 @@ def test_dedupe_merge_keeps_the_key_of_an_already_normalized_table() -> None:
     assert merged[0]["pk"] == ["StoreID"]
 
 
+def test_dedupe_merge_keeps_relationship_semantics() -> None:
+    fact = {
+        "relationship_type": "reciprocal_undirected_edge",
+        "endpoint_columns": ["left_ref", "right_ref"],
+        "edge_key_columns": ["edge_key"],
+        "reciprocal_rows_verified": True,
+    }
+    normalized = relevant_tables._normalize_table_to_relevant_shape(
+        {
+            "id": "table-1",
+            "name": "relationships",
+            "label": Labels.TABLE,
+            "relationship_semantics": [fact],
+        }
+    )
+
+    merged = relevant_tables.dedupe_merge_relevant_tables([normalized, normalized])
+
+    assert merged[0]["relationship_semantics"] == [fact]
+
+
 def test_normalize_merges_rich_nullability_into_parsed_columns() -> None:
     table = {
         "id": "table-1",

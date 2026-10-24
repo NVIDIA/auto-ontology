@@ -105,6 +105,66 @@ def test_reconstruction_uses_evidence_from_state(
     assert "only when no direct answer field exists" in " ".join(prompt.split())
 
 
+def test_reconstruction_includes_reciprocal_edge_guidance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_messages: list = []
+
+    def fake_invoke(_llm: object, messages: list, _model: object) -> None:
+        captured_messages.extend(messages)
+        return None
+
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    state = cast(
+        AgentState,
+        {
+            "llm": MagicMock(),
+            "initial_question": "List participating entities.",
+            "evidence": "",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "error": "reciprocal endpoints were duplicated",
+                "error_analysis_done": True,
+                "target_db": "db",
+                "relevant_tables": [
+                    {
+                        "name": "relationships",
+                        "schema_name": "main",
+                        "database_name": "db",
+                        "columns": [],
+                        "relationship_semantics": [
+                            {
+                                "relationship_type": "reciprocal_undirected_edge",
+                                "endpoint_columns": ["left_ref", "right_ref"],
+                                "edge_key_columns": ["edge_key"],
+                                "target_table": "entities",
+                                "target_column": "entity_id",
+                                "reciprocal_rows_verified": True,
+                            }
+                        ],
+                    }
+                ],
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT left_ref, right_ref FROM relationships",
+                    thought="",
+                ),
+            },
+        },
+    )
+
+    SQLReconstructionAgent().execute(state)
+
+    prompt = captured_messages[-1].content
+    assert "## Verified Reciprocal-Row Relationships" in prompt
+    assert "left_ref, right_ref" in prompt
+    assert "Do not return the same SQL" in prompt
+
+
 def test_reconstruction_drops_prior_repair_turns(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

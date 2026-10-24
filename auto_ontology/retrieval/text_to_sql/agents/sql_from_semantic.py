@@ -39,6 +39,7 @@ from auto_ontology.retrieval.entity_coverage.prompts import format_glossary_sect
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_important_columns_for_prompt,
     format_junction_table_guidance,
+    format_reciprocal_edge_guidance,
     format_semantic_context,
     format_tables_for_prompt,
 )
@@ -313,6 +314,11 @@ class SQLFromCandidatesAgent(BaseAgent):
                 junction_guidance=format_junction_table_guidance(
                     relevant_tables,
                     attribute_join_paths,
+                    target_db=target_db,
+                    dialect=dialect,
+                ),
+                reciprocal_edge_guidance=format_reciprocal_edge_guidance(
+                    relevant_tables,
                     target_db=target_db,
                     dialect=dialect,
                 ),

@@ -30,6 +30,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_junction_table_guidance,
+    format_reciprocal_edge_guidance,
     format_tables_for_prompt,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
@@ -162,6 +163,11 @@ class SQLFromTablesAgent(BaseAgent):
             junction_guidance=format_junction_table_guidance(
                 relevant_tables,
                 [],
+                target_db=target_db,
+                dialect=dialect,
+            ),
+            reciprocal_edge_guidance=format_reciprocal_edge_guidance(
+                relevant_tables,
                 target_db=target_db,
                 dialect=dialect,
             ),

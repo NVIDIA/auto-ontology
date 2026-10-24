@@ -54,6 +54,9 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     create_intent_validation_prompt,
     format_custom_analyses_section,
 )
+from auto_ontology.retrieval.text_to_sql.reciprocal_edge_validation import (
+    find_reciprocal_edge_violations,
+)
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_original_question,
@@ -900,6 +903,29 @@ class SQLValidationAgent(BaseAgent):
                 "decision": "invalid_sql",
                 "path_state": path_state,
             }
+
+        reciprocal_violations = find_reciprocal_edge_violations(
+            response.sql_code,
+            get_standalone_question(state),
+            path_state.get("relevant_tables") or [],
+            degenerate_dialect,
+            previously_rejected_sql=path_state.get("reciprocal_edge_rejected_sql"),
+        )
+        if reciprocal_violations:
+            error_msg = (
+                "The SQL violates a deterministically verified reciprocal-row "
+                "relationship representation. This correction is mandatory:\n- "
+                + "\n- ".join(reciprocal_violations)
+            )
+            self.logger.info("Reciprocal-edge SQL rejected: %s", error_msg)
+            path_state["error"] = error_msg
+            path_state["error_known_fixable"] = True
+            path_state["reciprocal_edge_rejected_sql"] = response.sql_code
+            return {
+                "decision": "invalid_sql",
+                "path_state": path_state,
+            }
+        path_state.pop("reciprocal_edge_rejected_sql", None)
 
         degenerate_reason = detect_degenerate_sql(response.sql_code, degenerate_dialect)
 

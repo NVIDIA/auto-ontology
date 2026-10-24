@@ -111,6 +111,7 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "error_analysis_done",
         "error_known_fixable",
         "last_intent_rejected_sql",
+        "reciprocal_edge_rejected_sql",
         "returned_deterministic_fallback",
         "unconstructable_explanation",
         "final_response",

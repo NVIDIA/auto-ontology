@@ -138,6 +138,7 @@ create_sql_user_prompt = (
     "join is forbidden, even when the bridge contributes no projected column.\n\n"
     "{join_paths}\n\n"
     "{junction_guidance}\n"
+    "{reciprocal_edge_guidance}\n"
     "**Aggregation**\n"
     "- Never use FILTER (WHERE ...) on aggregates — it is not supported in all dialects. "
     "Use CASE WHEN inside aggregates instead: "

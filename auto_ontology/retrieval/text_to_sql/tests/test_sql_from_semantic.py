@@ -366,6 +366,16 @@ def test_sql_generation_includes_selected_junction_guidance(monkeypatch) -> None
                         "is_junction_table": True,
                         "junction_table_kind": "bridge",
                         "junction_table_rationale": "Associates endpoint roles.",
+                        "relationship_semantics": [
+                            {
+                                "relationship_type": "reciprocal_undirected_edge",
+                                "endpoint_columns": ["entity_id", "related_entity_id"],
+                                "edge_key_columns": ["relationship_id"],
+                                "target_table": "entity",
+                                "target_column": "id",
+                                "reciprocal_rows_verified": True,
+                            }
+                        ],
                         "columns": [{"name": "entity_id", "data_type": "integer"}],
                     }
                 ],
@@ -378,6 +388,8 @@ def test_sql_generation_includes_selected_junction_guidance(monkeypatch) -> None
     assert "## Junction Tables" in prompt
     assert "Associates endpoint roles." in prompt
     assert "JOIN PATHS (VERIFIED OPTIONS" in prompt
+    assert "## Verified Reciprocal-Row Relationships" in prompt
+    assert "entity_id, related_entity_id" in prompt
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

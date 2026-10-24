@@ -247,6 +247,15 @@ catalog_table = Table(
     Column("is_junction_table", Boolean, nullable=False, server_default=text("false")),
     Column("junction_table_kind", Text, nullable=True),
     Column("junction_table_rationale", Text, nullable=True),
+    # Deterministically verified row-representation facts. A table can encode
+    # more than one relationship role pair, so this is a collection rather
+    # than another single table classification flag.
+    Column(
+        "relationship_semantics",
+        JSONB,
+        nullable=False,
+        server_default=text("'[]'::jsonb"),
+    ),
     _imported_id(),
     CheckConstraint(
         "junction_table_kind IS NULL OR "

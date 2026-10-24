@@ -355,6 +355,7 @@ def fetch_table_headers_for_database(database_name: str) -> list[dict[str, Any]]
             s.catalog_table.c.is_junction_table,
             s.catalog_table.c.junction_table_kind,
             s.catalog_table.c.junction_table_rationale,
+            s.catalog_table.c.relationship_semantics,
             s.catalog_schema.c.name.label("schema_name"),
         )
         .select_from(_table_join())
@@ -633,6 +634,33 @@ def replace_junction_table_classifications(
                     junction_table_kind=classification["kind"],
                     junction_table_rationale=classification["rationale"],
                 )
+            )
+
+
+def replace_relationship_semantics(
+    database_name: str,
+    facts_by_table: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Replace compiled relationship facts for every table in one database."""
+    table_ids = (
+        select(s.catalog_table.c.id)
+        .select_from(_table_join())
+        .where(s.catalog_database.c.name == database_name)
+    )
+    with write_transaction():
+        store().query_write(
+            update(s.catalog_table)
+            .where(s.catalog_table.c.id.in_(table_ids))
+            .values(relationship_semantics=[])
+        )
+        for table_id, facts in facts_by_table.items():
+            store().query_write(
+                update(s.catalog_table)
+                .where(
+                    s.catalog_table.c.id == table_id,
+                    s.catalog_table.c.id.in_(table_ids),
+                )
+                .values(relationship_semantics=facts)
             )
 
 
@@ -1109,6 +1137,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_table.c.is_junction_table,
                 s.catalog_table.c.junction_table_kind,
                 s.catalog_table.c.junction_table_rationale,
+                s.catalog_table.c.relationship_semantics,
                 s.catalog_database.c.name.label("database_name"),
                 s.catalog_schema.c.name.label("schema_name"),
                 s.catalog_column.c.name.label("column_name"),
@@ -1151,6 +1180,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 "is_junction_table": bool(row["is_junction_table"]),
                 "junction_table_kind": row["junction_table_kind"],
                 "junction_table_rationale": row["junction_table_rationale"] or "",
+                "relationship_semantics": row["relationship_semantics"] or [],
                 "columns": [],
             },
         )

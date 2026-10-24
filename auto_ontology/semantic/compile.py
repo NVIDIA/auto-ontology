@@ -15,6 +15,7 @@ from auto_ontology.semantic.cancellation import is_cancelled
 from auto_ontology.semantic.domain import DomainSummary, load_domain_summary
 from auto_ontology.semantic.embed import build_semantic_embedder
 from auto_ontology.semantic.junction_classifier import classify_junction_tables
+from auto_ontology.semantic.reciprocal_edges import detect_reciprocal_edges
 from auto_ontology.semantic.semantic_fk import resolve_semantic_fks
 
 from auto_ontology.semantic.pipeline import compile_semantic_layer
@@ -93,6 +94,11 @@ def _run_semantic_compilation(
     logger.info("Semantic FK edges created: %d", fk_count)
 
     logger.info("=" * 60)
+    logger.info("Detecting reciprocal-edge representations…")
+    logger.info("=" * 60)
+    reciprocal_edge_count = detect_reciprocal_edges(database_name)
+
+    logger.info("=" * 60)
     logger.info("Classifying junction tables…")
     logger.info("=" * 60)
     junction_table_count = classify_junction_tables(database_name)
@@ -120,11 +126,13 @@ def _run_semantic_compilation(
     logger.info(
         "Semantic calculation finished successfully (database=%r) — "
         "%d table(s), %d semantic FK edge(s), %d SqlAttribute(s), "
-        "%d junction table(s), %d bridge SqlAttribute(s) in %.1fs",
+        "%d reciprocal-edge fact(s), %d junction table(s), "
+        "%d bridge SqlAttribute(s) in %.1fs",
         database_name,
         count,
         fk_count,
         attr_count,
+        reciprocal_edge_count,
         junction_table_count,
         bridge_attribute_count,
         time.monotonic() - started,
