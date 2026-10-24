@@ -80,6 +80,11 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: false"
     else:
         line += " | is_nullable: unknown"
+    uniqueness = column.get("is_unique")
+    if uniqueness is True:
+        line += " | is_unique: true"
+    elif uniqueness is False:
+        line += " | is_unique: false"
     semantic_fk = column.get("semantic_fk")
     if semantic_fk:
         line += f" | foreign_key: {_plain_cell(semantic_fk)}"
@@ -304,6 +309,7 @@ _COLUMN_HEADERS = [
     "column",
     "type",
     "is_nullable",
+    "is_unique",
     "foreign key",
     "description",
     "sample values",
@@ -329,10 +335,18 @@ def _column_row(column: Any) -> dict[str, str]:
         nullable = "false"
     else:
         nullable = "unknown"
+    uniqueness = column.get("is_unique")
+    if uniqueness is True:
+        unique = "true"
+    elif uniqueness is False:
+        unique = "false"
+    else:
+        unique = ""
     return {
         "column": _plain_cell(column.get("name", "UNKNOWN")),
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
+        "is_unique": unique,
         "foreign key": _plain_cell(column.get("semantic_fk")),
         "description": description,
         "sample values": _plain_cell(

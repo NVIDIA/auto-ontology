@@ -113,7 +113,18 @@ create_sql_user_prompt = (
     "answers a different question.\n"
     "- Integer division truncates. Cast to REAL before dividing wherever the "
     "result can be fractional — CAST(SUM(x) AS REAL) / COUNT(y) — including "
-    "inside HAVING and before scaling a ratio by 100.\n\n"
+    "inside HAVING and before scaling a ratio by 100.\n"
+    "- Establish the requested answer grain before aggregating or applying LIMIT. "
+    "Whenever the question asks for entities identified by a column marked "
+    "`is_unique: false`, the source rows are finer-grained than those entities. "
+    "This applies both within one table and after joins. Count DISTINCT entity IDs, "
+    "and deduplicate/group to one row per entity before LIMIT so repeated source "
+    "rows cannot consume multiple result positions. When ordering entities by a "
+    "finer-grained value, aggregate that value at the entity grain before ordering.\n"
+    "- Do not add DISTINCT when the question asks for child/detail records themselves, "
+    "or when the counted identifier is already unique at the query grain. Preserve an "
+    "Authoritative Evidence formula's numerator, denominator, operators, and grain "
+    "exactly; uniqueness metadata must not change an evidence-defined denominator.\n\n"
     "**Example Queries**\n"
     "- Review example queries for WHERE values that match the question's intent. "
     "If a value or filter condition is relevant to what is being asked, include it in your SQL.\n\n"
@@ -126,12 +137,12 @@ create_sql_user_prompt = (
     "{dialect_rules}"
     "{projection_rules}"
     "**Style**\n"
-    "- Preserve natural row grain. Use DISTINCT only when the question or authoritative "
-    "evidence explicitly asks for distinct, different, unique, or deduplicated results. "
-    "A foreign-key marker signals possible fan-out but does not require DISTINCT: "
-    "COUNT(fk) counts matching child rows; COUNT(DISTINCT fk) counts referenced entities. "
-    "Never infer DISTINCT solely from an FK, one-to-many join, repeated IDs, or an entity "
-    "noun.\n"
+    "- Preserve the requested answer grain. DISTINCT is required when the question "
+    "asks for entities represented by an identifier marked `is_unique: false`, whether "
+    "the repeated identifier is in the base table or appears after a join. It is not "
+    "required merely because a foreign key exists. COUNT(id) counts source rows, while "
+    "COUNT(DISTINCT id) counts represented entities. Match that choice to what the "
+    "question asks to count.\n"
     "- NULL filtering: Do not add `IS NOT NULL` solely because a projected field "
     "has `is_nullable: true`, or because one or multiple fields are projected. "
     "Add it only when the question or evidence requires the requested value to "
@@ -959,7 +970,15 @@ Generated SQL Query:
 
 Check for CRITICAL issues ONLY (be lenient):
 {join_criterion}
-2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
+2. Are aggregations CLEARLY WRONG for the requested answer grain? This includes
+counting source rows when the question asks for entities represented by an
+identifier marked `is_unique: false`, whether those repeated IDs occur in one
+base table or after a join, or applying LIMIT before reducing repeated source
+rows to one row per requested entity. COUNT(DISTINCT entity_id) (or equivalent
+entity-grain grouping) is required in that case. Do not demand DISTINCT when
+the question asks for the finer-grained records themselves, the identifier is
+already unique at the query grain, or Authoritative Evidence explicitly defines
+a row-grain numerator or denominator. Other equivalent aggregation forms are OK.
 {evidence_criterion}
 {projection_criterion}
 
