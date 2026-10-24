@@ -110,8 +110,12 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     messages = mock_invoke.call_args.args[1]
     prompt = messages[1].content
     assert "AUTHORITATIVE JOIN PATHS" in prompt
+    assert "JOIN PATHS (VERIFIED OPTIONS" in prompt
     assert "public.orders.customer_id = public.customers.id" in prompt
     assert "do not flag a generated join that follows" in prompt
+    assert "SEMANTIC HINT" not in prompt
+    assert "likely starting table" not in prompt
+    assert "Column: customer_id  (Order Customer)" not in prompt
     assert "USED SQL OBJECTS" in prompt
     assert "- public.orders | description: Customer purchase records." in prompt
     assert "public.orders.customer_id (integer) - Customer placing the order." in prompt
