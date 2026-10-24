@@ -79,8 +79,11 @@ main_system_prompt_template = (
 create_sql_user_prompt = (
     "## Task\n"
     "Construct a SQL query that answers the user's question.\n"
-    "When Authoritative Evidence is provided, fulfill every rule in it. Never "
-    "ignore, omit, weaken, or substitute any evidence rule.\n"
+    "When Authoritative Evidence is provided, treat every explicit schema mapping, "
+    "predicate, expression, operator, relationship role, output mapping, and formula "
+    "as binding when compatible with the Available Schema. Never ignore, weaken, "
+    "substitute, or broaden those requirements, but do not turn unrelated explanatory "
+    "prose into SQL constraints.\n"
     "Dialect: {dialect}.\n\n"
     "## Question\n"
     "{main_question}\n"
@@ -260,8 +263,10 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
   requested projection, and filters or aggregations. Plan the query structure
   before writing SQL. Explicitly justify every DISTINCT, CAST, projected field,
   and JOIN from the question, Authoritative Evidence, schema, dialect, or a
-  mandatory selected join-path hop; omit any that has no such basis. Do not
-  include SQL in this field.
+  mandatory selected join-path hop; omit any that has no such basis. When
+  Authoritative Evidence is present, enumerate every explicit evidence
+  requirement and state where the SQL implements it. Do not include SQL in this
+  field.
 - thought: briefly explain your approach and state every assumption the
   request or schema doesn't uniquely determine. For each that applies,
   state the choice AND the reason ("X, because Y"): zero/missing values
@@ -390,6 +395,16 @@ def create_sql_from_candidates_prompt(
 
     return f"""You are an expert SQL query builder. You MUST always produce a SQL query.
 
+Apply context in this precedence order:
+1. Explicit Authoritative Evidence mappings and requirements.
+2. Verified schema facts and domain-specific custom analyses.
+3. Semantic hints and retrieved candidates.
+4. Reference SQL examples and general model preference.
+
+Verified database value anchors are authoritative only for stored literal values
+and their observed locations. They never override Authoritative Evidence about a
+column, relationship role, operator, formula, join, or output mapping.
+
 {sql_examples_block} Key rules:
 {table_name_rule}
 - When SQL snippets are provided as reference, do NOT copy their aliases.
@@ -431,40 +446,59 @@ def create_sql_from_candidates_prompt(
 def format_authoritative_evidence(
     evidence: str, *, evidence_first_sql: bool = False
 ) -> str:
-    """Wrap evidence verbatim with strict instructions for SQL use and validation."""
+    """Wrap evidence with binding, schema-checked SQL-generation instructions."""
     if not evidence:
         return ""
 
     construction_order = (
-        "- Start SQL construction from the evidence, before adding anything else "
-        "from the question. Decompose it into individual rules. For every rule, "
-        "map each business entity or concept it names to the physical table and "
-        "column whose name and description in the Available Schema best match that "
-        "meaning. Build the evidence-required projections, formulas, filters, and "
-        "joins as the query's backbone; only then add the remaining requirements "
-        "from the question. Do not skip an evidence rule or map by name alone when "
-        "a column description resolves the meaning. Never invent a mapping that "
-        "the supplied schema does not support; state that limitation in thought.\n"
+        "- Start SQL construction from the explicit evidence requirements. Build "
+        "their projections, formulas, predicates, operators, and join roles first; "
+        "only then add requirements from the question that do not conflict.\n"
         if evidence_first_sql
         else ""
     )
     return (
         "## Authoritative Evidence\n"
-        "This evidence is critical. The generated SQL MUST follow every instruction "
-        "in it exactly, even when another approach appears equivalent.\n"
+        "Explicit mappings in this evidence are binding when compatible with the "
+        "Available Schema. They outrank retrieved candidates, semantic hints, value "
+        "anchors, reference queries, metadata preferences, and model intuition.\n"
         f"{construction_order}"
-        "- Whenever the evidence explains a value or where that value is stored, "
-        "include the value in the SQL using the stated column, table, filter, and "
-        "operator. Do not substitute another value or location.\n"
-        "- Whenever the evidence explains a formula, calculate that exact formula "
-        "from the stated available tables and columns. Do not replace it with a "
-        "shortcut or precomputed field. Preserve the evidence's stated order of "
-        "all formula terms, operands, predicates, conditions, literal values, "
-        "operators, and scaling factors exactly. Add type coercion when required "
-        "to evaluate that formula correctly for the schema and dialect; a cast "
-        "needed to prevent integer truncation does not change the evidence-defined "
-        "formula. Do not add a cast around an evidence-defined direct comparison "
-        "operand unless the operation, schema, dialect, or evidence requires it.\n\n"
+        "- An explicit mapping names a physical table, column, predicate, expression, "
+        "operator, relationship role, join role, or output mapping. Use every such "
+        "mapping exactly. If several output columns are explicitly mapped, preserve "
+        "all of them.\n"
+        "- Do not substitute a semantically similar column. Do not broaden an "
+        "explicit predicate with another column, endpoint, relationship role, or OR "
+        "branch that the evidence did not state.\n"
+        "- Preserve the exact spelling and case of an evidence-named schema identifier "
+        "when that identifier exists in the Available Schema. If it does not exist, "
+        "never invent it: use only a schema-confirmed interpretation and state the "
+        "conflict in `thought`, or state that the mapping cannot be satisfied.\n"
+        "- Preserve evidence-specified operators, filters, grouping grain, output "
+        "mappings, formula terms, and scaling factors. Add type coercion only when "
+        "needed to evaluate the same formula correctly for the schema and dialect.\n"
+        "- MIN and MAX in evidence are aggregate semantics. Preserve them as "
+        "aggregates. When returning rows whose value equals the minimum or maximum, "
+        "use equality to an aggregate subquery or an equivalent tie-preserving form. "
+        "Do not replace this with ORDER BY and LIMIT 1 unless uniqueness is verified "
+        "or the evidence explicitly requests one arbitrary row.\n"
+        "- Value anchors may confirm a stored literal value and its observed location, "
+        "but cannot override evidence about columns, relationships, operators, "
+        "formulas, joins, or outputs.\n"
+        "- Scope evidence narrowly. If it only explains a literal value, it does not "
+        "resolve an otherwise ambiguous table, column, relationship role, or output "
+        "shape. Do not infer additional requirements that the evidence does not state, "
+        "and do not copy arbitrary prose into SQL.\n\n"
+        "## Authoritative Evidence Checklist\n"
+        "Before producing SQL:\n"
+        "1. Identify every explicit evidence mapping or requirement.\n"
+        "2. Verify every named identifier against the Available Schema.\n"
+        "3. Confirm the SQL represents each compatible requirement without "
+        "substitution, omission, or broadening.\n"
+        "4. Confirm formulas retain their operators, aggregation semantics, grouping "
+        "grain, scaling, and tie behavior.\n"
+        "5. Confirm no SQL requirement was inferred from evidence that did not state "
+        "it.\n\n"
         "Evidence (verbatim):\n"
         f"{evidence}"
     )
@@ -788,9 +822,11 @@ def format_value_anchors_section(value_anchors: list[dict] | None) -> str:
         "belongs to. A small count is not itself a reason to distrust a match — "
         "a value held by a single row is often the very entity the question names."
         + never_invent
-        + " Evidence "
-        "still outranks these lines, and a phrase absent from this list is not "
-        "thereby absent from the database — only the listed phrases were looked up."
+        + " Their authority is limited to verified stored literal values and observed "
+        "locations. Authoritative Evidence still outranks these lines for columns, "
+        "relationship roles, operators, formulas, joins, and output mappings. A "
+        "phrase absent from this list is not thereby absent from the database — only "
+        "the listed phrases were looked up."
     )
     return "\n".join(lines)
 

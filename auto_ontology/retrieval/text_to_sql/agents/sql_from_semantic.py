@@ -328,19 +328,17 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             messages = state["messages"] + [SystemMessage(content=system_prompt)]
             messages.append(SystemMessage(content=DIRECT_ANSWER_FIELD_RULES))
-            if authoritative_evidence_section:
-                messages.append(SystemMessage(content=authoritative_evidence_section))
             if calculation_template_section:
                 messages.append(SystemMessage(content=calculation_template_section))
-            # Before the query patterns: anchors state what this database
-            # contains, which constrains the SQL more tightly than precedent
-            # from another database does.
             if value_anchors_section:
                 messages.append(SystemMessage(content=value_anchors_section))
-            # After evidence, so that on any conflict the authoritative block is
-            # the one the model read first and the advisory one qualifies it.
             if sql_examples_section:
                 messages.append(SystemMessage(content=sql_examples_section))
+            # Evidence is the final system instruction so lower-precedence anchors,
+            # examples, semantic hints, and model preferences cannot qualify or
+            # override an explicit compatible mapping.
+            if authoritative_evidence_section:
+                messages.append(SystemMessage(content=authoritative_evidence_section))
             messages.append(HumanMessage(content=user_prompt))
 
             # Add calendar time window reminder if needed

@@ -19,8 +19,8 @@ def test_evidence_is_preserved_verbatim_without_derived_rules() -> None:
 
     assert block.endswith(evidence)
     assert "events.duration LIKE '1:54%'" not in block
-    assert "MUST follow every instruction" in block
-    assert "stated column, table, filter, and operator" in block
+    assert "Explicit mappings in this evidence are binding" in block
+    assert "Do not broaden an explicit predicate" in block
 
 
 def test_formula_instructions_require_exact_calculation_without_shortcut() -> None:
@@ -29,10 +29,9 @@ def test_formula_instructions_require_exact_calculation_without_shortcut() -> No
     block = format_authoritative_evidence(evidence)
 
     assert block.endswith(evidence)
-    assert "calculate that exact formula" in block
-    assert "Do not replace it with a shortcut or precomputed field" in block
-    assert "Preserve the evidence's stated order" in block
-    assert "never reorder them" in block
+    assert "Preserve evidence-specified operators" in block
+    assert "formula terms, and scaling factors" in block
+    assert "Confirm formulas retain their operators" in block
 
 
 def test_generation_can_require_evidence_first_schema_mapping() -> None:
@@ -40,8 +39,8 @@ def test_generation_can_require_evidence_first_schema_mapping() -> None:
 
     block = format_authoritative_evidence(evidence, evidence_first_sql=True)
 
-    assert "Start SQL construction from the evidence" in block
-    assert "Decompose it into individual rules" in block
-    assert "whose name and description in the Available Schema best match" in block
-    assert "only then add the remaining requirements from the question" in block
+    assert "Start SQL construction from the explicit evidence requirements" in block
+    assert "Build their projections, formulas, predicates" in block
+    assert "only then add requirements from the question" in block
+    assert "Verify every named identifier against the Available Schema" in block
     assert block.endswith(evidence)

@@ -60,7 +60,8 @@ def test_tables_agent_uses_state_evidence_as_authoritative_context(
     )
 
     assert "## Authoritative Evidence" in messages[1].content
-    assert "MUST follow every instruction" in messages[1].content
+    assert "Explicit mappings in this evidence are binding" in messages[1].content
+    assert "## Authoritative Evidence Checklist" in messages[1].content
     assert messages[1].content.endswith(
         "The time refers to events.duration LIKE 'M:SS%'."
     )
@@ -81,7 +82,7 @@ def test_tables_agent_does_not_scan_question_for_evidence(
     )
 
     assert "## Authoritative Evidence" not in messages[1].content
-    assert "MUST follow every instruction" not in messages[1].content
+    assert "Explicit mappings in this evidence are binding" not in messages[1].content
 
 
 def test_tables_agent_enables_reference_query_guidance(

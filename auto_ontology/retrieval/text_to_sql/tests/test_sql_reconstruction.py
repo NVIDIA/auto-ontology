@@ -96,7 +96,7 @@ def test_reconstruction_uses_evidence_from_state(
     prompt = captured_messages[-1].content
     evidence_message = captured_messages[-2].content
     assert "## Authoritative Evidence" in evidence_message
-    assert "MUST follow every instruction" in evidence_message
+    assert "Explicit mappings in this evidence are binding" in evidence_message
     assert evidence_message.endswith("The time refers to events.duration LIKE 'M:SS%'.")
     assert "The time refers to" not in prompt
     assert "events.duration LIKE '1:54%'" not in prompt

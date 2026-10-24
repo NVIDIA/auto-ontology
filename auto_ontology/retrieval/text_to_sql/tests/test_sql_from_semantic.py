@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     DIRECT_ANSWER_FIELD_RULES,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_authoritative_evidence,
     format_projection_rules,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -131,6 +132,86 @@ def test_sql_generation_plans_query_structure_before_sql() -> None:
     assert "evidence-defined direct comparison operand" in create_sql_user_prompt
 
 
+def test_authoritative_evidence_column_mapping_overrides_candidates() -> None:
+    rendered = format_authoritative_evidence(
+        "The requested identifier maps to records.canonical_identifier.",
+        evidence_first_sql=True,
+    )
+    system_prompt = create_sql_from_candidates_prompt(has_sql_examples=True)
+
+    assert "Explicit mappings in this evidence are binding" in rendered
+    assert "Do not substitute a semantically similar column" in rendered
+    assert "retrieved candidates" in rendered
+    assert "canonical_identifier" in rendered
+    assert "## Authoritative Evidence Checklist" in rendered
+    assert "enumerate every explicit evidence" in system_prompt
+    assert system_prompt.index("1. Explicit Authoritative Evidence") < (
+        system_prompt.index("2. Verified schema facts")
+    )
+    assert system_prompt.index("2. Verified schema facts") < (
+        system_prompt.index("3. Semantic hints")
+    )
+    assert system_prompt.index("3. Semantic hints") < (
+        system_prompt.index("4. Reference SQL examples")
+    )
+    assert "authoritative only for stored literal values" in system_prompt
+
+
+def test_authoritative_evidence_preserves_all_mapped_outputs() -> None:
+    rendered = format_authoritative_evidence(
+        "The requested classification maps to records.primary_class "
+        "and records.secondary_class."
+    )
+
+    assert "If several output columns are explicitly mapped, preserve all of them" in (
+        rendered
+    )
+    assert "primary_class" in rendered
+    assert "secondary_class" in rendered
+
+
+def test_authoritative_evidence_does_not_broaden_relationship_role() -> None:
+    rendered = format_authoritative_evidence(
+        "Match the requested entity through relations.source_entity_id."
+    )
+
+    assert "Do not broaden an explicit predicate" in rendered
+    assert "endpoint, relationship role, or OR branch" in rendered
+    assert "source_entity_id" in rendered
+
+
+def test_authoritative_evidence_min_max_preserves_ties() -> None:
+    rendered = format_authoritative_evidence(
+        "Use MIN(records.score) to identify the lowest score."
+    )
+
+    assert "MIN and MAX in evidence are aggregate semantics" in rendered
+    assert "equivalent tie-preserving form" in rendered
+    assert "Do not replace this with ORDER BY and LIMIT 1" in rendered
+
+
+def test_authoritative_evidence_preserves_schema_confirmed_spelling() -> None:
+    rendered = format_authoritative_evidence(
+        "Use records.CreationTimestmp as the event timestamp."
+    )
+
+    assert "Preserve the exact spelling and case" in rendered
+    assert "when that identifier exists in the Available Schema" in rendered
+    assert "never invent it" in rendered
+    assert "CreationTimestmp" in rendered
+
+
+def test_value_only_evidence_does_not_resolve_other_ambiguity() -> None:
+    rendered = format_authoritative_evidence(
+        "The stored label for the requested state is 'enabled'."
+    )
+
+    assert "If it only explains a literal value" in rendered
+    assert "does not resolve an otherwise ambiguous table, column" in rendered
+    assert "Do not infer additional requirements" in rendered
+    assert "do not copy arbitrary prose into SQL" in rendered
+
+
 def test_calculation_sql_template_is_structural_guidance() -> None:
     rendered = format_calculation_sql_template(
         {
@@ -173,6 +254,21 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
             "reasoning_llm": reasoning_llm,
             "initial_question": "How many accounts?",
             "evidence": "Active means accounts.status = 'active'.",
+            "value_anchors": [
+                {
+                    "phrase": "active",
+                    "tbl": "accounts",
+                    "col": "status",
+                    "stored_value": "active",
+                    "n_rows": 3,
+                }
+            ],
+            "sql_examples": [
+                {
+                    "question": "Count matching records",
+                    "sql": "SELECT COUNT(*) FROM records WHERE state = 'ready'",
+                }
+            ],
             "messages": [],
             "connectors": [],
             "path_state": {
@@ -189,6 +285,18 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    assert invoked_messages[-2].content.startswith("## Authoritative Evidence")
+    anchor_index = next(
+        index
+        for index, message in enumerate(invoked_messages)
+        if message.content.startswith("## Verified Database Values")
+    )
+    examples_index = next(
+        index
+        for index, message in enumerate(invoked_messages)
+        if message.content.startswith("## Reference Query Patterns")
+    )
+    assert anchor_index < examples_index < len(invoked_messages) - 2
     direct_answer_messages = [
         message
         for message in invoked_messages
