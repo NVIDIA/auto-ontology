@@ -143,7 +143,8 @@ class IntentValidationModel(BaseModel):
         description=(
             "List every way the SQL violates Authoritative Evidence, including a "
             "missing or substituted value, column/table mapping, filter, operator, "
-            "or formula. Leave EMPTY [] when all evidence instructions are followed."
+            "formula, literal, required cast, scaling factor, or canonical output "
+            "mapping. Leave EMPTY [] when all evidence instructions are followed."
         ),
     )
 
@@ -1026,7 +1027,7 @@ class SQLValidationAgent(BaseAgent):
             custom_analyses=custom_analyses,
             join_paths=join_paths,
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
-            has_evidence=bool(evidence),
+            evidence=evidence,
             used_schema_context=used_schema_context,
             shorten_answer=state.get("shorten_answer", False),
         )

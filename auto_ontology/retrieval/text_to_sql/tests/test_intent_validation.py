@@ -170,8 +170,13 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     assert "do not add a cast around an evidence-defined comparison operand" in (
         messages[1].content
     )
+    assert sum(evidence in message.content for message in messages) == 2
+    assert "AUTHORITATIVE EVIDENCE TO VALIDATE AGAINST" in messages[2].content
+    assert messages[2].content.count(evidence) == 1
     assert "Evidence compliance is strict, not lenient" in messages[2].content
-    assert "formula term, literal, or scaling factor" in messages[2].content
+    assert "formula term, literal, cast, or scaling factor" in messages[2].content
+    assert "An evidence-defined output mapping is canonical" in messages[2].content
+    assert "An evidence-required cast is mandatory and valid" in messages[2].content
     assert "QUERY SHAPE JUSTIFICATION CHECK" in messages[2].content
 
 

@@ -890,7 +890,7 @@ def create_intent_validation_prompt(
     custom_analyses: str = "",
     join_paths: str = "",
     joins_validated_elsewhere: bool = False,
-    has_evidence: bool = False,
+    evidence: str = "",
     used_schema_context: str = "",
     shorten_answer: bool = False,
 ) -> str:
@@ -931,10 +931,17 @@ def create_intent_validation_prompt(
         "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
         "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
         "substituted evidence-defined value, column/table mapping, filter, operator, "
-        "formula term, literal, or scaling factor as a critical evidence issue. "
+        "formula term, literal, cast, or scaling factor as a critical evidence issue. "
+        "An evidence-defined output mapping is canonical; substituting another "
+        "plausible output column is invalid. "
         "Also flag any wrapper, cast, or transformation added to an evidence-defined "
         "formula or comparison operand unless the evidence explicitly requires it."
-        if has_evidence
+        if evidence
+        else ""
+    )
+    evidence_block = (
+        f"\nAUTHORITATIVE EVIDENCE TO VALIDATE AGAINST (verbatim):\n{evidence}\n"
+        if evidence
         else ""
     )
     shape_criterion = (
@@ -948,9 +955,11 @@ def create_intent_validation_prompt(
         "unavoidable join fan-out at the requested result grain. Defensive DISTINCT "
         "is invalid; record it in shape_issues.\n"
         "- Every CAST must be required by the operation, schema, dialect, or "
-        "Authoritative Evidence. A cast around an evidence-defined comparison operand "
-        "is invalid unless the evidence explicitly requires it; record unsupported "
-        "casts in shape_issues and evidence_issues when evidence is violated."
+        "Authoritative Evidence. An evidence-required cast is mandatory and valid; "
+        "do not flag or remove it. A cast around an evidence-defined comparison "
+        "operand is invalid only when the evidence does not require it. Record "
+        "unsupported casts in shape_issues and evidence_issues when evidence is "
+        "violated."
     )
     projection_criterion = (
         "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
@@ -982,6 +991,7 @@ def create_intent_validation_prompt(
 {custom_analyses_block}
 {join_paths_block}
 {parsed_usage_block}
+{evidence_block}
 Generated SQL Query:
 ```sql
 {sql_code}
