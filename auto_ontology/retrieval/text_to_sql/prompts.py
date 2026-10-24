@@ -895,6 +895,7 @@ def create_intent_validation_prompt(
     joins_validated_elsewhere: bool = False,
     evidence: str = "",
     used_schema_context: str = "",
+    candidate_fields_context: str = "",
     shorten_answer: bool = False,
 ) -> str:
     question_block = format_dual_question_block(
@@ -960,7 +961,8 @@ def create_intent_validation_prompt(
         "- Flag CAST only when it demonstrably changes the requested arithmetic "
         "result or comparison semantics. Do not require explicit justification for "
         "a harmless cast, and never flag numeric coercion needed to avoid integer "
-        "truncation."
+        "truncation.\n"
+        "- Never flag harmless aliases or equivalent SQL forms."
     )
     projection_criterion = (
         "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
@@ -980,25 +982,43 @@ def create_intent_validation_prompt(
         "semantic hints help interpret the SQL but do not make one plausible column "
         "authoritative over another. Do not reject a projected column merely because "
         "metadata suggests a preferred alternative. A column mapping is authoritative "
-        "only when Authoritative Evidence explicitly maps the requested output."
+        "only when Authoritative Evidence explicitly maps the requested output. "
+        "Candidate fields may reveal that a requested concept is entirely missing, "
+        "but they cannot justify replacing an already plausible projection."
     )
     aggregation_criterion = (
         "\n2. Flag clear aggregation or cardinality errors: a missing restriction "
         "needed for an explicitly requested highest/top result, grouping at a grain "
-        "different from the one requested, using the wrong aggregate operation, or "
-        "combining outputs that the question explicitly requests separately. Accept "
-        "plausible equivalent implementations."
+        "different from the one requested, using the wrong aggregate operation, "
+        "implementing an explicit 'in total' request without the required aggregation, "
+        "combining outputs that the question explicitly requests separately, or "
+        "combining parallel category counts explicitly requested separately. Accept "
+        "plausible equivalent implementations. Deriving a measure is a clear error "
+        "only when a direct stored field unambiguously matches the requested concept "
+        "and grain as a verified schema fact; a candidate field that merely looks "
+        "preferable is not enough."
     )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
         "(catalog metadata only for tables and columns referenced by the query):\n"
         f"{used_schema_context}\n"
     )
+    candidate_fields_block = (
+        "\nRELEVANT CANDIDATE FIELDS (NON-AUTHORITATIVE):\n"
+        "These were retrieved as possible matches. They may identify a requested "
+        "concept absent from the SQL, but they are not proof that a plausible "
+        "projected column should be replaced.\n"
+        f"{candidate_fields_context}\n"
+        if candidate_fields_context
+        and candidate_fields_context != "No semantically matched columns."
+        else ""
+    )
     return f"""User's Question:
 {question_block}
 {custom_analyses_block}
 {join_paths_block}
 {parsed_usage_block}
+{candidate_fields_block}
 {evidence_block}
 Generated SQL Query:
 ```sql
@@ -1012,6 +1032,16 @@ Check for CRITICAL issues ONLY (be lenient):
 {projection_criterion}
 {shape_criterion}
 {metadata_criterion}
+
+For EVERY reported issue, provide:
+- basis: exactly one of explicit_question, authoritative_evidence, sql_semantics,
+  verified_schema, semantic_hint, preference, or ambiguity.
+- confidence: certain only when the error is directly demonstrated; otherwise
+  uncertain.
+Use semantic_hint, preference, or ambiguity for claims that another column or
+representation might be better. Words such as "probably", "might", "prefer", and
+"better" require uncertain confidence. Never present a preferred alternative as
+a certain critical error.
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

@@ -22,7 +22,7 @@ Design Decisions:
 
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, field_validator
@@ -44,6 +44,7 @@ from auto_ontology.retrieval.data_access.graph_schemas import (
     get_schemas_by_ids,
 )
 from auto_ontology.retrieval.text_to_sql.formatters_util import (
+    format_important_columns_for_prompt,
     format_semantic_context,
     format_used_schema_for_prompt,
 )
@@ -85,6 +86,50 @@ _JOINS_VALIDATED_ELSEWHERE = os.environ.get(
 # parsing. Qualification and dialect are the connector's to decide.
 _TRUTHY = {"1", "true", "yes", "on"}
 
+IssueBasis = Literal[
+    "explicit_question",
+    "authoritative_evidence",
+    "sql_semantics",
+    "verified_schema",
+    "semantic_hint",
+    "preference",
+    "ambiguity",
+]
+IssueConfidence = Literal["certain", "uncertain"]
+_RECONSTRUCTION_BASES = {
+    "explicit_question",
+    "authoritative_evidence",
+    "sql_semantics",
+    "verified_schema",
+}
+
+
+class IntentIssue(BaseModel):
+    """One intent-validation finding with its evidentiary strength."""
+
+    message: str = Field(description="Concise description of the concrete SQL error.")
+    basis: IssueBasis = Field(
+        description=(
+            "The sole strongest basis for this issue. semantic_hint, preference, "
+            "and ambiguity can never justify reconstruction."
+        )
+    )
+    confidence: IssueConfidence = Field(
+        description=(
+            "certain only when the issue is directly demonstrated by the selected "
+            "basis; use uncertain for probably, might, or preferred alternatives."
+        )
+    )
+
+
+def _reconstructable_issues(issues: list[IntentIssue]) -> list[IntentIssue]:
+    """Keep only findings strong enough to justify rewriting plausible SQL."""
+    return [
+        issue
+        for issue in issues
+        if issue.confidence == "certain" and issue.basis in _RECONSTRUCTION_BASES
+    ]
+
 
 class IntentValidationModel(BaseModel):
     """Structured response for the LLM phase of unified SQL validation."""
@@ -102,7 +147,7 @@ class IntentValidationModel(BaseModel):
             "unless there are serious problems."
         )
     )
-    join_issues: list[str] = Field(
+    join_issues: list[IntentIssue] = Field(
         default_factory=list,
         description=(
             "List of CRITICAL join issues that would produce completely wrong "
@@ -110,7 +155,7 @@ class IntentValidationModel(BaseModel):
             "explanatory text like 'no join issues'."
         ),
     )
-    aggregation_issues: list[str] = Field(
+    aggregation_issues: list[IntentIssue] = Field(
         default_factory=list,
         description=(
             "List only clear aggregation errors, including a missing requested "
@@ -119,7 +164,7 @@ class IntentValidationModel(BaseModel):
             "for plausible alternatives and when there are no aggregation issues."
         ),
     )
-    shape_issues: list[str] = Field(
+    shape_issues: list[IntentIssue] = Field(
         default_factory=list,
         description=(
             "List a DISTINCT or CAST only when it demonstrably changes the requested "
@@ -128,7 +173,7 @@ class IntentValidationModel(BaseModel):
             "EMPTY [] for harmless or plausibly correct query-shape choices."
         ),
     )
-    projection_issues: list[str] = Field(
+    projection_issues: list[IntentIssue] = Field(
         default_factory=list,
         description=(
             "Always list output fields not requested by the question or evidence. "
@@ -138,7 +183,7 @@ class IntentValidationModel(BaseModel):
             "Leave EMPTY [] only when no applicable projection issue exists."
         ),
     )
-    evidence_issues: list[str] = Field(
+    evidence_issues: list[IntentIssue] = Field(
         default_factory=list,
         description=(
             "List only clear semantic violations of Authoritative Evidence, such as "
@@ -1003,9 +1048,18 @@ class SQLValidationAgent(BaseAgent):
             dialect=dialect,
         )
 
+        primary_attribute = path_state.get("primary_attribute")
+        attribute_join_paths = path_state.get("attribute_join_paths") or []
+        candidate_fields_context = format_important_columns_for_prompt(
+            primary_attribute,
+            attribute_join_paths,
+            relevant_tables,
+            target_db=path_state.get("target_db"),
+            dialect=dialect,
+        )
+
         join_paths = ""
         if not _JOINS_VALIDATED_ELSEWHERE:
-            attribute_join_paths = path_state.get("attribute_join_paths") or []
             if attribute_join_paths:
                 join_paths = (
                     "AUTHORITATIVE JOIN PATHS "
@@ -1029,6 +1083,7 @@ class SQLValidationAgent(BaseAgent):
             joins_validated_elsewhere=_JOINS_VALIDATED_ELSEWHERE,
             evidence=evidence,
             used_schema_context=used_schema_context,
+            candidate_fields_context=candidate_fields_context,
             shorten_answer=state.get("shorten_answer", False),
         )
         system_prompt = (
@@ -1073,39 +1128,41 @@ class SQLValidationAgent(BaseAgent):
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
-        issue_lists = (
-            validation_result.join_issues,
-            validation_result.aggregation_issues,
-            validation_result.shape_issues,
-            validation_result.projection_issues,
-            validation_result.evidence_issues,
-        )
-        has_real_issues = any(issue_lists)
-        if validation_result.is_valid and not has_real_issues:
-            self.logger.info(
-                "SQL passed static and intent validation, columns: %s",
-                len(path_state.get("sql_columns") or []),
-            )
-            return {"decision": "valid_sql", "path_state": path_state}
-
-        if not has_real_issues:
-            self.logger.info(
-                "SQL intent validation passed (is_valid=False without issues)"
-            )
-            return {"decision": "valid_sql", "path_state": path_state}
-
-        error_parts = ["Critical SQL issues found:"]
-        issue_sections = (
+        reported_issue_lists = (
             ("Critical join issues", validation_result.join_issues),
             ("Critical aggregation issues", validation_result.aggregation_issues),
             ("Critical query-shape issues", validation_result.shape_issues),
             ("Critical projection issues", validation_result.projection_issues),
             ("Critical evidence issues", validation_result.evidence_issues),
         )
-        for title, issues in issue_sections:
+        qualifying_issue_lists = [
+            (title, _reconstructable_issues(issues))
+            for title, issues in reported_issue_lists
+        ]
+        reported_count = sum(len(issues) for _, issues in reported_issue_lists)
+        qualifying_count = sum(len(issues) for _, issues in qualifying_issue_lists)
+        if not qualifying_count:
+            if reported_count:
+                self.logger.info(
+                    "SQL intent validation ignored %d non-qualifying issue(s)",
+                    reported_count,
+                )
+            self.logger.info(
+                "SQL passed static and conservative intent validation, columns: %s",
+                len(path_state.get("sql_columns") or []),
+            )
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        error_parts = ["Critical SQL issues found:"]
+        for title, issues in qualifying_issue_lists:
             if issues:
                 error_parts.append(
-                    f"\n\n{title}:\n" + "\n".join(f"  - {issue}" for issue in issues)
+                    f"\n\n{title}:\n"
+                    + "\n".join(
+                        f"  - {issue.message} "
+                        f"[basis={issue.basis}, confidence={issue.confidence}]"
+                        for issue in issues
+                    )
                 )
 
         path_state["error"] = "".join(error_parts)

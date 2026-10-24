@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     INTENT_VALIDATION_SKIPPED_AFTER,
+    IntentIssue,
     IntentValidationModel,
     SQLValidationAgent,
 )
@@ -116,6 +117,9 @@ def test_intent_validation_keeps_authoritative_attribute_join(
     assert "SEMANTIC HINT" not in prompt
     assert "likely starting table" not in prompt
     assert "Column: customer_id  (Order Customer)" not in prompt
+    assert "RELEVANT CANDIDATE FIELDS (NON-AUTHORITATIVE)" in prompt
+    assert "Semantic match: Order Customer" in prompt
+    assert "not proof that a plausible projected column should be replaced" in prompt
     assert "USED SQL OBJECTS" in prompt
     assert "- public.orders | description: Customer purchase records." in prompt
     assert "public.orders.customer_id (integer) - Customer placing the order." in prompt
@@ -232,7 +236,14 @@ def test_intent_validation_omits_generation_only_direct_answer_rules(
     return_value=IntentValidationModel(
         is_valid=True,
         evidence_issues=[
-            "Uses converted_amount instead of the required net_amount * exchange_rate."
+            IntentIssue(
+                message=(
+                    "Uses converted_amount instead of the required "
+                    "net_amount * exchange_rate."
+                ),
+                basis="authoritative_evidence",
+                confidence="certain",
+            )
         ],
     ),
 )
@@ -273,7 +284,13 @@ def test_intent_validation_rejects_and_reports_evidence_violation(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
     return_value=IntentValidationModel(
         is_valid=True,
-        projection_issues=["The SQL returns account_id, which was not requested."],
+        projection_issues=[
+            IntentIssue(
+                message="The SQL returns account_id, which was not requested.",
+                basis="explicit_question",
+                confidence="certain",
+            )
+        ],
     ),
 )
 def test_short_answer_validation_requires_exact_projection(
@@ -359,19 +376,59 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     assert "never flag numeric coercion needed to avoid integer" in messages[1].content
     assert "SCHEMA METADATA IS CONTEXTUAL" in messages[1].content
     assert "Do not reject a projected column merely because" in messages[1].content
+    assert (
+        "Candidate fields may reveal that a requested concept is entirely missing"
+        in (messages[1].content)
+    )
+    assert "Never flag harmless aliases or equivalent SQL forms" in messages[1].content
     assert "missing restriction" in messages[1].content
     assert "highest/top result" in messages[1].content
     assert "grouping at a grain different" in messages[1].content
     assert "explicitly requests separately" in messages[1].content
+    assert "parallel category counts explicitly requested separately" in (
+        messages[1].content
+    )
+    assert "explicit 'in total' request" in messages[1].content
+    assert "direct stored field unambiguously matches" in messages[1].content
+    assert "basis: exactly one of explicit_question" in messages[1].content
+    assert "confidence: certain only when the error is directly demonstrated" in (
+        messages[1].content
+    )
+    assert '"probably", "might", "prefer", and' in messages[1].content
 
 
 @patch(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
     return_value=IntentValidationModel(
         is_valid=True,
-        join_issues=["The joined table supplies no required data or path hop."],
-        shape_issues=["DISTINCT demonstrably changes the count from rows to entities."],
-        projection_issues=["The projected identifier was not requested."],
+        join_issues=[
+            IntentIssue(
+                message="The join demonstrably duplicates the requested entity rows.",
+                basis="sql_semantics",
+                confidence="certain",
+            )
+        ],
+        aggregation_issues=[
+            IntentIssue(
+                message="Verified key metadata proves grouping occurs at child grain.",
+                basis="verified_schema",
+                confidence="certain",
+            )
+        ],
+        shape_issues=[
+            IntentIssue(
+                message="DISTINCT demonstrably changes the count from rows to entities.",
+                basis="sql_semantics",
+                confidence="certain",
+            )
+        ],
+        projection_issues=[
+            IntentIssue(
+                message="The projected identifier was not requested.",
+                basis="explicit_question",
+                confidence="certain",
+            )
+        ],
     ),
 )
 def test_intent_validation_rejects_unsupported_query_shape(
@@ -403,9 +460,68 @@ def test_intent_validation_rejects_unsupported_query_shape(
 
     assert result["decision"] == "invalid_sql"
     assert "Critical join issues" in result["path_state"]["error"]
+    assert "Critical aggregation issues" in result["path_state"]["error"]
     assert "Critical query-shape issues" in result["path_state"]["error"]
     assert "Critical projection issues" in result["path_state"]["error"]
     assert "DISTINCT demonstrably changes" in result["path_state"]["error"]
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(
+        is_valid=False,
+        projection_issues=[
+            IntentIssue(
+                message="A semantic candidate suggests a different identifier.",
+                basis="semantic_hint",
+                confidence="certain",
+            ),
+            IntentIssue(
+                message="Another output representation may be preferable.",
+                basis="preference",
+                confidence="certain",
+            ),
+            IntentIssue(
+                message="The requested representation is ambiguous.",
+                basis="ambiguity",
+                confidence="certain",
+            ),
+        ],
+        shape_issues=[
+            IntentIssue(
+                message="The cast might affect comparison behavior.",
+                basis="sql_semantics",
+                confidence="uncertain",
+            )
+        ],
+    ),
+)
+def test_intent_validation_ignores_preferences_hints_and_uncertainty(
+    _mock_invoke: MagicMock,
+) -> None:
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Return the account identifier",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT external_id AS account_identifier FROM accounts"
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.accounts"],
+        ["public.accounts.external_id"],
+    )
+
+    assert result["decision"] == "valid_sql"
+    assert "error" not in result["path_state"]
 
 
 @patch(
