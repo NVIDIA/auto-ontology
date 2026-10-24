@@ -191,6 +191,52 @@ def test_prompt_requests_structural_sql_example_filtering() -> None:
     assert "Reject examples with a different aggregation" in prompt
 
 
+def test_prompt_requests_evidence_only_value_anchor_filtering() -> None:
+    prompt = create_question_intent_prompt(
+        "Find records for the named value",
+        existing_evidence="The named value refers to the canonical status field.",
+        value_anchors=[
+            {
+                "phrase": "named value",
+                "tbl": "records",
+                "col": "status",
+                "stored_value": "Named Value",
+            },
+            {
+                "phrase": "named value",
+                "tbl": "records",
+                "col": "display_name",
+                "stored_value": "Named Value",
+            },
+        ],
+    )
+
+    assert "## Candidate value anchors" in prompt
+    assert '1. phrase="named value"; location=records.status' in prompt
+    assert '2. phrase="named value"; location=records.display_name' in prompt
+    assert "Use only Existing evidence" in prompt
+    assert "Do not use the question alone" in prompt
+    assert (
+        "Preserve every option for values the evidence does not disambiguate" in prompt
+    )
+
+
+def test_prompt_does_not_offer_anchor_filtering_without_evidence() -> None:
+    prompt = create_question_intent_prompt(
+        "Find records for the named value",
+        value_anchors=[
+            {
+                "phrase": "named value",
+                "tbl": "records",
+                "col": "status",
+                "stored_value": "Named Value",
+            }
+        ],
+    )
+
+    assert "## Candidate value anchors" not in prompt
+
+
 def test_agent_replaces_sql_examples_with_structurally_relevant_subset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -218,6 +264,90 @@ def test_agent_replaces_sql_examples_with_structurally_relevant_subset(
     result = QuestionIntentAgent().execute(_state(sql_examples=examples))
 
     assert result["sql_examples"] == [examples[1]]
+
+
+def test_agent_removes_only_value_anchor_options_rejected_by_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    anchors = [
+        {
+            "phrase": "active",
+            "tbl": "accounts",
+            "col": "status",
+            "stored_value": "active",
+        },
+        {
+            "phrase": "active",
+            "tbl": "accounts",
+            "col": "label",
+            "stored_value": "active",
+        },
+        {
+            "phrase": "retail",
+            "tbl": "accounts",
+            "col": "segment",
+            "stored_value": "retail",
+        },
+    ]
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.MATCH_BASED,
+            rewritten_question="Find active retail accounts",
+            extracted_evidence="",
+            target_db=None,
+            irrelevant_value_anchor_numbers=[2, 99],
+        ),
+    )
+
+    result = QuestionIntentAgent().execute(
+        _state(
+            initial_question="Find active retail accounts",
+            evidence="Active is the value in the status field.",
+            value_anchors=anchors,
+        )
+    )
+
+    assert result["value_anchors"] == [anchors[0], anchors[2]]
+
+
+def test_agent_preserves_value_anchors_without_existing_evidence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    anchors = [
+        {
+            "phrase": "active",
+            "tbl": "accounts",
+            "col": "status",
+            "stored_value": "active",
+        },
+        {
+            "phrase": "active",
+            "tbl": "accounts",
+            "col": "label",
+            "stored_value": "active",
+        },
+    ]
+    monkeypatch.setattr(
+        question_intent,
+        "invoke_with_structured_output",
+        lambda *_args, **_kwargs: QuestionIntentModel(
+            question_type=QuestionType.CALCULATION,
+            calculation_subtype=CalculationSubtype.MATCH_BASED,
+            rewritten_question="Find active accounts",
+            extracted_evidence="",
+            target_db=None,
+            irrelevant_value_anchor_numbers=[2],
+        ),
+    )
+
+    result = QuestionIntentAgent().execute(
+        _state(initial_question="Find active accounts", value_anchors=anchors)
+    )
+
+    assert result["value_anchors"] == anchors
 
 
 def test_failed_intent_filter_preserves_all_sql_examples(

@@ -165,6 +165,13 @@ class QuestionIntentModel(StrictLLMOutputModel):
             "One-based numbers of SQL examples structurally relevant to the request."
         ),
     )
+    irrelevant_value_anchor_numbers: list[int] = Field(
+        default_factory=list,
+        description=(
+            "One-based numbers of value-anchor options explicitly contradicted by "
+            "the supplied evidence. Empty when evidence does not resolve an option."
+        ),
+    )
 
     @model_validator(mode="after")
     def _subtype_matches_type(self) -> QuestionIntentModel:
@@ -217,6 +224,13 @@ class CalculationOnlyQuestionIntentModel(StrictLLMOutputModel):
             "One-based numbers of SQL examples structurally relevant to the request."
         ),
     )
+    irrelevant_value_anchor_numbers: list[int] = Field(
+        default_factory=list,
+        description=(
+            "One-based numbers of value-anchor options explicitly contradicted by "
+            "the supplied evidence. Empty when evidence does not resolve an option."
+        ),
+    )
 
 
 def create_question_intent_prompt(
@@ -228,6 +242,7 @@ def create_question_intent_prompt(
     existing_evidence: str = "",
     available_databases: list[str] | None = None,
     sql_examples: list[dict[str, str]] | None = None,
+    value_anchors: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build the classification and evidence-separation prompt."""
     override_instruction = ""
@@ -317,6 +332,38 @@ def create_question_intent_prompt(
         "example is structurally relevant. Use the one-based numbers shown above.\n"
     )
 
+    value_anchors_section = ""
+    if existing_evidence.strip() and value_anchors:
+        anchor_lines: list[str] = []
+        for number, anchor in enumerate(value_anchors, 1):
+            phrase = " ".join(str(anchor.get("phrase") or "").split())
+            table = str(anchor.get("tbl") or "").strip()
+            column = str(anchor.get("col") or "").strip()
+            stored_value = " ".join(str(anchor.get("stored_value") or "").split())
+            kind = str(anchor.get("kind") or "value").strip()
+            description = " ".join(str(anchor.get("description") or "").split())
+            details = [
+                f'phrase="{phrase}"',
+                f"location={table}.{column}" if table and column else "location=(none)",
+                f'stored_value="{stored_value}"' if stored_value else "",
+                f"kind={kind}",
+                f"description={description}" if description else "",
+            ]
+            anchor_lines.append(
+                f"{number}. " + "; ".join(detail for detail in details if detail)
+            )
+        value_anchors_section = (
+            "\n## Candidate value anchors\n" + "\n".join(anchor_lines) + "\n\n"
+            "Use only Existing evidence to remove value-anchor options. When the "
+            "evidence explicitly identifies or excludes a table, column, relationship "
+            "role, or meaning for a particular value, return the one-based numbers of "
+            "the incompatible options in irrelevant_value_anchor_numbers. Do not use "
+            "the question alone, schema-name preference, row counts, or model intuition "
+            "to choose among anchors. Preserve every option for values the evidence "
+            "does not disambiguate. If there is no explicit contradiction, return an "
+            "empty list.\n"
+        )
+
     subtype_section = "\n".join(
         (
             f"- {subtype.value}: {CALCULATION_SUBTYPE_DEFINITIONS[subtype.value]['description']}\n"
@@ -336,14 +383,16 @@ def create_question_intent_prompt(
 1. Choose exactly one calculation subtype.
 2. Rewrite the executable question without supporting inline instructions.
 3. Return any removed supporting instruction as extracted_evidence.
-4. Filter the candidate SQL examples by structural relevance."""
+4. Filter the candidate SQL examples by structural relevance.
+5. Remove value-anchor options only when Existing evidence contradicts them."""
         if calculation_only
-        else """Perform five tasks in one structured response:
+        else """Perform six tasks in one structured response:
 1. Classify the question as information, prediction, or calculation.
 2. For calculation only, choose exactly one calculation subtype.
 3. Rewrite the executable question without supporting inline instructions.
 4. Return any removed supporting instruction as extracted_evidence.
-5. Filter the candidate SQL examples by structural relevance."""
+5. Filter the candidate SQL examples by structural relevance.
+6. Remove value-anchor options only when Existing evidence contradicts them."""
     )
     question_types = (
         ""
@@ -398,7 +447,7 @@ Examples:
   → rewritten_question: unchanged
   → extracted_evidence: ""
 
-{database_section}{glossary_section}{evidence_section}{sql_examples_section}
+{database_section}{glossary_section}{evidence_section}{sql_examples_section}{value_anchors_section}
 Question:
 {question}"""
 
@@ -435,6 +484,7 @@ class QuestionIntentAgent(BaseAgent):
         calculation_only = state.get("calculation_only", False)
         existing_evidence = state.get("evidence") or ""
         sql_examples = list(state.get("sql_examples") or [])
+        value_anchors = list(state.get("value_anchors") or [])
         connectors = list(state.get("connectors") or [])
         available_databases = list(
             dict.fromkeys(
@@ -454,6 +504,7 @@ class QuestionIntentAgent(BaseAgent):
                     existing_evidence=existing_evidence,
                     available_databases=available_databases,
                     sql_examples=sql_examples,
+                    value_anchors=value_anchors,
                 )
             )
         ]
@@ -485,6 +536,7 @@ class QuestionIntentAgent(BaseAgent):
             extracted = ""
             selected_target_db = None
             filtered_sql_examples = sql_examples
+            filtered_value_anchors = value_anchors
         else:
             question_type = (
                 QuestionType.CALCULATION if calculation_only else intent.question_type
@@ -500,6 +552,16 @@ class QuestionIntentAgent(BaseAgent):
                 if number in selected_example_numbers
                 and str(example.get("question") or "").strip()
                 and str(example.get("sql") or "").strip()
+            ]
+            irrelevant_anchor_numbers = (
+                set(intent.irrelevant_value_anchor_numbers)
+                if existing_evidence.strip()
+                else set()
+            )
+            filtered_value_anchors = [
+                anchor
+                for number, anchor in enumerate(value_anchors, 1)
+                if number not in irrelevant_anchor_numbers
             ]
 
             if calculation_only:
@@ -554,6 +616,7 @@ class QuestionIntentAgent(BaseAgent):
         result: Dict[str, Any] = {
             "path_state": path_state,
             "sql_examples": filtered_sql_examples,
+            "value_anchors": filtered_value_anchors,
         }
         if merged_evidence or existing_evidence or extracted:
             result["evidence"] = merged_evidence
