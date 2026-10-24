@@ -43,7 +43,9 @@ def detect_reciprocal_edges(database_name: str) -> int:
         for table in fetch_table_headers_for_database(database_name)
     }
     grouped_roles: dict[tuple[str, str, str], list[dict[str, Any]]] = defaultdict(list)
+    roles_by_table: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for role in fetch_semantic_fk_join_groups(database_name):
+        roles_by_table[str(role["source_table_id"])].append(role)
         grouped_roles[
             (
                 str(role["source_table_id"]),
@@ -71,6 +73,23 @@ def detect_reciprocal_edges(database_name: str) -> int:
                 for column in (table.get("pk") or [])
                 if str(column) not in endpoints
             ]
+            if not edge_keys:
+                endpoint_target = (
+                    str(left["target_table_id"]),
+                    str(left["target_column_id"]),
+                )
+                edge_keys = list(
+                    dict.fromkeys(
+                        str(role["source_column_name"])
+                        for role in roles_by_table[table_id]
+                        if str(role["source_column_name"]) not in endpoints
+                        and (
+                            str(role["target_table_id"]),
+                            str(role["target_column_id"]),
+                        )
+                        != endpoint_target
+                    )
+                )
             if not edge_keys:
                 continue
             candidates.append((table, left, right, edge_keys))

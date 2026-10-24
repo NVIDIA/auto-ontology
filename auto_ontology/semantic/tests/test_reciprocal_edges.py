@@ -36,6 +36,18 @@ def _roles() -> list[dict]:
     ]
 
 
+def _edge_role() -> dict:
+    return {
+        "source_table_id": "relationship-table",
+        "source_column_id": "edge-key-column",
+        "source_column_name": "edge_key",
+        "target_table_id": "edge-table",
+        "target_table_name": "edges",
+        "target_column_id": "edge-id-column",
+        "target_column_name": "edge_id",
+    }
+
+
 def _connector() -> MagicMock:
     connector = MagicMock()
     connector.database_name = "db"
@@ -115,10 +127,10 @@ def test_detects_fully_verified_reciprocal_rows(
             "id": "relationship-table",
             "name": "relationships",
             "schema_name": "main",
-            "pk": ["edge_key", "left_ref", "right_ref"],
+            "pk": ["left_ref", "right_ref"],
         }
     ]
-    fetch_roles.return_value = _roles()
+    fetch_roles.return_value = [*_roles(), _edge_role()]
     probe = probe_cls.return_value.__enter__.return_value
     probe.run.return_value = {
         "ok": True,
