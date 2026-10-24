@@ -164,7 +164,15 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
     messages = mock_invoke.call_args.args[1]
     assert messages[1].content.endswith(evidence)
     assert "MUST follow every instruction" in messages[1].content
+    assert "literal values, operators, and scaling factors exactly" in (
+        messages[1].content
+    )
+    assert "do not add a cast around an evidence-defined comparison operand" in (
+        messages[1].content
+    )
     assert "Evidence compliance is strict, not lenient" in messages[2].content
+    assert "formula term, literal, or scaling factor" in messages[2].content
+    assert "QUERY SHAPE JUSTIFICATION CHECK" in messages[2].content
 
 
 @patch(
@@ -338,6 +346,54 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     messages = mock_invoke.call_args.args[1]
     assert "STRICT SHORT-ANSWER OVERRIDE" not in messages[0].content
     assert "STRICT PROJECTION CHECK" not in messages[1].content
+    assert "Every outermost projected field must be requested" in messages[1].content
+    assert "Defensive DISTINCT is invalid" in messages[1].content
+    assert "A cast around an evidence-defined comparison operand" in (
+        messages[1].content
+    )
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(
+        is_valid=True,
+        join_issues=["The joined table supplies no required data or path hop."],
+        shape_issues=["DISTINCT has no basis in the requested result grain."],
+        projection_issues=["The projected identifier was not requested."],
+    ),
+)
+def test_intent_validation_rejects_unsupported_query_shape(
+    _mock_invoke: MagicMock,
+) -> None:
+    state = {
+        "llm": MagicMock(),
+        "initial_question": "Count active accounts",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code=(
+                    "SELECT COUNT(DISTINCT account_id) "
+                    "FROM accounts WHERE status = 'active'"
+                )
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.accounts"],
+        ["public.accounts.account_id", "public.accounts.status"],
+    )
+
+    assert result["decision"] == "invalid_sql"
+    assert "Critical join issues" in result["path_state"]["error"]
+    assert "Critical query-shape issues" in result["path_state"]["error"]
+    assert "Critical projection issues" in result["path_state"]["error"]
+    assert "DISTINCT has no basis" in result["path_state"]["error"]
 
 
 @patch(

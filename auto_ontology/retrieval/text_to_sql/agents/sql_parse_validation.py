@@ -120,13 +120,22 @@ class IntentValidationModel(BaseModel):
             "issues — do NOT add explanatory text like 'no aggregation issues'."
         ),
     )
+    shape_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List every unsupported DISTINCT or CAST. Each must be justified by "
+            "the question, Authoritative Evidence, schema, dialect, requested "
+            "result grain, or unavoidable join fan-out. Leave EMPTY [] when every "
+            "DISTINCT and CAST has a concrete basis."
+        ),
+    )
     projection_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "When strict short-answer validation is requested, list every extra, "
-            "missing, duplicated, reordered, or reshaped output field compared with "
-            "the exact projection requested by the question and evidence. Leave "
-            "EMPTY [] only when the projection matches exactly."
+            "Always list output fields not requested by the question or evidence. "
+            "When strict short-answer validation is requested, also list every "
+            "missing, duplicated, reordered, or reshaped output field. Leave EMPTY "
+            "[] only when no applicable projection issue exists."
         ),
     )
     evidence_issues: list[str] = Field(
@@ -141,6 +150,7 @@ class IntentValidationModel(BaseModel):
     @field_validator(
         "join_issues",
         "aggregation_issues",
+        "shape_issues",
         "projection_issues",
         "evidence_issues",
         mode="before",
@@ -1059,23 +1069,28 @@ class SQLValidationAgent(BaseAgent):
                 validation_result.reasoning.strip(),
             )
 
-        if validation_result is None or (
-            validation_result.is_valid
-            and not validation_result.evidence_issues
-            and not validation_result.projection_issues
-        ):
+        if validation_result is None:
             self.logger.info(
                 "SQL passed static and intent validation, columns: %s",
                 len(path_state.get("sql_columns") or []),
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
-        has_real_issues = (
-            validation_result.join_issues
-            or validation_result.aggregation_issues
-            or validation_result.projection_issues
-            or validation_result.evidence_issues
+        issue_lists = (
+            validation_result.join_issues,
+            validation_result.aggregation_issues,
+            validation_result.shape_issues,
+            validation_result.projection_issues,
+            validation_result.evidence_issues,
         )
+        has_real_issues = any(issue_lists)
+        if validation_result.is_valid and not has_real_issues:
+            self.logger.info(
+                "SQL passed static and intent validation, columns: %s",
+                len(path_state.get("sql_columns") or []),
+            )
+            return {"decision": "valid_sql", "path_state": path_state}
+
         if not has_real_issues:
             self.logger.info(
                 "SQL intent validation passed (is_valid=False without issues)"
@@ -1086,6 +1101,7 @@ class SQLValidationAgent(BaseAgent):
         issue_sections = (
             ("Critical join issues", validation_result.join_issues),
             ("Critical aggregation issues", validation_result.aggregation_issues),
+            ("Critical query-shape issues", validation_result.shape_issues),
             ("Critical projection issues", validation_result.projection_issues),
             ("Critical evidence issues", validation_result.evidence_issues),
         )

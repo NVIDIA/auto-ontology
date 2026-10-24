@@ -42,6 +42,12 @@ _PROJECTION_RULES = (
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
+    "- Preserve natural row grain. Use DISTINCT only when the question or "
+    "Authoritative Evidence explicitly asks for distinct, different, unique, or "
+    "deduplicated results. A foreign-key marker signals possible fan-out but does "
+    "not require DISTINCT: COUNT(fk) counts matching child rows; COUNT(DISTINCT fk) "
+    "counts referenced entities. Never infer DISTINCT solely from an FK, "
+    "one-to-many join, repeated IDs, or an entity noun.\n"
 )
 
 
@@ -109,6 +115,13 @@ create_sql_user_prompt = (
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
+    "**Query Shape Justification**\n"
+    "- Every projected field and JOIN must be required by the question, "
+    "Authoritative Evidence, or a mandatory hop in a selected join path. Omit "
+    "unsupported output fields and joins.\n"
+    "- Use CAST only when required by an operation, the schema, the dialect, or "
+    "Authoritative Evidence. Do not add a cast around an evidence-defined "
+    "comparison operand unless the evidence explicitly requires that cast.\n\n"
     "**Joins**\n"
     "- When evidence rules map to columns in different tables, include the joins "
     "that connect those tables using the listed paths. Choose the join type "
@@ -146,12 +159,6 @@ create_sql_user_prompt = (
     "{dialect_rules}"
     "{projection_rules}"
     "**Style**\n"
-    "- Preserve natural row grain. Use DISTINCT only when the question or authoritative "
-    "evidence explicitly asks for distinct, different, unique, or deduplicated results. "
-    "A foreign-key marker signals possible fan-out but does not require DISTINCT: "
-    "COUNT(fk) counts matching child rows; COUNT(DISTINCT fk) counts referenced entities. "
-    "Never infer DISTINCT solely from an FK, one-to-many join, repeated IDs, or an entity "
-    "noun.\n"
     "- NULL filtering: Do not add `IS NOT NULL` solely because a projected field "
     "has `is_nullable: true`, or because one or multiple fields are projected. "
     "Add it only when the question or evidence requires the requested value to "
@@ -249,7 +256,10 @@ _POSTGRES_DIALECT_RULES = (
 _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
 - plan: briefly identify the tables, exact join-key pairs, result-row grain,
   requested projection, and filters or aggregations. Plan the query structure
-  before writing SQL. Do not include SQL in this field.
+  before writing SQL. Explicitly justify every DISTINCT, CAST, projected field,
+  and JOIN from the question, Authoritative Evidence, schema, dialect, or a
+  mandatory selected join-path hop; omit any that has no such basis. Do not
+  include SQL in this field.
 - thought: briefly explain your approach and state every assumption the
   request or schema doesn't uniquely determine. For each that applies,
   state the choice AND the reason ("X, because Y"): zero/missing values
@@ -447,8 +457,11 @@ def format_authoritative_evidence(
         "- Whenever the evidence explains a formula, calculate that exact formula "
         "from the stated available tables and columns. Do not replace it with a "
         "shortcut or precomputed field. Preserve the evidence's stated order of "
-        "all formula terms, operands, predicates, and conditions exactly; never "
-        "reorder them, even when the reordered expression appears equivalent.\n\n"
+        "all formula terms, operands, predicates, conditions, literal values, "
+        "operators, and scaling factors exactly; never omit, replace, wrap, cast, "
+        "or reorder them unless the evidence explicitly requires that "
+        "transformation. In particular, do not add a cast around an "
+        "evidence-defined comparison operand.\n\n"
         "Evidence (verbatim):\n"
         f"{evidence}"
     )
@@ -918,9 +931,26 @@ def create_intent_validation_prompt(
         "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
         "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
         "substituted evidence-defined value, column/table mapping, filter, operator, "
-        "or formula as a critical evidence issue."
+        "formula term, literal, or scaling factor as a critical evidence issue. "
+        "Also flag any wrapper, cast, or transformation added to an evidence-defined "
+        "formula or comparison operand unless the evidence explicitly requires it."
         if has_evidence
         else ""
+    )
+    shape_criterion = (
+        "\nQUERY SHAPE JUSTIFICATION CHECK:\n"
+        "- Every outermost projected field must be requested by the question or "
+        "Authoritative Evidence. Record unsupported extra fields in projection_issues.\n"
+        "- Every JOIN must supply a requested output, filter, aggregation input, or "
+        "a mandatory hop in a selected join path. Record unsupported joins in "
+        "join_issues.\n"
+        "- Every DISTINCT must be required by explicit uniqueness semantics or "
+        "unavoidable join fan-out at the requested result grain. Defensive DISTINCT "
+        "is invalid; record it in shape_issues.\n"
+        "- Every CAST must be required by the operation, schema, dialect, or "
+        "Authoritative Evidence. A cast around an evidence-defined comparison operand "
+        "is invalid unless the evidence explicitly requires it; record unsupported "
+        "casts in shape_issues and evidence_issues when evidence is violated."
     )
     projection_criterion = (
         "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
@@ -963,6 +993,7 @@ Check for CRITICAL issues ONLY (be lenient):
 {evidence_criterion}
 {projection_criterion}
 {direct_answer_criterion}
+{shape_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

@@ -91,11 +91,12 @@ def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
 
 
 def test_prompt_does_not_infer_distinct_from_foreign_keys() -> None:
-    assert "Use DISTINCT only when the question or authoritative evidence" in (
-        create_sql_user_prompt
+    projection_rules = format_projection_rules(False)
+    assert "Use DISTINCT only when the question or Authoritative Evidence" in (
+        projection_rules
     )
-    assert "COUNT(fk) counts matching child rows" in create_sql_user_prompt
-    assert "Never infer DISTINCT solely from an FK" in create_sql_user_prompt
+    assert "COUNT(fk) counts matching child rows" in projection_rules
+    assert "Never infer DISTINCT solely from an FK" in projection_rules
     assert "necessary one-to-many join" not in create_sql_user_prompt
 
 
@@ -122,8 +123,11 @@ def test_sql_generation_plans_query_structure_before_sql() -> None:
     assert plan_position < thought_position < sql_position
     assert "exact join-key pairs" in prompt
     assert "result-row grain" in prompt
-    assert "Do not include SQL in this field" in prompt
+    assert "Explicitly justify every DISTINCT, CAST, projected field" in prompt
+    assert "Do not include SQL in this field" in " ".join(prompt.split())
     assert "\nExample:\n" not in prompt
+    assert "Every projected field and JOIN must be required" in create_sql_user_prompt
+    assert "evidence-defined comparison operand" in create_sql_user_prompt
 
 
 def test_calculation_sql_template_is_structural_guidance() -> None:

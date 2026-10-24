@@ -222,7 +222,10 @@ class SQLGenerationModel(StrictModel):
             "Brief query-construction plan written before the SQL. Identify the "
             "tables to use, the exact join-key pairs between them, the grain of "
             "each result row, the requested projection, and any filters or "
-            "aggregations. Do not include SQL."
+            "aggregations. Explicitly justify every DISTINCT, CAST, projected "
+            "field, and JOIN from the question, Authoritative Evidence, schema, "
+            "dialect, or a mandatory selected join-path hop; omit any that has no "
+            "such basis. Do not include SQL."
         ),
     )
     thought: str = Field(
