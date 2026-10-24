@@ -931,16 +931,14 @@ def create_intent_validation_prompt(
             "one of those verified paths."
         )
     evidence_criterion = (
-        "\n3. Does the SQL follow EVERY instruction in the Authoritative Evidence "
-        "exactly? Evidence compliance is strict, not lenient. Flag any missing or "
-        "substituted evidence-defined value, column/table mapping, filter, operator, "
-        "formula term, literal, cast, or scaling factor as a critical evidence issue. "
-        "An evidence-defined output mapping is canonical; substituting another "
-        "plausible output column is invalid. "
-        "Type coercion required to evaluate the evidence-defined formula correctly "
-        "is valid even when the evidence expresses only the conceptual arithmetic. "
-        "Flag a cast around a direct comparison operand only when the operation, "
-        "schema, dialect, and evidence provide no basis for it."
+        "\n3. Does the SQL preserve the semantic requirements in the Authoritative "
+        "Evidence? Flag only clear omissions or contradictions involving a required "
+        "formula, scaling factor, operator, filter, or explicit output mapping. "
+        "Evidence is semantic context, not a requirement to reproduce its literal "
+        "text as SQL. Do not reject a literal only because surrounding whitespace "
+        "differs unless verified database values show that whitespace is significant. "
+        "Type coercion needed for correct arithmetic is valid even when evidence "
+        "states only the conceptual formula."
         if evidence
         else ""
     )
@@ -950,43 +948,46 @@ def create_intent_validation_prompt(
         else ""
     )
     shape_criterion = (
-        "\nQUERY SHAPE JUSTIFICATION CHECK:\n"
+        "\nCONSERVATIVE QUERY SHAPE CHECK:\n"
         "- Every outermost projected field must be requested by the question or "
         "Authoritative Evidence. Record unsupported extra fields in projection_issues.\n"
-        "- Every JOIN must supply a requested output, filter, aggregation input, or "
-        "a mandatory hop in a selected join path. Record unsupported joins in "
-        "join_issues.\n"
-        "- Every DISTINCT must be required by explicit uniqueness semantics or "
-        "unavoidable join fan-out at the requested result grain. Defensive DISTINCT "
-        "is invalid; record it in shape_issues.\n"
-        "- Every CAST must be required by the operation, schema, dialect, or "
-        "Authoritative Evidence. An evidence-required cast is mandatory and valid; "
-        "do not flag or remove it. A coercion needed to prevent integer truncation "
-        "in division is also mandatory and valid even when evidence states the "
-        "formula without SQL syntax. A cast around an evidence-defined direct "
-        "comparison operand is invalid only when the operation, schema, dialect, "
-        "and evidence provide no basis for it. Record unsupported casts in "
-        "shape_issues and evidence_issues when evidence is violated."
+        "- Flag a JOIN only when it clearly reaches the wrong entity or demonstrably "
+        "changes the requested cardinality or grain. Do not require every valid join "
+        "to prove it is the shortest or preferred representation.\n"
+        "- Flag DISTINCT only when it demonstrably changes the requested grain or "
+        "cardinality. Do not require an explicit uniqueness phrase when DISTINCT is "
+        "otherwise semantically harmless or plausibly needed for join fan-out.\n"
+        "- Flag CAST only when it demonstrably changes the requested arithmetic "
+        "result or comparison semantics. Do not require explicit justification for "
+        "a harmless cast, and never flag numeric coercion needed to avoid integer "
+        "truncation."
     )
     projection_criterion = (
         "\n4. STRICT PROJECTION CHECK (this overrides all leniency instructions): "
-        "Compare the outermost SELECT output with the exact output fields requested "
-        "by the question and Authoritative Evidence. The SQL must return every "
-        "requested field, exactly once, in the requested shape, and NO additional "
-        "fields. Aggregates and transformed values count as output fields. Never "
-        "accept extra context as helpful, and never remove a requested field. Record "
-        "every extra, missing, duplicated, reordered, or reshaped field in "
-        "projection_issues and mark the SQL invalid."
+        "The outermost SELECT must return every field requested by the question or "
+        "Authoritative Evidence exactly once, with NO additional fields. Aggregates "
+        "and transformed values count as output fields. Record only genuinely extra, "
+        "missing, or duplicated fields in projection_issues. When outputs are "
+        "explicitly requested separately, combining them into one output leaves "
+        "requested fields missing. Never infer a field-order or row-versus-column "
+        "representation requirement unless the question or evidence explicitly "
+        "states one."
         if shorten_answer
         else ""
     )
-    direct_answer_criterion = (
-        "\nDIRECT ANSWER FIELD CHECK: For a yes/no question, use the schema metadata "
-        "and Authoritative Evidence to determine whether a referenced text or boolean "
-        "column directly stores the requested property or state. If so, wrapping that "
-        "column in CASE or otherwise translating it to YES/NO is a critical reshaping "
-        "of the requested answer unless normalization was explicitly requested. Record "
-        "the violation in projection_issues and mark the SQL invalid."
+    metadata_criterion = (
+        "\nSCHEMA METADATA IS CONTEXTUAL: Column descriptions, sample values, and "
+        "semantic hints help interpret the SQL but do not make one plausible column "
+        "authoritative over another. Do not reject a projected column merely because "
+        "metadata suggests a preferred alternative. A column mapping is authoritative "
+        "only when Authoritative Evidence explicitly maps the requested output."
+    )
+    aggregation_criterion = (
+        "\n2. Flag clear aggregation or cardinality errors: a missing restriction "
+        "needed for an explicitly requested highest/top result, grouping at a grain "
+        "different from the one requested, using the wrong aggregate operation, or "
+        "combining outputs that the question explicitly requests separately. Accept "
+        "plausible equivalent implementations."
     )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
@@ -1006,11 +1007,11 @@ Generated SQL Query:
 
 Check for CRITICAL issues ONLY (be lenient):
 {join_criterion}
-2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
+{aggregation_criterion}
 {evidence_criterion}
 {projection_criterion}
-{direct_answer_criterion}
 {shape_criterion}
+{metadata_criterion}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \

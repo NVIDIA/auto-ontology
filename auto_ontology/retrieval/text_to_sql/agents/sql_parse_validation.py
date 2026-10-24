@@ -48,11 +48,9 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_used_schema_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
-    DIRECT_ANSWER_FIELD_RULES,
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
     create_intent_validation_prompt,
-    format_authoritative_evidence,
     format_custom_analyses_section,
 )
 from auto_ontology.retrieval.text_to_sql.state import (
@@ -115,20 +113,19 @@ class IntentValidationModel(BaseModel):
     aggregation_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "List of CRITICAL aggregation issues that are clearly wrong (not "
-            "minor variations). Leave EMPTY [] if there are no aggregation "
-            "issues — do NOT add explanatory text like 'no aggregation issues'."
+            "List only clear aggregation errors, including a missing requested "
+            "highest/top restriction, an incorrect grouping grain, or combining "
+            "outputs the question explicitly requests separately. Leave EMPTY [] "
+            "for plausible alternatives and when there are no aggregation issues."
         ),
     )
     shape_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "List every unsupported DISTINCT or CAST. Each must be justified by "
-            "the operation, question, Authoritative Evidence, schema, dialect, "
-            "requested result grain, or unavoidable join fan-out. A coercion needed "
-            "to prevent integer truncation is supported even when the evidence gives "
-            "only the conceptual arithmetic. Leave EMPTY [] when every DISTINCT and "
-            "CAST has a concrete basis."
+            "List a DISTINCT or CAST only when it demonstrably changes the requested "
+            "grain or arithmetic result. Do not require either construct to be "
+            "explicitly justified, and do not flag valid numeric coercion. Leave "
+            "EMPTY [] for harmless or plausibly correct query-shape choices."
         ),
     )
     projection_issues: list[str] = Field(
@@ -136,17 +133,19 @@ class IntentValidationModel(BaseModel):
         description=(
             "Always list output fields not requested by the question or evidence. "
             "When strict short-answer validation is requested, also list every "
-            "missing, duplicated, reordered, or reshaped output field. Leave EMPTY "
-            "[] only when no applicable projection issue exists."
+            "missing or duplicated requested field. Do not infer an ordering or "
+            "row-versus-column representation requirement unless explicitly stated. "
+            "Leave EMPTY [] only when no applicable projection issue exists."
         ),
     )
     evidence_issues: list[str] = Field(
         default_factory=list,
         description=(
-            "List every way the SQL violates Authoritative Evidence, including a "
-            "missing or substituted value, column/table mapping, filter, operator, "
-            "formula, literal, required cast, scaling factor, or canonical output "
-            "mapping. Leave EMPTY [] when all evidence instructions are followed."
+            "List only clear semantic violations of Authoritative Evidence, such as "
+            "an omitted required formula, scaling factor, operator, filter, or "
+            "explicit output mapping. Do not demand literal textual identity and do "
+            "not flag surrounding whitespace unless verified database values show "
+            "that it is significant."
         ),
     )
 
@@ -1038,20 +1037,16 @@ class SQLValidationAgent(BaseAgent):
             if _JOINS_VALIDATED_ELSEWHERE
             else INTENT_VALIDATION_SYSTEM_PROMPT
         )
-        system_prompt += f"\n\n{DIRECT_ANSWER_FIELD_RULES}"
         if state.get("shorten_answer", False):
             system_prompt += (
-                "\n\nSTRICT SHORT-ANSWER OVERRIDE: Projection matching is not "
-                "lenient. The outermost SELECT must return exactly every output "
-                "field requested by the question and evidence, with no extra fields "
-                "and no missing fields. Any mismatch is a critical "
-                "projection_issues failure."
+                "\n\nSTRICT SHORT-ANSWER OVERRIDE: The outermost SELECT must return "
+                "every requested output field exactly once, with no extra or missing "
+                "fields. Do not reject field ordering or a row-versus-column "
+                "representation unless the question or evidence explicitly requires "
+                "it. A genuine field-count mismatch is a critical projection_issues "
+                "failure."
             )
         messages = [SystemMessage(content=system_prompt)]
-        if evidence:
-            messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
         messages.append(HumanMessage(content=validation_prompt))
 
         try:

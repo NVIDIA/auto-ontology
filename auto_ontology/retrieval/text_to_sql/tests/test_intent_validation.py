@@ -14,7 +14,6 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     IntentValidationModel,
     SQLValidationAgent,
 )
-from auto_ontology.retrieval.text_to_sql.prompts import DIRECT_ANSWER_FIELD_RULES
 
 
 @patch(
@@ -162,30 +161,23 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
 
     assert result["decision"] == "valid_sql"
     messages = mock_invoke.call_args.args[1]
-    assert messages[1].content.endswith(evidence)
-    assert "MUST follow every instruction" in messages[1].content
-    assert "literal values, operators, and scaling factors exactly" in (
-        messages[1].content
+    assert len(messages) == 2
+    validation_prompt = messages[1].content
+    assert validation_prompt.count(evidence) == 1
+    assert "AUTHORITATIVE EVIDENCE TO VALIDATE AGAINST" in validation_prompt
+    assert "preserve the semantic requirements" in validation_prompt
+    assert "not a requirement to reproduce its literal text as SQL" in (
+        validation_prompt
     )
-    assert "a cast needed to prevent integer truncation does not change" in (
-        messages[1].content
-    )
-    assert "evidence-defined direct comparison operand" in messages[1].content
-    assert sum(evidence in message.content for message in messages) == 2
-    assert "AUTHORITATIVE EVIDENCE TO VALIDATE AGAINST" in messages[2].content
-    assert messages[2].content.count(evidence) == 1
-    assert "Evidence compliance is strict, not lenient" in messages[2].content
-    assert "formula term, literal, cast, or scaling factor" in messages[2].content
-    assert "An evidence-defined output mapping is canonical" in messages[2].content
-    assert "An evidence-required cast is mandatory and valid" in messages[2].content
-    assert "QUERY SHAPE JUSTIFICATION CHECK" in messages[2].content
+    assert "surrounding whitespace differs" in validation_prompt
+    assert "Type coercion needed for correct arithmetic is valid" in validation_prompt
 
 
 @patch(
     "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
     return_value=IntentValidationModel(is_valid=True),
 )
-def test_intent_validation_checks_direct_answer_field_projection(
+def test_intent_validation_omits_generation_only_direct_answer_rules(
     mock_invoke: MagicMock,
 ) -> None:
     path_state = {
@@ -222,10 +214,9 @@ def test_intent_validation_checks_direct_answer_field_projection(
 
     assert result["decision"] == "valid_sql"
     messages = mock_invoke.call_args.args[1]
-    assert DIRECT_ANSWER_FIELD_RULES in messages[0].content
-    assert "DIRECT ANSWER FIELD CHECK" in messages[-1].content
-    assert "Record the violation in projection_issues" in messages[-1].content
-    assert "normalization was explicitly requested" in messages[-1].content
+    assert "## Direct Answer Fields" not in messages[0].content
+    assert "DIRECT ANSWER FIELD CHECK" not in messages[-1].content
+    assert "normalization was explicitly requested" not in messages[-1].content
 
 
 @patch(
@@ -315,8 +306,13 @@ def test_short_answer_validation_requires_exact_projection(
     messages = mock_invoke.call_args.args[1]
     assert "STRICT SHORT-ANSWER OVERRIDE" in messages[0].content
     assert "STRICT PROJECTION CHECK" in messages[1].content
-    assert "every requested field, exactly once" in messages[1].content
+    assert "every field requested" in messages[1].content
     assert "NO additional fields" in messages[1].content
+    assert "extra, missing, or duplicated fields" in messages[1].content
+    assert "combining them into one output" in messages[1].content
+    assert "reordered" not in messages[1].content
+    assert "reshaped" not in messages[1].content
+    assert "row-versus-column" in messages[1].content
 
 
 @patch(
@@ -353,11 +349,16 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     assert "STRICT SHORT-ANSWER OVERRIDE" not in messages[0].content
     assert "STRICT PROJECTION CHECK" not in messages[1].content
     assert "Every outermost projected field must be requested" in messages[1].content
-    assert "Defensive DISTINCT is invalid" in messages[1].content
-    assert "A cast around an evidence-defined direct comparison operand" in (
-        messages[1].content
-    )
-    assert "coercion needed to prevent integer truncation" in messages[1].content
+    assert "Flag DISTINCT only when it demonstrably changes" in messages[1].content
+    assert "Do not require an explicit uniqueness phrase" in messages[1].content
+    assert "Flag CAST only when it demonstrably changes" in messages[1].content
+    assert "never flag numeric coercion needed to avoid integer" in messages[1].content
+    assert "SCHEMA METADATA IS CONTEXTUAL" in messages[1].content
+    assert "Do not reject a projected column merely because" in messages[1].content
+    assert "missing restriction" in messages[1].content
+    assert "highest/top result" in messages[1].content
+    assert "grouping at a grain different" in messages[1].content
+    assert "explicitly requests separately" in messages[1].content
 
 
 @patch(
@@ -365,7 +366,7 @@ def test_non_short_answer_validation_omits_strict_projection_check(
     return_value=IntentValidationModel(
         is_valid=True,
         join_issues=["The joined table supplies no required data or path hop."],
-        shape_issues=["DISTINCT has no basis in the requested result grain."],
+        shape_issues=["DISTINCT demonstrably changes the count from rows to entities."],
         projection_issues=["The projected identifier was not requested."],
     ),
 )
@@ -400,7 +401,7 @@ def test_intent_validation_rejects_unsupported_query_shape(
     assert "Critical join issues" in result["path_state"]["error"]
     assert "Critical query-shape issues" in result["path_state"]["error"]
     assert "Critical projection issues" in result["path_state"]["error"]
-    assert "DISTINCT has no basis" in result["path_state"]["error"]
+    assert "DISTINCT demonstrably changes" in result["path_state"]["error"]
 
 
 @patch(
