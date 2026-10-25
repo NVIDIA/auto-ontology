@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Connection, case, func, literal, or_, select, text
+from sqlalchemy import Connection, and_, case, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from auto_ontology.dal.schema import (
@@ -82,33 +82,49 @@ _DOCUMENT_LIST_COLUMNS = (
 )
 
 
-def _document_search(search: str | None) -> Any:
-    if not search:
-        return literal(True)
-    pattern = f"%{search}%"
-    return or_(
-        unstructured_document.c.name.ilike(pattern),
-        unstructured_document.c.description.ilike(pattern),
-    )
+def _document_filter(search: str | None, without_term: bool) -> Any:
+    conditions = []
+    if search:
+        pattern = f"%{search}%"
+        conditions.append(
+            or_(
+                unstructured_document.c.name.ilike(pattern),
+                unstructured_document.c.description.ilike(pattern),
+            )
+        )
+    if without_term:
+        conditions.append(
+            ~select(unstructured_term.c.id)
+            .where(unstructured_term.c.document_id == unstructured_document.c.id)
+            .exists()
+        )
+    return and_(literal(True), *conditions)
 
 
-def search_documents(
+def list_documents(
     conn: Connection,
     *,
     search: str | None = None,
+    without_term: bool = False,
+    newest_first: bool = False,
     skip: int = 0,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """Documents newest first, filtered by *search* over name and description.
+    """Ingested documents, oldest first unless *newest_first*.
 
-    *limit* ``None`` returns every match.
+    *search* matches name and description, case-insensitively.  With
+    *without_term*, only those the semantic stage has not processed — which is
+    what makes a second ``run_semantic`` run resume rather than redo.  *limit*
+    ``None`` returns every match.  Rows include the server ``path``; callers
+    that answer clients must drop it.
     """
+    ingested_at = unstructured_document.c.ingested_at
     rows = (
         conn.execute(
-            select(*_DOCUMENT_LIST_COLUMNS)
-            .where(_document_search(search))
+            select(unstructured_document)
+            .where(_document_filter(search, without_term))
             .order_by(
-                unstructured_document.c.ingested_at.desc(),
+                ingested_at.desc() if newest_first else ingested_at,
                 unstructured_document.c.id,
             )
             .offset(skip)
@@ -120,11 +136,13 @@ def search_documents(
     return [dict(r) for r in rows]
 
 
-def count_documents(conn: Connection, *, search: str | None = None) -> int:
+def count_documents(
+    conn: Connection, *, search: str | None = None, without_term: bool = False
+) -> int:
     return conn.execute(
         select(func.count())
         .select_from(unstructured_document)
-        .where(_document_search(search))
+        .where(_document_filter(search, without_term))
     ).scalar_one()
 
 
@@ -276,24 +294,6 @@ def delete_document(conn: Connection, document_id: str) -> None:
                 survivors < 2,
             )
         )
-
-
-def list_documents(
-    conn: Connection, *, without_term: bool = False
-) -> list[dict[str, Any]]:
-    """All ingested documents, oldest first.
-
-    With *without_term*, only those the semantic stage has not processed —
-    which is what makes a second ``run_semantic`` run resume rather than redo.
-    """
-    query = select(unstructured_document).order_by(unstructured_document.c.ingested_at)
-    if without_term:
-        query = query.where(
-            ~select(unstructured_term.c.id)
-            .where(unstructured_term.c.document_id == unstructured_document.c.id)
-            .exists()
-        )
-    return [dict(r) for r in conn.execute(query).mappings().all()]
 
 
 # ---------------------------------------------------------------------------

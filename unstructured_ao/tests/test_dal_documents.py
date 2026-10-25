@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Iterator
 
 import pytest
-from sqlalchemy import Connection, select
+from sqlalchemy import Connection, select, text
 
 from auto_ontology.dal.schema import (
     unstructured_attribute_family,
@@ -68,6 +68,34 @@ def _document(conn: Connection) -> str:
     return dal.insert_document(
         conn, name=f"{suffix}.txt", path=f"/tmp/{suffix}.txt", file_type="txt"
     )
+
+
+def test_list_documents_filters_and_orders(conn: Connection) -> None:
+    tag = uuid.uuid4().hex[:8]
+    first = dal.insert_document(
+        conn, name=f"{tag}-a.txt", path=f"/tmp/{tag}-a.txt", file_type="txt"
+    )
+    second = dal.insert_document(
+        conn, name=f"{tag}-b.txt", path=f"/tmp/{tag}-b.txt", file_type="txt"
+    )
+    conn.execute(
+        text(
+            "UPDATE unstructured_document SET ingested_at = now() - interval '1 day' "
+            "WHERE id = :id"
+        ),
+        {"id": first},
+    )
+    dal.insert_term(conn, document_id=second, name="Term")
+
+    def ids(**kwargs: object) -> list[str]:
+        return [r["id"] for r in dal.list_documents(conn, search=tag.upper(), **kwargs)]
+
+    assert ids() == [first, second]
+    assert ids(newest_first=True) == [second, first]
+    assert ids(without_term=True) == [first]
+    assert ids(newest_first=True, limit=1) == [second]
+    assert dal.count_documents(conn, search=tag, without_term=True) == 1
+    assert dal.list_documents(conn, search=tag)[0]["path"] == f"/tmp/{tag}-a.txt"
 
 
 def test_deleting_a_document_drops_only_families_it_leaves_too_small(

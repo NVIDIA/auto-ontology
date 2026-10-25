@@ -21,6 +21,7 @@ from fastapi import (
 from pydantic import BaseModel
 
 from auto_ontology.dal.session import get_engine
+from auto_ontology.server.models import Document
 from auto_ontology.server.pagination import LIMIT_QUERY, SKIP_QUERY
 from auto_ontology.server.responses import (
     DocumentPageResponse,
@@ -48,9 +49,9 @@ class DocumentUpdate(BaseModel):
 
 
 def _public(row: dict) -> dict:
-    """*row* without its server-side ``path``, which response models would pass
-    through since they allow extra keys."""
-    return {k: v for k, v in row.items() if k != "path"}
+    """*row* cut to the ``Document`` fields. Response models allow extra keys,
+    so anything else — the server-side ``path`` above all — would go out."""
+    return {k: v for k, v in row.items() if k in Document.model_fields}
 
 
 def _not_found(document_id: str) -> HTTPException:
@@ -72,9 +73,11 @@ def list_documents(
     settings page knows to read the list again until none are.
     """
     with get_engine().connect() as conn:
-        rows = dal.search_documents(conn, search=query, skip=skip, limit=limit)
+        rows = dal.list_documents(
+            conn, search=query, newest_first=True, skip=skip, limit=limit
+        )
         total = dal.count_documents(conn, search=query)
-    return {"data": rows, "count": len(rows), "total": total}
+    return {"data": [_public(r) for r in rows], "count": len(rows), "total": total}
 
 
 @router.post("/documents", status_code=202, response_model=DocumentResponse)

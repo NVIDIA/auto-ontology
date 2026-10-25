@@ -66,19 +66,20 @@ def test_list_passes_the_search_and_reports_the_total(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def search_documents(_conn: object, **kwargs: Any) -> list[dict[str, Any]]:
+    def list_documents(_conn: object, **kwargs: Any) -> list[dict[str, Any]]:
         seen.update(kwargs)
-        return [{k: v for k, v in _row().items() if k != "path"}]
+        return [_row(summary="internal")]
 
-    monkeypatch.setattr(documents.dal, "search_documents", search_documents)
+    monkeypatch.setattr(documents.dal, "list_documents", list_documents)
     monkeypatch.setattr(documents.dal, "count_documents", lambda _c, **_k: 7)
 
     response = client.get("/api/documents", params={"query": "rep", "limit": 20})
 
     assert response.status_code == 200
     body = response.json()
-    assert seen == {"search": "rep", "skip": 0, "limit": 20}
+    assert seen == {"search": "rep", "newest_first": True, "skip": 0, "limit": 20}
     assert body["total"] == 7 and body["count"] == 1
+    assert "path" not in body["data"][0] and "summary" not in body["data"][0]
 
 
 def test_an_unsupported_extension_is_refused(client: TestClient) -> None:
