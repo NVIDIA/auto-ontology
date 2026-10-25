@@ -148,6 +148,17 @@ backend:
   service:
     port: 3001
   replicas: 1
+  # Uploaded documents, mounted at the image's UNSTRUCTURED_UPLOAD_DIR
+  # (/data/documents). Without it they are lost whenever the Pod is replaced
+  # while their rows survive. ReadWriteOnce limits the backend to one replica
+  # and a Recreate rollout; use ReadWriteMany storage to scale out.
+  documents:
+    persistence:
+      enabled: true
+      size: 10Gi
+      accessMode: ReadWriteOnce
+      # Empty = cluster default, as for postgres.persistence.
+      storageClassName: ""
   resources:
     requests:
       cpu: 100m
