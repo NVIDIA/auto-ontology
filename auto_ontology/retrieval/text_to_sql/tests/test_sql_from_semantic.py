@@ -106,8 +106,11 @@ def test_mysql_rules_lift_the_division_cast_and_forbid_rounding_casts() -> None:
     # The generic rule the MySQL block overrides is still in the shared prompt.
     assert "Cast to REAL before dividing" in create_sql_user_prompt
     assert "`/` never truncates in MySQL" in rules
+    assert "4 more decimal places" in rules
     assert "rule does not apply" in rules
     assert "DECIMAL(p, s), FLOAT, DOUBLE or REAL" in rules
+    # Only a ratio too small for 4 decimal places may be widened.
+    assert "1 / 1000000 = 0.0000" in rules
     assert "POPULATION statistics" in rules
     # Other dialects keep their own rules.
     for dialect in ("sqlite", "postgres", "snowflake", None):

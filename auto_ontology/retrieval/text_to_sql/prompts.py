@@ -224,22 +224,29 @@ _POSTGRES_DIALECT_RULES = (
 )
 
 
-# MySQL's ``/`` never truncates: it returns an exact DECIMAL even for two
-# integers (integer division is the separate DIV operator). So the generic
-# "cast to REAL before dividing" rule only adds casts here, and the model's
-# MySQL cast of choice, DECIMAL(p, s), rounds the value to s places. Exact
-# graders compare values as strings (BEAVER's ex_acc: 150.250000 != 150.25),
-# so a rounded result fails even when the query is otherwise right.
+# MySQL's ``/`` never truncates to an integer: it returns a DECIMAL with
+# div_precision_increment (4) more decimal places than the dividend (integer
+# division is the separate DIV operator). So the generic "cast to REAL before
+# dividing" rule only adds casts here, and the model's MySQL cast of choice,
+# DECIMAL(p, s), changes the digits of the result. Exact graders compare
+# values as strings (BEAVER's ex_acc: 150.250000 != 150.25), so a cast result
+# fails even when the query is otherwise right. The one cast worth keeping
+# widens a small ratio a subquery or CTE stores, which keeps only those 4
+# places and divides as zero later; within one expression MySQL keeps the
+# precision itself.
 _MYSQL_DIALECT_RULES = (
     "**MySQL-specific (these OVERRIDE the generic rules above)**\n"
-    "- `/` never truncates in MySQL: it returns an exact DECIMAL even for two "
-    "integers. Do NOT cast before or after dividing; the generic 'cast to REAL "
-    "before dividing' rule does not apply.\n"
+    "- `/` never truncates in MySQL: integer / integer returns a DECIMAL with 4 "
+    "more decimal places (1 / 3 = 0.3333). Do NOT cast to make a division "
+    "fractional; the generic 'cast to REAL before dividing' rule does not "
+    "apply.\n"
     "- Do NOT CAST a computed value (an aggregate, average, ratio or window "
-    "result) to DECIMAL(p, s), FLOAT, DOUBLE or REAL, and do not ROUND it, "
-    "unless the question asks for a precision or for rounding: a cast rounds "
-    "the value and changes its digits. Return computed values as MySQL "
-    "produces them.\n"
+    "result), or the column inside it, to DECIMAL(p, s), FLOAT, DOUBLE or REAL, "
+    "and do not ROUND it, unless the question asks for a precision or for "
+    "rounding: a cast changes the result's digits. Return computed values as "
+    "MySQL produces them. The one exception: a ratio computed in a subquery "
+    "or CTE keeps only 4 decimal places (1 / 1000000 = 0.0000), so if it is "
+    "divided again later, cast its dividend to a DECIMAL with more scale.\n"
     "- STDDEV(), STD() and VARIANCE() are the POPULATION statistics in MySQL "
     "(the same as STDDEV_POP() and VAR_POP()). Use the function the question "
     "names; use STDDEV_SAMP() or VAR_SAMP() only when it asks for a sample "
