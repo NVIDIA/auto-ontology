@@ -66,11 +66,11 @@ def test_list_passes_the_search_and_reports_the_total(
 ) -> None:
     seen: dict[str, Any] = {}
 
-    def list_documents(_conn: object, **kwargs: Any) -> list[dict[str, Any]]:
+    def search_documents(_conn: object, **kwargs: Any) -> list[dict[str, Any]]:
         seen.update(kwargs)
         return [{k: v for k, v in _row().items() if k != "path"}]
 
-    monkeypatch.setattr(documents.dal, "list_documents", list_documents)
+    monkeypatch.setattr(documents.dal, "search_documents", search_documents)
     monkeypatch.setattr(documents.dal, "count_documents", lambda _c, **_k: 7)
 
     response = client.get("/api/documents", params={"query": "rep", "limit": 20})

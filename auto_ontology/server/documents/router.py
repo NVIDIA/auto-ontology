@@ -72,7 +72,7 @@ def list_documents(
     settings page knows to read the list again until none are.
     """
     with get_engine().connect() as conn:
-        rows = dal.list_documents(conn, search=query, skip=skip, limit=limit)
+        rows = dal.search_documents(conn, search=query, skip=skip, limit=limit)
         total = dal.count_documents(conn, search=query)
     return {"data": rows, "count": len(rows), "total": total}
 

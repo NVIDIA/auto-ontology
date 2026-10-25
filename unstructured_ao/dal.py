@@ -92,7 +92,7 @@ def _document_search(search: str | None) -> Any:
     )
 
 
-def list_documents(
+def search_documents(
     conn: Connection,
     *,
     search: str | None = None,
