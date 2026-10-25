@@ -3417,6 +3417,281 @@
         "x-auto-ontology-proxied": true
       }
     },
+    "/api/documents": {
+      "get": {
+        "description": "documentsApi.getAll — list uploaded documents with their ingest status.",
+        "operationId": "get_api_documents",
+        "parameters": [
+          {
+            "description": "Case-insensitive substring filter on name and description.",
+            "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring filter on name and description.",
+              "title": "Query"
+            }
+          },
+          {
+            "description": "Rows to skip before the page starts.",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Rows to skip before the page starts.",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Page size, at most 100. Omit to return every matching row in one response.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Page size, at most 100. Omit to return every matching row in one response.",
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PagedListResponse_Document_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Documents",
+        "tags": ["documents"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/documents/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["read"]
+        },
+        "x-auto-ontology-proxied": true
+      },
+      "post": {
+        "description": "documentsApi.upload — store a file and ingest it in the background (admin\nonly). Multipart; the proxy relays the body as bytes.",
+        "operationId": "post_api_documents",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_document_api_documents_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Document_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "documentsApi.upload — store a file and ingest it in the background (admin only).",
+        "tags": ["documents"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/documents/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/documents/{document_id}": {
+      "delete": {
+        "description": "documentsApi.delete — remove a document with its chunks and vectors (admin\nonly).",
+        "operationId": "delete_api_documents_document_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_IdRef_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Document",
+        "tags": ["documents"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/documents/[document_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      },
+      "patch": {
+        "description": "documentsApi.update — change a document's name or description (admin only).",
+        "operationId": "patch_api_documents_document_id_",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DocumentUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Document_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Document",
+        "tags": ["documents"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/documents/[document_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
     "/api/exploration/column-attributes/{attr_id}/details": {
       "get": {
         "description": "explorationApi.getColumnAttributeExplorationDetails — a ColumnAttribute's own owning Term, for expanding it on the graph.",
@@ -8259,6 +8534,18 @@
         "title": "Body_import_model_api_model_import_post",
         "type": "object"
       },
+      "Body_upload_document_api_documents_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          }
+        },
+        "required": ["file"],
+        "title": "Body_upload_document_api_documents_post",
+        "type": "object"
+      },
       "ChatCancelResponse": {
         "additionalProperties": true,
         "properties": {
@@ -9494,6 +9781,17 @@
         "title": "DataResponse[dict[str, list[ZoneChip]]]",
         "type": "object"
       },
+      "DataResponse_Document_": {
+        "additionalProperties": true,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/Document"
+          }
+        },
+        "required": ["data"],
+        "title": "DataResponse[Document]",
+        "type": "object"
+      },
       "DataResponse_EntityCoverageResult_": {
         "additionalProperties": true,
         "properties": {
@@ -9743,6 +10041,92 @@
         },
         "required": ["data"],
         "title": "DescriptionSuggestionResponse",
+        "type": "object"
+      },
+      "Document": {
+        "additionalProperties": true,
+        "description": "An unstructured document, as the settings list shows it.\n\n``description`` is the user's own, edited from that list. ``ingested_at``\nis when the file was added, which for an upload precedes its chunks.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "file_type": {
+            "title": "File Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ingested_at": {
+            "format": "date-time",
+            "title": "Ingested At",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/DocumentStatus"
+          }
+        },
+        "required": ["id", "name", "file_type", "status", "ingested_at"],
+        "title": "Document",
+        "type": "object"
+      },
+      "DocumentStatus": {
+        "description": "Where an unstructured document is in ingestion.\n\nAn upload answers before it is ingested, so its row is ``processing`` until\nthe background task writes its chunks, ``extracting`` while it extracts the\nterm and attributes, then ``ready`` — or ``failed`` at either stage, with\nthe reason in ``error``.",
+        "enum": ["processing", "extracting", "ready", "failed"],
+        "title": "DocumentStatus",
+        "type": "string"
+      },
+      "DocumentUpdate": {
+        "description": "Fields left out are left as they are; an empty description clears it.",
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "DocumentUpdate",
         "type": "object"
       },
       "EntityCoverageCandidate": {
@@ -11076,6 +11460,29 @@
         },
         "required": ["data", "count", "total"],
         "title": "PagedListResponse[CustomAnalysis]",
+        "type": "object"
+      },
+      "PagedListResponse_Document_": {
+        "additionalProperties": true,
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/Document"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": ["data", "count", "total"],
+        "title": "PagedListResponse[Document]",
         "type": "object"
       },
       "PagedListResponse_PqlAnalysis_": {

@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +33,7 @@ from auto_ontology.server.chat.router import router as chat_router  # noqa: E402
 from auto_ontology.server.chat.worker import get_pool, shutdown_pool  # noqa: E402
 from auto_ontology.server.connections.router import router as connections_router  # noqa: E402
 from auto_ontology.server.datasources.router import router as datasources_router  # noqa: E402
+from auto_ontology.server.documents.router import router as documents_router  # noqa: E402
 from auto_ontology.server.exploration.router import router as exploration_router  # noqa: E402
 from auto_ontology.server.health.router import router as health_router  # noqa: E402
 from auto_ontology.server.metadata.router import router as metadata_router  # noqa: E402
@@ -47,10 +50,11 @@ from auto_ontology.server.model_interchange.router import (  # noqa: E402
     router as model_interchange_router,
 )
 from auto_ontology.server.search.router import router as search_router  # noqa: E402
+from unstructured_ao.ingest import recover_pending_document_ingests  # noqa: E402
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # Before anything else: refuse to serve against a schema this build does not
     # expect. Here rather than in `create_app` deliberately — the OpenAPI spec
     # generator builds the app with no database at all (see that docstring), so
@@ -63,9 +67,14 @@ async def lifespan(_app: FastAPI):
     # itself is lazy on first use, but eagerly initialising here means the
     # very first chat request doesn't pay a cold start.
     get_pool()
+    recovery = asyncio.create_task(asyncio.to_thread(recover_pending_document_ingests))
     try:
         yield
     finally:
+        try:
+            await recovery
+        except Exception:
+            logger.exception("Interrupted document recovery failed.")
         # Tear down warm subprocesses before exiting so we don't leak them.
         shutdown_pool()
         close_store()
@@ -112,6 +121,7 @@ def create_app() -> FastAPI:
         model_interchange_router, prefix="/api", tags=["model-interchange"]
     )
     app.include_router(search_router, prefix="/api", tags=["search"])
+    app.include_router(documents_router, prefix="/api", tags=["documents"])
 
     return app
 

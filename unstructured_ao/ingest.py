@@ -39,13 +39,16 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import Connection
+from sqlalchemy import Connection, text
 
 import unstructured_ao.config as config
 from unstructured_ao.dal import (
+    get_document,
     get_document_by_path,
     insert_chunk,
     insert_document,
+    list_pending_documents,
+    set_document_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -90,6 +93,34 @@ _EXTRACTOR_EXTENSIONS: dict[str, frozenset[str]] = {
     "hosted": frozenset({".pdf"}),
     "docling": frozenset({".pdf", ".docx", ".pptx", ".html"}),
 }
+
+
+#: The optional package each extractor imports, from the ``unstructured``
+#: extra.  The text reader needs none.
+_EXTRACTOR_REQUIREMENTS: dict[str, str | None] = {
+    "docling": "docling",
+    "hosted": "pypdfium2",
+    "text": None,
+}
+
+
+def supported_extensions() -> frozenset[str]:
+    """File extensions the configured extractor accepts, e.g. ``".pdf"``."""
+    return _EXTRACTOR_EXTENSIONS.get(config.EXTRACTOR, frozenset())
+
+
+def missing_dependency(file_path: str | Path) -> str | None:
+    """The package *file_path*'s extractor needs but cannot import, if any.
+
+    Lets a caller refuse a file up front instead of accepting it and failing
+    in the background.
+    """
+    from importlib.util import find_spec
+
+    required = _EXTRACTOR_REQUIREMENTS.get(_extractor_for_file(file_path))
+    if required is None or find_spec(required) is not None:
+        return None
+    return required
 
 
 def _extractor_for_file(file_path: str | Path) -> str:
@@ -171,12 +202,12 @@ def _resolve_page_number(chunk: dict[str, Any]) -> int | None:
 def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
     """Ingest a single file into Postgres and the vector store.
 
-    Returns the ``unstructured_document.id`` on success, or ``None`` when the
-    file was already ingested (same absolute path already present).
+    Returns the ``unstructured_document.id`` of the new document, or of the
+    existing one when the same absolute path was already ingested.  Returns
+    ``None`` when the extractor fails or yields no chunks.
 
-    On re-ingest (``force=True`` is not yet implemented), call
-    ``dal.delete_document`` first to cascade-delete all downstream rows before
-    calling this function again.
+    To re-ingest, call ``dal.delete_document`` first to cascade-delete all
+    downstream rows before calling this function again.
     """
     path = str(Path(file_path).expanduser().resolve())
     name = Path(path).name
@@ -207,7 +238,171 @@ def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
         path=path,
         file_type=file_type,
     )
+    _store_chunks(conn, document_id, name, raw_chunks)
+    return document_id
 
+
+def ingest_document(
+    document_id: str,
+    file_path: str | Path,
+    conn: Connection,
+    *,
+    then: str = "ready",
+) -> int:
+    """Extract *file_path* into the already-inserted document *document_id*.
+
+    For uploads, whose row is inserted as ``processing`` before extraction
+    starts.  Moves the document to status *then* — ``extracting`` when the
+    semantic pass follows — and returns the chunk count; raises
+    when the extractor fails, yields nothing, or yields more than
+    ``config.MAX_DOCUMENT_WORDS`` words, leaving the status to the caller,
+    whose transaction this rolls back.
+    """
+    path = str(Path(file_path).expanduser().resolve())
+    name = Path(path).name
+
+    logger.info("Extracting chunks from %s …", name)
+    raw_chunks = _extract_chunks_from_file(path)
+    if not raw_chunks:
+        raise ValueError(f"No content could be extracted from {name}.")
+    words = sum(len((chunk.get("text") or "").split()) for chunk in raw_chunks)
+    if words > config.MAX_DOCUMENT_WORDS:
+        raise ValueError(
+            f"{name} has {words:,} words; the limit is {config.MAX_DOCUMENT_WORDS:,}."
+        )
+
+    _store_chunks(conn, document_id, name, raw_chunks)
+    set_document_status(conn, document_id, then)
+    return len(raw_chunks)
+
+
+def extract_document_semantics(document_id: str, conn: Connection) -> None:
+    """Extract *document_id*'s term and attributes and link them to chunks.
+
+    The LLM pass that follows ingest: ``extract.run_extraction`` over the
+    document's chunk windows, then ``retrieve.link_document_attributes`` for the
+    vector links.  Marks the document ``ready``; raises when no term came out,
+    since ``run_extraction`` only logs that and a document with no term would
+    otherwise read as done.
+    """
+    from unstructured_ao.dal import get_document_chunks, get_document_term
+    from unstructured_ao.extract import run_extraction
+    from unstructured_ao.retrieve import link_document_attributes
+    from unstructured_ao.windows import build_windows
+
+    chunks = get_document_chunks(conn, document_id)
+    windows = build_windows([c["id"] for c in chunks], [c["content"] for c in chunks])
+    run_extraction(document_id, windows, conn)
+    if get_document_term(conn, document_id) is None:
+        raise RuntimeError("Term extraction failed; see the server log.")
+    link_document_attributes(document_id, conn)
+    set_document_status(conn, document_id, "ready")
+
+
+def _acquire_document_lock(conn: Connection, document_id: str) -> bool:
+    """Own this document's pipeline across transactions and server replicas."""
+    acquired = conn.execute(
+        text("SELECT pg_try_advisory_lock(hashtextextended(:document_id, 0))"),
+        {"document_id": document_id},
+    ).scalar_one()
+    conn.commit()
+    return bool(acquired)
+
+
+def _release_document_lock(conn: Connection, document_id: str) -> None:
+    conn.execute(
+        text("SELECT pg_advisory_unlock(hashtextextended(:document_id, 0))"),
+        {"document_id": document_id},
+    )
+    conn.commit()
+
+
+def run_document_ingest(document_id: str, file_path: str | Path) -> None:
+    """Ingest an uploaded document, then extract its semantics, recording failure.
+
+    Meant for a background task or startup recovery: nothing waits on it, so a
+    failure is written to the row as ``failed`` with the error instead of being
+    raised.  ``processing`` resumes at file ingestion and ``extracting``
+    resumes at semantic extraction.
+
+    Two transactions, so the chunks are committed — and searchable — while the
+    slower LLM pass runs, and the list can tell the two stages apart.  A failed
+    semantic pass leaves the chunks in place.  A session advisory lock prevents
+    a rolling deployment or multiple replicas from resuming the same row.
+    """
+    from auto_ontology.dal.session import get_engine
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        if not _acquire_document_lock(conn, document_id):
+            logger.info("Document %s is already being ingested.", document_id)
+            return
+        try:
+            document = get_document(conn, document_id)
+            conn.commit()
+            if document is None or document["status"] not in (
+                "processing",
+                "extracting",
+            ):
+                return
+
+            if document["status"] == "processing":
+                extract = config.EXTRACT_ON_UPLOAD
+                try:
+                    with conn.begin():
+                        ingest_document(
+                            document_id,
+                            file_path,
+                            conn,
+                            then="extracting" if extract else "ready",
+                        )
+                except Exception as exc:
+                    logger.exception("Ingest failed for document %s.", document_id)
+                    with conn.begin():
+                        set_document_status(conn, document_id, "failed", error=str(exc))
+                    return
+                if not extract:
+                    return
+
+            try:
+                with conn.begin():
+                    extract_document_semantics(document_id, conn)
+            except Exception as exc:
+                logger.exception(
+                    "Semantic extraction failed for document %s.", document_id
+                )
+                with conn.begin():
+                    set_document_status(
+                        conn,
+                        document_id,
+                        "failed",
+                        error=f"Term and attribute extraction failed: {exc}",
+                    )
+        finally:
+            _release_document_lock(conn, document_id)
+
+
+def recover_pending_document_ingests() -> None:
+    """Resume every non-terminal upload found when the API starts."""
+    from auto_ontology.dal.session import get_engine
+
+    engine = get_engine()
+    with engine.connect() as conn:
+        pending = list_pending_documents(conn)
+        conn.commit()
+    if pending:
+        logger.info("Recovering %d interrupted document ingest(s).", len(pending))
+    for document in pending:
+        run_document_ingest(document["id"], document["path"])
+
+
+def _store_chunks(
+    conn: Connection,
+    document_id: str,
+    name: str,
+    raw_chunks: list[dict[str, Any]],
+) -> None:
+    """Write *raw_chunks* to ``unstructured_chunk`` and the chunk vector store."""
     # Assign UUIDs up front so the same id lands in both the relational table
     # and the vector store.
     chunk_ids: list[str] = [str(uuid.uuid4()) for _ in raw_chunks]
@@ -281,8 +476,6 @@ def ingest_file(file_path: str | Path, conn: Connection) -> str | None:
         config.CHUNK_SCHEMA,
         config.CHUNK_TABLE,
     )
-
-    return document_id
 
 
 def ingest_directory(

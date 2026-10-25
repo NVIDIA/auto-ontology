@@ -38,6 +38,8 @@ def insert_document(
     file_type: str,
     summary: str | None = None,
     publication_date: str | None = None,
+    description: str | None = None,
+    status: str = "ready",
 ) -> str:
     row = conn.execute(
         unstructured_document.insert().returning(unstructured_document.c.id),
@@ -47,6 +49,8 @@ def insert_document(
             "file_type": file_type,
             "summary": summary,
             "publication_date": publication_date,
+            "description": description,
+            "status": status,
         },
     ).scalar_one()
     return row
@@ -63,7 +67,178 @@ def get_document_by_path(conn: Connection, path: str) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+#: What the settings page shows of a document; ``path`` is a server path and
+#: stays internal.
+_DOCUMENT_LIST_COLUMNS = (
+    unstructured_document.c.id,
+    unstructured_document.c.name,
+    unstructured_document.c.description,
+    unstructured_document.c.file_type,
+    unstructured_document.c.status,
+    unstructured_document.c.error,
+    unstructured_document.c.ingested_at,
+)
+
+
+def _document_search(search: str | None) -> Any:
+    if not search:
+        return literal(True)
+    pattern = f"%{search}%"
+    return or_(
+        unstructured_document.c.name.ilike(pattern),
+        unstructured_document.c.description.ilike(pattern),
+    )
+
+
+def list_documents(
+    conn: Connection,
+    *,
+    search: str | None = None,
+    skip: int = 0,
+    limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Documents newest first, filtered by *search* over name and description.
+
+    *limit* ``None`` returns every match.
+    """
+    rows = (
+        conn.execute(
+            select(*_DOCUMENT_LIST_COLUMNS)
+            .where(_document_search(search))
+            .order_by(
+                unstructured_document.c.ingested_at.desc(),
+                unstructured_document.c.id,
+            )
+            .offset(skip)
+            .limit(limit)
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(r) for r in rows]
+
+
+def count_documents(conn: Connection, *, search: str | None = None) -> int:
+    return conn.execute(
+        select(func.count())
+        .select_from(unstructured_document)
+        .where(_document_search(search))
+    ).scalar_one()
+
+
+def _split_name(name: str) -> tuple[str, str]:
+    """``("report", ".pdf")`` for ``report.pdf``; a dotfile has no extension."""
+    stem, dot, extension = name.rpartition(".")
+    if not dot or not stem:
+        return name, ""
+    return stem, f".{extension}"
+
+
+def next_free_name(name: str, taken: set[str]) -> str:
+    """*name*, or ``"<stem> (n)<suffix>"`` with the lowest *n* not in *taken*.
+
+    *taken* holds lower-cased names, so ``Report.docx`` beside ``report.docx``
+    still reads as a second copy.
+    """
+    if name.lower() not in taken:
+        return name
+    stem, suffix = _split_name(name)
+    n = 1
+    while f"{stem} ({n}){suffix}".lower() in taken:
+        n += 1
+    return f"{stem} ({n}){suffix}"
+
+
+def unique_document_name(conn: Connection, name: str) -> str:
+    """*name* made unique among stored documents — see :func:`next_free_name`.
+
+    The transaction-scoped lock keeps choosing a suffix and inserting the row
+    one atomic operation for callers that insert before committing.  One lock
+    covers every spelling because ``report.pdf`` and an explicit
+    ``report (1).pdf`` upload can otherwise choose the same candidate.
+    """
+    conn.execute(
+        text(
+            "SELECT pg_advisory_xact_lock("
+            "hashtext('auto_ontology.unstructured_document.name'))"
+        )
+    )
+    stem, suffix = _split_name(name)
+    escaped = stem.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    taken = {
+        row.lower()
+        for row in conn.execute(
+            select(unstructured_document.c.name).where(
+                or_(
+                    func.lower(unstructured_document.c.name) == name.lower(),
+                    unstructured_document.c.name.ilike(
+                        f"{escaped} (%){suffix}", escape="\\"
+                    ),
+                )
+            )
+        ).scalars()
+    }
+    return next_free_name(name, taken)
+
+
+def list_pending_documents(conn: Connection) -> list[dict[str, Any]]:
+    """Documents whose background pipeline did not reach a terminal state."""
+    rows = (
+        conn.execute(
+            select(
+                unstructured_document.c.id,
+                unstructured_document.c.path,
+                unstructured_document.c.status,
+            ).where(unstructured_document.c.status.in_(("processing", "extracting")))
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(row) for row in rows]
+
+
+def get_document(conn: Connection, document_id: str) -> dict[str, Any] | None:
+    row = (
+        conn.execute(
+            select(*_DOCUMENT_LIST_COLUMNS, unstructured_document.c.path).where(
+                unstructured_document.c.id == document_id
+            )
+        )
+        .mappings()
+        .first()
+    )
+    return dict(row) if row else None
+
+
+def update_document(
+    conn: Connection, document_id: str, values: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Set the given ``name``/``description`` fields; ``None`` when not found."""
+    allowed = {k: v for k, v in values.items() if k in ("name", "description")}
+    if allowed:
+        conn.execute(
+            unstructured_document.update()
+            .where(unstructured_document.c.id == document_id)
+            .values(**allowed)
+        )
+    return get_document(conn, document_id)
+
+
+def set_document_status(
+    conn: Connection, document_id: str, status: str, *, error: str | None = None
+) -> None:
+    conn.execute(
+        unstructured_document.update()
+        .where(unstructured_document.c.id == document_id)
+        .values(status=status, error=error)
+    )
+
+
 def delete_document(conn: Connection, document_id: str) -> None:
+    """Delete the document, its downstream rows, and its vectors."""
+    from unstructured_ao.vectorstore import delete_document_vectors
+
+    delete_document_vectors(conn, document_id)
     conn.execute(
         unstructured_document.delete().where(unstructured_document.c.id == document_id)
     )

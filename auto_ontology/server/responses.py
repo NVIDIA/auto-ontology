@@ -30,6 +30,7 @@ from auto_ontology.server.models import (
     CustomAnalysis,
     DataExplorationGraph,
     DatabaseSummary,
+    Document,
     GlobalSearchItem,
     EntityCoverageResult,
     ExplorationEdge,
@@ -84,6 +85,8 @@ __all__ = [
     "DataResponse",
     "DatabaseListResponse",
     "DescriptionSuggestionResponse",
+    "DocumentPageResponse",
+    "DocumentResponse",
     "EntityCoverageResponse",
     "ExplorationEdgeListResponse",
     "ExplorationRelatedNodesResponse",
@@ -311,6 +314,10 @@ TagItemPageResponse = PagedListResponse[TagItem]
 # The attach and detach routes answer with the *object's* tags after the change,
 # which is what the page redraws from — not with the tag that was moved.
 TagChipListResponse = ListResponse[TagChip]
+
+# Unstructured documents
+DocumentResponse = DataResponse[Document]
+DocumentPageResponse = PagedListResponse[Document]
 
 # Rules
 RuleResponse = DataResponse[Rule]

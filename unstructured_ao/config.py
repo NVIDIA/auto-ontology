@@ -31,6 +31,30 @@ import os
 #: somewhere else when comparing them.
 EXTRACTOR = os.environ.get("UNSTRUCTURED_EXTRACTOR", "auto")
 
+#: Where files uploaded through ``/api/documents`` are kept, one subdirectory
+#: per upload so two files with the same name do not collide.  The stored path
+#: is the document's unique key, so it must survive restarts: mount a volume
+#: here in a container.
+UPLOAD_DIR = os.environ.get(
+    "UNSTRUCTURED_UPLOAD_DIR",
+    os.path.join(os.path.expanduser("~"), ".auto_ontology", "documents"),
+)
+
+#: Most words an uploaded document may hold.  Counted over the extracted text,
+#: so it is enforced after extraction: a file over it ends up ``failed``.
+MAX_DOCUMENT_WORDS = 500_000
+
+#: Whether an upload's background task goes on from ingest to term and
+#: attribute extraction.  That pass makes several LLM calls per document, so it
+#: is the slow and paid part; turn it off to ingest chunks only.
+EXTRACT_ON_UPLOAD = os.environ.get(
+    "UNSTRUCTURED_EXTRACT_ON_UPLOAD", "true"
+).lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 #: Table holding unstructured chunk embeddings, written by the v2
 #: ``PGVectorStore`` API.  Must be stable across ingest and retrieve runs — a
 #: mismatch means retrieval queries the wrong table (or an empty one).

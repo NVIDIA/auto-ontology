@@ -25,6 +25,7 @@ import psycopg
 from langchain_core.embeddings import Embeddings
 from langchain_postgres import Column, PGEngine, PGVectorStore
 from psycopg import sql
+from sqlalchemy import Connection, text
 
 import unstructured_ao.config as config
 
@@ -119,6 +120,32 @@ ATTRIBUTE_METADATA_COLUMNS = [DOCUMENT_ID_COLUMN, "term_id", "attribute_type"]
 
 _store: PGVectorStore | None = None
 _attribute_store: PGVectorStore | None = None
+
+
+def delete_document_vectors(conn: Connection, document_id: str) -> None:
+    """Delete *document_id*'s chunk and attribute vectors on *conn*.
+
+    The vector tables sit outside the relational schema, so the cascade from
+    ``unstructured_document`` never reaches them.  Deleting through the
+    caller's connection keeps them in the same transaction as the rows they
+    mirror.  Either table may not exist yet: both are created on first write.
+    """
+    quote = conn.dialect.identifier_preparer.quote
+    for schema, table in (
+        (config.CHUNK_SCHEMA, config.CHUNK_TABLE),
+        (config.ATTRIBUTE_SCHEMA, config.ATTRIBUTE_TABLE),
+    ):
+        qualified = f"{quote(schema)}.{quote(table)}"
+        if conn.execute(
+            text("SELECT to_regclass(:qualified)"), {"qualified": qualified}
+        ).scalar():
+            conn.execute(
+                text(
+                    f"DELETE FROM {qualified} "
+                    f"WHERE {quote(DOCUMENT_ID_COLUMN)} = :document_id"
+                ),
+                {"document_id": document_id},
+            )
 
 
 def get_attribute_store(*, vector_size: int | None = None) -> PGVectorStore:

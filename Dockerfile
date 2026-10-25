@@ -87,7 +87,14 @@ WORKDIR /app
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
+# The documents API imports it. Its extractors' heavy packages come from the
+# `unstructured` extra, which this image does not install, so uploads that need
+# one answer 503 until it is.
+COPY --chown=auto_ontology:auto_ontology unstructured_ao/ ./unstructured_ao/
 COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
+# Uploaded documents. Mount a volume here to keep them across restarts.
+ENV UNSTRUCTURED_UPLOAD_DIR=/data/documents
+RUN mkdir -p /data/documents && chown -R auto_ontology:auto_ontology /data
 # Fail the image build if the generated permission resource is absent or invalid.
 RUN python -c "from auto_ontology.server.users.permissions import permissions_for_role; assert 'group:read' in permissions_for_role('admin')"
 # Schema migrations for the `public` schema, run by the `migrate` mode below.
