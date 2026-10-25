@@ -21,6 +21,9 @@ this module offers two deterministic, SQL-level levers:
 * :func:`flip_numeric_output_types` moves the numeric output columns of a
   top-level ``SELECT`` to the *other* type, for the one retry a benchmark
   allows after a wrong answer.
+* :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
+  has none. The grader compares the concatenated text exactly, and an
+  unordered aggregate is not a stable string.
 
 The module is pure (``sqlglot`` only) so it can be exercised without a database.
 """
@@ -395,6 +398,47 @@ def flip_numeric_output_types(
     return tree.sql(dialect="postgres") if converted else None
 
 
+def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
+    """Give every unordered ``STRING_AGG`` an ``ORDER BY`` on its own value.
+
+    Postgres leaves the order of ``STRING_AGG(expr, delim)`` unspecified, and
+    the grader compares the resulting text exactly. Reference answers that
+    list the aggregated values sort them by that same expression. An aggregate
+    that already has an ``ORDER BY`` is left alone — a caller-chosen key
+    (rank, score) must win over alphabetical order.
+
+    Returns *sql* unchanged when there is nothing to add, so a query with no
+    ``STRING_AGG`` is never re-serialised.
+    """
+    if not _is_postgres(dialect) or not sql.strip():
+        return sql
+    if "string_agg" not in sql.lower():
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+
+    changed = False
+    for aggregate in tree.find_all(exp.GroupConcat):
+        inner = aggregate.this
+        if isinstance(inner, exp.Order):
+            continue
+        sort_key = (
+            inner.expressions[0].copy()
+            if isinstance(inner, exp.Distinct) and inner.expressions
+            else inner.copy()
+        )
+        aggregate.set(
+            "this",
+            exp.Order(
+                this=inner.copy(),
+                expressions=[exp.Ordered(this=sort_key, nulls_first=False)],
+            ),
+        )
+        changed = True
+    return tree.sql(dialect="postgres") if changed else sql
+
+
 __all__ = [
     "cast_jsonb_numeric_projections",
     "dominant_kind",
@@ -403,5 +447,6 @@ __all__ = [
     "has_avg_expression",
     "numeric_column_kinds",
     "opposite_target",
+    "order_string_aggregates",
     "result_values_digest",
 ]

@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     has_avg_expression,
     numeric_column_kinds,
     opposite_target,
+    order_string_aggregates,
     result_values_digest,
 )
 
@@ -385,6 +386,47 @@ def _validate(
         }
     )
     return response.sql_code
+
+
+def test_unordered_string_agg_sorts_by_its_own_value() -> None:
+    rewritten = order_string_aggregates(
+        "SELECT STRING_AGG(q.tickersym, ', ') AS ticker_symbols FROM t GROUP BY a",
+        "postgres",
+    )
+    assert "ORDER BY q.tickersym" in rewritten
+
+
+def test_string_agg_keeps_an_existing_order() -> None:
+    sql = "SELECT STRING_AGG(reg_id, ', ' ORDER BY erf DESC, reg_id ASC) FROM t"
+    assert order_string_aggregates(sql, "postgres") == sql
+
+
+def test_string_agg_order_is_postgres_only() -> None:
+    sql = "SELECT STRING_AGG(t, ', ') FROM u"
+    assert order_string_aggregates(sql, "sqlite") == sql
+    assert order_string_aggregates("SELECT a FROM t", "postgres") == "SELECT a FROM t"
+
+
+def test_distinct_string_agg_orders_by_the_distinct_expression() -> None:
+    rewritten = order_string_aggregates(
+        "SELECT STRING_AGG(DISTINCT t, ', ') FROM u", "postgres"
+    )
+    assert "DISTINCT" in rewritten.upper()
+    assert "ORDER BY t" in rewritten
+
+
+def test_validation_orders_string_agg_when_alignment_is_requested(monkeypatch) -> None:
+    sql = _validate(
+        monkeypatch,
+        "SELECT STRING_AGG(tickersym, ', ') FROM funds GROUP BY parentgroup",
+        numeric_type_alignment=True,
+    )
+    assert "ORDER BY tickersym" in sql
+
+
+def test_validation_leaves_string_agg_alone_without_the_flag(monkeypatch) -> None:
+    original = "SELECT STRING_AGG(tickersym, ', ') FROM funds GROUP BY parentgroup"
+    assert _validate(monkeypatch, original) == original
 
 
 def test_validation_rewrites_float_casts_when_alignment_is_requested(
