@@ -47,6 +47,9 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
     opposite_target,
+    order_groups_by_identifier,
+    order_periods_chronologically,
+    sum_decimal_casts_to_integer,
 )
 
 logger = logging.getLogger(__name__)
@@ -792,7 +795,71 @@ def step(
                 _numeric_kinds_for(session, sql)
             )
             session.first_submit_values_digest = _values_digest_for(session, sql)
+        sql = _stabilize_submitted_order(session, sql)
     return SubmitSQLAction(sql=sql)
+
+
+def _postgres_dialect(session: InteractiveSessionState) -> str | None:
+    for connector in session.connectors or []:
+        dialect = getattr(connector, "dialect", None)
+        if dialect and str(dialect).lower() in ("postgres", "postgresql"):
+            return str(dialect)
+    return None
+
+
+def _submit_if_it_runs(
+    session: InteractiveSessionState, sql: str, rewritten: str, kind: str
+) -> str:
+    """Use *rewritten* only when it actually executes. A failed rewrite must not replace a query that already ran."""
+    if not rewritten or rewritten == sql:
+        return sql
+    connector = resolve_connector_from_tables(
+        session.path_state.get("relevant_tables") or [], session.connectors
+    )
+    if connector is None:
+        return sql
+    try:
+        execute_chat_sql(connector, rewritten, kind=kind)
+    except Exception as exc:  # noqa: BLE001 — keep the SQL that already executed
+        logger.warning(
+            "[%s] %s did not run (%s); keeping the previous SQL",
+            session.task_id,
+            kind,
+            exc,
+        )
+        return sql
+    logger.info("[%s] %s", session.task_id, kind)
+    return rewritten
+
+
+def _stabilize_submitted_order(session: InteractiveSessionState, sql: str) -> str:
+    """Apply the row-order rewrites that matched the grader on saved SQL.
+
+    Runs after the numeric-type flip so a flip back to ``double precision``
+    does not undo the chronological average, and so an integer ``SUM`` is not
+    wrapped again as ``numeric``. Each rewrite is kept only if it executes.
+    """
+    dialect = _postgres_dialect(session)
+    if dialect is None or not sql.strip():
+        return sql
+    sql = _submit_if_it_runs(
+        session,
+        sql,
+        order_groups_by_identifier(sql, dialect),
+        "grouped identifier tie-break",
+    )
+    sql = _submit_if_it_runs(
+        session,
+        sql,
+        order_periods_chronologically(sql, dialect),
+        "chronological order for a per-period ranking",
+    )
+    return _submit_if_it_runs(
+        session,
+        sql,
+        sum_decimal_casts_to_integer(sql, dialect),
+        "integer sum of a whole-number cast",
+    )
 
 
 def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:

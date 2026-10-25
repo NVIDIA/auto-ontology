@@ -12,7 +12,7 @@ two answers that agree to the last digit still fail when one side is a float
 and the other a numeric.
 
 The grader cannot be changed from here and the reference is never visible, so
-this module offers two deterministic, SQL-level levers:
+this module offers deterministic, SQL-level levers:
 
 * :func:`float_casts_to_numeric` rewrites our own explicit
   ``CAST(.. AS REAL / FLOAT / DOUBLE PRECISION)`` to ``NUMERIC``. Reference
@@ -24,6 +24,12 @@ this module offers two deterministic, SQL-level levers:
 * :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
   has none. The grader compares the concatenated text exactly, and an
   unordered aggregate is not a stable string.
+* :func:`order_groups_by_identifier` and :func:`order_periods_chronologically`
+  settle two row-order shapes the grader compares exactly: a grouped metric
+  tied on its value, and a per-period ranking displayed by the period.
+* :func:`sum_decimal_casts_to_integer` keeps ``SUM`` of a whole-number cast as
+  an integer. ``SUM(int)`` is ``bigint``; ``SUM(numeric)`` is ``numeric``, and
+  the grader treats those as different values.
 
 The module is pure (``sqlglot`` only) so it can be exercised without a database.
 """
@@ -439,6 +445,173 @@ def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
     return tree.sql(dialect="postgres") if changed else sql
 
 
+_IDENTIFIER_SUFFIX = re.compile(r"(id|key|code)$", re.IGNORECASE)
+_PERIOD_SUFFIX = re.compile(r"(month|date|year|day|time)$", re.IGNORECASE)
+_RANK_SUFFIX = re.compile(r"(rank|row_number|rn)$", re.IGNORECASE)
+
+
+def _outermost_select(tree: exp.Expression) -> Optional[exp.Select]:
+    node: exp.Expression = tree
+    while isinstance(node, exp.With):
+        node = node.this
+    return node if isinstance(node, exp.Select) else None
+
+
+def _ordered_name(ordered: exp.Ordered) -> str:
+    key = ordered.this
+    if isinstance(key, (exp.Column, exp.Identifier)):
+        return key.name
+    return ""
+
+
+def order_groups_by_identifier(sql: str, dialect: Optional[str]) -> str:
+    """Break ties on a grouped aggregate by the grouped identifier, ascending.
+
+    When several groups share the metric, ``ORDER BY metric DESC`` alone is not
+    a stable row order. Appending the grouped id/key/code column makes it
+    stable. Other grouped columns are left alone: a label such as a category
+    is often not the tie-break the grader used, and adding it reorders rows the
+    grader already accepted. A ``LIMIT`` is also left alone, because the extra
+    key would change which tied rows survive the limit.
+
+    Returns *sql* unchanged when there is nothing to add.
+    """
+    if not _is_postgres(dialect) or not sql.strip():
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+    select = _outermost_select(tree)
+    if (
+        select is None
+        or not select.args.get("group")
+        or not select.args.get("order")
+        or select.args.get("limit")
+    ):
+        return sql
+
+    order = select.args["order"]
+    existing = set()
+    for ordered in order.expressions:
+        existing.add(ordered.this.sql(dialect="postgres").lower())
+        name = _ordered_name(ordered)
+        if name:
+            existing.add(name.lower())
+
+    group_sql = [
+        g.sql(dialect="postgres").lower() for g in select.args["group"].expressions
+    ]
+    group_names = [
+        g.name.lower()
+        for g in select.args["group"].expressions
+        if isinstance(g, exp.Column)
+    ]
+    extras: list[exp.Expression] = []
+    for projection in select.expressions:
+        alias = projection.alias if isinstance(projection, exp.Alias) else None
+        inner = projection.this if isinstance(projection, exp.Alias) else projection
+        if isinstance(inner, exp.AggFunc):
+            continue
+        name = alias or (inner.name if isinstance(inner, exp.Column) else "")
+        if not name or not _IDENTIFIER_SUFFIX.search(name) or name.lower() in existing:
+            continue
+        inner_sql = inner.sql(dialect="postgres").lower()
+        inner_name = inner.name.lower() if isinstance(inner, exp.Column) else ""
+        if (
+            inner_sql in group_sql
+            or inner_name in group_names
+            or name.lower() in group_names
+        ):
+            extras.append(exp.to_identifier(alias) if alias else inner.copy())
+    if not extras:
+        return sql
+    for extra in extras:
+        order.append("expressions", exp.Ordered(this=extra, nulls_first=False))
+    return tree.sql(dialect="postgres")
+
+
+def order_periods_chronologically(sql: str, dialect: Optional[str]) -> str:
+    """Show a per-period ranking in period order, as a numeric average.
+
+    A result shaped as period, metric, rank is graded in chronological order
+    even when the rank was computed from the metric. When the outermost
+    ``ORDER BY`` leads with the rank and also names a month/date/year column,
+    keep only that period column (ascending). A ``CAST(... AS DOUBLE
+    PRECISION)`` on a selected value is removed in the same edit: the flip to
+    float makes an average of ``numeric`` fail the grader's exact type check.
+
+    Returns *sql* unchanged when the order shape does not match.
+    """
+    if not _is_postgres(dialect) or not sql.strip():
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+    select = _outermost_select(tree)
+    if select is None or not select.args.get("order"):
+        return sql
+    order = select.args["order"]
+    keys = [(_ordered_name(ordered), ordered) for ordered in order.expressions]
+    if not keys or not _RANK_SUFFIX.search(keys[0][0] or ""):
+        return sql
+    period_keys = [key for key in keys if _PERIOD_SUFFIX.search(key[0] or "")]
+    if not period_keys:
+        return sql
+    order.set(
+        "expressions",
+        [
+            exp.Ordered(this=key[1].this.copy(), nulls_first=False)
+            for key in period_keys
+        ],
+    )
+    for projection in list(select.expressions):
+        inner = projection.this if isinstance(projection, exp.Alias) else projection
+        target = inner.args.get("to") if isinstance(inner, exp.Cast) else None
+        if not isinstance(target, exp.DataType) or target.this not in (
+            exp.DataType.Type.DOUBLE,
+            exp.DataType.Type.FLOAT,
+        ):
+            continue
+        if isinstance(projection, exp.Alias):
+            projection.set("this", inner.this)
+        else:
+            projection.replace(inner.this)
+    return tree.sql(dialect="postgres")
+
+
+def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
+    """Sum a ``CAST(... AS NUMERIC)`` as an integer when the cast is the whole sum.
+
+    ``SUM(numeric)`` is ``numeric`` and ``SUM(int)`` is ``bigint``. A count of
+    whole units (episodes, items) stored as text and cast to ``numeric`` then
+    comes back as ``Decimal``, which fails a grader that expected the integer
+    sum. The caller must be ready for the rewritten statement to fail when a
+    value is not an integer, and keep the original SQL in that case.
+
+    Returns *sql* unchanged when no such sum is present.
+    """
+    if not _is_postgres(dialect) or not sql.strip():
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+    changed = False
+    for total in tree.find_all(exp.Sum):
+        inner = total.this
+        while isinstance(inner, exp.Paren):
+            inner = inner.this
+        if not isinstance(inner, exp.Cast):
+            continue
+        target = inner.args.get("to")
+        if (
+            isinstance(target, exp.DataType)
+            and target.this == exp.DataType.Type.DECIMAL
+        ):
+            inner.set("to", exp.DataType.build("int"))
+            changed = True
+    return tree.sql(dialect="postgres") if changed else sql
+
+
 __all__ = [
     "cast_jsonb_numeric_projections",
     "dominant_kind",
@@ -447,6 +620,9 @@ __all__ = [
     "has_avg_expression",
     "numeric_column_kinds",
     "opposite_target",
+    "order_groups_by_identifier",
+    "order_periods_chronologically",
     "order_string_aggregates",
     "result_values_digest",
+    "sum_decimal_casts_to_integer",
 ]

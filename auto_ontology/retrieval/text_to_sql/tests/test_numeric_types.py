@@ -19,8 +19,11 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     has_avg_expression,
     numeric_column_kinds,
     opposite_target,
+    order_groups_by_identifier,
+    order_periods_chronologically,
     order_string_aggregates,
     result_values_digest,
+    sum_decimal_casts_to_integer,
 )
 
 
@@ -413,6 +416,60 @@ def test_distinct_string_agg_orders_by_the_distinct_expression() -> None:
     )
     assert "DISTINCT" in rewritten.upper()
     assert "ORDER BY t" in rewritten
+
+
+def test_grouped_metric_breaks_ties_by_the_identifier() -> None:
+    sql = (
+        "SELECT c.series_id AS id, SUM(CAST(x AS NUMERIC)) AS total "
+        "FROM core c GROUP BY c.series_id ORDER BY SUM(CAST(x AS NUMERIC)) DESC"
+    )
+    rewritten = order_groups_by_identifier(sql, "postgres")
+    assert rewritten.upper().rstrip().endswith("DESC, ID")
+
+
+def test_grouped_order_leaves_a_category_tie_break_alone() -> None:
+    sql = (
+        "SELECT complexity_classification, AVG(days) AS avg_processing_time_days "
+        "FROM cases GROUP BY complexity_classification "
+        "ORDER BY avg_processing_time_days DESC"
+    )
+    assert order_groups_by_identifier(sql, "postgres") == sql
+
+
+def test_grouped_order_does_not_change_a_limited_query() -> None:
+    sql = (
+        "SELECT c.series_id AS id, COUNT(*) AS n FROM core c "
+        "GROUP BY c.series_id ORDER BY COUNT(*) DESC LIMIT 3"
+    )
+    assert order_groups_by_identifier(sql, "postgres") == sql
+
+
+def test_period_ranking_is_shown_chronologically_as_numeric() -> None:
+    sql = (
+        "SELECT audit_month, CAST(avg_afs AS DOUBLE PRECISION), severity_rank "
+        "FROM ranked ORDER BY severity_rank, audit_month"
+    )
+    rewritten = order_periods_chronologically(sql, "postgres")
+    assert "DOUBLE PRECISION" not in rewritten.upper()
+    assert rewritten.upper().rstrip().endswith("ORDER BY AUDIT_MONTH")
+
+
+def test_period_ranking_leaves_a_metric_sort_alone() -> None:
+    sql = "SELECT name, score FROM t ORDER BY score DESC"
+    assert order_periods_chronologically(sql, "postgres") == sql
+
+
+def test_sum_of_a_decimal_cast_becomes_an_integer_sum() -> None:
+    rewritten = sum_decimal_casts_to_integer(
+        "SELECT SUM(CAST(episodes AS DECIMAL)) AS total FROM shows", "postgres"
+    )
+    assert "DECIMAL" not in rewritten.upper()
+    assert "INT" in rewritten.upper()
+
+
+def test_sum_integer_cast_ignores_a_sum_that_is_already_numeric_free() -> None:
+    sql = "SELECT SUM(episodes) AS total FROM shows"
+    assert sum_decimal_casts_to_integer(sql, "postgres") == sql
 
 
 def test_validation_orders_string_agg_when_alignment_is_requested(monkeypatch) -> None:
