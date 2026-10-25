@@ -289,10 +289,13 @@ def extract_document_semantics(document_id: str, conn: Connection) -> None:
     from unstructured_ao.dal import get_document_chunks, get_document_term
     from unstructured_ao.extract import run_extraction
     from unstructured_ao.retrieve import link_document_attributes
+    from unstructured_ao.vectorstore import delete_document_attribute_vectors
     from unstructured_ao.windows import build_windows
 
     chunks = get_document_chunks(conn, document_id)
     windows = build_windows([c["id"] for c in chunks], [c["content"] for c in chunks])
+    # A previous pass that rolled back may have left vectors behind.
+    delete_document_attribute_vectors(conn, document_id)
     run_extraction(document_id, windows, conn)
     if get_document_term(conn, document_id) is None:
         raise RuntimeError("Term extraction failed; see the server log.")

@@ -130,22 +130,34 @@ def delete_document_vectors(conn: Connection, document_id: str) -> None:
     caller's connection keeps them in the same transaction as the rows they
     mirror.  Either table may not exist yet: both are created on first write.
     """
+    _delete_vectors(conn, config.CHUNK_SCHEMA, config.CHUNK_TABLE, document_id)
+    delete_document_attribute_vectors(conn, document_id)
+
+
+def delete_document_attribute_vectors(conn: Connection, document_id: str) -> None:
+    """Delete only *document_id*'s attribute vectors on *conn*, keeping its chunks'.
+
+    The attribute store writes on its own connection, so vectors from a semantic
+    pass whose transaction rolled back outlive the attributes they point at.
+    """
+    _delete_vectors(conn, config.ATTRIBUTE_SCHEMA, config.ATTRIBUTE_TABLE, document_id)
+
+
+def _delete_vectors(
+    conn: Connection, schema: str, table: str, document_id: str
+) -> None:
     quote = conn.dialect.identifier_preparer.quote
-    for schema, table in (
-        (config.CHUNK_SCHEMA, config.CHUNK_TABLE),
-        (config.ATTRIBUTE_SCHEMA, config.ATTRIBUTE_TABLE),
-    ):
-        qualified = f"{quote(schema)}.{quote(table)}"
-        if conn.execute(
-            text("SELECT to_regclass(:qualified)"), {"qualified": qualified}
-        ).scalar():
-            conn.execute(
-                text(
-                    f"DELETE FROM {qualified} "
-                    f"WHERE {quote(DOCUMENT_ID_COLUMN)} = :document_id"
-                ),
-                {"document_id": document_id},
-            )
+    qualified = f"{quote(schema)}.{quote(table)}"
+    if conn.execute(
+        text("SELECT to_regclass(:qualified)"), {"qualified": qualified}
+    ).scalar():
+        conn.execute(
+            text(
+                f"DELETE FROM {qualified} "
+                f"WHERE {quote(DOCUMENT_ID_COLUMN)} = :document_id"
+            ),
+            {"document_id": document_id},
+        )
 
 
 def get_attribute_store(*, vector_size: int | None = None) -> PGVectorStore:

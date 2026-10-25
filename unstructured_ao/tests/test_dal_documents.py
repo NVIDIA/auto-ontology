@@ -98,6 +98,32 @@ def test_list_documents_filters_and_orders(conn: Connection) -> None:
     assert dal.list_documents(conn, search=tag)[0]["path"] == f"/tmp/{tag}-a.txt"
 
 
+def test_attribute_vector_delete_keeps_chunk_vectors(
+    conn: Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from unstructured_ao import config
+    from unstructured_ao.vectorstore import delete_document_attribute_vectors
+
+    for table in ("chunk_vectors", "attribute_vectors"):
+        conn.execute(text(f"CREATE TEMP TABLE {table} (document_id text)"))
+        conn.execute(
+            text(f"INSERT INTO {table} VALUES ('doc'), ('other')"),
+        )
+    monkeypatch.setattr(config, "CHUNK_SCHEMA", "pg_temp")
+    monkeypatch.setattr(config, "CHUNK_TABLE", "chunk_vectors")
+    monkeypatch.setattr(config, "ATTRIBUTE_SCHEMA", "pg_temp")
+    monkeypatch.setattr(config, "ATTRIBUTE_TABLE", "attribute_vectors")
+
+    delete_document_attribute_vectors(conn, "doc")
+
+    def rows(table: str) -> list[str]:
+        query = text(f"SELECT document_id FROM {table} ORDER BY 1")
+        return list(conn.execute(query).scalars())
+
+    assert rows("attribute_vectors") == ["other"]
+    assert rows("chunk_vectors") == ["doc", "other"]
+
+
 def test_deleting_a_document_drops_only_families_it_leaves_too_small(
     conn: Connection,
 ) -> None:
