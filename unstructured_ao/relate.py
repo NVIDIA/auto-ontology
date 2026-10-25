@@ -428,10 +428,16 @@ def label_families(
     attributes: dict[str, dict[str, Any]],
     *,
     progress: bool = True,
-) -> list[dict[str, Any]]:
-    """The qualifier, value and disambiguating note for each family."""
+) -> tuple[list[dict[str, Any]], int]:
+    """The qualifier, value and disambiguating note for each family.
+
+    Returns ``(labelled, failed)``.  *failed* counts groups whose call errored;
+    a group with no surviving attributes is dropped without counting, since
+    there is nothing to label.
+    """
     llm = get_llm_client(max_tokens=2048)
     labelled: list[dict[str, Any]] = []
+    failed = 0
 
     with (
         limit_inflight(MAX_INFLIGHT),
@@ -443,6 +449,7 @@ def label_families(
             if label is None:
                 continue
             if "error" in label:
+                failed += 1
                 if progress:
                     print(f"  [{done}/{len(groups)}] {label['error']}", flush=True)
                 continue
@@ -453,7 +460,7 @@ def label_families(
                     f"by {label.get('dimension')}: {label.get('canonical')}",
                     flush=True,
                 )
-    return labelled
+    return labelled, failed
 
 
 def write_relations(
@@ -621,7 +628,7 @@ def build(
     groups = group_families(edges)
     if progress:
         print(f"\n{len(groups)} family/families to label", flush=True)
-    families = label_families(groups, attributes, progress=progress)
+    families, failed_labels = label_families(groups, attributes, progress=progress)
 
     if out:
         from pathlib import Path
@@ -641,8 +648,18 @@ def build(
             )
         return {"relations": 0, "skipped": 0, "families": 0}
 
-    with engine.begin() as conn:
-        written_families = write_families(conn, families)
+    # write_families replaces every stored family, so a partial labelling would
+    # silently delete the families whose call failed.
+    if failed_labels:
+        logger.error(
+            "Labelling failed for %d of %d families; kept the stored families.",
+            failed_labels,
+            len(groups),
+        )
+        written_families = 0
+    else:
+        with engine.begin() as conn:
+            written_families = write_families(conn, families)
     if progress:
         print(
             f"\nwrote {relations['written']} relation(s) and {written_families} "
