@@ -162,12 +162,6 @@ create_sql_user_prompt = (
     "required merely because a foreign key exists. COUNT(id) counts source rows, while "
     "COUNT(DISTINCT id) counts represented entities. Match that choice to what the "
     "question asks to count.\n"
-    "- NULL filtering: Do not add `IS NOT NULL` solely because a projected field "
-    "has `is_nullable: true`, or because one or multiple fields are projected. "
-    "Add it only when the question or evidence requires the requested value to "
-    "exist. If the concept maps to one nullable column, check that column; if it "
-    "maps to a composite concept, check every required nullable component. "
-    "Otherwise, preserve rows containing NULLs.\n"
     "- Time windows: apply a date/year filter ONLY when the question's data "
     "request names a period; 'last week/month/year' then means the most "
     "recent completed calendar period, not a rolling window.\n"
@@ -411,6 +405,11 @@ def create_sql_from_candidates_prompt(
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
+- Never match a human name/label against an id or foreign-key column (`*_id`,
+  `link_to_*`). To filter by a name, join to the table holding the name columns
+  (first_name/last_name/*_name) and filter there. Join each foreign key to the
+  primary key it actually references (e.g. `expense.link_to_member` =
+  `member.member_id`, never `event.event_id`).
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.

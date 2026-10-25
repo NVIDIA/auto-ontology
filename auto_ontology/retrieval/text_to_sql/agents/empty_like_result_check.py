@@ -5,13 +5,17 @@
 """
 Post-execution result integrity checks.
 
-Two checks run after successful SQL execution:
+Three checks run after successful SQL execution:
 
-1. All-NULL JSONB columns: if a JSONB-accessed computed column returns NULL for
+1. NULL result values: when a projected row-level expression returns NULL, add
+   the corresponding ``IS NOT NULL`` predicate deterministically and execute the
+   corrected SQL once before involving reconstruction.
+
+2. All-NULL JSONB columns: if a JSONB-accessed computed column returns NULL for
    every row, the path is likely wrong (wrong nesting level or wrong key name).
    Routes once to reconstruction with a targeted error — no LLM call needed.
 
-2. Empty-result LIKE check: if execution returns zero rows and the SQL contains
+3. Empty-result LIKE check: if execution returns zero rows and the SQL contains
    LIKE/ILIKE predicates, uses an LLM to identify non-essential filters and
    routes once to reconstruction with explicit removal guidance.
 """
@@ -25,8 +29,13 @@ from typing import Any
 
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
+import sqlglot
+from sqlglot import exp
 
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.connector_routing import (
+    resolve_connector_from_tables,
+)
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_empty_like_check_prompt,
     format_dual_question_block,
@@ -127,6 +136,87 @@ def _parse_db_rows(db_result: Any) -> list[dict]:
     return []
 
 
+def _null_result_columns(db_result: Any) -> list[str]:
+    """Return result-column labels containing at least one SQL NULL."""
+    rows = _parse_db_rows(db_result)
+    if not rows:
+        return []
+    return list(
+        dict.fromkeys(
+            str(column)
+            for row in rows
+            for column, value in row.items()
+            if value is None
+        )
+    )
+
+
+def _row_level_projection(expression: exp.Expression) -> exp.Expression | None:
+    """Return a projection expression that is safe to repeat in ``WHERE``."""
+    source = expression.this if isinstance(expression, exp.Alias) else expression
+    if isinstance(source, exp.Star):
+        return None
+    if any(
+        source.find(node_type) is not None
+        for node_type in (exp.AggFunc, exp.Window, exp.Subquery, exp.Select)
+    ):
+        return None
+    return source.copy()
+
+
+def add_not_null_filters_for_result(
+    sql: str,
+    db_result: Any,
+    dialect: str | None = None,
+) -> tuple[str | None, list[str]]:
+    """Add predicates for projected row-level expressions that returned NULL.
+
+    The rewrite is deliberately conservative. It handles a single top-level
+    SELECT whose output labels can be mapped back to projections. Aggregate,
+    window, wildcard, subquery, and set-operation outputs are left to
+    reconstruction because moving those expressions into ``WHERE`` can change
+    semantics or produce invalid SQL.
+    """
+    null_columns = _null_result_columns(db_result)
+    if not null_columns:
+        return None, []
+
+    try:
+        tree = sqlglot.parse_one(sql, read=dialect or None)
+    except Exception:
+        return None, null_columns
+    if not isinstance(tree, exp.Select):
+        return None, null_columns
+
+    projections = {
+        projection.alias_or_name.casefold(): projection
+        for projection in tree.expressions
+        if projection.alias_or_name
+    }
+    predicates: list[exp.Expression] = []
+    filtered_columns: list[str] = []
+    for column in null_columns:
+        projection = projections.get(column.casefold())
+        if projection is None:
+            continue
+        source = _row_level_projection(projection)
+        if source is None:
+            continue
+        predicates.append(exp.Is(this=source, expression=exp.Null(), negate=True))
+        filtered_columns.append(column)
+
+    if not predicates:
+        return None, null_columns
+
+    rewritten: exp.Expression = tree
+    for predicate in predicates:
+        rewritten = rewritten.where(predicate)
+    try:
+        return rewritten.sql(dialect=dialect or None), filtered_columns
+    except Exception:
+        return None, null_columns
+
+
 def _null_jsonb_aliases(sql: str, db_result: Any) -> list[str]:
     """Return aliases of JSONB-accessed SELECT columns where every row value is NULL.
 
@@ -163,6 +253,16 @@ def _build_null_jsonb_error(null_aliases: list[str]) -> str:
         "so flat access (->>'key') should be (->'container'->>'key'); "
         "(2) wrong key name — the key is abbreviated or named differently in the schema "
         "than expected. Check the column schema and correct whichever applies."
+    )
+
+
+def _build_null_result_error(null_columns: list[str]) -> str:
+    columns = ", ".join(f"`{column}`" for column in null_columns)
+    return (
+        f"SQL executed successfully but returned NULL in result column(s) {columns}. "
+        "The final result must not contain NULL values. Add an IS NOT NULL filter "
+        "for each nullable projected field without changing the requested output, "
+        "grain, joins, or other filters."
     )
 
 
@@ -248,6 +348,45 @@ class EmptyLikeResultCheckAgent(BaseAgent):
                         null_aliases,
                     )
                     return {"decision": "invalid_sql", "path_state": path_state}
+
+            null_columns = _null_result_columns(db_result)
+            if null_columns:
+                if path_state.get("null_result_filter_retry_sql") == sql_code.strip():
+                    path_state["error"] = _build_null_result_error(null_columns)
+                    self.logger.info(
+                        "NULL values remained after deterministic filtering in %s — "
+                        "routing to reconstruction",
+                        null_columns,
+                    )
+                    return {"decision": "invalid_sql", "path_state": path_state}
+
+                connectors = state.get("connectors") or []
+                relevant_tables = path_state.get("relevant_tables", [])
+                connector = resolve_connector_from_tables(relevant_tables, connectors)
+                dialect = getattr(connector, "dialect", None)
+                rewritten_sql, filtered_columns = add_not_null_filters_for_result(
+                    sql_code, db_result, dialect
+                )
+                if rewritten_sql and rewritten_sql.strip() != sql_code.strip():
+                    _set_sql_code(path_state, rewritten_sql)
+                    path_state["null_result_filter_retry_sql"] = rewritten_sql.strip()
+                    path_state["sql_response_from_db"] = None
+                    self.logger.info(
+                        "Added NOT NULL result filters for %s — re-executing SQL",
+                        filtered_columns,
+                    )
+                    return {"decision": "retry_sql", "path_state": path_state}
+
+                path_state["error"] = _build_null_result_error(null_columns)
+                self.logger.info(
+                    "Could not safely add NOT NULL filters for %s — routing to "
+                    "reconstruction",
+                    null_columns,
+                )
+                return {"decision": "invalid_sql", "path_state": path_state}
+            return {"decision": "valid_sql", "path_state": path_state}
+
+        if state.get("shorten_answer", False):
             return {"decision": "valid_sql", "path_state": path_state}
 
         if not _sql_has_like(sql_code):
