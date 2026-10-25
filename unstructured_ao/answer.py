@@ -236,6 +236,8 @@ def complete(messages: list[dict], client=None) -> tuple[str, str | None]:
             time.sleep(BACKOFF_BASE_SECONDS * 2**attempt + random.random())
             continue
 
+        if not response.choices:
+            return "", "empty_choices"
         text = (response.choices[0].message.content or "").strip()
         # Reasoning models can spend the whole budget thinking and return
         # nothing. Retryable now, because REASONING_EFFORT caps the thinking.
