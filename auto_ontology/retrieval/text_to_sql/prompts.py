@@ -225,7 +225,8 @@ _POSTGRES_DIALECT_RULES = (
 
 
 # MySQL's ``/`` never truncates to an integer: it returns a DECIMAL with
-# div_precision_increment (4) more decimal places than the dividend (integer
+# div_precision_increment (by default 4, and Auto Ontology's MySQL connector
+# leaves it there) more decimal places than the dividend (integer
 # division is the separate DIV operator). So the generic "cast to REAL before
 # dividing" rule only adds casts here, and the model's MySQL cast of choice,
 # DECIMAL(p, s), changes the digits of the result. Exact graders compare
@@ -236,10 +237,10 @@ _POSTGRES_DIALECT_RULES = (
 # precision itself.
 _MYSQL_DIALECT_RULES = (
     "**MySQL-specific (these OVERRIDE the generic rules above)**\n"
-    "- `/` never truncates in MySQL: integer / integer returns a DECIMAL with 4 "
-    "more decimal places (1 / 3 = 0.3333). Do NOT cast to make a division "
-    "fractional; the generic 'cast to REAL before dividing' rule does not "
-    "apply.\n"
+    "- `/` never truncates in MySQL: integer / integer returns a DECIMAL with, "
+    "by default, 4 more decimal places (1 / 3 = 0.3333). Do NOT cast to make "
+    "a division fractional; the generic 'cast to REAL before dividing' rule "
+    "does not apply.\n"
     "- Do NOT CAST a computed value (an aggregate, average, ratio or window "
     "result), or the column inside it, to DECIMAL(p, s), FLOAT, DOUBLE or REAL, "
     "and do not ROUND it, unless the question asks for a precision or for "
