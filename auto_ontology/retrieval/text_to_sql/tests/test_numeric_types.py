@@ -16,6 +16,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
     float_casts_to_numeric,
+    float_json_arithmetic,
     has_avg_expression,
     numeric_column_kinds,
     opposite_target,
@@ -507,6 +508,33 @@ def test_sum_of_a_decimal_cast_becomes_an_integer_sum() -> None:
 def test_sum_integer_cast_ignores_a_sum_that_is_already_numeric_free() -> None:
     sql = "SELECT SUM(episodes) AS total FROM shows"
     assert sum_decimal_casts_to_integer(sql, "postgres") == sql
+
+
+def test_float_json_arithmetic_moves_json_metrics_to_double() -> None:
+    sql = (
+        "SELECT CAST("
+        "CAST(e.metrics ->> 'ospi' AS DECIMAL) + CAST(e.reliab_idx AS DECIMAL)"
+        " AS DECIMAL) AS eer FROM equipment e"
+    )
+    rewritten = float_json_arithmetic(sql, "postgres", ["RELIAB_IDX"])
+    upper = rewritten.upper()
+    assert (
+        "CAST(E.METRICS ->> 'OSPI' AS DOUBLE PRECISION) + "
+        "CAST(E.RELIAB_IDX AS DECIMAL) AS EER" in upper
+    )
+
+
+def test_float_json_arithmetic_leaves_sql_alone_without_a_native_real() -> None:
+    mixed = (
+        "SELECT CAST("
+        "CAST(e.metrics ->> 'ospi' AS DECIMAL) + CAST(e.hist_sign AS DECIMAL)"
+        " AS DECIMAL) AS eer FROM equipment e"
+    )
+    json_only = "SELECT CAST(e.metrics ->> 'ospi' AS DECIMAL) AS eer FROM equipment e"
+    assert float_json_arithmetic(mixed, "postgres", ["reliab_idx"]) == mixed
+    assert float_json_arithmetic(json_only, "postgres", ["reliab_idx"]) == json_only
+    assert float_json_arithmetic(mixed, "postgres", []) == mixed
+    assert float_json_arithmetic(mixed, "sqlite", ["hist_sign"]) == mixed
 
 
 def test_validation_orders_string_agg_when_alignment_is_requested(monkeypatch) -> None:

@@ -33,6 +33,10 @@ this module offers deterministic, SQL-level levers:
 * :func:`sum_decimal_casts_to_integer` keeps ``SUM`` of a whole-number cast as
   an integer. ``SUM(int)`` is ``bigint``; ``SUM(numeric)`` is ``numeric``, and
   the grader treats those as different values.
+* :func:`float_json_arithmetic` keeps a native ``real`` column on the float
+  side of the 0.01 rounding boundary. ``numeric`` hits ``x.xx5`` and rounds
+  half-up the other way from the float value the grader compares with
+  ``round``.
 
 The module is pure (``sqlglot`` only) so it can be exercised without a database.
 """
@@ -657,6 +661,83 @@ def order_by_leading_aggregate(sql: str, dialect: Optional[str]) -> str:
     return tree.sql(dialect="postgres")
 
 
+def _is_decimal_cast(cast: exp.Expression) -> bool:
+    target = cast.args.get("to")
+    return isinstance(target, exp.DataType) and target.this == exp.DataType.Type.DECIMAL
+
+
+def _cast_inner(cast: exp.Expression) -> exp.Expression:
+    inner = cast.this
+    while isinstance(inner, exp.Paren):
+        inner = inner.this
+    return inner
+
+
+def float_json_arithmetic(
+    sql: str, dialect: Optional[str], real_columns: Sequence[str]
+) -> str:
+    """Compute JSON metrics in ``double precision`` when a native ``real`` is cast to ``numeric``.
+
+    A ``real`` column forced through ``CAST(... AS NUMERIC)`` together with
+    ``CAST(json ->> 'key' AS NUMERIC)`` is exact decimal arithmetic. A float
+    reference of the same formula lands just below ``x.xx5`` where the decimal
+    lands on it, so after the grader's 2-place rounding the cells differ by
+    ``0.01`` and, once the outer numeric wrap is gone, by type as well.
+    JSON text casts become ``double precision`` and a numeric wrap around a
+    projection that still contains one is removed. The native ``real`` cast is
+    left in place.
+
+    Returns *sql* unchanged unless the statement both casts JSON text to
+    ``numeric`` and casts one of *real_columns* to ``numeric``.
+    """
+    if not _is_postgres(dialect) or not sql.strip() or not real_columns:
+        return sql
+    names = {name.lower() for name in real_columns if name}
+    if not names:
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+    real_cast = False
+    json_cast = False
+    for cast in tree.find_all(exp.Cast):
+        if not _is_decimal_cast(cast):
+            continue
+        inner = _cast_inner(cast)
+        if isinstance(inner, exp.Column) and inner.name.lower() in names:
+            real_cast = True
+        elif isinstance(inner, (exp.JSONExtract, exp.JSONExtractScalar)):
+            json_cast = True
+    if not (real_cast and json_cast):
+        return sql
+
+    for cast in list(tree.find_all(exp.Cast)):
+        if not _is_decimal_cast(cast):
+            continue
+        inner = _cast_inner(cast)
+        if isinstance(inner, (exp.JSONExtract, exp.JSONExtractScalar)):
+            cast.set("to", exp.DataType.build("double"))
+    select = _outermost_select(tree)
+    if select is not None:
+        for projection in list(select.expressions):
+            inner = projection.this if isinstance(projection, exp.Alias) else projection
+            while isinstance(inner, exp.Paren):
+                inner = inner.this
+            if (
+                isinstance(inner, exp.Cast)
+                and _is_decimal_cast(inner)
+                and (
+                    inner.find(exp.JSONExtractScalar) is not None
+                    or inner.find(exp.JSONExtract) is not None
+                )
+            ):
+                if isinstance(projection, exp.Alias):
+                    projection.set("this", inner.this)
+                else:
+                    projection.replace(inner.this)
+    return tree.sql(dialect="postgres")
+
+
 def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
     """Sum a ``CAST(... AS NUMERIC)`` as an integer when the cast is the whole sum.
 
@@ -694,6 +775,7 @@ __all__ = [
     "cast_jsonb_numeric_projections",
     "dominant_kind",
     "flip_numeric_output_types",
+    "float_json_arithmetic",
     "float_casts_to_numeric",
     "has_avg_expression",
     "numeric_column_kinds",

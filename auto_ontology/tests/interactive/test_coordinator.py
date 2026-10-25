@@ -373,6 +373,48 @@ def test_no_flip_when_the_first_submit_had_no_fractional_numbers():
     assert _step_debug(sess, sql).sql == sql
 
 
+def test_debug_without_a_recorded_type_retries_decimal_as_double():
+    connector = _Connector()
+    sess, sql = _debug_session(
+        connector,
+        first_kind=None,
+        kinds=("decimal",),
+        first_values_digest=None,
+    )
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == "SELECT CAST(AVG(x) AS DOUBLE PRECISION) AS v FROM aliens"
+    assert connector.executed == [action.sql]
+
+
+def test_integer_first_submit_keeps_a_new_decimal_debug_answer():
+    connector = _Connector()
+    sess, sql = _debug_session(
+        connector,
+        first_kind=None,
+        kinds=("decimal",),
+        first_values_digest="integer-rows",
+    )
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
+
+
+def test_untyped_decimal_retry_falls_back_when_it_does_not_run():
+    connector = _Connector(fail=True)
+    sess, sql = _debug_session(
+        connector,
+        first_kind=None,
+        kinds=("decimal",),
+        first_values_digest=None,
+    )
+
+    assert _step_debug(sess, sql).sql == sql
+
+
 def test_phase1_debug_sorts_by_the_leading_aggregate():
     connector = _Connector()
     sess = _make_session(connectors=[connector], numeric_type_alignment=True)
