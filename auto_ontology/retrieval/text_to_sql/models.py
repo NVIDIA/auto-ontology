@@ -183,7 +183,7 @@ class AnchorColumnModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reasoning: str = Field(..., description="Brief reasoning (1-2 sentences max).")
-    anchor_id: str | None = Field(
+    anchor_id: str = Field(
         ...,
         description="The id of the ColumnAttribute that is the primary focus of the question.",
     )

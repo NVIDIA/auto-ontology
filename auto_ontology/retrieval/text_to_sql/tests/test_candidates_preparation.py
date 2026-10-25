@@ -3,9 +3,11 @@
 # SPDX-License-Identifier: Apache-2.0
 
 import threading
-from typing import cast
+from types import SimpleNamespace
+from typing import cast, get_args
 
 import pytest
+from pydantic import ValidationError
 
 from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
 from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
@@ -31,6 +33,7 @@ def test_anchor_maps_evidence_to_schema_table_column(
 
     def fake_invoke(_llm, messages, _model):
         captured["prompt"] = messages[-1].content
+        captured["model"] = _model
         return AnchorColumnModel(anchor_id="frpm", reasoning="Evidence matches")
 
     monkeypatch.setattr(
@@ -70,6 +73,146 @@ def test_anchor_maps_evidence_to_schema_table_column(
     assert "main.frpm.enrollment_k12" in captured["prompt"]
     assert "FRPM Count (K-12)" not in captured["prompt"]
     assert "schema.table.column physical references" in captured["prompt"]
+    assert set(get_args(captured["model"].model_fields["anchor_id"].annotation)) == {
+        "frpm",
+        "enrollment",
+    }
+
+
+def test_anchor_model_rejects_null() -> None:
+    with pytest.raises(ValidationError):
+        AnchorColumnModel(anchor_id=None, reasoning="No exact match")
+
+
+def test_anchor_selection_retries_an_out_of_list_id(monkeypatch) -> None:
+    responses = [
+        SimpleNamespace(anchor_id="invented", reasoning=""),
+        SimpleNamespace(anchor_id="customer_id", reasoning="Valid proxy"),
+    ]
+    prompts: list[str] = []
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, messages, _model):
+        prompts.append(messages[-1].content)
+        return responses.pop(0)
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    contexts = {
+        "status": {
+            "table_name": "customers",
+            "col_name": "status",
+            "attr_description": "Current customer status.",
+        },
+        "customer_id": {
+            "table_name": "customers",
+            "col_name": "customer_id",
+            "attr_description": "Stable customer identifier.",
+        },
+    }
+
+    anchor_id, reasoning = CandidatePreparationAgent()._identify_anchor(
+        cast(AgentState, {"llm": FakeLlm()}),
+        "How many customers are active?",
+        contexts,
+    )
+
+    assert anchor_id == "customer_id"
+    assert reasoning == "Valid proxy"
+    assert len(prompts) == 2
+    assert "prior anchor_id 'invented' is invalid" in prompts[1]
+    assert "customer_id" in prompts[1]
+
+
+def test_anchor_prompt_requires_proxy_when_exact_column_is_absent(monkeypatch) -> None:
+    captured: dict = {}
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, messages, _model):
+        captured["system"] = messages[0].content
+        return SimpleNamespace(anchor_id="school_code", reasoning="Output identifier")
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    contexts = {
+        "school_code": {
+            "table_name": "schools",
+            "col_name": "school_code",
+            "attr_description": "School identifier.",
+        },
+        "enrollment": {
+            "table_name": "schools",
+            "col_name": "enrollment",
+            "attr_description": "Enrollment count.",
+        },
+    }
+
+    anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
+        cast(AgentState, {"llm": FakeLlm()}),
+        "List school campuses by attendance zone.",
+        contexts,
+    )
+
+    assert anchor_id == "school_code"
+    assert "Never return null" in captured["system"]
+    assert "requested output entity or table" in captured["system"]
+    assert "entity identifier or grouping attribute" in captured["system"]
+    assert "attribute used by the requested calculation" in captured["system"]
+    assert "most relevant filter attribute" in captured["system"]
+
+
+def test_anchor_retry_failure_uses_stable_semantic_fallback(
+    monkeypatch, caplog
+) -> None:
+    calls: list[object] = []
+
+    class FakeLlm:
+        def bind(self, **_kwargs):
+            return self
+
+    def fake_invoke(_llm, _messages, _model):
+        calls.append(_model)
+        return SimpleNamespace(anchor_id=None, reasoning="")
+
+    monkeypatch.setattr(
+        candidates_preparation, "invoke_with_structured_output", fake_invoke
+    )
+    # The filter is deliberately first. The fallback must select the identifier
+    # by role, not by dictionary insertion order.
+    contexts = {
+        "status_filter": {
+            "table_name": "customers",
+            "col_name": "status",
+            "attr_description": "Current customer status.",
+        },
+        "customer_identifier": {
+            "table_name": "customers",
+            "col_name": "customer_id",
+            "attr_description": "Stable customer identifier.",
+        },
+    }
+
+    with caplog.at_level("WARNING"):
+        anchor_id, reasoning = CandidatePreparationAgent()._identify_anchor(
+            cast(AgentState, {"llm": FakeLlm()}),
+            "How many customers are active?",
+            contexts,
+        )
+
+    assert anchor_id == "customer_identifier"
+    assert reasoning == ""
+    assert len(calls) == 2
+    assert "invalid anchor_id=None" in caplog.text
+    assert "allowed_ids=" in caplog.text
+    assert "deterministic fallback='customer_identifier'" in caplog.text
 
 
 def test_column_metadata_backfill_requires_samples_nullability_and_semantic_fk() -> (

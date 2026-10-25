@@ -25,10 +25,12 @@ Design Decisions:
 
 import logging
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
+from pydantic import Field, create_model
 
 from auto_ontology.dal.attributes import (
     fetch_attr_column_contexts,
@@ -75,6 +77,88 @@ from auto_ontology.retrieval.text_to_sql.value_anchors import (
     split_schema_named_anchors,
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
+
+
+_ANCHOR_IDENTIFIER_TOKENS = frozenset(
+    {"id", "identifier", "key", "code", "name", "group", "category", "type", "class"}
+)
+_ANCHOR_STOPWORDS = frozenset(
+    {
+        "a",
+        "an",
+        "and",
+        "are",
+        "by",
+        "for",
+        "from",
+        "in",
+        "is",
+        "of",
+        "on",
+        "the",
+        "to",
+        "with",
+    }
+)
+
+
+def _anchor_selection_model(ids: list[str]) -> type[AnchorColumnModel]:
+    """Build a per-call schema whose anchor id can only be one listed id."""
+    allowed_ids = Literal.__getitem__(tuple(ids))
+    return create_model(
+        "AllowedAnchorColumnModel",
+        __base__=AnchorColumnModel,
+        anchor_id=(
+            allowed_ids,
+            Field(
+                ...,
+                description=(
+                    "Exactly one ColumnAttribute id from the provided allowed-id list."
+                ),
+            ),
+        ),
+    )
+
+
+def _anchor_tokens(value: Any) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", str(value or "").casefold())
+        if token not in _ANCHOR_STOPWORDS
+    }
+
+
+def _deterministic_anchor_fallback(
+    question: str,
+    contexts: dict[str, dict],
+) -> str:
+    """Choose a stable proxy by semantic role, never mapping insertion order."""
+    question_tokens = _anchor_tokens(question)
+
+    def _score(item: tuple[str, dict]) -> tuple[int, int, int, int, str]:
+        anchor_id, context = item
+        entity_tokens = _anchor_tokens(
+            " ".join(str(context.get(key) or "") for key in ("table_name", "term_name"))
+        )
+        attribute_tokens = _anchor_tokens(
+            " ".join(
+                str(context.get(key) or "")
+                for key in ("attr_name", "col_name", "attr_description")
+            )
+        )
+        entity_overlap = len(question_tokens & entity_tokens)
+        identifier_or_grouping = bool(attribute_tokens & _ANCHOR_IDENTIFIER_TOKENS)
+        calculation_overlap = len(question_tokens & attribute_tokens)
+        all_overlap = len(question_tokens & (entity_tokens | attribute_tokens))
+        return (
+            -entity_overlap,
+            -int(identifier_or_grouping),
+            -calculation_overlap,
+            -all_overlap,
+            anchor_id,
+        )
+
+    return min(contexts.items(), key=_score)[0]
 
 
 def _qualified_name(t: dict) -> str:
@@ -1224,10 +1308,14 @@ class CandidatePreparationAgent(BaseAgent):
         try:
             llm = state["llm"]
         except KeyError:
+            fallback_id = _deterministic_anchor_fallback(question, contexts)
             self.logger.warning(
-                "_identify_anchor: no LLM in state — using first attribute"
+                "_identify_anchor: no LLM in state; deterministic fallback=%r "
+                "allowed_ids=%s",
+                fallback_id,
+                ids,
             )
-            return ids[0], ""
+            return fallback_id, ""
 
         def _physical_column(ctx: dict) -> str:
             parts = (
@@ -1247,8 +1335,15 @@ class CandidatePreparationAgent(BaseAgent):
         messages = [
             SystemMessage(
                 content=(
-                    "You are identifying the primary column attribute that is the main focus "
-                    "of a user's analytical question."
+                    "You are identifying the primary column attribute that is the "
+                    "main focus of a user's analytical question. Return exactly one "
+                    "id from the provided list. Never return null and never invent "
+                    "an id. If the exact requested column is unavailable, choose the "
+                    "closest valid proxy in this strict priority order: (1) another "
+                    "attribute representing the requested output entity or table; "
+                    "(2) an entity identifier or grouping attribute; (3) an "
+                    "attribute used by the requested calculation; (4) the most "
+                    "relevant filter attribute."
                 )
             ),
             HumanMessage(
@@ -1258,32 +1353,81 @@ class CandidatePreparationAgent(BaseAgent):
                     "Return the id of the single column attribute that best represents "
                     "the primary subject of the question. Map evidence concepts to "
                     "the listed schema.table.column physical references, not to "
-                    "semantic attribute names."
+                    "semantic attribute names. The anchor_id must be exactly one of: "
+                    f"{ids}."
                 )
             ),
         ]
+        schema = _anchor_selection_model(ids)
+        bound_llm = llm.bind(max_tokens=1024)
 
         try:
-            result = invoke_with_structured_output(
-                llm.bind(max_tokens=1024), messages, AnchorColumnModel
+            result = invoke_with_structured_output(bound_llm, messages, schema)
+        except Exception:
+            self.logger.warning(
+                "_identify_anchor: initial LLM call failed; allowed_ids=%s; "
+                "retrying with correction",
+                ids,
+                exc_info=True,
+            )
+            result = None
+
+        returned_id = getattr(result, "anchor_id", None)
+        if returned_id in contexts:
+            self.logger.info(
+                "Anchor column identified: %s (%s)",
+                returned_id,
+                result.reasoning,
+            )
+            return returned_id, (result.reasoning or "").strip()
+
+        self.logger.warning(
+            "_identify_anchor: invalid anchor_id=%r; allowed_ids=%s; retrying "
+            "with correction",
+            returned_id,
+            ids,
+        )
+        correction = HumanMessage(
+            content=(
+                f"Correction: the prior anchor_id {returned_id!r} is invalid. "
+                f"Return exactly one of these allowed IDs: {ids}. "
+                "Do not return null and do not invent an ID."
+            )
+        )
+        try:
+            retry_result = invoke_with_structured_output(
+                bound_llm,
+                [*messages, correction],
+                schema,
             )
         except Exception:
             self.logger.warning(
-                "_identify_anchor: LLM call failed — using first attribute",
+                "_identify_anchor: correction retry failed; invalid anchor_id=%r; "
+                "allowed_ids=%s",
+                returned_id,
+                ids,
                 exc_info=True,
             )
-            return ids[0], ""
+            retry_result = None
 
-        if result and result.anchor_id and result.anchor_id in contexts:
+        retry_id = getattr(retry_result, "anchor_id", None)
+        if retry_id in contexts:
             self.logger.info(
-                "Anchor column identified: %s (%s)", result.anchor_id, result.reasoning
+                "Anchor column identified after correction retry: %s (%s)",
+                retry_id,
+                retry_result.reasoning,
             )
-            return result.anchor_id, (result.reasoning or "").strip()
+            return retry_id, (retry_result.reasoning or "").strip()
 
+        fallback_id = _deterministic_anchor_fallback(question, contexts)
         self.logger.warning(
-            "_identify_anchor: LLM returned invalid id — using first attribute"
+            "_identify_anchor: correction retry returned invalid anchor_id=%r; "
+            "allowed_ids=%s; deterministic fallback=%r",
+            retry_id,
+            ids,
+            fallback_id,
         )
-        return ids[0], ""
+        return fallback_id, ""
 
     def _build_custom_analyses_str(self, relevant_queries: list[dict]) -> list[str]:
         """Build string representation of custom analyses for prompts."""
