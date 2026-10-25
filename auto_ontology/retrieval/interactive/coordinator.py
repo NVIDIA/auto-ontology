@@ -47,6 +47,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
     opposite_target,
+    order_by_leading_aggregate,
     order_groups_by_identifier,
     order_periods_chronologically,
     sum_decimal_casts_to_integer,
@@ -796,6 +797,20 @@ def step(
             )
             session.first_submit_values_digest = _values_digest_for(session, sql)
         sql = _stabilize_submitted_order(session, sql)
+        # After the tie-break, so a grouped id appended above is dropped again
+        # when the sort key itself was the later aggregate. Phase 2 is left
+        # alone: a follow-up often sorts by that later metric on purpose.
+        if (
+            turn_type == TurnType.DEBUG
+            and debug_error is None
+            and session.phase == InteractivePhase.ROUND1_CLARIFY
+        ):
+            sql = _submit_if_it_runs(
+                session,
+                sql,
+                order_by_leading_aggregate(sql, _postgres_dialect(session)),
+                "debug order by the leading aggregate",
+            )
     return SubmitSQLAction(sql=sql)
 
 

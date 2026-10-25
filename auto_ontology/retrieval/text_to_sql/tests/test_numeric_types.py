@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     has_avg_expression,
     numeric_column_kinds,
     opposite_target,
+    order_by_leading_aggregate,
     order_groups_by_identifier,
     order_periods_chronologically,
     order_string_aggregates,
@@ -457,6 +458,42 @@ def test_period_ranking_is_shown_chronologically_as_numeric() -> None:
 def test_period_ranking_leaves_a_metric_sort_alone() -> None:
     sql = "SELECT name, score FROM t ORDER BY score DESC"
     assert order_periods_chronologically(sql, "postgres") == sql
+
+
+def test_debug_order_uses_the_first_aggregate_and_drops_the_tie_break() -> None:
+    sql = (
+        "SELECT c.series_id, COUNT(DISTINCT c.content_key) AS show_count, "
+        "COUNT(DISTINCT r.tiertype) AS distribution_setup_count "
+        "FROM core c GROUP BY c.series_id "
+        "ORDER BY COUNT(DISTINCT r.tiertype) DESC, c.series_id"
+    )
+    rewritten = order_by_leading_aggregate(sql, "postgres")
+    order_by = rewritten.upper().split("ORDER BY", 1)[1]
+    assert order_by.strip().startswith("SHOW_COUNT DESC")
+    assert "SERIES_ID" not in order_by
+    assert "TIERTYPE" not in order_by
+
+
+def test_debug_order_leaves_the_leading_aggregate_byte_for_byte() -> None:
+    sql = (
+        "SELECT series_id, COUNT(*) AS show_count, COUNT(tier) AS tier_count "
+        "FROM core GROUP BY series_id ORDER BY show_count DESC, series_id"
+    )
+    assert order_by_leading_aggregate(sql, "postgres") == sql
+
+
+def test_debug_order_leaves_a_rank_and_a_limited_query_alone() -> None:
+    ranked = (
+        "SELECT audit_month, AVG(afs) AS avg_afs, RANK() OVER (ORDER BY AVG(afs) DESC) "
+        "AS severity_rank FROM audits GROUP BY audit_month ORDER BY severity_rank"
+    )
+    limited = (
+        "SELECT a, COUNT(*) AS n, SUM(v) AS total FROM t GROUP BY a "
+        "ORDER BY total DESC LIMIT 3"
+    )
+    assert order_by_leading_aggregate(ranked, "postgres") == ranked
+    assert order_by_leading_aggregate(limited, "postgres") == limited
+    assert order_by_leading_aggregate(ranked, "sqlite") == ranked
 
 
 def test_sum_of_a_decimal_cast_becomes_an_integer_sum() -> None:

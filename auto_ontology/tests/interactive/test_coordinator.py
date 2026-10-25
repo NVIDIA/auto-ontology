@@ -15,7 +15,11 @@ from auto_ontology.retrieval.interactive.coordinator import (
     create_session,
     step,
 )
-from auto_ontology.retrieval.interactive.types import SubmitSQLAction, TurnType
+from auto_ontology.retrieval.interactive.types import (
+    InteractivePhase,
+    SubmitSQLAction,
+    TurnType,
+)
 from auto_ontology.retrieval.interactive.state import InteractiveSessionState
 
 
@@ -367,6 +371,43 @@ def test_no_flip_when_the_first_submit_had_no_fractional_numbers():
     sess, sql = _debug_session(connector, first_kind=None)
 
     assert _step_debug(sess, sql).sql == sql
+
+
+def test_phase1_debug_sorts_by_the_leading_aggregate():
+    connector = _Connector()
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sess.path_state["relevant_tables"] = []
+    sql = (
+        "SELECT c.series_id, COUNT(DISTINCT c.content_key) AS show_count, "
+        "COUNT(DISTINCT r.tiertype) AS distribution_setup_count "
+        "FROM core c GROUP BY c.series_id "
+        "ORDER BY COUNT(DISTINCT r.tiertype) DESC, c.series_id"
+    )
+
+    action = _step_debug(sess, sql)
+
+    order_by = action.sql.upper().split("ORDER BY", 1)[1]
+    assert order_by.strip().startswith("SHOW_COUNT DESC")
+    assert "SERIES_ID" not in order_by
+    assert connector.executed  # the rewritten order was executed before submit
+
+
+def test_phase2_debug_keeps_a_later_aggregate_order():
+    connector = _Connector()
+    sess = _make_session(connectors=[connector], numeric_type_alignment=True)
+    sess.phase = InteractivePhase.ROUND2_CLARIFY
+    sess.path_state["relevant_tables"] = []
+    sql = (
+        "SELECT c.series_id, COUNT(DISTINCT c.content_key) AS show_count, "
+        "COUNT(DISTINCT r.tiertype) AS distribution_setup_count "
+        "FROM core c GROUP BY c.series_id "
+        "ORDER BY COUNT(DISTINCT r.tiertype) DESC, c.series_id"
+    )
+
+    action = _step_debug(sess, sql)
+
+    assert action.sql == sql
+    assert connector.executed == []
 
 
 def test_alignment_is_off_unless_the_session_asks_for_it():

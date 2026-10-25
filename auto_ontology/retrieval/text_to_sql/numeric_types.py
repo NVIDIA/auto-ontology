@@ -27,6 +27,9 @@ this module offers deterministic, SQL-level levers:
 * :func:`order_groups_by_identifier` and :func:`order_periods_chronologically`
   settle two row-order shapes the grader compares exactly: a grouped metric
   tied on its value, and a per-period ranking displayed by the period.
+* :func:`order_by_leading_aggregate` is the debug-turn analogue of the type
+  flip for sort keys: when the outermost ``ORDER BY`` leads with a later
+  aggregate, retry the first aggregate and drop extra tie-break keys.
 * :func:`sum_decimal_casts_to_integer` keeps ``SUM`` of a whole-number cast as
   an integer. ``SUM(int)`` is ``bigint``; ``SUM(numeric)`` is ``numeric``, and
   the grader treats those as different values.
@@ -579,6 +582,81 @@ def order_periods_chronologically(sql: str, dialect: Optional[str]) -> str:
     return tree.sql(dialect="postgres")
 
 
+def _aggregate_outputs(select: exp.Select) -> list[tuple[str, exp.Expression]]:
+    """Projected aggregates in select order, skipping ids and rank columns."""
+    outputs: list[tuple[str, exp.Expression]] = []
+    for projection in select.expressions:
+        if isinstance(projection, exp.Alias):
+            inner: exp.Expression = projection.this
+            name = projection.alias
+        else:
+            inner = projection
+            name = inner.name if isinstance(inner, exp.Column) else ""
+        if (
+            not name
+            or isinstance(inner, exp.Column)
+            or _IDENTIFIER_SUFFIX.search(name)
+            or _RANK_SUFFIX.search(name)
+        ):
+            continue
+        outputs.append((name, inner))
+    return outputs
+
+
+def order_by_leading_aggregate(sql: str, dialect: Optional[str]) -> str:
+    """Sort by the first aggregate when ``ORDER BY`` leads with a later one.
+
+    Two aggregates in one row (a count and a coverage count, for example) are
+    often ordered by the second, with the grouped id appended as a tie-break.
+    Graders that name only the first aggregate then disagree on tied rows.
+    Replacing the outermost ``ORDER BY`` with that first aggregate, in the
+    same direction and with no extra keys, is the other obvious sort — the
+    same kind of single retry as flipping ``numeric`` and ``float``.
+
+    The caller runs this on the phase-1 debug turn only. A follow-up question
+    sometimes really does sort by the later metric, and a ``LIMIT`` would
+    change which tied rows are kept, so both are left alone here.
+
+    Returns *sql* unchanged unless the leading sort key is exactly a later
+    aggregate.
+    """
+    if not _is_postgres(dialect) or not sql.strip():
+        return sql
+    tree = _parse(sql)
+    if tree is None:
+        return sql
+    select = _outermost_select(tree)
+    if select is None or not select.args.get("order") or select.args.get("limit"):
+        return sql
+    aggregates = _aggregate_outputs(select)
+    if len(aggregates) < 2:
+        return sql
+    order = select.args["order"]
+    lead = order.expressions[0]
+    lead_name = _ordered_name(lead).lower()
+    lead_sql = lead.this.sql(dialect="postgres").lower().replace(" ", "")
+    matched = None
+    for index, (name, expression) in enumerate(aggregates):
+        expression_sql = expression.sql(dialect="postgres").lower().replace(" ", "")
+        if lead_name == name.lower() or lead_sql == expression_sql:
+            matched = index
+            break
+    if matched is None or matched == 0:
+        return sql
+    descending = bool(lead.args.get("desc"))
+    order.set(
+        "expressions",
+        [
+            exp.Ordered(
+                this=exp.to_identifier(aggregates[0][0]),
+                desc=descending or None,
+                nulls_first=False if not descending else True,
+            )
+        ],
+    )
+    return tree.sql(dialect="postgres")
+
+
 def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
     """Sum a ``CAST(... AS NUMERIC)`` as an integer when the cast is the whole sum.
 
@@ -620,6 +698,7 @@ __all__ = [
     "has_avg_expression",
     "numeric_column_kinds",
     "opposite_target",
+    "order_by_leading_aggregate",
     "order_groups_by_identifier",
     "order_periods_chronologically",
     "order_string_aggregates",
