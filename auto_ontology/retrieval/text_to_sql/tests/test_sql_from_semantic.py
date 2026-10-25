@@ -167,6 +167,10 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     reasoning_llm = object()
     invoked_with: list[object] = []
     invoked_messages: list = []
+    semantic_context = (
+        "## Important Semantic Context\n"
+        "- [field_mapping] Use account status for lifecycle state."
+    )
 
     def fake_invoke(llm, messages, _schema):
         invoked_with.append(llm)
@@ -194,6 +198,14 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
                 "primary_attribute": None,
                 "relevant_tables": [],
                 "relevant_queries": [],
+                "semantic_constraints": [
+                    {
+                        "kind": "field_mapping",
+                        "instruction": "Use account status for lifecycle state.",
+                        "source_ids": ["column:status"],
+                    }
+                ],
+                "semantic_constraints_context": semantic_context,
             },
         }
     )
@@ -204,6 +216,19 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert sum(evidence in message.content for message in invoked_messages) == 2
     assert evidence in invoked_messages[-1].content
     assert "## Authoritative Evidence" in invoked_messages[-1].content
+    semantic_messages = [
+        message for message in invoked_messages if message.content == semantic_context
+    ]
+    assert len(semantic_messages) == 1
+    evidence_message = next(
+        message
+        for message in invoked_messages
+        if message.content.startswith("## Authoritative Evidence")
+    )
+    assert invoked_messages.index(evidence_message) < invoked_messages.index(
+        semantic_messages[0]
+    )
+    assert "## Available Schema" in invoked_messages[-1].content
     direct_answer_messages = [
         message
         for message in invoked_messages

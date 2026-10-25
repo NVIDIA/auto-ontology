@@ -67,6 +67,8 @@ def _unconstructable_update(fallback_sql: str = "") -> dict[str, Any]:
     path_state: dict[str, Any] = {
         "normalized_question": "mutated question",
         "failed_attempts": [{"sql": "SELECT bad"}],
+        "semantic_constraints": [{"instruction": "stale"}],
+        "semantic_constraints_context": "stale context",
         "sql_generation_result": object(),
         "final_response": {
             "response": "SQL cannot be constructed.",

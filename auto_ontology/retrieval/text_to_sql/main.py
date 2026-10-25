@@ -101,6 +101,8 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "attribute_join_paths",
         "table_relevance_reasoning",
         "evidence_repairs_applied",
+        "semantic_constraints",
+        "semantic_constraints_context",
         "sql_code",
         "sql_generation_result",
         "error",

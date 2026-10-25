@@ -699,7 +699,7 @@ def test_evidence_routing_runs_only_on_evidence_bearing_sql_paths() -> None:
     )
 
 
-def test_graph_wires_refinement_before_sql_construction(
+def test_graph_wires_semantic_context_after_optional_refinement(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("KUMO_RFM_API_URL", raising=False)
@@ -709,8 +709,14 @@ def test_graph_wires_refinement_before_sql_construction(
     }
 
     assert ("prepare_candidates", "refine_evidence", True) in edges
-    assert ("prepare_candidates", "construct_sql_from_candidates", True) in edges
-    assert ("refine_evidence", "construct_sql_from_candidates", False) in edges
+    assert ("prepare_candidates", "extract_semantic_context", True) in edges
+    assert ("refine_evidence", "extract_semantic_context", False) in edges
+    assert (
+        "extract_semantic_context",
+        "construct_sql_from_candidates",
+        False,
+    ) in edges
+    assert ("prepare_candidates", "construct_sql_from_candidates", True) not in edges
 
 
 def test_prediction_graph_can_bypass_refinement(
@@ -725,3 +731,5 @@ def test_prediction_graph_can_bypass_refinement(
     assert ("question_intent", "question_extraction", False) in edges
     assert ("prepare_candidates", "prepare_prediction_graph", True) in edges
     assert ("prepare_candidates", "refine_evidence", True) in edges
+    assert ("prepare_candidates", "extract_semantic_context", True) in edges
+    assert ("prepare_prediction_graph", "extract_semantic_context", False) not in edges

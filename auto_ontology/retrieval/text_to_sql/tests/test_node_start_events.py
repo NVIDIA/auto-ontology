@@ -94,6 +94,7 @@ def test_announcing_outside_a_stream_is_not_fatal() -> None:
 
 def test_information_agent_has_a_streaming_label() -> None:
     assert NODE_LABELS["information_agent"] == "Answering from metadata"
+    assert NODE_LABELS["extract_semantic_context"] == "Extracting semantic constraints"
 
 
 def test_node_still_runs_when_announcing_fails(monkeypatch: Any) -> None:

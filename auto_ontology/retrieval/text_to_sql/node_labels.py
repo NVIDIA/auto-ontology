@@ -26,6 +26,7 @@ NODE_LABELS: dict[str, str] = {
     "information_agent": "Answering from metadata",
     "prepare_candidates": "Preparing candidates",
     "refine_evidence": "Refining evidence",
+    "extract_semantic_context": "Extracting semantic constraints",
     "precheck_combined": "Checking joins and filter values",
     "construct_sql_from_candidates": "Constructing SQL",
     "reconstruct_sql": "Reconstructing SQL",

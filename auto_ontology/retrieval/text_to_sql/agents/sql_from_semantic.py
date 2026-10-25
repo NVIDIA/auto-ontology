@@ -151,6 +151,9 @@ class SQLFromCandidatesAgent(BaseAgent):
         authoritative_evidence_section = format_authoritative_evidence(
             evidence, evidence_first_sql=True
         )
+        semantic_constraints_context = (
+            path_state.get("semantic_constraints_context") or ""
+        ).strip()
         sql_examples_section = format_sql_examples_section(state.get("sql_examples"))
         value_anchors_section = format_value_anchors_section(state.get("value_anchors"))
         calculation_template_section = format_calculation_sql_template(path_state)
@@ -203,6 +206,11 @@ class SQLFromCandidatesAgent(BaseAgent):
             self.logger.info(
                 "Injecting the %s calculation SQL shape into the SQL prompt.",
                 path_state.get("calculation_subtype"),
+            )
+        if semantic_constraints_context:
+            self.logger.info(
+                "Injecting %d extracted semantic constraint(s) into the SQL prompt.",
+                len(path_state.get("semantic_constraints") or []),
             )
 
         def build_messages() -> list:
@@ -323,6 +331,8 @@ class SQLFromCandidatesAgent(BaseAgent):
             messages.append(SystemMessage(content=DIRECT_ANSWER_FIELD_RULES))
             if authoritative_evidence_section:
                 messages.append(SystemMessage(content=authoritative_evidence_section))
+            if semantic_constraints_context:
+                messages.append(SystemMessage(content=semantic_constraints_context))
             if calculation_template_section:
                 messages.append(SystemMessage(content=calculation_template_section))
             # Before the query patterns: anchors state what this database
