@@ -77,6 +77,10 @@ unstructured = [
 unstructured-docling = [
     "docling>=2.140.0",
 ]
+# Hosted PDF extraction only; what the backend image installs.
+unstructured-hosted = [
+    "pypdfium2>=4.30.0",
+]
 
 [build-system]
 requires = ["hatchling"]

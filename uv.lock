@@ -277,6 +277,9 @@ unstructured = [
 unstructured-docling = [
     { name = "docling" },
 ]
+unstructured-hosted = [
+    { name = "pypdfium2" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -319,6 +322,7 @@ requires-dist = [
     { name = "pyhive", extras = ["hive-pure-sasl"], specifier = ">=0.7.0" },
     { name = "pyjks", specifier = ">=20.0.0" },
     { name = "pypdfium2", marker = "extra == 'unstructured'", specifier = ">=4.30.0" },
+    { name = "pypdfium2", marker = "extra == 'unstructured-hosted'", specifier = ">=4.30.0" },
     { name = "python-dotenv", specifier = ">=1.2.3" },
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "pyyaml", specifier = ">=6.0.3" },
@@ -332,7 +336,7 @@ requires-dist = [
     { name = "trino", specifier = ">=0.339.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.52.4" },
 ]
-provides-extras = ["kumo", "unstructured", "unstructured-docling"]
+provides-extras = ["kumo", "unstructured", "unstructured-docling", "unstructured-hosted"]
 
 [package.metadata.requires-dev]
 dev = [

@@ -58,7 +58,7 @@ COPY vendor/ vendor/
 
 # Resolve and install the dependency closure into /opt/venv.
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --no-dev --no-install-project
+    uv sync --no-dev --no-install-project --extra unstructured-hosted
 
 ############################
 # Stage 2: runtime
@@ -87,9 +87,9 @@ WORKDIR /app
 COPY --from=builder /opt/python /opt/python
 COPY --from=builder /opt/venv /opt/venv
 COPY --chown=auto_ontology:auto_ontology auto_ontology/ ./auto_ontology/
-# The documents API imports it. Its extractors' heavy packages come from the
-# `unstructured` extra, which this image does not install, so uploads that need
-# one answer 503 until it is.
+# The documents API imports it. The builder installs `unstructured-hosted`, so
+# PDF and TXT uploads work; Docling (DOCX/PPTX/HTML) is in the much larger
+# `unstructured` extra, which this image leaves out, so those answer 503.
 COPY --chown=auto_ontology:auto_ontology unstructured_ao/ ./unstructured_ao/
 COPY --chown=auto_ontology:auto_ontology pyproject.toml ./
 # Uploaded documents. Mount a volume here to keep them across restarts.
