@@ -159,6 +159,127 @@ def test_reconstruction_drops_prior_repair_turns(
     assert "column missing" in captured_messages[-1].content
 
 
+def test_intent_repair_uses_reasoning_model_and_minimal_change_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, list]] = []
+
+    def fake_invoke(llm: object, messages: list, _model: object) -> SimpleNamespace:
+        calls.append((llm, messages))
+        return SimpleNamespace(
+            sql_code="SELECT account_id, account_name FROM accounts",
+            thought="Added only the missing requested field.",
+            response="ok",
+        )
+
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    fast_llm = MagicMock(name="fast_llm")
+    reasoning_llm = MagicMock(name="reasoning_llm")
+    state = cast(
+        AgentState,
+        {
+            "llm": fast_llm,
+            "reasoning_llm": reasoning_llm,
+            "initial_question": "List each account id and account name.",
+            "evidence": "",
+            "messages": [],
+            "path_state": {
+                "error": (
+                    "Critical SQL issues found:\n\n"
+                    "Critical projection issues:\n"
+                    "  - The requested account name is missing."
+                ),
+                "error_analysis_done": True,
+                "intent_repair_contract": True,
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT account_id FROM accounts",
+                    thought="Use the accounts table.",
+                ),
+            },
+        },
+    )
+
+    result = SQLReconstructionAgent().execute(state)
+
+    assert calls[0][0] is reasoning_llm
+    prompt = calls[0][1][-1].content
+    assert "INTENT-REPAIR CONTRACT" in prompt
+    assert "Preserve every unflagged projection" in prompt
+    assert "Do not improve, normalize, simplify, or reinterpret" in prompt
+    assert "intent_repair_contract" not in result["path_state"]
+
+
+def test_grain_intent_repair_preserves_unflagged_sql(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[tuple[object, list]] = []
+
+    def fake_invoke(llm: object, messages: list, _model: object) -> SimpleNamespace:
+        calls.append((llm, messages))
+        return SimpleNamespace(
+            sql_code=(
+                "SELECT driver_id, MIN(milliseconds) AS fastest "
+                "FROM laps WHERE race_id = 7 GROUP BY driver_id "
+                "ORDER BY fastest LIMIT 5"
+            ),
+            thought=(
+                "Aggregated by driver before top-N; preserved race_id filter, "
+                "projection, ordering direction, and limit."
+            ),
+            response="ok",
+        )
+
+    monkeypatch.setattr(
+        sql_reconstruction,
+        "invoke_with_structured_output",
+        fake_invoke,
+    )
+    fast_llm = MagicMock(name="fast_llm")
+    reasoning_llm = MagicMock(name="reasoning_llm")
+    state = cast(
+        AgentState,
+        {
+            "llm": fast_llm,
+            "reasoning_llm": reasoning_llm,
+            "initial_question": "List the five drivers with the fastest lap in race 7.",
+            "evidence": "",
+            "messages": [],
+            "path_state": {
+                "error": (
+                    "Critical SQL issues found:\n\n"
+                    "Critical answer-grain issues:\n"
+                    "  - LIMIT 5 is applied to lap rows before finding one fastest "
+                    "lap per driver."
+                ),
+                "error_analysis_done": True,
+                "intent_repair_contract": True,
+                "sql_generation_result": SimpleNamespace(
+                    sql_code=(
+                        "SELECT driver_id, milliseconds FROM laps "
+                        "WHERE race_id = 7 ORDER BY milliseconds LIMIT 5"
+                    ),
+                    thought="Filter to race 7 and return the five fastest rows.",
+                ),
+            },
+        },
+    )
+
+    result = SQLReconstructionAgent().execute(state)
+
+    assert calls[0][0] is reasoning_llm
+    prompt = calls[0][1][-1].content
+    assert "Critical answer-grain issues" in prompt
+    assert "Make only the changes explicitly required" in prompt
+    assert "Preserve every unflagged projection" in prompt
+    assert result["path_state"]["sql_generation_result"].sql_code.endswith(
+        "ORDER BY fastest LIMIT 5"
+    )
+
+
 def test_dictionary_error_is_normalized_before_classification(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -48,8 +48,11 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_used_schema_for_prompt,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    INTENT_REJECTION_REVIEW_SYSTEM_PROMPT,
+    INTENT_VALIDATION_EVIDENCE_HIERARCHY,
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
+    create_intent_rejection_review_prompt,
     create_intent_validation_prompt,
     format_authoritative_evidence,
     format_custom_analyses_section,
@@ -90,6 +93,27 @@ _TRUTHY = {"1", "true", "yes", "on"}
 class IntentValidationModel(BaseModel):
     """Structured response for the LLM phase of unified SQL validation."""
 
+    requested_outputs: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Every output explicitly requested by the original question. Keep "
+            "separately requested dimensions, measures, and ranks separate."
+        ),
+    )
+    answer_grain: str = Field(
+        default="",
+        description=(
+            "The entity represented by one requested result row, or 'single result' "
+            "for one aggregate/boolean answer. Leave empty only when unknowable."
+        ),
+    )
+    calculation_contract: str = Field(
+        default="",
+        description=(
+            "For a ratio/rate/share/percentage, briefly state numerator population, "
+            "denominator population, filter scope, and scale; otherwise leave empty."
+        ),
+    )
     reasoning: str = Field(
         default="",
         description=(
@@ -136,17 +160,115 @@ class IntentValidationModel(BaseModel):
             "or formula. Leave EMPTY [] when all evidence instructions are followed."
         ),
     )
+    calculation_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List only proven formula, numerator, denominator, population/filter "
+            "scope, precedence, comparison/sort direction, or percentage-scale "
+            "errors. Leave EMPTY [] for equivalent or ambiguous calculations."
+        ),
+    )
+    grain_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List only proven aggregation, grouping, deduplication, ranking, or "
+            "top-N errors at the wrong answer-entity grain. Do not infer DISTINCT "
+            "or a tie policy not explicitly required."
+        ),
+    )
+    semantic_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "List only proven wrong literals or columns belonging to a different "
+            "semantic concept/entity role. Type compatibility alone is insufficient."
+        ),
+    )
 
     @field_validator(
         "join_issues",
         "aggregation_issues",
         "projection_issues",
         "evidence_issues",
+        "calculation_issues",
+        "grain_issues",
+        "semantic_issues",
         mode="before",
     )
     @classmethod
     def _empty_string_means_no_issues(cls, value: Any) -> Any:
         """Treat the model's occasional empty-string issue list as empty."""
+        if value == "":
+            return []
+        return value
+
+
+class IntentRejectionReviewModel(BaseModel):
+    """Reasoning-model adjudication of a first-pass intent rejection."""
+
+    reasoning: str = Field(
+        default="",
+        description=(
+            "Briefly explain whether the proposed rejection is uniquely required "
+            "or is only an alternative interpretation/style change."
+        ),
+    )
+    reject_sql: bool = Field(
+        description=(
+            "True only when at least one proposed issue is unambiguously proved "
+            "by the question, non-conflicting evidence, or schema."
+        )
+    )
+    join_issues: list[str] = Field(
+        default_factory=list,
+        description="Confirmed critical join issues from the proposed rejection only.",
+    )
+    aggregation_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Confirmed critical aggregation issues from the proposed rejection only."
+        ),
+    )
+    projection_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Confirmed critical projection issues from the proposed rejection only."
+        ),
+    )
+    evidence_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Confirmed critical evidence issues from the proposed rejection only."
+        ),
+    )
+    calculation_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Confirmed critical calculation issues from the proposed rejection only."
+        ),
+    )
+    grain_issues: list[str] = Field(
+        default_factory=list,
+        description="Confirmed critical answer-grain issues from the proposal only.",
+    )
+    semantic_issues: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Confirmed critical literal or semantic-role issues from the proposal only."
+        ),
+    )
+
+    @field_validator(
+        "join_issues",
+        "aggregation_issues",
+        "projection_issues",
+        "evidence_issues",
+        "calculation_issues",
+        "grain_issues",
+        "semantic_issues",
+        mode="before",
+    )
+    @classmethod
+    def _empty_string_means_no_issues(cls, value: Any) -> Any:
         if value == "":
             return []
         return value
@@ -1035,7 +1157,12 @@ class SQLValidationAgent(BaseAgent):
         messages = [SystemMessage(content=system_prompt)]
         if evidence:
             messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
+                SystemMessage(
+                    content=(
+                        format_authoritative_evidence(evidence)
+                        + INTENT_VALIDATION_EVIDENCE_HIERARCHY
+                    )
+                )
             )
         messages.append(HumanMessage(content=validation_prompt))
 
@@ -1057,37 +1184,129 @@ class SQLValidationAgent(BaseAgent):
                 validation_result.reasoning.strip(),
             )
 
-        if validation_result is None or (
-            validation_result.is_valid
-            and not validation_result.evidence_issues
-            and not validation_result.projection_issues
-        ):
+        def issue_sections(result: Any) -> tuple[tuple[str, list[str]], ...]:
+            return (
+                ("Critical join issues", result.join_issues),
+                ("Critical aggregation issues", result.aggregation_issues),
+                ("Critical projection issues", result.projection_issues),
+                ("Critical evidence issues", result.evidence_issues),
+                ("Critical calculation issues", result.calculation_issues),
+                ("Critical answer-grain issues", result.grain_issues),
+                ("Critical semantic-role issues", result.semantic_issues),
+            )
+
+        if validation_result is None:
             self.logger.info(
                 "SQL passed static and intent validation, columns: %s",
                 len(path_state.get("sql_columns") or []),
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
-        has_real_issues = (
-            validation_result.join_issues
-            or validation_result.aggregation_issues
-            or validation_result.projection_issues
-            or validation_result.evidence_issues
-        )
+        has_real_issues = any(issues for _, issues in issue_sections(validation_result))
         if not has_real_issues:
             self.logger.info(
-                "SQL intent validation passed (is_valid=False without issues)"
+                "SQL passed static and intent validation, columns: %s",
+                len(path_state.get("sql_columns") or []),
             )
             return {"decision": "valid_sql", "path_state": path_state}
 
+        def render_issues(result: Any) -> str:
+            parts = []
+            for title, issues in issue_sections(result):
+                if issues:
+                    parts.append(
+                        f"{title}:\n" + "\n".join(f"  - {issue}" for issue in issues)
+                    )
+            return "\n\n".join(parts)
+
+        # The fast model is useful for recall, but a false rejection is much
+        # costlier than a missed suggestion: it sends an executable query to a
+        # generative repair step that can destroy unrelated, correct clauses.
+        # Adjudicate proposed rejections with the reasoning model and require
+        # consensus. This adds a reasoning call only on the small rejected
+        # subset, not on every query.
+        reasoning_llm = state.get("reasoning_llm")
+        can_review = reasoning_llm is not None and reasoning_llm is not state.get("llm")
+        if not can_review and (
+            validation_result.calculation_issues
+            or validation_result.grain_issues
+            or validation_result.semantic_issues
+        ):
+            # The new recall-oriented categories are intentionally proposals,
+            # never standalone rewrite authority. Without an independent
+            # reasoning model, discard them and preserve the candidate. Legacy
+            # join/aggregation/projection/evidence behavior remains unchanged.
+            self.logger.info(
+                "No independent reasoning model; ignoring unreviewed calculation, "
+                "grain, and semantic intent issues"
+            )
+            validation_result.calculation_issues = []
+            validation_result.grain_issues = []
+            validation_result.semantic_issues = []
+            if not any(issues for _, issues in issue_sections(validation_result)):
+                return {"decision": "valid_sql", "path_state": path_state}
+
+        if can_review:
+            review_messages = [
+                SystemMessage(content=INTENT_REJECTION_REVIEW_SYSTEM_PROMPT)
+            ]
+            if evidence:
+                review_messages.append(
+                    SystemMessage(
+                        content=(
+                            format_authoritative_evidence(evidence)
+                            + INTENT_VALIDATION_EVIDENCE_HIERARCHY
+                        )
+                    )
+                )
+            review_messages.append(
+                HumanMessage(
+                    content=create_intent_rejection_review_prompt(
+                        validation_prompt,
+                        render_issues(validation_result),
+                    )
+                )
+            )
+            try:
+                reviewed = invoke_with_structured_output(
+                    reasoning_llm,
+                    review_messages,
+                    IntentRejectionReviewModel,
+                )
+            except Exception as error:
+                self.logger.error(
+                    "Intent rejection review LLM call failed; keeping candidate SQL: %s",
+                    error,
+                )
+                reviewed = None
+
+            reviewed_has_issues = bool(
+                reviewed and any(issues for _, issues in issue_sections(reviewed))
+            )
+            if reviewed is None or not reviewed.reject_sql or not reviewed_has_issues:
+                self.logger.info(
+                    "Reasoning review did not confirm intent rejection; keeping SQL"
+                )
+                if reviewed is not None and (reviewed.reasoning or "").strip():
+                    record_thought(
+                        path_state,
+                        "validate_sql_query",
+                        "Rejection review kept the candidate: "
+                        + reviewed.reasoning.strip(),
+                    )
+                return {"decision": "valid_sql", "path_state": path_state}
+
+            validation_result = reviewed
+            if (reviewed.reasoning or "").strip():
+                record_thought(
+                    path_state,
+                    "validate_sql_query",
+                    "Rejection review confirmed the issue: "
+                    + reviewed.reasoning.strip(),
+                )
+
         error_parts = ["Critical SQL issues found:"]
-        issue_sections = (
-            ("Critical join issues", validation_result.join_issues),
-            ("Critical aggregation issues", validation_result.aggregation_issues),
-            ("Critical projection issues", validation_result.projection_issues),
-            ("Critical evidence issues", validation_result.evidence_issues),
-        )
-        for title, issues in issue_sections:
+        for title, issues in issue_sections(validation_result):
             if issues:
                 error_parts.append(
                     f"\n\n{title}:\n" + "\n".join(f"  - {issue}" for issue in issues)
@@ -1095,4 +1314,5 @@ class SQLValidationAgent(BaseAgent):
 
         path_state["error"] = "".join(error_parts)
         path_state["last_intent_rejected_sql"] = sql_code
+        path_state["intent_repair_contract"] = True
         return {"decision": "invalid_sql", "path_state": path_state}

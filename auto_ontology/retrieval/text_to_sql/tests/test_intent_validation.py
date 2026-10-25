@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     INTENT_VALIDATION_SKIPPED_AFTER,
+    IntentRejectionReviewModel,
     IntentValidationModel,
     SQLValidationAgent,
 )
@@ -161,9 +162,14 @@ def test_intent_validation_receives_verbatim_authoritative_evidence(
 
     assert result["decision"] == "valid_sql"
     messages = mock_invoke.call_args.args[1]
-    assert messages[1].content.endswith(evidence)
+    assert evidence in messages[1].content
     assert "MUST follow every instruction" in messages[1].content
+    assert "Validation authority hierarchy" in messages[1].content
+    assert "direct contradiction" in messages[1].content
     assert "Evidence compliance is strict, not lenient" in messages[2].content
+    assert "original request wins" in messages[0].content
+    assert "COUNT(DISTINCT ...)" in messages[0].content
+    assert "derived yes/no" in messages[0].content
 
 
 @patch(
@@ -210,6 +216,254 @@ def test_intent_validation_rejects_and_reports_evidence_violation(
     assert result["path_state"]["last_intent_rejected_sql"] == (
         "SELECT SUM(converted_amount) FROM orders"
     )
+    assert result["path_state"]["intent_repair_contract"] is True
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
+)
+def test_reasoning_review_blocks_unconfirmed_intent_rejection(
+    mock_invoke: MagicMock,
+) -> None:
+    fast_llm = MagicMock(name="fast_llm")
+    reasoning_llm = MagicMock(name="reasoning_llm")
+    mock_invoke.side_effect = [
+        IntentValidationModel(
+            is_valid=False,
+            aggregation_issues=["COUNT(*) should be COUNT(DISTINCT patient_id)."],
+        ),
+        IntentRejectionReviewModel(
+            reject_sql=False,
+            reasoning=(
+                "The question does not explicitly request distinct patients, so "
+                "the existing joined-row grain is a reasonable interpretation."
+            ),
+        ),
+    ]
+    state = {
+        "llm": fast_llm,
+        "reasoning_llm": reasoning_llm,
+        "initial_question": "How many qualifying patients are there?",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code=(
+                    "SELECT COUNT(*) FROM patient JOIN laboratory USING (patient_id)"
+                )
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.patient", "public.laboratory"],
+        ["public.patient.patient_id", "public.laboratory.patient_id"],
+    )
+
+    assert result["decision"] == "valid_sql"
+    assert mock_invoke.call_args_list[0].args[0] is fast_llm
+    assert mock_invoke.call_args_list[1].args[0] is reasoning_llm
+    review_prompt = mock_invoke.call_args_list[1].args[1][-1].content
+    assert "COUNT(*) should be COUNT(DISTINCT patient_id)" in review_prompt
+    assert "proposed issues above" in review_prompt
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
+)
+def test_reasoning_review_confirms_only_supported_intent_issues(
+    mock_invoke: MagicMock,
+) -> None:
+    fast_llm = MagicMock(name="fast_llm")
+    reasoning_llm = MagicMock(name="reasoning_llm")
+    mock_invoke.side_effect = [
+        IntentValidationModel(
+            is_valid=False,
+            projection_issues=["The requested account name is missing."],
+            evidence_issues=["An alias could be improved."],
+            semantic_issues=["The account id might belong to another role."],
+        ),
+        IntentRejectionReviewModel(
+            reject_sql=True,
+            reasoning="The account name is explicitly requested.",
+            projection_issues=["The requested account name is missing."],
+        ),
+    ]
+    state = {
+        "llm": fast_llm,
+        "reasoning_llm": reasoning_llm,
+        "initial_question": "List each account id and account name.",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT account_id FROM accounts"
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.accounts"],
+        ["public.accounts.account_id"],
+    )
+
+    assert result["decision"] == "invalid_sql"
+    assert "The requested account name is missing" in result["path_state"]["error"]
+    assert "alias could be improved" not in result["path_state"]["error"]
+    assert "another role" not in result["path_state"]["error"]
+    assert result["path_state"]["intent_repair_contract"] is True
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output"
+)
+def test_reasoning_review_confirms_calculation_contract_failure(
+    mock_invoke: MagicMock,
+) -> None:
+    fast_llm = MagicMock(name="fast_llm")
+    reasoning_llm = MagicMock(name="reasoning_llm")
+    issue = (
+        "The denominator counts all transactions, but 'among active accounts' "
+        "requires the population of active accounts."
+    )
+    mock_invoke.side_effect = [
+        IntentValidationModel(
+            is_valid=False,
+            requested_outputs=["percentage of active accounts"],
+            answer_grain="single result",
+            calculation_contract=(
+                "active accounts / all accounts in the requested region * 100"
+            ),
+            calculation_issues=[issue],
+        ),
+        IntentRejectionReviewModel(
+            reject_sql=True,
+            reasoning="The question explicitly names accounts as the population.",
+            calculation_issues=[issue],
+        ),
+    ]
+    state = {
+        "llm": fast_llm,
+        "reasoning_llm": reasoning_llm,
+        "initial_question": "What percentage of active accounts are in region A?",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code=(
+                    "SELECT 100.0 * SUM(amount) / "
+                    "(SELECT SUM(amount) FROM transactions) FROM accounts "
+                    "JOIN transactions USING (account_id) WHERE status = 'active'"
+                )
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.accounts", "public.transactions"],
+        ["public.accounts.status", "public.transactions.amount"],
+    )
+
+    assert result["decision"] == "invalid_sql"
+    assert "Critical calculation issues" in result["path_state"]["error"]
+    assert "active accounts" in result["path_state"]["error"]
+    assert result["path_state"]["intent_repair_contract"] is True
+    review_prompt = mock_invoke.call_args_list[1].args[1][-1].content
+    assert issue in review_prompt
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(
+        is_valid=False,
+        grain_issues=["The top-N may be at the wrong entity grain."],
+    ),
+)
+def test_new_recall_issue_cannot_rewrite_without_independent_review(
+    _mock_invoke: MagicMock,
+) -> None:
+    llm = MagicMock(name="shared_llm")
+    state = {
+        "llm": llm,
+        "reasoning_llm": llm,
+        "initial_question": "List the top five drivers by their fastest lap.",
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code="SELECT driver_id FROM laps ORDER BY milliseconds LIMIT 5"
+            )
+        },
+    }
+
+    result = SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.laps"],
+        ["public.laps.driver_id", "public.laps.milliseconds"],
+    )
+
+    assert result["decision"] == "valid_sql"
+    assert "intent_repair_contract" not in result["path_state"]
+
+
+@patch(
+    "auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation.invoke_with_structured_output",
+    return_value=IntentValidationModel(is_valid=True),
+)
+def test_intent_prompt_includes_recall_checks_and_benchmark_traps(
+    mock_invoke: MagicMock,
+) -> None:
+    state = {
+        "llm": MagicMock(),
+        "initial_question": (
+            "What percentage of active accounts are in region A? Return their rank."
+        ),
+        "evidence": "Use transaction rows as the denominator.",
+        "shorten_answer": True,
+        "connectors": [],
+        "path_state": {
+            "sql_generation_result": SimpleNamespace(
+                sql_code=(
+                    "SELECT account_id, COUNT(*) FROM accounts "
+                    "JOIN transactions USING (account_id) GROUP BY account_id"
+                )
+            )
+        },
+    }
+
+    SQLValidationAgent()._validate_intent(
+        state,
+        {
+            **state["path_state"],
+            "sql_code": state["path_state"]["sql_generation_result"].sql_code,
+        },
+        ["public.accounts", "public.transactions"],
+        ["public.accounts.account_id"],
+    )
+
+    messages = mock_invoke.call_args.args[1]
+    combined = "\n".join(str(message.content) for message in messages)
+    assert "answer entity and grain" in combined
+    assert "numerator population" in combined
+    assert "sorting alone is not that output" in combined
+    assert "original request wins" in combined
+    assert "Do not infer DISTINCT or a tie policy" in combined
+    assert "raw stored code/label with a derived yes/no" in combined
 
 
 @patch(

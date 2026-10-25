@@ -516,6 +516,7 @@ class SQLReconstructionAgent(BaseAgent):
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
         llm = state["llm"]
+        intent_repair = bool(path_state.pop("intent_repair_contract", False))
         raw_error = path_state.get("error", "")
         error = _error_to_text(raw_error)
         if not isinstance(raw_error, str):
@@ -679,11 +680,26 @@ class SQLReconstructionAgent(BaseAgent):
                 f"{interpretation_text}\n\n"
                 "Keep every valid assumption above. Change one only when required "
                 "by the question, schema, or error, and state the change "
-                "explicitly. Omission does not remove an assumption. Do not treat "
-                "SQL implementation choices—such as joins, columns, aliases, or "
-                "query structure—as fixed. Restate all active assumptions in "
+                "explicitly. Omission does not remove an assumption. Restate all "
+                "active assumptions in "
                 "`thought`; revise only parts contradicted by the question, "
                 "available schema, or validation error.\n\n"
+            )
+
+        intent_repair_section = ""
+        if intent_repair:
+            intent_repair_section = (
+                "\nINTENT-REPAIR CONTRACT:\n"
+                "- Make only the changes explicitly required by the confirmed "
+                "intent issues above.\n"
+                "- Preserve every unflagged projection, expression, literal, "
+                "operator, join, filter, grouping, ordering, limit, alias, result "
+                "grain, and DISTINCT choice exactly.\n"
+                "- Do not improve, normalize, simplify, or reinterpret any "
+                "unflagged part of the SQL.\n"
+                "- In `thought`, list each changed SQL fragment and the confirmed "
+                "issue that requires it. If an issue does not require a fragment "
+                "to change, leave that fragment byte-for-byte equivalent.\n\n"
             )
 
         error_prompt = (
@@ -692,6 +708,7 @@ class SQLReconstructionAgent(BaseAgent):
             f"Validation failed with the following message:\n{error}\n\n"
             f"{history_section}"
             f"{prior_interpretation_section}"
+            f"{intent_repair_section}"
             "Please correct the SQL. Do not return the same SQL — "
             "it is invalid.\n"
             "Fix what the error requires while preserving every still-valid "
@@ -720,8 +737,11 @@ class SQLReconstructionAgent(BaseAgent):
             )
         prompt_messages.append(HumanMessage(content=error_prompt))
 
+        repair_llm = llm
+        if intent_repair:
+            repair_llm = state.get("reasoning_llm") or llm
         response = invoke_with_structured_output(
-            llm, prompt_messages, SQLGenerationModel
+            repair_llm, prompt_messages, SQLGenerationModel
         )
 
         if response is None:

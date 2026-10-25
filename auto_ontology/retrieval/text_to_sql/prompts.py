@@ -467,7 +467,76 @@ Do NOT mention corrected errors.
 Do NOT force a match if the tables are not relevant to the question."""
 
 
-INTENT_VALIDATION_SYSTEM_PROMPT = """You are a SQL
+_INTENT_VALIDATION_PRECISION_RULES = """
+
+The candidate SQL is presumed valid. Rejecting it forces a rewrite, so rejection
+is appropriate only when the question, non-conflicting evidence, or schema makes
+the candidate unambiguously unable to answer the request. Validation is not an
+opportunity to normalize style or replace one reasonable interpretation with
+another.
+
+Do NOT reject solely to:
+- replace a raw stored code/label with a derived yes/no or prose label when the
+  evidence already explains how to interpret that stored value;
+- add DISTINCT or change COUNT to COUNT(DISTINCT ...) merely because the
+  question names an entity. Preserve row multiplicity unless the question or
+  evidence explicitly says distinct, unique, different, or one per entity;
+- reorder algebraically equivalent operations, add/remove an alias, swap one
+  equivalent date/age expression for another, concatenate separately requested
+  name parts, or reorder output columns;
+- add a count field when the request ultimately says to list the matching
+  identifiers/values. The returned list itself answers "how many";
+- enforce an evidence literal, date, operator, or mapping that directly
+  contradicts an explicit literal or constraint in the original user request.
+  In a direct conflict, the original request wins;
+- treat formula pseudocode such as DIVIDE(a, b) as forbidding percentage
+  scaling when the original request explicitly asks for a percentage.
+
+For joins and aggregation grain, reject only when you can cite the exact
+question/evidence phrase or schema fact that proves the current choice wrong.
+Plausible alternatives are not critical errors."""
+
+
+_INTENT_VALIDATION_COVERAGE_RULES = """
+
+Before deciding, derive a compact answer contract from the ORIGINAL request:
+1. List every output the user explicitly asks to return. Treat separately
+   requested measures as separate outputs. If the user explicitly asks for a
+   rank or ordinal, sorting alone is not that output.
+2. Name the answer entity and grain (for example, one row per city, card,
+   customer, driver, or event). Check that GROUP BY, DISTINCT, aggregate inputs,
+   and top-N/ranking logic operate at that grain. In particular, "most common"
+   is a frequency calculation, not lexical MAX/MIN, and "largest total per X"
+   requires aggregation per X before ranking.
+3. For every ratio, rate, share, or percentage, state the numerator population,
+   denominator population, filters applying to each, and scale. The denominator
+   must represent the population named by phrases such as "among", "of", or
+   "compared with". An explicit percentage normally requires multiplication by
+   100; a ratio/proportion normally does not. Check boolean precedence and
+   parentheses so unrelated rows cannot enter either population.
+4. Compare every explicit literal, threshold, comparison direction, sort
+   direction, and requested semantic role with the SQL. A type-compatible
+   column is still wrong when its documented role belongs to another entity or
+   represents another concept (for example, station segment vs customer
+   segment, identifier vs name, milliseconds vs formatted finish time).
+5. When evidence conflicts with an explicit request, the original request wins.
+   Flag SQL that follows the conflicting evidence and therefore contradicts the
+   request. Do not flag SQL that correctly preserves the request.
+
+Put proven problems in the matching issue list:
+- projection_issues: missing, extra, duplicated, or materially reshaped outputs;
+- calculation_issues: wrong formula, numerator, denominator, scope, precedence,
+  comparison/sort direction, or percentage scale;
+- grain_issues: aggregation, grouping, deduplication, ranking, or top-N at the
+  wrong answer-entity grain;
+- semantic_issues: wrong literal or semantically wrong column/entity role.
+
+These checks do not relax the precision rules. Do not manufacture an answer
+contract from narrative wording, and do not reject when two interpretations are
+genuinely plausible."""
+
+
+INTENT_VALIDATION_SYSTEM_PROMPT = f"""You are a SQL
 validation expert. Your job is to check if a generated
 SQL query has any CRITICAL issues that would prevent it
 from answering the user's question.
@@ -504,7 +573,9 @@ that join as invalid.
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
 Only fail validation for serious, critical errors that
-would make the query unusable."""
+would make the query unusable.
+{_INTENT_VALIDATION_COVERAGE_RULES}
+{_INTENT_VALIDATION_PRECISION_RULES}"""
 
 
 # INTENT_VALIDATION_JOINS_VALIDATED_ELSEWHERE variant of the system prompt —
@@ -512,7 +583,7 @@ would make the query unusable."""
 # already validates join legality, so this LLM check can assume every join is
 # real and focus on whether it reaches the right entity. See the intent phase in
 # sql_parse_validation.py.
-INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE = """You are a SQL
+INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE = f"""You are a SQL
 validation expert. Your job is to check if a generated
 SQL query has any CRITICAL issues that would prevent it
 from answering the user's question.
@@ -555,7 +626,36 @@ that join as invalid.
 IMPORTANT: Be generous in your validation. If the SQL
 could reasonably answer the question, mark it as valid.
 Only fail validation for serious, critical errors that
-would make the query unusable."""
+would make the query unusable.
+{_INTENT_VALIDATION_COVERAGE_RULES}
+{_INTENT_VALIDATION_PRECISION_RULES}"""
+
+
+INTENT_REJECTION_REVIEW_SYSTEM_PROMPT = f"""You are the final adjudicator for a
+proposed SQL rejection. A first-pass validator claims that an executable SQL
+query has critical intent errors. Review only those proposed errors; do not
+invent new ones.
+
+Confirm rejection only when at least one proposed issue is unambiguously proved
+by the original request, non-conflicting evidence, or schema. If the candidate
+is a reasonable interpretation, if the proposed change is merely stylistic or
+equivalent, or if evidence contradicts an explicit fact in the original
+request, keep the candidate SQL.
+
+The cost of a false rejection is high: a rewrite can destroy a correct query.
+Default to keeping the candidate when there is genuine ambiguity.
+{_INTENT_VALIDATION_COVERAGE_RULES}
+{_INTENT_VALIDATION_PRECISION_RULES}"""
+
+
+INTENT_VALIDATION_EVIDENCE_HIERARCHY = """
+
+## Validation authority hierarchy
+Evidence remains authoritative for domain mappings, formulas, and filters unless
+it directly contradicts an explicit literal, date, operator, output request, or
+constraint in the original user request. Omission is not a contradiction. In a
+direct contradiction, preserve the original request and do not reject SQL merely
+for refusing the contradictory evidence instruction."""
 
 
 def format_dual_question_block(
@@ -930,10 +1030,25 @@ def create_intent_validation_prompt(
         "requested field, exactly once, in the requested shape, and NO additional "
         "fields. Aggregates and transformed values count as output fields. Never "
         "accept extra context as helpful, and never remove a requested field. Record "
-        "every extra, missing, duplicated, reordered, or reshaped field in "
+        "every extra, missing, duplicated, or materially reshaped field in "
         "projection_issues and mark the SQL invalid."
         if shorten_answer
         else ""
+    )
+    semantic_criteria = (
+        "\n5. CALCULATION CONTRACT: For each ratio, rate, share, or percentage, "
+        "verify the numerator, denominator, population/filter scope, operator "
+        "precedence, comparison/sort direction, and scale against the request.\n"
+        "6. ANSWER GRAIN: Verify aggregation, grouping, deduplication, ranking, "
+        "and top-N happen at the entity grain explicitly requested. Do not infer "
+        "DISTINCT or a tie policy that the request does not establish.\n"
+        "7. SEMANTIC ROLE AND LITERALS: Verify explicit literals, thresholds, "
+        "operators, and referenced column roles. Flag a role only when the shown "
+        "schema description or the request proves it belongs to a different "
+        "entity/concept.\n"
+        "8. REQUEST/EVIDENCE CONFLICT: If evidence contradicts an explicit user "
+        "constraint, the user request wins. Flag SQL that follows the conflicting "
+        "evidence; keep SQL that preserves the request."
     )
     parsed_usage_block = (
         "\nUSED SQL OBJECTS "
@@ -955,6 +1070,7 @@ Check for CRITICAL issues ONLY (be lenient):
 2. Are aggregations CLEARLY WRONG for the question? (e.g., COUNT when explicitly asking for SUM) (Variations are OK)
 {evidence_criterion}
 {projection_criterion}
+{semantic_criteria}
 
 Only mark as invalid if there are SERIOUS problems. If the SQL could reasonably work, mark it as VALID.
 If DOMAIN-SPECIFIC CUSTOM ANALYSES are listed above, treat their SQL as intentional domain \
@@ -962,6 +1078,23 @@ definitions — do not flag the generated query as invalid merely for following 
 patterns.{authoritative_note}
 
 Provide your analysis."""
+
+
+def create_intent_rejection_review_prompt(
+    validation_prompt: str,
+    proposed_issues: str,
+) -> str:
+    """Ask the reasoning model to adjudicate a first-pass intent rejection."""
+    return f"""{validation_prompt}
+
+## Proposed rejection from the first-pass validator
+{proposed_issues}
+
+Decide whether the candidate SQL truly must be rejected. Review only the
+proposed issues above. Confirm only issues whose required correction is uniquely
+entailed by the original request, non-conflicting evidence, or schema. Return
+the confirmed issues in their original categories. If none meet that standard,
+keep all issue lists empty and set `reject_sql` to false."""
 
 
 def create_entity_extraction_prompt(question: str) -> str:
