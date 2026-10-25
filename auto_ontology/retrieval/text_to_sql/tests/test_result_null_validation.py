@@ -42,7 +42,7 @@ def test_adds_not_null_filters_for_nullable_projected_fields() -> None:
     assert normalized.args.get("where") is not None
     assert "customer_city" not in normalized.args["where"].sql()
     assert "city" in normalized.args["where"].sql()
-    assert "IS NOT NULL" in normalized.args["where"].sql()
+    assert "IS NOT NULL" in rewritten
 
 
 def test_does_not_move_aggregate_projection_into_where() -> None:

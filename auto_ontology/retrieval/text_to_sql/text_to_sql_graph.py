@@ -28,9 +28,6 @@ from auto_ontology.retrieval.text_to_sql.agents.empty_result_value_repair import
 from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
     EvidenceRefinementAgent,
 )
-from auto_ontology.retrieval.text_to_sql.agents.semantic_context_extraction import (
-    SemanticContextExtractionAgent,
-)
 from auto_ontology.retrieval.text_to_sql.agents.combined_precheck import (
     CombinedPrecheckAgent,
 )
@@ -352,7 +349,6 @@ def create_graph():
     information_agent = InformationAgent()
     candidate_preparation_agent = CandidatePreparationAgent()
     evidence_refinement_agent = EvidenceRefinementAgent()
-    semantic_context_extraction_agent = SemanticContextExtractionAgent()
     sql_from_candidates_agent = SQLFromCandidatesAgent()
     sql_reconstruction_agent = SQLReconstructionAgent()
     sql_value_validation_agent = SQLValueValidationAgent()
@@ -381,10 +377,6 @@ def create_graph():
     )
     refine_evidence_node = _make_node(
         "refine_evidence", agent_wrapper(evidence_refinement_agent)
-    )
-    extract_semantic_context_node = _make_node(
-        "extract_semantic_context",
-        agent_wrapper(semantic_context_extraction_agent),
     )
     # Live DB grounding is a repair signal, not always-on context: the
     # value-repair node only runs after an empty execution result.
@@ -465,7 +457,6 @@ def create_graph():
     graph.add_node("information_agent", information_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
     graph.add_node("refine_evidence", refine_evidence_node)
-    graph.add_node("extract_semantic_context", extract_semantic_context_node)
     graph.add_node("check_value_repair", value_repair_node)
     if combined_precheck_node is not None:
         graph.add_node("precheck_combined", combined_precheck_node)
@@ -515,7 +506,7 @@ def create_graph():
             {
                 "prediction": "prepare_prediction_graph",
                 "refine_evidence": "refine_evidence",
-                "construct_sql_from_candidates": "extract_semantic_context",
+                "construct_sql_from_candidates": "construct_sql_from_candidates",
             },
         )
         graph.add_conditional_edges(
@@ -533,12 +524,11 @@ def create_graph():
             route_evidence_refinement,
             {
                 "refine_evidence": "refine_evidence",
-                "construct_sql_from_candidates": "extract_semantic_context",
+                "construct_sql_from_candidates": "construct_sql_from_candidates",
             },
         )
 
-    graph.add_edge("refine_evidence", "extract_semantic_context")
-    graph.add_edge("extract_semantic_context", "construct_sql_from_candidates")
+    graph.add_edge("refine_evidence", "construct_sql_from_candidates")
     graph.add_conditional_edges(
         "construct_sql_from_candidates",
         route_generated_sql,
