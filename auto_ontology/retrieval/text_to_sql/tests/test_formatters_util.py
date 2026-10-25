@@ -119,7 +119,6 @@ def test_used_schema_context_marks_semantic_fk() -> None:
                         "name": "customer_id",
                         "data_type": "integer",
                         "semantic_fk": "public.customers.id",
-                        "is_unique": False,
                     }
                 ],
             }
@@ -129,7 +128,6 @@ def test_used_schema_context_marks_semantic_fk() -> None:
     )
 
     assert "foreign_key: public.customers.id" in rendered
-    assert "is_unique: false" in rendered
 
 
 def test_available_tables_mark_semantic_fk_on_ordinary_columns() -> None:
@@ -148,15 +146,14 @@ def test_available_tables_mark_semantic_fk_on_ordinary_columns() -> None:
                         "name": "customer_id",
                         "data_type": "integer",
                         "semantic_fk": "public.customers.id",
-                        "is_unique": False,
                     },
                 ],
             }
         ]
     )
 
-    assert "column | type | is_nullable | is_unique | foreign key" in rendered
-    assert "customer_id | integer | unknown | false | public.customers.id" in rendered
+    assert "column | type | is_nullable | foreign key" in rendered
+    assert "customer_id | integer | unknown | public.customers.id" in rendered
 
 
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:

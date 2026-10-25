@@ -1035,7 +1035,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
-                s.catalog_column.c.is_unique,
                 semantic_fk_target.label("semantic_fk"),
             )
             .select_from(
@@ -1081,7 +1080,6 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
-                    "is_unique": row["is_unique"],
                     "semantic_fk": row["semantic_fk"],
                 }
             )

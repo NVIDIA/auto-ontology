@@ -17,7 +17,6 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
     DIRECT_ANSWER_FIELD_RULES,
-    create_intent_validation_prompt,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_projection_rules,
@@ -91,32 +90,13 @@ def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
     assert "preserve rows containing NULLs" in create_sql_user_prompt
 
 
-def test_prompt_uses_distinct_when_source_grain_repeats_requested_entities() -> None:
-    assert "identifier marked `is_unique: false`" in create_sql_user_prompt
-    assert "both within one table and after joins" in create_sql_user_prompt
-    assert "Count DISTINCT entity IDs" in create_sql_user_prompt
-    assert "deduplicate/group to one row per entity before LIMIT" in (
+def test_prompt_does_not_infer_distinct_from_foreign_keys() -> None:
+    assert "Use DISTINCT only when the question or authoritative evidence" in (
         create_sql_user_prompt
     )
-    assert "question asks for child/detail records themselves" in create_sql_user_prompt
-    assert "Authoritative Evidence formula's numerator" in create_sql_user_prompt
-
-
-def test_intent_validation_checks_repeated_entity_grain_without_a_join() -> None:
-    prompt = create_intent_validation_prompt(
-        "How many customers have active events?",
-        "How many customers have active events?",
-        "How many customers have active events?",
-        "SELECT COUNT(customer_id) FROM events WHERE status = 'active'",
-        used_schema_context=(
-            "events.customer_id | foreign_key: customers.id | is_unique: false"
-        ),
-    )
-
-    assert "whether those repeated IDs occur in one" in prompt
-    assert "base table or after a join" in prompt
-    assert "COUNT(DISTINCT entity_id)" in prompt
-    assert "finer-grained records themselves" in prompt
+    assert "COUNT(fk) counts matching child rows" in create_sql_user_prompt
+    assert "Never infer DISTINCT solely from an FK" in create_sql_user_prompt
+    assert "necessary one-to-many join" not in create_sql_user_prompt
 
 
 def test_projection_strictness_is_configured_per_request() -> None:
