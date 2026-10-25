@@ -224,6 +224,29 @@ _POSTGRES_DIALECT_RULES = (
 )
 
 
+# MySQL's ``/`` never truncates: it returns an exact DECIMAL even for two
+# integers (integer division is the separate DIV operator). So the generic
+# "cast to REAL before dividing" rule only adds casts here, and the model's
+# MySQL cast of choice, DECIMAL(p, s), rounds the value to s places. Exact
+# graders compare values as strings (BEAVER's ex_acc: 150.250000 != 150.25),
+# so a rounded result fails even when the query is otherwise right.
+_MYSQL_DIALECT_RULES = (
+    "**MySQL-specific (these OVERRIDE the generic rules above)**\n"
+    "- `/` never truncates in MySQL: it returns an exact DECIMAL even for two "
+    "integers. Do NOT cast before or after dividing; the generic 'cast to REAL "
+    "before dividing' rule does not apply.\n"
+    "- Do NOT CAST a computed value (an aggregate, average, ratio or window "
+    "result) to DECIMAL(p, s), FLOAT, DOUBLE or REAL, and do not ROUND it, "
+    "unless the question asks for a precision or for rounding: a cast rounds "
+    "the value and changes its digits. Return computed values as MySQL "
+    "produces them.\n"
+    "- STDDEV(), STD() and VARIANCE() are the POPULATION statistics in MySQL "
+    "(the same as STDDEV_POP() and VAR_POP()). Use the function the question "
+    "names; use STDDEV_SAMP() or VAR_SAMP() only when it asks for a sample "
+    "statistic.\n\n"
+)
+
+
 # Shared output-field spec for SQL-generation prompts (candidates-based and
 # table-based) — kept as a single source so the two call sites can't drift.
 _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
@@ -249,7 +272,9 @@ def format_dialect_rules(dialect: str | None) -> str:
     SQLite lacks many functions the model habitually emits (spatial,
     LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
     identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
-    lowercase columns (Spider2 PATENTS etc.). Returns '' for other dialects.
+    lowercase columns (Spider2 PATENTS etc.). MySQL needs the generic
+    division-cast rule lifted, since its casts round results. Returns '' for
+    other dialects.
     """
     normalized = (dialect or "").strip().lower()
     if normalized == "sqlite":
@@ -258,6 +283,8 @@ def format_dialect_rules(dialect: str | None) -> str:
         return _SNOWFLAKE_DIALECT_RULES
     if normalized in ("postgres", "postgresql"):
         return _POSTGRES_DIALECT_RULES
+    if normalized == "mysql":
+        return _MYSQL_DIALECT_RULES
     return ""
 
 
