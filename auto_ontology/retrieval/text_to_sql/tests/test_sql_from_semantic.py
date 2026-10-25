@@ -82,12 +82,10 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     )
 
 
-def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
-    assert "Do not add `IS NOT NULL` solely because" in create_sql_user_prompt
-    assert "question or evidence requires the requested value" in (
-        create_sql_user_prompt
-    )
-    assert "preserve rows containing NULLs" in create_sql_user_prompt
+def test_prompt_limits_null_filtering_to_unfiltered_single_columns() -> None:
+    assert "outer query projects exactly one" in create_sql_user_prompt
+    assert "no WHERE, HAVING, or QUALIFY predicate" in create_sql_user_prompt
+    assert "Otherwise preserve NULL values" in create_sql_user_prompt
 
 
 def test_prompt_does_not_infer_distinct_from_foreign_keys() -> None:

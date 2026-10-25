@@ -129,6 +129,7 @@ _FULL_RETRY_PATH_KEYS_TO_CLEAR = frozenset(
         "value_repair_attempted",
         "null_jsonb_retry_attempted",
         "empty_like_retry_attempted",
+        "single_projection_null_retry_attempted",
         "thoughts_log",
         "node_visit_counts",
     }
