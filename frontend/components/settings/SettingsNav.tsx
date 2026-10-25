@@ -10,6 +10,7 @@ import { usePathname } from 'next/navigation';
 type NavItem = { label: string; href: string };
 
 const CONNECTIONS_NAV_ITEM: NavItem = { label: 'Connections', href: '/settings/connections' };
+const DOCUMENTS_NAV_ITEM: NavItem = { label: 'Documents', href: '/settings/documents' };
 const ZONES_NAV_ITEM: NavItem = { label: 'Zones', href: '/settings/zones' };
 const TAGS_NAV_ITEM: NavItem = { label: 'Tags', href: '/settings/tags' };
 const RULES_NAV_ITEM: NavItem = { label: 'Rules', href: '/settings/rules' };
@@ -65,6 +66,7 @@ export const SettingsNav = ({ connectionsEnvManaged }: SettingsNavProps) => {
 		ZONES_NAV_ITEM,
 		TAGS_NAV_ITEM,
 		RULES_NAV_ITEM,
+		DOCUMENTS_NAV_ITEM,
 		PII_SETTINGS_NAV_ITEM,
 		SEMANTIC_INPUT_NAV_ITEM,
 		USERS_NAV_ITEM,
