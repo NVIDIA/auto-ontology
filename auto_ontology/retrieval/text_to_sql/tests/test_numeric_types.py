@@ -12,6 +12,7 @@ import pytest
 from auto_ontology.retrieval.text_to_sql.agents import sql_execution
 from auto_ontology.retrieval.text_to_sql.agents.sql_execution import SQLExecutionAgent
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    SQL_CORRECTION_ERROR,
     cast_jsonb_numeric_projections,
     dominant_kind,
     flip_numeric_output_types,
@@ -274,13 +275,15 @@ def test_flip_is_postgres_only() -> None:
 
 
 class _Connector:
-    dialect = "postgres"
     database_name = "db"
 
-    def __init__(self, frame: pd.DataFrame) -> None:
+    def __init__(self, frame: pd.DataFrame, dialect: str = "postgres") -> None:
         self._frame = frame
+        self.dialect = dialect
+        self.executed: list[str] = []
 
     def execute(self, sql: str, **_: object) -> pd.DataFrame:
+        self.executed.append(sql)
         return self._frame
 
 
@@ -323,6 +326,56 @@ def test_execution_leaves_other_callers_untouched(monkeypatch) -> None:
     assert "result_numeric_kinds" not in update["path_state"]
     assert "result_numeric_kinds_sql" not in update["path_state"]
     assert "result_values_digest" not in update["path_state"]
+
+
+def test_jsonb_numeric_text_is_reported_for_reconstruction(monkeypatch) -> None:
+    frame = pd.DataFrame({"buy_force": ["0.235", "0.574"]})
+    connector = _Connector(frame)
+    monkeypatch.setattr(
+        sql_execution,
+        "resolve_connector_from_tables",
+        lambda tables, connectors: connectors[0],
+    )
+    sql = "SELECT indicator_bundle ->> 'buy_pressure' AS buy_force FROM t"
+    update = SQLExecutionAgent().execute(
+        {
+            "path_state": {"sql_code": sql, "relevant_tables": []},
+            "connectors": [connector],
+            "numeric_type_alignment": True,
+        }
+    )
+
+    assert update["decision"] == "invalid_sql"
+    path_state = update["path_state"]
+    assert path_state["error"] == SQL_CORRECTION_ERROR
+    assert "CAST(" in path_state["sql_correction"]
+    assert "buy_pressure" in path_state["sql_correction"]
+    assert "result_numeric_kinds" not in path_state
+    assert connector.executed == [sql]
+
+
+def test_sqlite_qualifier_strip_is_reported_for_reconstruction(monkeypatch) -> None:
+    connector = _Connector(pd.DataFrame({"a": [1]}), dialect="sqlite")
+    monkeypatch.setattr(
+        sql_execution,
+        "resolve_connector_from_tables",
+        lambda tables, connectors: connectors[0],
+    )
+    update = SQLExecutionAgent().execute(
+        {
+            "path_state": {
+                "sql_code": "SELECT a FROM PUBLIC.t",
+                "relevant_tables": [],
+            },
+            "connectors": [connector],
+            "numeric_type_alignment": True,
+        }
+    )
+
+    assert update["decision"] == "invalid_sql"
+    assert update["path_state"]["error"] == SQL_CORRECTION_ERROR
+    assert update["path_state"]["sql_correction"] == "SELECT a FROM t"
+    assert connector.executed == ["SELECT a FROM t"]
 
 
 # ── result values digest ────────────────────────────────────────────────────

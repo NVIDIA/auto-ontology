@@ -234,6 +234,12 @@ def has_avg_expression(sql: str) -> bool:
     return tree is not None and tree.find(exp.Avg) is not None
 
 
+# Execution reports this in ``path_state["error"]`` instead of rewriting SQL
+# itself. The corrected statement is ``path_state["sql_correction"]``.
+# Reconstruction is what installs it and sends it back through validation.
+SQL_CORRECTION_ERROR = "sql_correction"
+
+
 def cast_jsonb_numeric_projections(
     sql: str, dialect: Optional[str], frame: Any
 ) -> Optional[str]:
@@ -772,6 +778,7 @@ def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
 
 
 __all__ = [
+    "SQL_CORRECTION_ERROR",
     "cast_jsonb_numeric_projections",
     "dominant_kind",
     "flip_numeric_output_types",

@@ -40,6 +40,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
+from auto_ontology.retrieval.text_to_sql.numeric_types import SQL_CORRECTION_ERROR
 from auto_ontology.retrieval.text_to_sql.prompts import (
     format_authoritative_evidence,
     format_dual_question_block,
@@ -231,6 +232,54 @@ _NUMERIC_FORMAT_CAST_ERROR_RE = re.compile(
     r'\s*"[^"]*(?:%|\$|USD|EUR|GBP)[^"]*"',
     re.IGNORECASE,
 )
+
+
+def _pending_sql_correction(path_state: dict, sql_code: str) -> str | None:
+    """Corrected SQL reported by execution, or None when there is nothing to install.
+
+    Execution fails with ``SQL_CORRECTION_ERROR`` instead of submitting a
+    statement it rewrote itself. The fix belongs here: replace the generated
+    SQL and let validation run the corrected statement.
+    """
+    if path_state.get("error") != SQL_CORRECTION_ERROR:
+        return None
+    corrected = str(path_state.get("sql_correction") or "").strip()
+    if not corrected or corrected == (sql_code or "").strip():
+        return None
+    return corrected
+
+
+def _install_sql_correction(
+    path_state: dict,
+    sql_code: str,
+    corrected: str,
+    previous: Any,
+) -> Dict[str, Any]:
+    """Adopt *corrected* as the generated SQL without an LLM rewrite."""
+    failed_attempts: list[dict] = list(path_state.get("failed_attempts") or [])
+    failed_attempts.append({"sql": sql_code, "error": SQL_CORRECTION_ERROR})
+    path_state["failed_attempts"] = failed_attempts
+    path_state.pop("error", None)
+    path_state.pop("sql_correction", None)
+    record_thought(
+        path_state,
+        _GRAPH_NODE_NAME,
+        "Rewriting the query so the submitted statement matches what should run.",
+    )
+    thought = (getattr(previous, "thought", "") or "").strip() or (
+        "The query is unchanged apart from the correction required to run it."
+    )
+    summary = (getattr(previous, "response", "") or "").strip() or (
+        "The query was adjusted so its results come back in the expected form."
+    )
+    response = SQLGenerationModel(thought=thought, sql_code=corrected, response=summary)
+    return {
+        "path_state": {
+            **path_state,
+            "sql_generation_result": response,
+            "relevant_tables": list(path_state.get("relevant_tables") or []),
+        }
+    }
 
 
 def _is_numeric_format_cast_error(error: str) -> bool:
@@ -485,9 +534,16 @@ class SQLReconstructionAgent(BaseAgent):
 
     def execute(self, state: AgentState) -> Dict[str, Any]:
         path_state = state.get("path_state", {})
+        incorrect_response = path_state.get("sql_generation_result")
+        sql_code = getattr(incorrect_response, "sql_code", "") or ""
+        corrected = _pending_sql_correction(path_state, sql_code)
+        if corrected:
+            return _install_sql_correction(
+                path_state, sql_code, corrected, incorrect_response
+            )
+
         llm = state["llm"]
         error = path_state.get("error", "")
-        incorrect_response = path_state.get("sql_generation_result")
         original_question = get_original_question(state)
         sanitized_question = get_question_for_processing(state)
         # Evidence now arrives as its own state field rather than embedded in

@@ -19,6 +19,7 @@ from auto_ontology.retrieval.text_to_sql.connector_routing import (
 )
 from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 from auto_ontology.retrieval.text_to_sql.numeric_types import (
+    SQL_CORRECTION_ERROR,
     cast_jsonb_numeric_projections,
     numeric_column_kinds,
     result_values_digest,
@@ -65,6 +66,7 @@ class QueryResponse:
         statement: Optional[str] = None,
         numeric_kinds: Optional[list] = None,
         values_digest: Optional[str] = None,
+        sql_correction: Optional[str] = None,
     ):
         # Per output column ``"float"`` / ``"decimal"`` / ``None``; lets a caller
         # that needs a predictable numeric type know what this SQL returned.
@@ -78,6 +80,9 @@ class QueryResponse:
         # ``_sanitize_sql_for_dialect``. Classifying ``error`` means stripping
         # the statement the driver echoed, so it has to be this text.
         self.statement = statement
+        # Set when the statement that should be submitted is not the statement
+        # that was generated. Execution reports it; reconstruction installs it.
+        self.sql_correction = sql_correction
 
 
 def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
@@ -85,6 +90,29 @@ def _sanitize_sql_for_dialect(sql: str, dialect: str) -> str:
     if (dialect or "").lower() == "sqlite":
         return re.sub(r"\bPUBLIC\.", "", sql, flags=re.IGNORECASE)
     return sql
+
+
+def _sql_correction_for(
+    original_sql: str,
+    executed_sql: str,
+    dialect: str,
+    frame: Any,
+    record_numeric_kinds: bool,
+) -> Optional[str]:
+    """The statement reconstruction should run, or None when *original_sql* is fine.
+
+    A bare JSON numeric projection comes back as text, and a sqlite schema
+    qualifier is stripped before execution. Either way the generated SQL is
+    not what ran. The corrected text is reported as ``SQL_CORRECTION_ERROR``
+    rather than submitted from here.
+    """
+    if not record_numeric_kinds:
+        return None
+    rewritten = cast_jsonb_numeric_projections(executed_sql, dialect, frame)
+    candidate = rewritten if rewritten else executed_sql
+    if candidate.strip() == original_sql.strip():
+        return None
+    return candidate.strip()
 
 
 def _run_sql(
@@ -104,21 +132,13 @@ def _run_sql(
             result=None, sliced=False, error="No connector available to execute SQL."
         )
     try:
+        original_sql = sql
         dialect = getattr(connector, "dialect", "")
         sql = _sanitize_sql_for_dialect(sql, dialect)
         df = execute_chat_sql(connector, sql)
-        if record_numeric_kinds:
-            rewritten = cast_jsonb_numeric_projections(sql, dialect, df)
-            if rewritten:
-                try:
-                    df = execute_chat_sql(
-                        connector, rewritten, kind="jsonb numeric projection cast"
-                    )
-                    sql = rewritten
-                except Exception:  # noqa: BLE001 — keep original df and sql
-                    logger.warning(
-                        "JSONB numeric projection cast did not run; keeping original SQL"
-                    )
+        sql_correction = _sql_correction_for(
+            original_sql, sql, dialect, df, record_numeric_kinds
+        )
     except Exception as e:
         logger.exception("SQL execution failed (injected connector)")
         return QueryResponse(result=None, sliced=False, error=str(e), statement=sql)
@@ -134,6 +154,7 @@ def _run_sql(
         statement=sql,
         numeric_kinds=numeric_column_kinds(df) if record_numeric_kinds else [],
         values_digest=result_values_digest(df) if record_numeric_kinds else None,
+        sql_correction=sql_correction,
     )
 
 
@@ -186,6 +207,20 @@ class SQLExecutionAgent(BaseAgent):
         else:
             response_from_db = _run_sql(sql_code, connector)
 
+        if response_from_db.sql_correction:
+            # The query ran, but not as generated: a JSON numeric came back as
+            # text, or the dialect rewrote a qualifier. Reconstruction installs
+            # the corrected statement. Doing it here would submit SQL the
+            # generator never produced.
+            path_state["error"] = SQL_CORRECTION_ERROR
+            path_state["sql_correction"] = response_from_db.sql_correction
+            record_thought(
+                path_state,
+                _GRAPH_NODE_NAME,
+                "Query needs a rewrite before its result can be submitted.",
+            )
+            return {"decision": "invalid_sql", "path_state": path_state}
+
         if response_from_db.error:
             self.logger.info(
                 "SQL execution failed\n  SQL: %s\n  Error: %s",
@@ -236,14 +271,10 @@ class SQLExecutionAgent(BaseAgent):
             "sql_response_from_db": response_from_db.result,
         }
         if record_kinds:
+            # Numeric types of what just ran, tagged with that SQL so a reader
+            # can tell when they are stale. A statement that differs from the
+            # generated one never reaches here: it fails over above.
             executed_sql = (response_from_db.statement or sql_code).strip()
-            if executed_sql != str(sql_code).strip():
-                updated_path_state["sql_code"] = executed_sql
-                llm_res = updated_path_state.get("sql_generation_result")
-                if llm_res is not None and hasattr(llm_res, "sql_code"):
-                    llm_res.sql_code = executed_sql
-            # Numeric types of what ``executed_sql`` just returned, tagged with the
-            # SQL they belong to so a reader can tell when they are stale.
             updated_path_state["result_numeric_kinds"] = response_from_db.numeric_kinds
             updated_path_state["result_numeric_kinds_sql"] = executed_sql
             updated_path_state["result_values_digest"] = response_from_db.values_digest

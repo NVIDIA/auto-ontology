@@ -13,7 +13,48 @@ from auto_ontology.retrieval.text_to_sql.agents import sql_reconstruction
 from auto_ontology.retrieval.text_to_sql.agents.sql_reconstruction import (
     SQLReconstructionAgent,
 )
+from auto_ontology.retrieval.text_to_sql.numeric_types import SQL_CORRECTION_ERROR
 from auto_ontology.retrieval.text_to_sql.state import AgentState
+
+
+def test_sql_correction_is_installed_without_calling_the_llm(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_invoke(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError(
+            "reconstruction must not call the LLM for a sql correction"
+        )
+
+    monkeypatch.setattr(
+        sql_reconstruction, "invoke_with_structured_output", fail_invoke
+    )
+    state = cast(
+        AgentState,
+        {
+            "path_state": {
+                "error": SQL_CORRECTION_ERROR,
+                "sql_correction": "SELECT CAST(v AS DECIMAL) AS v FROM t",
+                "sql_generation_result": SimpleNamespace(
+                    sql_code="SELECT v FROM t",
+                    thought="Sum the stored counts.",
+                    response="The total of the stored counts.",
+                ),
+                "relevant_tables": [],
+            },
+        },
+    )
+
+    result = SQLReconstructionAgent().execute(state)
+
+    path_state = result["path_state"]
+    generated = path_state["sql_generation_result"]
+    assert generated.sql_code == "SELECT CAST(v AS DECIMAL) AS v FROM t"
+    assert generated.thought == "Sum the stored counts."
+    assert "error" not in path_state
+    assert "sql_correction" not in path_state
+    assert path_state["failed_attempts"] == [
+        {"sql": "SELECT v FROM t", "error": SQL_CORRECTION_ERROR}
+    ]
 
 
 def test_table_discovery_uses_target_database(
