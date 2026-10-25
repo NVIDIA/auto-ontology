@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import threading
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
 
@@ -67,14 +67,19 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     # itself is lazy on first use, but eagerly initialising here means the
     # very first chat request doesn't pay a cold start.
     get_pool()
-    recovery = asyncio.create_task(asyncio.to_thread(recover_pending_document_ingests))
+    # A daemon thread rather than `asyncio.to_thread`: recovery can run LLM
+    # extraction for minutes, and shutdown must not wait for it.
+    stop_recovery = threading.Event()
+    threading.Thread(
+        target=recover_pending_document_ingests,
+        args=(stop_recovery,),
+        name="document-recovery",
+        daemon=True,
+    ).start()
     try:
         yield
     finally:
-        try:
-            await recovery
-        except Exception:
-            logger.exception("Interrupted document recovery failed.")
+        stop_recovery.set()
         # Tear down warm subprocesses before exiting so we don't leak them.
         shutdown_pool()
         close_store()

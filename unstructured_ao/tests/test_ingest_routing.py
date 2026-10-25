@@ -204,6 +204,36 @@ def test_startup_recovery_resumes_every_pending_document(
     ]
 
 
+def test_startup_recovery_stops_between_documents_on_shutdown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    import auto_ontology.dal.session as session
+
+    monkeypatch.setattr(session, "get_engine", lambda: _FakeEngine())
+    monkeypatch.setattr(
+        ingest,
+        "list_pending_documents",
+        lambda _c: [
+            {"id": "doc-1", "path": "/uploads/one.txt", "status": "processing"},
+            {"id": "doc-2", "path": "/uploads/two.pdf", "status": "processing"},
+        ],
+    )
+    stop = threading.Event()
+    resumed: list[str] = []
+
+    def resume(document_id: str, _path: str) -> None:
+        resumed.append(document_id)
+        stop.set()
+
+    monkeypatch.setattr(ingest, "run_document_ingest", resume)
+
+    ingest.recover_pending_document_ingests(stop)
+
+    assert resumed == ["doc-1"]
+
+
 def test_a_failed_semantic_pass_marks_the_document_failed(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -18,6 +18,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from auto_ontology.dal.schema import (
     unstructured_attribute,
     unstructured_attribute__chunk,
+    unstructured_attribute_family,
+    unstructured_attribute_family__attribute,
     unstructured_chunk,
     unstructured_document,
     unstructured_term,
@@ -235,13 +237,45 @@ def set_document_status(
 
 
 def delete_document(conn: Connection, document_id: str) -> None:
-    """Delete the document, its downstream rows, and its vectors."""
+    """Delete the document, its downstream rows, and its vectors.
+
+    Membership cascades with the attributes, but a family spans documents, so
+    only the families this document touched that are left with fewer than two
+    members are deleted.  Larger survivors keep their labels until
+    ``relate.build`` regenerates them.
+    """
     from unstructured_ao.vectorstore import delete_document_vectors
+
+    member = unstructured_attribute_family__attribute
+    touched = select(member.c.family_id).where(
+        member.c.attribute_id.in_(
+            select(unstructured_attribute.c.id)
+            .join(
+                unstructured_term,
+                unstructured_term.c.id == unstructured_attribute.c.term_id,
+            )
+            .where(unstructured_term.c.document_id == document_id)
+        )
+    )
+    family_ids = list(conn.execute(touched.distinct()).scalars())
 
     delete_document_vectors(conn, document_id)
     conn.execute(
         unstructured_document.delete().where(unstructured_document.c.id == document_id)
     )
+
+    if family_ids:
+        survivors = (
+            select(func.count())
+            .where(member.c.family_id == unstructured_attribute_family.c.id)
+            .scalar_subquery()
+        )
+        conn.execute(
+            unstructured_attribute_family.delete().where(
+                unstructured_attribute_family.c.id.in_(family_ids),
+                survivors < 2,
+            )
+        )
 
 
 def list_documents(

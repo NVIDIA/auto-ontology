@@ -35,6 +35,7 @@ Terms and attributes come afterwards, from
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -382,18 +383,29 @@ def run_document_ingest(document_id: str, file_path: str | Path) -> None:
             _release_document_lock(conn, document_id)
 
 
-def recover_pending_document_ingests() -> None:
-    """Resume every non-terminal upload found when the API starts."""
+def recover_pending_document_ingests(stop: threading.Event | None = None) -> None:
+    """Resume every non-terminal upload found when the API starts.
+
+    Checks *stop* between documents.  A document cut off mid-way by shutdown
+    keeps its non-terminal status — its transaction rolls back and its advisory
+    lock goes with the connection — so the next start resumes it.
+    """
     from auto_ontology.dal.session import get_engine
 
-    engine = get_engine()
-    with engine.connect() as conn:
-        pending = list_pending_documents(conn)
-        conn.commit()
-    if pending:
-        logger.info("Recovering %d interrupted document ingest(s).", len(pending))
-    for document in pending:
-        run_document_ingest(document["id"], document["path"])
+    try:
+        engine = get_engine()
+        with engine.connect() as conn:
+            pending = list_pending_documents(conn)
+            conn.commit()
+        if pending:
+            logger.info("Recovering %d interrupted document ingest(s).", len(pending))
+        for document in pending:
+            if stop is not None and stop.is_set():
+                logger.info("Stopping document recovery for shutdown.")
+                return
+            run_document_ingest(document["id"], document["path"])
+    except Exception:
+        logger.exception("Interrupted document recovery failed.")
 
 
 def _store_chunks(
