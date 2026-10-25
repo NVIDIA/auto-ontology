@@ -50,7 +50,6 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     opposite_target,
     order_by_leading_aggregate,
     order_groups_by_identifier,
-    order_periods_chronologically,
     sum_decimal_casts_to_integer,
 )
 
@@ -537,19 +536,10 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
     changed the values themselves (a different filter, join, or expression), the
     type the first submit had says nothing about the new answer, and flipping
     would swap a possibly-correct type for a wrong one.
-
-    A debug result can also arrive with no recorded first type: the phase
-    ended without a submit, so there is no kind and no value digest. Decimal
-    columns in that result are retried as ``double precision``. An integer
-    first submit still has a digest, and its debug SQL is left alone.
     """
     first_kind = session.first_submit_numeric_kind
     kinds = _numeric_kinds_for(session, sql)
-    if not kinds:
-        return sql
-    if not first_kind:
-        if session.first_submit_values_digest is None and "decimal" in kinds:
-            return _retry_double_without_a_recorded_type(session, sql, kinds)
+    if not kinds or not first_kind:
         return sql
 
     first_values_digest = session.first_submit_values_digest
@@ -585,44 +575,6 @@ def _flip_numeric_types_for_retry(session: InteractiveSessionState, sql: str) ->
         "[%s] Debug retry: numeric columns moved to the opposite type (first submit was %s)",
         session.task_id,
         first_kind,
-    )
-    return flipped
-
-
-def _retry_double_without_a_recorded_type(
-    session: InteractiveSessionState,
-    sql: str,
-    kinds: list,
-) -> str:
-    """Retry decimal output as ``double precision`` when no first type was stored.
-
-    The opposite-type flip needs a first submit to know which side was already
-    graded wrong. When that submit never recorded a result, a decimal answer
-    still has the other side left: ``double precision``. The rewritten
-    statement is kept only when it executes.
-    """
-    connector = resolve_connector_from_tables(
-        session.path_state.get("relevant_tables") or [], session.connectors
-    )
-    if connector is None:
-        return sql
-    flipped = flip_numeric_output_types(
-        sql, getattr(connector, "dialect", None), kinds, "double"
-    )
-    if not flipped:
-        return sql
-    try:
-        execute_chat_sql(connector, flipped, kind="numeric type retry")
-    except Exception as exc:  # noqa: BLE001 — fall back to the SQL as generated
-        logger.warning(
-            "[%s] Decimal-to-double retry did not run (%s); keeping the generated SQL",
-            session.task_id,
-            exc,
-        )
-        return sql
-    logger.info(
-        "[%s] Debug retry: decimal columns moved to double precision (no first-submit numeric type)",
-        session.task_id,
     )
     return flipped
 
@@ -938,9 +890,8 @@ def _submit_if_it_runs(
 def _stabilize_submitted_order(session: InteractiveSessionState, sql: str) -> str:
     """Apply the row-order rewrites that matched the grader on saved SQL.
 
-    Runs after the numeric-type flip so a flip back to ``double precision``
-    does not undo the chronological average, and so an integer ``SUM`` is not
-    wrapped again as ``numeric``. Each rewrite is kept only if it executes.
+    Runs after the numeric-type flip so an integer ``SUM`` is not wrapped again
+    as ``numeric``. Each rewrite is kept only if it executes.
     """
     dialect = _postgres_dialect(session)
     if dialect is None or not sql.strip():
@@ -950,12 +901,6 @@ def _stabilize_submitted_order(session: InteractiveSessionState, sql: str) -> st
         sql,
         order_groups_by_identifier(sql, dialect),
         "grouped identifier tie-break",
-    )
-    sql = _submit_if_it_runs(
-        session,
-        sql,
-        order_periods_chronologically(sql, dialect),
-        "chronological order for a per-period ranking",
     )
     sql = _submit_if_it_runs(
         session,

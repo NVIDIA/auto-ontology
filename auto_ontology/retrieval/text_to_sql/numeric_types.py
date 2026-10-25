@@ -24,9 +24,9 @@ this module offers deterministic, SQL-level levers:
 * :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
   has none. The grader compares the concatenated text exactly, and an
   unordered aggregate is not a stable string.
-* :func:`order_groups_by_identifier` and :func:`order_periods_chronologically`
-  settle two row-order shapes the grader compares exactly: a grouped metric
-  tied on its value, and a per-period ranking displayed by the period.
+* :func:`order_groups_by_identifier` settles a grouped metric that ties on its
+  value: the grader compares that row order exactly, so the grouped identifier
+  is appended as the tie-break.
 * :func:`order_by_leading_aggregate` is the debug-turn analogue of the type
   flip for sort keys: when the outermost ``ORDER BY`` leads with a later
   aggregate, retry the first aggregate and drop extra tie-break keys.
@@ -453,7 +453,6 @@ def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
 
 
 _IDENTIFIER_SUFFIX = re.compile(r"(id|key|code)$", re.IGNORECASE)
-_PERIOD_SUFFIX = re.compile(r"(month|date|year|day|time)$", re.IGNORECASE)
 _RANK_SUFFIX = re.compile(r"(rank|row_number|rn)$", re.IGNORECASE)
 
 
@@ -534,55 +533,6 @@ def order_groups_by_identifier(sql: str, dialect: Optional[str]) -> str:
         return sql
     for extra in extras:
         order.append("expressions", exp.Ordered(this=extra, nulls_first=False))
-    return tree.sql(dialect="postgres")
-
-
-def order_periods_chronologically(sql: str, dialect: Optional[str]) -> str:
-    """Show a per-period ranking in period order, as a numeric average.
-
-    A result shaped as period, metric, rank is graded in chronological order
-    even when the rank was computed from the metric. When the outermost
-    ``ORDER BY`` leads with the rank and also names a month/date/year column,
-    keep only that period column (ascending). A ``CAST(... AS DOUBLE
-    PRECISION)`` on a selected value is removed in the same edit: the flip to
-    float makes an average of ``numeric`` fail the grader's exact type check.
-
-    Returns *sql* unchanged when the order shape does not match.
-    """
-    if not _is_postgres(dialect) or not sql.strip():
-        return sql
-    tree = _parse(sql)
-    if tree is None:
-        return sql
-    select = _outermost_select(tree)
-    if select is None or not select.args.get("order"):
-        return sql
-    order = select.args["order"]
-    keys = [(_ordered_name(ordered), ordered) for ordered in order.expressions]
-    if not keys or not _RANK_SUFFIX.search(keys[0][0] or ""):
-        return sql
-    period_keys = [key for key in keys if _PERIOD_SUFFIX.search(key[0] or "")]
-    if not period_keys:
-        return sql
-    order.set(
-        "expressions",
-        [
-            exp.Ordered(this=key[1].this.copy(), nulls_first=False)
-            for key in period_keys
-        ],
-    )
-    for projection in list(select.expressions):
-        inner = projection.this if isinstance(projection, exp.Alias) else projection
-        target = inner.args.get("to") if isinstance(inner, exp.Cast) else None
-        if not isinstance(target, exp.DataType) or target.this not in (
-            exp.DataType.Type.DOUBLE,
-            exp.DataType.Type.FLOAT,
-        ):
-            continue
-        if isinstance(projection, exp.Alias):
-            projection.set("this", inner.this)
-        else:
-            projection.replace(inner.this)
     return tree.sql(dialect="postgres")
 
 
@@ -782,7 +732,6 @@ __all__ = [
     "opposite_target",
     "order_by_leading_aggregate",
     "order_groups_by_identifier",
-    "order_periods_chronologically",
     "order_string_aggregates",
     "result_values_digest",
     "sum_decimal_casts_to_integer",

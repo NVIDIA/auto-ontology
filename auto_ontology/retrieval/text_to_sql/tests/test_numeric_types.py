@@ -22,7 +22,6 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     opposite_target,
     order_by_leading_aggregate,
     order_groups_by_identifier,
-    order_periods_chronologically,
     order_string_aggregates,
     result_values_digest,
     sum_decimal_casts_to_integer,
@@ -444,21 +443,6 @@ def test_grouped_order_does_not_change_a_limited_query() -> None:
         "GROUP BY c.series_id ORDER BY COUNT(*) DESC LIMIT 3"
     )
     assert order_groups_by_identifier(sql, "postgres") == sql
-
-
-def test_period_ranking_is_shown_chronologically_as_numeric() -> None:
-    sql = (
-        "SELECT audit_month, CAST(avg_afs AS DOUBLE PRECISION), severity_rank "
-        "FROM ranked ORDER BY severity_rank, audit_month"
-    )
-    rewritten = order_periods_chronologically(sql, "postgres")
-    assert "DOUBLE PRECISION" not in rewritten.upper()
-    assert rewritten.upper().rstrip().endswith("ORDER BY AUDIT_MONTH")
-
-
-def test_period_ranking_leaves_a_metric_sort_alone() -> None:
-    sql = "SELECT name, score FROM t ORDER BY score DESC"
-    assert order_periods_chronologically(sql, "postgres") == sql
 
 
 def test_debug_order_uses_the_first_aggregate_and_drops_the_tie_break() -> None:
