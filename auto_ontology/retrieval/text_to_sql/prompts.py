@@ -411,11 +411,6 @@ def create_sql_from_candidates_prompt(
 - When creating a JOIN, both sides of the ON condition must use columns with
   the same data type. Never join a text column to a numeric column or a date
   column to an integer column, or uuid column to a string column.
-- Never match a human name/label against an id or foreign-key column (`*_id`,
-  `link_to_*`). To filter by a name, join to the table holding the name columns
-  (first_name/last_name/*_name) and filter there. Join each foreign key to the
-  primary key it actually references (e.g. `expense.link_to_member` =
-  `member.member_id`, never `event.event_id`).
 - Use only standard JOIN types with explicit ON conditions: INNER JOIN, LEFT JOIN,
   RIGHT JOIN, FULL OUTER JOIN. Never use CROSS JOIN LATERAL, LATERAL JOIN,
   NATURAL JOIN, implicit comma joins, or any other non-standard join syntax.
