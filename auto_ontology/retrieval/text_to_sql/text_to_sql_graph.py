@@ -160,13 +160,6 @@ def _make_soft_check_router(check_name: str):
     return _route
 
 
-def route_post_execution_result_check(state: AgentState) -> str:
-    """Route deterministic result cleanup directly back to SQL execution."""
-    if state.get("decision") == "retry_sql":
-        return "retry_sql"
-    return _make_soft_check_router("check_empty_like_result")(state)
-
-
 def route_translation(state: AgentState) -> str:
     """
     Route to translation or graph END based on target language and context.
@@ -577,7 +570,7 @@ def create_graph():
         route_sql_execution,
         {
             "valid_sql": "check_empty_like_result",
-            "valid_sql_without_like_check": "check_empty_like_result",
+            "valid_sql_without_like_check": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
             "unconstructable": "unconstructable_sql_response",
         },
@@ -587,11 +580,10 @@ def create_graph():
     # empty result at run time).
     graph.add_conditional_edges(
         "check_empty_like_result",
-        route_post_execution_result_check,
+        _make_soft_check_router("check_empty_like_result"),
         {
             "valid_sql": "check_value_repair",
             "invalid_sql": "reconstruct_sql",
-            "retry_sql": "execute_sql_query",
         },
     )
     graph.add_conditional_edges(

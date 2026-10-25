@@ -83,9 +83,12 @@ def test_prompt_does_not_prefer_fewer_joins() -> None:
     )
 
 
-def test_generation_prompt_does_not_decide_null_result_filtering() -> None:
-    assert "IS NOT NULL" not in create_sql_user_prompt
-    assert "NULL filtering" not in create_sql_user_prompt
+def test_prompt_filters_nulls_only_when_the_request_requires_values() -> None:
+    assert "Do not add `IS NOT NULL` solely because" in create_sql_user_prompt
+    assert "question or evidence requires the requested value" in (
+        create_sql_user_prompt
+    )
+    assert "preserve rows containing NULLs" in create_sql_user_prompt
 
 
 def test_prompt_uses_distinct_when_source_grain_repeats_requested_entities() -> None:
