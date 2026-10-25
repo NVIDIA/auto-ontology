@@ -38,7 +38,11 @@ _PROJECTION_RULES = (
     "- If the user asks for name, project the requested name fields and never add "
     "IDs unless the user explicitly asks for them.\n"
     "- Preserve the question's field order in SELECT: project explicitly requested "
-    "outputs from left to right in the same order the user names them.\n"
+    "outputs from left to right in the same order the user names them. For a "
+    "non-aggregate attribute lookup, a later instruction such as 'include' or "
+    "'indicate' appends that field after the fields already requested. For a grouped "
+    "aggregate, keep the conventional grouping-dimension-then-measure order unless "
+    "the user explicitly requests another order.\n"
     "- If evidence maps an answer concept to specific columns, preserve that "
     "projection exactly; do not collapse, reshape, or replace those columns "
     "unless the question explicitly asks for a transformed value.\n"
@@ -106,6 +110,16 @@ create_sql_user_prompt = (
     "must be defined in FROM or JOIN. Never reference an undefined alias.\n"
     "- Verify each column exists in the table you reference it from. "
     "Do not confuse columns across tables.\n"
+    "- Scope every qualifier to the noun phrase it modifies. A qualifier such as "
+    "'mailing' in 'mailing state address in California' applies to the state field; "
+    "it does not silently turn a separately requested unqualified city into mailing "
+    "city. Reuse a qualifier for a later field only when the request repeats it or "
+    "clearly coordinates the fields under the same qualifier.\n"
+    "- When a requested entity attribute exists both on that entity's canonical "
+    "table and as a denormalized copy elsewhere, use the canonical field when that "
+    "entity table is already required or joined. Use the copy only when the question "
+    "or evidence specifically names its role, or when the canonical table is not "
+    "available. Column-name similarity alone does not make the copy equivalent.\n"
     "- GROUP BY must include all non-aggregated columns in SELECT.\n"
     "- ORDER BY must only reference aggregated aliases or columns "
     "present in SELECT/GROUP BY.\n\n"
@@ -166,7 +180,9 @@ create_sql_user_prompt = (
     "if a superlative (most/least/highest/lowest/best/worst/top/bottom) "
     "is paired with a number, add LIMIT with that number; "
     "if an unnumbered superlative asks for one singular item, add LIMIT 1; "
-    "if it asks for plural items, do not add LIMIT; "
+    "if it asks for plural items, return only rows tied at the extremal value "
+    "using MAX/MIN (or an equivalent rank=1 construction), rather than returning "
+    "all rows merely sorted by the metric; "
     "if a specific count is requested without a superlative, "
     "add LIMIT with that number; "
     "otherwise do not add LIMIT.\n"
@@ -483,7 +499,12 @@ Do NOT reject solely to:
   evidence explicitly says distinct, unique, different, or one per entity;
 - reorder algebraically equivalent operations, add/remove an alias, swap one
   equivalent date/age expression for another, concatenate separately requested
-  name parts, or reorder output columns;
+  name parts, or reorder output columns when the request does not establish an
+  order. For non-aggregate attribute lookups, preserve the request's explicit
+  field sequence, including fields appended by a later "include" or "indicate"
+  instruction. Do not apply that lookup convention to grouped aggregates:
+  grouping dimensions normally precede measures unless the user explicitly
+  requests another order;
 - add a count field when the request ultimately says to list the matching
   identifiers/values. The returned list itself answers "how many";
 - enforce an evidence literal, date, operator, or mapping that directly
@@ -502,12 +523,20 @@ _INTENT_VALIDATION_COVERAGE_RULES = """
 Before deciding, derive a compact answer contract from the ORIGINAL request:
 1. List every output the user explicitly asks to return. Treat separately
    requested measures as separate outputs. If the user explicitly asks for a
-   rank or ordinal, sorting alone is not that output.
+   rank or ordinal, sorting alone is not that output. For non-aggregate
+   attribute lookups, preserve the explicit request sequence; a later "include"
+   or "indicate" field comes after the fields already requested. Do not infer
+   aggregate output order from narrative mention order: grouping dimensions
+   conventionally precede measures unless the request explicitly says otherwise.
 2. Name the answer entity and grain (for example, one row per city, card,
    customer, driver, or event). Check that GROUP BY, DISTINCT, aggregate inputs,
    and top-N/ranking logic operate at that grain. In particular, "most common"
    is a frequency calculation, not lexical MAX/MIN, and "largest total per X"
-   requires aggregation per X before ranking.
+   requires aggregation per X before ranking. A superlative asks for only the
+   extremal item(s): ORDER BY alone with no LIMIT, extremum predicate, or rank
+   filter is invalid because it returns non-extremal rows too. An unspecified
+   tie policy affects whether to keep one extremal row or all tied rows; it
+   never permits returning every lower-ranked row.
 3. For every ratio, rate, share, or percentage, state the numerator population,
    denominator population, filters applying to each, and scale. The denominator
    must represent the population named by phrases such as "among", "of", or
@@ -518,7 +547,12 @@ Before deciding, derive a compact answer contract from the ORIGINAL request:
    direction, and requested semantic role with the SQL. A type-compatible
    column is still wrong when its documented role belongs to another entity or
    represents another concept (for example, station segment vs customer
-   segment, identifier vs name, milliseconds vs formatted finish time).
+   segment, identifier vs name, milliseconds vs formatted finish time). Scope a
+   qualifier only to the noun phrase it modifies: "mailing state ... in
+   California" does not make a separately stated unqualified city a mailing
+   city. When the canonical entity table is already joined, prefer its requested
+   entity attribute over a denormalized copy on another table unless the request
+   or evidence specifically names the copy's role.
 5. When evidence conflicts with an explicit request, the original request wins.
    Flag SQL that follows the conflicting evidence and therefore contradicts the
    request. Do not flag SQL that correctly preserves the request.
@@ -1030,7 +1064,8 @@ def create_intent_validation_prompt(
         "requested field, exactly once, in the requested shape, and NO additional "
         "fields. Aggregates and transformed values count as output fields. Never "
         "accept extra context as helpful, and never remove a requested field. Record "
-        "every extra, missing, duplicated, or materially reshaped field in "
+        "every extra, missing, duplicated, materially reshaped, or explicitly "
+        "misordered non-aggregate lookup field in "
         "projection_issues and mark the SQL invalid."
         if shorten_answer
         else ""
@@ -1041,11 +1076,15 @@ def create_intent_validation_prompt(
         "precedence, comparison/sort direction, and scale against the request.\n"
         "6. ANSWER GRAIN: Verify aggregation, grouping, deduplication, ranking, "
         "and top-N happen at the entity grain explicitly requested. Do not infer "
-        "DISTINCT or a tie policy that the request does not establish.\n"
+        "DISTINCT or a tie policy that the request does not establish. A "
+        "superlative cannot return every row merely sorted; tie ambiguity changes "
+        "which extremal rows survive, not whether non-extremal rows survive.\n"
         "7. SEMANTIC ROLE AND LITERALS: Verify explicit literals, thresholds, "
         "operators, and referenced column roles. Flag a role only when the shown "
         "schema description or the request proves it belongs to a different "
-        "entity/concept.\n"
+        "entity/concept. Keep qualifiers scoped to the phrase they modify and "
+        "prefer a joined entity's canonical requested attribute over a denormalized "
+        "copy unless the copy's role is specifically requested.\n"
         "8. REQUEST/EVIDENCE CONFLICT: If evidence contradicts an explicit user "
         "constraint, the user request wins. Flag SQL that follows the conflicting "
         "evidence; keep SQL that preserves the request."

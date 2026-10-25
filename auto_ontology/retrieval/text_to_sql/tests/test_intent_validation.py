@@ -15,6 +15,10 @@ from auto_ontology.retrieval.text_to_sql.agents.sql_parse_validation import (
     IntentValidationModel,
     SQLValidationAgent,
 )
+from auto_ontology.retrieval.text_to_sql.prompts import (
+    create_sql_user_prompt,
+    format_projection_rules,
+)
 
 
 @patch(
@@ -464,6 +468,23 @@ def test_intent_prompt_includes_recall_checks_and_benchmark_traps(
     assert "original request wins" in combined
     assert "Do not infer DISTINCT or a tie policy" in combined
     assert "raw stored code/label with a derived yes/no" in combined
+    assert "ORDER BY alone with no LIMIT" in combined
+    assert "tie policy affects whether to keep one extremal row" in combined
+    assert "separately stated unqualified city" in combined
+    assert "canonical entity table is already joined" in combined
+    assert "explicitly misordered non-aggregate lookup field" in combined
+
+
+def test_generation_prompt_covers_targeted_california_regressions() -> None:
+    projection_rules = format_projection_rules(shorten_answer=True)
+
+    assert "later instruction such as 'include' or 'indicate'" in projection_rules
+    assert "grouping-dimension-then-measure order" in projection_rules
+    assert "return only rows tied at the extremal value" in create_sql_user_prompt
+    assert "separately requested unqualified city into mailing city" in (
+        create_sql_user_prompt
+    )
+    assert "entity's canonical table" in create_sql_user_prompt
 
 
 @patch(
