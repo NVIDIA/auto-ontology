@@ -26,10 +26,13 @@ Phase-2 LLM-driven exploration loop, so all live access inherits these guards.
 from __future__ import annotations
 
 import logging
-import re
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
+
+import sqlglot
+from sqlglot import exp
+from sqlglot.errors import ErrorLevel, ParseError
 
 from auto_ontology.connectors.base import SQLDatabase
 
@@ -42,39 +45,129 @@ from auto_ontology.retrieval.text_to_sql.chat_sql import execute_chat_sql
 
 logger = logging.getLogger(__name__)
 
-# Statement keywords that must never appear in a probe (mutations / side effects).
-_FORBIDDEN = re.compile(
-    r"\b(insert|update|delete|drop|alter|create|replace|truncate|grant|revoke|"
-    r"attach|detach|pragma|vacuum|reindex|merge|call|exec|execute|copy|into)\b",
-    re.IGNORECASE,
+# SQLGlot expression class names that represent writes, schema changes, commands,
+# transaction control, or another side effect. Names keep this compatible across
+# SQLGlot releases where less-common dialect nodes may not exist as attributes.
+_FORBIDDEN_NODE_TYPES = frozenset(
+    {
+        "Alter",
+        "Analyze",
+        "Attach",
+        "Cache",
+        "Command",
+        "Commit",
+        "Copy",
+        "Create",
+        "Delete",
+        "Detach",
+        "Drop",
+        "Execute",
+        "Grant",
+        "Insert",
+        "Into",
+        "LoadData",
+        "Lock",
+        "Merge",
+        "Pragma",
+        "Replace",
+        "Revoke",
+        "Rollback",
+        "Set",
+        "Transaction",
+        "TruncateTable",
+        "Uncache",
+        "Update",
+        "Use",
+        "Vacuum",
+    }
 )
-_LIMIT_RE = re.compile(r"\blimit\b", re.IGNORECASE)
+_SIDE_EFFECTING_FUNCTIONS = frozenset(
+    {
+        "benchmark",
+        "dblink_exec",
+        "get_lock",
+        "lo_export",
+        "lo_import",
+        "nextval",
+        "pg_advisory_lock",
+        "pg_advisory_xact_lock",
+        "pg_cancel_backend",
+        "pg_reload_conf",
+        "pg_rotate_logfile",
+        "pg_sleep",
+        "pg_terminate_backend",
+        "pg_try_advisory_lock",
+        "pg_try_advisory_xact_lock",
+        "release_lock",
+        "setval",
+        "sleep",
+    }
+)
 
 
-def is_read_only_select(sql: str) -> bool:
-    """Return ``True`` only for a single, side-effect-free ``SELECT``/``WITH`` query."""
+def _parse_read_only_query(
+    sql: str,
+    dialect: str | None = None,
+) -> tuple[exp.Query | None, str | None]:
+    """Parse one query and return a specific fail-closed rejection reason."""
     if not sql:
-        return False
-    stripped = sql.strip().rstrip(";").strip()
-    if not stripped:
-        return False
-    # Reject multi-statement payloads (anything with an interior ';').
-    if ";" in stripped:
-        return False
-    lowered = stripped.lower()
-    if not (lowered.startswith("select") or lowered.startswith("with")):
-        return False
-    if _FORBIDDEN.search(stripped):
-        return False
-    return True
+        return None, "empty SQL"
+    try:
+        statements = sqlglot.parse(
+            sql,
+            read=dialect or None,
+            error_level=ErrorLevel.RAISE,
+        )
+    except (ParseError, ValueError, TypeError) as exc:
+        return None, f"unparseable SQL: {str(exc).splitlines()[0]}"
+
+    if len(statements) != 1 or statements[0] is None:
+        return None, f"expected exactly one SQL statement, found {len(statements)}"
+
+    tree = statements[0]
+    if not isinstance(tree, exp.Query):
+        return None, f"statement type {type(tree).__name__} is not a read-only query"
+
+    for node in tree.walk():
+        node_type = type(node).__name__
+        if node_type in _FORBIDDEN_NODE_TYPES:
+            if node_type == "Into":
+                return None, "SELECT INTO is not read-only"
+            return None, f"forbidden {node_type} construct"
+        if isinstance(node, exp.Anonymous) and node.name.casefold() in (
+            _SIDE_EFFECTING_FUNCTIONS
+        ):
+            return None, f"side-effecting function {node.name} is forbidden"
+
+    if tree.find(exp.Select) is None:
+        return None, "query contains no SELECT"
+
+    return tree, None
 
 
-def _ensure_limit(sql: str, max_rows: int) -> str:
-    """Append ``LIMIT max_rows`` when the query has no explicit LIMIT."""
+def is_read_only_select(sql: str, dialect: str | None = None) -> bool:
+    """Return ``True`` only for one parsed, side-effect-free query."""
+    tree, _reason = _parse_read_only_query(sql, dialect)
+    return tree is not None
+
+
+def _ensure_limit(
+    sql: str,
+    max_rows: int,
+    dialect: str | None = None,
+    *,
+    tree: exp.Query | None = None,
+) -> str:
+    """Preserve a top-level LIMIT or add one to the parsed query expression."""
     stripped = sql.strip().rstrip(";").strip()
-    if _LIMIT_RE.search(stripped):
+    parsed = tree
+    if parsed is None:
+        parsed, reason = _parse_read_only_query(stripped, dialect)
+        if parsed is None:
+            raise ValueError(reason or "query could not be validated")
+    if parsed.args.get("limit") is not None:
         return stripped
-    return f"{stripped} LIMIT {max_rows}"
+    return parsed.limit(max_rows, copy=True).sql(dialect=dialect or None)
 
 
 @dataclass
@@ -141,13 +234,23 @@ class ProbeExecutor:
             self.log.append(entry)
             return entry
 
-        if not is_read_only_select(sql):
-            entry["error"] = "rejected: not a single read-only SELECT"
-            logger.warning("Probe rejected (not read-only): %s", sql)
+        dialect = getattr(self.connector, "dialect", None)
+        tree, rejection_reason = _parse_read_only_query(sql, dialect)
+        if tree is None:
+            reason = rejection_reason or "query could not be validated"
+            entry["error"] = f"rejected: {reason}"
+            logger.warning("Probe rejected (%s): %s", reason, sql)
             self.log.append(entry)
             return entry
 
-        bounded_sql = _ensure_limit(sql, self.max_rows)
+        try:
+            bounded_sql = _ensure_limit(sql, self.max_rows, dialect, tree=tree)
+        except Exception as exc:  # noqa: BLE001 — uncertainty must fail closed
+            reason = f"row-limit enforcement failed: {exc}"
+            entry["error"] = f"rejected: {reason}"
+            logger.warning("Probe rejected (%s): %s", reason, sql)
+            self.log.append(entry)
+            return entry
         entry["sql"] = bounded_sql
         self.calls += 1
 
