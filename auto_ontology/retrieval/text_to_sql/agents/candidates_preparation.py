@@ -48,7 +48,11 @@ from auto_ontology.dal.sql_attributes import (
     fetch_sql_attributes_with_sql,
     fetch_tables_from_sql_attributes,
 )
-from auto_ontology.dal.terms import fetch_term_synonyms, fetch_term_table_pairs
+from auto_ontology.dal.terms import (
+    fetch_term_synonyms,
+    fetch_term_table_pairs,
+    fetch_terms_and_attributes_for_table,
+)
 from auto_ontology.retrieval.data_access.relevant_tables import (
     dedupe_merge_relevant_tables,
     get_relevant_tables,
@@ -100,6 +104,20 @@ _ANCHOR_STOPWORDS = frozenset(
         "with",
     }
 )
+_ANCHOR_RELATIONSHIP_CUES = frozenset(
+    {
+        "across",
+        "associated",
+        "association",
+        "between",
+        "connected",
+        "link",
+        "linked",
+        "participating",
+        "relationship",
+        "related",
+    }
+)
 
 
 def _anchor_selection_model(ids: list[str]) -> type[AnchorColumnModel]:
@@ -134,8 +152,9 @@ def _deterministic_anchor_fallback(
 ) -> str:
     """Choose a stable proxy by semantic role, never mapping insertion order."""
     question_tokens = _anchor_tokens(question)
+    relationship_expected = bool(question_tokens & _ANCHOR_RELATIONSHIP_CUES)
 
-    def _score(item: tuple[str, dict]) -> tuple[int, int, int, int, str]:
+    def _score(item: tuple[str, dict]) -> tuple[int, int, int, int, int, str]:
         anchor_id, context = item
         entity_tokens = _anchor_tokens(
             " ".join(str(context.get(key) or "") for key in ("table_name", "term_name"))
@@ -150,7 +169,11 @@ def _deterministic_anchor_fallback(
         identifier_or_grouping = bool(attribute_tokens & _ANCHOR_IDENTIFIER_TOKENS)
         calculation_overlap = len(question_tokens & attribute_tokens)
         all_overlap = len(question_tokens & (entity_tokens | attribute_tokens))
+        structural_priority = bool(
+            relationship_expected and context.get("anchor_table_role")
+        )
         return (
+            -int(structural_priority),
             -entity_overlap,
             -int(identifier_or_grouping),
             -calculation_overlap,
@@ -159,6 +182,76 @@ def _deterministic_anchor_fallback(
         )
 
     return min(contexts.items(), key=_score)[0]
+
+
+def _expand_anchor_contexts_with_structural_tables(
+    contexts: dict[str, dict],
+    database_name: str | None,
+) -> tuple[dict[str, dict], dict[str, str]]:
+    """Add real ColumnAttributes owned by connected bridge/junction tables."""
+    expanded = {
+        attribute_id: dict(context) for attribute_id, context in contexts.items()
+    }
+    base_table_ids = list(
+        dict.fromkeys(
+            str(context["table_id"])
+            for context in contexts.values()
+            if context.get("table_id")
+        )
+    )
+    if not base_table_ids:
+        return expanded, {}
+
+    table_roles: dict[str, str] = {}
+    for table in fetch_tables_by_ids(base_table_ids):
+        table_id = str(table.get("id") or "")
+        if table_id and table.get("is_junction_table"):
+            table_roles[table_id] = "junction"
+
+    junction_tables, _junction_paths = find_connected_junction_tables(base_table_ids)
+    for table in junction_tables:
+        table_id = str(table.get("id") or "")
+        if table_id:
+            table_roles[table_id] = "junction"
+
+    bridge_tables, _bridge_paths, _skipped = find_kept_table_bridges(
+        base_table_ids,
+        allowed_table_ids=None,
+    )
+    for table in bridge_tables:
+        table_id = str(table.get("id") or "")
+        if table_id:
+            table_roles.setdefault(table_id, "bridge")
+
+    for context in expanded.values():
+        table_id = str(context.get("table_id") or "")
+        if table_id in table_roles:
+            context["anchor_table_role"] = table_roles[table_id]
+
+    added_ids: list[str] = []
+    for table_id, role in table_roles.items():
+        if table_id in base_table_ids:
+            continue
+        _terms, attributes = fetch_terms_and_attributes_for_table(table_id)
+        added_ids.extend(
+            str(attribute["id"])
+            for attribute in attributes
+            if attribute.get("id") and str(attribute["id"]) not in expanded
+        )
+
+    if added_ids:
+        added_contexts = fetch_attr_column_contexts(
+            list(dict.fromkeys(added_ids)),
+            database_name=database_name,
+        )
+        for attribute_id, context in added_contexts.items():
+            enriched = dict(context)
+            role = table_roles.get(str(context.get("table_id") or ""))
+            if role:
+                enriched["anchor_table_role"] = role
+            expanded[attribute_id] = enriched
+
+    return expanded, table_roles
 
 
 def _qualified_name(t: dict) -> str:
@@ -435,7 +528,22 @@ class CandidatePreparationAgent(BaseAgent):
                     len(attr_contexts),
                     len(attr_ids),
                 )
-                term_synonyms = fetch_term_synonyms(attr_ids)
+                original_attribute_count = len(attr_contexts)
+                attr_contexts, structural_table_roles = (
+                    _expand_anchor_contexts_with_structural_tables(
+                        attr_contexts,
+                        target_db,
+                    )
+                )
+                if structural_table_roles:
+                    self.logger.info(
+                        "Anchor selection includes %d bridge/junction table(s) and "
+                        "%d additional structural-table attribute(s): %s",
+                        len(structural_table_roles),
+                        len(attr_contexts) - original_attribute_count,
+                        structural_table_roles,
+                    )
+                term_synonyms = fetch_term_synonyms(list(attr_contexts))
                 self.logger.info("Fetched synonyms for %d term(s)", len(term_synonyms))
 
                 anchor_id, anchor_reasoning = self._identify_anchor(
@@ -447,6 +555,8 @@ class CandidatePreparationAgent(BaseAgent):
 
                 if anchor_id and anchor_id in attr_contexts:
                     anchor_ctx = attr_contexts[anchor_id]
+                    if anchor_ctx.get("anchor_table_role"):
+                        forced_table_ids.add(anchor_ctx["table_id"])
                     primary_attribute = {
                         "id": anchor_id,
                         "attr_name": anchor_ctx["attr_name"],
@@ -1327,6 +1437,11 @@ class CandidatePreparationAgent(BaseAgent):
 
         attrs_block = "\n".join(
             f"- id: {aid} | physical column: {_physical_column(ctx)}"
+            + (
+                f" | table role: {ctx['anchor_table_role']}"
+                if ctx.get("anchor_table_role")
+                else ""
+            )
             + (f" — {ctx['attr_description']}" if ctx.get("attr_description") else "")
             for aid, ctx in contexts.items()
         )
@@ -1338,7 +1453,12 @@ class CandidatePreparationAgent(BaseAgent):
                     "You are identifying the primary column attribute that is the "
                     "main focus of a user's analytical question. Return exactly one "
                     "id from the provided list. Never return null and never invent "
-                    "an id. If the exact requested column is unavailable, choose the "
+                    "an id. First determine whether the expected SQL needs a table "
+                    "marked with the bridge or junction role to connect requested "
+                    "entities or represent the relationship grain. If it does, give "
+                    "priority to the closest attribute owned by that structural table "
+                    "and use it as the anchor. Otherwise, if the exact requested "
+                    "column is unavailable, choose the "
                     "closest valid proxy in this strict priority order: (1) another "
                     "attribute representing the requested output entity or table; "
                     "(2) an entity identifier or grouping attribute; (3) an "

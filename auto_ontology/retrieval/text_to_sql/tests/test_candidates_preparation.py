@@ -12,6 +12,8 @@ from pydantic import ValidationError
 from auto_ontology.retrieval.text_to_sql.agents import candidates_preparation
 from auto_ontology.retrieval.text_to_sql.agents.candidates_preparation import (
     CandidatePreparationAgent,
+    _deterministic_anchor_fallback,
+    _expand_anchor_contexts_with_structural_tables,
 )
 from auto_ontology.retrieval.text_to_sql.models import (
     AnchorColumnModel,
@@ -137,6 +139,7 @@ def test_anchor_prompt_requires_proxy_when_exact_column_is_absent(monkeypatch) -
 
     def fake_invoke(_llm, messages, _model):
         captured["system"] = messages[0].content
+        captured["prompt"] = messages[-1].content
         return SimpleNamespace(anchor_id="school_code", reasoning="Output identifier")
 
     monkeypatch.setattr(
@@ -153,6 +156,12 @@ def test_anchor_prompt_requires_proxy_when_exact_column_is_absent(monkeypatch) -
             "col_name": "enrollment",
             "attr_description": "Enrollment count.",
         },
+        "school_membership": {
+            "table_name": "school_membership",
+            "col_name": "membership_type",
+            "attr_description": "Relationship classification.",
+            "anchor_table_role": "junction",
+        },
     }
 
     anchor_id, _ = CandidatePreparationAgent()._identify_anchor(
@@ -167,6 +176,107 @@ def test_anchor_prompt_requires_proxy_when_exact_column_is_absent(monkeypatch) -
     assert "entity identifier or grouping attribute" in captured["system"]
     assert "attribute used by the requested calculation" in captured["system"]
     assert "most relevant filter attribute" in captured["system"]
+    assert (
+        "give priority to the closest attribute owned by that structural table"
+        in (captured["system"])
+    )
+    assert "table role: junction" in captured["prompt"]
+
+
+def test_anchor_contexts_include_bridge_and_junction_attributes(monkeypatch) -> None:
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_tables_by_ids",
+        lambda _ids: [{"id": "entity-table", "is_junction_table": False}],
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_connected_junction_tables",
+        lambda _ids: ([{"id": "junction-table", "name": "entity_links"}], []),
+    )
+    monkeypatch.setattr(
+        candidates_preparation,
+        "find_kept_table_bridges",
+        lambda _ids, allowed_table_ids=None: (
+            [{"id": "bridge-table", "name": "entity_bridge"}],
+            [],
+            0,
+        ),
+    )
+
+    def fake_attributes(table_id):
+        return [], [{"id": f"{table_id}-attribute"}]
+
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_terms_and_attributes_for_table",
+        fake_attributes,
+    )
+
+    def fake_contexts(ids, database_name=None):
+        assert database_name == "db"
+        return {
+            attribute_id: {
+                "attr_name": attribute_id,
+                "attr_description": "Structural relationship attribute.",
+                "col_name": "kind",
+                "col_id": f"{attribute_id}-column",
+                "table_id": attribute_id.removesuffix("-attribute"),
+                "table_name": attribute_id.removesuffix("-attribute"),
+                "schema_name": "main",
+                "database_name": "db",
+            }
+            for attribute_id in ids
+        }
+
+    monkeypatch.setattr(
+        candidates_preparation,
+        "fetch_attr_column_contexts",
+        fake_contexts,
+    )
+
+    expanded, roles = _expand_anchor_contexts_with_structural_tables(
+        {
+            "entity-attribute": {
+                "table_id": "entity-table",
+                "table_name": "entities",
+            }
+        },
+        "db",
+    )
+
+    assert roles == {
+        "junction-table": "junction",
+        "bridge-table": "bridge",
+    }
+    assert expanded["junction-table-attribute"]["anchor_table_role"] == "junction"
+    assert expanded["bridge-table-attribute"]["anchor_table_role"] == "bridge"
+
+
+def test_anchor_fallback_prioritizes_structural_table_for_relationship_question() -> (
+    None
+):
+    contexts = {
+        "entity_identifier": {
+            "table_name": "entities",
+            "col_name": "entity_id",
+            "attr_description": "Entity identifier.",
+        },
+        "relationship_kind": {
+            "table_name": "entity_links",
+            "col_name": "kind",
+            "attr_description": "Relationship classification.",
+            "anchor_table_role": "junction",
+        },
+    }
+
+    assert (
+        _deterministic_anchor_fallback(
+            "Which entities are connected by this relationship?",
+            contexts,
+        )
+        == "relationship_kind"
+    )
 
 
 def test_anchor_retry_failure_uses_stable_semantic_fallback(
