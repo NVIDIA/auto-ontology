@@ -55,10 +55,13 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
         "string (via CONCAT_WS, STRING_AGG, or CASE), use ', ' (comma followed by "
         "a space) as the delimiter unless an unspaced comma is explicitly requested.\n"
         "- When computing a derived formula, ratio, score, or category from "
-        "nullable columns or JSONB fields, exclude rows where the required input "
-        "operands are NULL (unless the question explicitly asks to include all "
-        "rows even with missing data/gaps, in which case use ORDER BY ... DESC "
-        "NULLS LAST so NULLs never float to the top).\n"
+        "nullable columns or JSONB fields, handle NULL operands inside that "
+        "calculation. Do not drop the row when another aggregate still needs "
+        "it, such as a shipment count beside an average delivery time. Exclude "
+        "the row only when the derived value is the only result and a NULL "
+        "input would make it meaningless (unless the question explicitly asks "
+        "to include all rows even with missing data/gaps, in which case use "
+        "ORDER BY ... DESC NULLS LAST so NULLs never float to the top).\n"
     )
 
 

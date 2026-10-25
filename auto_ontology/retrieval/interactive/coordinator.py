@@ -47,10 +47,12 @@ from auto_ontology.retrieval.text_to_sql.numeric_types import (
     dominant_kind,
     flip_numeric_output_types,
     float_json_arithmetic,
+    numeric_column_kinds,
     opposite_target,
     order_by_leading_aggregate,
     order_groups_by_identifier,
     order_periods_chronologically,
+    result_values_digest,
     sum_decimal_casts_to_integer,
 )
 
@@ -836,15 +838,25 @@ def step(
 
     sql = _run_sql_generation(session)
     if session.numeric_type_alignment:
+        kinds_before_stabilize = None
         if turn_type == TurnType.DEBUG and debug_error is None:
             sql = _flip_numeric_types_for_retry(session, sql)
         elif turn_type != TurnType.DEBUG:
             sql = _align_mixed_numeric_types(session, sql)
-            session.first_submit_numeric_kind = dominant_kind(
-                _numeric_kinds_for(session, sql)
-            )
+            # Digest stays pre-stabilization. The debug turn compares it with
+            # the debug SQL before that SQL is stabilized, so a later rewrite
+            # must not replace it.
             session.first_submit_values_digest = _values_digest_for(session, sql)
-        sql = _stabilize_submitted_order(session, sql)
+            kinds_before_stabilize = _numeric_kinds_for(session, sql)
+        sql, stabilized_kinds = _stabilize_submitted_order(session, sql)
+        if turn_type != TurnType.DEBUG:
+            # The kind is the type the grader saw. Stabilization can turn a
+            # numeric sum into bigint, or drop a double-precision cast.
+            session.first_submit_numeric_kind = dominant_kind(
+                stabilized_kinds
+                if stabilized_kinds is not None
+                else kinds_before_stabilize
+            )
         # After the tie-break, so a grouped id appended above is dropped again
         # when the sort key itself was the later aggregate. Phase 2 is left
         # alone: a follow-up often sorts by that later metric on purpose.
@@ -853,7 +865,7 @@ def step(
             and debug_error is None
             and session.phase == InteractivePhase.ROUND1_CLARIFY
         ):
-            sql = _submit_if_it_runs(
+            sql, _ = _submit_if_it_runs(
                 session,
                 sql,
                 order_by_leading_aggregate(sql, _postgres_dialect(session)),
@@ -911,18 +923,33 @@ def _postgres_dialect(session: InteractiveSessionState) -> str | None:
 
 
 def _submit_if_it_runs(
-    session: InteractiveSessionState, sql: str, rewritten: str, kind: str
-) -> str:
-    """Use *rewritten* only when it actually executes. A failed rewrite must not replace a query that already ran."""
+    session: InteractiveSessionState,
+    sql: str,
+    rewritten: str,
+    kind: str,
+    *,
+    same_values: bool = False,
+) -> tuple[str, list | None]:
+    """Use *rewritten* only when it actually executes.
+
+    A failed rewrite must not replace a query that already ran. The second
+    value is the numeric column kinds of the rewrite that ran, or ``None``
+    when *rewritten* was not kept. A kept rewrite can change the type the
+    grader sees, so the first-submit kind has to come from this frame.
+
+    When *same_values* is set, the rewrite is also dropped unless its result
+    matches *sql* once numbers are rounded the way the grader rounds them.
+    ``CAST(numeric AS int)`` rounds fractional values and still executes.
+    """
     if not rewritten or rewritten == sql:
-        return sql
+        return sql, None
     connector = resolve_connector_from_tables(
         session.path_state.get("relevant_tables") or [], session.connectors
     )
     if connector is None:
-        return sql
+        return sql, None
     try:
-        execute_chat_sql(connector, rewritten, kind=kind)
+        frame = execute_chat_sql(connector, rewritten, kind=kind)
     except Exception as exc:  # noqa: BLE001 — keep the SQL that already executed
         logger.warning(
             "[%s] %s did not run (%s); keeping the previous SQL",
@@ -930,45 +957,86 @@ def _submit_if_it_runs(
             kind,
             exc,
         )
-        return sql
+        return sql, None
+    if same_values and not _result_values_match(session, connector, sql, frame, kind):
+        return sql, None
     logger.info("[%s] %s", session.task_id, kind)
-    return rewritten
+    return rewritten, numeric_column_kinds(frame)
 
 
-def _stabilize_submitted_order(session: InteractiveSessionState, sql: str) -> str:
+def _result_values_match(
+    session: InteractiveSessionState,
+    connector: Any,
+    sql: str,
+    rewritten_frame: Any,
+    kind: str,
+) -> bool:
+    """Whether *sql* and an already-run rewrite round to the same result."""
+    try:
+        original_frame = execute_chat_sql(connector, sql, kind=f"{kind} original")
+    except Exception as exc:  # noqa: BLE001 — an unverified rewrite is not submitted
+        logger.warning(
+            "[%s] %s could not be compared (%s); keeping the previous SQL",
+            session.task_id,
+            kind,
+            exc,
+        )
+        return False
+    if result_values_digest(original_frame) == result_values_digest(rewritten_frame):
+        return True
+    logger.warning(
+        "[%s] %s changed the result values; keeping the previous SQL",
+        session.task_id,
+        kind,
+    )
+    return False
+
+
+def _stabilize_submitted_order(
+    session: InteractiveSessionState, sql: str
+) -> tuple[str, list | None]:
     """Apply the row-order rewrites that matched the grader on saved SQL.
 
     Runs after the numeric-type flip so a flip back to ``double precision``
     does not undo the chronological average, and so an integer ``SUM`` is not
     wrapped again as ``numeric``. Each rewrite is kept only if it executes.
+    The integer sum is also kept only when its values match: a fractional
+    ``numeric`` or ``real`` rounds into ``int`` and the rewritten statement
+    still runs.
+
+    The kinds are those of the last rewrite that ran, or ``None`` when nothing
+    was rewritten. ``first_submit_values_digest`` is not taken from these
+    frames: the debug retry compares it with the debug SQL before
+    stabilization, so it stays the pre-stabilization result.
     """
     dialect = _postgres_dialect(session)
     if dialect is None or not sql.strip():
-        return sql
-    sql = _submit_if_it_runs(
-        session,
-        sql,
-        order_groups_by_identifier(sql, dialect),
-        "grouped identifier tie-break",
-    )
-    sql = _submit_if_it_runs(
-        session,
-        sql,
+        return sql, None
+    kinds: list | None = None
+
+    def _apply(rewritten: str, label: str, *, same_values: bool = False) -> None:
+        nonlocal sql, kinds
+        sql, step_kinds = _submit_if_it_runs(
+            session, sql, rewritten, label, same_values=same_values
+        )
+        if step_kinds is not None:
+            kinds = step_kinds
+
+    _apply(order_groups_by_identifier(sql, dialect), "grouped identifier tie-break")
+    _apply(
         order_periods_chronologically(sql, dialect),
         "chronological order for a per-period ranking",
     )
-    sql = _submit_if_it_runs(
-        session,
-        sql,
+    _apply(
         sum_decimal_casts_to_integer(sql, dialect),
         "integer sum of a whole-number cast",
+        same_values=True,
     )
-    return _submit_if_it_runs(
-        session,
-        sql,
+    _apply(
         float_json_arithmetic(sql, dialect, _real_column_names(session, sql)),
         "float arithmetic for a real column mixed with JSON metrics",
     )
+    return sql, kinds
 
 
 def apply_user_answer(session: InteractiveSessionState, answer: str) -> None:

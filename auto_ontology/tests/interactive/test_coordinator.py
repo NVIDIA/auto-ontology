@@ -539,3 +539,161 @@ def test_first_submit_aligns_mixed_decimal_and_float_columns():
     assert action.sql == "SELECT a, CAST(b AS DECIMAL) FROM aliens"
     assert sess.first_submit_numeric_kind == "decimal"
     assert sess.path_state["result_numeric_kinds"] == ["decimal", "decimal"]
+
+
+def test_first_submit_kind_follows_the_stabilized_integer_sum():
+    from decimal import Decimal
+
+    import pandas as pd
+
+    class _SumConnector:
+        dialect = "postgres"
+        database_name = "alien"
+
+        def execute(self, sql: str, **_):
+            if "INT" in sql.upper():
+                return pd.DataFrame({"total": [12]})
+            return pd.DataFrame({"total": [Decimal("12.00")]})
+
+    sess = _make_session(connectors=[_SumConnector()], numeric_type_alignment=True)
+    sql = "SELECT SUM(CAST(amount AS NUMERIC)) AS total FROM sales"
+    sess.path_state["result_numeric_kinds"] = ["decimal"]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "pre-stabilize"
+    sess.path_state["relevant_tables"] = []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert "INT" in action.sql.upper()
+    assert sess.first_submit_numeric_kind is None
+    assert sess.first_submit_values_digest == "pre-stabilize"
+
+
+def test_fractional_sum_keeps_the_decimal_cast():
+    from decimal import Decimal
+
+    import pandas as pd
+
+    class _SumConnector:
+        dialect = "postgres"
+        database_name = "alien"
+
+        def execute(self, sql: str, **_):
+            if "INT" in sql.upper():
+                return pd.DataFrame({"total": [4]})
+            return pd.DataFrame({"total": [Decimal("3.20")]})
+
+    sess = _make_session(connectors=[_SumConnector()], numeric_type_alignment=True)
+    sql = "SELECT SUM(CAST(amount AS DECIMAL(10, 2))) AS total FROM sales"
+    sess.path_state["result_numeric_kinds"] = ["decimal"]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "pre-stabilize"
+    sess.path_state["relevant_tables"] = []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert action.sql == sql
+    assert sess.first_submit_numeric_kind == "decimal"
+    assert sess.first_submit_values_digest == "pre-stabilize"
+
+
+def test_integer_sum_that_does_not_run_keeps_the_decimal_cast():
+    from decimal import Decimal
+
+    import pandas as pd
+
+    class _SumConnector:
+        dialect = "postgres"
+        database_name = "alien"
+
+        def execute(self, sql: str, **_):
+            if "INT" in sql.upper():
+                raise RuntimeError("invalid input syntax for type integer")
+            return pd.DataFrame({"total": [Decimal("2.5")]})
+
+    sess = _make_session(connectors=[_SumConnector()], numeric_type_alignment=True)
+    sql = "SELECT SUM(CAST(episodes AS NUMERIC)) AS total FROM shows"
+    sess.path_state["result_numeric_kinds"] = ["decimal"]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "pre-stabilize"
+    sess.path_state["relevant_tables"] = []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert action.sql == sql
+    assert sess.first_submit_numeric_kind == "decimal"
+
+
+def test_first_submit_kind_follows_a_stabilized_numeric_average():
+    from decimal import Decimal
+
+    import pandas as pd
+
+    class _PeriodConnector:
+        dialect = "postgres"
+        database_name = "alien"
+
+        def execute(self, sql: str, **_):
+            return pd.DataFrame(
+                {
+                    "audit_month": ["2024-01"],
+                    "avg_afs": [Decimal("1.50")],
+                    "severity_rank": [1],
+                }
+            )
+
+    sess = _make_session(connectors=[_PeriodConnector()], numeric_type_alignment=True)
+    sql = (
+        "SELECT audit_month, CAST(avg_afs AS DOUBLE PRECISION), severity_rank "
+        "FROM ranked ORDER BY severity_rank, audit_month"
+    )
+    sess.path_state["result_numeric_kinds"] = ["float"]
+    sess.path_state["result_numeric_kinds_sql"] = sql
+    sess.path_state["result_values_digest"] = "pre-stabilize"
+    sess.path_state["relevant_tables"] = []
+
+    with (
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator._run_sql_generation",
+            return_value=sql,
+        ),
+        patch(
+            "auto_ontology.retrieval.interactive.coordinator.resolve_connector_from_tables",
+            side_effect=lambda tables, connectors: connectors[0],
+        ),
+    ):
+        action = step(sess, turn_type=TurnType.FOLLOW_UP, follow_up_question="and now?")
+
+    assert "DOUBLE PRECISION" not in action.sql.upper()
+    assert sess.first_submit_numeric_kind == "decimal"
+    assert sess.first_submit_values_digest == "pre-stabilize"

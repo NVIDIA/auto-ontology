@@ -95,15 +95,15 @@ def test_percentile_cont_and_ntile_are_not_wrapped_when_flipping_to_numeric() ->
     )
 
 
-def test_is_distinct_from_is_rewritten_to_standard_operators() -> None:
+def test_is_distinct_from_keeps_null_safe_comparisons() -> None:
     rewritten = float_casts_to_numeric(
         "SELECT COUNT(CASE WHEN a IS DISTINCT FROM b THEN 1 END) FROM t "
         "WHERE c IS NOT DISTINCT FROM d",
         "postgres",
     )
     assert "DISTINCT" not in rewritten.upper()
-    assert "a <> b" in rewritten
-    assert "c = d" in rewritten
+    assert "COALESCE((a <> b), (a IS NULL) <> (b IS NULL))" in rewritten
+    assert "COALESCE((c = d), (c IS NULL) = (d IS NULL))" in rewritten
 
 
 def test_nullable_integer_column_coerced_by_pandas_is_not_classified_as_float() -> None:

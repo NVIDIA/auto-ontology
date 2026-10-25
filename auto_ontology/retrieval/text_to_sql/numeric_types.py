@@ -32,7 +32,9 @@ this module offers deterministic, SQL-level levers:
   aggregate, retry the first aggregate and drop extra tie-break keys.
 * :func:`sum_decimal_casts_to_integer` keeps ``SUM`` of a whole-number cast as
   an integer. ``SUM(int)`` is ``bigint``; ``SUM(numeric)`` is ``numeric``, and
-  the grader treats those as different values.
+  the grader treats those as different values. A fractional ``numeric`` or
+  ``real`` casts to ``int`` by rounding and still runs, so the caller keeps
+  the rewrite only when the result values match.
 * :func:`float_json_arithmetic` keeps a native ``real`` column on the float
   side of the 0.01 rounding boundary. ``numeric`` hits ``x.xx5`` and rounds
   half-up the other way from the float value the grader compares with
@@ -121,6 +123,27 @@ def _parse(sql: str) -> Optional[exp.Expression]:
         return None
 
 
+def _null_safe_comparison(node: exp.Expression, op: type[exp.Binary]) -> exp.Expression:
+    """``IS [NOT] DISTINCT FROM`` without the word ``DISTINCT``.
+
+    ``COALESCE(a op b, (a IS NULL) op (b IS NULL))`` is NULL exactly where the
+    plain comparison is, and the second term then says whether both sides are
+    null. That matches the null-safe operators.
+    """
+    left, right = node.this, node.expression
+    return exp.Coalesce(
+        this=exp.Paren(this=op(this=left.copy(), expression=right.copy())),
+        expressions=[
+            op(
+                this=exp.Paren(this=exp.Is(this=left.copy(), expression=exp.Null())),
+                expression=exp.Paren(
+                    this=exp.Is(this=right.copy(), expression=exp.Null())
+                ),
+            )
+        ],
+    )
+
+
 def float_casts_to_numeric(sql: str, dialect: Optional[str]) -> str:
     """Rewrite explicit float casts (``REAL``, ``FLOAT``, ``DOUBLE PRECISION``,
     ``::real``, ``::float8`` ...) to ``NUMERIC``; Postgres only.
@@ -146,21 +169,13 @@ def float_casts_to_numeric(sql: str, dialect: Optional[str]) -> str:
     # BIRD-Interact's evaluator runs a naive token filter (remove_distinct)
     # that deletes every space-delimited word "DISTINCT", corrupting
     # ``a IS DISTINCT FROM b`` into ``a IS FROM b`` (a syntax error).
+    # ``<>`` / ``=`` avoid that token but drop rows that involve NULL, so the
+    # replacement keeps the null-safe result without writing DISTINCT.
     for null_neq in list(tree.find_all(exp.NullSafeNEQ)):
-        null_neq.replace(
-            exp.NEQ(
-                this=null_neq.this.copy(),
-                expression=null_neq.expression.copy(),
-            )
-        )
+        null_neq.replace(_null_safe_comparison(null_neq, exp.NEQ))
         changed = True
     for null_eq in list(tree.find_all(exp.NullSafeEQ)):
-        null_eq.replace(
-            exp.EQ(
-                this=null_eq.this.copy(),
-                expression=null_eq.expression.copy(),
-            )
-        )
+        null_eq.replace(_null_safe_comparison(null_eq, exp.EQ))
         changed = True
 
     # In PostgreSQL, combining a NUMERIC operand with a native real/float8
@@ -750,8 +765,11 @@ def sum_decimal_casts_to_integer(sql: str, dialect: Optional[str]) -> str:
     ``SUM(numeric)`` is ``numeric`` and ``SUM(int)`` is ``bigint``. A count of
     whole units (episodes, items) stored as text and cast to ``numeric`` then
     comes back as ``Decimal``, which fails a grader that expected the integer
-    sum. The caller must be ready for the rewritten statement to fail when a
-    value is not an integer, and keep the original SQL in that case.
+    sum. Text that is not an integer makes the rewritten statement fail.
+    A fractional ``numeric`` or ``real`` rounds into ``int`` and still runs,
+    and ``DECIMAL(p, s)`` matches here regardless of precision, so the caller
+    must keep the original SQL unless the rewrite both runs and returns the
+    same values.
 
     Returns *sql* unchanged when no such sum is present.
     """
