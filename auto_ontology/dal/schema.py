@@ -1098,6 +1098,14 @@ unstructured_document = Table(
     Column("file_type", Text, nullable=False),
     Column("summary", Text, nullable=True),
     Column("publication_date", Text, nullable=True),
+    # User-written, edited from the settings page; ``summary`` stays the
+    # pipeline's own.
+    Column("description", Text, nullable=True),
+    # An uploaded file is ingested in the background, so its row exists before
+    # its chunks do (``processing``) and before its term and attributes do
+    # (``extracting``). Rows ingested from the CLI arrive whole, hence ``ready``.
+    Column("status", Text, nullable=False, server_default="ready"),
+    Column("error", Text, nullable=True),
     Column(
         "ingested_at",
         DateTime(timezone=True),
@@ -1105,6 +1113,10 @@ unstructured_document = Table(
         server_default=func.now(),
     ),
     UniqueConstraint("path", name="uq_unstructured_document_path"),
+    CheckConstraint(
+        "status IN ('processing', 'extracting', 'ready', 'failed')",
+        name="status_value",
+    ),
 )
 
 #: One row per extracted chunk from a document.  Embeddings live in the
