@@ -12,7 +12,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import Connection, and_, case, func, literal, or_, select, text
+from sqlalchemy import Connection, and_, case, exists, func, literal, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from auto_ontology.dal.schema import (
@@ -144,6 +144,24 @@ def count_documents(
         .select_from(unstructured_document)
         .where(_document_filter(search, without_term))
     ).scalar_one()
+
+
+def has_retrievable_documents(conn: Connection) -> bool:
+    """Whether at least one ready document has a chunk available to search."""
+    return bool(
+        conn.execute(
+            select(
+                exists(
+                    select(unstructured_chunk.c.id)
+                    .join(
+                        unstructured_document,
+                        unstructured_document.c.id == unstructured_chunk.c.document_id,
+                    )
+                    .where(unstructured_document.c.status == "ready")
+                )
+            )
+        ).scalar_one()
+    )
 
 
 def _split_name(name: str) -> tuple[str, str]:
@@ -343,6 +361,21 @@ def get_document_chunks(conn: Connection, document_id: str) -> list[dict[str, An
         .all()
     )
     return [dict(r) for r in rows]
+
+
+def has_document_chunks(conn: Connection, document_id: str) -> bool:
+    """Whether *document_id* has committed chunks and can resume semantics."""
+    return bool(
+        conn.execute(
+            select(
+                exists(
+                    select(unstructured_chunk.c.id).where(
+                        unstructured_chunk.c.document_id == document_id
+                    )
+                )
+            )
+        ).scalar_one()
+    )
 
 
 # ---------------------------------------------------------------------------

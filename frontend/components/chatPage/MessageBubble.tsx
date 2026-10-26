@@ -84,11 +84,15 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 	const showCharts = !isUser && hasEmbeddedChart(message.content);
 	const showSql = !isUser && Boolean(message.sql) && !showCharts;
 	const showQueryResults = !isUser && !showCharts && Boolean(message.sqlResponse);
+	const sources = !isUser
+		? (message.sources ?? []).filter((source) => Boolean(source.document))
+		: [];
+	const showSources = sources.length > 0;
 	const showText = Boolean(message.content.trim());
 
 	// Stretch assistant bubbles that carry SQL / charts / tables to the same
 	// width so Message 2 matches Message 1's SQL block.
-	const wideAssistant = !isUser && (showSql || showCharts || showQueryResults);
+	const wideAssistant = !isUser && (showSql || showCharts || showQueryResults || showSources);
 
 	return (
 		<div className={`flex ${isUser ? 'justify-end' : 'justify-start'}`}>
@@ -123,6 +127,25 @@ export const MessageBubble = ({ message }: MessageBubbleProps) => {
 						singleCell={singleCellResult}
 						className={showText || showSql ? 'mt-3' : undefined}
 					/>
+				)}
+
+				{showSources && (
+					<div className={showText || showSql || showQueryResults ? 'mt-3' : undefined}>
+						<div className="mb-1 text-xs font-medium text-secondary dark:text-zinc-400">
+							Sources
+						</div>
+						<ul className="space-y-1 text-xs text-secondary dark:text-zinc-300">
+							{sources.map((source, index) => (
+								<li
+									key={`${source.chunk_id ?? source.document_id ?? source.document}-${source.page ?? index}`}
+									className="rounded-md border border-zinc-200 bg-white px-2.5 py-1.5 dark:border-zinc-700 dark:bg-zinc-900"
+								>
+									{source.document}
+									{source.page != null ? `, page ${source.page}` : ''}
+								</li>
+							))}
+						</ul>
+					</div>
 				)}
 
 				<time className="mt-1.5 block text-right text-[10px] opacity-50">

@@ -96,6 +96,12 @@ def test_information_agent_has_a_streaming_label() -> None:
     assert NODE_LABELS["information_agent"] == "Answering from metadata"
 
 
+def test_document_agents_have_streaming_labels() -> None:
+    assert NODE_LABELS["retrieve_document_candidates"] == "Searching documents"
+    assert NODE_LABELS["decide_document_relevance"] == "Checking document evidence"
+    assert NODE_LABELS["answer_from_documents"] == "Answering from documents"
+
+
 def test_node_still_runs_when_announcing_fails(monkeypatch: Any) -> None:
     """Progress reporting is best-effort — a broken writer must not stop the
     agent from doing its work."""

@@ -38,6 +38,7 @@ model Message {
   content         String       @default("")
   sql_code        String?      @map("sql_code")
   sql_response    String?      @map("sql_response")
+  metadata        Json?
   created_at      DateTime     @default(now()) @map("created_at") @db.Timestamptz
   conversation    Conversation @relation(fields: [conversation_id], references: [id], onDelete: Cascade)
 

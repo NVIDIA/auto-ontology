@@ -2416,6 +2416,17 @@
                             ],
                             "description": "Serialised result table / chart payload for the bubble."
                           },
+                          "metadata": {
+                            "anyOf": [
+                              {
+                                "$ref": "#/$defs/__schema0"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Optional assistant-answer metadata, including document citations."
+                          },
                           "created_at": {
                             "type": "string",
                             "format": "date-time"
@@ -2428,6 +2439,7 @@
                           "content",
                           "sql_code",
                           "sql_response",
+                          "metadata",
                           "created_at"
                         ],
                         "additionalProperties": false
@@ -2442,7 +2454,40 @@
                     "updated_at",
                     "messages"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "$defs": {
+                    "__schema0": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/__schema0"
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/$defs/__schema0"
+                          }
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -2630,9 +2675,52 @@
                         "type": "null"
                       }
                     ]
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "$ref": "#/$defs/__schema0"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   }
                 },
-                "required": ["role"]
+                "required": ["role"],
+                "$defs": {
+                  "__schema0": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      },
+                      {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      },
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      }
+                    ]
+                  }
+                }
               }
             }
           }
@@ -2693,6 +2781,17 @@
                       ],
                       "description": "Serialised result table / chart payload for the bubble."
                     },
+                    "metadata": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/$defs/__schema0"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Optional assistant-answer metadata, including document citations."
+                    },
                     "created_at": {
                       "type": "string",
                       "format": "date-time"
@@ -2705,9 +2804,43 @@
                     "content",
                     "sql_code",
                     "sql_response",
+                    "metadata",
                     "created_at"
                   ],
-                  "additionalProperties": false
+                  "additionalProperties": false,
+                  "$defs": {
+                    "__schema0": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "boolean"
+                        },
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/$defs/__schema0"
+                          }
+                        },
+                        {
+                          "type": "object",
+                          "propertyNames": {
+                            "type": "string"
+                          },
+                          "additionalProperties": {
+                            "$ref": "#/$defs/__schema0"
+                          }
+                        }
+                      ]
+                    }
+                  }
                 }
               }
             }
@@ -3686,6 +3819,63 @@
           }
         ],
         "x-auto-ontology-source": "frontend/app/api/documents/[document_id]/route.ts",
+        "x-auto-ontology-permissions": {
+          "document": ["manage"]
+        },
+        "x-auto-ontology-proxied": true
+      }
+    },
+    "/api/documents/{document_id}/retry": {
+      "post": {
+        "description": "Retry a failed upload from its stored file (admin only).",
+        "operationId": "post_api_documents_document_id_retry",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "document_id",
+            "required": true,
+            "schema": {
+              "title": "Document Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataResponse_Document_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "No authenticated caller could be resolved"
+          },
+          "403": {
+            "description": "The caller lacks the required permission"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Document",
+        "tags": ["documents"],
+        "security": [
+          {
+            "ApiToken": []
+          }
+        ],
+        "x-auto-ontology-source": "frontend/app/api/documents/[document_id]/retry/route.ts",
         "x-auto-ontology-permissions": {
           "document": ["manage"]
         },

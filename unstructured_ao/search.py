@@ -71,6 +71,8 @@ class Passage:
     score: float | None
     document: str | None = None
     page: int | None = None
+    document_id: str | None = None
+    chunk_id: str | None = None
 
 
 @dataclass
@@ -149,6 +151,8 @@ def _linked_chunk_rows(
             link.c.source,
             link.c.score,
             unstructured_attribute.c.name.label("attribute_name"),
+            unstructured_chunk.c.id.label("chunk_id"),
+            unstructured_chunk.c.document_id,
             unstructured_chunk.c.content,
             unstructured_chunk.c.page_number,
             unstructured_document.c.name.label("document_name"),
@@ -304,6 +308,8 @@ def attribute_search(
                 score=float(row["score"]) if row["score"] is not None else None,
                 document=row["document_name"],
                 page=row["page_number"],
+                document_id=str(row["document_id"]),
+                chunk_id=str(row["chunk_id"]),
             )
         )
         # Only families a delivered chunk actually came through are worth
@@ -363,6 +369,7 @@ def chunk_search(query: str, *, k: int = 10) -> list[Passage]:
     statement = (
         select(
             unstructured_chunk.c.id,
+            unstructured_chunk.c.document_id,
             unstructured_chunk.c.content,
             unstructured_chunk.c.page_number,
             unstructured_document.c.name.label("document_name"),
@@ -388,6 +395,8 @@ def chunk_search(query: str, *, k: int = 10) -> list[Passage]:
             score=score,
             document=rows[chunk_id]["document_name"],
             page=rows[chunk_id]["page_number"],
+            document_id=str(rows[chunk_id]["document_id"]),
+            chunk_id=chunk_id,
         )
         for chunk_id, score in scores.items()
         if chunk_id in rows

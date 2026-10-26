@@ -25,6 +25,11 @@ from auto_ontology.retrieval.entity_coverage.agents.question_extraction import (
 from auto_ontology.retrieval.text_to_sql.agents.empty_result_value_repair import (
     EmptyResultValueRepairAgent,
 )
+from auto_ontology.retrieval.text_to_sql.agents.document_answer import (
+    AnswerFromDocumentsAgent,
+    DecideDocumentRelevanceAgent,
+    RetrieveDocumentCandidatesAgent,
+)
 from auto_ontology.retrieval.text_to_sql.agents.evidence_refinement import (
     EvidenceRefinementAgent,
 )
@@ -263,6 +268,20 @@ def route_after_candidate_retrieval(state: AgentState) -> str:
     return "prepare_candidates"
 
 
+def route_document_relevance(state: AgentState) -> str:
+    """Answer from documents only when the sufficiency node selected evidence."""
+    if state.get("path_state", {}).get("use_documents"):
+        return "documents"
+    return "structured"
+
+
+def route_document_candidates(state: AgentState) -> str:
+    """Skip the relevance LLM when document retrieval produced no excerpts."""
+    if state.get("path_state", {}).get("document_candidates"):
+        return "judge"
+    return "structured"
+
+
 def _make_node(name, fn):
     """
     Create a node with logging wrapper.
@@ -361,6 +380,18 @@ def create_graph():
     question_extraction_node = _make_node(
         "question_extraction", agent_wrapper(question_extraction_agent)
     )
+    retrieve_document_candidates_node = _make_node(
+        "retrieve_document_candidates",
+        agent_wrapper(RetrieveDocumentCandidatesAgent()),
+    )
+    decide_document_relevance_node = _make_node(
+        "decide_document_relevance",
+        agent_wrapper(DecideDocumentRelevanceAgent()),
+    )
+    answer_from_documents_node = _make_node(
+        "answer_from_documents",
+        agent_wrapper(AnswerFromDocumentsAgent()),
+    )
     retrieve_candidates_node = _make_node(
         "retrieve_candidates", agent_wrapper(retrieval_agent)
     )
@@ -446,6 +477,9 @@ def create_graph():
     # Add only nodes instantiated above.
     graph.add_node("question_intent", question_intent_node)
     graph.add_node("question_extraction", question_extraction_node)
+    graph.add_node("retrieve_document_candidates", retrieve_document_candidates_node)
+    graph.add_node("decide_document_relevance", decide_document_relevance_node)
+    graph.add_node("answer_from_documents", answer_from_documents_node)
     graph.add_node("retrieve_candidates", retrieve_candidates_node)
     graph.add_node("information_agent", information_node)
     graph.add_node("prepare_candidates", prepare_candidates_node)
@@ -464,7 +498,24 @@ def create_graph():
 
     # Minimal flow using only the defined nodes.
     graph.add_edge("question_intent", "question_extraction")
-    graph.add_edge("question_extraction", "retrieve_candidates")
+    graph.add_edge("question_extraction", "retrieve_document_candidates")
+    graph.add_conditional_edges(
+        "retrieve_document_candidates",
+        route_document_candidates,
+        {
+            "judge": "decide_document_relevance",
+            "structured": "retrieve_candidates",
+        },
+    )
+    graph.add_conditional_edges(
+        "decide_document_relevance",
+        route_document_relevance,
+        {
+            "documents": "answer_from_documents",
+            "structured": "retrieve_candidates",
+        },
+    )
+    graph.add_edge("answer_from_documents", END)
     graph.add_conditional_edges(
         "retrieve_candidates",
         route_after_candidate_retrieval,
@@ -615,7 +666,9 @@ def create_graph():
 __all__ = [
     "INTENT_VALIDATION_SKIPPED_AFTER",
     "NODE_START_EVENT",
+    "route_document_candidates",
     "route_generated_sql",
+    "route_document_relevance",
     "route_reconstructed_sql",
     "TextToSQLPayload",
     "AgentState",

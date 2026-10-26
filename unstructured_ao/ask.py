@@ -91,6 +91,8 @@ def ask(query: str, *, k: int = 10, note: bool = False) -> Answer:
             score=p.score,
             document=p.document,
             page=p.page,
+            document_id=p.document_id,
+            chunk_id=p.chunk_id,
         )
         for p, label in zip(passages, labels)
     ]

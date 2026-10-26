@@ -39,6 +39,7 @@ export const POST = withPermission<Ctx>({ conversation: ['write'] })(async (
 			content: body.content ?? '',
 			sql_code: body.sql_code ?? null,
 			sql_response: body.sql_response ?? null,
+			...(body.metadata == null ? {} : { metadata: body.metadata }),
 		},
 		select: messageSelect,
 	});

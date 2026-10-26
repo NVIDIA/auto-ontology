@@ -35,6 +35,10 @@ export const documentsApi = {
 	): Promise<ResponseWithError<{ data: DocumentItem }>> =>
 		requests.patch(`documents/${documentId}`, input),
 
+	/** Restart a failed document from its stored upload. */
+	retry: (documentId: string): Promise<ResponseWithError<{ data: DocumentItem }>> =>
+		requests.post(`documents/${documentId}/retry`),
+
 	/** 404 when the document is already gone, which means the caller's list is stale. */
 	delete: (documentId: string): Promise<ResponseWithError<{ data: { id: string } }>> =>
 		requests.delete(`documents/${documentId}`),

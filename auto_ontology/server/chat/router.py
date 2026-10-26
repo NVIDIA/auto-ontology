@@ -2,7 +2,7 @@
 # All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-"""Chat streaming endpoint — wraps the LangGraph text-to-SQL pipeline.
+"""Chat streaming endpoint — wraps the document-aware LangGraph pipeline.
 
 Each chat request runs in a prewarmed agent subprocess from
 ``WarmPool``. See ``worker.py`` for why subprocess isolation is
@@ -408,9 +408,16 @@ def _pump(slot: _Slot) -> None:
             # Fall back to the last one streamed so the failed query is still
             # in history, matching what the user watched live.
             sql_code = answer.get("sql_code") or slot.last_sql
+            metadata = None
+            if answer.get("answer_source") or answer.get("sources"):
+                metadata = {
+                    "answer_source": answer.get("answer_source"),
+                    "sources": answer.get("sources") or [],
+                }
         elif event_type == "error":
             response = str(event.get("message") or "")
             sql_code = slot.last_sql
+            metadata = None
         else:
             return
         if not response and not sql_code:
@@ -424,6 +431,7 @@ def _pump(slot: _Slot) -> None:
                     analytics_id=slot.analytics_id,
                     response=response,
                     sql_code=sql_code,
+                    metadata=metadata,
                 )
             else:
                 persist_analytics_result(
@@ -540,17 +548,14 @@ def _stream_slot(slot: _Slot) -> Generator[str, None, None]:
 async def chat_completions(
     request: ChatRequest, http_request: Request
 ) -> StreamingResponse:
-    """Run the text-to-SQL agent and stream OpenAI-style SSE frames back.
+    """Run the document-aware agent and stream OpenAI-style SSE frames back.
 
-    Emits a ``sql`` event once the agent has a validated query, just before it
-    executes, so callers can show the SQL while it runs. Emits the final SQL
-    and formatted answer as a ``result`` event, then — if that
-    answer has an executed result — generates and persists the chart/table
-    bubble itself and streams it back as a ``charts`` event before the stream
-    closes with ``[DONE]``. Callers that only care about the text/SQL answer
-    can still stop reading after ``result``; the chart step and its
-    persistence happen server-side regardless of whether anyone keeps
-    listening (see ``_build_charts_event``).
+    Uploaded-document evidence is checked before the structured-data path. When
+    it is sufficient, the ``result`` carries a grounded answer and citations;
+    otherwise the existing text-to-SQL path runs. That path emits a ``sql``
+    event once the agent has a validated query, just before execution, then a
+    final ``result`` and — when rows were returned — a persisted ``charts``
+    event before the stream closes with ``[DONE]``.
 
     Requires a compiled semantic layer; without one the request is rejected with
     409 rather than run against a bare schema. ``conversation_id`` persists the

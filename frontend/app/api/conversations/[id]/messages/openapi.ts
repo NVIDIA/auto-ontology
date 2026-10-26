@@ -22,6 +22,7 @@ export const openapi: OpenApiRoute = {
 				content: z.string().optional(),
 				sql_code: z.string().nullish(),
 				sql_response: z.string().nullish(),
+				metadata: z.json().nullish(),
 			}),
 		},
 		responses: {

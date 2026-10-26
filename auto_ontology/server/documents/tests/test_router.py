@@ -152,6 +152,60 @@ def test_an_upload_is_stored_answered_and_then_ingested(
     assert ingested == [("doc-9", str(stored))]
 
 
+@pytest.mark.parametrize(
+    ("has_chunks", "expected_status"),
+    [(False, "processing"), (True, "extracting")],
+)
+def test_retry_resumes_from_the_available_stage(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    has_chunks: bool,
+    expected_status: str,
+) -> None:
+    stored = tmp_path / "stored" / "report.docx"
+    stored.parent.mkdir()
+    stored.write_text("document")
+    status = "failed"
+    ingested: list[tuple[str, str]] = []
+
+    def get_document(_conn: object, document_id: str) -> dict[str, Any]:
+        return _row(document_id, status=status, error=None, path=str(stored))
+
+    def set_status(
+        _conn: object, _document_id: str, new_status: str, *, error: str | None = None
+    ) -> None:
+        nonlocal status
+        status = new_status
+
+    monkeypatch.setattr(documents.dal, "get_document", get_document)
+    monkeypatch.setattr(
+        documents.dal, "has_document_chunks", lambda _conn, _id: has_chunks
+    )
+    monkeypatch.setattr(documents.dal, "set_document_status", set_status)
+    monkeypatch.setattr(
+        documents.ingest,
+        "run_document_ingest",
+        lambda document_id, path: ingested.append((document_id, path)),
+    )
+
+    response = client.post("/api/documents/doc-1/retry")
+
+    assert response.status_code == 202
+    assert response.json()["data"]["status"] == expected_status
+    assert ingested == [("doc-1", str(stored.resolve()))]
+
+
+def test_retry_refuses_a_document_that_is_not_failed(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(documents.dal, "get_document", lambda *_a: _row(status="ready"))
+
+    response = client.post("/api/documents/doc-1/retry")
+
+    assert response.status_code == 409
+
+
 def test_an_edit_trims_and_clears(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:

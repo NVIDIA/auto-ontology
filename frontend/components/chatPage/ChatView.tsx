@@ -96,7 +96,6 @@ export const ChatView = () => {
 			return;
 		}
 		if (loadedFocusRef.current === focusId) return;
-		loadedFocusRef.current = focusId;
 		clearConversation();
 
 		let active = true;
@@ -106,6 +105,7 @@ export const ChatView = () => {
 			.then((detail: ConversationDetail) => {
 				if (!active) return;
 				const conv = toConversation(detail);
+				loadedFocusRef.current = detail.id;
 				setActiveConvId(detail.id);
 				setMessages(conv.messages);
 				resumeIfRunning(detail.id);

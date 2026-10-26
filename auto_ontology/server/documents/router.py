@@ -164,6 +164,55 @@ def upload_document(
     return {"data": _public(row)}
 
 
+@router.post(
+    "/documents/{document_id}/retry",
+    status_code=202,
+    response_model=DocumentResponse,
+)
+def retry_document(document_id: str, background_tasks: BackgroundTasks) -> dict:
+    """Retry a failed document from its stored file.
+
+    A failure during semantic extraction resumes from the committed chunks.
+    Earlier failures restart extraction and embedding from the original upload.
+    Only failed rows are accepted, preventing a retry from racing a live ingest
+    or needlessly rebuilding a ready document.
+    """
+    with get_engine().begin() as conn:
+        row = dal.get_document(conn, document_id)
+        if row is None:
+            raise _not_found(document_id)
+        if row["status"] != "failed":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Document {document_id!r} is not failed and cannot be retried",
+            )
+
+        path = Path(row["path"]).expanduser().resolve()
+        if not path.is_file():
+            raise HTTPException(
+                status_code=409,
+                detail="The stored document file is unavailable; upload it again.",
+            )
+        missing = ingest.missing_dependency(path.name)
+        if missing is not None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    f"Ingesting {path.suffix.lower()} files needs the {missing!r} "
+                    "package; install the 'unstructured' extra"
+                ),
+            )
+
+        status = (
+            "extracting" if dal.has_document_chunks(conn, document_id) else "processing"
+        )
+        dal.set_document_status(conn, document_id, status)
+        row = dal.get_document(conn, document_id)
+
+    background_tasks.add_task(ingest.run_document_ingest, document_id, str(path))
+    return {"data": _public(row)}
+
+
 @router.patch("/documents/{document_id}", response_model=DocumentResponse)
 def update_document(document_id: str, body: DocumentUpdate) -> dict:
     """Rename a document or change its description.

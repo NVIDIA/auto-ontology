@@ -94,6 +94,8 @@ export const DocumentsSettingsView = () => {
 	const [confirmDelete, setConfirmDelete] = useState<DocumentItem | null>(null);
 	const [deleting, setDeleting] = useState(false);
 	const [deleteError, setDeleteError] = useState<string | null>(null);
+	const [retryingId, setRetryingId] = useState<string | null>(null);
+	const [retryError, setRetryError] = useState<string | null>(null);
 
 	const [query, setQuery] = useState('');
 	const debouncedQuery = useDebouncedValue(query.trim(), SEARCH_DEBOUNCE_MS);
@@ -209,6 +211,20 @@ export const DocumentsSettingsView = () => {
 		reload();
 	};
 
+	const handleRetry = async (document: DocumentItem) => {
+		if (retryingId != null) return;
+		setRetryingId(document.id);
+		setRetryError(null);
+		const response = await documentsApi.retry(document.id);
+		setRetryingId(null);
+		if (response.error || response.data == null) {
+			setRetryError(response.message ?? 'Failed to retry document.');
+			return;
+		}
+		const updated = response.data;
+		setItems((rows) => rows.map((row) => (row.id === updated.id ? updated : row)));
+	};
+
 	// The dialog closes itself once every file is sent, and stays open on the
 	// ones that failed; either way the stored ones belong in the list now.
 	const handleUploaded = () => reload();
@@ -263,6 +279,22 @@ export const DocumentsSettingsView = () => {
 				<span className="flex justify-end">
 					<PopoverMenu
 						items={[
+							...(document.status === DocumentStatus.Failed
+								? [
+										{
+											label:
+												retryingId === document.id ? 'Retrying…' : 'Retry',
+											icon: (
+												<Icon
+													name={IconName.Lightning}
+													className="h-3.5 w-3.5"
+												/>
+											),
+											onClick: () => void handleRetry(document),
+											disabled: retryingId != null,
+										},
+									]
+								: []),
 							{
 								label: 'Edit',
 								icon: <Icon name={IconName.Pencil} className="h-3.5 w-3.5" />,
@@ -335,6 +367,12 @@ export const DocumentsSettingsView = () => {
 					{!loading && error != null && documents.length === 0 ? (
 						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
 							{error}
+						</div>
+					) : null}
+
+					{retryError != null ? (
+						<div className="rounded-lg border border-red-200/90 bg-red-50 px-4 py-3 text-sm text-red-800 dark:border-red-900/50 dark:bg-red-950/40 dark:text-red-200">
+							{retryError}
 						</div>
 					) : null}
 
