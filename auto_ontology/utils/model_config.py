@@ -30,7 +30,7 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
     # inference-api.nvidia.com (sk-... keys).
     "sk-": {
         "REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
-        "REASONING_MODEL": "aws/anthropic/bedrock-claude-opus-4-8",
+        "REASONING_MODEL": "azure/openai/gpt-6.1-sol",
         "NON_REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "NON_REASONING_MODEL": "aws/anthropic/bedrock-claude-sonnet-5-5",
         "EMBED_ENDPOINT": "https://inference-api.nvidia.com/v1",
