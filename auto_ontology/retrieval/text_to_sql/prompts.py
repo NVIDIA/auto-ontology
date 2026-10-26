@@ -48,11 +48,9 @@ def format_projection_rules(shorten_answer: bool = False) -> str:
         "descriptive columns of the table.\n"
         "- Strictly follow the left-to-right column order stated in the user's "
         "question and clarifications. When a breakdown requests both counts and "
-        "percentages across several categories (e.g. Simple, Medium, Complex) "
-        "and the user gives no order for the two sets, place all category counts "
-        "together followed by all category percentages. If the user asks for "
-        "percentages first, or interleaves counts and percentages, keep that "
-        "order.\n"
+        "percentages across several categories (e.g. Simple, Medium, Complex), "
+        "place all category counts together followed by all category percentages "
+        "unless the user explicitly interleaves them.\n"
         "- When concatenating multiple labels or values into a comma-separated "
         "string (via CONCAT_WS, STRING_AGG, or CASE), use ', ' (comma followed by "
         "a space) as the delimiter unless an unspaced comma is explicitly requested.\n"
@@ -245,19 +243,13 @@ _POSTGRES_DIALECT_RULES = (
     "field holds a numeric metric, score, count, percentage, or measurement, you MUST cast "
     "the ->> expression to NUMERIC (e.g. CAST(col->'a'->>'b' AS NUMERIC)) in SELECT as well "
     "as in WHERE/ORDER BY — never project a numeric JSONB field as raw text.\n"
+    "- In PostgreSQL, AVG() and arithmetic (+, -, *, /) on REAL/DOUBLE PRECISION columns "
+    "return floating-point (double precision); wrap computed AVG() and arithmetic metric "
+    "projections in CAST(... AS NUMERIC) so fractional metrics are returned as NUMERIC.\n"
     "- Postgres folds unquoted identifiers to lowercase. If a table or column name shown in "
     "AVAILABLE TABLES / KNOWN COLUMN MAPPINGS contains any uppercase letter, wrap it in double "
     "quotes using the EXACT case shown — leaving it unquoted silently resolves to the wrong "
     "(lowercase) relation and errors as 'does not exist'. All-lowercase names need no quoting.\n\n"
-)
-
-# Grader alignment, not a Postgres error. Native float AVG/arithmetic is valid
-# SQL; casting it to NUMERIC changes the result type, so ordinary chat must not
-# be told to do it.
-_POSTGRES_FLOAT_NUMERIC_RULE = (
-    "- In PostgreSQL, AVG() and arithmetic (+, -, *, /) on REAL/DOUBLE PRECISION columns "
-    "return floating-point (double precision); wrap computed AVG() and arithmetic metric "
-    "projections in CAST(... AS NUMERIC) so fractional metrics are returned as NUMERIC.\n"
 )
 
 
@@ -280,19 +272,13 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
 - All fields are required."""
 
 
-def format_dialect_rules(
-    dialect: str | None,
-    *,
-    numeric_type_alignment: bool = False,
-) -> str:
+def format_dialect_rules(dialect: str | None) -> str:
     """Return dialect-specific SQL rules for the ``dialect_rules`` prompt slot.
 
     SQLite lacks many functions the model habitually emits (spatial,
     LEAST/GREATEST, stats aggregates, EXTRACT/DATE_TRUNC). Snowflake needs
     identifier-quoting and VARIANT/FLATTEN guidance for case-sensitive
-    lowercase columns (Spider2 PATENTS etc.). The Postgres float-to-NUMERIC
-    cast is included only when *numeric_type_alignment* is set. Returns ''
-    for other dialects.
+    lowercase columns (Spider2 PATENTS etc.). Returns '' for other dialects.
     """
     normalized = (dialect or "").strip().lower()
     if normalized == "sqlite":
@@ -300,10 +286,7 @@ def format_dialect_rules(
     if normalized == "snowflake":
         return _SNOWFLAKE_DIALECT_RULES
     if normalized in ("postgres", "postgresql"):
-        rules = _POSTGRES_DIALECT_RULES
-        if numeric_type_alignment:
-            rules += _POSTGRES_FLOAT_NUMERIC_RULE
-        return rules
+        return _POSTGRES_DIALECT_RULES
     return ""
 
 

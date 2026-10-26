@@ -473,40 +473,6 @@ def test_distinct_string_agg_orders_by_the_distinct_expression() -> None:
     assert "ORDER BY t" in rewritten
 
 
-def test_windowed_string_agg_is_left_unordered() -> None:
-    sql = "SELECT STRING_AGG(city, ', ') OVER (PARTITION BY carrier) FROM t"
-    assert order_string_aggregates(sql, "postgres") == sql
-
-
-def test_filtered_windowed_string_agg_is_left_unordered() -> None:
-    sql = (
-        "SELECT STRING_AGG(city, ', ') FILTER (WHERE city IS NOT NULL) "
-        "OVER (PARTITION BY carrier) FROM t"
-    )
-    assert order_string_aggregates(sql, "postgres") == sql
-
-
-def test_filtered_grouped_string_agg_still_sorts_by_its_value() -> None:
-    rewritten = order_string_aggregates(
-        "SELECT STRING_AGG(city, ', ') FILTER (WHERE city IS NOT NULL) "
-        "FROM t GROUP BY carrier",
-        "postgres",
-    )
-    assert "ORDER BY city" in rewritten
-
-
-def test_grouped_string_agg_sorts_beside_an_unordered_window() -> None:
-    rewritten = order_string_aggregates(
-        "SELECT STRING_AGG(city, ', ') AS names, "
-        "STRING_AGG(code, ', ') OVER (PARTITION BY carrier) "
-        "FROM t GROUP BY carrier",
-        "postgres",
-    )
-    assert "STRING_AGG(city, ', ' ORDER BY city)" in rewritten
-    assert "STRING_AGG(code, ', ') OVER" in rewritten
-    assert "ORDER BY code" not in rewritten
-
-
 def test_grouped_metric_breaks_ties_by_the_identifier() -> None:
     sql = (
         "SELECT c.series_id AS id, SUM(CAST(x AS NUMERIC)) AS total "

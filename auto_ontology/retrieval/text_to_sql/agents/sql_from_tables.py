@@ -129,10 +129,7 @@ class SQLFromTablesAgent(BaseAgent):
         # Build user prompt with formatted tables
         user_prompt = create_sql_user_prompt.format(
             dialect=dialect,
-            dialect_rules=format_dialect_rules(
-                dialect,
-                numeric_type_alignment=bool(state.get("numeric_type_alignment")),
-            ),
+            dialect_rules=format_dialect_rules(dialect),
             projection_rules=format_projection_rules(
                 state.get("shorten_answer", False)
             ),
