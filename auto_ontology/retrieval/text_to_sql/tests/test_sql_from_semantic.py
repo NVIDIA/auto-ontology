@@ -18,6 +18,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
+    format_dialect_rules,
     format_projection_rules,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
@@ -108,6 +109,30 @@ def test_projection_strictness_is_configured_per_request() -> None:
     assert strict_rule in format_projection_rules(shorten_answer=True)
     assert combined_aggregate_rule not in format_projection_rules(False)
     assert combined_aggregate_rule in format_projection_rules(True)
+
+
+def test_postgres_float_cast_guidance_follows_numeric_alignment() -> None:
+    cast_rule = "wrap computed AVG() and arithmetic metric"
+    alias_rule = "WHERE and HAVING cannot reference SELECT aliases"
+
+    plain = format_dialect_rules("postgres")
+    aligned = format_dialect_rules("postgres", numeric_type_alignment=True)
+
+    assert cast_rule not in plain
+    assert alias_rule in plain
+    assert "JSONB" in plain
+    assert cast_rule in aligned
+    assert alias_rule in aligned
+    assert cast_rule in format_dialect_rules("postgresql", numeric_type_alignment=True)
+    assert cast_rule not in format_dialect_rules("sqlite", numeric_type_alignment=True)
+
+
+def test_counts_first_only_when_the_user_states_no_order() -> None:
+    strict = format_projection_rules(shorten_answer=True)
+
+    assert "gives no order for the two sets" in strict
+    assert "percentages first, or interleaves" in strict
+    assert "unless the user explicitly interleaves them" not in strict
 
 
 def test_derived_formula_nulls_stay_inside_the_calculation() -> None:

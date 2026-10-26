@@ -21,9 +21,10 @@ this module offers deterministic, SQL-level levers:
 * :func:`flip_numeric_output_types` moves the numeric output columns of a
   top-level ``SELECT`` to the *other* type, for the one retry a benchmark
   allows after a wrong answer.
-* :func:`order_string_aggregates` adds ``ORDER BY`` to a ``STRING_AGG`` that
-  has none. The grader compares the concatenated text exactly, and an
-  unordered aggregate is not a stable string.
+* :func:`order_string_aggregates` adds ``ORDER BY`` to a grouped ``STRING_AGG``
+  that has none. The grader compares the concatenated text exactly, and an
+  unordered aggregate is not a stable string. A windowed aggregate is left
+  alone: Postgres rejects an aggregate ``ORDER BY`` on a window function.
 * :func:`order_groups_by_identifier` and :func:`order_periods_chronologically`
   settle two row-order shapes the grader compares exactly: a grouped metric
   tied on its value, and a per-period ranking displayed by the period.
@@ -432,14 +433,31 @@ def flip_numeric_output_types(
     return tree.sql(dialect="postgres") if converted else None
 
 
+def _windowed_aggregate(aggregate: exp.Expression) -> bool:
+    """True when *aggregate* is used as a window function.
+
+    ``FILTER`` sits between the aggregate and ``OVER``, so the window is the
+    grandparent in that shape.
+    """
+    parent = aggregate.parent
+    if isinstance(parent, exp.Filter):
+        parent = parent.parent
+    return isinstance(parent, exp.Window)
+
+
 def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
-    """Give every unordered ``STRING_AGG`` an ``ORDER BY`` on its own value.
+    """Give every unordered grouped ``STRING_AGG`` an ``ORDER BY`` on its value.
 
     Postgres leaves the order of ``STRING_AGG(expr, delim)`` unspecified, and
     the grader compares the resulting text exactly. Reference answers that
     list the aggregated values sort them by that same expression. An aggregate
     that already has an ``ORDER BY`` is left alone — a caller-chosen key
     (rank, score) must win over alphabetical order.
+
+    A windowed ``STRING_AGG`` is left alone. Postgres rejects
+    ``STRING_AGG(... ORDER BY ...) OVER (...)`` ("aggregate ORDER BY is not
+    implemented for window functions"), and moving that key into ``OVER``
+    would turn the whole partition into a running frame.
 
     Returns *sql* unchanged when there is nothing to add, so a query with no
     ``STRING_AGG`` is never re-serialised.
@@ -454,6 +472,8 @@ def order_string_aggregates(sql: str, dialect: Optional[str]) -> str:
 
     changed = False
     for aggregate in tree.find_all(exp.GroupConcat):
+        if _windowed_aggregate(aggregate):
+            continue
         inner = aggregate.this
         if isinstance(inner, exp.Order):
             continue

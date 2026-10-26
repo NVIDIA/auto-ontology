@@ -118,10 +118,16 @@ _SORT_DIRECTION = re.compile(
     r"larg(est)?\s+first|small(est)?\s+first|"
     r"best\s+first|worst\s+first|"
     r"increasing order|decreasing order|"
-    r"top \d|bottom \d|"
+    r"top \d+|bottom \d+|"
     r"from (high(est)?|low(est)?|larg(est)?|small(est)?|best|worst)|"
     r"(high(est)?|low(est)?|larg(est)?|small(est)?|worst|best)\s+to\s+"
     r"(high(est)?|low(est)?|small(est)?|larg(est)?|worst|best))\b",
+    re.IGNORECASE,
+)
+
+# A named column ("ordered by customer name") is a sort key even with no direction.
+_SORT_KEY = re.compile(
+    r"\b(?:order(?:ed)?|sort(?:ed|ing)?)\s+by\b|\bin order of\b",
     re.IGNORECASE,
 )
 
@@ -129,10 +135,12 @@ _DEFAULT_SORT_HINT = (
     "DefaultSort: a primary output metric is the metric most central to the query, "
     "typically the one used in a filter condition, computed by a formula, or "
     "aggregated in a breakdown (e.g. COUNT, SUM, AVG, ratio, score, cost, fee, or "
-    "duration). Identify if such a metric exists for this Question. If it exists, "
-    "prefer ORDER BY that metric DESC — unless the question explicitly requests "
+    "duration). If the question names a sort key, ORDER BY that key even when it "
+    "states no direction, and do not replace it with the metric. Only when the "
+    "question names neither a sort key nor a direction, and such a metric exists, "
+    "prefer ORDER BY that metric DESC. If it explicitly requests "
     "ascending/lowest-first order, orders by a rank number (1, 2, 3), or orders "
-    "chronologically by a date/year/month dimension, in which case use ASC. Do NOT "
+    "chronologically by a date/year/month dimension, use ASC. Do NOT "
     "use ASC merely because the metric is a cost, fee, time, or error rate. Do NOT "
     "add secondary tie-breaker columns to ORDER BY unless the question or evidence "
     "explicitly specifies a tie-breaker. When ordering DESC by a computed or "
@@ -145,15 +153,15 @@ _DEFAULT_SORT_HINT = (
 
 
 def should_inject_default_sort(question: str) -> bool:
-    """Inject the default DESC sort hint unless the question already specifies a direction.
+    """Inject the metric DESC hint only when the question names neither a key nor a direction.
 
-    When an explicit direction is present (ascending/descending/highest first/etc.) the hint
-    would create a contradictory signal, so we suppress it. In all other cases the hint is
-    safe — its text is self-limiting ("when results include a computed score or metric",
-    "does not suggest ascending order", "if no single metric is clearly primary, do not add
-    an ORDER BY").
+    ``ordered by customer name`` names the key and must not be replaced by the
+    metric, even though it states no direction. An explicit direction
+    (ascending, highest first, top N) must be kept as well.
     """
-    return not bool(_SORT_DIRECTION.search(question))
+    if _SORT_DIRECTION.search(question) or _SORT_KEY.search(question):
+        return False
+    return True
 
 
 def _last_answer_is_stuck(history: list[dict]) -> bool:
