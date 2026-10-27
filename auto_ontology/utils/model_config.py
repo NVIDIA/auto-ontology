@@ -30,13 +30,13 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
     # inference-api.nvidia.com (sk-... keys).
     "sk-": {
         "REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
-        "REASONING_MODEL": "aws/anthropic/bedrock-claude-opus-4-8",
+        "REASONING_MODEL": "azure/anthropic/claude-opus-4-8",
         "NON_REASONING_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "NON_REASONING_MODEL": "aws/anthropic/bedrock-claude-sonnet-5-5",
         "EMBED_ENDPOINT": "https://inference-api.nvidia.com/v1",
-        "EMBED_MODEL": "nvidia/nvidia/nemotron-3-embed-1b",
+        "EMBED_MODEL": "nvidia/nvidia/nemotron-3.5-embed-1b-nvfp4",
         "RERANK_ENDPOINT": "https://inference-api.nvidia.com/v1/rerank",
-        "RERANK_MODEL": "nvidia/nvidia/llama-nemotron-rerank-vl-1b-v2",
+        "RERANK_MODEL": "nvidia/nvidia/nemotron-3.5-rerank-8b-bf16",
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
