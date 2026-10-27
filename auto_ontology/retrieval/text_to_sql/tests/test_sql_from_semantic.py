@@ -42,8 +42,10 @@ def test_prompt_renders_date_format_when_present() -> None:
             }
         ]
     )
-    assert "description | format" in rendered
-    assert "YYMMDD" in rendered
+    assert "COLUMN DESCRIPTIONS:" in rendered
+    assert "  Match_Date: Date the match was played." in rendered
+    assert "COLUMN FORMATS:" in rendered
+    assert "  Match_Date: YYMMDD" in rendered
 
 
 def test_prompt_omits_format_when_absent() -> None:

@@ -72,7 +72,7 @@ def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
             }
         ]
     )
-    assert "table\ndw.SIS_DEPARTMENT" in rendered
+    assert "TABLES:\n- dw.SIS_DEPARTMENT" in rendered
     assert "dw.dw." not in rendered
 
 
@@ -152,8 +152,13 @@ def test_available_tables_mark_semantic_fk_on_ordinary_columns() -> None:
         ]
     )
 
-    assert "column | type | is_nullable | foreign key" in rendered
-    assert "customer_id | integer | unknown | public.customers.id" in rendered
+    assert "COLUMNS:\nTable public.orders:" in rendered
+    assert "  - customer_id (integer)" in rendered
+    assert (
+        "SEMANTIC FOREIGN KEYS:\n"
+        "Table public.orders:\n"
+        "  customer_id: public.customers.id"
+    ) in rendered
 
 
 def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
@@ -169,7 +174,7 @@ def test_prompt_renders_catalog_qualified_name_for_spark_tables() -> None:
         ],
         dialect="spark",
     )
-    assert "table\nlakehouse.lakehouse.events" in rendered
+    assert "TABLES:\n- lakehouse.lakehouse.events" in rendered
 
 
 def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
@@ -193,9 +198,9 @@ def test_prompt_spells_out_sample_values_without_list_punctuation() -> None:
             }
         ]
     )
-    assert "column | type | is_nullable | sample values" in rendered
-    assert "status | varchar | unknown | open, closed" in rendered
-    assert "channel | varchar | unknown | web, store" in rendered
+    assert "SAMPLE VALUES:\nTable orders:" in rendered
+    assert "  status: open, closed" in rendered
+    assert "  channel: web, store" in rendered
     assert "['open'" not in rendered
 
 
@@ -228,10 +233,50 @@ def test_prompt_renders_column_nullability_states() -> None:
         ]
     )
 
-    assert "column | type | is_nullable" in rendered
-    assert "id | int | false" in rendered
-    assert "category | text | true" in rendered
-    assert "legacy_value | text | unknown" in rendered
+    assert "COLUMN NULLABILITY:\nTable items:" in rendered
+    assert "  id: false" in rendered
+    assert "  category: true" in rendered
+    assert "  legacy_value: unknown" in rendered
+
+
+def test_prompt_renders_column_uniqueness_states_in_its_own_section() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "items",
+                "columns": [
+                    {"name": "id", "data_type": "int", "is_unique": True},
+                    {"name": "category", "data_type": "text", "is_unique": False},
+                    {"name": "legacy_value", "data_type": "text"},
+                ],
+            }
+        ]
+    )
+
+    assert "COLUMN UNIQUENESS:\nTable items:" in rendered
+    assert "  id: true" in rendered
+    assert "  category: false" in rendered
+    assert "  legacy_value: unknown" in rendered
+
+
+def test_prompt_keeps_table_metadata_in_separate_sections() -> None:
+    rendered = format_tables_for_prompt(
+        [
+            {
+                "name": "orders",
+                "schema_name": "public",
+                "label": "Order facts",
+                "description": "One row per order.",
+                "pk": ["order_id"],
+            }
+        ]
+    )
+
+    assert "TABLES:\n- public.orders" in rendered
+    assert "TABLE LABELS:" not in rendered
+    assert "Order facts" not in rendered
+    assert "TABLE DESCRIPTIONS:\n- public.orders: One row per order." in rendered
+    assert "PRIMARY KEYS:\n- public.orders: order_id" in rendered
 
 
 def test_prompt_renders_date_format_when_present() -> None:
@@ -252,10 +297,10 @@ def test_prompt_renders_date_format_when_present() -> None:
             }
         ]
     )
-    assert "description | format" in rendered
-    assert "Match_Date | text | unknown | Date the match was played. | YYMMDD" in (
-        rendered
-    )
+    assert "COLUMN DESCRIPTIONS:\nTable cricket.public.matches:" in rendered
+    assert "  Match_Date: Date the match was played." in rendered
+    assert "COLUMN FORMATS:\nTable cricket.public.matches:" in rendered
+    assert "  Match_Date: YYMMDD" in rendered
 
 
 def test_semantic_context_keeps_catalog_on_spark() -> None:
@@ -416,7 +461,7 @@ def test_prompt_falls_back_to_target_db_when_table_has_no_database() -> None:
         dialect="spark",
     )
 
-    assert "table\nlakehouse.lakehouse.events" in rendered
+    assert "TABLES:\n- lakehouse.lakehouse.events" in rendered
 
 
 def test_table_own_database_wins_over_target_db() -> None:
@@ -426,7 +471,7 @@ def test_table_own_database_wins_over_target_db() -> None:
         dialect="spark",
     )
 
-    assert "table\nother.lakehouse.events" in rendered
+    assert "TABLES:\n- other.lakehouse.events" in rendered
 
 
 def test_legacy_rows_spell_the_same_table_in_both_sections() -> None:

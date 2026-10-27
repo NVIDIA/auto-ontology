@@ -974,6 +974,8 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
     restored so the back-fill isn't a no-op again. ``is_nullable`` is included
     alongside it so projection rules can tell when a requested item may be
     missing; ``None`` means the connector could not determine it.
+    ``is_unique`` carries the profiler's observed uniqueness state, with
+    ``None`` meaning the table has not been profiled.
     ``semantic_fk`` resolves the referenced attribute back to its owning column
     and returns that target as ``schema.table.column`` for SQL prompts.
     """
@@ -1035,6 +1037,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                 s.catalog_column.c.format,
                 s.catalog_column.c.sample_values,
                 s.catalog_column.c.is_nullable,
+                s.catalog_column.c.is_unique,
                 semantic_fk_target.label("semantic_fk"),
             )
             .select_from(
@@ -1080,6 +1083,7 @@ def fetch_tables_by_ids(table_ids: list[str]) -> list[dict[str, Any]]:
                     "format": row["format"],
                     "sample_values": parse_sample_values(row["sample_values"]),
                     "is_nullable": row["is_nullable"],
+                    "is_unique": row["is_unique"],
                     "semantic_fk": row["semantic_fk"],
                 }
             )

@@ -397,7 +397,7 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     store().query_write(
         s.catalog_column.update()
         .where(s.catalog_column.c.id == world.columns["orders.order_id"])
-        .values(is_nullable=False)
+        .values(is_nullable=False, is_unique=True)
     )
     store().query_write(
         s.catalog_column.update()
@@ -430,8 +430,11 @@ def test_tables_by_ids_nests_column_summaries(world) -> None:
     ]
     columns = {column["name"]: column for column in rows["orders"]["columns"]}
     assert columns["order_id"]["is_nullable"] is False
+    assert columns["order_id"]["is_unique"] is True
     assert columns["customer_id"]["is_nullable"] is True
+    assert columns["customer_id"]["is_unique"] is None
     assert columns["total"]["is_nullable"] is None
+    assert columns["total"]["is_unique"] is None
     assert columns["order_id"]["semantic_fk"] is None
     assert columns["customer_id"]["semantic_fk"] == "shop.customers.customer_id"
     assert columns["total"]["semantic_fk"] is None

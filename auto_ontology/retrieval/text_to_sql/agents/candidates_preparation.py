@@ -203,7 +203,7 @@ def _merge_tables(base: list[dict], additions: list[dict]) -> list[dict]:
 
 
 def _needs_column_metadata_backfill(table: dict) -> bool:
-    """Whether a relevant table lacks samples, nullability, or semantic-FK metadata."""
+    """Whether a relevant table lacks metadata rendered in schema prompts."""
     columns = table.get("columns") or []
     has_samples = any(
         isinstance(column, dict) and column.get("sample_values") for column in columns
@@ -214,8 +214,14 @@ def _needs_column_metadata_backfill(table: dict) -> bool:
     has_complete_semantic_fks = bool(columns) and all(
         isinstance(column, dict) and "semantic_fk" in column for column in columns
     )
+    has_complete_uniqueness = bool(columns) and all(
+        isinstance(column, dict) and "is_unique" in column for column in columns
+    )
     return (
-        not has_samples or not has_complete_nullability or not has_complete_semantic_fks
+        not has_samples
+        or not has_complete_nullability
+        or not has_complete_semantic_fks
+        or not has_complete_uniqueness
     )
 
 

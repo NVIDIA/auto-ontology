@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from auto_ontology.utils.sample_values import stringify_sample_values
@@ -25,30 +26,13 @@ def _format_sample_values(raw: Any) -> str:
 
 
 def _plain_cell(value: Any) -> str:
-    """One pipe-table cell: no newlines, and no ``|`` that would add a column."""
+    """Render prompt metadata on one line."""
     if value is None:
         return ""
     if isinstance(value, (list, tuple)):
         parts = [_plain_cell(item) for item in value]
         return ", ".join(part for part in parts if part)
     return " ".join(str(value).replace("|", "/").split())
-
-
-def _pipe_table(headers: list[str], rows: list[dict[str, str]]) -> str:
-    """Render ``header 1 | header 2`` then one ``|``-separated row per record.
-
-    A header is omitted when every cell under it is empty, so a table with no
-    descriptions does not pay for a description column.
-    """
-    active = [
-        header for header in headers if any(row.get(header, "").strip() for row in rows)
-    ]
-    if not active:
-        return ""
-    lines = [" | ".join(active)]
-    for row in rows:
-        lines.append(" | ".join(row.get(header, "") for header in active))
-    return "\n".join(lines)
 
 
 def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> str:
@@ -80,6 +64,13 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: false"
     else:
         line += " | is_nullable: unknown"
+    uniqueness = column.get("is_unique")
+    if uniqueness is True:
+        line += " | is_unique: true"
+    elif uniqueness is False:
+        line += " | is_unique: false"
+    else:
+        line += " | is_unique: unknown"
     semantic_fk = column.get("semantic_fk")
     if semantic_fk:
         line += f" | foreign_key: {_plain_cell(semantic_fk)}"
@@ -299,47 +290,42 @@ def format_important_columns_for_prompt(
     return "\n".join(lines) or "No semantically matched columns."
 
 
-_TABLE_HEADERS = ["table", "label", "description", "primary key"]
-_COLUMN_HEADERS = [
-    "column",
-    "type",
-    "is_nullable",
-    "foreign key",
-    "description",
-    "sample values",
-    "format",
-]
 _JSONB_SAMPLE_NOTE = (
     "JSONB sample values are keys (dot = nesting level, use as "
     "->>'key' or ->'container'->>'leaf')."
 )
 
 
-def _column_row(column: Any) -> dict[str, str]:
-    if not isinstance(column, dict):
-        return {"column": _plain_cell(column)}
-    description = _plain_cell(column.get("description"))
-    notation = _plain_cell(column.get("format"))
-    if notation and "format:" in description.lower():
-        notation = ""
-    nullability = column.get("is_nullable")
-    if nullability is True:
-        nullable = "true"
-    elif nullability is False:
-        nullable = "false"
-    else:
-        nullable = "unknown"
-    return {
-        "column": _plain_cell(column.get("name", "UNKNOWN")),
-        "type": _plain_cell(column.get("data_type", "UNKNOWN")),
-        "is_nullable": nullable,
-        "foreign key": _plain_cell(column.get("semantic_fk")),
-        "description": description,
-        "sample values": _plain_cell(
-            _format_sample_values(column.get("sample_values"))
-        ),
-        "format": notation,
-    }
+def _metadata_state(value: Any) -> str:
+    """Spell a nullable boolean without conflating ``None`` with ``False``."""
+    if value is True:
+        return "true"
+    if value is False:
+        return "false"
+    return "unknown"
+
+
+def _grouped_column_section(
+    title: str,
+    tables: list[dict[str, Any]],
+    render: Callable[[dict[str, Any]], str],
+) -> str:
+    """Render one column-metadata category, grouped under its owning tables."""
+    lines: list[str] = []
+    for table in tables:
+        entries: list[str] = []
+        for column in table["columns"]:
+            value = render(column)
+            if value:
+                entries.append(
+                    f"  {_plain_cell(column.get('name', 'UNKNOWN'))}: {value}"
+                )
+        if entries:
+            lines.append(f"Table {table['full_name']}:")
+            lines.extend(entries)
+    if not lines:
+        return ""
+    return f"{title}:\n" + "\n".join(lines)
 
 
 def format_tables_for_prompt(
@@ -347,7 +333,7 @@ def format_tables_for_prompt(
     target_db: str | None = None,
     dialect: str | None = None,
 ) -> str:
-    """Format tables and their columns as schema context for a prompt.
+    """Format schema context in separate table, column, and metadata sections.
 
     *dialect* only decides how each table name is qualified; see
     :func:`qualify_table`. Omitting it keeps the two-part form, which is wrong
@@ -364,41 +350,113 @@ def format_tables_for_prompt(
     if not tables:
         return "No tables available"
 
-    formatted_tables = []
+    normalized_tables: list[dict[str, Any]] = []
     for table in tables:
         table_name = table.get("name", "UNKNOWN")
-        table_label = table.get("label", "")
         database_name = table.get("database_name") or target_db or ""
         schema_name = table.get("schema_name", "")
         full_name = qualify_table(database_name, schema_name, table_name, dialect)
-        blocks = [
-            _pipe_table(
-                _TABLE_HEADERS,
-                [
-                    {
-                        "table": _plain_cell(full_name),
-                        "label": _plain_cell(
-                            table_label if table_label != table_name else ""
-                        ),
-                        "description": _plain_cell(table.get("description")),
-                        "primary key": _plain_cell(table.get("pk")),
-                    }
-                ],
-            )
-        ]
-
         columns = table.get("columns")
         if not isinstance(columns, list):
             columns = []
-        if columns:
-            column_rows = [_column_row(column) for column in columns]
-            blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))
-            if any("json" in row["type"].lower() for row in column_rows):
-                blocks.append(_JSONB_SAMPLE_NOTE)
+        normalized_tables.append(
+            {
+                "full_name": _plain_cell(full_name),
+                "description": _plain_cell(table.get("description")),
+                "pk": _plain_cell(table.get("pk")),
+                "columns": [
+                    column
+                    if isinstance(column, dict)
+                    else {"name": _plain_cell(column), "data_type": "UNKNOWN"}
+                    for column in columns
+                ],
+            }
+        )
 
-        formatted_tables.append("\n".join(block for block in blocks if block))
+    sections: list[str] = [
+        "TABLES:\n"
+        + "\n".join(f"- {table['full_name']}" for table in normalized_tables)
+    ]
 
-    return "\n\n".join(formatted_tables)
+    table_descriptions = [
+        f"- {table['full_name']}: {table['description']}"
+        for table in normalized_tables
+        if table["description"]
+    ]
+    if table_descriptions:
+        sections.append("TABLE DESCRIPTIONS:\n" + "\n".join(table_descriptions))
+
+    primary_keys = [
+        f"- {table['full_name']}: {table['pk']}"
+        for table in normalized_tables
+        if table["pk"]
+    ]
+    if primary_keys:
+        sections.append("PRIMARY KEYS:\n" + "\n".join(primary_keys))
+
+    column_lines: list[str] = []
+    for table in normalized_tables:
+        if not table["columns"]:
+            continue
+        column_lines.append(f"Table {table['full_name']}:")
+        column_lines.extend(
+            "  - "
+            + _plain_cell(column.get("name", "UNKNOWN"))
+            + " ("
+            + _plain_cell(column.get("data_type", "UNKNOWN"))
+            + ")"
+            for column in table["columns"]
+        )
+    if column_lines:
+        sections.append("COLUMNS:\n" + "\n".join(column_lines))
+
+    metadata_sections = [
+        _grouped_column_section(
+            "COLUMN DESCRIPTIONS",
+            normalized_tables,
+            lambda column: _plain_cell(column.get("description")),
+        ),
+        _grouped_column_section(
+            "SAMPLE VALUES",
+            normalized_tables,
+            lambda column: _format_sample_values(column.get("sample_values")),
+        ),
+        _grouped_column_section(
+            "COLUMN FORMATS",
+            normalized_tables,
+            lambda column: (
+                ""
+                if "format:" in str(column.get("description") or "").lower()
+                else _plain_cell(column.get("format"))
+            ),
+        ),
+        _grouped_column_section(
+            "COLUMN NULLABILITY",
+            normalized_tables,
+            lambda column: _metadata_state(column.get("is_nullable")),
+        ),
+        _grouped_column_section(
+            "COLUMN UNIQUENESS",
+            normalized_tables,
+            lambda column: _metadata_state(column.get("is_unique")),
+        ),
+        _grouped_column_section(
+            "SEMANTIC FOREIGN KEYS",
+            normalized_tables,
+            lambda column: _plain_cell(column.get("semantic_fk")),
+        ),
+    ]
+    sections.extend(section for section in metadata_sections if section)
+
+    has_json = any(
+        "json" in str(column.get("data_type") or "").lower()
+        for table in normalized_tables
+        for column in table["columns"]
+    )
+    if has_json:
+        sections.append(_JSONB_SAMPLE_NOTE)
+
+    return "\n\n".join(sections)
 
 
 def format_used_schema_for_prompt(
