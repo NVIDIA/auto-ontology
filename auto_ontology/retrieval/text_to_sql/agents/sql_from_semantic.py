@@ -23,8 +23,10 @@ Design Decisions:
 """
 
 import logging
+from collections.abc import Callable
 from typing import Any, Dict
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from auto_ontology.utils.llm_invoke import safe_invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent, record_thought
@@ -47,6 +49,8 @@ from auto_ontology.retrieval.text_to_sql.state import (
     get_question_for_processing,
 )
 from auto_ontology.retrieval.text_to_sql.prompts import (
+    SCHEMA_ONLY_SQL_SYSTEM_PROMPT,
+    SCHEMA_ONLY_SQL_USER_PROMPT,
     create_sql_from_candidates_prompt,
     create_sql_user_prompt,
     format_authoritative_evidence,
@@ -58,6 +62,7 @@ from auto_ontology.retrieval.text_to_sql.prompts import (
     format_value_anchors_section,
 )
 from auto_ontology.retrieval.text_to_sql.models import SQLGenerationModel
+from auto_ontology.utils.rerank import get_rerank_kwargs, rerank_hits
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +209,9 @@ class SQLFromCandidatesAgent(BaseAgent):
                 path_state.get("calculation_subtype"),
             )
 
-        def build_messages() -> list:
+        target_db = path_state.get("target_db")
+
+        def build_semantic_messages() -> list[BaseMessage]:
             """
             Build messages for SQL construction.
 
@@ -260,8 +267,6 @@ class SQLFromCandidatesAgent(BaseAgent):
                     + "\n".join(sa_lines)
                     + "\n\n"
                 )
-
-            target_db = path_state.get("target_db")
 
             # Build the join-paths section (semantic hint + suggested joins).
             join_paths = ""
@@ -347,46 +352,76 @@ class SQLFromCandidatesAgent(BaseAgent):
 
             return messages
 
-        # Choose schema based on context
-        # Use SQLGenerationModel for new flow (without formatting)
-        # Keep old models for feedback scenarios
+        def build_schema_only_messages() -> list[BaseMessage]:
+            """Build the minimal question/evidence/table-view prompt."""
+            tables = format_tables_for_prompt(
+                relevant_tables, target_db=target_db, dialect=dialect
+            )
+            user_prompt = SCHEMA_ONLY_SQL_USER_PROMPT.format(
+                question=sanitized_question,
+                evidence=evidence,
+                dialect=dialect or "SQL",
+                tables=tables,
+            )
+            return [
+                SystemMessage(content=SCHEMA_ONLY_SQL_SYSTEM_PROMPT),
+                HumanMessage(content=user_prompt),
+            ]
 
         schema = SQLGenerationModel
 
-        def run_with_context() -> tuple:
-            """Invoke LLM with messages, optionally including file snippets and extracted data."""
+        def invoke_candidate(
+            name: str,
+            build_messages: Callable[[], list[BaseMessage]],
+        ) -> tuple[SQLGenerationModel | None, list[BaseMessage]]:
+            """Generate one candidate with isolated retries and prompt context."""
             messages = build_messages()
-            try:
-                response = safe_invoke_with_structured_output(llm, messages, schema)
-            except Exception as e:
-                self.logger.error(
-                    "LLM structured output failed: %s: %s",
-                    type(e).__name__,
-                    e,
-                    exc_info=True,
-                )
-                return None, messages
-            if response and hasattr(response, "response") and response.response:
-                self.logger.info(
-                    "LLM response generated: %s...",
-                    response.response[:100],
+            max_retries = 3
+            response = None
+            for attempt in range(1, max_retries + 1):
+                try:
+                    response = safe_invoke_with_structured_output(llm, messages, schema)
+                except Exception as e:
+                    self.logger.error(
+                        "%s SQL generation failed: %s: %s",
+                        name,
+                        type(e).__name__,
+                        e,
+                        exc_info=True,
+                    )
+                    response = None
+                if response is not None:
+                    self.logger.info(
+                        "%s SQL description generated: %s...",
+                        name,
+                        response.description[:100],
+                    )
+                    break
+                self.logger.warning(
+                    "%s SQL generation returned no response on attempt %d/%d.",
+                    name,
+                    attempt,
+                    max_retries,
                 )
             return response, messages
 
-        MAX_RETRIES = 3
-        response, messages = None, []
-        for attempt in range(1, MAX_RETRIES + 1):
-            response, messages = run_with_context()
-            if response is not None:
-                break
-            self.logger.warning(
-                "LLM returned None on attempt %d/%d — retrying.",
-                attempt,
-                MAX_RETRIES,
+        semantic_response, semantic_messages = invoke_candidate(
+            "semantic", build_semantic_messages
+        )
+        schema_response, schema_messages = invoke_candidate(
+            "schema-only", build_schema_only_messages
+        )
+        candidates = [
+            (source, response, messages)
+            for source, response, messages in (
+                ("semantic", semantic_response, semantic_messages),
+                ("schema-only", schema_response, schema_messages),
             )
+            if response is not None
+        ]
 
-        if response is None:
-            self.logger.error("LLM returned None after %d attempts.", MAX_RETRIES)
+        if not candidates:
+            self.logger.error("Both SQL generation candidates failed.")
             return {
                 "path_state": {
                     **path_state,
@@ -394,6 +429,49 @@ class SQLFromCandidatesAgent(BaseAgent):
                 },
                 "decision": "unconstructable",
             }
+
+        selected = candidates[0]
+        if len(candidates) == 2:
+            rerank_query = f"Question:\n{sanitized_question}"
+            if evidence:
+                rerank_query += f"\n\nEvidence:\n{evidence}"
+            hits = [
+                {"id": source, "text": candidate.description}
+                for source, candidate, _ in candidates
+            ]
+            try:
+                ranked = rerank_hits(
+                    rerank_query,
+                    hits,
+                    top_n=1,
+                    **get_rerank_kwargs(),
+                )
+            except Exception:
+                self.logger.exception(
+                    "SQL description rerank failed; using the semantic candidate."
+                )
+                ranked = []
+            if ranked:
+                winner_id = ranked[0].get("id")
+                selected = next(
+                    (
+                        candidate
+                        for candidate in candidates
+                        if candidate[0] == winner_id
+                    ),
+                    candidates[0],
+                )
+                self.logger.info(
+                    "SQL candidate selected by description rerank: %s (score=%s).",
+                    selected[0],
+                    ranked[0].get("_rerank_score"),
+                )
+
+        selected_source, response, messages = selected
+        if len(candidates) == 1:
+            self.logger.info(
+                "Using the only successful SQL candidate: %s.", selected_source
+            )
 
         thought = (getattr(response, "thought", "") or "").strip()
         if thought:

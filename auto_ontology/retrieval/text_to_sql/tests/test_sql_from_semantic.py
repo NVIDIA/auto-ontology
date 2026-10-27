@@ -145,23 +145,58 @@ def test_calculation_sql_template_is_structural_guidance() -> None:
     assert format_calculation_sql_template({}) == ""
 
 
+def test_sql_description_is_a_user_question_separate_from_response() -> None:
+    description = SQLGenerationModel.model_fields["description"].description or ""
+    response = SQLGenerationModel.model_fields["response"].description or ""
+
+    assert "After writing sql_code" in description
+    assert "one concise natural-language question" in description
+    for forbidden_detail in ("tables", "columns", "joins", "clauses", "aliases"):
+        assert forbidden_detail in description
+    assert "2-4 sentences" in response
+
+
 def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     non_reasoning_llm = object()
     reasoning_llm = object()
     invoked_with: list[object] = []
-    invoked_messages: list = []
+    invocations: list[list] = []
 
     def fake_invoke(llm, messages, _schema):
         invoked_with.append(llm)
-        invoked_messages.extend(messages)
+        invocations.append(messages)
+        is_schema_only = messages[-1].content.startswith("### Question")
         return SQLGenerationModel(
             thought="No assumptions.",
-            sql_code="SELECT COUNT(*) FROM accounts",
-            response="Counts all accounts.",
+            sql_code=(
+                "SELECT COUNT(*) FROM accounts"
+                if not is_schema_only
+                else "SELECT COUNT(id) FROM accounts"
+            ),
+            description=(
+                "How many accounts are there?"
+                if not is_schema_only
+                else "How many accounts have an identifier?"
+            ),
+            response=(
+                "Counts every row in the accounts table."
+                if not is_schema_only
+                else "Counts every non-null account identifier."
+            ),
         )
 
     monkeypatch.setattr(
         sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
+    )
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "rerank_hits",
+        lambda query, hits, **kwargs: [
+            {
+                "_rerank_score": 1.0,
+                **next(hit for hit in hits if hit["id"] == "semantic"),
+            }
+        ],
     )
 
     result = SQLFromCandidatesAgent().execute(
@@ -181,11 +216,245 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     )
 
     assert result["decision"] == "constructable"
-    assert invoked_with == [reasoning_llm]
+    assert invoked_with == [reasoning_llm, reasoning_llm]
+    assert len(invocations) == 2
     evidence = "Active means accounts.status = 'active'."
-    assert sum(evidence in message.content for message in invoked_messages) == 2
-    assert evidence in invoked_messages[-1].content
-    assert "## Authoritative Evidence" in invoked_messages[-1].content
+    semantic_messages, schema_messages = invocations
+    assert sum(evidence in message.content for message in semantic_messages) == 2
+    assert evidence in semantic_messages[-1].content
+    assert "## Authoritative Evidence" in semantic_messages[-1].content
+    assert len(schema_messages) == 2
+    assert schema_messages[-1].content.startswith("### Question")
+    assert "### Evidence" in schema_messages[-1].content
+    assert evidence in schema_messages[-1].content
+    assert "## Semantic Hints" not in schema_messages[-1].content
+    assert "## Example SQL Queries" not in schema_messages[-1].content
+    assert (
+        result["path_state"]["sql_generation_result"].sql_code
+        == "SELECT COUNT(*) FROM accounts"
+    )
+
+
+def test_sql_generation_reranks_descriptions_without_sending_sql(monkeypatch) -> None:
+    seen: dict = {}
+
+    def fake_invoke(_llm, messages, _schema):
+        schema_only = messages[-1].content.startswith("### Question")
+        if schema_only:
+            seen["schema_prompt"] = messages[-1].content
+        return SQLGenerationModel(
+            thought="No assumptions.",
+            sql_code=(
+                "SELECT account_id FROM accounts"
+                if not schema_only
+                else "SELECT name FROM accounts"
+            ),
+            description=(
+                "What are the account identifiers?"
+                if not schema_only
+                else "What are the account names?"
+            ),
+            response=(
+                "Semantic candidate user response."
+                if not schema_only
+                else "Schema-only candidate user response."
+            ),
+        )
+
+    def fake_rerank(query, hits, **kwargs):
+        seen.update(query=query, hits=hits, kwargs=kwargs)
+        return [
+            {
+                "_rerank_score": 0.9,
+                **next(hit for hit in hits if hit["id"] == "schema-only"),
+            }
+        ]
+
+    monkeypatch.setattr(
+        sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
+    )
+    monkeypatch.setattr(sql_from_semantic, "rerank_hits", fake_rerank)
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "get_rerank_kwargs",
+        lambda: {
+            "rerank_invoke_url": "https://rerank.example/rerank",
+            "model_name": "reranker",
+            "api_key": "",
+        },
+    )
+
+    result = SQLFromCandidatesAgent().execute(
+        {
+            "llm": object(),
+            "initial_question": "List account names",
+            "evidence": "Use the account name.",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "relevant_tables": [
+                    {
+                        "name": "accounts",
+                        "columns": [
+                            {"name": "account_id", "data_type": "integer"},
+                            {"name": "name", "data_type": "text"},
+                        ],
+                    }
+                ],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    assert seen["query"] == (
+        "Question:\nList account names\n\nEvidence:\nUse the account name."
+    )
+    assert seen["hits"] == [
+        {"id": "semantic", "text": "What are the account identifiers?"},
+        {
+            "id": "schema-only",
+            "text": "What are the account names?",
+        },
+    ]
+    assert seen["kwargs"]["top_n"] == 1
+    assert all("SELECT" not in hit["text"] for hit in seen["hits"])
+    assert "table\naccounts" in seen["schema_prompt"]
+    assert "column | type | is_nullable" in seen["schema_prompt"]
+    assert "list of important semantic entities" not in seen["schema_prompt"]
+    winner = result["path_state"]["sql_generation_result"]
+    assert winner.sql_code == "SELECT name FROM accounts"
+    assert winner.description == "What are the account names?"
+    assert winner.response == "Schema-only candidate user response."
+
+
+def test_sql_generation_rerank_failure_falls_back_to_semantic(monkeypatch) -> None:
+    responses = iter(
+        [
+            SQLGenerationModel(
+                thought="Semantic.",
+                sql_code="SELECT semantic_value FROM facts",
+                description="What is the semantic value?",
+                response="Returns the semantic value.",
+            ),
+            SQLGenerationModel(
+                thought="Schema only.",
+                sql_code="SELECT schema_value FROM facts",
+                description="What is the schema-only value?",
+                response="Returns the schema-only value.",
+            ),
+        ]
+    )
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "safe_invoke_with_structured_output",
+        lambda *_args, **_kwargs: next(responses),
+    )
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "rerank_hits",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("offline")),
+    )
+
+    result = SQLFromCandidatesAgent().execute(
+        {
+            "llm": object(),
+            "initial_question": "Return a value",
+            "evidence": "",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "relevant_tables": [],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    assert (
+        result["path_state"]["sql_generation_result"].sql_code
+        == "SELECT semantic_value FROM facts"
+    )
+
+
+def test_sql_generation_uses_only_successful_candidate(monkeypatch) -> None:
+    def fake_invoke(_llm, messages, _schema):
+        if messages[-1].content.startswith("### Question"):
+            return None
+        return SQLGenerationModel(
+            thought="No assumptions.",
+            sql_code="SELECT COUNT(*) FROM accounts",
+            description="How many accounts are there?",
+            response="Counts all account rows.",
+        )
+
+    monkeypatch.setattr(
+        sql_from_semantic, "safe_invoke_with_structured_output", fake_invoke
+    )
+    monkeypatch.setattr(
+        sql_from_semantic,
+        "rerank_hits",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("rerank must not run for one candidate")
+        ),
+    )
+
+    result = SQLFromCandidatesAgent().execute(
+        {
+            "llm": object(),
+            "initial_question": "Count accounts",
+            "evidence": "",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "relevant_tables": [],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    assert result["decision"] == "constructable"
+    assert (
+        result["path_state"]["sql_generation_result"].sql_code
+        == "SELECT COUNT(*) FROM accounts"
+    )
+
+
+def test_sql_generation_is_unconstructable_when_both_candidates_fail(
+    monkeypatch,
+) -> None:
+    calls = 0
+
+    def fail_invoke(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return None
+
+    monkeypatch.setattr(
+        sql_from_semantic, "safe_invoke_with_structured_output", fail_invoke
+    )
+
+    result = SQLFromCandidatesAgent().execute(
+        {
+            "llm": object(),
+            "initial_question": "Count accounts",
+            "evidence": "",
+            "messages": [],
+            "connectors": [],
+            "path_state": {
+                "primary_attribute": None,
+                "relevant_tables": [],
+                "relevant_queries": [],
+            },
+        }
+    )
+
+    assert calls == 6
+    assert result["decision"] == "unconstructable"
+    assert result["path_state"]["unconstructable_explanation"] == (
+        "LLM failed to produce a response."
+    )
 
 
 def test_important_columns_include_full_details_and_ignore_structural_paths() -> None:

@@ -265,6 +265,11 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
   denominator), and ties (what breaks a tie in a ranking/superlative
   query).
 - sql_code: the complete SQL, no comments or delimiters.
+- description: after sql_code is complete, express the request that the SQL
+  answers as one concise natural-language question in the same style as a user
+  question. Capture the requested result and business conditions, but do not
+  mention SQL, tables, columns, joins, clauses, aliases, implementation details,
+  reasoning, or assumptions.
 - response: 2-4 sentences for the end user, in plain English. Describe WHAT is
   being calculated, WHICH tables and columns are used, any FILTERS or time
   windows applied, and the GROUPING/ORDERING.
@@ -272,6 +277,26 @@ _SQL_GENERATION_OUTPUT_SPEC = """Output (fill fields in this exact order):
   or meta-commentary about your reasoning. Refer to tables
   and columns by their human-readable names.
 - All fields are required."""
+
+
+SCHEMA_ONLY_SQL_SYSTEM_PROMPT = f"""Reason step by step, then write one complete
+SQL query that answers the request using only the supplied schema. Return exactly
+the requested output fields and no others.
+
+{_SQL_GENERATION_OUTPUT_SPEC}"""
+
+
+SCHEMA_ONLY_SQL_USER_PROMPT = """### Question
+{question}
+
+### Evidence
+{evidence}
+
+Write a single {dialect} query that answers the question.
+
+The following table view describes the database and the tables in it.
+{tables}
+"""
 
 
 def format_dialect_rules(dialect: str | None) -> str:
@@ -449,6 +474,10 @@ since the question didn't ask for one.
 
 sql_code:
 {example_sql}
+
+description:
+What is the total sales revenue for each country during the most recently
+completed calendar quarter, ordered from highest to lowest?
 
 response:
 This calculates total sales revenue per country for the most recently completed

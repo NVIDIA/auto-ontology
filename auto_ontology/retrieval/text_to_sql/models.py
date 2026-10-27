@@ -236,6 +236,16 @@ class SQLGenerationModel(StrictModel):
             "The complete, executable SQL query. No comments, no delimiters, no explanation."
         ),
     )
+    description: NonEmptyStr = Field(
+        ...,
+        description=(
+            "After writing sql_code, express the request that this SQL answers as one "
+            "concise natural-language question in the same style as a user question. "
+            "Capture the requested result and business conditions, but do not mention "
+            "SQL, tables, columns, joins, clauses, aliases, implementation details, "
+            "reasoning, or assumptions."
+        ),
+    )
     response: NonEmptyStr = Field(
         ...,
         description=(
@@ -249,7 +259,7 @@ class SQLGenerationModel(StrictModel):
         ),
     )
 
-    @field_validator("sql_code", "response")
+    @field_validator("sql_code", "description", "response")
     @classmethod
     def reject_placeholder_strings(cls, v: str, info) -> str:
         """Block LLM stubs like literal '...' that satisfy min length but are not valid output."""
@@ -259,6 +269,7 @@ class SQLGenerationModel(StrictModel):
         ):
             raise ValueError(
                 f"{info.field_name!r} must be real content, not an ellipsis placeholder. "
-                "sql_code must be the full executable statement; response must be a real explanation."
+                "sql_code must be the full executable statement; description and "
+                "response must be real text."
             )
         return v

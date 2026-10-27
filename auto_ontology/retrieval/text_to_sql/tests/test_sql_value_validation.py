@@ -29,6 +29,7 @@ def _generation(sql: str) -> SQLGenerationModel:
     return SQLGenerationModel(
         thought="No assumptions.",
         sql_code=sql,
+        description="Which accounts match the request?",
         response="Account rows are returned.",
     )
 
