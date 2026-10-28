@@ -142,6 +142,33 @@ def test_one_unreadable_crop_costs_only_its_own_row() -> None:
     assert client.describe_images("read this", ["a", "b"]) == ["chart text", ""]
 
 
+def test_figures_are_read_by_the_vision_triplet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A text-only ``MODEL_NAME`` 400s on images, silently dropping every figure."""
+    from unstructured_ao import embed_client
+
+    monkeypatch.setenv("UNSTRUCTURED_VISION_API_KEY", "nvapi-test")
+    for name in ("UNSTRUCTURED_VISION_ENDPOINT", "UNSTRUCTURED_VISION_MODEL"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("BASE_URL", "https://integrate.api.nvidia.com/v1")
+    monkeypatch.setenv("MODEL_NAME", "nvidia/text-only")
+    sent: dict[str, Any] = {}
+
+    def fake_post(_http: Any, url: str, **kwargs: Any) -> dict[str, Any]:
+        sent.update(url=url, **kwargs)
+        return {"choices": [{"message": {"content": "a chart"}}]}
+
+    monkeypatch.setattr(embed_client, "post_with_retry", fake_post)
+    client = object.__new__(EmbedClient)
+    client._http = None
+
+    assert client.describe_image("read this", "QUJD") == "a chart"
+    assert sent["url"] == "https://integrate.api.nvidia.com/v1/chat/completions"
+    assert sent["json"]["model"] == "nvidia/nemotron-3.5-super-vl-120b-a12b"
+    assert sent["headers"] == {"Authorization": "Bearer nvapi-test"}
+
+
 def test_no_crops_sends_no_request() -> None:
     client = _vision_client({})
     assert client.describe_images("read this", []) == []

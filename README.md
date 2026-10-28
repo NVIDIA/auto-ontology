@@ -58,7 +58,7 @@ Auto Ontology uses NVIDIA NIM endpoints for inference — either the hosted
 [NVIDIA API catalog](https://build.nvidia.com) (`integrate.api.nvidia.com`) or
 self-hosted NIMs. The defaults in `.env.example` are:
 
-- **LLM:** `nvidia/nemotron-3-nano-30b-a3b`
+- **LLM:** `nvidia/nemotron-3.5-lightning-30b-a3b`
 - **Embeddings:** `nvidia/nemotron-3-embed-1b`
 - **Reranking:** `nvidia/llama-nemotron-rerank-vl-1b-v2`
 

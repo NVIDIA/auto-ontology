@@ -34,6 +34,9 @@ _BATCH = 16
 #: would turn a slow ingest into a failed one.
 _VISION_WORKERS = 8
 
+#: The model-config triplet figure reading uses; see :meth:`EmbedClient.describe_image`.
+_VISION_PREFIX = "UNSTRUCTURED_VISION"
+
 #: Seconds.  Generous because a cold model behind the gateway can take a while,
 #: and because an ingest that dies at document 11 of 14 wastes more than it
 #: saves.
@@ -197,22 +200,23 @@ class EmbedClient:
         return self.embed([text], input_type="query")[0]
 
     def describe_image(self, prompt: str, image_b64: str) -> str:
-        """Ask the chat model about an image, for figures the extractor cannot read.
+        """Ask a vision model about an image, for figures the extractor cannot read.
 
-        Uses the ``NON_REASONING`` triplet, not ``EMBED``: this is a
-        vision-language chat call and the embed model cannot serve it.  Reading
-        a chart is transcription rather than reasoning, so it belongs on the
-        cheaper tier — and both triplets fall back to ``BASE_URL`` /
-        ``MODEL_NAME`` when only those are set.
+        Uses the ``UNSTRUCTURED_VISION`` triplet. Its endpoint and key fall
+        back like any other, but its model never inherits ``MODEL_NAME`` or
+        ``DEFAULT_MODELS_MODEL``: those are usually text-only, which the
+        endpoint rejects with a 400 and every figure is silently dropped.
+        Unset, the model follows the key — a vision model on either endpoint.
         """
         from auto_ontology.utils.model_config import resolve
 
+        endpoint = resolve(_VISION_PREFIX, "ENDPOINT").rstrip("/")
         data = post_with_retry(
             self._http,
-            f"{resolve('NON_REASONING', 'ENDPOINT').rstrip('/')}/chat/completions",
-            headers={"Authorization": f"Bearer {resolve('NON_REASONING', 'API_KEY')}"},
+            f"{endpoint}/chat/completions",
+            headers={"Authorization": f"Bearer {resolve(_VISION_PREFIX, 'API_KEY')}"},
             json={
-                "model": resolve("NON_REASONING", "MODEL"),
+                "model": resolve(_VISION_PREFIX, "MODEL", use_shared_default=False),
                 "max_tokens": 2048,
                 "messages": [
                     {

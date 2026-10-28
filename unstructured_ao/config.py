@@ -14,10 +14,10 @@ import os
 #: - ``auto`` uses hosted extraction for PDF, Docling for DOCX/PPTX/HTML, and
 #:   the built-in plain-text reader for TXT.
 #: - ``hosted`` runs no model locally.  Layout comes from NVIDIA's page-elements
-#:   service and figures from the gateway's vision model, so the only local work
+#:   service and figures from a hosted vision model, so the only local work
 #:   is parsing and rasterising the PDF.  1.70 s/page.  Needs the
-#:   ``UNSTRUCTURED_PAGE_ELEMENTS_*`` triplet, which defaults to the hosted
-#:   inference gateway and its ``sk-`` key.
+#:   ``UNSTRUCTURED_PAGE_ELEMENTS_*`` and ``UNSTRUCTURED_VISION_*`` triplets,
+#:   which both default to models served for whichever key is configured.
 #: - ``docling`` runs page layout on the local CPU, which costs 3.0GB of torch
 #:   and CUDA wheels on linux-x86_64 and crashes on Apple's MPS backend, so it
 #:   is pinned to CPU.  2.05 s/page.  Install the ``unstructured-docling`` extra.

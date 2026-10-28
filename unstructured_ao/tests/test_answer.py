@@ -64,7 +64,7 @@ def test_a_bare_key_picks_the_matching_endpoint(
     assert answer._resolved() == {
         "endpoint": "https://integrate.api.nvidia.com/v1",
         "api_key": "nvapi-legacy",
-        "model": "nvidia/nemotron-3-super-120b-a12b",
+        "model": "nvidia/nemotron-3.5-lightning-30b-a3b",
     }
 
 
@@ -82,34 +82,65 @@ def test_reasoning_is_spelled_for_the_endpoint(
     assert answer.reasoning_body(endpoint) == expected
 
 
-def test_complete_sends_the_resolved_model_and_endpoint_spelling(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("NVIDIA_API_KEY", "sk-gateway")
-    monkeypatch.setattr(answer.GEN_LIMITER, "acquire", lambda _slots=1: None)
-    sent: dict[str, Any] = {}
+_MESSAGES = [{"role": "user", "content": "?"}]
 
+
+def _fake_client(base_url: str, sent: dict[str, Any]) -> Any:
     def create(**kwargs: Any) -> Any:
         sent.update(kwargs)
         message = types.SimpleNamespace(content="42")
         return types.SimpleNamespace(choices=[types.SimpleNamespace(message=message)])
 
-    client = types.SimpleNamespace(
-        base_url="https://inference-api.nvidia.com/v1/",
+    return types.SimpleNamespace(
+        base_url=base_url,
         chat=types.SimpleNamespace(completions=types.SimpleNamespace(create=create)),
     )
 
-    assert answer.complete([{"role": "user", "content": "?"}], client=client) == (
-        "42",
-        None,
-    )
-    assert sent["model"] == "nvidia/nvidia/nemotron-3-super-120b-long-ctx"
+
+@pytest.fixture
+def unpaced(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(answer.GEN_LIMITER, "acquire", lambda _slots=1: None)
+
+
+@pytest.mark.usefixtures("unpaced")
+def test_a_passed_client_uses_the_model_passed_with_it() -> None:
+    sent: dict[str, Any] = {}
+    client = _fake_client("https://inference-api.nvidia.com/v1/", sent)
+
+    assert answer.complete(_MESSAGES, client=client, model="own/model") == ("42", None)
+    assert sent["model"] == "own/model"
     assert sent["extra_body"] == {"reasoning_effort": "low"}
+
+
+def test_a_passed_client_without_its_model_is_refused() -> None:
+    client = _fake_client("https://inference-api.nvidia.com/v1/", {})
+    with pytest.raises(ValueError, match="model"):
+        answer.complete(_MESSAGES, client=client)
+
+
+@pytest.mark.usefixtures("unpaced")
+def test_the_shared_client_keeps_the_model_it_was_built_for(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing the environment later cannot pair the endpoint with another model."""
+    monkeypatch.setattr(answer, "_client", None)
+    monkeypatch.setattr(answer, "_model", "")
+    monkeypatch.setenv("NVIDIA_API_KEY", "sk-gateway")
+    answer.get_client()
+    sent: dict[str, Any] = {}
+    monkeypatch.setattr(
+        answer, "_client", _fake_client("https://inference-api.nvidia.com/v1/", sent)
+    )
+    monkeypatch.setenv(f"{_PREFIX}_MODEL", "changed/later")
+
+    assert answer.complete(_MESSAGES) == ("42", None)
+    assert sent["model"] == "nvidia/nvidia/nemotron-3-super-120b-long-ctx"
 
 
 def test_no_key_names_the_variables_that_would_supply_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(answer, "_client", None)
+    monkeypatch.setattr(answer, "_model", "")
     with pytest.raises(RuntimeError, match=f"{_PREFIX}_API_KEY"):
         answer.get_client()

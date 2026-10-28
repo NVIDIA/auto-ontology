@@ -5,9 +5,9 @@
 """Shared resolution of model-endpoint env var triplets.
 
 Every triplet (``REASONING``, ``NON_REASONING``, ``EMBED``, ``RERANK``,
-``UNSTRUCTURED_PAGE_ELEMENTS``, and ``UNSTRUCTURED``) exposes three fields —
-``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as ``<PREFIX>_<FIELD>`` env
-vars. Any field left
+``UNSTRUCTURED_PAGE_ELEMENTS``, ``UNSTRUCTURED``, and ``UNSTRUCTURED_VISION``)
+exposes three fields — ``ENDPOINT`` (URL), ``API_KEY``, and ``MODEL`` — as
+``<PREFIX>_<FIELD>`` env vars. Any field left
 unset normally falls back to the corresponding ``DEFAULT_MODELS_<FIELD>``, so a
 single ``DEFAULT_MODELS_*`` triplet can supply the shared endpoint/key/model for
 all of them. Each field also falls back to its legacy pre-triplet env var name
@@ -44,13 +44,15 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": ("nvidia/nvidia/nemotron-page-elements-v3"),
         "UNSTRUCTURED_ENDPOINT": "https://inference-api.nvidia.com/v1",
         "UNSTRUCTURED_MODEL": "nvidia/nvidia/nemotron-3-super-120b-long-ctx",
+        "UNSTRUCTURED_VISION_ENDPOINT": "https://inference-api.nvidia.com/v1",
+        "UNSTRUCTURED_VISION_MODEL": "aws/anthropic/bedrock-claude-sonnet-5-5",
     },
     # integrate.api.nvidia.com / build.nvidia.com (nvapi-... keys).
     "nvapi-": {
         "REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "REASONING_MODEL": "nvidia/nemotron-3-nano-30b-a3b",
+        "REASONING_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "NON_REASONING_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "NON_REASONING_MODEL": "nvidia/nemotron-3-nano-30b-a3b",
+        "NON_REASONING_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
         "EMBED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
         "EMBED_MODEL": "nvidia/nemotron-3-embed-1b",
         "RERANK_ENDPOINT": (
@@ -63,7 +65,9 @@ _DEFAULTS_BY_KEY_PREFIX: dict[str, dict[str, str]] = {
         ),
         "UNSTRUCTURED_PAGE_ELEMENTS_MODEL": "nemotron-page-elements-v3",
         "UNSTRUCTURED_ENDPOINT": "https://integrate.api.nvidia.com/v1",
-        "UNSTRUCTURED_MODEL": "nvidia/nemotron-3-super-120b-a12b",
+        "UNSTRUCTURED_MODEL": "nvidia/nemotron-3.5-lightning-30b-a3b",
+        "UNSTRUCTURED_VISION_ENDPOINT": "https://integrate.api.nvidia.com/v1",
+        "UNSTRUCTURED_VISION_MODEL": "nvidia/nemotron-3.5-super-vl-120b-a12b",
     },
 }
 

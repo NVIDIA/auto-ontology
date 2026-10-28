@@ -52,7 +52,7 @@ def test_page_elements_uses_key_specific_defaults(
         (
             "nvapi-test",
             "https://integrate.api.nvidia.com/v1",
-            "nvidia/nemotron-3-super-120b-a12b",
+            "nvidia/nemotron-3.5-lightning-30b-a3b",
         ),
     ],
 )
@@ -79,6 +79,45 @@ def test_unstructured_answer_uses_key_specific_defaults(
     assert resolve(prefix, "API_KEY") == api_key
     assert resolve(prefix, "ENDPOINT") == endpoint
     assert resolve(prefix, "MODEL") == model
+
+
+@pytest.mark.parametrize(
+    ("api_key", "endpoint", "model"),
+    [
+        (
+            "sk-test",
+            "https://inference-api.nvidia.com/v1",
+            "aws/anthropic/bedrock-claude-sonnet-5-5",
+        ),
+        (
+            "nvapi-test",
+            "https://integrate.api.nvidia.com/v1",
+            "nvidia/nemotron-3.5-super-vl-120b-a12b",
+        ),
+    ],
+)
+def test_vision_model_ignores_the_shared_text_model(
+    monkeypatch: pytest.MonkeyPatch,
+    api_key: str,
+    endpoint: str,
+    model: str,
+) -> None:
+    prefix = "UNSTRUCTURED_VISION"
+    for name in (
+        f"{prefix}_API_KEY",
+        f"{prefix}_ENDPOINT",
+        f"{prefix}_MODEL",
+        "DEFAULT_MODELS_API_KEY",
+        "DEFAULT_MODELS_ENDPOINT",
+        "BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("NVIDIA_API_KEY", api_key)
+    monkeypatch.setenv("MODEL_NAME", "some/text-only-model")
+    monkeypatch.setenv("DEFAULT_MODELS_MODEL", "another/text-only-model")
+
+    assert resolve(prefix, "ENDPOINT") == endpoint
+    assert resolve(prefix, "MODEL", use_shared_default=False) == model
 
 
 def test_shared_default_remains_the_normal_precedence(

@@ -16,10 +16,11 @@ conversation, for callers that build their own turns; they must go through it
 rather than the endpoint, since two independent pacers each keep to the budget
 and together double it.
 
-Not routed through ``auto_ontology.utils.llm_invoke`` yet, deliberately: that
-gateway is configured for a different model on a different endpoint, and every
-number measured for this pipeline is paced against *this* budget. Moving it is
-a change of behaviour and belongs in its own step, not inside a move.
+The endpoint, key and model resolve through the shared model config like every
+other triplet (see :data:`_PREFIX`). The pacing and retries do not: they are
+not routed through ``auto_ontology.utils.llm_invoke``, because every number
+measured for this pipeline is paced against *this* budget. Moving them is a
+change of behaviour and belongs in its own step.
 """
 
 from __future__ import annotations
@@ -63,8 +64,8 @@ _INTEGRATE_HOST = "integrate.api.nvidia.com"
 
 #: How much the generator may reason before answering. Unbounded, it spends the
 #: whole budget thinking on hard questions and returns nothing; capping it keeps
-#: the reasoning and leaves room for the answer. Measured on a question that
-#: truncates with reasoning unbounded:
+#: the reasoning and leaves room for the answer. Measured on Nemotron Super via
+#: integrate, on a question that truncates with reasoning unbounded:
 #:
 #:   default  unbounded           4096 tokens, 47s, empty answer
 #:   low      kept but capped      502 tokens,  5s, answers
@@ -77,12 +78,15 @@ _INTEGRATE_HOST = "integrate.api.nvidia.com"
 #: `max_thinking_tokens` is rejected with a 400.
 REASONING_EFFORT = "low"
 
-#: Requests a minute. The hosted endpoint caps per model; this one tops out near
-#: 8/min and gets *worse* when pushed harder. Paced client-side so every request
-#: lands inside the budget instead of spending the budget on rejections.
+#: Requests a minute. Measured for ``nvidia/nemotron-3-super-120b-a12b`` on
+#: integrate.api.nvidia.com, which caps per model: it tops out near 8/min and
+#: gets *worse* when pushed harder. Paced client-side so every request lands
+#: inside the budget instead of spending the budget on rejections. Other
+#: endpoints and models have their own limits; this is conservative for them.
 GEN_RPM = 7
 
-#: Characters of prompt per reserved slot. The endpoint budgets tokens as well
+#: Characters of prompt per reserved slot, measured on the same endpoint and
+#: model as :data:`GEN_RPM`. That endpoint budgets tokens as well
 #: as requests, and a request limiter cannot see tokens: going from five chunks
 #: of context to ten doubled prompts (~15k characters to ~29k, measured) and so
 #: doubled tokens a minute at an unchanged 7/min, which is when the 429s
@@ -145,6 +149,9 @@ class RateLimiter:
 GEN_LIMITER = RateLimiter(GEN_RPM)
 
 _client: OpenAI | None = None
+#: The model ``_client`` was built for, resolved in the same read so the two
+#: cannot drift apart if the environment changes later.
+_model = ""
 _client_lock = threading.Lock()
 
 
@@ -157,12 +164,6 @@ def _resolved() -> dict[str, str]:
         "api_key": resolve(_PREFIX, "API_KEY"),
         "model": resolve(_PREFIX, "MODEL"),
     }
-
-
-def gen_model() -> str:
-    """The model :func:`complete` asks for."""
-    resolved = _resolved()
-    return resolved["model"]
 
 
 def reasoning_body(endpoint: str) -> dict[str, object]:
@@ -180,7 +181,7 @@ def get_client() -> OpenAI:
     429s came in clusters. :func:`complete` retries with backoff through the
     limiter, covering the same failures while staying inside the budget.
     """
-    global _client
+    global _client, _model
     with _client_lock:
         if _client is None:
             from openai import OpenAI
@@ -197,6 +198,7 @@ def get_client() -> OpenAI:
                 timeout=180.0,
                 max_retries=0,
             )
+            _model = config["model"]
     return _client
 
 
@@ -232,6 +234,7 @@ def answer(
     labels: list[str] | None = None,
     note: str | None = None,
     client: OpenAI | None = None,
+    model: str | None = None,
 ) -> tuple[str, str | None]:
     """A grounded answer to *query*, as ``(answer, error)``."""
     context = build_context(chunks, labels, note)
@@ -239,20 +242,26 @@ def answer(
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": USER_TEMPLATE.format(context=context, query=query)},
     ]
-    return complete(messages, client=client)
+    return complete(messages, client=client, model=model)
 
 
 def complete(
-    messages: list[dict[str, str]], client: OpenAI | None = None
+    messages: list[dict[str, str]],
+    client: OpenAI | None = None,
+    model: str | None = None,
 ) -> tuple[str, str | None]:
     """One paced, retried completion over a conversation, as ``(text, error)``.
 
     Never raises: a caller answering several hundred questions must not lose
     the run to one of them, so a failure is returned as a named error for the
-    caller to record and retry later.
+    caller to record and retry later. The one exception is a *client* passed
+    without its *model*, which is a caller bug rather than a failed call.
     """
-    client = client or get_client()
-    model = gen_model()
+    if client is None:
+        client = get_client()
+        model = model or _model
+    elif not model:
+        raise ValueError("pass the model the client serves along with the client")
     body = reasoning_body(str(client.base_url))
     extra = {"extra_body": body} if body else {}
 
