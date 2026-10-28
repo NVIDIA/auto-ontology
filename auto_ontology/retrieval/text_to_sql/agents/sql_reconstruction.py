@@ -35,6 +35,10 @@ from auto_ontology.retrieval.data_access.relevant_tables import (
 )
 from auto_ontology.utils.llm_invoke import invoke_with_structured_output
 from auto_ontology.retrieval.text_to_sql.formatters_util import format_tables_for_prompt
+from auto_ontology.retrieval.text_to_sql.message_utils import (
+    message_contents,
+    single_turn_messages,
+)
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_connector_from_tables,
 )
@@ -386,7 +390,13 @@ class SQLReconstructionAgent(BaseAgent):
 
         result = invoke_with_structured_output(
             llm,
-            [SystemMessage(content=prompt)],
+            single_turn_messages(
+                system_parts=[
+                    "You classify whether a failed SQL query needs more schema "
+                    "data or can be repaired with the current schema."
+                ],
+                user_parts=[prompt],
+            ),
             ErrorAnalysis,
         )
 
@@ -679,12 +689,17 @@ class SQLReconstructionAgent(BaseAgent):
         # Local copy only. Returning it would make the next inner-loop attempt
         # send every earlier error prompt again. ``failed_attempts`` already
         # carries that history inside this one prompt.
-        prompt_messages = _without_prior_repair_turns(list(state["messages"]))
-        if evidence:
-            prompt_messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
-        prompt_messages.append(HumanMessage(content=error_prompt))
+        base_messages = _without_prior_repair_turns(list(state["messages"]))
+        prompt_messages = single_turn_messages(
+            system_parts=[
+                *message_contents(base_messages, SystemMessage),
+                format_authoritative_evidence(evidence) if evidence else "",
+            ],
+            user_parts=[
+                *message_contents(base_messages, HumanMessage),
+                error_prompt,
+            ],
+        )
 
         response = invoke_with_structured_output(
             llm, prompt_messages, SQLGenerationModel

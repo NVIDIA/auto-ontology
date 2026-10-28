@@ -6,6 +6,8 @@
 
 from __future__ import annotations
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
 from auto_ontology.retrieval.text_to_sql.agents import sql_from_semantic
 from auto_ontology.retrieval.text_to_sql.agents.sql_from_semantic import (
     SQLFromCandidatesAgent,
@@ -220,10 +222,15 @@ def test_sql_generation_uses_reasoning_client(monkeypatch) -> None:
     assert len(invocations) == 2
     evidence = "Active means accounts.status = 'active'."
     semantic_messages, schema_messages = invocations
+    assert len(semantic_messages) == 2
+    assert isinstance(semantic_messages[0], SystemMessage)
+    assert isinstance(semantic_messages[1], HumanMessage)
     assert sum(evidence in message.content for message in semantic_messages) == 2
     assert evidence in semantic_messages[-1].content
     assert "## Authoritative Evidence" in semantic_messages[-1].content
     assert len(schema_messages) == 2
+    assert isinstance(schema_messages[0], SystemMessage)
+    assert isinstance(schema_messages[1], HumanMessage)
     assert schema_messages[-1].content.startswith("### Question")
     assert "### Evidence" in schema_messages[-1].content
     assert evidence in schema_messages[-1].content

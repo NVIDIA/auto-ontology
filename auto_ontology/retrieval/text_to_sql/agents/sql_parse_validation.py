@@ -24,7 +24,6 @@ import logging
 import os
 from typing import Any, Dict
 
-from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field, field_validator
 import sqlglot
 from sqlglot import expressions as exp
@@ -47,6 +46,7 @@ from auto_ontology.retrieval.text_to_sql.formatters_util import (
     format_semantic_context,
     format_used_schema_for_prompt,
 )
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.prompts import (
     INTENT_VALIDATION_SYSTEM_PROMPT,
     INTENT_VALIDATION_SYSTEM_PROMPT_JOINS_VALIDATED_ELSEWHERE,
@@ -1032,12 +1032,13 @@ class SQLValidationAgent(BaseAgent):
                 "and no missing fields. Any mismatch is a critical "
                 "projection_issues failure."
             )
-        messages = [SystemMessage(content=system_prompt)]
-        if evidence:
-            messages.append(
-                SystemMessage(content=format_authoritative_evidence(evidence))
-            )
-        messages.append(HumanMessage(content=validation_prompt))
+        messages = single_turn_messages(
+            system_parts=[
+                system_prompt,
+                format_authoritative_evidence(evidence) if evidence else "",
+            ],
+            user_parts=[validation_prompt],
+        )
 
         try:
             validation_result = invoke_with_structured_output(
