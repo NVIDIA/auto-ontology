@@ -23,10 +23,10 @@ import logging
 import re
 from typing import Any
 
-from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, ConfigDict, Field
 
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.prompts import (
     create_empty_like_check_prompt,
     format_dual_question_block,
@@ -267,10 +267,10 @@ class EmptyLikeResultCheckAgent(BaseAgent):
         )
 
         prompt = create_empty_like_check_prompt(question_block, sql_code)
-        messages = [
-            SystemMessage(content=_EMPTY_LIKE_SYSTEM_PROMPT),
-            SystemMessage(content=prompt),
-        ]
+        messages = single_turn_messages(
+            system_parts=[_EMPTY_LIKE_SYSTEM_PROMPT],
+            user_parts=[prompt],
+        )
 
         try:
             result = invoke_with_structured_output(

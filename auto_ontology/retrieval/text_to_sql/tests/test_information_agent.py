@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from auto_ontology.retrieval.text_to_sql.agents import information_agent
 from auto_ontology.retrieval.text_to_sql.agents.information_agent import (
@@ -216,7 +217,10 @@ def test_first_prompt_is_grounded_with_candidates(
     prompts: list[str] = []
 
     def answer(_llm: object, messages: list[Any], _model: object) -> object:
-        prompts.append(str(messages[0].content))
+        assert len(messages) == 2
+        assert isinstance(messages[0], SystemMessage)
+        assert isinstance(messages[1], HumanMessage)
+        prompts.append(str(messages[1].content))
         return _answer_action()
 
     monkeypatch.setattr(

@@ -12,13 +12,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Any, Dict
 
-from langchain_core.messages import SystemMessage
 from pydantic import Field, model_validator
 
 from auto_ontology.retrieval.text_to_sql.connector_routing import (
     resolve_target_database_name,
 )
 from auto_ontology.retrieval.text_to_sql.base import BaseAgent
+from auto_ontology.retrieval.text_to_sql.message_utils import single_turn_messages
 from auto_ontology.retrieval.text_to_sql.state import (
     AgentState,
     get_standalone_question,
@@ -444,9 +444,13 @@ class QuestionIntentAgent(BaseAgent):
             )
         )
 
-        messages = [
-            SystemMessage(
-                content=create_question_intent_prompt(
+        messages = single_turn_messages(
+            system_parts=[
+                "You classify user questions for a text-to-SQL workflow and "
+                "return only the requested structured result."
+            ],
+            user_parts=[
+                create_question_intent_prompt(
                     question,
                     prediction_override=override,
                     calculation_only=calculation_only,
@@ -455,8 +459,8 @@ class QuestionIntentAgent(BaseAgent):
                     available_databases=available_databases,
                     sql_examples=sql_examples,
                 )
-            )
-        ]
+            ],
+        )
         intent = invoke_with_structured_output(
             state["llm"],
             messages,

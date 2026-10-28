@@ -6,6 +6,7 @@
 
 from types import SimpleNamespace
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pytest import MonkeyPatch
 
 from auto_ontology.retrieval.text_to_sql import follow_up
@@ -46,13 +47,19 @@ def test_independent_question_is_never_rewritten(monkeypatch: MonkeyPatch) -> No
 
 
 def test_follow_up_uses_standalone_question(monkeypatch: MonkeyPatch) -> None:
+    def resolve(_llm, messages, _model):
+        assert len(messages) == 2
+        assert isinstance(messages[0], SystemMessage)
+        assert isinstance(messages[1], HumanMessage)
+        return SimpleNamespace(
+            is_follow_up=True,
+            standalone_question="Show revenue for August",
+        )
+
     monkeypatch.setattr(
         follow_up,
         "invoke_with_structured_output",
-        lambda *args, **kwargs: SimpleNamespace(
-            is_follow_up=True,
-            standalone_question="Show revenue for August",
-        ),
+        resolve,
     )
 
     assert follow_up.resolve_follow_up(
