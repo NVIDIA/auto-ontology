@@ -257,6 +257,31 @@ def detect_degenerate_sql(sql: str, dialect: str | None = None) -> str:
     return ""
 
 
+def strip_sqlite_database_qualifiers(sql: str, dialect: str | None) -> str:
+    """Drop the database part of ``database.schema.table`` names on SQLite.
+
+    SQLite accepts at most ``schema.table`` and fails on the second dot, while
+    sqlglot parses the three-part form without complaint, so static validation
+    cannot catch it. No-op on other dialects, on SQL without such a name, and on
+    SQL that does not parse.
+    """
+    if (dialect or "").lower() != "sqlite" or not sql or "." not in sql:
+        return sql
+    try:
+        tree = sqlglot.parse_one(sql, read="sqlite")
+    except Exception:
+        return sql
+    if tree is None:
+        return sql
+
+    changed = False
+    for node in [*tree.find_all(exp.Table), *tree.find_all(exp.Column)]:
+        if node.args.get("catalog") is not None:
+            node.set("catalog", None)
+            changed = True
+    return tree.sql(dialect="sqlite") if changed else sql
+
+
 def quote_known_mixed_case_identifiers(
     sql: str, relevant_tables: list[dict] | None, dialect: str | None
 ) -> str:
@@ -806,6 +831,17 @@ class SQLValidationAgent(BaseAgent):
         # up unquoted mixed-case identifiers regardless of which path
         # produced the SQL — see quote_known_mixed_case_identifiers for why
         # this can't just be left to the prompt/model.
+        stripped_sql = strip_sqlite_database_qualifiers(
+            response.sql_code, degenerate_dialect
+        )
+        if stripped_sql != response.sql_code:
+            self.logger.info(
+                "Dropped database qualifier(s) SQLite does not accept from the "
+                "generated SQL before validation"
+            )
+            response.sql_code = stripped_sql
+            path_state["sql_generation_result"] = response
+
         quoted_sql = quote_known_mixed_case_identifiers(
             response.sql_code, path_state.get("relevant_tables"), degenerate_dialect
         )

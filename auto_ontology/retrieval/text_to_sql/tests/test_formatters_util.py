@@ -61,6 +61,35 @@ def test_omits_missing_parts() -> None:
     assert qualify_table("", "", "orders") == "orders"
 
 
+def test_sqlite_never_takes_the_database_part() -> None:
+    """SQLite fails on ``database.schema.table`` at the second dot."""
+    assert qualify_table("california_schools", "main", "schools", "sqlite") == (
+        "schools"
+    )
+    assert qualify_table("db", "aux", "orders", "SQLITE") == "aux.orders"
+    assert qualify_table("db", "", "orders", "sqlite") == "orders"
+
+
+def test_foreign_key_reference_is_named_like_its_table() -> None:
+    tables = [
+        {
+            "name": "satscores",
+            "schema_name": "main",
+            "database_name": "schools_db",
+            "columns": [
+                {"name": "cds", "data_type": "TEXT", "semantic_fk": "main.schools.CDS"}
+            ],
+        }
+    ]
+
+    sqlite = format_tables_for_prompt(tables, dialect="sqlite")
+    assert "cds | TEXT | unknown | schools.CDS" in sqlite
+    assert "schools_db" not in sqlite
+    postgres = format_tables_for_prompt(tables, dialect="postgres")
+    assert "schools_db.main.satscores" in postgres
+    assert "schools_db.main.schools.CDS" in postgres
+
+
 def test_prompt_renders_two_level_name_for_mysql_tables() -> None:
     rendered = format_tables_for_prompt(
         [

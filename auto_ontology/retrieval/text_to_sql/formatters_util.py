@@ -51,7 +51,27 @@ def _pipe_table(headers: list[str], rows: list[dict[str, str]]) -> str:
     return "\n".join(lines)
 
 
-def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> str:
+def _fk_reference(semantic_fk: Any, database_name: str, dialect: str | None) -> str:
+    """A ``schema.table.column`` FK target, named as :func:`qualify_table` names tables.
+
+    The target is in the same database as the referencing column.
+    """
+    text = _plain_cell(semantic_fk)
+    parts = text.split(".", 2)
+    if len(parts) != 3:
+        return text
+    schema_name, table_name, column_name = parts
+    table = qualify_table(database_name, schema_name, table_name, dialect)
+    return f"{table}.{column_name}"
+
+
+def _format_column_for_prompt(
+    column: dict[str, Any],
+    *,
+    indent: str = "",
+    database_name: str = "",
+    dialect: str | None = None,
+) -> str:
     """Render one catalog column consistently wherever schema context appears."""
     name = column.get("name", "UNKNOWN")
     data_type = column.get("data_type", "UNKNOWN")
@@ -82,7 +102,7 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
         line += " | is_nullable: unknown"
     semantic_fk = column.get("semantic_fk")
     if semantic_fk:
-        line += f" | foreign_key: {_plain_cell(semantic_fk)}"
+        line += f" | foreign_key: {_fk_reference(semantic_fk, database_name, dialect)}"
     return line
 
 
@@ -92,6 +112,10 @@ def _format_column_for_prompt(column: dict[str, Any], *, indent: str = "") -> st
 # ``auto_ontology.connectors.trino``); everywhere else the session is already scoped to
 # the database and a two-part name resolves.
 _CATALOG_QUALIFIED_DIALECTS = frozenset({"spark", "trino"})
+
+# SQLite names a table at most ``schema.table``, where the schema is an attached
+# database (``main`` for the file itself); a database prefix is a syntax error.
+_SQLITE_DEFAULT_SCHEMA = "main"
 
 
 def qualify_table(
@@ -118,7 +142,14 @@ def qualify_table(
     TABLE_OR_VIEW_NOT_FOUND. Scoping the session instead is not an option:
     Spark rejects ``USE CATALOG``, and ``SET CATALOG`` leaves
     ``current_schema()`` empty so the two-part name still does not resolve.
+
+    SQLite never takes the database part, and its default ``main`` schema is
+    dropped too, so tables read bare as the SQLite prompt rules require.
     """
+    if (dialect or "").lower() == "sqlite":
+        if not schema_name or schema_name.lower() == _SQLITE_DEFAULT_SCHEMA:
+            return table_name
+        return f"{schema_name}.{table_name}"
     parts = [database_name, schema_name, table_name]
     collapsible = (dialect or "").lower() not in _CATALOG_QUALIFIED_DIALECTS
     if (
@@ -294,7 +325,11 @@ def format_important_columns_for_prompt(
         full_table = qualify_table(database, schema, table_name, dialect)
         lines.append(f"Semantic match: {entry['attr_name']}")
         lines.append(f"  Table: {full_table}")
-        lines.append(_format_column_for_prompt(column, indent="  "))
+        lines.append(
+            _format_column_for_prompt(
+                column, indent="  ", database_name=database, dialect=dialect
+            )
+        )
 
     return "\n".join(lines) or "No semantically matched columns."
 
@@ -315,7 +350,9 @@ _JSONB_SAMPLE_NOTE = (
 )
 
 
-def _column_row(column: Any) -> dict[str, str]:
+def _column_row(
+    column: Any, database_name: str = "", dialect: str | None = None
+) -> dict[str, str]:
     if not isinstance(column, dict):
         return {"column": _plain_cell(column)}
     description = _plain_cell(column.get("description"))
@@ -333,7 +370,11 @@ def _column_row(column: Any) -> dict[str, str]:
         "column": _plain_cell(column.get("name", "UNKNOWN")),
         "type": _plain_cell(column.get("data_type", "UNKNOWN")),
         "is_nullable": nullable,
-        "foreign key": _plain_cell(column.get("semantic_fk")),
+        "foreign key": (
+            _fk_reference(column["semantic_fk"], database_name, dialect)
+            if column.get("semantic_fk")
+            else ""
+        ),
         "description": description,
         "sample values": _plain_cell(
             _format_sample_values(column.get("sample_values"))
@@ -391,7 +432,9 @@ def format_tables_for_prompt(
         if not isinstance(columns, list):
             columns = []
         if columns:
-            column_rows = [_column_row(column) for column in columns]
+            column_rows = [
+                _column_row(column, database_name, dialect) for column in columns
+            ]
             blocks.append(_pipe_table(_COLUMN_HEADERS, column_rows))
             if any("json" in row["type"].lower() for row in column_rows):
                 blocks.append(_JSONB_SAMPLE_NOTE)
@@ -472,13 +515,16 @@ def format_used_schema_for_prompt(
         if column is None:
             column_lines.append(f"- {used_name}")
             continue
+        database_name = table.get("database_name") or target_db or ""
         full_table = qualify_table(
-            table.get("database_name") or target_db or "",
+            database_name,
             table.get("schema_name") or "",
             table.get("name") or "",
             dialect,
         )
-        rendered = _format_column_for_prompt(column)
+        rendered = _format_column_for_prompt(
+            column, database_name=database_name, dialect=dialect
+        )
         rendered = rendered.replace(
             f"- {column.get('name', 'UNKNOWN')}",
             f"- {full_table}.{column.get('name', 'UNKNOWN')}",
